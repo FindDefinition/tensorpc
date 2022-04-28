@@ -6,18 +6,29 @@ from distflow.constants import PACKAGE_ROOT
 
 
 def compile_proto(cwd, proto_dir, js_out=True, cpp_out=False, grpc_web: bool = False):
+    proto_dir_p = Path(proto_dir)
     proto_files = list(Path(proto_dir).glob("*.proto"))
-    cmds = [
+    grpc_files = ["remote_object.proto"]
+    grpc_paths = [proto_dir_p / p for p in grpc_files]
+    no_grpc_path = list(filter(lambda x: x.name not in grpc_files, proto_files))
+    grpc_proto_cmds = [
         "python",
         "-m",
         "grpc_tools.protoc",
         "-I{}".format(proto_dir),
         "--python_out={}".format(proto_dir),
+        # "--pyi_out={}".format(proto_dir),
         "--grpc_python_out={}".format(proto_dir),
-        *[str(p) for p in proto_files],  # windows have problem with wildcard
+        *[str(p) for p in grpc_paths],  # windows have problem with wildcard
+    ]
+    no_grpc_proto_cmds = [
+        "protoc",
+        "-I{}".format(proto_dir),
+        "--python_out={}".format(proto_dir),
+        "--pyi_out={}".format(proto_dir),
+        *[str(p) for p in no_grpc_path],  # windows have problem with wildcard
     ]
     cpp_proto_dir = str(Path(proto_dir) / "cpp")
-
     js_proto_dir = str(Path(proto_dir) / "js")
     cmds_js = ["protoc", 
                 f"-I={proto_dir}", f"{proto_dir}/*.proto",
@@ -41,7 +52,9 @@ def compile_proto(cwd, proto_dir, js_out=True, cpp_out=False, grpc_web: bool = F
         output = subprocess.check_output(" ".join(cpp_cmds),
                                          shell=True,
                                          cwd=str(cwd))
-    output = subprocess.check_output(" ".join(cmds), shell=True, cwd=str(cwd))
+    output = subprocess.check_output(" ".join(grpc_proto_cmds), shell=True, cwd=str(cwd))
+    output = subprocess.check_output(" ".join(no_grpc_proto_cmds), shell=True, cwd=str(cwd))
+
     if js_out:
         output = subprocess.check_output(" ".join(cmds_js),
                                          shell=True,

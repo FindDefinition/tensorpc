@@ -3,7 +3,7 @@ import socket
 import time
 
 
-def wait_until(func, max_retries=200, check_interval=1, check_func=None):
+def wait_until(func, max_retries: int=200, check_interval: float=1, check_func=None):
     while max_retries > 0:
         res = func()
         if res:

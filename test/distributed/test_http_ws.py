@@ -42,7 +42,7 @@ async def sess_url():
     proc = subprocess.Popen(
         f"python -m distflow.serve --port {port} --http_port={port2} --serv_def_file {serv_def}",
         shell=True)
-    url = f"http://localhost:{port2}/api/jsonrpc"
+    url = f"http://localhost:{port2}/api/rpc"
     try:
         async with asyncclient.AsyncRemoteManager(
                 "localhost:{}".format(port)) as robj:
@@ -68,7 +68,7 @@ async def sess_url_local():
     proc = subprocess.Popen(
         f"python -m distflow.serve --port {port} --http_port={port2} --serv_def_file {serv_def}",
         shell=True)
-    url = f"http://localhost:{port2}/api/jsonrpc"
+    url = f"http://localhost:{port2}/api/rpc"
     try:
         async with asyncclient.AsyncRemoteManager(
                 "localhost:{}".format(port)) as robj:
@@ -93,6 +93,11 @@ async def test_remote_call(sess_url: Tuple[aiohttp.ClientSession, str]):
     assert res == 3
     res = await http_remote_call(sess, url, "Test3Async.add", datas_a, datas_b)
     assert np.allclose(res, expected)
+    datas_a = np.random.uniform(size=(30000))
+    expected = datas_a.sum()
+    res = await http_remote_call(sess, url, "Test3Async.sum", datas_a)
+    assert np.allclose(res, expected)
+
 
 async def main_async():
     async with sess_url_local() as robj:

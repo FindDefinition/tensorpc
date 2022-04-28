@@ -7,9 +7,10 @@ from typing import Any, Dict, Hashable, List, Tuple, Union
 
 import msgpack
 import numpy as np
-from distflow.protos import arraybuf_pb2, remote_object_pb2
+from distflow.protos import arraybuf_pb2, rpc_message_pb2, wsdef_pb2
+import traceback 
 
-JSON_INDEX_KEY = "__cumm_json_index"
+JSON_INDEX_KEY = "__jsonarray_index"
 
 
 class EncodeMethod(Enum):
@@ -37,7 +38,7 @@ class Placeholder(object):
         return self.index == other.index and self.nbytes == other.nbytes
 
 
-def _inv_map(dict_map: Dict[Hashable, Hashable]) -> Dict[Hashable, Hashable]:
+def _inv_map(dict_map: dict) -> dict:
     return {v: k for k, v in dict_map.items()}
 
 
@@ -51,49 +52,51 @@ def byte_size(obj: Union[bytes, np.ndarray]) -> int:
 
 
 NPDTYPE_TO_PB_MAP = {
-    np.dtype(np.uint64): arraybuf_pb2.dtype.DataType.uint64,
-    np.dtype(np.uint32): arraybuf_pb2.dtype.DataType.uint32,
-    np.dtype(np.uint16): arraybuf_pb2.dtype.DataType.uint16,
-    np.dtype(np.uint8): arraybuf_pb2.dtype.DataType.uint8,
-    np.dtype(np.int64): arraybuf_pb2.dtype.DataType.int64,
-    np.dtype(np.int32): arraybuf_pb2.dtype.DataType.int32,
-    np.dtype(np.int16): arraybuf_pb2.dtype.DataType.int16,
-    np.dtype(np.int8): arraybuf_pb2.dtype.DataType.int8,
-    np.dtype(np.float64): arraybuf_pb2.dtype.DataType.float64,
-    np.dtype(np.float32): arraybuf_pb2.dtype.DataType.float32,
-    np.dtype(np.float16): arraybuf_pb2.dtype.DataType.float16,
-    "custom_bytes": arraybuf_pb2.dtype.DataType.CustomBytes,
+    np.dtype(np.uint64): arraybuf_pb2.dtype.uint64,
+    np.dtype(np.uint32): arraybuf_pb2.dtype.uint32,
+    np.dtype(np.uint16): arraybuf_pb2.dtype.uint16,
+    np.dtype(np.uint8): arraybuf_pb2.dtype.uint8,
+    np.dtype(np.int64): arraybuf_pb2.dtype.int64,
+    np.dtype(np.int32): arraybuf_pb2.dtype.int32,
+    np.dtype(np.int16): arraybuf_pb2.dtype.int16,
+    np.dtype(np.int8): arraybuf_pb2.dtype.int8,
+    np.dtype(np.float64): arraybuf_pb2.dtype.float64,
+    np.dtype(np.float32): arraybuf_pb2.dtype.float32,
+    np.dtype(np.float16): arraybuf_pb2.dtype.float16,
+    "custom_bytes": arraybuf_pb2.dtype.CustomBytes,
 }
 
 NPDTYPE_TO_JSONARRAY_MAP = {
-    np.dtype(np.uint64): 1,
-    np.dtype(np.uint32): 2,
-    np.dtype(np.uint16): 3,
-    np.dtype(np.uint8): 4,
-    np.dtype(np.int64): 5,
+    np.dtype(np.bool_): 0,
+    np.dtype(np.float16): 1,
+    np.dtype(np.float32): 2,
+    np.dtype(np.float64): 3,
+    np.dtype(np.int8): 4,
+    np.dtype(np.int16): 5,
     np.dtype(np.int32): 6,
-    np.dtype(np.int16): 7,
-    np.dtype(np.int8): 8,
-    np.dtype(np.float64): 9,
-    np.dtype(np.float32): 10,
-    np.dtype(np.float16): 11,
-    np.dtype(np.bool_): 12,
+    np.dtype(np.int64): 7,
+    np.dtype(np.uint8): 8,
+    np.dtype(np.uint16): 9,
+    np.dtype(np.uint32): 10,
+    np.dtype(np.uint64): 11,
 }
+
+BYTES_JSONARRAY_CODE = 100
 
 INV_NPDTYPE_TO_PB_MAP = _inv_map(NPDTYPE_TO_PB_MAP)
 INV_NPDTYPE_TO_JSONARRAY_MAP = _inv_map(NPDTYPE_TO_JSONARRAY_MAP)
 
 NPBYTEORDER_TO_PB_MAP = {
-    "=": arraybuf_pb2.dtype.ByteOrder.native,
-    "<": arraybuf_pb2.dtype.ByteOrder.littleEndian,
-    ">": arraybuf_pb2.dtype.ByteOrder.bigEndian,
-    "|": arraybuf_pb2.dtype.ByteOrder.na,
+    "=": arraybuf_pb2.dtype.native,
+    "<": arraybuf_pb2.dtype.littleEndian,
+    ">": arraybuf_pb2.dtype.bigEndian,
+    "|": arraybuf_pb2.dtype.na,
 }
 INV_NPBYTEORDER_TO_PB_MAP = _inv_map(NPBYTEORDER_TO_PB_MAP)
 
 
 def bytes2pb(data: bytes, send_data=True) -> arraybuf_pb2.ndarray:
-    dtype = arraybuf_pb2.dtype.DataType.CustomBytes
+    dtype = arraybuf_pb2.dtype.CustomBytes
     pb = arraybuf_pb2.ndarray(
         dtype=arraybuf_pb2.dtype(type=dtype),
         shape=[len(data)],
@@ -122,7 +125,7 @@ def array2pb(array: np.ndarray, send_data=True) -> arraybuf_pb2.ndarray:
 
 
 def pb2data(buf: arraybuf_pb2.ndarray) -> np.ndarray:
-    if buf.dtype.type == arraybuf_pb2.dtype.DataType.CustomBytes:
+    if buf.dtype.type == arraybuf_pb2.dtype.CustomBytes:
         return buf.data
     byte_order = INV_NPBYTEORDER_TO_PB_MAP[buf.dtype.byte_order]
     dtype = INV_NPDTYPE_TO_PB_MAP[buf.dtype.type].newbyteorder(byte_order)
@@ -131,7 +134,7 @@ def pb2data(buf: arraybuf_pb2.ndarray) -> np.ndarray:
 
 
 def pb2meta(buf: arraybuf_pb2.ndarray) -> Tuple[List[int], int]:
-    if buf.dtype.type == arraybuf_pb2.dtype.DataType.CustomBytes:
+    if buf.dtype.type == arraybuf_pb2.dtype.CustomBytes:
         return list(buf.shape), None
     byte_order = INV_NPBYTEORDER_TO_PB_MAP[buf.dtype.byte_order]
     dtype = INV_NPDTYPE_TO_PB_MAP[buf.dtype.type].newbyteorder(byte_order)
@@ -229,7 +232,7 @@ def to_protobuf_stream(data_list: List[Any],
             num_chunk = 1  # avoid empty string raise error
         bufs = []
         for i in range(num_chunk):
-            buf = remote_object_pb2.RemoteCallStream(
+            buf = rpc_message_pb2.RemoteCallStream(
                 num_chunk=num_chunk,
                 chunk_id=i,
                 num_args=num_args,
@@ -355,21 +358,21 @@ def _json_dumps_to_binary(obj):
 
 
 _METHOD_TO_DUMP = {
-    remote_object_pb2.EncodeMethod.Json: _json_dumps_to_binary,
-    remote_object_pb2.EncodeMethod.JsonArray: _json_dumps_to_binary,
-    remote_object_pb2.EncodeMethod.MessagePack: msgpack.dumps,
-    remote_object_pb2.EncodeMethod.MessagePackArray: msgpack.dumps,
-    remote_object_pb2.EncodeMethod.Pickle: pickle.dumps,
-    remote_object_pb2.EncodeMethod.PickleArray: pickle.dumps,
+    rpc_message_pb2.Json: _json_dumps_to_binary,
+    rpc_message_pb2.JsonArray: _json_dumps_to_binary,
+    rpc_message_pb2.MessagePack: msgpack.dumps,
+    rpc_message_pb2.MessagePackArray: msgpack.dumps,
+    rpc_message_pb2.Pickle: pickle.dumps,
+    rpc_message_pb2.PickleArray: pickle.dumps,
 }
 
 _METHOD_TO_LOAD = {
-    remote_object_pb2.EncodeMethod.Json: json.loads,
-    remote_object_pb2.EncodeMethod.JsonArray: json.loads,
-    remote_object_pb2.EncodeMethod.MessagePack: msgpack.loads,
-    remote_object_pb2.EncodeMethod.MessagePackArray: msgpack.loads,
-    remote_object_pb2.EncodeMethod.Pickle: pickle.loads,
-    remote_object_pb2.EncodeMethod.PickleArray: pickle.loads,
+    rpc_message_pb2.EncodeMethod.Json: json.loads,
+    rpc_message_pb2.EncodeMethod.JsonArray: json.loads,
+    rpc_message_pb2.EncodeMethod.MessagePack: msgpack.loads,
+    rpc_message_pb2.EncodeMethod.MessagePackArray: msgpack.loads,
+    rpc_message_pb2.EncodeMethod.Pickle: pickle.loads,
+    rpc_message_pb2.EncodeMethod.PickleArray: pickle.loads,
 }
 
 
@@ -384,11 +387,11 @@ def loads_method(x, method: int):
 
 
 def _enable_json_index(method):
-    return method == remote_object_pb2.EncodeMethod.JsonArray or method == remote_object_pb2.EncodeMethod.MessagePackArray
+    return method == rpc_message_pb2.JsonArray or method == rpc_message_pb2.MessagePackArray
 
 
-_ENCODE_METHOD_MASK = remote_object_pb2.EncodeMethod.Mask
-_ENCODE_METHOD_ARRAY_MASK = remote_object_pb2.EncodeMethod.ArrayMask
+_ENCODE_METHOD_MASK = rpc_message_pb2.Mask
+_ENCODE_METHOD_ARRAY_MASK = rpc_message_pb2.ArrayMask
 
 
 def data_to_pb(data, method: int):
@@ -420,7 +423,7 @@ def data_from_pb(bufs, method: int):
 
 def data_to_json(data, method: int) -> Tuple[List[arraybuf_pb2.ndarray], str]:
     method &= _ENCODE_METHOD_MASK
-    if method == remote_object_pb2.EncodeMethod.JsonArray:
+    if method == rpc_message_pb2.EncodeMethod.JsonArray:
         arrays, decoupled = extract_arrays_from_data(data, json_index=True)
         arrays = [data2pb(a) for a in arrays]
     else:
@@ -433,7 +436,7 @@ def data_from_json(bufs: List[arraybuf_pb2.ndarray], data: str, method: int):
     arrays = [pb2data(b) for b in bufs]
     data_skeleton = json.loads(data)
     method &= _ENCODE_METHOD_MASK
-    if method == remote_object_pb2.EncodeMethod.JsonArray:
+    if method == rpc_message_pb2.EncodeMethod.JsonArray:
         res = put_arrays_to_data(arrays, data_skeleton, json_index=True)
     else:
         res = data_skeleton
@@ -527,7 +530,7 @@ def dumps(obj, multi_thread=False, buffer=None, use_bytearray=False):
     data_skeleton_bytes = pickle.dumps(data_skeleton)
     data_to_be_send = arrays + [data_skeleton_bytes]
     data_to_be_send = [data2pb(a, send_data=False) for a in data_to_be_send]
-    protobuf = remote_object_pb2.RemoteCallReply(arrays=data_to_be_send)
+    protobuf = rpc_message_pb2.RemoteCallReply(arrays=data_to_be_send)
     protobuf_bytes = protobuf.SerializeToString()
     meta_length = len(protobuf_bytes)
     sum_array_nbytes = 0
@@ -582,7 +585,7 @@ def loads(binary, copy=False):
     meta_end_offset = np.frombuffer(buffer_view[8:16], dtype=np.int64).item()
     pb_bytes = buffer_view[content_end_offset:meta_end_offset]
     shared_mem = buffer_view[16:]
-    pb = remote_object_pb2.RemoteCallReply()
+    pb = rpc_message_pb2.RemoteCallReply()
     pb.ParseFromString(pb_bytes)
 
     results_metas = [pb2meta(b) for b in pb.arrays]
@@ -626,3 +629,300 @@ def loads_arraybuf(binary: bytes):
     arrays = [pb2data(a) for a in arrays_pb]
     obj = put_arrays_to_data(arrays, data_skeleton, json_index=True)
     return obj
+
+
+class SocketMsgType(Enum):
+    Subscribe = 0x01
+    UnSubscribe = 0x02
+    RPC = 0x03
+    Event = 0x04
+    Chunk = 0x05
+    QueryServiceIds = 0x06
+    Notification = 0x07
+
+    EventError = 0x10
+    RPCError = 0x20
+    UserError = 0x30
+    SubscribeError = 0x40
+    OnConnectError = 0x50
+
+    ErrorMask = 0xF0
+
+
+def encode_protobuf_uint(val: int):
+    """this function encode protobuf fised uint to make sure
+    message size is stable.
+    """
+    assert val >= 0
+    return val + 1
+
+
+def decode_protobuf_uint(val: int):
+    return val - 1
+
+
+class SocketMessageEncoder:
+    """
+    distflow socket message format
+
+    0-1: msg type, can be rpc/event/error/raw
+
+    if type is raw, following bytes are raw byte message.
+
+    if not:
+
+    1~5: header length
+    5~X: header 
+    X~Y: array data
+
+    """
+    def __init__(self, data) -> None:
+        arrays, data_skeleton = extract_arrays_from_data(data, json_index=True)
+
+        self.arrays: List[Union[np.ndarray, bytes]] = arrays
+        self.data_skeleton = data_skeleton
+        self._total_size = 0
+
+        self._arr_metadata: List[Tuple[int, List[int]]] = []
+        for arr in self.arrays:
+            if isinstance(arr, np.ndarray):
+                self._total_size += arr.nbytes
+                self._arr_metadata.append(
+                    (NPDTYPE_TO_JSONARRAY_MAP[arr.dtype], list(arr.shape)))
+            else:
+                self._total_size += len(arr)
+                self._arr_metadata.append((BYTES_JSONARRAY_CODE, [len(arr)]))
+        self._ser_skeleton = json.dumps(self.get_skeleton())
+
+    def get_total_array_binary_size(self):
+        return self._total_size
+
+    def get_skeleton(self):
+        return [self._arr_metadata, self.data_skeleton]
+
+    def get_message_chunks(self, type: SocketMsgType, req: wsdef_pb2.Header,
+                           chunk_size: int):
+        req.data = self._ser_skeleton
+        req_msg_size = req.ByteSize()
+        final_size = 5 + req_msg_size + self.get_total_array_binary_size()
+        cnt_arr = np.array([0], np.int32)
+        if final_size < chunk_size:
+            binary = bytearray(final_size)
+            binary_view = memoryview(binary)
+            binary_view[0] = type.value
+            cnt_arr[0] = req_msg_size
+            binary_view[1:5] = cnt_arr.tobytes()
+            binary_view[5:req_msg_size + 5] = req.SerializeToString()
+            start = req_msg_size + 5
+
+            for arr in self.arrays:
+                if isinstance(arr, np.ndarray):
+                    buff2 = memoryview(arr.reshape(-1).view(np.uint8))
+                    binary_view[start:start + arr.nbytes] = buff2
+                    start += arr.nbytes
+                else:
+                    # bytes
+                    binary_view[start:start + len(arr)] = arr
+                    start += len(arr)
+            yield binary
+            return
+        assert req_msg_size + 5 <= chunk_size, "req size must smaller than chunk size"
+        # if field of fixedXX is zero, it will be ignored. so all value of protobuf MUST LARGER THAN ZERO here.
+        chunk_header = wsdef_pb2.Header(
+            service_id=encode_protobuf_uint(req.service_id),
+            chunk_index=encode_protobuf_uint(0),
+            rpc_id=encode_protobuf_uint(req.rpc_id),
+            data="")
+
+        header_msg_size = chunk_header.ByteSize()
+        chunk_size_for_arr = chunk_size - header_msg_size - 5
+        assert chunk_size_for_arr > 0
+        num_chunks = _div_up(self._total_size, chunk_size_for_arr)
+        req.chunk_index = num_chunks
+
+        # req msg size will change if value changed.
+        req_msg_size = req.ByteSize()
+
+        res_header_binary = bytearray(req_msg_size + 5)
+        res_header_binary[0] = type.value
+        cnt_arr[0] = req_msg_size
+        res_header_binary[1:5] = cnt_arr.tobytes()
+        res_header_binary[5:req_msg_size + 5] = req.SerializeToString()
+        yield res_header_binary
+        # breakpoint()
+
+        req2 = wsdef_pb2.Header()
+        req2.ParseFromString(res_header_binary[5:req_msg_size + 5])
+
+        chunk = bytearray(chunk_size)
+        chunk[0] = SocketMsgType.Chunk.value
+        cnt_arr[0] = header_msg_size
+        chunk[1:5] = cnt_arr.tobytes()
+        chunk[5:header_msg_size + 5] = chunk_header.SerializeToString()
+        chunk_idx = 0
+        start = header_msg_size + 5
+        chunk_remain_size = chunk_size - header_msg_size - 5
+        remain_msg_size = num_chunks * (header_msg_size + 5) + self._total_size
+        for arr in self.arrays:
+            if isinstance(arr, np.ndarray):
+                size = arr.nbytes
+                memview = memoryview(arr.reshape(-1).view(np.uint8))
+            else:
+                size = len(arr)
+                memview = memoryview(arr)
+            arr_start = 0
+            while size > 0:
+                ser_size = min(size, chunk_remain_size)
+                chunk[start:start + ser_size] = memview[arr_start:arr_start +
+                                                        ser_size]
+                arr_start += ser_size
+                start += ser_size
+                chunk_remain_size -= ser_size
+                size -= ser_size
+                if chunk_remain_size == 0:
+                    yield chunk
+                    chunk_idx += 1
+                    if chunk_idx != num_chunks:
+                        remain_msg_size -= chunk_size
+                        chunk = bytearray(min(remain_msg_size, chunk_size))
+                        chunk_remain_size = len(chunk) - header_msg_size - 5
+                        chunk[0] = SocketMsgType.Chunk.value
+                        cnt_arr[0] = header_msg_size
+
+                        chunk[1:5] = cnt_arr.tobytes()
+                        chunk[5:header_msg_size +
+                              5] = chunk_header.SerializeToString()
+                        start = header_msg_size + 5
+                        chunk_header.chunk_index = encode_protobuf_uint(
+                            chunk_idx)
+
+class ChunkHeader:
+    def __init__(self, binary) -> None:
+        req_length = np.frombuffer(binary[1:5], dtype=np.int32)[0]
+        req_arr = binary[5:req_length + 5]
+        req = wsdef_pb2.Header()
+        req.ParseFromString(req_arr)
+
+        self.type = SocketMsgType(binary[0])
+        self.req = req
+
+def parse_message_chunks(chunks: List[bytes]):
+    chunk_desp = chunks[0]
+    req_length = np.frombuffer(chunk_desp[1:5], dtype=np.int32)[0]
+    req_arr = chunk_desp[5:req_length + 5]
+    req = wsdef_pb2.Header()
+    req.ParseFromString(req_arr)
+    meta, skeleton = json.loads(req.data)
+    msg_type = SocketMsgType(chunk_desp[0])
+    if req.chunk_index == 0:
+        # not chunked
+        data_arr = chunk_desp[req_length + 5:]
+        start = 0
+        arrs = []
+        for dtype_jarr, shape in meta:
+            if dtype_jarr == BYTES_JSONARRAY_CODE:
+                arrs.append(data_arr[start:start + shape[0]])
+                start += shape[0]
+            else:
+                dtype_np = INV_NPDTYPE_TO_JSONARRAY_MAP[dtype_jarr]
+
+                size = shape[0] * dtype_np.itemsize
+                for s in shape[1:]:
+                    size *= s
+                arrs.append(
+                    np.frombuffer(data_arr[start:start + size],
+                                  dtype=dtype_np).reshape(shape))
+                start += size
+        data = put_arrays_to_data(arrs, skeleton, True)
+        return msg_type, req, data
+    # chunked
+    num_chunks = req.chunk_index
+    # print(num_chunks, len(chunks) - 1)
+    assert num_chunks == len(chunks) - 1
+    arr_idx = 0
+    cur_chunk = chunks[1]
+    chunk_idx = 1
+    chunk_header_length = np.frombuffer(cur_chunk[1:5], dtype=np.int32)[0]
+    chunk_size = len(cur_chunk) - 5 - chunk_header_length
+    cur_chunk_start = 5 + chunk_header_length
+
+    arrs: List[Union[bytes, np.ndarray]] = []
+    for dtype_jarr, shape in meta:
+        if dtype_jarr == BYTES_JSONARRAY_CODE:
+            data = np.empty(shape, np.uint8)
+            data_buffer = memoryview(data.reshape(-1).view(np.uint8))
+            size = shape[0]
+        else:
+            dtype_np = INV_NPDTYPE_TO_JSONARRAY_MAP[dtype_jarr]
+            size = shape[0] * dtype_np.itemsize
+            for s in shape[1:]:
+                size *= s
+            data = np.empty(shape, dtype_np)
+            data_buffer = memoryview(data.reshape(-1).view(np.uint8))
+        arr_start = 0
+        while size > 0:
+            ser_size = min(size, chunk_size)
+            data_buffer[arr_start:arr_start +
+                        ser_size] = cur_chunk[cur_chunk_start:cur_chunk_start +
+                                              ser_size]
+            size -= ser_size
+            chunk_size -= ser_size
+            cur_chunk_start += ser_size
+            arr_start += ser_size
+            if chunk_size == 0 and chunk_idx != num_chunks:
+                chunk_idx += 1
+                cur_chunk = chunks[chunk_idx]
+                chunk_header_length = np.frombuffer(cur_chunk[1:5],
+                                                    dtype=np.int32)[0]
+                chunk_size = len(cur_chunk) - 5 - chunk_header_length
+                cur_chunk_start = 5 + chunk_header_length
+        if dtype_jarr == BYTES_JSONARRAY_CODE:
+            arrs.append(data.tobytes())
+        else:
+            arrs.append(data)
+
+    return msg_type, req, put_arrays_to_data(arrs, skeleton)
+
+def get_error_json(type: str, detail: str):
+    return json.dumps({"error": type, "detail": detail})
+
+def get_exception_json(exc: BaseException):
+    detail = traceback.format_exc()
+    exception_json = {"error": str(exc), "detail": detail}
+    return json.dumps(exception_json)
+
+def _structured_data():
+    return {
+        "test0": [5, 3, np.random.uniform(size=(5, 3))],
+        "test1": {
+            "test2": np.random.uniform(size=(5, 3)),
+            "test3": (6, np.random.uniform(size=(4, )), b"asfasf")
+        }
+    }
+
+
+def _huge_structured_data():
+    return {
+        "test0": [5, 3, np.random.uniform(size=(5000, 300))],
+        "test1": {
+            "test2": np.random.uniform(size=(5000, 300)),
+            "test3": (6, np.random.uniform(size=(40000, )), b"asfasf")
+        }
+    }
+
+
+if __name__ == "__main__":
+    data = _huge_structured_data()
+    enc = SocketMessageEncoder(data)
+    chunks = list(
+        enc.get_message_chunks(
+            SocketMsgType.Event,
+            wsdef_pb2.Header(service_id=0, chunk_index=0, rpc_id=0), 1048576))
+    print(len(chunks))
+    _, _, de = parse_message_chunks(chunks)
+    # breakpoint()
+    assert np.allclose(data["test0"][2], de["test0"][2])
+    assert np.allclose(data["test1"]["test2"], de["test1"]["test2"])
+    assert np.allclose(data["test1"]["test3"][1], de["test1"]["test3"][1])
+
+    # print(de)

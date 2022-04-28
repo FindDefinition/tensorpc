@@ -30,6 +30,8 @@ from distflow.core.defs import ServiceDef
 from distflow.core.server_core import ProtobufServiceCore
 
 from distflow.protos import remote_object_pb2 as remote_object_pb2
+from distflow.protos import rpc_message_pb2
+
 from distflow.protos import \
     remote_object_pb2_grpc as remote_object_pb2_grpc
 from distflow.utils.df_logging import get_logger
@@ -61,7 +63,7 @@ class RemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
             "service_metas": self.server_core.get_service_meta(),
             "message_max_length": self.length,
         }
-        return remote_object_pb2.SimpleReply(data=json.dumps(meta))
+        return rpc_message_pb2.SimpleReply(data=json.dumps(meta))
 
     def QueryServiceMeta(self, request, context):
         print("?")
@@ -69,7 +71,7 @@ class RemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
         service_key = request.service_key
         _, meta = self.server_core.service_units.get_service_and_meta(service_key)
         print("?")
-        return remote_object_pb2.SimpleReply(
+        return rpc_message_pb2.SimpleReply(
             data=json.dumps(meta.to_json()))
 
     def RemoteJsonCall(self, request, context):
@@ -110,19 +112,17 @@ class RemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
     def Shutdown(self, request, context):
         print("Shutdown message received")
         self.server_core._reset_timeout()
-
         def shutdown_cb():
             self.server_core.shutdown_event.set()
-
         context.add_callback(shutdown_cb)
-        return remote_object_pb2.SimpleReply()
+        return rpc_message_pb2.SimpleReply()
 
     def HealthCheck(self, request, context):
         self.server_core._reset_timeout()
-        return remote_object_pb2.SimpleReply(data="{}")
+        return rpc_message_pb2.SimpleReply(data="{}")
 
     def SayHello(self, request, context):
-        return remote_object_pb2.HelloReply(data=request.data)
+        return rpc_message_pb2.HelloReply(data=request.data)
 
 
 def serve_service(service: RemoteObjectService,
@@ -205,10 +205,8 @@ def serve_with_http(service_def: ServiceDef,
 
     # run grpc server in background, and ws in main
     url = '[::]:{}'.format(port)
-    loop = asyncio.get_event_loop()
     server_core = ProtobufServiceCore(url,
-                                      service_def,
-                                      loop=loop)
+                                      service_def)
     service = RemoteObjectService(server_core, is_local, length)
 
     kwargs = {
@@ -226,7 +224,10 @@ def serve_with_http(service_def: ServiceDef,
     thread.setDaemon(True)
     thread.start()
     threads.append(thread)
-    httpserver.serve_service_core(server_core, http_port, None)
-    server_core.shutdown_event.set()
-    for thread in threads:
-        thread.join()
+    try:
+        httpserver.serve_service_core(server_core, http_port, None)
+    finally:
+        server_core.shutdown_event.set()
+        # loop = asyncio.get_running_loop()
+        for thread in threads:
+            thread.join()

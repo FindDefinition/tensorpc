@@ -2,7 +2,7 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-from . import remote_object_pb2 as remote__object__pb2
+from . import rpc_message_pb2 as rpc__message__pb2
 
 
 class RemoteObjectStub(object):
@@ -16,68 +16,68 @@ class RemoteObjectStub(object):
         """
         self.RemoteCall = channel.unary_unary(
                 '/distflow.protos.RemoteObject/RemoteCall',
-                request_serializer=remote__object__pb2.RemoteCallRequest.SerializeToString,
-                response_deserializer=remote__object__pb2.RemoteCallReply.FromString,
+                request_serializer=rpc__message__pb2.RemoteCallRequest.SerializeToString,
+                response_deserializer=rpc__message__pb2.RemoteCallReply.FromString,
                 )
         self.RemoteGenerator = channel.unary_stream(
                 '/distflow.protos.RemoteObject/RemoteGenerator',
-                request_serializer=remote__object__pb2.RemoteCallRequest.SerializeToString,
-                response_deserializer=remote__object__pb2.RemoteCallReply.FromString,
+                request_serializer=rpc__message__pb2.RemoteCallRequest.SerializeToString,
+                response_deserializer=rpc__message__pb2.RemoteCallReply.FromString,
                 )
         self.RemoteJsonCall = channel.unary_unary(
                 '/distflow.protos.RemoteObject/RemoteJsonCall',
-                request_serializer=remote__object__pb2.RemoteJsonCallRequest.SerializeToString,
-                response_deserializer=remote__object__pb2.RemoteJsonCallReply.FromString,
+                request_serializer=rpc__message__pb2.RemoteJsonCallRequest.SerializeToString,
+                response_deserializer=rpc__message__pb2.RemoteJsonCallReply.FromString,
                 )
         self.RemoteJsonGenerator = channel.unary_stream(
                 '/distflow.protos.RemoteObject/RemoteJsonGenerator',
-                request_serializer=remote__object__pb2.RemoteJsonCallRequest.SerializeToString,
-                response_deserializer=remote__object__pb2.RemoteJsonCallReply.FromString,
+                request_serializer=rpc__message__pb2.RemoteJsonCallRequest.SerializeToString,
+                response_deserializer=rpc__message__pb2.RemoteJsonCallReply.FromString,
                 )
         self.RemoteStreamCall = channel.stream_stream(
                 '/distflow.protos.RemoteObject/RemoteStreamCall',
-                request_serializer=remote__object__pb2.RemoteCallRequest.SerializeToString,
-                response_deserializer=remote__object__pb2.RemoteCallReply.FromString,
+                request_serializer=rpc__message__pb2.RemoteCallRequest.SerializeToString,
+                response_deserializer=rpc__message__pb2.RemoteCallReply.FromString,
                 )
         self.Shutdown = channel.unary_unary(
                 '/distflow.protos.RemoteObject/Shutdown',
-                request_serializer=remote__object__pb2.HealthCheckRequest.SerializeToString,
-                response_deserializer=remote__object__pb2.HealthCheckReply.FromString,
+                request_serializer=rpc__message__pb2.HealthCheckRequest.SerializeToString,
+                response_deserializer=rpc__message__pb2.HealthCheckReply.FromString,
                 )
         self.HealthCheck = channel.unary_unary(
                 '/distflow.protos.RemoteObject/HealthCheck',
-                request_serializer=remote__object__pb2.HealthCheckRequest.SerializeToString,
-                response_deserializer=remote__object__pb2.HealthCheckReply.FromString,
+                request_serializer=rpc__message__pb2.HealthCheckRequest.SerializeToString,
+                response_deserializer=rpc__message__pb2.HealthCheckReply.FromString,
                 )
         self.QueryServerMeta = channel.unary_unary(
                 '/distflow.protos.RemoteObject/QueryServerMeta',
-                request_serializer=remote__object__pb2.RemoteCallRequest.SerializeToString,
-                response_deserializer=remote__object__pb2.SimpleReply.FromString,
+                request_serializer=rpc__message__pb2.RemoteCallRequest.SerializeToString,
+                response_deserializer=rpc__message__pb2.SimpleReply.FromString,
                 )
         self.QueryServiceMeta = channel.unary_unary(
                 '/distflow.protos.RemoteObject/QueryServiceMeta',
-                request_serializer=remote__object__pb2.RemoteCallRequest.SerializeToString,
-                response_deserializer=remote__object__pb2.SimpleReply.FromString,
+                request_serializer=rpc__message__pb2.RemoteCallRequest.SerializeToString,
+                response_deserializer=rpc__message__pb2.SimpleReply.FromString,
                 )
         self.ChunkedRemoteCall = channel.stream_stream(
                 '/distflow.protos.RemoteObject/ChunkedRemoteCall',
-                request_serializer=remote__object__pb2.RemoteCallStream.SerializeToString,
-                response_deserializer=remote__object__pb2.RemoteCallStream.FromString,
+                request_serializer=rpc__message__pb2.RemoteCallStream.SerializeToString,
+                response_deserializer=rpc__message__pb2.RemoteCallStream.FromString,
                 )
         self.ClientStreamRemoteCall = channel.stream_unary(
                 '/distflow.protos.RemoteObject/ClientStreamRemoteCall',
-                request_serializer=remote__object__pb2.RemoteCallRequest.SerializeToString,
-                response_deserializer=remote__object__pb2.RemoteCallReply.FromString,
+                request_serializer=rpc__message__pb2.RemoteCallRequest.SerializeToString,
+                response_deserializer=rpc__message__pb2.RemoteCallReply.FromString,
                 )
         self.BiStreamRemoteCall = channel.stream_stream(
                 '/distflow.protos.RemoteObject/BiStreamRemoteCall',
-                request_serializer=remote__object__pb2.RemoteCallRequest.SerializeToString,
-                response_deserializer=remote__object__pb2.RemoteCallReply.FromString,
+                request_serializer=rpc__message__pb2.RemoteCallRequest.SerializeToString,
+                response_deserializer=rpc__message__pb2.RemoteCallReply.FromString,
                 )
         self.SayHello = channel.unary_unary(
                 '/distflow.protos.RemoteObject/SayHello',
-                request_serializer=remote__object__pb2.HelloRequest.SerializeToString,
-                response_deserializer=remote__object__pb2.HelloReply.FromString,
+                request_serializer=rpc__message__pb2.HelloRequest.SerializeToString,
+                response_deserializer=rpc__message__pb2.HelloReply.FromString,
                 )
 
 
@@ -168,68 +168,68 @@ def add_RemoteObjectServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'RemoteCall': grpc.unary_unary_rpc_method_handler(
                     servicer.RemoteCall,
-                    request_deserializer=remote__object__pb2.RemoteCallRequest.FromString,
-                    response_serializer=remote__object__pb2.RemoteCallReply.SerializeToString,
+                    request_deserializer=rpc__message__pb2.RemoteCallRequest.FromString,
+                    response_serializer=rpc__message__pb2.RemoteCallReply.SerializeToString,
             ),
             'RemoteGenerator': grpc.unary_stream_rpc_method_handler(
                     servicer.RemoteGenerator,
-                    request_deserializer=remote__object__pb2.RemoteCallRequest.FromString,
-                    response_serializer=remote__object__pb2.RemoteCallReply.SerializeToString,
+                    request_deserializer=rpc__message__pb2.RemoteCallRequest.FromString,
+                    response_serializer=rpc__message__pb2.RemoteCallReply.SerializeToString,
             ),
             'RemoteJsonCall': grpc.unary_unary_rpc_method_handler(
                     servicer.RemoteJsonCall,
-                    request_deserializer=remote__object__pb2.RemoteJsonCallRequest.FromString,
-                    response_serializer=remote__object__pb2.RemoteJsonCallReply.SerializeToString,
+                    request_deserializer=rpc__message__pb2.RemoteJsonCallRequest.FromString,
+                    response_serializer=rpc__message__pb2.RemoteJsonCallReply.SerializeToString,
             ),
             'RemoteJsonGenerator': grpc.unary_stream_rpc_method_handler(
                     servicer.RemoteJsonGenerator,
-                    request_deserializer=remote__object__pb2.RemoteJsonCallRequest.FromString,
-                    response_serializer=remote__object__pb2.RemoteJsonCallReply.SerializeToString,
+                    request_deserializer=rpc__message__pb2.RemoteJsonCallRequest.FromString,
+                    response_serializer=rpc__message__pb2.RemoteJsonCallReply.SerializeToString,
             ),
             'RemoteStreamCall': grpc.stream_stream_rpc_method_handler(
                     servicer.RemoteStreamCall,
-                    request_deserializer=remote__object__pb2.RemoteCallRequest.FromString,
-                    response_serializer=remote__object__pb2.RemoteCallReply.SerializeToString,
+                    request_deserializer=rpc__message__pb2.RemoteCallRequest.FromString,
+                    response_serializer=rpc__message__pb2.RemoteCallReply.SerializeToString,
             ),
             'Shutdown': grpc.unary_unary_rpc_method_handler(
                     servicer.Shutdown,
-                    request_deserializer=remote__object__pb2.HealthCheckRequest.FromString,
-                    response_serializer=remote__object__pb2.HealthCheckReply.SerializeToString,
+                    request_deserializer=rpc__message__pb2.HealthCheckRequest.FromString,
+                    response_serializer=rpc__message__pb2.HealthCheckReply.SerializeToString,
             ),
             'HealthCheck': grpc.unary_unary_rpc_method_handler(
                     servicer.HealthCheck,
-                    request_deserializer=remote__object__pb2.HealthCheckRequest.FromString,
-                    response_serializer=remote__object__pb2.HealthCheckReply.SerializeToString,
+                    request_deserializer=rpc__message__pb2.HealthCheckRequest.FromString,
+                    response_serializer=rpc__message__pb2.HealthCheckReply.SerializeToString,
             ),
             'QueryServerMeta': grpc.unary_unary_rpc_method_handler(
                     servicer.QueryServerMeta,
-                    request_deserializer=remote__object__pb2.RemoteCallRequest.FromString,
-                    response_serializer=remote__object__pb2.SimpleReply.SerializeToString,
+                    request_deserializer=rpc__message__pb2.RemoteCallRequest.FromString,
+                    response_serializer=rpc__message__pb2.SimpleReply.SerializeToString,
             ),
             'QueryServiceMeta': grpc.unary_unary_rpc_method_handler(
                     servicer.QueryServiceMeta,
-                    request_deserializer=remote__object__pb2.RemoteCallRequest.FromString,
-                    response_serializer=remote__object__pb2.SimpleReply.SerializeToString,
+                    request_deserializer=rpc__message__pb2.RemoteCallRequest.FromString,
+                    response_serializer=rpc__message__pb2.SimpleReply.SerializeToString,
             ),
             'ChunkedRemoteCall': grpc.stream_stream_rpc_method_handler(
                     servicer.ChunkedRemoteCall,
-                    request_deserializer=remote__object__pb2.RemoteCallStream.FromString,
-                    response_serializer=remote__object__pb2.RemoteCallStream.SerializeToString,
+                    request_deserializer=rpc__message__pb2.RemoteCallStream.FromString,
+                    response_serializer=rpc__message__pb2.RemoteCallStream.SerializeToString,
             ),
             'ClientStreamRemoteCall': grpc.stream_unary_rpc_method_handler(
                     servicer.ClientStreamRemoteCall,
-                    request_deserializer=remote__object__pb2.RemoteCallRequest.FromString,
-                    response_serializer=remote__object__pb2.RemoteCallReply.SerializeToString,
+                    request_deserializer=rpc__message__pb2.RemoteCallRequest.FromString,
+                    response_serializer=rpc__message__pb2.RemoteCallReply.SerializeToString,
             ),
             'BiStreamRemoteCall': grpc.stream_stream_rpc_method_handler(
                     servicer.BiStreamRemoteCall,
-                    request_deserializer=remote__object__pb2.RemoteCallRequest.FromString,
-                    response_serializer=remote__object__pb2.RemoteCallReply.SerializeToString,
+                    request_deserializer=rpc__message__pb2.RemoteCallRequest.FromString,
+                    response_serializer=rpc__message__pb2.RemoteCallReply.SerializeToString,
             ),
             'SayHello': grpc.unary_unary_rpc_method_handler(
                     servicer.SayHello,
-                    request_deserializer=remote__object__pb2.HelloRequest.FromString,
-                    response_serializer=remote__object__pb2.HelloReply.SerializeToString,
+                    request_deserializer=rpc__message__pb2.HelloRequest.FromString,
+                    response_serializer=rpc__message__pb2.HelloReply.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -253,8 +253,8 @@ class RemoteObject(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.unary_unary(request, target, '/distflow.protos.RemoteObject/RemoteCall',
-            remote__object__pb2.RemoteCallRequest.SerializeToString,
-            remote__object__pb2.RemoteCallReply.FromString,
+            rpc__message__pb2.RemoteCallRequest.SerializeToString,
+            rpc__message__pb2.RemoteCallReply.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -270,8 +270,8 @@ class RemoteObject(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.unary_stream(request, target, '/distflow.protos.RemoteObject/RemoteGenerator',
-            remote__object__pb2.RemoteCallRequest.SerializeToString,
-            remote__object__pb2.RemoteCallReply.FromString,
+            rpc__message__pb2.RemoteCallRequest.SerializeToString,
+            rpc__message__pb2.RemoteCallReply.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -287,8 +287,8 @@ class RemoteObject(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.unary_unary(request, target, '/distflow.protos.RemoteObject/RemoteJsonCall',
-            remote__object__pb2.RemoteJsonCallRequest.SerializeToString,
-            remote__object__pb2.RemoteJsonCallReply.FromString,
+            rpc__message__pb2.RemoteJsonCallRequest.SerializeToString,
+            rpc__message__pb2.RemoteJsonCallReply.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -304,8 +304,8 @@ class RemoteObject(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.unary_stream(request, target, '/distflow.protos.RemoteObject/RemoteJsonGenerator',
-            remote__object__pb2.RemoteJsonCallRequest.SerializeToString,
-            remote__object__pb2.RemoteJsonCallReply.FromString,
+            rpc__message__pb2.RemoteJsonCallRequest.SerializeToString,
+            rpc__message__pb2.RemoteJsonCallReply.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -321,8 +321,8 @@ class RemoteObject(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/distflow.protos.RemoteObject/RemoteStreamCall',
-            remote__object__pb2.RemoteCallRequest.SerializeToString,
-            remote__object__pb2.RemoteCallReply.FromString,
+            rpc__message__pb2.RemoteCallRequest.SerializeToString,
+            rpc__message__pb2.RemoteCallReply.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -338,8 +338,8 @@ class RemoteObject(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.unary_unary(request, target, '/distflow.protos.RemoteObject/Shutdown',
-            remote__object__pb2.HealthCheckRequest.SerializeToString,
-            remote__object__pb2.HealthCheckReply.FromString,
+            rpc__message__pb2.HealthCheckRequest.SerializeToString,
+            rpc__message__pb2.HealthCheckReply.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -355,8 +355,8 @@ class RemoteObject(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.unary_unary(request, target, '/distflow.protos.RemoteObject/HealthCheck',
-            remote__object__pb2.HealthCheckRequest.SerializeToString,
-            remote__object__pb2.HealthCheckReply.FromString,
+            rpc__message__pb2.HealthCheckRequest.SerializeToString,
+            rpc__message__pb2.HealthCheckReply.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -372,8 +372,8 @@ class RemoteObject(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.unary_unary(request, target, '/distflow.protos.RemoteObject/QueryServerMeta',
-            remote__object__pb2.RemoteCallRequest.SerializeToString,
-            remote__object__pb2.SimpleReply.FromString,
+            rpc__message__pb2.RemoteCallRequest.SerializeToString,
+            rpc__message__pb2.SimpleReply.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -389,8 +389,8 @@ class RemoteObject(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.unary_unary(request, target, '/distflow.protos.RemoteObject/QueryServiceMeta',
-            remote__object__pb2.RemoteCallRequest.SerializeToString,
-            remote__object__pb2.SimpleReply.FromString,
+            rpc__message__pb2.RemoteCallRequest.SerializeToString,
+            rpc__message__pb2.SimpleReply.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -406,8 +406,8 @@ class RemoteObject(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/distflow.protos.RemoteObject/ChunkedRemoteCall',
-            remote__object__pb2.RemoteCallStream.SerializeToString,
-            remote__object__pb2.RemoteCallStream.FromString,
+            rpc__message__pb2.RemoteCallStream.SerializeToString,
+            rpc__message__pb2.RemoteCallStream.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -423,8 +423,8 @@ class RemoteObject(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_unary(request_iterator, target, '/distflow.protos.RemoteObject/ClientStreamRemoteCall',
-            remote__object__pb2.RemoteCallRequest.SerializeToString,
-            remote__object__pb2.RemoteCallReply.FromString,
+            rpc__message__pb2.RemoteCallRequest.SerializeToString,
+            rpc__message__pb2.RemoteCallReply.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -440,8 +440,8 @@ class RemoteObject(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/distflow.protos.RemoteObject/BiStreamRemoteCall',
-            remote__object__pb2.RemoteCallRequest.SerializeToString,
-            remote__object__pb2.RemoteCallReply.FromString,
+            rpc__message__pb2.RemoteCallRequest.SerializeToString,
+            rpc__message__pb2.RemoteCallReply.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -457,7 +457,7 @@ class RemoteObject(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.unary_unary(request, target, '/distflow.protos.RemoteObject/SayHello',
-            remote__object__pb2.HelloRequest.SerializeToString,
-            remote__object__pb2.HelloReply.FromString,
+            rpc__message__pb2.HelloRequest.SerializeToString,
+            rpc__message__pb2.HelloReply.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

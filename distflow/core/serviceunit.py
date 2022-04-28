@@ -49,21 +49,24 @@ class ServiceType(Enum):
     BiStream = "BidirectinoalStream"  # only support grpc for now
     ClientStream = "ClientStream"  # only support grpc for now
     AsyncWebSocket = "AsyncWebSocket"  # only support ws
+    WebSocketEventProvider = "EventProvider"  # only support ws
     WebSocketOnConnect = "WebSocketOnConnect"  # only support ws
     WebSocketOnDisConnect = "WebSocketOnDisConnect"  # only support ws
 
 
 @dataclasses.dataclass
 class ServFunctionMeta:
+    fn: Callable
     name: str
     type: ServiceType
     args: List[ParamMeta]
     is_gen: bool
     is_async: bool
     is_static: bool
+    is_binded: bool
 
-    def __init__(self, name: str, type: ServiceType, sig: inspect.Signature,
-                 is_gen: bool, is_async: bool, is_static: bool) -> None:
+    def __init__(self, fn: Callable, name: str, type: ServiceType, sig: inspect.Signature,
+                 is_gen: bool, is_async: bool, is_static: bool, is_binded: bool) -> None:
         self.name = name
         self.type = type
         self.args = [ParamMeta(n, p) for n, p in sig.parameters.items()]
@@ -72,6 +75,8 @@ class ServFunctionMeta:
         self.is_gen = is_gen
         self.is_async = is_async
         self.is_static = is_static
+        self.is_binded = is_binded
+        self.fn = fn
 
     def to_json(self):
         return {
@@ -100,9 +105,25 @@ def _get_cls_obj_from_module_name(module_name: str):
 
 
 class FunctionUserMeta:
-    def __init__(self, type: ServiceType) -> None:
+    def __init__(self, type: ServiceType, event_name: str = "") -> None:
         self.type = type
+        self._event_name = event_name 
 
+    @property 
+    def event_name(self):
+        assert self._event_name != ""
+        return self._event_name
+
+class EventProvider:
+    def __init__(self, service_key: str, event_name: str, fn: Callable, is_static: bool) -> None:
+        self.service_key = service_key
+        self.event_name = event_name
+        self.fn = fn
+        self.is_static = is_static
+        self.is_binded = False
+
+    def copy(self):
+        return EventProvider(self.service_key, self.event_name, self.fn, self.is_static)
 
 class ServiceUnit:
     """x.y.z:Class:Alias
@@ -115,11 +136,11 @@ class ServiceUnit:
         self.obj_type, self.alias, self.module_key = _get_cls_obj_from_module_name(
             module_name)
         members = inspecttools.get_members_by_type(self.obj_type, False)
-        self.services: Dict[str, Tuple[Callable, ServFunctionMeta]] = {}
+        self.services: Dict[str, ServFunctionMeta] = {}
         self.exit_fn: Optional[Callable[[], None]] = None
         self.ws_onconn_fn: Optional[Callable[[Any], None]] = None
-        self.ws_ondisconn_fn: Optional[Callable[[], None]] = None
-
+        self.ws_ondisconn_fn: Optional[Callable[[Any], None]] = None
+        self.name_to_events: Dict[str, EventProvider] = {}
         for k, v in members:
             if inspecttools.isclassmethod(v) or inspecttools.isproperty(v):
                 # ignore property and classmethod
@@ -127,20 +148,31 @@ class ServiceUnit:
             if k.startswith("__"):
                 # ignore all private and magic methods
                 continue
+            serv_key = f"{self.module_key}.{k}"
+
             serv_type = ServiceType.Normal
             is_gen = inspect.isgeneratorfunction(v)
             is_async_gen = inspect.isasyncgenfunction(v)
             is_async = inspect.iscoroutinefunction(v) or is_async_gen
-            isstatic = inspecttools.isstaticmethod(self.obj_type, k)
+            is_static = inspecttools.isstaticmethod(self.obj_type, k)
             if is_async:
                 is_gen = is_async_gen
             # TODO Why?
             v_static = inspect.getattr_static(self.obj_type, k)
+            v_sig = inspect.signature(v)
+            ev_provider: Optional[EventProvider] = None
             if hasattr(v_static, DISTFLOW_FUNC_META_KEY):
                 # for special methods
                 meta: FunctionUserMeta = getattr(v_static, DISTFLOW_FUNC_META_KEY)
                 # meta: FunctionUserMeta = inspect.getattr_static(v, DISTFLOW_FUNC_META_KEY)
                 serv_type = meta.type
+                if serv_type == ServiceType.WebSocketEventProvider:
+                    num_parameters = len(v_sig.parameters) - (0 if is_static else 1)
+                    msg =  f"event can't have any parameter, but {serv_key} have {num_parameters} param"
+                    assert num_parameters == 0, msg
+                    assert is_async and not is_async_gen, "event provider must be async function"
+                    # self.events.append(EventProvider(serv_key, meta.event_name, v, is_static))
+                    ev_provider = EventProvider(serv_key, meta.event_name, v, is_static)
             if serv_type == ServiceType.Exit:
                 assert self.exit_fn is None, "you can only register one exit"
                 self.exit_fn = v
@@ -150,19 +182,25 @@ class ServiceUnit:
             if serv_type == ServiceType.WebSocketOnDisConnect:
                 assert self.ws_ondisconn_fn is None, "you can only register one ws_onconn_fn"
                 self.ws_ondisconn_fn = v
-            serv_meta = ServFunctionMeta(k, serv_type, inspect.signature(v),
-                                         is_gen, is_async, isstatic)
+
+            serv_meta = ServFunctionMeta(v, k, serv_type, v_sig,
+                                         is_gen, is_async, is_static, False)
             # if module_name == "distflow.services.for_test:Service2:Test3" and k == "client_stream":
             #     print(dir(v))
             # print(module_name, serv_meta, is_async, is_async_gen)
 
-            serv_key = f"{self.module_key}.{k}"
             assert serv_key not in self.services
-            self.services[serv_key] = (v, serv_meta)
+            self.services[serv_key] = serv_meta
+            if ev_provider is not None:
+                self.name_to_events[serv_key] = ev_provider
             if self.alias is not None:
                 alias_key = f"{self.alias}.{k}"
                 assert alias_key not in self.services
-                self.services[alias_key] = (v, serv_meta)
+                self.services[alias_key] = serv_meta
+                if ev_provider is not None:
+                    ev_provider.service_key = alias_key
+                    self.name_to_events[alias_key] = ev_provider
+
         assert len(
             self.services
         ) > 0, f"your service {module_name} must have at least one valid method"
@@ -181,11 +219,19 @@ class ServiceUnit:
             if self.ws_ondisconn_fn is not None:
                 self.ws_ondisconn_fn = types.MethodType(self.ws_ondisconn_fn, self.obj)
 
-            for k, (fn, meta) in self.services.items():
+            for k, meta in self.services.items():
                 # bind fn if not static
-                if not meta.is_static:
-                    new_fn = types.MethodType(fn, self.obj)
-                    self.services[k] = (new_fn, meta)
+                if not meta.is_static and not meta.is_binded:
+                    meta.fn = types.MethodType(meta.fn, self.obj)
+                    meta.is_binded = True
+            for ev in self.name_to_events.values():
+                if not ev.is_static and not ev.is_binded:
+                    new_fn = types.MethodType(ev.fn, self.obj)
+                    ev.fn = new_fn
+                    ev.is_binded = True
+
+    def get_all_event_providers(self):
+        return self.name_to_events
 
     def get_service_unit_ids(self):
         if self.alias is not None:
@@ -197,16 +243,17 @@ class ServiceUnit:
         return list(self.services.keys())
 
     def get_service_metas_json(self):
-        return {k: v[1].to_json() for k, v in self.services.items()}
+        return {k: v.to_json() for k, v in self.services.items()}
 
     def get_service_and_meta(self, serv_key: str):
         self.init_service()
-        return self.services[serv_key]
+        meta = self.services[serv_key]
+        return meta.fn, meta
 
     def run_service(self, serv_key: str, *args, **kwargs):
         self.init_service()
         assert self.obj is not None
-        fn, _ = self.services[serv_key]
+        fn = self.services[serv_key].fn
         return fn(*args, **kwargs)
 
     def run_service_from_fn(self, fn: Callable, *args, **kwargs):
@@ -218,9 +265,9 @@ class ServiceUnit:
         if self.ws_onconn_fn is not None:
             self.ws_onconn_fn(client)
 
-    def websocket_ondisconnect(self):
+    def websocket_ondisconnect(self, client):
         if self.ws_ondisconn_fn is not None:
-            self.ws_ondisconn_fn()
+            self.ws_ondisconn_fn(client)
 
     def run_exit(self):
         if self.exit_fn is not None:
@@ -231,16 +278,23 @@ class ServiceUnits:
     def __init__(self, sus: List[ServiceUnit]) -> None:
         self.sus = sus
         self.key_to_su: Dict[str, ServiceUnit] = {}
+        self._service_id_to_key :Dict[int, str] = {}
         unique_module_ids: Set[str] = set()
+        cnt: int = 0
         for su in sus:
             for suid in su.get_service_unit_ids():
                 assert suid not in self.key_to_su
                 unique_module_ids.add(suid)
             for sid in su.get_service_ids():
                 self.key_to_su[sid] = su
+                self._service_id_to_key[cnt] = sid
+                cnt += 1
 
     def get_service_and_meta(self, serv_key: str):
         return self.key_to_su[serv_key].get_service_and_meta(serv_key)
+
+    def get_service_id_to_name(self):
+        return self._service_id_to_key
 
     def get_service(self, serv_key: str):
         return self.key_to_su[serv_key].get_service_and_meta(serv_key)[0]
@@ -259,10 +313,15 @@ class ServiceUnits:
         for s in self.sus:
             s.websocket_onconnect(client)
 
-    def websocket_ondisconnect(self):
+    def websocket_ondisconnect(self, client):
         for s in self.sus:
-            s.websocket_ondisconnect()
+            s.websocket_ondisconnect(client)
 
+    def get_all_event_providers(self):
+        res: Dict[str, EventProvider] = {}
+        for su in self.sus:
+            res.update(su.get_all_event_providers())
+        return res 
 
 
 if __name__ == "__main__":

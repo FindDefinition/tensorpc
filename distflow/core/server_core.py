@@ -18,6 +18,8 @@ from distflow.core.defs import Service, ServiceDef
 from distflow import compat
 from distflow.core import core_io, serviceunit
 from distflow.protos import remote_object_pb2 as remote_object_pb2
+from distflow.protos import rpc_message_pb2 as rpc_msg_pb2
+
 from distflow.utils import df_logging
 
 LOGGER = df_logging.get_logger()
@@ -27,12 +29,11 @@ class _ExposedServerProps(object):
     """we save static methods/props of service to a object
     """
     def __init__(self, exec_lock, service_units, shutdown_event,
-                 local_url, loop):
+                 local_url):
         self.exec_lock = exec_lock
         self.service_units = service_units
         self.shutdown_event = shutdown_event
         self.local_url = local_url
-        self.loop = loop
 
 
 class ServerContext(object):
@@ -94,8 +95,7 @@ def get_server_context() -> ServerContext:
 class ServiceCore(object):
     def __init__(self,
                  local_url: str,
-                 service_def: ServiceDef,
-                 loop: Optional[asyncio.AbstractEventLoop]=None):
+                 service_def: ServiceDef):
         self._exec_lock = threading.Lock()
         self.local_url = local_url
         self.shutdown_event = threading.Event()
@@ -106,10 +106,13 @@ class ServiceCore(object):
         
         self._register_exit_lock = threading.Lock()
         self._exit_funcs = {}
-        self.loop = loop
         self._exposed_props = _ExposedServerProps(
             self._exec_lock, self.service_units, self.shutdown_event,
-            self.local_url, self.loop)
+            self.local_url)
+
+    def _init_async_members(self):
+        # in future python versions, asyncio event can't be created if no event loop running.
+        self.async_shutdown_event = asyncio.Event()
 
     def exec_exit_funcs(self):
         return self.service_units.run_exit()
@@ -118,7 +121,7 @@ class ServiceCore(object):
         with self.reset_timeout_lock:
             self.latest_active_time = time.time()
 
-    def _remote_exception_json(self, e: Exception):
+    def _remote_exception_json(self, e: BaseException):
         detail = traceback.format_exc()
         exception_json = {"error": str(e), "detail": detail}
         return json.dumps(exception_json)
@@ -255,34 +258,34 @@ class ProtobufServiceCore(ServiceCore):
     def _process_data(self, arrays, method: int):
         return core_io.data_from_pb(arrays, method)
 
-    def remote_call(self, request: remote_object_pb2.RemoteCallRequest):
+    def remote_call(self, request: rpc_msg_pb2.RemoteCallRequest):
         self._reset_timeout()
         args, kwargs = self._process_data(request.arrays, request.flags)
         res_func, is_exc = self.execute_service(request.service_key, args,
                                                    kwargs)
         if is_exc:
-            return remote_object_pb2.RemoteCallReply(exception=res_func)
-        res = remote_object_pb2.RemoteCallReply(arrays=core_io.data_to_pb(
+            return rpc_msg_pb2.RemoteCallReply(exception=res_func)
+        res = rpc_msg_pb2.RemoteCallReply(arrays=core_io.data_to_pb(
             [res_func], request.flags),
                                                 flags=request.flags)
         del res_func
         return res
 
     async def remote_call_async(self,
-                                request: remote_object_pb2.RemoteCallRequest):
+                                request: rpc_msg_pb2.RemoteCallRequest):
         self._reset_timeout()
         args, kwargs = self._process_data(request.arrays, request.flags)
         res_func, is_exc = await self.execute_async_service(
             request.service_key, args, kwargs)
         if is_exc:
-            return remote_object_pb2.RemoteCallReply(exception=res_func)
-        res = remote_object_pb2.RemoteCallReply(arrays=core_io.data_to_pb(
+            return rpc_msg_pb2.RemoteCallReply(exception=res_func)
+        res = rpc_msg_pb2.RemoteCallReply(arrays=core_io.data_to_pb(
             [res_func], request.flags),
                                                 flags=request.flags)
         del res_func
         return res
 
-    def remote_generator(self, request: remote_object_pb2.RemoteCallRequest):
+    def remote_generator(self, request: rpc_msg_pb2.RemoteCallRequest):
         self._reset_timeout()
         flags = request.flags
         args, kwargs = self._process_data(request.arrays, flags)
@@ -290,15 +293,15 @@ class ProtobufServiceCore(ServiceCore):
                 request.service_key, args, kwargs, False):
             self._reset_timeout()
             if is_exc:  # exception
-                yield remote_object_pb2.RemoteCallReply(exception=res)
+                yield rpc_msg_pb2.RemoteCallReply(exception=res)
 
                 break
             res = [res]
             res = core_io.data_to_pb(res, flags)
-            yield remote_object_pb2.RemoteCallReply(arrays=res, flags=flags)
+            yield rpc_msg_pb2.RemoteCallReply(arrays=res, flags=flags)
 
     def remote_json_generator(
-            self, request: remote_object_pb2.RemoteJsonCallRequest):
+            self, request: rpc_msg_pb2.RemoteJsonCallRequest):
         self._reset_timeout()
         flags = request.flags
         args, kwargs = core_io.data_from_json(request.arrays, request.data,
@@ -307,16 +310,16 @@ class ProtobufServiceCore(ServiceCore):
                 request.service_key, args, kwargs, False):
             self._reset_timeout()
             if is_exc:  # exception
-                yield remote_object_pb2.RemoteJsonCallReply(exception=res)
+                yield rpc_msg_pb2.RemoteJsonCallReply(exception=res)
                 break
             res = [res]
             arrays, decoupled = core_io.data_to_json(res, flags)
-            yield remote_object_pb2.RemoteJsonCallReply(arrays=arrays,
+            yield rpc_msg_pb2.RemoteJsonCallReply(arrays=arrays,
                                                         data=decoupled,
                                                         flags=flags)
 
     def remote_json_call(self,
-                         request: remote_object_pb2.RemoteJsonCallRequest):
+                         request: rpc_msg_pb2.RemoteJsonCallRequest):
         self._reset_timeout()
         flags = request.flags
         args, kwargs = core_io.data_from_json(request.arrays, request.data,
@@ -326,15 +329,15 @@ class ProtobufServiceCore(ServiceCore):
                                               kwargs,
                                               json_call=True)
         if is_exc:
-            return remote_object_pb2.RemoteJsonCallReply(exception=res)
+            return rpc_msg_pb2.RemoteJsonCallReply(exception=res)
         res = [res]
         arrays, decoupled = core_io.data_to_json(res, flags)
-        return remote_object_pb2.RemoteJsonCallReply(arrays=arrays,
+        return rpc_msg_pb2.RemoteJsonCallReply(arrays=arrays,
                                                      data=decoupled,
                                                      flags=flags)
 
     async def remote_json_call_async(
-            self, request: remote_object_pb2.RemoteJsonCallRequest):
+            self, request: rpc_msg_pb2.RemoteJsonCallRequest):
         self._reset_timeout()
         flags = request.flags
         args, kwargs = core_io.data_from_json(request.arrays, request.data,
@@ -344,15 +347,15 @@ class ProtobufServiceCore(ServiceCore):
                                                           kwargs,
                                                           json_call=True)
         if is_exc:
-            return remote_object_pb2.RemoteJsonCallReply(exception=res)
+            return rpc_msg_pb2.RemoteJsonCallReply(exception=res)
         res = [res]
         arrays, decoupled = core_io.data_to_json(res, flags)
-        return remote_object_pb2.RemoteJsonCallReply(arrays=arrays,
+        return rpc_msg_pb2.RemoteJsonCallReply(arrays=arrays,
                                                      data=decoupled,
                                                      flags=flags)
 
     def chunked_remote_call(
-            self, request_iter: Iterator[remote_object_pb2.RemoteCallStream]):
+            self, request_iter: Iterator[rpc_msg_pb2.RemoteCallStream]):
         self._reset_timeout()
         from_stream = core_io.FromBufferStream()
         for request in request_iter:
@@ -369,7 +372,7 @@ class ProtobufServiceCore(ServiceCore):
                 res, is_exc = self.execute_service(func_key, args, kwargs)
                 if is_exc:
                     # exception
-                    yield remote_object_pb2.RemoteCallStream(
+                    yield rpc_msg_pb2.RemoteCallStream(
                         exception=res,
                         chunked_data=b'',
                     )
@@ -387,13 +390,13 @@ class ProtobufServiceCore(ServiceCore):
 
 
     def remote_stream_call(
-            self, request_iter: Iterator[remote_object_pb2.RemoteCallRequest]):
+            self, request_iter: Iterator[rpc_msg_pb2.RemoteCallRequest]):
         self._reset_timeout()
         for request in request_iter:
             yield self.remote_call(request)
 
     def client_stream(
-            self, request_iter: Iterator[remote_object_pb2.RemoteCallRequest]):
+            self, request_iter: Iterator[rpc_msg_pb2.RemoteCallRequest]):
         self._reset_timeout()
         call_request = next(request_iter)
         args, kwargs = self._process_data(call_request.arrays,
@@ -413,14 +416,14 @@ class ProtobufServiceCore(ServiceCore):
             kwargs,
             service_type=serviceunit.ServiceType.ClientStream)
         if is_exc:
-            return remote_object_pb2.RemoteCallReply(exception=res)
+            return rpc_msg_pb2.RemoteCallReply(exception=res)
         res = [res]
         res = core_io.data_to_pb(res, call_request.flags)
-        return remote_object_pb2.RemoteCallReply(arrays=res,
+        return rpc_msg_pb2.RemoteCallReply(arrays=res,
                                                  flags=call_request.flags)
 
     def bi_stream(self,
-                  request_iter: Iterator[remote_object_pb2.RemoteCallRequest]):
+                  request_iter: Iterator[rpc_msg_pb2.RemoteCallRequest]):
         self._reset_timeout()
         call_request = next(request_iter)
         args, kwargs = self._process_data(call_request.arrays,
@@ -441,15 +444,15 @@ class ProtobufServiceCore(ServiceCore):
                 service_type=serviceunit.ServiceType.BiStream):
             self._reset_timeout()
             if is_exc:  # exception
-                yield remote_object_pb2.RemoteCallReply(exception=res)
+                yield rpc_msg_pb2.RemoteCallReply(exception=res)
                 break
             res = [res]
             res = core_io.data_to_pb(res, call_request.flags)
-            yield remote_object_pb2.RemoteCallReply(arrays=res,
+            yield rpc_msg_pb2.RemoteCallReply(arrays=res,
                                                     flags=call_request.flags)
 
     async def remote_generator_async(
-            self, request: remote_object_pb2.RemoteCallRequest):
+            self, request: rpc_msg_pb2.RemoteCallRequest):
         self._reset_timeout()
         # TODO determine generator is async generator
         flags = request.flags
@@ -460,27 +463,27 @@ class ProtobufServiceCore(ServiceCore):
                     request.service_key, args, kwargs, False):
                 self._reset_timeout()
                 if is_exc:  # exception
-                    yield remote_object_pb2.RemoteCallReply(exception=res)
+                    yield rpc_msg_pb2.RemoteCallReply(exception=res)
 
                     break
                 res = [res]
                 res = core_io.data_to_pb(res, flags)
-                yield remote_object_pb2.RemoteCallReply(arrays=res,
+                yield rpc_msg_pb2.RemoteCallReply(arrays=res,
                                                         flags=flags)
         else:
             async for res, is_exc in self.execute_async_generator_service(
                     request.service_key, args, kwargs, False):
                 self._reset_timeout()
                 if is_exc:  # exception
-                    yield remote_object_pb2.RemoteCallReply(exception=res)
+                    yield rpc_msg_pb2.RemoteCallReply(exception=res)
                     break
                 res = [res]
                 res = core_io.data_to_pb(res, flags)
-                yield remote_object_pb2.RemoteCallReply(arrays=res,
+                yield rpc_msg_pb2.RemoteCallReply(arrays=res,
                                                         flags=flags)
 
     async def remote_json_generator_async(
-            self, request: remote_object_pb2.RemoteCallRequest):
+            self, request: rpc_msg_pb2.RemoteJsonCallRequest):
         self._reset_timeout()
         flags = request.flags
         args, kwargs = core_io.data_from_json(request.arrays, request.data,
@@ -491,11 +494,11 @@ class ProtobufServiceCore(ServiceCore):
                     request.service_key, args, kwargs, False):
                 self._reset_timeout()
                 if is_exc:  # exception
-                    yield remote_object_pb2.RemoteJsonCallReply(exception=res)
+                    yield rpc_msg_pb2.RemoteJsonCallReply(exception=res)
                     break
                 res = [res]
                 arrays, decoupled = core_io.data_to_json(res, flags)
-                yield remote_object_pb2.RemoteJsonCallReply(arrays=arrays,
+                yield rpc_msg_pb2.RemoteJsonCallReply(arrays=arrays,
                                                             data=decoupled,
                                                             flags=flags)
         else:
@@ -503,17 +506,17 @@ class ProtobufServiceCore(ServiceCore):
                     request.service_key, args, kwargs, False):
                 self._reset_timeout()
                 if is_exc:  # exception
-                    yield remote_object_pb2.RemoteJsonCallReply(exception=res)
+                    yield rpc_msg_pb2.RemoteJsonCallReply(exception=res)
                     break
                 res = [res]
                 arrays, decoupled = core_io.data_to_json(res, flags)
-                yield remote_object_pb2.RemoteJsonCallReply(arrays=arrays,
+                yield rpc_msg_pb2.RemoteJsonCallReply(arrays=arrays,
                                                             data=decoupled,
                                                             flags=flags)
 
     async def chunked_remote_call_async(
             self,
-            request_iter: AsyncIterator[remote_object_pb2.RemoteCallStream]):
+            request_iter: AsyncIterator[rpc_msg_pb2.RemoteCallStream]):
         self._reset_timeout()
         from_stream = core_io.FromBufferStream()
         async for request in request_iter:
@@ -531,7 +534,7 @@ class ProtobufServiceCore(ServiceCore):
                     func_key, args, kwargs)
                 if is_exc:
                     # exception
-                    yield remote_object_pb2.RemoteCallStream(
+                    yield rpc_msg_pb2.RemoteCallStream(
                         exception=res,
                         chunked_data=b'',
                     )
@@ -549,14 +552,14 @@ class ProtobufServiceCore(ServiceCore):
 
     async def remote_stream_call_async(
             self,
-            request_iter: AsyncIterator[remote_object_pb2.RemoteCallRequest]):
+            request_iter: AsyncIterator[rpc_msg_pb2.RemoteCallRequest]):
         self._reset_timeout()
         async for request in request_iter:
             yield await self.remote_call_async(request)
 
     async def client_stream_async(
             self,
-            request_iter: AsyncIterator[remote_object_pb2.RemoteCallRequest]):
+            request_iter: AsyncIterator[rpc_msg_pb2.RemoteCallRequest]):
         self._reset_timeout()
         call_request = None
         async for call_request in request_iter:
@@ -580,15 +583,15 @@ class ProtobufServiceCore(ServiceCore):
             kwargs,
             service_type=serviceunit.ServiceType.ClientStream)
         if is_exc:
-            return remote_object_pb2.RemoteCallReply(exception=res)
+            return rpc_msg_pb2.RemoteCallReply(exception=res)
         res = [res]
         res = core_io.data_to_pb(res, call_request.flags)
-        return remote_object_pb2.RemoteCallReply(arrays=res,
+        return rpc_msg_pb2.RemoteCallReply(arrays=res,
                                                  flags=call_request.flags)
 
     async def bi_stream_async(
             self,
-            request_iter: AsyncIterator[remote_object_pb2.RemoteCallRequest]):
+            request_iter: AsyncIterator[rpc_msg_pb2.RemoteCallRequest]):
         self._reset_timeout()
         call_request = None
         async for call_request in request_iter:
@@ -614,11 +617,11 @@ class ProtobufServiceCore(ServiceCore):
                     service_type=serviceunit.ServiceType.BiStream):
                 self._reset_timeout()
                 if is_exc:  # exception
-                    yield remote_object_pb2.RemoteCallReply(exception=res)
+                    yield rpc_msg_pb2.RemoteCallReply(exception=res)
                     break
                 res = [res]
                 res = core_io.data_to_pb(res, call_request.flags)
-                yield remote_object_pb2.RemoteCallReply(
+                yield rpc_msg_pb2.RemoteCallReply(
                     arrays=res, flags=call_request.flags)
         else:
             async for res, is_exc in self.execute_async_generator_service(
@@ -628,9 +631,9 @@ class ProtobufServiceCore(ServiceCore):
                     service_type=serviceunit.ServiceType.BiStream):
                 self._reset_timeout()
                 if is_exc:  # exception
-                    yield remote_object_pb2.RemoteCallReply(exception=res)
+                    yield rpc_msg_pb2.RemoteCallReply(exception=res)
                     break
                 res = [res]
                 res = core_io.data_to_pb(res, call_request.flags)
-                yield remote_object_pb2.RemoteCallReply(
+                yield rpc_msg_pb2.RemoteCallReply(
                     arrays=res, flags=call_request.flags)

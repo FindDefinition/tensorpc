@@ -39,12 +39,6 @@ def get_current_service_key():
 def get_local_url():
     return get_server_exposed_props().local_url
 
-def get_loop():
-    loop = get_server_exposed_props().loop
-    if loop is None:
-        raise ValueError("you haven't provide any loop to service core")
-    return loop
-
 def run_coro(coro):
     """run coro in loop when you provide a loop to service core.
     should only be used when you schedule a ws task from grpc client.

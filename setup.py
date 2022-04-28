@@ -22,7 +22,7 @@ VERSION = None
 
 # What packages are required for this module to be executed?
 REQUIRED = [
-    "protobuf",
+    "protobuf>=3.20",
     "grpcio",
     "grpcio-tools",
     "fire",

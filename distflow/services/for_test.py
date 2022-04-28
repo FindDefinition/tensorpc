@@ -1,9 +1,18 @@
+import asyncio
 from distflow.core import marker
-
+import time
 
 class Service1:
     def add(self, a, b):
         return a + b
+
+    def echo(self, x):
+        return x
+
+    @marker.mark_websocket_event
+    async def event(self):
+        await asyncio.sleep(0.5)
+        return time.time()
 
 class Service2:
     def __init__(self, x) -> None:
@@ -48,7 +57,12 @@ class Service2Async:
     @staticmethod 
     async def add(a, b):
         return a + b
-    
+
+    @staticmethod 
+    async def sum(a):
+        print(a.shape)
+        return a.sum()
+
     def gen_func(self, a):
         for i in range(10):
             yield a + i
