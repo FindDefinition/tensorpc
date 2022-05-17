@@ -22,11 +22,11 @@ from typing import Tuple
 import numpy as np
 import pytest
 import aiohttp 
-from distflow.core import asyncclient
-from distflow.utils.wait_tools import get_free_loopback_tcp_port
-from distflow import PACKAGE_ROOT
-from distflow.services.for_test import Service2
-from distflow.core.httpclient import http_remote_call
+from tensorpc.core import asyncclient
+from tensorpc.utils.wait_tools import get_free_loopback_tcp_port
+from tensorpc import PACKAGE_ROOT
+from tensorpc.services.for_test import Service2
+from tensorpc.core.httpclient import http_remote_call, WebsocketClient
 import pytest_asyncio
 
 @pytest_asyncio.fixture
@@ -40,15 +40,17 @@ async def sess_url():
 
     serv_def = PACKAGE_ROOT / "services/serv_def.yaml"
     proc = subprocess.Popen(
-        f"python -m distflow.serve --port {port} --http_port={port2} --serv_def_file {serv_def}",
+        f"python -m tensorpc.serve --port {port} --http_port={port2} --serv_def_file {serv_def}",
         shell=True)
     url = f"http://localhost:{port2}/api/rpc"
+    wsurl = f"http://localhost:{port2}/api/ws"
+
     try:
         async with asyncclient.AsyncRemoteManager(
                 "localhost:{}".format(port)) as robj:
             await robj.wait_for_remote_ready()
         async with aiohttp.ClientSession() as session:
-            yield session, url
+            yield session, url, wsurl
     finally:
         async with asyncclient.AsyncRemoteManager(
                 "localhost:{}".format(port)) as robj:
@@ -66,15 +68,17 @@ async def sess_url_local():
 
     serv_def = PACKAGE_ROOT / "services/serv_def.yaml"
     proc = subprocess.Popen(
-        f"python -m distflow.serve --port {port} --http_port={port2} --serv_def_file {serv_def}",
+        f"python -m tensorpc.serve --port {port} --http_port={port2} --serv_def_file {serv_def}",
         shell=True)
     url = f"http://localhost:{port2}/api/rpc"
+    wsurl = f"http://localhost:{port2}/api/ws"
+
     try:
         async with asyncclient.AsyncRemoteManager(
                 "localhost:{}".format(port)) as robj:
             await robj.wait_for_remote_ready()
         async with aiohttp.ClientSession() as session:
-            yield session, url
+            yield session, url, wsurl
     finally:
         async with asyncclient.AsyncRemoteManager(
                 "localhost:{}".format(port)) as robj:
@@ -83,9 +87,11 @@ async def sess_url_local():
 
 
 @pytest.mark.asyncio
-async def test_remote_call(sess_url: Tuple[aiohttp.ClientSession, str]):
+async def test_remote_call(sess_url: Tuple[aiohttp.ClientSession, str, str]):
     sess = sess_url[0]
     url = sess_url[1]
+    wsurl = sess_url[2]
+
     datas_a = np.random.uniform(size=(30))
     datas_b = np.random.uniform(size=(30))
     expected = datas_a + datas_b
@@ -97,6 +103,16 @@ async def test_remote_call(sess_url: Tuple[aiohttp.ClientSession, str]):
     expected = datas_a.sum()
     res = await http_remote_call(sess, url, "Test3Async.sum", datas_a)
     assert np.allclose(res, expected)
+    async with sess.ws_connect(wsurl) as ws:
+        client = WebsocketClient(ws)
+        await client.subscribe("Test.event")
+        await client.on("Test.event", lambda x: print(x))
+        res = await client.remote_json_call("Test.echo", 5)
+        assert res == 5
+        res2 = await client.remote_json_call("Test.large_return")
+        assert np.allclose(res2, np.arange(1000000))
+        await asyncio.sleep(2)
+
 
 
 async def main_async():

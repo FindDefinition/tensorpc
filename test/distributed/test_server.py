@@ -21,10 +21,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from distflow.core import client
-from distflow.utils.wait_tools import get_free_loopback_tcp_port
-from distflow import PACKAGE_ROOT
-from distflow.services.for_test import Service2
+from tensorpc.core import client
+from tensorpc.utils.wait_tools import get_free_loopback_tcp_port
+from tensorpc import PACKAGE_ROOT
+from tensorpc.services.for_test import Service2
 
 @pytest.fixture
 def server_client():
@@ -33,7 +33,7 @@ def server_client():
         pass
     serv_def = PACKAGE_ROOT / "services/serv_def.yaml"
     proc = subprocess.Popen(
-        f"python -m distflow.serve_sync --port {port} --serv_def_file {serv_def}",
+        f"python -m tensorpc.serve_sync --port {port} --serv_def_file {serv_def}",
         shell=True)
     try:
         with client.simple_client("localhost:{}".format(port)) as robj:
@@ -51,7 +51,7 @@ def server_client_local():
         pass
     serv_def = PACKAGE_ROOT / "services/serv_def.yaml"
     proc = subprocess.Popen(
-        f"python -m distflow.serve_sync --port {port} --serv_def_file {serv_def}",
+        f"python -m tensorpc.serve_sync --port {port} --serv_def_file {serv_def}",
         shell=True)
     try:
         with client.simple_client("localhost:{}".format(port)) as robj:

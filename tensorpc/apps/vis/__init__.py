@@ -1,0 +1,12 @@
+from typing import List
+from . import figure
+from tensorpc import simple_chunk_call
+
+def vis_figures(addr: str, figs: List[figure.Figure]):
+    assert figs, "at least one fig is needed"
+    datas = []
+    for d in figs:
+        assert isinstance(d, figure.Figure)
+        datas.append(d.data())
+    simple_chunk_call(addr, "tensorpc.services.vis:VisService.send_vis_message", datas)
+

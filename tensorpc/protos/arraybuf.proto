@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package tensorpc.protos;
+
+message dtype {
+  enum ByteOrder {
+    littleEndian = 0; // '<' order
+    bigEndian = 1;    // '>' order
+    native = 2;        // '=' order
+    na = 3;            // '|' order (not applicable)
+  }
+  enum DataType {
+    float64 = 0;
+    float32 = 1;
+    float16 = 2;
+    uint64 = 3;
+    uint32 = 4;
+    uint16 = 5;
+    uint8 = 6;
+    int64 = 7;
+    int32 = 8;
+    int16 = 9;
+    int8 = 10;
+    bool_ = 11;
+    CustomBytes = 12; // just bytes without any specific format.
+    Base64 = 13; // just bytes without any specific format.
+  }
+  DataType type = 1;
+  ByteOrder byte_order = 2;
+}
+
+message ndarray {
+  repeated int64 shape = 1;
+  dtype dtype = 2;
+  bytes data = 3;
+}
+
+message arrayjson {
+  repeated ndarray arrays = 1;
+  string data = 2;
+}

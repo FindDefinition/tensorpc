@@ -1,18 +1,25 @@
 import inspect 
-from distflow.core import inspecttools
+from tensorpc.core import inspecttools
+from tensorpc.apps.vis import vis_figures, figure
 
-class A:
-    def a(self):
-        pass 
+def intensity_to_color(inten, rate=255):
+    return np.tile((inten / rate).reshape(-1, 1), [1, 3])
 
-    @staticmethod 
-    def b(x):
-        return x 
+def get_pc_fig(pc, uid=0, colors=None, factor=-1, **props) -> figure.PointCloudFigure:
+    if pc is not None:
+        if colors is None:
+            if pc.shape[1] >= 4:
+                ind = intensity_to_color(pc[:, 3])
+                colors = ind
+        pc = pc[:, :3]
+    fig = figure.PointCloudFigure(uid, pc, color=colors, factor=factor)
+    fig.data()["type"] = "pointcloud"
+    fig.data()["props"] = props
+    return fig
 
 
 if __name__ == "__main__":
-    members = inspecttools.get_members_by_type(A, False)
-    for k, v in members:
-            v_static = inspect.getattr_static(A, k)
-            v_sig = inspect.signature(v)
-            print(len(v_sig.parameters), k)
+    import numpy as np 
+    pc = np.load("/home/yy/test.npy")
+    pc_fig = get_pc_fig(pc)
+    vis_figures("localhost:51051", [pc_fig])

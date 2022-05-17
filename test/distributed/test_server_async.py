@@ -21,10 +21,10 @@ import asyncio
 import numpy as np
 import pytest
 
-from distflow.core import asyncclient
-from distflow.utils.wait_tools import get_free_loopback_tcp_port
-from distflow import PACKAGE_ROOT
-from distflow.services.for_test import Service2
+from tensorpc.core import asyncclient
+from tensorpc.utils.wait_tools import get_free_loopback_tcp_port
+from tensorpc import PACKAGE_ROOT
+from tensorpc.services.for_test import Service2
 import pytest_asyncio
 
 @pytest_asyncio.fixture
@@ -34,7 +34,7 @@ async def server_client():
         pass
     serv_def = PACKAGE_ROOT / "services/serv_def.yaml"
     proc = subprocess.Popen(
-        f"python -m distflow.serve --port {port} --serv_def_file {serv_def}",
+        f"python -m tensorpc.serve --port {port} --serv_def_file {serv_def}",
         shell=True)
     try:
         async with asyncclient.AsyncRemoteManager(
@@ -54,7 +54,7 @@ async def server_client_local():
         pass
     serv_def = PACKAGE_ROOT / "services/serv_def.yaml"
     proc = subprocess.Popen(
-        f"python -m distflow.serve --port {port} --serv_def_file {serv_def}",
+        f"python -m tensorpc.serve --port {port} --serv_def_file {serv_def}",
         shell=True)
     try:
         async with asyncclient.AsyncRemoteManager(

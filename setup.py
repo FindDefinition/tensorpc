@@ -12,9 +12,9 @@ from shutil import rmtree
 from setuptools import Command, find_packages, setup
 
 # Package meta-data.
-NAME = 'distflow'
+NAME = 'tensorpc'
 DESCRIPTION = 'Backend for distflow-frontend.'
-URL = 'https://github.com/traveller59/distflow'
+URL = 'https://github.com/FindDefinition/tensorpc'
 EMAIL = 'yanyan.sub@outlook.com'
 AUTHOR = 'Yan Yan'
 REQUIRES_PYTHON = '>=3.7'
