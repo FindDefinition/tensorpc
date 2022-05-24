@@ -292,7 +292,7 @@ class Lines3d(FigureObject3d):
     def move(self, x: float, y: float, z: float):
         self.lines[..., 0] += x
         self.lines[..., 1] += y
-        self.lines[..., 2] += y
+        self.lines[..., 2] += z
 
     def bound(self):
         mins = self.lines.reshape(-1, 3).min(axis=0)

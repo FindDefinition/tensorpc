@@ -65,8 +65,9 @@ class ServFunctionMeta:
     is_static: bool
     is_binded: bool
 
-    def __init__(self, fn: Callable, name: str, type: ServiceType, sig: inspect.Signature,
-                 is_gen: bool, is_async: bool, is_static: bool, is_binded: bool) -> None:
+    def __init__(self, fn: Callable, name: str, type: ServiceType,
+                 sig: inspect.Signature, is_gen: bool, is_async: bool,
+                 is_static: bool, is_binded: bool) -> None:
         self.name = name
         self.type = type
         self.args = [ParamMeta(n, p) for n, p in sig.parameters.items()]
@@ -88,6 +89,7 @@ class ServFunctionMeta:
             "is_static": self.is_static,
         }
 
+
 def _get_cls_obj_from_module_name(module_name: str):
     module_cls = module_name.split(":")
     module_path = module_cls[0]
@@ -105,25 +107,43 @@ def _get_cls_obj_from_module_name(module_name: str):
 
 
 class FunctionUserMeta:
-    def __init__(self, type: ServiceType, event_name: str = "") -> None:
+    def __init__(self,
+                 type: ServiceType,
+                 event_name: str = "",
+                 is_dynamic: bool = False) -> None:
         self.type = type
-        self._event_name = event_name 
+        self._event_name = event_name
+        self.is_dynamic = is_dynamic
 
-    @property 
+    @property
     def event_name(self):
         assert self._event_name != ""
         return self._event_name
 
+class DynamicEvent:
+    def __init__(self, name: str, data: Any) -> None:
+        self.name = name
+        self.data = data
+
 class EventProvider:
-    def __init__(self, service_key: str, event_name: str, fn: Callable, is_static: bool) -> None:
+    def __init__(self,
+                 service_key: str,
+                 event_name: str,
+                 fn: Callable,
+                 is_static: bool,
+                 is_dynamic: bool = False) -> None:
         self.service_key = service_key
         self.event_name = event_name
         self.fn = fn
         self.is_static = is_static
         self.is_binded = False
 
+        self.is_dynamic = is_dynamic
+
     def copy(self):
-        return EventProvider(self.service_key, self.event_name, self.fn, self.is_static)
+        return EventProvider(self.service_key, self.event_name, self.fn,
+                             self.is_static, self.is_dynamic)
+
 
 class ServiceUnit:
     """x.y.z:Class:Alias
@@ -163,16 +183,19 @@ class ServiceUnit:
             ev_provider: Optional[EventProvider] = None
             if hasattr(v_static, TENSORPC_FUNC_META_KEY):
                 # for special methods
-                meta: FunctionUserMeta = getattr(v_static, TENSORPC_FUNC_META_KEY)
+                meta: FunctionUserMeta = getattr(v_static,
+                                                 TENSORPC_FUNC_META_KEY)
                 # meta: FunctionUserMeta = inspect.getattr_static(v, TENSORPC_FUNC_META_KEY)
                 serv_type = meta.type
                 if serv_type == ServiceType.WebSocketEventProvider:
-                    num_parameters = len(v_sig.parameters) - (0 if is_static else 1)
-                    msg =  f"event can't have any parameter, but {serv_key} have {num_parameters} param"
+                    num_parameters = len(
+                        v_sig.parameters) - (0 if is_static else 1)
+                    msg = f"event can't have any parameter, but {serv_key} have {num_parameters} param"
                     assert num_parameters == 0, msg
                     assert is_async and not is_async_gen, "event provider must be async function"
                     # self.events.append(EventProvider(serv_key, meta.event_name, v, is_static))
-                    ev_provider = EventProvider(serv_key, meta.event_name, v, is_static)
+                    ev_provider = EventProvider(serv_key, meta.event_name, v,
+                                                is_static, meta.is_dynamic)
             if serv_type == ServiceType.Exit:
                 assert self.exit_fn is None, "you can only register one exit"
                 self.exit_fn = v
@@ -183,8 +206,8 @@ class ServiceUnit:
                 assert self.ws_ondisconn_fn is None, "you can only register one ws_onconn_fn"
                 self.ws_ondisconn_fn = v
 
-            serv_meta = ServFunctionMeta(v, k, serv_type, v_sig,
-                                         is_gen, is_async, is_static, False)
+            serv_meta = ServFunctionMeta(v, k, serv_type, v_sig, is_gen,
+                                         is_async, is_static, False)
             # if module_name == "distflow.services.for_test:Service2:Test3" and k == "client_stream":
             #     print(dir(v))
             # print(module_name, serv_meta, is_async, is_async_gen)
@@ -215,9 +238,11 @@ class ServiceUnit:
             if self.exit_fn is not None:
                 self.exit_fn = types.MethodType(self.exit_fn, self.obj)
             if self.ws_onconn_fn is not None:
-                self.ws_onconn_fn = types.MethodType(self.ws_onconn_fn, self.obj)
+                self.ws_onconn_fn = types.MethodType(self.ws_onconn_fn,
+                                                     self.obj)
             if self.ws_ondisconn_fn is not None:
-                self.ws_ondisconn_fn = types.MethodType(self.ws_ondisconn_fn, self.obj)
+                self.ws_ondisconn_fn = types.MethodType(
+                    self.ws_ondisconn_fn, self.obj)
 
             for k, meta in self.services.items():
                 # bind fn if not static
@@ -278,7 +303,7 @@ class ServiceUnits:
     def __init__(self, sus: List[ServiceUnit]) -> None:
         self.sus = sus
         self.key_to_su: Dict[str, ServiceUnit] = {}
-        self._service_id_to_key :Dict[int, str] = {}
+        self._service_id_to_key: Dict[int, str] = {}
         unique_module_ids: Set[str] = set()
         cnt: int = 0
         for su in sus:
@@ -289,7 +314,7 @@ class ServiceUnits:
                 self.key_to_su[sid] = su
                 self._service_id_to_key[cnt] = sid
                 cnt += 1
-    
+
     def init_service(self):
         for s in self.sus:
             s.init_service()
@@ -325,7 +350,7 @@ class ServiceUnits:
         res: Dict[str, EventProvider] = {}
         for su in self.sus:
             res.update(su.get_all_event_providers())
-        return res 
+        return res
 
 
 if __name__ == "__main__":

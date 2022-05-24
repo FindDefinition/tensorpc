@@ -20,6 +20,10 @@ def get_pc_fig(pc, uid=0, colors=None, factor=-1, **props) -> figure.PointCloudF
 
 if __name__ == "__main__":
     import numpy as np 
-    pc = np.load("/home/yy/test.npy")
-    pc_fig = get_pc_fig(pc)
-    vis_figures("localhost:51051", [pc_fig])
+    # pc = np.load("/home/yy/test.npy")
+    # pc_fig = get_pc_fig(pc)
+    # vis_figures("localhost:51051", [pc_fig])
+    import pickle 
+    with open("/home/yy/test.pkl", "rb") as f:
+        figs = pickle.load(f)
+        vis_figures("localhost:51051", figs)

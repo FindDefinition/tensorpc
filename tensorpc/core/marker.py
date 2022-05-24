@@ -55,3 +55,7 @@ def mark_websocket_ondisconnect(func=None):
 def mark_websocket_event(func=None, name: Optional[str] = None):
     meta = FunctionUserMeta(ServiceType.WebSocketEventProvider)
     return meta_decorator(func, meta, name)
+
+def mark_websocket_dynamic_event(func=None, name: Optional[str] = None):
+    meta = FunctionUserMeta(ServiceType.WebSocketEventProvider, is_dynamic=True)
+    return meta_decorator(func, meta, name)

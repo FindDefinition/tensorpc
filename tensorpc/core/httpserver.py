@@ -11,6 +11,7 @@ from aiohttp import web
 
 from tensorpc import compat
 from tensorpc.core import core_io
+from tensorpc.core import serviceunit
 from tensorpc.core.client import RemoteException, format_stdout
 from tensorpc.core.serviceunit import ServiceType
 
@@ -61,7 +62,8 @@ class WebsocketClient(object):
                    msg_type: core_io.SocketMsgType,
                    service_key: str = "",
                    request_id: int = 0,
-                   is_json: bool = False):
+                   is_json: bool = False,
+                   dynamic_key: str = ""):
         if self._uid is not None:
             request_id = self._uid
         sid = 0
@@ -72,7 +74,8 @@ class WebsocketClient(object):
                                    data=data,
                                    rpc_id=request_id)
         else:
-            req = wsdef_pb2.Header(service_id=sid, rpc_id=request_id)
+            req = wsdef_pb2.Header(service_id=sid, rpc_id=request_id,
+                dynamic_key=dynamic_key)
         if is_json:
             return await self.ws.send_bytes(core_io.json_only_encode(data, msg_type, req))
         max_size = self.ws._max_msg_size - 128
@@ -426,16 +429,24 @@ class AllWebsocketHandler:
                         msg_type = core_io.SocketMsgType.Event
                         res = task.result()
                     ev_str = task_to_ev[task]
+                    if isinstance(res, serviceunit.DynamicEvent):
+                        data = res.data 
+                        dynamic_key = res.name
+                    else:
+                        data = res
+                        dynamic_key = "" 
                     # this event may be deleted before. 
                     ev_clients = self.event_to_clients[ev_str]
                     # we need to generate a rpc id for event
                     for client in ev_clients:
                         rpc_id = client.get_event_id()
+
                         sending_tasks.append(
-                            client.send([res],
+                            client.send([data],
                                         service_key=ev_str,
                                         msg_type=msg_type,
-                                        request_id=rpc_id))
+                                        request_id=rpc_id,
+                                        dynamic_key=dynamic_key))
             # we must cancel task AFTER clear _delete_events
             for task in task_to_be_canceled:
                 # TODO better cancel, don't await here.

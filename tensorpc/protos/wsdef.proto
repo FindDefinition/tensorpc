@@ -10,5 +10,7 @@ message Header {
   fixed64 rpc_id = 3;
   string data = 4;
   string service_key = 5;
+  string dynamic_key = 6;
+
 }
 
