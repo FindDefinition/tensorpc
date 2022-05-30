@@ -4,7 +4,7 @@ import threading
 from tensorpc.core import serviceunit
 from tensorpc.core.server_core import (get_server_context,
                                                  is_in_server_context)
-
+from tensorpc.core.defs import DynamicEvent
 
 def get_server_exposed_props():
     return get_server_context().exposed_props

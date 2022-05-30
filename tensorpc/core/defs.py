@@ -7,7 +7,6 @@ from typing import Dict, List, Optional, Tuple, Union, Any
 from pathlib import Path
 
 
-
 @dataclass
 class Service(DataClassYAMLMixin):
     module_name: str 
@@ -18,6 +17,10 @@ class Service(DataClassYAMLMixin):
 class ServiceDef(DataClassYAMLMixin):
     services: List[Service]
 
+class DynamicEvent:
+    def __init__(self, name: str, data: Any) -> None:
+        self.name = name
+        self.data = data
 
 def from_yaml_path(path: Union[Path, str]) -> ServiceDef:
     """read yaml config with strong-type check
@@ -26,3 +29,4 @@ def from_yaml_path(path: Union[Path, str]) -> ServiceDef:
     with p.open("r") as f:
         data = f.read()
     return ServiceDef.from_yaml(data)
+

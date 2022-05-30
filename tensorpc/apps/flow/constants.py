@@ -12,12 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from tensorpc.core.defs import Service, ServiceDef, from_yaml_path
+from tensorpc.apps.flow.serv.core import Flow
 
-BUILTIN_SERVICES = [ 
-    Service("tensorpc.services.vis:VisService", {}),
-    Service("tensorpc.services.collection:FileOps", {}),
-    Service("tensorpc.apps.flow.serv.core:Flow", {}),
+from tensorpc.utils import get_service_key_by_type
 
-]
-
+FLOW_UPDATE_NODE_STATUS = get_service_key_by_type(Flow, Flow.update_node_status.__name__)

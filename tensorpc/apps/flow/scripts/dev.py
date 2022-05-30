@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from tensorpc.core.defs import Service, ServiceDef, from_yaml_path
+import tensorpc 
+import time 
+from tensorpc.apps.flow.constants import FLOW_UPDATE_NODE_STATUS
+def update_status():
+    tensorpc.simple_remote_call("localhost:51051", FLOW_UPDATE_NODE_STATUS, "WTF", f"NEWS {time.time()}")
 
-BUILTIN_SERVICES = [ 
-    Service("tensorpc.services.vis:VisService", {}),
-    Service("tensorpc.services.collection:FileOps", {}),
-    Service("tensorpc.apps.flow.serv.core:Flow", {}),
-
-]
-
+if __name__ == "__main__":
+    print(FLOW_UPDATE_NODE_STATUS)
+    update_status()

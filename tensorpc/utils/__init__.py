@@ -11,4 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from typing import Type, TypeVar
 
+
+def get_qualname_of_type(klass: Type) -> str:
+    module = klass.__module__
+    if module == 'builtins':
+        return klass.__qualname__  # avoid outputs like 'builtins.str'
+    return module + '.' + klass.__qualname__
+
+def get_service_key_by_type(klass: Type, method_name: str):
+    qname = get_qualname_of_type(klass)
+    splits = qname.split(".")[:-1]
+    ns = ".".join(splits)
+    type_name = klass.__qualname__
+    return f"{ns}:{type_name}.{method_name}"

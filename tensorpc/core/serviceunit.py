@@ -7,7 +7,7 @@ import importlib
 from tensorpc.constants import TENSORPC_FUNC_META_KEY
 import types
 from tensorpc.core import inspecttools
-
+from tensorpc.core.defs import DynamicEvent
 
 class ParamType(Enum):
     PosOnly = "PosOnly"
@@ -119,11 +119,6 @@ class FunctionUserMeta:
     def event_name(self):
         assert self._event_name != ""
         return self._event_name
-
-class DynamicEvent:
-    def __init__(self, name: str, data: Any) -> None:
-        self.name = name
-        self.data = data
 
 class EventProvider:
     def __init__(self,

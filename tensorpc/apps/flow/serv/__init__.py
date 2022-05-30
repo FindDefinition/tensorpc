@@ -12,12 +12,3 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from tensorpc.core.defs import Service, ServiceDef, from_yaml_path
-
-BUILTIN_SERVICES = [ 
-    Service("tensorpc.services.vis:VisService", {}),
-    Service("tensorpc.services.collection:FileOps", {}),
-    Service("tensorpc.apps.flow.serv.core:Flow", {}),
-
-]
-
