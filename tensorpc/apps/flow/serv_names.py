@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from pathlib import Path 
+from tensorpc.apps.flow.serv.core import Flow
+from tensorpc.utils import get_service_key_by_type
 
-FLOW_FOLDER_PATH = Path.home() / ".tensorpc" / "flow"
-
-FLOW_DEFAULT_GRAPH_NAME = "default_flow"
+FLOW_UPDATE_NODE_STATUS = get_service_key_by_type(Flow, Flow.update_node_status.__name__)

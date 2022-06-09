@@ -156,7 +156,7 @@ class RegexHandler(Handler):
         return []
 
 
-_DEFAULT_SEPARATORS = ('\n', )
+_DEFAULT_SEPARATORS = ('\n', '\r')
 
 
 class SSHClient:

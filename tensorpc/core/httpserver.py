@@ -64,6 +64,8 @@ class WebsocketClient(object):
                    request_id: int = 0,
                    is_json: bool = False,
                    dynamic_key: str = ""):
+        """data must not be encoded.
+        """
         if self._uid is not None:
             request_id = self._uid
         sid = 0
@@ -71,7 +73,7 @@ class WebsocketClient(object):
             sid = self._name_to_serv_id[service_key]
         if msg_type.value & core_io.SocketMsgType.ErrorMask.value:
             req = wsdef_pb2.Header(service_id=sid,
-                                   data=data,
+                                   data=json.dumps(data),
                                    rpc_id=request_id)
         else:
             req = wsdef_pb2.Header(service_id=sid, rpc_id=request_id,
@@ -114,7 +116,7 @@ class WebsocketClient(object):
                                      request_id: int):
         return await self.send_error_string(err, detail,
                                             core_io.SocketMsgType.UserError,
-                                            request_id)
+                                            request_id,)
 
     async def send_user_error(self, exc, request_id: int):
         return await self.send_exception(exc, core_io.SocketMsgType.UserError,
@@ -190,6 +192,8 @@ class AllWebsocketHandler:
             res = json.dumps({"error": exc_str, "detail": ""})
         if is_exception:
             msg_type = core_io.SocketMsgType.RPCError
+            await client.send(json.loads(res), msg_type=msg_type, request_id=req_id, is_json=True)
+            return 
         else:
             msg_type = core_io.SocketMsgType.RPC
         if is_notification and not is_exception:

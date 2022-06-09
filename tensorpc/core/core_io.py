@@ -838,7 +838,7 @@ def parse_array_of_chunked_message(req: wsdef_pb2.Header, chunks: List[bytes]):
     chunk_header_length = np.frombuffer(cur_chunk[1:5], dtype=np.int32)[0]
     chunk_size = len(cur_chunk) - 5 - chunk_header_length
     cur_chunk_start = 5 + chunk_header_length
-    print("START", chunk_header_length)
+    # print("START", chunk_header_length)
     arrs: List[Union[bytes, np.ndarray]] = []
     for dtype_jarr, shape in meta:
         if dtype_jarr == BYTES_JSONARRAY_CODE:
@@ -858,7 +858,7 @@ def parse_array_of_chunked_message(req: wsdef_pb2.Header, chunks: List[bytes]):
             data_buffer[arr_start:arr_start +
                         ser_size] = cur_chunk[cur_chunk_start:cur_chunk_start +
                                               ser_size]
-            print(len(cur_chunk), ser_size, arr_start, len(data_buffer), chunk_size)
+            # print(len(cur_chunk), ser_size, arr_start, len(data_buffer), chunk_size)
             size -= ser_size
             chunk_size -= ser_size
             cur_chunk_start += ser_size

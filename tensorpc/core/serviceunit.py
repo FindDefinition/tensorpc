@@ -160,8 +160,8 @@ class ServiceUnit:
             if inspecttools.isclassmethod(v) or inspecttools.isproperty(v):
                 # ignore property and classmethod
                 continue
-            if k.startswith("__"):
-                # ignore all private and magic methods
+            if k.startswith("_"):
+                # ignore all protected, private and magic methods
                 continue
             serv_key = f"{self.module_key}.{k}"
 
