@@ -126,7 +126,7 @@ class Points2d(FigureObject2d):
     def data(self) -> dict:
         return {
             "type": self.Type,
-            "points": self.points.reshape(-1).tolist(),
+            "points": self.points,
             "color": self.color,
             "width": self.width,
             "opacity": self.opacity,

@@ -49,7 +49,7 @@ class CommandEventType(enum.Enum):
 
 
 _DEFAULT_SEPARATORS = r"(?:\r\n)|(?:\n)|(?:\r)|(?:\033\]784;[ABPCFGD](?:;(.*?))?\007)"
-
+# _DEFAULT_SEPARATORS = "\n"
 
 def remove_ansi_seq(string: Union[str, bytes]):
     # https://stackoverflow.com/questions/14693701/how-can-i-remove-the-ansi-escape-sequences-from-a-string-in-python
@@ -220,6 +220,7 @@ class PeerSSHClient:
                     separator = separator.encode("utf-8")
                 separators.append(separator)
         try:
+            # print(separators)
             res = await reader.readuntil(separators)
             is_eof = reader.at_eof()
             # print("ISEOF", is_eof)
@@ -248,6 +249,7 @@ class PeerSSHClient:
         else:
             match = self._vsc_re.search(res.data)
             data = res.data
+            print(data)
             if match:
                 cmd_type = match.group(1)
                 additional = match.group(2)
@@ -332,7 +334,14 @@ class SSHClient:
                  password: str,
                  known_hosts,
                  uid: str = "") -> None:
-        self.url = url
+        url_parts = url.split(":")
+        if len(url_parts) == 1:
+
+            self.url = url
+            self.port = 22
+        else:
+            self.url = url_parts[0]
+            self.port = int(url_parts[1])
         self.username = username
         self.password = password
         self.known_hosts = known_hosts
@@ -341,7 +350,7 @@ class SSHClient:
     async def connect_queue(self, inp_queue: asyncio.Queue,
                             callback: Callable[[Event], Awaitable[None]],
                             shutdown_task: asyncio.Task):
-        async with asyncssh.connect(self.url,
+        async with asyncssh.connect(self.url, self.port,
                                     username=self.username,
                                     password=self.password,
                                     known_hosts=None) as conn:
@@ -350,6 +359,7 @@ class SSHClient:
             stdin, stdout, stderr = await conn.open_session(
                 "bash --init-file ~/.tensorpc_hooks-bash.sh",
                 request_pty="force")
+            print("WTF")
             peer_client = PeerSSHClient(stdin, stdout, stderr, uid=self.uid)
             loop_task = asyncio.create_task(
                 peer_client.wait_loop_queue(callback, shutdown_task))
@@ -363,6 +373,7 @@ class SSHClient:
                     break
                 text = wait_tasks[0].result()
                 text = text.strip()
+                print("INPUT", text)
                 stdin.write(text + "\n")
                 wait_tasks = [
                     asyncio.create_task(inp_queue.get()), shutdown_task
@@ -442,8 +453,10 @@ async def main3():
         if isinstance(ev, ExceptionEvent):
             print("ERROR", ev.data)
             shutdown_ev.set()
-    username = input("username:")
-    password = getpass.getpass("password:")
+    # username = input("username:")
+    # password = getpass.getpass("password:")
+    username = "tusimple"
+    password = "tusimple2019"
     client = SSHClient('localhost',
                        username=username,
                        password=password,

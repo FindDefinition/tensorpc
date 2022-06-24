@@ -74,6 +74,7 @@ class Node:
 class CommandNode(Node):
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
         super().__init__(flow_data, graph_id)
+        # print(json.dumps(flow_data, indent=2))
         self.task: Optional[asyncio.Task] = None
         self.shutdown_ev = asyncio.Event()
         self.input_queue = asyncio.Queue()
@@ -81,10 +82,11 @@ class CommandNode(Node):
 
     @property
     def commands(self):
-        args = self.raw_data["args"]
-        return [x["value"] for x in filter(lambda x: x["enable"], args)]
+        args = self.node_data["args"]
+        return [x["value"] for x in filter(lambda x: x["enabled"], args)]
 
     async def shutdown(self):
+        print("NODE", self.id, "SHUTDOWN")
         if self.task is not None:
             self.shutdown_ev.set()
             await cancel_task(self.task)
@@ -100,7 +102,7 @@ class CommandNode(Node):
 
     def start_session(self, msg_q: asyncio.Queue, url: str, username: str,
                       password: str):
-        assert self.task is not None
+        assert self.task is None
         client = SSHClient(url, username, password, None, self.get_uid())
 
         async def callback(ev: Event):
@@ -276,10 +278,12 @@ class Flow:
         # uid: {graph_id}@{node_id}
         while True:
             (uid, event) = await self._ssh_q.get()
+            print(uid, event)
             graph_id, node_id = _extract_graph_node_id(uid)
             node = self._get_node(graph_id, node_id)
             assert isinstance(node, CommandNode)
             if isinstance(event, LineEvent):
+                print(node.id, event.line, end="")
                 node.stdout += event.line
                 if uid != self.selected_node_uid:
                     continue
@@ -297,6 +301,7 @@ class Flow:
         node = self._get_node(graph_id, node_id)
         assert isinstance(node, CommandNode)
         self.selected_node_uid = node.get_uid()
+        print("STDOUT", node.stdout, node.id)
         return node.stdout
 
     def remove_node(self):
@@ -304,6 +309,10 @@ class Flow:
 
     async def save_graph(self, graph_id: str, flow_data):
         # TODO do we need a async lock here?
+        ssh_data = flow_data["ssh"]
+        flow_data = flow_data["graph"]
+        flow_data["ssh"] = ssh_data
+        flow_data["id"] = graph_id
         if graph_id in self.flow_dict:
             await self.flow_dict[graph_id].update_graph(graph_id, flow_data)
         else:
