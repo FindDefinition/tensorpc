@@ -16,7 +16,11 @@ from pathlib import Path
 
 from tensorpc import marker, prim
 
+
 class FileOps:
+    def print_in_server(self, content):
+        print(content)
+    
     def get_file(self, path, start_chunk=0, chunk_size=65536):
         """service that get a large file from server.
         you need to use remote_generator instead of remote_call.

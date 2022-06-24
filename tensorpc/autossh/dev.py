@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from pathlib import Path 
+import re 
 
-FLOW_FOLDER_PATH = Path.home() / ".tensorpc" / "flow"
+pat = re.compile(r"(?:\033\]633;[ABPCFGD](;.*)?\007)")
 
-FLOW_DEFAULT_GRAPH_ID = "default_flow"
+match = pat.search("\x1b]633;C\x07\x1b]633;D\x07\x1b]633;P;Cwd=/home/yy\x07\x1b]633;A\x07(base) yy@yy-Lenovo-Legion-R9000K2021H:~$ \x1b]633;B\x07\r")
+print(match)
