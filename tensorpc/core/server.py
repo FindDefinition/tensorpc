@@ -27,7 +27,7 @@ import grpc
 import numpy as np
 from tensorpc.core.defs import ServiceDef
 
-from tensorpc.core.server_core import ProtobufServiceCore
+from tensorpc.core.server_core import ProtobufServiceCore, ServerMeta
 
 from tensorpc.protos import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos import rpc_message_pb2
@@ -185,7 +185,8 @@ def serve(service_def: ServiceDef,
           process_id=-1,
           credentials=None):
     url = '[::]:{}'.format(port)
-    server_core = ProtobufServiceCore(url, service_def, True)
+    smeta = ServerMeta(port=port, http_port=-1)
+    server_core = ProtobufServiceCore(url, service_def, True, smeta)
     service = RemoteObjectService(server_core, is_local, length)
     return serve_service(service, wait_time, port, length, is_local,
                          max_threads, process_id, credentials)
@@ -205,8 +206,10 @@ def serve_with_http(service_def: ServiceDef,
 
     # run grpc server in background, and ws in main
     url = '[::]:{}'.format(port)
+    smeta = ServerMeta(port=port, http_port=http_port)
+
     server_core = ProtobufServiceCore(url,
-                                      service_def, True)
+                                      service_def, True, smeta)
     service = RemoteObjectService(server_core, is_local, length)
 
     kwargs = {

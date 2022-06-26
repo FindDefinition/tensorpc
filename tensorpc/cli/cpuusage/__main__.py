@@ -12,14 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from pathlib import Path 
+from tensorpc.apps.flow.client import update_node_status
 
-FLOW_FOLDER_PATH = Path.home() / ".tensorpc" / "flow"
 
-FLOW_DEFAULT_GRAPH_ID = "default_flow"
+import psutil 
+import fire 
 
-TENSORPC_FLOW_GRAPH_ID = "TENSORPC_FLOW_GRAPH_ID"
-TENSORPC_FLOW_NODE_ID = "TENSORPC_FLOW_NODE_ID"
-TENSORPC_FLOW_NODE_UID = "TENSORPC_FLOW_NODE_UID"
-TENSORPC_FLOW_MASTER_GRPC_PORT = "TENSORPC_FLOW_MASTER_GRPC_PORT"
-TENSORPC_FLOW_MASTER_HTTP_PORT = "TENSORPC_FLOW_MASTER_HTTP_PORT"
+import asyncio 
+
+async def main_async(duration: float = 1):
+    while True:
+        await asyncio.sleep(duration)
+        cpu_percent = psutil.cpu_percent()
+        vm_percent = psutil.virtual_memory().percent
+
+        content = f"cpu={cpu_percent:.2f}%,mem={vm_percent:.2f}%"
+        update_node_status(content)
+
+def main(duration: float = 1):
+    asyncio.run(main_async(duration))
+
+if __name__ == "__main__":
+    fire.Fire(main)

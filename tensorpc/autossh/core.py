@@ -11,7 +11,7 @@ import time
 from asyncio.tasks import FIRST_COMPLETED
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Deque, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional, Set, Tuple, Type, Union
 from contextlib import suppress
 import asyncssh
 import tensorpc
@@ -155,7 +155,7 @@ class CommandEvent(Event):
 
     def to_dict(self):
         res = super().to_dict()
-        res["type"] = self.type.value
+        res["cmdtype"] = self.type.value
         if self.arg is not None:
             res["arg"] = self.arg
         return res
@@ -249,12 +249,11 @@ class PeerSSHClient:
         else:
             match = self._vsc_re.search(res.data)
             data = res.data
-            print(data)
             if match:
                 cmd_type = match.group(1)
                 additional = match.group(2)
                 data_line = data[:match.start()]
-                ce = CommandEvent(ts, cmd_type, additional, is_stderr)
+                ce = CommandEvent(ts, cmd_type, additional, is_stderr, uid=self.uid)
                 if ce.type == CommandEventType.PROMPT_END:
                     ce.arg = data[:match.start()]
                 else:
@@ -349,7 +348,12 @@ class SSHClient:
 
     async def connect_queue(self, inp_queue: asyncio.Queue,
                             callback: Callable[[Event], Awaitable[None]],
-                            shutdown_task: asyncio.Task):
+                            shutdown_task: asyncio.Task,
+                            env: Optional[Dict[str, str]] = None,
+                            r_forward_ports: Optional[List[int]] = None,
+                            env_port_modifier: Optional[Callable[[List[int], Dict[str, str]], None]] = None):
+        if env is None:
+            env = {}
         async with asyncssh.connect(self.url, self.port,
                                     username=self.username,
                                     password=self.password,
@@ -359,11 +363,25 @@ class SSHClient:
             stdin, stdout, stderr = await conn.open_session(
                 "bash --init-file ~/.tensorpc_hooks-bash.sh",
                 request_pty="force")
-            print("WTF")
+            # print("WTF")
+
             peer_client = PeerSSHClient(stdin, stdout, stderr, uid=self.uid)
             loop_task = asyncio.create_task(
                 peer_client.wait_loop_queue(callback, shutdown_task))
             wait_tasks = [asyncio.create_task(inp_queue.get()), shutdown_task]
+            if r_forward_ports is not None:
+                for p in r_forward_ports:
+                    listener = await conn.forward_remote_port('', 0, 'localhost', p)
+                    print('Listening on port %s...' % listener.get_port())
+                    wait_tasks.append(asyncio.create_task(listener.wait_closed()))
+                # await listener.wait_closed()
+                if env_port_modifier is not None:
+                    env_port_modifier(r_forward_ports, env)
+            if env:
+                cmds: List[str] = []
+                for k, v in env.items():
+                    cmds.append(f"export {k}={v}")
+                stdin.write(" && ".join(cmds) + "\n")
             while True:
                 done, pending = await asyncio.wait(
                     wait_tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -372,9 +390,9 @@ class SSHClient:
                         await _cancel(task)
                     break
                 text = wait_tasks[0].result()
-                text = text.strip()
-                print("INPUT", text)
-                stdin.write(text + "\n")
+                # text = text.strip()
+                # print("INPUT", text)
+                stdin.write(text)
                 wait_tasks = [
                     asyncio.create_task(inp_queue.get()), shutdown_task
                 ]
@@ -449,21 +467,21 @@ async def main3():
             if ev.type == CommandEventType.PROMPT_END:
                 print(ev.arg, end="", flush=True)
         if isinstance(ev, LineEvent):
+            # print(ev.line.encode("utf-8"))
             print(ev.line, end="")
         if isinstance(ev, ExceptionEvent):
             print("ERROR", ev.data)
             shutdown_ev.set()
-    # username = input("username:")
-    # password = getpass.getpass("password:")
-    username = "tusimple"
-    password = "tusimple2019"
+    username = input("username:")
+    password = getpass.getpass("password:")
     client = SSHClient('localhost',
                        username=username,
                        password=password,
                        known_hosts=None)
     q = asyncio.Queue()
     shutdown_task = asyncio.create_task(shutdown_ev.wait())
-    task = asyncio.create_task(client.connect_queue(q, handler, shutdown_task))
+    task = asyncio.create_task(client.connect_queue(q, handler, shutdown_task,
+        r_forward_ports=[51051]))
     while True:
         try:
             text = await prompt_session.prompt_async("")

@@ -39,3 +39,6 @@ def get_current_service_key():
 def get_local_url():
     return get_server_exposed_props().local_url
 
+def get_server_meta():
+    return get_server_exposed_props().server_meta
+

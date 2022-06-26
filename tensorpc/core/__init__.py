@@ -18,6 +18,6 @@ BUILTIN_SERVICES = [
     Service("tensorpc.services.vis:VisService", {}),
     Service("tensorpc.services.collection:FileOps", {}),
     Service("tensorpc.apps.flow.serv.core:Flow", {}),
-
+    Service("tensorpc.services.collection:Simple", {}),
 ]
 

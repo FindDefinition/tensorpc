@@ -16,6 +16,9 @@ from pathlib import Path
 
 from tensorpc import marker, prim
 
+class Simple:
+    def echo(self, x):
+        return x
 
 class FileOps:
     def print_in_server(self, content):

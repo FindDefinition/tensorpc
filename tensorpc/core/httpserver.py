@@ -15,7 +15,7 @@ from tensorpc.core import serviceunit
 from tensorpc.core.client import RemoteException, format_stdout
 from tensorpc.core.serviceunit import ServiceType
 
-from tensorpc.core.server_core import ProtobufServiceCore, ServiceCore
+from tensorpc.core.server_core import ProtobufServiceCore, ServiceCore, ServerMeta
 
 from tensorpc.protos import remote_object_pb2
 from tensorpc.protos import remote_object_pb2 as remote_object_pb2
@@ -428,7 +428,7 @@ class AllWebsocketHandler:
                     exc = task.exception()
                     if exc is not None:
                         msg_type = core_io.SocketMsgType.EventError
-                        res = self.service_core._remote_exception_json(exc)
+                        res = self.service_core._remote_exception_dict(exc)
                     else:
                         msg_type = core_io.SocketMsgType.Event
                         res = task.result()
@@ -440,16 +440,23 @@ class AllWebsocketHandler:
                         data = res
                         dynamic_key = "" 
                     # this event may be deleted before. 
+                    if exc is None:
+                        data_to_send = [data]
+                    else:
+                        data_to_send = data
+                        print(data)
+                    
                     ev_clients = self.event_to_clients[ev_str]
                     # we need to generate a rpc id for event
                     for client in ev_clients:
                         rpc_id = client.get_event_id()
-
+                        
                         sending_tasks.append(
-                            client.send([data],
+                            client.send(data_to_send,
                                         service_key=ev_str,
                                         msg_type=msg_type,
                                         request_id=rpc_id,
+                                        is_json=exc is not None,
                                         dynamic_key=dynamic_key))
             # we must cancel task AFTER clear _delete_events
             for task in task_to_be_canceled:

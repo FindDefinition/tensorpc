@@ -12,14 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from pathlib import Path
 import asyncio
-from typing import Any, Dict, Iterable, Optional, Tuple, Type
-import json
-from tensorpc import marker, prim
-from tensorpc.apps.flow.constants import FLOW_FOLDER_PATH, FLOW_DEFAULT_GRAPH_ID
 import enum
-from tensorpc.autossh.core import EofEvent, ExceptionEvent, SSHClient, Event, LineEvent, CommandEvent, CommandEventType
+import json
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type
+
+from tensorpc import marker, prim
+from tensorpc.apps.flow.constants import (
+    FLOW_DEFAULT_GRAPH_ID, FLOW_FOLDER_PATH, TENSORPC_FLOW_GRAPH_ID,
+    TENSORPC_FLOW_MASTER_GRPC_PORT, TENSORPC_FLOW_MASTER_HTTP_PORT,
+    TENSORPC_FLOW_NODE_ID, TENSORPC_FLOW_NODE_UID)
+from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
+                                   Event, ExceptionEvent, LineEvent, SSHClient)
 from tensorpc.core.asynctools import cancel_task
 
 
@@ -37,6 +42,8 @@ class Node:
         self._flow_data = flow_data
         self.id: str = flow_data["id"]
         self.graph_id: str = graph_id
+        self.inputs: List[str] = []
+        self.outputs: List[str] = []
 
     @property
     def position(self) -> Tuple[float, float]:
@@ -70,6 +77,32 @@ class Node:
     async def shutdown(self):
         return
 
+    def clear_connections(self):
+        self.inputs.clear()
+        self.outputs.clear()
+
+
+class DirectSSHNode(Node):
+    @property
+    def url(self) -> str:
+        return self.node_data["url"]
+
+    @property
+    def username(self) -> str:
+        return self.node_data["username"]
+
+    @property
+    def password(self) -> str:
+        return self.node_data["password"]
+
+    @property
+    def enable_remote_forward(self) -> bool:
+        return self.node_data["enableRemoteForward"]
+
+
+class EnvNode(Node):
+    pass
+
 
 class CommandNode(Node):
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
@@ -100,8 +133,14 @@ class CommandNode(Node):
         # https://github.com/ronf/asyncssh/issues/112#issuecomment-343318916
         return await self.input_queue.put("\x03")
 
-    def start_session(self, msg_q: asyncio.Queue, url: str, username: str,
-                      password: str):
+    def start_session(self,
+                      msg_q: asyncio.Queue,
+                      url: str,
+                      username: str,
+                      password: str,
+                      envs: Dict[str, str],
+                      rfports: Optional[List[int]] = None,
+                      env_port_modifier: Optional[Callable[[List[int], Dict[str, str]], None]] = None):
         assert self.task is None
         client = SSHClient(url, username, password, None, self.get_uid())
 
@@ -110,7 +149,12 @@ class CommandNode(Node):
 
         sd_task = asyncio.create_task(self.shutdown_ev.wait())
         self.task = asyncio.create_task(
-            client.connect_queue(self.input_queue, callback, sd_task))
+            client.connect_queue(self.input_queue,
+                                 callback,
+                                 sd_task,
+                                 env=envs,
+                                 r_forward_ports=rfports,
+                                 env_port_modifier=env_port_modifier))
 
     def is_started(self):
         return self.task is not None
@@ -118,7 +162,8 @@ class CommandNode(Node):
 
 _TYPE_TO_NODE_CLS: Dict[str, Type[Node]] = {
     "command": CommandNode,
-    "env": Node,
+    "env": EnvNode,
+    "directssh": DirectSSHNode,
 }
 
 
@@ -139,6 +184,22 @@ class Edge:
         self._flow_data = flow_data
         self.graph_id = graph_id
 
+    @property
+    def source_id(self):
+        return self._flow_data["source"]
+
+    @property
+    def target_id(self):
+        return self._flow_data["target"]
+
+    @property
+    def source_handle(self):
+        return self._flow_data["sourceHandle"]
+
+    @property
+    def target_handle(self):
+        return self._flow_data["targetHandle"]
+
 
 class FlowGraph:
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
@@ -155,9 +216,19 @@ class FlowGraph:
         self._node_rid_to_node = {n.readable_id: n for n in nodes}
 
         self._edge_id_to_edge = {n.id: n for n in edges}
+        self._update_connection(edges)
 
         self.graph_id = graph_id
         self.ssh_data = flow_data["ssh"]
+
+    def _update_connection(self, edges: List[Edge]):
+        for k, v in self._node_id_to_node.items():
+            v.clear_connections()
+        for edge in edges:
+            source = edge.source_id
+            target = edge.target_id
+            self._node_id_to_node[source].outputs.append(target)
+            self._node_id_to_node[target].inputs.append(source)
 
     def update_nodes(self, nodes: Iterable[Node]):
         self._node_id_to_node = {n.id: n for n in nodes}
@@ -219,6 +290,7 @@ class FlowGraph:
         # we assume edges don't contain any state, so just update them.
         # we may need to handle this in future.
         self._edge_id_to_edge = {n.id: n for n in edges}
+        self._update_connection(edges)
         return
 
 
@@ -244,7 +316,7 @@ def _empty_flow_graph(graph_id: str = ""):
 class Flow:
     def __init__(self, root: Optional[str] = None) -> None:
         self._q = asyncio.Queue()
-        self._ssh_q: "asyncio.Queue[Tuple[str, Event]]" = asyncio.Queue()
+        self._ssh_q: "asyncio.Queue[Event]" = asyncio.Queue()
         # self._ssh_stdout_q: "asyncio.Queue[Tuple[str, Event]]" = asyncio.Queue()
         self.selected_node_uid: str = ""
         if root is None or root == "":
@@ -277,16 +349,21 @@ class Flow:
     async def command_node_event(self):
         # uid: {graph_id}@{node_id}
         while True:
-            (uid, event) = await self._ssh_q.get()
-            print(uid, event)
+            event = await self._ssh_q.get()
+            # print(event)
+            uid = event.uid
             graph_id, node_id = _extract_graph_node_id(uid)
             node = self._get_node(graph_id, node_id)
             assert isinstance(node, CommandNode)
             if isinstance(event, LineEvent):
-                print(node.id, event.line, end="")
+                # print(node.id, self.selected_node_uid == uid, event.line, end="")
                 node.stdout += event.line
                 if uid != self.selected_node_uid:
                     continue
+            elif isinstance(event, CommandEvent):
+                if event.type == CommandEventType.PROMPT_END:
+                    node.stdout += str(event.arg)
+
             elif isinstance(event, (EofEvent, ExceptionEvent)):
                 await node.shutdown()
             return prim.DynamicEvent(uid, event.to_dict())
@@ -301,8 +378,14 @@ class Flow:
         node = self._get_node(graph_id, node_id)
         assert isinstance(node, CommandNode)
         self.selected_node_uid = node.get_uid()
-        print("STDOUT", node.stdout, node.id)
+        # print("STDOUT", node.stdout, node.id)
         return node.stdout
+
+    async def command_node_input(self, graph_id: str, node_id: str, data: str):
+        node = self._get_node(graph_id, node_id)
+        if (isinstance(node, CommandNode)):
+            if node.is_started():
+                await node.input_queue.put(data)
 
     def remove_node(self):
         self.selected_node_uid = ""
@@ -317,29 +400,85 @@ class Flow:
             await self.flow_dict[graph_id].update_graph(graph_id, flow_data)
         else:
             self.flow_dict[graph_id] = FlowGraph(flow_data, graph_id)
+        for n in flow_data["nodes"]:
+            n["selected"] = False
         flow_path = self.root / f"{graph_id}.json"
         with flow_path.open("w") as f:
             json.dump(flow_data, f)
 
     def load_default_graph(self):
-        return self.load_graph(FLOW_DEFAULT_GRAPH_ID)
+        return self.load_graph(FLOW_DEFAULT_GRAPH_ID, force_reload=False)
 
-    def load_graph(self, graph_id: str):
+    def load_graph(self, graph_id: str, force_reload: bool = True):
         flow_path = self.root / f"{graph_id}.json"
         with flow_path.open("r") as f:
             flow_data = json.load(f)
-        self.flow_dict[graph_id] = FlowGraph(flow_data, graph_id)
+        for n in flow_data["nodes"]:
+            n["selected"] = False
+            n.pop("handleBounds")
+        if force_reload:
+            reload = True
+        else:
+            reload = graph_id not in self.flow_dict
+        if reload:
+            self.flow_dict[graph_id] = FlowGraph(flow_data, graph_id)
         return flow_data
 
+    def _get_node_envs(self, graph_id: str, node_id: str):
+        node = self.flow_dict[graph_id].get_node_by_id(node_id)
+        envs: Dict[str, str] = {}
+        if isinstance(node, CommandNode):
+            envs[TENSORPC_FLOW_GRAPH_ID] = graph_id
+            envs[TENSORPC_FLOW_NODE_ID] = node_id
+            envs[TENSORPC_FLOW_NODE_UID] = node.get_uid()
+            envs[TENSORPC_FLOW_MASTER_GRPC_PORT] = str(
+                prim.get_server_meta().port)
+            envs[TENSORPC_FLOW_MASTER_HTTP_PORT] = str(
+                prim.get_server_meta().http_port)
+        return envs
+
+    @staticmethod
+    def _env_modifier(fwd_ports: List[int], env: Dict[str, str]):
+        env[TENSORPC_FLOW_MASTER_GRPC_PORT] = str(
+            fwd_ports[0])
+        env[TENSORPC_FLOW_MASTER_HTTP_PORT] = str(
+            fwd_ports[1])
+
     async def start(self, graph_id: str, node_id: str):
-        print("START", graph_id, node_id)
         node = self.flow_dict[graph_id].get_node_by_id(node_id)
         if isinstance(node, CommandNode):
+            print("START", graph_id, node_id, node.commands, node.is_started())
             if not node.is_started():
-                ssh_data = self.flow_dict[graph_id].ssh_data
-                assert ssh_data["url"] != ""
-                node.start_session(self._ssh_q, ssh_data["url"],
-                                   ssh_data["username"], ssh_data["password"])
+                if not node.inputs:
+                    print("ERRROROROR")
+                    return
+                driver = self._get_node(graph_id, node.inputs[0])
+                if isinstance(driver, DirectSSHNode):
+                    # ssh_data = self.flow_dict[graph_id].ssh_data
+
+                    assert (driver.url != "" and driver.username != ""
+                            and driver.password != "")
+
+                    # TODO if graph name changed, session must be restart
+                    # we need to find a way to avoid this.
+                    envs = self._get_node_envs(graph_id, node_id)
+                    # node.start_session(self._ssh_q, ssh_data["url"],
+                    #                 ssh_data["username"], ssh_data["password"],
+                    #                 envs=envs)
+                    rfports = []
+                    if driver.enable_remote_forward:
+                        rfports = [prim.get_server_meta().port]
+                        if prim.get_server_meta().http_port >= 0:
+                            rfports.append(prim.get_server_meta().http_port)
+                    node.start_session(self._ssh_q,
+                                       driver.url,
+                                       driver.username,
+                                       driver.password,
+                                       envs=envs,
+                                       rfports=rfports,
+                                       env_port_modifier=self._env_modifier)
+                else:
+                    print("ERROROROROR")
             await node.run_command()
 
     def pause(self, graph_id: str, node_id: str):
@@ -351,4 +490,3 @@ class Flow:
         if isinstance(node, CommandNode):
             if node.is_started():
                 await node.send_ctrl_c()
-

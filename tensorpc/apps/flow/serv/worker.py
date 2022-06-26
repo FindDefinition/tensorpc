@@ -12,14 +12,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from pathlib import Path 
-
-FLOW_FOLDER_PATH = Path.home() / ".tensorpc" / "flow"
-
-FLOW_DEFAULT_GRAPH_ID = "default_flow"
-
-TENSORPC_FLOW_GRAPH_ID = "TENSORPC_FLOW_GRAPH_ID"
-TENSORPC_FLOW_NODE_ID = "TENSORPC_FLOW_NODE_ID"
-TENSORPC_FLOW_NODE_UID = "TENSORPC_FLOW_NODE_UID"
-TENSORPC_FLOW_MASTER_GRPC_PORT = "TENSORPC_FLOW_MASTER_GRPC_PORT"
-TENSORPC_FLOW_MASTER_HTTP_PORT = "TENSORPC_FLOW_MASTER_HTTP_PORT"
+""" worker that running inside tmux and manage ssh tasks
+"""

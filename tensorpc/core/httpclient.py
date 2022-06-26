@@ -4,7 +4,7 @@ import traceback
 from typing import Any, Dict, List, Optional
 
 import aiohttp
-
+import requests
 from tensorpc.core import core_io as core_io
 from tensorpc.core.client import RemoteManager
 from tensorpc.protos import rpc_message_pb2, wsdef_pb2
@@ -27,6 +27,32 @@ async def http_remote_call(sess: aiohttp.ClientSession, url: str, key: str,
         raise ValueError(f"Http Post {url} {key} Failed with Status {resp.status}")
     resp_pb = rpc_message_pb2.RemoteJsonCallReply()
     resp_pb.ParseFromString(data)
+    if resp_pb.exception != "":
+        exc_dict = json.loads(resp_pb.exception)
+        raise RemoteException(exc_dict["detail"])
+    arrays = [core_io.pb2data(b) for b in resp_pb.arrays]
+    data_skeleton = json.loads(resp_pb.data)
+    results = core_io.put_arrays_to_data(arrays,
+                                         data_skeleton,
+                                         json_index=True)
+    results = results[0]
+    return results
+
+def http_remote_call_request(url: str, key: str,
+                           *args, **kwargs):
+    arrays, decoupled = core_io.extract_arrays_from_data((args, kwargs),
+                                                         json_index=True)
+    arrays = [core_io.data2pb(a) for a in arrays]
+    request = rpc_message_pb2.RemoteJsonCallRequest(
+        service_key=key,
+        arrays=arrays,
+        data=json.dumps(decoupled),
+        callback="")
+    res = requests.post(url, data=request.SerializeToString())
+    if res.status_code != 200:
+        raise ValueError(f"Http Post {url} {key} Failed with Status {resp.status}")
+    resp_pb = rpc_message_pb2.RemoteJsonCallReply()
+    resp_pb.ParseFromString(res.content)
     if resp_pb.exception != "":
         exc_dict = json.loads(resp_pb.exception)
         raise RemoteException(exc_dict["detail"])
@@ -254,4 +280,6 @@ async def main():
     
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # asyncio.run(main())
+    data = http_remote_call_request("http://localhost:51052/api/rpc", "tensorpc.services.collection:Simple.echo", 5)
+    print(data, type(data))

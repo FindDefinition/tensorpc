@@ -168,3 +168,5 @@ if [[ -n "$__vsc_original_prompt_command" && "$__vsc_original_prompt_command" !=
 else
 	PROMPT_COMMAND=__vsc_prompt_cmd
 fi
+
+# export TERM=xterm-256color

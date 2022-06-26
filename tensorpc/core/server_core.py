@@ -10,10 +10,9 @@ import tempfile
 import threading
 import time
 import traceback
-from typing import (AsyncIterator, Callable, Dict, Iterator, List, Mapping, Optional,
+from typing import (Any, AsyncIterator, Callable, Dict, Iterator, List, Mapping, Optional,
                     Sequence, Union)
-
-import msgpack
+import dataclasses
 from tensorpc.core.defs import Service, ServiceDef
 from tensorpc import compat
 from tensorpc.core import core_io, serviceunit
@@ -24,17 +23,23 @@ from tensorpc.utils import df_logging
 
 LOGGER = df_logging.get_logger()
 
+@dataclasses.dataclass
+class ServerMeta:
+    port: int 
+    http_port: int 
+
 
 class _ExposedServerProps(object):
     """we save static methods/props of service to a object
     """
     def __init__(self, exec_lock, service_units, shutdown_event,
-                 local_url, is_sync: bool):
+                 local_url, is_sync: bool, server_meta: ServerMeta):
         self.exec_lock = exec_lock
         self.service_units = service_units
         self.shutdown_event = shutdown_event
         self.local_url = local_url
         self.is_sync = is_sync
+        self.server_meta = server_meta
 
 
 class ServerContext(object):
@@ -97,7 +102,8 @@ class ServiceCore(object):
     def __init__(self,
                  local_url: str,
                  service_def: ServiceDef,
-                 is_sync: bool):
+                 is_sync: bool,
+                 server_meta: ServerMeta):
         self._exec_lock = threading.Lock()
         self.local_url = local_url
         self.shutdown_event = threading.Event()
@@ -110,7 +116,7 @@ class ServiceCore(object):
         self._exit_funcs = {}
         self._exposed_props = _ExposedServerProps(
             self._exec_lock, self.service_units, self.shutdown_event,
-            self.local_url, is_sync)
+            self.local_url, is_sync, server_meta)
 
     def _init_async_members(self):
         # in future python versions, asyncio event can't be created if no event loop running.
@@ -124,9 +130,12 @@ class ServiceCore(object):
             self.latest_active_time = time.time()
 
     def _remote_exception_json(self, e: BaseException):
+        return json.dumps(self._remote_exception_dict(e))
+
+    def _remote_exception_dict(self, e: BaseException):
         detail = traceback.format_exc()
         exception_json = {"error": str(e), "detail": detail}
-        return json.dumps(exception_json)
+        return exception_json
 
     def get_service_meta(self):
         return self.service_units.get_all_service_metas_json()

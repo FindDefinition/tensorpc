@@ -25,7 +25,7 @@ import numpy as np
 
 from tensorpc import compat
 from tensorpc.core.defs import ServiceDef
-from tensorpc.core.server_core import ProtobufServiceCore
+from tensorpc.core.server_core import ProtobufServiceCore, ServerMeta
 from tensorpc.protos import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos import rpc_message_pb2
 
@@ -212,7 +212,9 @@ async def serve_with_http_async(service_def: ServiceDef,
                     credentials=None):
     if not compat.Python3_7AndLater:
         raise NotImplementedError
-    server_core = ProtobufServiceCore(url, service_def, False)
+    smeta = ServerMeta(port=port, http_port=http_port)
+
+    server_core = ProtobufServiceCore(url, service_def, False, smeta)
 
     
     url = '[::]:{}'.format(port)
@@ -236,7 +238,9 @@ async def serve_async(service_def: ServiceDef,
         raise NotImplementedError
 
     url = '[::]:{}'.format(port)
-    server_core = ProtobufServiceCore(url, service_def, False)
+    smeta = ServerMeta(port=port, http_port=-1)
+
+    server_core = ProtobufServiceCore(url, service_def, False, smeta)
     server_core._init_async_members()
     service = AsyncRemoteObjectService(server_core, is_local, length)
     grpc_task = serve_service(service, wait_time, port, length, is_local,
