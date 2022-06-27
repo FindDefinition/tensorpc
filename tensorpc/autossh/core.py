@@ -5,12 +5,14 @@ import abc
 import asyncio
 import bisect
 import enum
+import io
 import re
 import sys
 import time
 from asyncio.tasks import FIRST_COMPLETED
 from collections import deque
 from dataclasses import dataclass
+import traceback
 from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional, Set, Tuple, Type, Union
 from contextlib import suppress
 import asyncssh
@@ -130,9 +132,11 @@ class ExceptionEvent(Event):
                  timestamp: int,
                  data: Any,
                  is_stderr=False,
-                 uid: str = ""):
+                 uid: str = "",
+                 traceback_str: str = ""):
         super().__init__(timestamp, is_stderr, uid)
         self.data = data
+        self.traceback_str = traceback_str
 
 
 class CommandEvent(Event):
@@ -169,10 +173,11 @@ async def _cancel(task):
 
 
 class ReadResult:
-    def __init__(self, data: Any, is_eof: bool, is_exc: bool) -> None:
+    def __init__(self, data: Any, is_eof: bool, is_exc: bool, traceback_str: str = "") -> None:
         self.data = data
         self.is_eof = is_eof
         self.is_exc = is_exc
+        self.traceback_str = traceback_str
 
 
 class PeerSSHClient:
@@ -223,13 +228,14 @@ class PeerSSHClient:
             # print(separators)
             res = await reader.readuntil(separators)
             is_eof = reader.at_eof()
-            # print("ISEOF", is_eof)
             return ReadResult(res, is_eof, False)
         except asyncio.IncompleteReadError as exc:
             # print("WTFWTF")
             return ReadResult(exc.partial, True, False)
         except Exception as exc:
-            return ReadResult(exc, False, True)
+            tb_str = io.StringIO()
+            traceback.print_exc(file=tb_str)
+            return ReadResult(exc, False, True, tb_str.getvalue())
 
     # def _parse_line(self, data: str):
 
@@ -243,7 +249,7 @@ class PeerSSHClient:
                 EofEvent(ts, reader.channel.get_returncode(), uid=self.uid))
             return True
         elif res.is_exc:
-            await callback(ExceptionEvent(ts, res.data, uid=self.uid))
+            await callback(ExceptionEvent(ts, res.data, uid=self.uid, traceback_str=res.traceback_str))
             # if exception, exit loop
             return True
         else:
@@ -346,8 +352,7 @@ class SSHClient:
         self.known_hosts = known_hosts
         self.uid = uid
 
-    async def connect_queue(self, inp_queue: asyncio.Queue,
-                            callback: Callable[[Event], Awaitable[None]],
+    async def create_tmux(self, cmd: str,
                             shutdown_task: asyncio.Task,
                             env: Optional[Dict[str, str]] = None,
                             r_forward_ports: Optional[List[int]] = None,
@@ -357,6 +362,31 @@ class SSHClient:
         async with asyncssh.connect(self.url, self.port,
                                     username=self.username,
                                     password=self.password,
+                                    keepalive_interval=15,
+                                    known_hosts=None) as conn:
+            p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
+            await asyncssh.scp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
+            result = await conn.run('ls abc', check=True)
+            print(result.stdout, end='')
+
+            stdin, stdout, stderr = await conn.open_session(
+                "bash --init-file ~/.tensorpc_hooks-bash.sh",
+                request_pty="force")
+            
+
+    async def connect_queue(self, inp_queue: asyncio.Queue,
+                            callback: Callable[[Event], Awaitable[None]],
+                            shutdown_task: asyncio.Task,
+                            env: Optional[Dict[str, str]] = None,
+                            r_forward_ports: Optional[List[int]] = None,
+                            env_port_modifier: Optional[Callable[[List[int], Dict[str, str]], None]] = None):
+        if env is None:
+            env = {}
+        # TODO better keepalive
+        async with asyncssh.connect(self.url, self.port,
+                                    username=self.username,
+                                    password=self.password,
+                                    keepalive_interval=5,
                                     known_hosts=None) as conn:
             p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
             await asyncssh.scp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
@@ -370,13 +400,15 @@ class SSHClient:
                 peer_client.wait_loop_queue(callback, shutdown_task))
             wait_tasks = [asyncio.create_task(inp_queue.get()), shutdown_task]
             if r_forward_ports is not None:
+                fwd_ports: List[int] = []
                 for p in r_forward_ports:
                     listener = await conn.forward_remote_port('', 0, 'localhost', p)
+                    fwd_ports.append(listener.get_port())
                     print('Listening on port %s...' % listener.get_port())
                     wait_tasks.append(asyncio.create_task(listener.wait_closed()))
                 # await listener.wait_closed()
-                if env_port_modifier is not None:
-                    env_port_modifier(r_forward_ports, env)
+                if env_port_modifier is not None and fwd_ports:
+                    env_port_modifier(fwd_ports, env)
             if env:
                 cmds: List[str] = []
                 for k, v in env.items():

@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-""" worker that running inside tmux and manage ssh tasks
-"""
+import libtmux 
 
-class FlowWorker:
-    def __init__(self) -> None:
-        pass
+def create_tmux_session_and_run(sess_name: str, cmd: str):
+    server = libtmux.Server()
+    sess = server.find_where({ "session_name": sess_name })
+    assert sess is None 

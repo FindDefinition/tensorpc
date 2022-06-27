@@ -22,7 +22,7 @@ from tensorpc import marker, prim
 from tensorpc.apps.flow.constants import (
     FLOW_DEFAULT_GRAPH_ID, FLOW_FOLDER_PATH, TENSORPC_FLOW_GRAPH_ID,
     TENSORPC_FLOW_MASTER_GRPC_PORT, TENSORPC_FLOW_MASTER_HTTP_PORT,
-    TENSORPC_FLOW_NODE_ID, TENSORPC_FLOW_NODE_UID)
+    TENSORPC_FLOW_NODE_ID, TENSORPC_FLOW_NODE_UID, TENSORPC_FLOW_USE_REMOTE_FWD)
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, SSHClient)
 from tensorpc.core.asynctools import cancel_task
@@ -365,7 +365,11 @@ class Flow:
                     node.stdout += str(event.arg)
 
             elif isinstance(event, (EofEvent, ExceptionEvent)):
+                print(node.readable_id, "DISCONNECTING...", type(event))
+                if isinstance(event, ExceptionEvent):
+                    print(event.traceback_str)
                 await node.shutdown()
+                print(node.readable_id, "DISCONNECTED.")
             return prim.DynamicEvent(uid, event.to_dict())
 
     def update_node_status(self, graph_id: str, node_id: str, content: Any):
@@ -443,6 +447,7 @@ class Flow:
             fwd_ports[0])
         env[TENSORPC_FLOW_MASTER_HTTP_PORT] = str(
             fwd_ports[1])
+        env[TENSORPC_FLOW_USE_REMOTE_FWD] = "1"
 
     async def start(self, graph_id: str, node_id: str):
         node = self.flow_dict[graph_id].get_node_by_id(node_id)
