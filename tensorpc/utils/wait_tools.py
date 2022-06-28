@@ -1,7 +1,7 @@
 import contextlib
 import socket
 import time
-
+import asyncio
 
 def wait_until(func, max_retries: int=200, check_interval: float=1, check_func=None):
     while max_retries > 0:
@@ -25,7 +25,7 @@ async def wait_until_async(func,
             return res
         if check_func is not None:
             check_func()
-        time.sleep(check_interval)
+        await asyncio.sleep(check_interval)
         max_retries -= 1
     raise TimeoutError
 

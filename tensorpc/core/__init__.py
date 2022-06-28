@@ -18,6 +18,12 @@ BUILTIN_SERVICES = [
     Service("tensorpc.services.vis:VisService", {}),
     Service("tensorpc.services.collection:FileOps", {}),
     Service("tensorpc.apps.flow.serv.core:Flow", {}),
+    Service("tensorpc.apps.flow.serv.worker:FlowWorker", {}),
     Service("tensorpc.services.collection:Simple", {}),
 ]
 
+def get_http_url(url: str, port: int):
+    return f"http://{url}:{port}/api/rpc"
+
+def get_websocket_url(url: str, port: int):
+    return f"http://{url}:{port}/api/ws"

@@ -12,25 +12,3 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from tensorpc.apps.flow.client import update_node_status
-
-
-import psutil 
-import fire 
-
-import asyncio 
-
-async def main_async(duration: float = 2):
-    while True:
-        await asyncio.sleep(duration)
-        cpu_percent = psutil.cpu_percent()
-        vm_percent = psutil.virtual_memory().percent
-
-        content = f"cpu={cpu_percent:.2f}%,mem={vm_percent:.2f}%"
-        update_node_status(content)
-
-def main(duration: float = 2):
-    asyncio.run(main_async(duration))
-
-if __name__ == "__main__":
-    fire.Fire(main)

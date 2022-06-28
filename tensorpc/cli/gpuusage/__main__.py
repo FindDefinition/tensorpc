@@ -36,7 +36,7 @@ class GPUMeasure:
         msg += f"{self.temperature}\u2103,io={self.memusage}%"
         return msg 
 
-async def main_async(duration: float = 1):
+async def main_async(duration: float = 2):
     while True:
         await asyncio.sleep(duration)
         querys = [
@@ -69,7 +69,7 @@ async def main_async(duration: float = 1):
         content = f"{gpu_names}\n{measure}"
         update_node_status(content)
 
-def main(duration: float = 1):
+def main(duration: float = 2):
     try:
         asyncio.run(main_async(duration))
     except KeyboardInterrupt:

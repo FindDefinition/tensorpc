@@ -132,8 +132,9 @@ class ServiceCore(object):
     def _remote_exception_json(self, e: BaseException):
         return json.dumps(self._remote_exception_dict(e))
 
-    def _remote_exception_dict(self, e: BaseException):
-        detail = traceback.format_exc()
+    def _remote_exception_dict(self, e: BaseException, detail: Optional[Any] = None):
+        if detail is None:
+            detail = traceback.format_exc()
         exception_json = {"error": str(e), "detail": detail}
         return exception_json
 

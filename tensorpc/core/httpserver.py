@@ -1,4 +1,5 @@
 import asyncio
+import io
 import json
 import sys
 import threading
@@ -155,7 +156,8 @@ class AllWebsocketHandler:
         self.new_event_ev = asyncio.Event()
         self.shutdown_ev = service_core.async_shutdown_event
         self._shutdown_task: Optional[asyncio.Task] = None
-        service_core.service_units.init_service()
+        with service_core._enter_exec_context():
+            service_core.service_units.init_service()
         self.all_ev_providers = service_core.service_units.get_all_event_providers(
         )
         self.event_to_clients: Dict[str, Set[WebsocketClient]] = {}
@@ -196,7 +198,7 @@ class AllWebsocketHandler:
             return 
         else:
             msg_type = core_io.SocketMsgType.RPC
-        if is_notification and not is_exception:
+        if is_notification:
             return
         await client.send([res], msg_type=msg_type, request_id=req_id)
 
@@ -426,13 +428,18 @@ class AllWebsocketHandler:
                 # done may contains deleted tasks. they will be removed in task_to_ev before.
                 if task in task_to_ev:
                     exc = task.exception()
+                    
+                    ev_str = task_to_ev[task]
+
                     if exc is not None:
                         msg_type = core_io.SocketMsgType.EventError
-                        res = self.service_core._remote_exception_dict(exc)
+                        ss = io.StringIO()
+                        task.print_stack(file=ss)
+                        detail = ss.getvalue()
+                        res = self.service_core._remote_exception_dict(exc, detail)
                     else:
                         msg_type = core_io.SocketMsgType.Event
                         res = task.result()
-                    ev_str = task_to_ev[task]
                     if isinstance(res, serviceunit.DynamicEvent):
                         data = res.data 
                         dynamic_key = res.name
@@ -444,13 +451,11 @@ class AllWebsocketHandler:
                         data_to_send = [data]
                     else:
                         data_to_send = data
-                        print(data)
                     
                     ev_clients = self.event_to_clients[ev_str]
                     # we need to generate a rpc id for event
                     for client in ev_clients:
                         rpc_id = client.get_event_id()
-                        
                         sending_tasks.append(
                             client.send(data_to_send,
                                         service_key=ev_str,

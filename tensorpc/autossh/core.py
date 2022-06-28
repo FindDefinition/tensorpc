@@ -83,7 +83,14 @@ class Event:
             "type": self.name,
             "ts": self.timestamp,
             "uid": self.uid,
+            "is_stderr": self.is_stderr,
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        assert cls.name == data["type"]
+        return cls(data["ts"], data["is_stderr"],
+            data["uid"])
 
 
 class EofEvent(Event):
@@ -102,6 +109,17 @@ class EofEvent(Event):
 
     def __repr__(self):
         return "{}({}|{})".format(self.name, self.status, self.timestamp)
+    
+    def to_dict(self):
+        res = super().to_dict()
+        res["status"] = self.status
+        return res
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        assert cls.name == data["type"]
+        return cls(data["ts"], data["status"], data["is_stderr"],
+            data["uid"])
 
 
 class LineEvent(Event):
@@ -124,6 +142,11 @@ class LineEvent(Event):
         res["line"] = self.line
         return res
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        assert cls.name == data["type"]
+        return cls(data["ts"], data["line"], data["is_stderr"],
+            data["uid"])
 
 class ExceptionEvent(Event):
     name = "ExceptionEvent"
@@ -137,7 +160,17 @@ class ExceptionEvent(Event):
         super().__init__(timestamp, is_stderr, uid)
         self.data = data
         self.traceback_str = traceback_str
+    
+    def to_dict(self):
+        res = super().to_dict()
+        res["traceback_str"] = self.traceback_str
+        return res
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        assert cls.name == data["type"]
+        return cls(data["ts"], None, data["is_stderr"],
+            data["uid"], data["traceback_str"])
 
 class CommandEvent(Event):
     name = "CommandEvent"
@@ -164,6 +197,19 @@ class CommandEvent(Event):
             res["arg"] = self.arg
         return res
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        assert cls.name == data["type"]
+        return cls(data["ts"], data["cmdtype"], data.get("arg", None), data["is_stderr"],
+            data["uid"])
+
+_ALL_EVENT_TYPES: List[Type[Event]] = [LineEvent, CommandEvent, EofEvent, ExceptionEvent]
+
+def event_from_dict(data: Dict[str, Any]):
+    for t in _ALL_EVENT_TYPES:
+        if data["type"] == t.name:
+            return t.from_dict(data)
+    raise NotImplementedError
 
 async def _cancel(task):
     # more info: https://stackoverflow.com/a/43810272/1113207
@@ -179,6 +225,11 @@ class ReadResult:
         self.is_exc = is_exc
         self.traceback_str = traceback_str
 
+def _warp_exception_to_event(exc: Exception, uid: str):
+    tb_str = io.StringIO()
+    traceback.print_exc(file=tb_str)
+    ts = time.time_ns()
+    return ExceptionEvent(ts, exc, uid=uid, traceback_str=tb_str.getvalue())
 
 class PeerSSHClient:
     """
@@ -378,58 +429,73 @@ class SSHClient:
                             callback: Callable[[Event], Awaitable[None]],
                             shutdown_task: asyncio.Task,
                             env: Optional[Dict[str, str]] = None,
+                            forward_ports: Optional[List[int]] = None,
                             r_forward_ports: Optional[List[int]] = None,
-                            env_port_modifier: Optional[Callable[[List[int], Dict[str, str]], None]] = None):
+                            env_port_modifier: Optional[Callable[[List[int], List[int], Dict[str, str]], None]] = None,
+                            exit_callback: Optional[Callable[[], Awaitable[None]]] = None):
         if env is None:
             env = {}
         # TODO better keepalive
-        async with asyncssh.connect(self.url, self.port,
-                                    username=self.username,
-                                    password=self.password,
-                                    keepalive_interval=5,
-                                    known_hosts=None) as conn:
-            p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
-            await asyncssh.scp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
-            stdin, stdout, stderr = await conn.open_session(
-                "bash --init-file ~/.tensorpc_hooks-bash.sh",
-                request_pty="force")
-            # print("WTF")
-
-            peer_client = PeerSSHClient(stdin, stdout, stderr, uid=self.uid)
-            loop_task = asyncio.create_task(
-                peer_client.wait_loop_queue(callback, shutdown_task))
-            wait_tasks = [asyncio.create_task(inp_queue.get()), shutdown_task]
-            if r_forward_ports is not None:
+        try:
+            async with asyncssh.connect(self.url, self.port,
+                                        username=self.username,
+                                        password=self.password,
+                                        keepalive_interval=10,
+                                        known_hosts=None) as conn:
+                p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
+                await asyncssh.scp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
+                stdin, stdout, stderr = await conn.open_session(
+                    "bash --init-file ~/.tensorpc_hooks-bash.sh",
+                    request_pty="force")
+                peer_client = PeerSSHClient(stdin, stdout, stderr, uid=self.uid)
+                loop_task = asyncio.create_task(
+                    peer_client.wait_loop_queue(callback, shutdown_task))
+                wait_tasks = [asyncio.create_task(inp_queue.get()), shutdown_task, loop_task]
+                rfwd_ports: List[int] = []
                 fwd_ports: List[int] = []
-                for p in r_forward_ports:
-                    listener = await conn.forward_remote_port('', 0, 'localhost', p)
-                    fwd_ports.append(listener.get_port())
-                    print('Listening on port %s...' % listener.get_port())
-                    wait_tasks.append(asyncio.create_task(listener.wait_closed()))
-                # await listener.wait_closed()
-                if env_port_modifier is not None and fwd_ports:
-                    env_port_modifier(fwd_ports, env)
-            if env:
-                cmds: List[str] = []
-                for k, v in env.items():
-                    cmds.append(f"export {k}={v}")
-                stdin.write(" && ".join(cmds) + "\n")
-            while True:
-                done, pending = await asyncio.wait(
-                    wait_tasks, return_when=asyncio.FIRST_COMPLETED)
-                if shutdown_task in done:
-                    for task in pending:
-                        await _cancel(task)
-                    break
-                text = wait_tasks[0].result()
-                # text = text.strip()
-                # print("INPUT", text)
-                stdin.write(text)
-                wait_tasks = [
-                    asyncio.create_task(inp_queue.get()), shutdown_task
-                ]
-            await loop_task
 
+                if r_forward_ports is not None:
+                    for p in r_forward_ports:
+                        listener = await conn.forward_remote_port('', 0, 'localhost', p)
+                        rfwd_ports.append(listener.get_port())
+                        print('Listening on Remote port %s...' % listener.get_port())
+                        wait_tasks.append(asyncio.create_task(listener.wait_closed()))
+                if forward_ports is not None:
+                    for p in forward_ports:
+                        listener = await conn.forward_local_port('', 0, 'localhost', p)
+                        fwd_ports.append(listener.get_port())
+                        print('Listening on Local port %s...' % listener.get_port())
+                        wait_tasks.append(asyncio.create_task(listener.wait_closed()))
+                # await listener.wait_closed()
+                if env_port_modifier is not None and (rfwd_ports or fwd_ports):
+                    env_port_modifier(fwd_ports, rfwd_ports, env)
+                
+                if env:
+                    cmds: List[str] = []
+                    for k, v in env.items():
+                        cmds.append(f"export {k}={v}")
+                    stdin.write(" && ".join(cmds) + "\n")
+                while True:
+                    done, pending = await asyncio.wait(
+                        wait_tasks, return_when=asyncio.FIRST_COMPLETED)
+                    if shutdown_task in done:
+                        for task in pending:
+                            await _cancel(task)
+                        break
+                    if loop_task in done:
+                        break 
+                    text = wait_tasks[0].result()
+                    # text = text.strip()
+                    # print("INPUT", text)
+                    stdin.write(text)
+                    wait_tasks = [
+                        asyncio.create_task(inp_queue.get()), shutdown_task
+                    ]
+                await loop_task
+        except Exception as exc:
+            await callback(_warp_exception_to_event(exc, self.uid))
+        if exit_callback is not None:
+            await exit_callback()
 
 async def main2():
     from prompt_toolkit.shortcuts.prompt import PromptSession

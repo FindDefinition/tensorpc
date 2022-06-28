@@ -42,3 +42,8 @@ def get_local_url():
 def get_server_meta():
     return get_server_exposed_props().server_meta
 
+def get_server_grpc_port():
+    return get_server_meta().port
+
+def get_server_http_port():
+    return get_server_meta().http_port

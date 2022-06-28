@@ -12,9 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from . import constants, serv_names
+from . import constants
+from .serv_names import serv_names
 from tensorpc.core.httpclient import http_remote_call_request
 import os 
+from tensorpc.apps.flow.coretypes import RelayUpdateNodeEvent
 
 
 def update_node_status(content: str):
@@ -22,7 +24,9 @@ def update_node_status(content: str):
     nid = os.getenv(constants.TENSORPC_FLOW_NODE_ID)
     port = os.getenv(constants.TENSORPC_FLOW_MASTER_HTTP_PORT)
     use_rf = os.getenv(constants.TENSORPC_FLOW_USE_REMOTE_FWD)
-    if use_rf is not None and use_rf == "1":
+    is_worker_env = os.getenv(constants.TENSORPC_FLOW_IS_WORKER)
+    is_worker = is_worker_env is not None and is_worker_env == "1"
+    if (use_rf is not None and use_rf == "1") or is_worker:
         url = f"http://localhost:{port}/api/rpc"
     else:
         # for direct connection
@@ -31,4 +35,10 @@ def update_node_status(content: str):
             raise ValueError("this function can only be called via devflow")
         ssh_server_ip = ssh_server.split(" ")[0]
         url = f"http://{ssh_server_ip}:{port}/api/rpc"
-    http_remote_call_request(url, serv_names.FLOW_UPDATE_NODE_STATUS, gid, nid, content)
+    if not is_worker:
+        http_remote_call_request(url, serv_names.FLOW_UPDATE_NODE_STATUS, gid, nid, content)
+    else:
+        # TODO remove this assert
+        assert gid is not None and nid is not None 
+        ev = RelayUpdateNodeEvent(gid, nid, content)
+        http_remote_call_request(url, serv_names.FLOWWORKER_PUT_WORKER_EVENT_JSON, gid, ev.to_dict())
