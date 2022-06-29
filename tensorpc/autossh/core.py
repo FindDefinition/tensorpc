@@ -424,7 +424,6 @@ class SSHClient:
                 "bash --init-file ~/.tensorpc_hooks-bash.sh",
                 request_pty="force")
             
-
     async def connect_queue(self, inp_queue: asyncio.Queue,
                             callback: Callable[[Event], Awaitable[None]],
                             shutdown_task: asyncio.Task,
@@ -432,7 +431,8 @@ class SSHClient:
                             forward_ports: Optional[List[int]] = None,
                             r_forward_ports: Optional[List[int]] = None,
                             env_port_modifier: Optional[Callable[[List[int], List[int], Dict[str, str]], None]] = None,
-                            exit_callback: Optional[Callable[[], Awaitable[None]]] = None):
+                            exit_callback: Optional[Callable[[], Awaitable[None]]] = None,
+                            client_ip_callback: Optional[Callable[[str], None]] = None):
         if env is None:
             env = {}
         # TODO better keepalive
@@ -444,6 +444,14 @@ class SSHClient:
                                         known_hosts=None) as conn:
                 p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
                 await asyncssh.scp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
+                if client_ip_callback is not None:
+                    result = await conn.run("echo $SSH_CLIENT | awk '{ print $1}'", check=True)
+                    if result.stdout is not None:
+                        stdout_content = result.stdout
+                        if isinstance(stdout_content, bytes):
+                            stdout_content = stdout_content.decode("utf-8")
+                        client_ip_callback(stdout_content)
+
                 stdin, stdout, stderr = await conn.open_session(
                     "bash --init-file ~/.tensorpc_hooks-bash.sh",
                     request_pty="force")

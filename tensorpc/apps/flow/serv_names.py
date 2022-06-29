@@ -55,5 +55,9 @@ class _ServiceNames:
         from tensorpc.apps.flow.serv.worker import FlowWorker
         return get_service_key_by_type(FlowWorker, FlowWorker.stop.__name__)
 
+    @property
+    def FLOWWORKER_QUERY_STATUS(self):
+        from tensorpc.apps.flow.serv.worker import FlowWorker
+        return get_service_key_by_type(FlowWorker, FlowWorker.query_nodes_last_event.__name__)
 
 serv_names = _ServiceNames()

@@ -17,7 +17,7 @@ import asyncio
 import enum
 import os
 import traceback
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 import tensorpc
 from tensorpc.apps.flow import constants as flowconstants
 from tensorpc.apps.flow.serv_names import serv_names
@@ -36,48 +36,55 @@ class FlowClient:
         self._send_loop_task: Optional[asyncio.Task] = None
         self.shutdown_ev = asyncio.Event()
         self._cached_nodes: Dict[str, CommandNode] = {}
+        self._need_to_send_env: Optional[RelayEvent] = None
+
+    async def _send_event(self, ev: RelayEvent, robj: tensorpc.AsyncRemoteManager):
+        if isinstance(ev, RelayUpdateNodeEvent):
+            await robj.remote_call(
+                serv_names.FLOW_UPDATE_NODE_STATUS, ev.graph_id,
+                ev.node_id, ev.content)
+        elif isinstance(ev, RelaySSHEvent):
+            if isinstance(ev.event, (EofEvent, ExceptionEvent)):
+                node = self._cached_nodes[ev.uid]
+                print(node.readable_id, "DISCONNECTING...",
+                        type(ev.event))
+                if isinstance(ev.event, ExceptionEvent):
+                    print(ev.event.traceback_str)
+                await node.shutdown()
+                print(node.readable_id, "DISCONNECTED.")
+            await robj.remote_call(
+                serv_names.FLOW_PUT_WORKER_EVENT, ev.event)
+        else:
+            raise NotImplementedError
 
     async def _grpc_send_loop(self, url: str):
         async with tensorpc.AsyncRemoteManager(url) as robj:
+            if self._need_to_send_env is not None:
+                await self._send_event(self._need_to_send_env, robj)
+                self._need_to_send_env = None
             while True:
                 # TODO if send fail, save this ev and send after reconnection
                 ev = await self._send_loop.get()
                 try:
-                    if isinstance(ev, RelayUpdateNodeEvent):
-                        await robj.remote_call(
-                            serv_names.FLOW_UPDATE_NODE_STATUS, ev.graph_id,
-                            ev.node_id, ev.content)
-                    elif isinstance(ev, RelaySSHEvent):
-                        if isinstance(ev.event, (EofEvent, ExceptionEvent)):
-                            node = self._cached_nodes[ev.uid]
-                            print(node.readable_id, "DISCONNECTING...",
-                                  type(ev.event))
-                            if isinstance(ev.event, ExceptionEvent):
-                                print(ev.event.traceback_str)
-                            await node.shutdown()
-                            print(node.readable_id, "DISCONNECTED.")
-                        await robj.remote_call(
-                            serv_names.FLOW_PUT_WORKER_EVENT, ev.event)
-                    else:
-                        raise NotImplementedError
+                    await self._send_event(ev, robj)
                 except Exception as e:
                     # remote call may fail by connection broken
                     # TODO retry for reconnection
                     traceback.print_exc()
                     self._send_loop_task = None
+                    self._need_to_send_env = ev
                     break
 
     async def create_connection(self, url: str, timeout: float):
-        # check url valid
         async with tensorpc.AsyncRemoteManager(url) as robj:
             await robj.wait_for_remote_ready(timeout)
         self.previous_connection_url = url
         self._send_loop_task = asyncio.create_task(self._grpc_send_loop(url))
 
-    async def check_and_reconnect(self, timeout: float = 10):
+    async def check_and_reconnect(self, master_url: str, timeout: float = 10):
         if self.connected():
             return
-        return await self.create_connection(self.previous_connection_url,
+        return await self.create_connection(master_url,
                                             timeout)
 
     def connected(self):
@@ -99,38 +106,57 @@ class FlowClient:
 
         return envs
 
+    def query_nodes_last_event(self, graph_id: str, node_ids: List[str]):
+        res = []
+        for nid in node_ids:
+            uid = _get_uid(graph_id, nid)
+            if uid in self._cached_nodes:
+                res.append({
+                    "id": nid,
+                    "last_event": self._cached_nodes[uid].last_event.value,
+                    "stdout": self._cached_nodes[uid].stdout,
+                })
+            else:
+                res.append({
+                    "id": nid,
+                    "last_event": CommandEventType.PROMPT_END,
+                    "stdout": "",
+                })
+        return res 
+
     async def create_ssh_session(self, flow_data: Dict[str,
                                                        Any], graph_id: str,
-                                 url: str, username: str, password: str):
+                                 url: str, username: str, password: str, init_cmds: str,
+                                 master_url: str):
         # check connection, if not available, try to reconnect
-        await self.check_and_reconnect()
+        await self.check_and_reconnect(master_url)
         assert self._send_loop_task is not None
-        node = CommandNode(flow_data, graph_id)
-        uid = node.get_uid()
-        # TODO if new node replace a node that still running
+        uid = _get_uid(graph_id, flow_data["id"])
+
         if uid in self._cached_nodes:
-            node_old = self._cached_nodes[uid]
-            if node_old.is_started():
+            node = self._cached_nodes[uid]
+            if node.last_event == CommandEventType.COMMAND_OUTPUT_START:
                 # TODO tell master still running
                 return
-            else:
-                node_old.update_data(graph_id, flow_data)
-                node = node_old
+            node.update_data(graph_id, flow_data)
+        else:
+            node = CommandNode(flow_data, graph_id)
+            self._cached_nodes[uid] = node
 
-        self._cached_nodes[uid] = node
-
-        async def callback(ev: Event):
-            await self._send_loop.put(RelaySSHEvent(ev, uid))
-
-        envs = self._get_node_envs(graph_id, node.id)
-        node.start_session(callback, url, username, password, envs=envs)
+        if not node.is_session_started():
+            async def callback(ev: Event):
+                await self._send_loop.put(RelaySSHEvent(ev, uid))
+            envs = self._get_node_envs(graph_id, node.id)
+            node.start_session(callback, url, username, password, envs=envs)
+            if init_cmds:
+                await node.input_queue.put(init_cmds)
         await node.run_command()
 
     async def stop(self, graph_id: str, node_id: str):
-        print("STOP", graph_id, node_id)
         node = self._cached_nodes[_get_uid(graph_id, node_id)]
-        if node.is_started():
+        if node.is_session_started():
             await node.send_ctrl_c()
+        print("STOP", graph_id, node_id, node.is_session_started())
 
 
 class FlowWorker:
@@ -150,9 +176,11 @@ class FlowWorker:
             url, timeout)
 
     async def create_ssh_session(self, flow_data: Dict[str, Any], graph_id: str,
-                                 url: str, username: str, password: str):
+                                 url: str, username: str, password: str, init_cmds: str,
+                                 master_url: str):
         return await self._get_client(graph_id).create_ssh_session(
-            flow_data, graph_id, url, username, password)
+            flow_data, graph_id, url, username, password, init_cmds,
+            master_url)
 
     async def stop(self, graph_id: str, node_id: str):
         return await self._get_client(graph_id).stop(graph_id, node_id)
@@ -162,3 +190,6 @@ class FlowWorker:
 
     async def put_relay_event_json(self, graph_id: str, ev_data: dict):
         return await self._get_client(graph_id)._send_loop.put(relay_event_from_dict(ev_data))
+    
+    def query_nodes_last_event(self, graph_id: str, node_ids: List[str]):
+        return self._get_client(graph_id).query_nodes_last_event(graph_id, node_ids)

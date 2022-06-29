@@ -60,3 +60,48 @@ def relay_event_from_dict(data: Dict[str, Any]):
     elif data["type"] == RelayEventType.UpdateNodeStatus.value:
         return RelayUpdateNodeEvent.from_dict(data)
     raise NotImplementedError
+
+class UserEventType(enum.Enum):
+    """user event: event come from user code instead of
+    ssh.
+    for example:
+    1. node call api to update content
+        of a command node.
+    2. node submit a message
+    3. node submit a new status (currently
+        only come from master server)
+    """
+    Status = "Status"
+    Content = "Content"
+    Message = "Message"
+
+class UserEvent:
+    def __init__(self, type: UserEventType):
+        self.type = type
+
+    def to_dict(self):
+        return {
+            "type": self.type.value,
+        }
+
+class UserStatusEvent(UserEvent):
+    ALL_STATUS = set(["idle", "running", "error", "success"])
+    def __init__(self, status: str):
+        super().__init__(UserEventType.Status)
+        assert status in self.ALL_STATUS
+        self.status = status
+
+    def to_dict(self):
+        res = super().to_dict()
+        res["status"] = self.status 
+        return res  
+
+class UserContentEvent(UserEvent):
+    def __init__(self, content: Any):
+        super().__init__(UserEventType.Content)
+        self.content = content
+
+    def to_dict(self):
+        res = super().to_dict()
+        res["content"] = self.content 
+        return res  

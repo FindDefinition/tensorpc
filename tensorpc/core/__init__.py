@@ -25,5 +25,8 @@ BUILTIN_SERVICES = [
 def get_http_url(url: str, port: int):
     return f"http://{url}:{port}/api/rpc"
 
+def get_grpc_url(url: str, port: int):
+    return f"{url}:{port}"
+
 def get_websocket_url(url: str, port: int):
     return f"http://{url}:{port}/api/ws"
