@@ -122,8 +122,11 @@ class ServiceCore(object):
         # in future python versions, asyncio event can't be created if no event loop running.
         self.async_shutdown_event = asyncio.Event()
 
-    def exec_exit_funcs(self):
-        return self.service_units.run_exit()
+    async def exec_exit_funcs(self):
+        return await self.service_units.run_exit()
+
+    def exec_exit_funcs_sync(self):
+        return self.service_units.run_exit_sync()
 
     def _reset_timeout(self):
         with self.reset_timeout_lock:

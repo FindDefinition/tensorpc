@@ -152,7 +152,8 @@ class ServiceUnit:
             module_name)
         members = inspecttools.get_members_by_type(self.obj_type, False)
         self.services: Dict[str, ServFunctionMeta] = {}
-        self.exit_fn: Optional[Callable[[], None]] = None
+        self.exit_fn: Optional[Any] = None
+        self._is_exit_fn_async: bool = False
         self.ws_onconn_fn: Optional[Callable[[Any], None]] = None
         self.ws_ondisconn_fn: Optional[Callable[[Any], None]] = None
         self.name_to_events: Dict[str, EventProvider] = {}
@@ -194,6 +195,7 @@ class ServiceUnit:
             if serv_type == ServiceType.Exit:
                 assert self.exit_fn is None, "you can only register one exit"
                 self.exit_fn = v
+                self._is_exit_fn_async = is_async
             if serv_type == ServiceType.WebSocketOnConnect:
                 assert self.ws_onconn_fn is None, "you can only register one ws_onconn_fn"
                 self.ws_onconn_fn = v
@@ -289,9 +291,19 @@ class ServiceUnit:
         if self.ws_ondisconn_fn is not None:
             self.ws_ondisconn_fn(client)
 
-    def run_exit(self):
+    async def run_exit(self):
         if self.exit_fn is not None:
-            self.exit_fn()
+            if self._is_exit_fn_async:
+                await self.exit_fn()
+            else:
+                self.exit_fn()
+
+    def run_exit_sync(self):
+        if self.exit_fn is not None:
+            if self._is_exit_fn_async:
+                return
+            else:
+                self.exit_fn()
 
 
 class ServiceUnits:
@@ -326,9 +338,13 @@ class ServiceUnits:
     def run_service(self, serv_key: str, *args, **kwargs):
         return self.get_service(serv_key)(*args, **kwargs)
 
-    def run_exit(self):
+    async def run_exit(self):
         for s in self.sus:
-            s.run_exit()
+            await s.run_exit()
+
+    def run_exit_sync(self):
+        for s in self.sus:
+            s.run_exit_sync()
 
     def get_all_service_metas_json(self):
         return {su.module_key: su.get_service_metas_json() for su in self.sus}

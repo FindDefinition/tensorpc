@@ -137,7 +137,7 @@ async def serve_service(service: AsyncRemoteObjectService,
         wait_interval = wait_time
     options = None
     if length > 0:
-        options = [('grpc.max_message_length', length * 1024 * 1024),
+        options = [('grpc.max_send_message_length', length * 1024 * 1024),
                    ('grpc.max_receive_message_length', length * 1024 * 1024)]
     server = grpc.aio.server(options=options)
     remote_object_pb2_grpc.add_RemoteObjectServicer_to_server(service, server)
@@ -164,7 +164,7 @@ async def serve_service(service: AsyncRemoteObjectService,
     #             break
     await server.stop(0)
     # exec cleanup functions
-    server_core.exec_exit_funcs()
+    await server_core.exec_exit_funcs()
 
 
 

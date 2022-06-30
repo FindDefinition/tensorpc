@@ -145,7 +145,7 @@ def serve_service(service: RemoteObjectService,
         wait_interval = wait_time
     options = None
     if length > 0:
-        options = [('grpc.max_message_length', length * 1024 * 1024),
+        options = [('grpc.max_send_message_length', length * 1024 * 1024),
                    ('grpc.max_receive_message_length', length * 1024 * 1024)]
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_threads),
                          options=options)
@@ -168,11 +168,11 @@ def serve_service(service: RemoteObjectService,
                     break
         server.stop(0)
         # exec cleanup functions
-        server_core.exec_exit_funcs()
+        server_core.exec_exit_funcs_sync()
         LOGGER.info("server closed")
     except KeyboardInterrupt:
+        server_core.exec_exit_funcs_sync()
         server.stop(0)
-        server_core.exec_exit_funcs()
         LOGGER.info("server shutdown by keyboard interrupt")
 
 

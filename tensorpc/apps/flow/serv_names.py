@@ -59,5 +59,10 @@ class _ServiceNames:
     def FLOWWORKER_QUERY_STATUS(self):
         from tensorpc.apps.flow.serv.worker import FlowWorker
         return get_service_key_by_type(FlowWorker, FlowWorker.query_nodes_last_event.__name__)
+    
+    @property
+    def FLOWWORKER_CLOSE_CONNECTION(self):
+        from tensorpc.apps.flow.serv.worker import FlowWorker
+        return get_service_key_by_type(FlowWorker, FlowWorker.close_grpc_connection.__name__)
 
 serv_names = _ServiceNames()

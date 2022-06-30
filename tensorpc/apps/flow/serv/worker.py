@@ -58,13 +58,25 @@ class FlowClient:
             raise NotImplementedError
 
     async def _grpc_send_loop(self, url: str):
+        shut_task = asyncio.create_task(self.shutdown_ev.wait())
         async with tensorpc.AsyncRemoteManager(url) as robj:
             if self._need_to_send_env is not None:
                 await self._send_event(self._need_to_send_env, robj)
                 self._need_to_send_env = None
+            wait_tasks: List[asyncio.Task] = [
+                shut_task, asyncio.create_task(self._send_loop.get())
+            ]
             while True:
                 # TODO if send fail, save this ev and send after reconnection
                 ev = await self._send_loop.get()
+                (done,
+                pending) = await asyncio.wait(wait_tasks,
+                                            return_when=asyncio.FIRST_COMPLETED)
+                if shut_task in done:
+                    break
+                wait_tasks: List[asyncio.Task] = [
+                    shut_task, asyncio.create_task(self._send_loop.get())
+                ]
                 try:
                     await self._send_event(ev, robj)
                 except Exception as e:
@@ -74,11 +86,13 @@ class FlowClient:
                     self._send_loop_task = None
                     self._need_to_send_env = ev
                     break
+        self._send_loop_task = None
 
     async def create_connection(self, url: str, timeout: float):
         async with tensorpc.AsyncRemoteManager(url) as robj:
             await robj.wait_for_remote_ready(timeout)
         self.previous_connection_url = url
+        self.shutdown_ev.clear()
         self._send_loop_task = asyncio.create_task(self._grpc_send_loop(url))
 
     async def check_and_reconnect(self, master_url: str, timeout: float = 10):
@@ -158,6 +172,23 @@ class FlowClient:
             await node.send_ctrl_c()
         print("STOP", graph_id, node_id, node.is_session_started())
 
+    def close_grpc_connection(self):
+        self.shutdown_ev.set()
+
+    async def shutdown_node_session(self, graph_id: str, node_id: str):
+        uid = _get_uid(graph_id, node_id)
+        if uid not in self._cached_nodes:
+            return 
+        node = self._cached_nodes[uid]
+        if node.is_session_started():
+            await node.shutdown()
+
+    async def remove_node(self, graph_id: str, node_id: str):
+        uid = _get_uid(graph_id, node_id)
+        if uid not in self._cached_nodes:
+            return 
+        await self.shutdown_node_session(graph_id, node_id)
+        self._cached_nodes.pop(uid)
 
 class FlowWorker:
     def __init__(self) -> None:
@@ -193,3 +224,6 @@ class FlowWorker:
     
     def query_nodes_last_event(self, graph_id: str, node_ids: List[str]):
         return self._get_client(graph_id).query_nodes_last_event(graph_id, node_ids)
+
+    def close_grpc_connection(self, graph_id: str):
+        return self._get_client(graph_id).close_grpc_connection()

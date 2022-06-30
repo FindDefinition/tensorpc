@@ -16,6 +16,7 @@ import asyncio
 import enum
 import json
 from pathlib import Path
+import traceback
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set, Tuple, Type
 
 import aiohttp
@@ -83,6 +84,8 @@ class Node:
         self._flow_data = flow_data
         # graph id may change due to rename
         self.graph_id = graph_id
+        self.inputs: List[str] = []
+        self.outputs: List[str] = []
 
     def get_uid(self):
         return _get_uid(self.graph_id, self.id)
@@ -109,8 +112,8 @@ class DirectSSHNode(Node):
         return self.node_data["password"]
 
     @property
-    def enable_remote_forward(self) -> bool:
-        return self.node_data["enableRemoteForward"]
+    def enable_port_forward(self) -> bool:
+        return self.node_data["enablePortForward"]
 
     @property
     def init_commands(self) -> str:
@@ -211,7 +214,10 @@ class RemoteSSHNode(Node):
         assert self.task is None
         client = SSHClient(url, username, password, None, self.get_uid())
         print("CONNECT", url)
-
+        # TODO sync graph, close removed node when we reconnect
+        # a remote worker.
+        # we assume that if this session is started, we 
+        # can connect to remote worker successfully.
         async def callback2(ev: Event):
             # if isinstance(ev, LineEvent):
             #     self.stdout += ev.line
@@ -220,6 +226,7 @@ class RemoteSSHNode(Node):
             await callback(ev)
         async def exit_callback():
             self.task = None
+            http_url = self.worker_http_url
             self.last_event = CommandEventType.PROMPT_END
             self.worker_port = -1
             self.worker_http_port = -1
@@ -227,6 +234,16 @@ class RemoteSSHNode(Node):
             self.remote_master_http_port = -1
             self._remote_self_ip = ""
             print("SESSION EXIT!!!")
+
+            # TODO send message to disable grpc client in
+            # remote worker.
+
+            try:
+                async with aiohttp.ClientSession() as sess:
+                    await http_remote_call(sess, http_url, serv_names.FLOWWORKER_CLOSE_CONNECTION, self.graph_id, self.id)
+            except:
+                traceback.print_exc()
+
         def client_ip_callback(cip: str):
             self._remote_self_ip = cip.strip()
         sd_task = asyncio.create_task(self.shutdown_ev.wait())
@@ -533,7 +550,7 @@ class Flow:
                 node.stdout += event.line
                 if uid != self.selected_node_uid:
                     continue
-            elif isinstance(event, (CommandEvent, RemoteSSHNode)):
+            elif isinstance(event, (CommandEvent)):
                 node.last_event = event.type
                 if event.type == CommandEventType.PROMPT_END:
                     node.stdout += str(event.arg)
@@ -637,7 +654,6 @@ class Flow:
         envs: Dict[str, str] = {}
         if isinstance(node, CommandNode):
             envs[TENSORPC_FLOW_NODE_ID] = node_id
-
             envs[TENSORPC_FLOW_GRAPH_ID] = graph_id
             envs[TENSORPC_FLOW_NODE_ID] = node_id
             envs[TENSORPC_FLOW_NODE_UID] = node.get_uid()
@@ -709,7 +725,7 @@ class Flow:
                     #                 ssh_data["username"], ssh_data["password"],
                     #                 envs=envs)
                     rfports = []
-                    if driver.enable_remote_forward:
+                    if driver.enable_port_forward:
                         rfports = [prim.get_server_meta().port]
                         if prim.get_server_meta().http_port >= 0:
                             rfports.append(prim.get_server_meta().http_port)
@@ -770,3 +786,12 @@ class Flow:
                 await node.send_ctrl_c()
 
 
+    @marker.mark_exit
+    async def _on_exit(self):
+        # send exit message to all remote workers
+        for g in self.flow_dict.values():
+            for n in g.nodes:
+                if isinstance(n, RemoteSSHNode):
+                    # send close-connection message to remote worker
+                    if n.worker_http_port >= 0:
+                        await n.shutdown()

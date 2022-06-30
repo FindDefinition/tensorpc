@@ -22,9 +22,12 @@ def start_flow_remote_worker(name: str, port: int, http_port: int):
     except FileNotFoundError:
         print("Can't find tmux. please install it first.")
         raise 
-    sess_output = subprocess.check_output(["tmux", "ls"]).decode("utf-8")
-    sess_lines = sess_output.strip().split("\n")
-    sess_names = [s.split(":")[0] for s in sess_lines]
+    try:
+        sess_output = subprocess.check_output(["tmux", "ls"]).decode("utf-8")
+        sess_lines = sess_output.strip().split("\n")
+        sess_names = [s.split(":")[0] for s in sess_lines]
+    except:
+        sess_names = []
     if name in sess_names:
         return 
     output = subprocess.check_output(["tmux", "new-session", "-d", "-s", name])
