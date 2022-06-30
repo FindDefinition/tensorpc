@@ -281,5 +281,5 @@ async def main():
 
 if __name__ == "__main__":
     # asyncio.run(main())
-    data = http_remote_call_request("http://localhost:51052/api/rpc", "tensorpc.services.collection:Simple.echo", 5)
+    data = http_remote_call_request("http://localhost:54052/api/rpc", "tensorpc.services.collection:Simple.echo", 5)
     print(data, type(data))

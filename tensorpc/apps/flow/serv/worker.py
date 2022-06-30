@@ -52,6 +52,8 @@ class FlowClient:
                     print(ev.event.traceback_str)
                 await node.shutdown()
                 print(node.readable_id, "DISCONNECTED.")
+            print("SEND", ev.event)
+
             await robj.remote_call(
                 serv_names.FLOW_PUT_WORKER_EVENT, ev.event)
         else:
@@ -63,19 +65,22 @@ class FlowClient:
             if self._need_to_send_env is not None:
                 await self._send_event(self._need_to_send_env, robj)
                 self._need_to_send_env = None
+            send_task = asyncio.create_task(self._send_loop.get())
             wait_tasks: List[asyncio.Task] = [
-                shut_task, asyncio.create_task(self._send_loop.get())
+                shut_task, send_task
             ]
             while True:
                 # TODO if send fail, save this ev and send after reconnection
-                ev = await self._send_loop.get()
+                # ev = await self._send_loop.get()
                 (done,
                 pending) = await asyncio.wait(wait_tasks,
                                             return_when=asyncio.FIRST_COMPLETED)
                 if shut_task in done:
                     break
+                ev: RelayEvent = send_task.result()
+                send_task = asyncio.create_task(self._send_loop.get())
                 wait_tasks: List[asyncio.Task] = [
-                    shut_task, asyncio.create_task(self._send_loop.get())
+                    shut_task, send_task
                 ]
                 try:
                     await self._send_event(ev, robj)
@@ -133,7 +138,7 @@ class FlowClient:
             else:
                 res.append({
                     "id": nid,
-                    "last_event": CommandEventType.PROMPT_END,
+                    "last_event": CommandEventType.PROMPT_END.value,
                     "stdout": "",
                 })
         return res 
@@ -159,9 +164,10 @@ class FlowClient:
 
         if not node.is_session_started():
             async def callback(ev: Event):
+                print("CALLBACK", ev)
                 await self._send_loop.put(RelaySSHEvent(ev, uid))
             envs = self._get_node_envs(graph_id, node.id)
-            node.start_session(callback, url, username, password, envs=envs)
+            await node.start_session(callback, url, username, password, envs=envs)
             if init_cmds:
                 await node.input_queue.put(init_cmds)
         await node.run_command()

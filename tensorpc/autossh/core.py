@@ -4,6 +4,7 @@ import bisect
 import abc
 import asyncio
 import bisect
+import contextlib
 import enum
 import io
 import re
@@ -403,27 +404,16 @@ class SSHClient:
         self.known_hosts = known_hosts
         self.uid = uid
 
-    async def create_tmux(self, cmd: str,
-                            shutdown_task: asyncio.Task,
-                            env: Optional[Dict[str, str]] = None,
-                            r_forward_ports: Optional[List[int]] = None,
-                            env_port_modifier: Optional[Callable[[List[int], Dict[str, str]], None]] = None):
-        if env is None:
-            env = {}
+    @contextlib.asynccontextmanager
+    async def simple_connect(self):
         async with asyncssh.connect(self.url, self.port,
                                     username=self.username,
                                     password=self.password,
                                     keepalive_interval=15,
                                     known_hosts=None) as conn:
-            p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
-            await asyncssh.scp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
-            result = await conn.run('ls abc', check=True)
-            print(result.stdout, end='')
+            yield conn
 
-            stdin, stdout, stderr = await conn.open_session(
-                "bash --init-file ~/.tensorpc_hooks-bash.sh",
-                request_pty="force")
-            
+
     async def connect_queue(self, inp_queue: asyncio.Queue,
                             callback: Callable[[Event], Awaitable[None]],
                             shutdown_task: asyncio.Task,
