@@ -14,10 +14,9 @@
 
 import tensorpc 
 import time 
-from tensorpc.apps.flow.serv_names import FLOW_UPDATE_NODE_STATUS
+from tensorpc.apps.flow.serv_names import serv_names
 def update_status():
-    tensorpc.simple_remote_call("localhost:51051", FLOW_UPDATE_NODE_STATUS, "WTF", f"NEWS {time.time()}")
+    tensorpc.simple_remote_call("localhost:51051", serv_names.FLOW_SSH_INPUT, "default_flow", f"Node_0", "\x1b[16;1R")
 
 if __name__ == "__main__":
-    print(FLOW_UPDATE_NODE_STATUS)
     update_status()

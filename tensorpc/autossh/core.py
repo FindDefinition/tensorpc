@@ -14,7 +14,7 @@ from asyncio.tasks import FIRST_COMPLETED
 from collections import deque
 from dataclasses import dataclass
 import traceback
-from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, AnyStr, Awaitable, Callable, Deque, Dict, List, Optional, Set, Tuple, Type, Union
 from contextlib import suppress
 import asyncssh
 import tensorpc
@@ -23,6 +23,23 @@ import getpass
 # 7-bit C1 ANSI sequences
 ANSI_ESCAPE_REGEX = re.compile(
     br'''
+    (?: # either 7-bit C1, two bytes, ESC Fe (omitting CSI)
+        \x1B
+        [@-Z\\-_]
+    |   # or a single 8-bit byte Fe (omitting CSI)
+        [\x80-\x9A\x9C-\x9F]
+    |   # or CSI + control codes
+        (?: # 7-bit CSI, ESC [ 
+            \x1B\[
+        |   # 8-bit CSI, 9B
+            \x9B
+        )
+        [0-?]*  # Parameter bytes
+        [ -/]*  # Intermediate bytes
+        [@-~]   # Final byte
+    )
+''', re.VERBOSE)
+ANSI_ESCAPE_REGEX_8BIT = re.compile(br'''
     (?: # either 7-bit C1, two bytes, ESC Fe (omitting CSI)
         \x1B
         [@-Z\\-_]
@@ -57,10 +74,10 @@ _DEFAULT_SEPARATORS = r"(?:\r\n)|(?:\n)|(?:\r)|(?:\033\]784;[ABPCFGD](?:;(.*?))?
 def remove_ansi_seq(string: Union[str, bytes]):
     # https://stackoverflow.com/questions/14693701/how-can-i-remove-the-ansi-escape-sequences-from-a-string-in-python
     if isinstance(string, str):
-        return ANSI_ESCAPE_REGEX.sub(b'',
+        return ANSI_ESCAPE_REGEX_8BIT.sub(b'',
                                      string.encode("utf-8")).decode("utf-8")
     else:
-        return ANSI_ESCAPE_REGEX.sub(b'', string).decode("utf-8")
+        return ANSI_ESCAPE_REGEX_8BIT.sub(b'', string).decode("utf-8")
 
 
 class OutData:
@@ -93,6 +110,35 @@ class Event:
         return cls(data["ts"], data["is_stderr"],
             data["uid"])
 
+    def __lt__(self, other: Union["Event", int]):
+        if isinstance(other, Event):
+            other = other.timestamp
+        return self.timestamp < other
+
+    def __le__(self, other: Union["Event", int]):
+        if isinstance(other, Event):
+            other = other.timestamp
+        return self.timestamp <= other
+
+    def __gt__(self, other: Union["Event", int]):
+        if isinstance(other, Event):
+            other = other.timestamp
+        return self.timestamp > other
+
+    def __ge__(self, other: Union["Event", int]):
+        if isinstance(other, Event):
+            other = other.timestamp
+        return self.timestamp >= other
+
+    def __eq__(self, other: Union["Event", int]):
+        if isinstance(other, Event):
+            other = other.timestamp
+        return self.timestamp == other
+
+    def __ne__(self, other: Union["Event", int]):
+        if isinstance(other, Event):
+            other = other.timestamp
+        return self.timestamp != other
 
 class EofEvent(Event):
     name = "EofEvent"
@@ -141,6 +187,32 @@ class LineEvent(Event):
     def to_dict(self):
         res = super().to_dict()
         res["line"] = self.line
+        return res
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        assert cls.name == data["type"]
+        return cls(data["ts"], data["line"], data["is_stderr"],
+            data["uid"])
+
+class RawEvent(Event):
+    name = "RawEvent"
+
+    def __init__(self,
+                 timestamp: int,
+                 raw: str,
+                 is_stderr=False,
+                 uid: str = ""):
+        super().__init__(timestamp, is_stderr, uid)
+        self.raw = raw
+
+    def __repr__(self):
+        return "{}({}|{}|raw={})".format(self.name, self.is_stderr,
+                                          self.timestamp, self.raw.encode('utf-8'))
+
+    def to_dict(self):
+        res = super().to_dict()
+        res["raw"] = self.raw
         return res
 
     @classmethod
@@ -239,9 +311,9 @@ class PeerSSHClient:
     2. code path detection
     """
     def __init__(self,
-                 stdin: asyncssh.SSHWriter,
-                 stdout: asyncssh.SSHReader,
-                 stderr: asyncssh.SSHReader,
+                 stdin: asyncssh.stream.SSHWriter,
+                 stdout: asyncssh.stream.SSHReader,
+                 stderr: asyncssh.stream.SSHReader,
                  separators: str = _DEFAULT_SEPARATORS,
                  uid: str = ""):
         self.stdin = stdin
@@ -261,7 +333,7 @@ class PeerSSHClient:
         # https://github.com/ronf/asyncssh/issues/112#issuecomment-343318916
         return await self.send('\x03')
 
-    async def _readuntil(self, reader: asyncssh.SSHReader):
+    async def _readuntil(self, reader: asyncssh.stream.SSHReader):
         if isinstance(self.separators, str):
             separators = self.separators
             if reader._session._encoding:
@@ -291,7 +363,7 @@ class PeerSSHClient:
 
     # def _parse_line(self, data: str):
 
-    async def _handle_result(self, res: ReadResult, reader: asyncssh.SSHReader,
+    async def _handle_result(self, res: ReadResult, reader: asyncssh.stream.SSHReader,
                              ts: int, callback: Callable[[Event],
                                                          Awaitable[None]],
                              is_stderr: bool):
@@ -383,6 +455,34 @@ async def wait_queue_until_event(handler: Callable[[Any], None],
             q_get_task = asyncio.create_task(q.get())
         wait_tasks = [q_get_task, shut_task]
 
+class SSHRequestType(enum.Enum):
+    ChangeSize = 0
+
+
+class SSHRequest:
+    def __init__(self, type: SSHRequestType, data: Any) -> None:
+        self.type = type
+        self.data = data
+
+class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
+    def __init__(self) -> None:
+        super().__init__()
+        self.callback: Optional[Callable[[Event], Awaitable[None]]] = None
+        self.uid = ""
+
+    def data_received(self, data: AnyStr, datatype) -> None:
+        res = super().data_received(data, datatype)
+        if self.callback is not None:
+            ts = time.time_ns()
+            if isinstance(data, bytes):
+                res_str = data.decode("utf-8")
+                # print(data, type(data)) 
+            else:
+                res_str = data
+                # print(data.encode("utf-8"), type(data)) 
+            loop = asyncio.get_running_loop()
+            asyncio.run_coroutine_threadsafe(self.callback(RawEvent(ts, res_str, False, self.uid)), loop)
+        return res 
 
 class SSHClient:
     def __init__(self,
@@ -442,9 +542,20 @@ class SSHClient:
                             stdout_content = stdout_content.decode("utf-8")
                         client_ip_callback(stdout_content)
 
-                stdin, stdout, stderr = await conn.open_session(
-                    "bash --init-file ~/.tensorpc_hooks-bash.sh",
-                    request_pty="force")
+                chan, session = await conn.create_session(
+                            MySSHClientStreamSession, "bash --init-file ~/.tensorpc_hooks-bash.sh", request_pty="force") # type: ignore
+                # chan, session = await conn.create_session(
+                #             MySSHClientStreamSession, request_pty="force") # type: ignore
+
+                session: MySSHClientStreamSession
+                session.uid = self.uid 
+                session.callback = callback
+                # stdin, stdout, stderr = await conn.open_session(
+                #     "bash --init-file ~/.tensorpc_hooks-bash.sh",
+                #     request_pty="force")
+                stdin, stdout, stderr = (asyncssh.stream.SSHWriter(session, chan), asyncssh.stream.SSHReader(session, chan),
+                    asyncssh.stream.SSHReader(session, chan, asyncssh.constants.EXTENDED_DATA_STDERR))
+                
                 peer_client = PeerSSHClient(stdin, stdout, stderr, uid=self.uid)
                 loop_task = asyncio.create_task(
                     peer_client.wait_loop_queue(callback, shutdown_task))
@@ -483,9 +594,13 @@ class SSHClient:
                     if loop_task in done:
                         break 
                     text = wait_tasks[0].result()
-                    # text = text.strip()
-                    # print("INPUT", text)
-                    stdin.write(text)
+                    if isinstance(text, SSHRequest):
+                        if text.type == SSHRequestType.ChangeSize:
+                            # print("CHANGE SIZE", text.data)
+                            chan.change_terminal_size(text.data[0], text.data[1])
+                    else:
+                        # print("INPUTWTF", text.encode("utf-8"))        
+                        stdin.write(text)
                     wait_tasks = [
                         asyncio.create_task(inp_queue.get()), shutdown_task
                     ]

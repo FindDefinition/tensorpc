@@ -22,6 +22,11 @@ class _ServiceNames:
         return get_service_key_by_type(Flow, Flow.update_node_status.__name__)
 
     @property
+    def FLOW_SSH_INPUT(self):
+        from tensorpc.apps.flow.serv.core import Flow
+        return get_service_key_by_type(Flow,
+                                       Flow.command_node_input.__name__)
+    @property
     def FLOW_PUT_WORKER_EVENT(self):
         from tensorpc.apps.flow.serv.core import Flow
         return get_service_key_by_type(Flow,

@@ -28,13 +28,17 @@ from tensorpc.apps.flow.serv_names import serv_names
 from tensorpc.apps.flow.constants import (
     FLOW_DEFAULT_GRAPH_ID, FLOW_FOLDER_PATH, TENSORPC_FLOW_GRAPH_ID,
     TENSORPC_FLOW_MASTER_GRPC_PORT, TENSORPC_FLOW_MASTER_HTTP_PORT,
-    TENSORPC_FLOW_NODE_ID, TENSORPC_FLOW_NODE_UID, TENSORPC_FLOW_USE_REMOTE_FWD,
-    TENSORPC_FLOW_DEFAULT_TMUX_NAME)
+    TENSORPC_FLOW_NODE_ID, TENSORPC_FLOW_NODE_UID,
+    TENSORPC_FLOW_USE_REMOTE_FWD, TENSORPC_FLOW_DEFAULT_TMUX_NAME)
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
-                                   Event, ExceptionEvent, LineEvent, SSHClient)
+                                   Event, ExceptionEvent, LineEvent, SSHClient,
+                                   RawEvent, SSHRequest, SSHRequestType,
+                                   remove_ansi_seq)
 from tensorpc.core import get_grpc_url
 from tensorpc.core.asynctools import cancel_task
-
+from collections import deque 
+import bisect
+import itertools
 
 def _extract_graph_node_id(uid: str):
     parts = uid.split("@")
@@ -44,6 +48,7 @@ def _extract_graph_node_id(uid: str):
 def _get_uid(graph_id: str, node_id: str):
     return f"{graph_id}@{node_id}"
 
+
 def _get_status_from_last_event(ev: CommandEventType):
     if ev == CommandEventType.COMMAND_OUTPUT_START:
         return "running"
@@ -51,6 +56,7 @@ def _get_status_from_last_event(ev: CommandEventType):
         return "success"
     else:
         return "idle"
+
 
 class Node:
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
@@ -121,31 +127,51 @@ class DirectSSHNode(Node):
         cmds = self.node_data["initCommands"].strip() + "\n"
         return cmds
 
-class RemoteSSHNode(Node):
+class NodeWithSSHBase(Node):
+    def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
+        super().__init__(flow_data, graph_id)
+        self.shutdown_ev = asyncio.Event()
+        self.task: Optional[asyncio.Task] = None
+        self.input_queue = asyncio.Queue()
+        self.last_event: CommandEventType = CommandEventType.PROMPT_END
+        self.stdout = ""
+        self.init_terminal_size: Tuple[int, int] = (34, 16)
+        self.terminal_state = ""
+        self.terminal_close_ts: int = -1
+        self._raw_event_history: "deque[RawEvent]" = deque(maxlen=10000)
+
+    def push_raw_event(self, ev: RawEvent):
+        self._raw_event_history.append(ev)
+    
+    def collect_raw_event_after_ts(self, ts: int):
+        left = bisect.bisect_left(self._raw_event_history, ts, 0, len(self._raw_event_history))
+        return itertools.islice(self._raw_event_history, left)
+
+    async def send_ctrl_c(self):
+        # https://github.com/ronf/asyncssh/issues/112#issuecomment-343318916
+        return await self.input_queue.put("\x03")
+
+    async def shutdown(self):
+        print("NODE", self.id, "SHUTDOWN")
+        if self.task is not None:
+            self.shutdown_ev.set()
+            await cancel_task(self.task)
+            self.task = None
+            self.shutdown_ev.clear()
+
+    def is_session_started(self):
+        return self.task is not None
+
+class RemoteSSHNode(NodeWithSSHBase):
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
         super().__init__(flow_data, graph_id)
         self.worker_port: int = -1
         self.worker_http_port: int = -1
         self.remote_master_port: int = -1
         self.remote_master_http_port: int = -1
-
         self.remote_port = 54051
         self.remote_http_port = 54052
-
-        self.shutdown_ev = asyncio.Event()
-        self.task: Optional[asyncio.Task] = None
-        self.input_queue = asyncio.Queue()
-        self.last_event: CommandEventType = CommandEventType.PROMPT_END
-        self.stdout = ""
         self._remote_self_ip = ""
-
-    async def shutdown(self):
-        print("RemoteSSHNode", self.id, "SHUTDOWN")
-        if self.task is not None:
-            self.shutdown_ev.set()
-            await cancel_task(self.task)
-            self.task = None
-            self.shutdown_ev.clear()
 
     @property
     def worker_http_url(self) -> str:
@@ -153,9 +179,9 @@ class RemoteSSHNode(Node):
             assert self.worker_http_port >= 0
 
             return get_http_url("localhost", self.worker_http_port)
-        
+
         return get_http_url(self.url, self.remote_http_port)
-    
+
     @property
     def master_grpc_url(self) -> str:
         if self.enable_port_forward:
@@ -190,14 +216,8 @@ class RemoteSSHNode(Node):
         cmds = self.node_data["remoteInitCommands"].strip() + "\n"
         return cmds
 
-    async def send_ctrl_c(self):
-        # https://github.com/ronf/asyncssh/issues/112#issuecomment-343318916
-        return await self.input_queue.put("\x03")
-
-    def is_session_started(self):
-        return self.task is not None
-
-    def _env_port_modifier(self, fports: List[int], rfports: List[int], env: Dict[str, str]):
+    def _env_port_modifier(self, fports: List[int], rfports: List[int],
+                           env: Dict[str, str]):
         if fports:
             self.worker_port = fports[0]
             self.worker_http_port = fports[1]
@@ -206,12 +226,11 @@ class RemoteSSHNode(Node):
             self.remote_master_http_port = rfports[1]
 
     async def start_session(self,
-                    callback: Callable[[Event], Awaitable[None]],
-
-                      url: str,
-                      username: str,
-                      password: str,
-                      rfports: Optional[List[int]] = None):
+                            callback: Callable[[Event], Awaitable[None]],
+                            url: str,
+                            username: str,
+                            password: str,
+                            rfports: Optional[List[int]] = None):
         assert self.task is None
         new_sess_name = TENSORPC_FLOW_DEFAULT_TMUX_NAME
         client = SSHClient(url, username, password, None, self.get_uid())
@@ -232,7 +251,7 @@ class RemoteSSHNode(Node):
         print("CONNECT", url)
         # TODO sync graph, close removed node when we reconnect
         # a remote worker.
-        # we assume that if this session is started, we 
+        # we assume that if this session is started, we
         # can connect to remote worker successfully.
         async def callback2(ev: Event):
             # if isinstance(ev, LineEvent):
@@ -240,6 +259,7 @@ class RemoteSSHNode(Node):
             # elif isinstance(ev, CommandEvent):
             #     self.last_event = ev.type
             await callback(ev)
+
         async def exit_callback():
             self.task = None
             http_url = self.worker_http_url
@@ -254,12 +274,15 @@ class RemoteSSHNode(Node):
             # remote worker.
             try:
                 async with aiohttp.ClientSession() as sess:
-                    await http_remote_call(sess, http_url, serv_names.FLOWWORKER_CLOSE_CONNECTION, self.graph_id, self.id)
+                    await http_remote_call(
+                        sess, http_url, serv_names.FLOWWORKER_CLOSE_CONNECTION,
+                        self.graph_id, self.id)
             except:
                 traceback.print_exc()
 
         def client_ip_callback(cip: str):
             self._remote_self_ip = cip.strip()
+
         sd_task = asyncio.create_task(self.shutdown_ev.wait())
         forward_ports = []
         if self.enable_port_forward:
@@ -273,58 +296,48 @@ class RemoteSSHNode(Node):
                                  env_port_modifier=self._env_port_modifier,
                                  exit_callback=exit_callback,
                                  client_ip_callback=client_ip_callback))
+        await self.input_queue.put(
+            SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
         return worker_exists
 
     async def run_command(self):
         if self.init_commands:
             await self.input_queue.put(self.init_commands)
-        await self.input_queue.put((f"python -m tensorpc.cli.start_worker --name={TENSORPC_FLOW_DEFAULT_TMUX_NAME} "
+        await self.input_queue.put((
+            f"python -m tensorpc.cli.start_worker --name={TENSORPC_FLOW_DEFAULT_TMUX_NAME} "
             f"--port={self.remote_port} "
-            f"--http_port={self.remote_http_port} && while :; do sleep 2073600; done\n"))
+            f"--http_port={self.remote_http_port} && while :; do sleep 2073600; done\n"
+        ))
+
 
 class EnvNode(Node):
     pass
 
 
-class CommandNode(Node):
+class CommandNode(NodeWithSSHBase):
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
         super().__init__(flow_data, graph_id)
-        # print(json.dumps(flow_data, indent=2))
-        self.task: Optional[asyncio.Task] = None
-        self.shutdown_ev = asyncio.Event()
-        self.input_queue = asyncio.Queue()
-        self.stdout = ""
-        self.last_event: CommandEventType = CommandEventType.PROMPT_END
 
     @property
     def commands(self):
         args = self.node_data["args"]
         return [x["value"] for x in filter(lambda x: x["enabled"], args)]
 
-    async def shutdown(self):
-        print("NODE", self.id, "SHUTDOWN")
-        if self.task is not None:
-            self.shutdown_ev.set()
-            await cancel_task(self.task)
-            self.task = None
-            self.shutdown_ev.clear()
-
     async def run_command(self):
         await self.input_queue.put(" ".join(self.commands) + "\n")
 
-    async def send_ctrl_c(self):
-        # https://github.com/ronf/asyncssh/issues/112#issuecomment-343318916
-        return await self.input_queue.put("\x03")
 
-    async def start_session(self,
-                    callback: Callable[[Event], Awaitable[None]],
-                    #   msg_q: asyncio.Queue,
-                      url: str,
-                      username: str,
-                      password: str,
-                      envs: Dict[str, str],
-                      rfports: Optional[List[int]] = None,
-                      env_port_modifier: Optional[Callable[[List[int], List[int], Dict[str, str]], None]] = None):
+    async def start_session(
+        self,
+        callback: Callable[[Event], Awaitable[None]],
+        #   msg_q: asyncio.Queue,
+        url: str,
+        username: str,
+        password: str,
+        envs: Dict[str, str],
+        rfports: Optional[List[int]] = None,
+        env_port_modifier: Optional[Callable[
+            [List[int], List[int], Dict[str, str]], None]] = None):
         assert self.task is None
         client = SSHClient(url, username, password, None, self.get_uid())
 
@@ -333,6 +346,7 @@ class CommandNode(Node):
         async def exit_callback():
             self.task = None
             self.last_event = CommandEventType.PROMPT_END
+
         sd_task = asyncio.create_task(self.shutdown_ev.wait())
         self.task = asyncio.create_task(
             client.connect_queue(self.input_queue,
@@ -342,9 +356,8 @@ class CommandNode(Node):
                                  r_forward_ports=rfports,
                                  env_port_modifier=env_port_modifier,
                                  exit_callback=exit_callback))
-
-    def is_session_started(self):
-        return self.task is not None
+        await self.input_queue.put(
+            SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
 
 
 _TYPE_TO_NODE_CLS: Dict[str, Type[Node]] = {
@@ -489,7 +502,6 @@ class FlowGraph:
         return
 
 
-
 def _empty_flow_graph(graph_id: str = ""):
     data = {
         "nodes": [],
@@ -511,7 +523,8 @@ def _empty_flow_graph(graph_id: str = ""):
 
 class Flow:
     def __init__(self, root: Optional[str] = None) -> None:
-        self._user_ev_q: "asyncio.Queue[Tuple[str, UserEvent]]" = asyncio.Queue()
+        self._user_ev_q: "asyncio.Queue[Tuple[str, UserEvent]]" = asyncio.Queue(
+        )
         self._ssh_q: "asyncio.Queue[Event]" = asyncio.Queue()
         # self._ssh_stdout_q: "asyncio.Queue[Tuple[str, Event]]" = asyncio.Queue()
         self.selected_node_uid: str = ""
@@ -535,9 +548,13 @@ class Flow:
     def _get_node(self, graph_id: str, node_id: str):
         return self.flow_dict[graph_id].get_node_by_id(node_id)
 
+    @marker.mark_websocket_ondisconnect
+    def _on_client_disconnect(self, cl):
+        pass
+
     def _node_exists(self, graph_id: str, node_id: str):
         if graph_id not in self.flow_dict:
-            return False 
+            return False
         return self.flow_dict[graph_id].node_exists(node_id)
 
     @marker.mark_websocket_event
@@ -559,15 +576,27 @@ class Flow:
             graph_id, node_id = _extract_graph_node_id(uid)
             node = self._get_node(graph_id, node_id)
             assert isinstance(node, (CommandNode, RemoteSSHNode))
-            if isinstance(event, LineEvent):
+            # if isinstance(event, LineEvent):
+            #     # print(node.id, self.selected_node_uid == uid, event.line, end="")
+            #     node.stdout += event.line
+            #     if uid != self.selected_node_uid:
+            #         continue
+            if isinstance(event, RawEvent):
                 # print(node.id, self.selected_node_uid == uid, event.line, end="")
-                node.stdout += event.line
+                node.stdout += event.raw
+                node.push_raw_event(event)
+                if node.terminal_close_ts >= 0:
+                    if event.timestamp > node.terminal_close_ts:
+                        evs = node.collect_raw_event_after_ts(event.timestamp)
+                        node.terminal_state += "".join(ev.raw for ev in evs)
+                        node.terminal_close_ts = event.timestamp
                 if uid != self.selected_node_uid:
                     continue
+
             elif isinstance(event, (CommandEvent)):
                 node.last_event = event.type
-                if event.type == CommandEventType.PROMPT_END:
-                    node.stdout += str(event.arg)
+                # if event.type == CommandEventType.PROMPT_END:
+                #     node.stdout += str(event.arg)
 
             elif isinstance(event, (EofEvent, ExceptionEvent)):
                 print(node.readable_id, "DISCONNECTING...", type(event))
@@ -588,23 +617,45 @@ class Flow:
         if not self._node_exists(graph_id, node_id):
             return CommandEventType.PROMPT_END.value
         node = self._get_node(graph_id, node_id)
-        if isinstance(node, (CommandNode, RemoteSSHNode)):
-            return node.last_event.value 
+        if isinstance(node, (NodeWithSSHBase)):
+            return node.last_event.value
         return CommandEventType.PROMPT_END.value
 
+    def save_terminal_state(self, graph_id: str, node_id: str, state, timestamp_ms: int):
+        if len(state) > 0:
+            node = self._get_node(graph_id, node_id)
+            assert isinstance(node, (NodeWithSSHBase))
+            node.terminal_state = state
+            node.terminal_close_ts = timestamp_ms * 1000000
 
     def select_node(self, graph_id: str, node_id: str):
         node = self._get_node(graph_id, node_id)
-        assert isinstance(node, (CommandNode, RemoteSSHNode))
+        assert isinstance(node, (NodeWithSSHBase))
         self.selected_node_uid = node.get_uid()
-        # print("STDOUT", node.stdout, node.id)
-        return node.stdout
+        # here we can't use saved stdout because it contains
+        # input string and cause problem.
+        # we must use state from xterm.js in frontend.
+        # if that terminal closed, we assume no destructive input 
+        # (have special input charactors) exists
+        node.terminal_close_ts = -1
+        return node.terminal_state
 
     async def command_node_input(self, graph_id: str, node_id: str, data: str):
         node = self._get_node(graph_id, node_id)
-        if (isinstance(node, CommandNode)):
+        # print("INPUT", data.encode("utf-8"))
+        if (isinstance(node, (NodeWithSSHBase))):
             if node.is_session_started():
                 await node.input_queue.put(data)
+
+    async def ssh_change_size(self, graph_id: str, node_id: str, width: int,
+                              height: int):
+        node = self._get_node(graph_id, node_id)
+        if isinstance(node, (NodeWithSSHBase)):
+            if node.is_session_started():
+                req = SSHRequest(SSHRequestType.ChangeSize, (width, height))
+                await node.input_queue.put(req)
+            else:
+                node.init_terminal_size = (width, height)
 
     def remove_node(self):
         self.selected_node_uid = ""
@@ -656,11 +707,14 @@ class Flow:
                 if isinstance(n, (CommandNode, RemoteSSHNode)):
                     uid = _get_uid(graph_id, n.id)
 
-                    await self._user_ev_q.put((uid, UserStatusEvent(_get_status_from_last_event(n.last_event))))
+                    await self._user_ev_q.put(
+                        (uid,
+                         UserStatusEvent(
+                             _get_status_from_last_event(n.last_event))))
         if reload:
             # TODO we should shutdown all session first.
             self.flow_dict[graph_id] = FlowGraph(flow_data, graph_id)
-        
+
         return flow_data
 
     def _get_node_envs(self, graph_id: str, node_id: str):
@@ -678,13 +732,12 @@ class Flow:
         return envs
 
     @staticmethod
-    def _env_modifier(fwd_ports: List[int], rfwd_ports: List[int], env: Dict[str, str]):
-        env[TENSORPC_FLOW_MASTER_GRPC_PORT] = str(
-            rfwd_ports[0])
-        env[TENSORPC_FLOW_MASTER_HTTP_PORT] = str(
-            rfwd_ports[1])
+    def _env_modifier(fwd_ports: List[int], rfwd_ports: List[int],
+                      env: Dict[str, str]):
+        env[TENSORPC_FLOW_MASTER_GRPC_PORT] = str(rfwd_ports[0])
+        env[TENSORPC_FLOW_MASTER_HTTP_PORT] = str(rfwd_ports[1])
         env[TENSORPC_FLOW_USE_REMOTE_FWD] = "1"
-    
+
     async def _cmd_node_callback(self, ev: Event):
         await self._ssh_q.put(ev)
 
@@ -693,37 +746,45 @@ class Flow:
         if isinstance(node, RemoteSSHNode):
             worker_exists: bool = False
             if not node.is_session_started():
-                print("START, RemoteSSHNode", graph_id, node_id, node.is_session_started())
+                print("START, RemoteSSHNode", graph_id, node_id,
+                      node.is_session_started())
                 rfports = []
                 if node.enable_port_forward:
                     rfports = [prim.get_server_meta().port]
                     if prim.get_server_meta().http_port >= 0:
                         rfports.append(prim.get_server_meta().http_port)
 
-                worker_exists = await node.start_session(self._cmd_node_callback, node.url,
-                                    node.username,
-                                    node.password,
-                                    rfports=rfports)
+                worker_exists = await node.start_session(
+                    self._cmd_node_callback,
+                    node.url,
+                    node.username,
+                    node.password,
+                    rfports=rfports)
             await node.run_command()
             driver_http_url = node.worker_http_url
             if worker_exists:
                 # query node status.
                 async with aiohttp.ClientSession() as sess:
                     node_ids = node.outputs
-                    res = await http_remote_call(sess, driver_http_url, serv_names.FLOWWORKER_QUERY_STATUS, graph_id, node_ids)
+                    res = await http_remote_call(
+                        sess, driver_http_url,
+                        serv_names.FLOWWORKER_QUERY_STATUS, graph_id, node_ids)
                     for ev, nid in zip(res, node_ids):
                         uid = _get_uid(graph_id, nid)
                         le = CommandEventType(ev["last_event"])
-                        node.last_event = le 
+                        node.last_event = le
                         node.stdout = ev["stdout"]
-                        await self._user_ev_q.put((uid, UserStatusEvent(_get_status_from_last_event(le))))
+                        await self._user_ev_q.put(
+                            (uid,
+                             UserStatusEvent(_get_status_from_last_event(le))))
 
     async def start(self, graph_id: str, node_id: str):
         node = self.flow_dict[graph_id].get_node_by_id(node_id)
         if isinstance(node, RemoteSSHNode):
             return await self._start_remote_worker(graph_id, node_id)
         if isinstance(node, CommandNode):
-            print("START", graph_id, node_id, node.commands, node.is_session_started())
+            print("START", graph_id, node_id, node.commands,
+                  node.is_session_started())
             if not node.inputs:
                 print("ERRROROROR")
                 return
@@ -746,13 +807,14 @@ class Flow:
                         rfports = [prim.get_server_meta().port]
                         if prim.get_server_meta().http_port >= 0:
                             rfports.append(prim.get_server_meta().http_port)
-                    await node.start_session(self._cmd_node_callback,
-                                       driver.url,
-                                       driver.username,
-                                       driver.password,
-                                       envs=envs,
-                                       rfports=rfports,
-                                       env_port_modifier=self._env_modifier)
+                    await node.start_session(
+                        self._cmd_node_callback,
+                        driver.url,
+                        driver.username,
+                        driver.password,
+                        envs=envs,
+                        rfports=rfports,
+                        env_port_modifier=self._env_modifier)
                     if driver.init_commands != "":
                         await node.input_queue.put(driver.init_commands)
                 await node.run_command()
@@ -760,21 +822,24 @@ class Flow:
                 assert (driver.url != "" and driver.username != ""
                         and driver.password != "")
                 if not driver.is_session_started():
-                    print(f"DRIVER {driver.readable_id} not running. run it first.")
+                    print(
+                        f"DRIVER {driver.readable_id} not running. run it first."
+                    )
                     return
-                # if driver started, we can send start msg to 
+                # if driver started, we can send start msg to
                 # this driver
                 driver_http_url = driver.worker_http_url
                 # we send (may be new) node data to remote worker, then run it.
                 # TODO if node deleted, shutdown them in remote worker
                 print("START REMOTE")
                 async with aiohttp.ClientSession() as sess:
-                    await http_remote_call(sess, driver_http_url, serv_names.FLOWWORKER_CREATE_SESSION, node.raw_data, graph_id, 
-                        driver.url, driver.username, driver.password, driver.remote_init_commands,
-                        driver.master_grpc_url)
+                    await http_remote_call(
+                        sess, driver_http_url,
+                        serv_names.FLOWWORKER_CREATE_SESSION, node.raw_data,
+                        graph_id, driver.url, driver.username, driver.password,
+                        driver.remote_init_commands, driver.master_grpc_url)
             else:
                 print("ERROROROROR")
-
 
     def pause(self, graph_id: str, node_id: str):
         # currently not supported.
@@ -795,13 +860,14 @@ class Flow:
             if driver.is_session_started():
                 driver_http_url = driver.worker_http_url
                 async with aiohttp.ClientSession() as sess:
-                    await http_remote_call(sess, driver_http_url, serv_names.FLOWWORKER_STOP, graph_id, node_id)
+                    await http_remote_call(sess, driver_http_url,
+                                           serv_names.FLOWWORKER_STOP,
+                                           graph_id, node_id)
             # TODO raise a exception to front end if driver not start
             return
         if isinstance(node, CommandNode):
             if node.is_session_started():
                 await node.send_ctrl_c()
-
 
     @marker.mark_exit
     async def _on_exit(self):
