@@ -24,8 +24,8 @@ class _ServiceNames:
     @property
     def FLOW_SSH_INPUT(self):
         from tensorpc.apps.flow.serv.core import Flow
-        return get_service_key_by_type(Flow,
-                                       Flow.command_node_input.__name__)
+        return get_service_key_by_type(Flow, Flow.command_node_input.__name__)
+
     @property
     def FLOW_PUT_WORKER_EVENT(self):
         from tensorpc.apps.flow.serv.core import Flow
@@ -33,15 +33,23 @@ class _ServiceNames:
                                        Flow.put_event_from_worker.__name__)
 
     @property
+    def FLOW_ADD_MESSAGE(self):
+        from tensorpc.apps.flow.serv.core import Flow
+        return get_service_key_by_type(Flow,
+                                       Flow.add_message.__name__)
+
+
+    @property
     def FLOWWORKER_PUT_WORKER_EVENT(self):
         from tensorpc.apps.flow.serv.worker import FlowWorker
         return get_service_key_by_type(FlowWorker,
                                        FlowWorker.put_relay_event.__name__)
+
     @property
     def FLOWWORKER_PUT_WORKER_EVENT_JSON(self):
         from tensorpc.apps.flow.serv.worker import FlowWorker
-        return get_service_key_by_type(FlowWorker,
-                                       FlowWorker.put_relay_event_json.__name__)
+        return get_service_key_by_type(
+            FlowWorker, FlowWorker.put_relay_event_json.__name__)
 
     @property
     def FLOWWORKER_CREATE_SESSION(self):
@@ -54,11 +62,12 @@ class _ServiceNames:
         from tensorpc.apps.flow.serv.worker import FlowWorker
         return get_service_key_by_type(FlowWorker,
                                        FlowWorker.create_connection.__name__)
+
     @property
     def FLOWWORKER_CLOSE_CONNECTION(self):
         from tensorpc.apps.flow.serv.worker import FlowWorker
-        return get_service_key_by_type(FlowWorker,
-                                       FlowWorker.close_grpc_connection.__name__)
+        return get_service_key_by_type(
+            FlowWorker, FlowWorker.close_grpc_connection.__name__)
 
     @property
     def FLOWWORKER_STOP(self):
@@ -68,24 +77,50 @@ class _ServiceNames:
     @property
     def FLOWWORKER_QUERY_STATUS(self):
         from tensorpc.apps.flow.serv.worker import FlowWorker
-        return get_service_key_by_type(FlowWorker, FlowWorker.query_nodes_last_event.__name__)
-    
+        return get_service_key_by_type(
+            FlowWorker, FlowWorker.query_nodes_last_event.__name__)
+
     @property
     def FLOWWORKER_SELECT_NODE(self):
         from tensorpc.apps.flow.serv.worker import FlowWorker
-        return get_service_key_by_type(FlowWorker, FlowWorker.select_node.__name__)
+        return get_service_key_by_type(FlowWorker,
+                                       FlowWorker.select_node.__name__)
 
     @property
     def FLOWWORKER_SET_TERMINAL_STATE(self):
         from tensorpc.apps.flow.serv.worker import FlowWorker
-        return get_service_key_by_type(FlowWorker, FlowWorker.save_terminal_state.__name__)
+        return get_service_key_by_type(FlowWorker,
+                                       FlowWorker.save_terminal_state.__name__)
+
     @property
     def FLOWWORKER_COMMAND_NODE_INPUT(self):
         from tensorpc.apps.flow.serv.worker import FlowWorker
-        return get_service_key_by_type(FlowWorker, FlowWorker.command_node_input.__name__)
+        return get_service_key_by_type(FlowWorker,
+                                       FlowWorker.command_node_input.__name__)
+
     @property
     def FLOWWORKER_SSH_CHANGE_SIZE(self):
         from tensorpc.apps.flow.serv.worker import FlowWorker
-        return get_service_key_by_type(FlowWorker, FlowWorker.ssh_change_size.__name__)
+        return get_service_key_by_type(FlowWorker,
+                                       FlowWorker.ssh_change_size.__name__)
+
+    @property
+    def FLOWWORKER_SYNC_GRAPH(self):
+        from tensorpc.apps.flow.serv.worker import FlowWorker
+        return get_service_key_by_type(FlowWorker,
+                                       FlowWorker.sync_graph.__name__)
+
+    @property
+    def FLOWWORKER_DELETE_MESSAGE(self):
+        from tensorpc.apps.flow.serv.worker import FlowWorker
+        return get_service_key_by_type(FlowWorker,
+                                       FlowWorker.delete_message.__name__)
+
+    @property
+    def FLOWWORKER_QUERY_MESSAGE(self):
+        from tensorpc.apps.flow.serv.worker import FlowWorker
+        return get_service_key_by_type(FlowWorker,
+                                       FlowWorker.query_message.__name__)
+
 
 serv_names = _ServiceNames()

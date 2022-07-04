@@ -23,11 +23,11 @@ from tensorpc.apps.flow import constants as flowconstants
 from tensorpc.apps.flow.serv_names import serv_names
 from tensorpc import prim
 import grpc
-from tensorpc.apps.flow.coretypes import RelayEvent, RelayEventType, RelaySSHEvent, RelayUpdateNodeEvent, relay_event_from_dict
+from tensorpc.apps.flow.coretypes import MessageEvent, RelayEvent, RelayEventType, RelaySSHEvent, RelayUpdateNodeEvent, relay_event_from_dict, Message
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, RawEvent,
                                    SSHClient, SSHRequest, SSHRequestType)
-from .core import CommandNode, NodeWithSSHBase, _get_uid
+from .core import CommandNode, Node, NodeWithSSHBase, _get_uid, node_from_data
 import time
 
 
@@ -40,6 +40,17 @@ class FlowClient:
         self._cached_nodes: Dict[str, CommandNode] = {}
         self._need_to_send_env: Optional[RelayEvent] = None
         self.selected_node_uid = ""
+        self.lock = asyncio.Lock()
+
+    async def delete_message(self, graph_id: str, node_id: str, message_id: str):
+        node = self._get_node(graph_id, node_id)
+        node.messages.pop(message_id)
+    
+    async def query_message(self):
+        msgs = []
+        for node in self._cached_nodes.values():
+            msgs.extend([v.to_dict() for v in node.messages.values()])
+        return msgs
 
     async def _send_event(self, ev: RelayEvent,
                           robj: tensorpc.AsyncRemoteManager):
@@ -54,9 +65,12 @@ class FlowClient:
                     print(ev.event.traceback_str)
                 await node.shutdown()
                 print(node.readable_id, "DISCONNECTED.")
-            print("SEND", ev.event)
+            # print("SEND", ev.event)
 
             await robj.remote_call(serv_names.FLOW_PUT_WORKER_EVENT, ev.event)
+        elif isinstance(ev, MessageEvent):
+            await robj.remote_call(serv_names.FLOW_PUT_WORKER_EVENT, ev)
+
         else:
             raise NotImplementedError
 
@@ -115,7 +129,12 @@ class FlowClient:
     def _has_node(self, graph_id: str, node_id: str):
         return _get_uid(graph_id, node_id) in self._cached_nodes
 
-    def select_node(self, graph_id: str, node_id: str):
+    async def add_message(self, raw_msgs: List[Any]):
+
+        await self._msg_q.put(MessageEvent(MessageEventType.Update, raw_msgs))
+
+
+    async def select_node(self, graph_id: str, node_id: str, width: int = -1, height: int = -1):
         node = self._get_node(graph_id, node_id)
         assert isinstance(node, (NodeWithSSHBase))
         self.selected_node_uid = node.get_uid()
@@ -125,12 +144,55 @@ class FlowClient:
         # if that terminal closed, we assume no destructive input
         # (have special input charactors) exists
         node.terminal_close_ts = -1
+        # print("SELECT NODE", len(node.terminal_state))
+        if width >= 0 and height >= 0:
+            await self.ssh_change_size(graph_id, node_id, width, height)
+
         return node.terminal_state
+
+    async def sync_graph(self, graph_id: str, node_datas: List[Dict[str, Any]]):
+        new_nodes = [node_from_data(d) for d in node_datas]
+        # print("EXIST", self._cached_nodes)
+        # print("SYNCED NODES", [n.id for n in new_nodes])
+        new_node_dict: Dict[str, CommandNode] = {}
+        for new_node in new_nodes:
+            uid = new_node.get_uid()
+            if uid in self._cached_nodes:
+                old_node = self._cached_nodes[uid]
+                if old_node.remote_driver_id != new_node.remote_driver_id:
+                    # remote driver changed. stop this node.
+                    await old_node.shutdown()
+            assert isinstance(new_node, CommandNode)
+            new_node_dict[uid] = new_node
+        for k, v in self._cached_nodes.items():
+            if k not in new_node_dict:
+                # node removed. 
+                print("NODE SHUTDOWN???")
+                await v.shutdown()
+            else:
+                # we need to keep local state such as terminal state
+                # so we update here instead of replace.
+                v.update_data(graph_id, new_node_dict[k]._flow_data)
+                new_node_dict[k] = v 
+        async with self.lock:
+            self._cached_nodes = new_node_dict
+        res = []
+        for node in new_node_dict.values():
+            msgs = node.messages
+            res.append({
+                "id": node.id,
+                "last_event": node.last_event.value,
+                "stdout": node.stdout,
+                "msgs": [m.to_dict() for m in msgs.values()],
+            })
+        # print("GRAPH", self._cached_nodes)
+        return res
 
     def save_terminal_state(self, graph_id: str, node_id: str, state,
                             timestamp_ms: int):
         if len(state) > 0:
             node = self._get_node(graph_id, node_id)
+            print("SAVE STATE", len(state))
             assert isinstance(node, (NodeWithSSHBase))
             node.terminal_state = state
             node.terminal_close_ts = timestamp_ms * 1000000
@@ -157,16 +219,19 @@ class FlowClient:
         for nid in node_ids:
             uid = _get_uid(graph_id, nid)
             if uid in self._cached_nodes:
+                msgs = self._cached_nodes[uid].messages
                 res.append({
                     "id": nid,
                     "last_event": self._cached_nodes[uid].last_event.value,
                     "stdout": self._cached_nodes[uid].stdout,
+                    "msgs": [m.to_dict() for m in msgs.values()],
                 })
             else:
                 res.append({
                     "id": nid,
                     "last_event": CommandEventType.PROMPT_END.value,
                     "stdout": "",
+                    "msgs": [],
                 })
         return res
 
@@ -200,6 +265,7 @@ class FlowClient:
                     if node.terminal_close_ts >= 0:
                         if ev.timestamp > node.terminal_close_ts:
                             evs = node.collect_raw_event_after_ts(ev.timestamp)
+                            print("NODE APPEND STATE")
                             node.terminal_state += "".join(ev.raw
                                                            for ev in evs)
                             node.terminal_close_ts = ev.timestamp
@@ -254,6 +320,7 @@ class FlowClient:
         node = self._get_node(graph_id, node_id)
         if isinstance(node, (NodeWithSSHBase)):
             if node.is_session_started():
+                # print("CHANGE SIZE")
                 req = SSHRequest(SSHRequestType.ChangeSize, (width, height))
                 await node.input_queue.put(req)
             else:
@@ -269,6 +336,11 @@ class FlowWorker:
         if graph_id not in self._clients:
             self._clients[graph_id] = FlowClient()
         return self._clients[graph_id]
+
+    async def sync_graph(self, graph_id: str, node_datas: List[Dict[str, Any]]):
+        return await self._get_client(graph_id).sync_graph(graph_id, node_datas)
+
+
 
     async def create_connection(self, graph_id: str, url: str, timeout: float):
         return await self._get_client(graph_id).create_connection(url, timeout)
@@ -298,8 +370,8 @@ class FlowWorker:
     def close_grpc_connection(self, graph_id: str):
         return self._get_client(graph_id).close_grpc_connection()
 
-    def select_node(self, graph_id: str, node_id: str):
-        return self._get_client(graph_id).select_node(graph_id, node_id)
+    async def select_node(self, graph_id: str, node_id: str, width: int = -1, height: int = -1):
+        return await self._get_client(graph_id).select_node(graph_id, node_id, width, height)
 
     def save_terminal_state(self, graph_id: str, node_id: str, state,
                             timestamp_ms: int):
@@ -314,3 +386,10 @@ class FlowWorker:
                               height: int):
         return await self._get_client(graph_id).ssh_change_size(
             graph_id, node_id, width, height)
+    
+    async def delete_message(self, graph_id: str, node_id: str, message_id: str):
+        return await self._get_client(graph_id).delete_message(
+            graph_id, node_id, message_id)
+
+    async def query_message(self, graph_id: str):
+        return await self._get_client(graph_id).query_message()
