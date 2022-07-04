@@ -500,6 +500,25 @@ class HttpService:
         res = web.Response(body=byte, headers=headers)
         return res
 
+    async def remote_pickle_call_http(self, request: web.Request):
+        try:
+            data_bin = await request.read()
+            pb_data = rpc_message_pb2.RemoteCallRequest()
+            pb_data.ParseFromString(data_bin)
+            pb_data.flags = rpc_message_pb2.Pickle
+            res = await self.service_core.remote_call_async(pb_data)
+        except Exception as e:
+            data = self.service_core._remote_exception_json(e)
+            res = rpc_message_pb2.RemoteCallReply(exception=data)
+        byte = res.SerializeToString()
+        # TODO better headers
+        headers = {
+            'Access-Control-Allow-Origin': '*',
+            # 'Access-Control-Allow-Headers': '*',
+            # 'Access-Control-Allow-Method': 'POST',
+        }
+        res = web.Response(body=byte, headers=headers)
+        return res
 
 async def _await_shutdown(shutdown_ev, loop):
     return await loop.run_in_executor(None, shutdown_ev.wait)
@@ -529,17 +548,22 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
                                   credentials=None,
                                   rpc_name="/api/rpc",
                                   ws_name="/api/ws",
-                                  is_sync: bool = False):
+                                  is_sync: bool = False,
+                                  rpc_pickle_name: str="/api/rpc_pickle"):
     http_service = HttpService(server_core)
     server_core._init_async_members()
     ws_service = AllWebsocketHandler(server_core)
     app = web.Application()
-    loop_task = asyncio.create_task(ws_service.event_provide_executor())
-    app.router.add_post(rpc_name, http_service.remote_json_call_http)
-    app.router.add_get(ws_name, ws_service.handle_new_connection)
-    return await asyncio.gather(
-        serve_app(app, port, server_core.shutdown_event,
-                  server_core.async_shutdown_event, is_sync), loop_task)
+    # TODO should we create a global client session for all http call in server?
+    async with aiohttp.ClientSession() as sess:
+        server_core.init_http_client_session(sess)
+        loop_task = asyncio.create_task(ws_service.event_provide_executor())
+        app.router.add_post(rpc_name, http_service.remote_json_call_http)
+        app.router.add_post(rpc_pickle_name, http_service.remote_pickle_call_http)
+        app.router.add_get(ws_name, ws_service.handle_new_connection)
+        return await asyncio.gather(
+            serve_app(app, port, server_core.shutdown_event,
+                    server_core.async_shutdown_event, is_sync), loop_task)
 
 
 def serve_service_core(server_core: ProtobufServiceCore,

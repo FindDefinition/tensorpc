@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 import traceback
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set, Tuple, Type
-
+import time
 import aiohttp
 import asyncssh
 
@@ -36,9 +36,12 @@ from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    remove_ansi_seq)
 from tensorpc.core import get_grpc_url
 from tensorpc.core.asynctools import cancel_task
-from collections import deque 
+from collections import deque
 import bisect
 import itertools
+
+class HandleTypes(enum.Enum):
+    Driver = "driver"
 
 def _extract_graph_node_id(uid: str):
     parts = uid.split("@")
@@ -57,14 +60,30 @@ def _get_status_from_last_event(ev: CommandEventType):
     else:
         return "idle"
 
+class Handle:
+    def __init__(self, target_node_id: str, type: str, edge_id: str) -> None:
+        self.target_node_id = target_node_id
+        self.type = type 
+        self.edge_id = edge_id
 
 class Node:
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
         self._flow_data = flow_data
         self.id: str = flow_data["id"]
         self.graph_id: str = graph_id
-        self.inputs: List[str] = []
-        self.outputs: List[str] = []
+        self.inputs: Dict[str, List[Handle]] = {}
+        self.outputs: Dict[str, List[Handle]] = {}
+        self.remote_driver_id: str = ""
+
+    def get_input_handles(self, type: str):
+        if type not in self.inputs:
+            return []
+        return self.inputs[type]
+
+    def get_output_handles(self, type: str):
+        if type not in self.outputs:
+            return []
+        return self.outputs[type]
 
     @property
     def position(self) -> Tuple[float, float]:
@@ -91,8 +110,9 @@ class Node:
         self._flow_data = flow_data
         # graph id may change due to rename
         self.graph_id = graph_id
-        self.inputs: List[str] = []
-        self.outputs: List[str] = []
+        self.inputs: Dict[str, List[Handle]] = {}
+        self.outputs: Dict[str, List[Handle]] = {}
+
 
     def get_uid(self):
         return _get_uid(self.graph_id, self.id)
@@ -127,6 +147,7 @@ class DirectSSHNode(Node):
         cmds = self.node_data["initCommands"].strip() + "\n"
         return cmds
 
+
 class NodeWithSSHBase(Node):
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
         super().__init__(flow_data, graph_id)
@@ -140,11 +161,13 @@ class NodeWithSSHBase(Node):
         self.terminal_close_ts: int = -1
         self._raw_event_history: "deque[RawEvent]" = deque(maxlen=10000)
 
+
     def push_raw_event(self, ev: RawEvent):
         self._raw_event_history.append(ev)
-    
+
     def collect_raw_event_after_ts(self, ts: int):
-        left = bisect.bisect_left(self._raw_event_history, ts, 0, len(self._raw_event_history))
+        left = bisect.bisect_left(self._raw_event_history, ts, 0,
+                                  len(self._raw_event_history))
         return itertools.islice(self._raw_event_history, left)
 
     async def send_ctrl_c(self):
@@ -161,6 +184,7 @@ class NodeWithSSHBase(Node):
 
     def is_session_started(self):
         return self.task is not None
+
 
 class RemoteSSHNode(NodeWithSSHBase):
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
@@ -189,6 +213,11 @@ class RemoteSSHNode(NodeWithSSHBase):
             return get_grpc_url("localhost", self.remote_master_port)
         assert self._remote_self_ip != ""
         return get_grpc_url(self._remote_self_ip, prim.get_server_grpc_port())
+
+    async def http_remote_call(self, key: str, *args, **kwargs):
+        return await http_remote_call(prim.get_http_client_session(),
+                                      self.worker_http_url, key, *args,
+                                      **kwargs)
 
     @property
     def url(self) -> str:
@@ -249,6 +278,7 @@ class RemoteSSHNode(NodeWithSSHBase):
             except asyncssh.process.ProcessError:
                 worker_exists = False
         print("CONNECT", url)
+
         # TODO sync graph, close removed node when we reconnect
         # a remote worker.
         # we assume that if this session is started, we
@@ -273,10 +303,10 @@ class RemoteSSHNode(NodeWithSSHBase):
             # TODO send message to disable grpc client in
             # remote worker.
             try:
-                async with aiohttp.ClientSession() as sess:
-                    await http_remote_call(
-                        sess, http_url, serv_names.FLOWWORKER_CLOSE_CONNECTION,
-                        self.graph_id, self.id)
+                await http_remote_call(prim.get_http_client_session(),
+                                       http_url,
+                                       serv_names.FLOWWORKER_CLOSE_CONNECTION,
+                                       self.graph_id, self.id)
             except:
                 traceback.print_exc()
 
@@ -325,7 +355,6 @@ class CommandNode(NodeWithSSHBase):
 
     async def run_command(self):
         await self.input_queue.put(" ".join(self.commands) + "\n")
-
 
     async def start_session(
         self,
@@ -429,8 +458,26 @@ class FlowGraph:
         for edge in edges:
             source = edge.source_id
             target = edge.target_id
-            self._node_id_to_node[source].outputs.append(target)
-            self._node_id_to_node[target].inputs.append(source)
+            src_handle = Handle(source, edge.source_handle, edge.id)
+            tgt_handle = Handle(target, edge.target_handle, edge.id)
+            source_outs = self._node_id_to_node[source].outputs
+            if tgt_handle.type not in source_outs:
+                source_outs[tgt_handle.type] = []
+            source_outs[tgt_handle.type].append(tgt_handle)
+            target_outs = self._node_id_to_node[target].inputs
+            if src_handle.type not in target_outs:
+                target_outs[src_handle.type] = []
+            target_outs[src_handle.type].append(src_handle)
+
+    def _update_driver(self, ):
+        for k, v in self._node_id_to_node.items():
+            v.remote_driver_id = ""
+        for node in self.nodes:
+            if isinstance(node, RemoteSSHNode):
+                out_handles = node.get_output_handles(HandleTypes.Driver.value)
+                out_nodes = [self.get_node_by_id(h.target_node_id) for h in out_handles]
+                for n in out_nodes:
+                    n.remote_driver_id = node.id
 
     def update_nodes(self, nodes: Iterable[Node]):
         self._node_id_to_node = {n.id: n for n in nodes}
@@ -469,6 +516,8 @@ class FlowGraph:
         }
 
     async def update_graph(self, graph_id: str, new_flow_data):
+        """TODO if remove driver of a node changes (source change/type change)
+        """
         # we may need to shutdown node, so use async function
         new_graph_data = new_flow_data
         self.ssh_data = new_flow_data["ssh"]
@@ -494,6 +543,7 @@ class FlowGraph:
             if node.id not in new_node_id_to_node:
                 # shutdown this node
                 await node.shutdown()
+                # TODO if node is a remote node, shutdown in remote
         self.update_nodes(new_node_id_to_node.values())
         # we assume edges don't contain any state, so just update them.
         # we may need to handle this in future.
@@ -550,7 +600,12 @@ class Flow:
 
     @marker.mark_websocket_ondisconnect
     def _on_client_disconnect(self, cl):
-        pass
+        # TODO when all client closed instead of one client, close all terminal
+        for g in self.flow_dict.values():
+            for n in g.nodes:
+                if isinstance(n, NodeWithSSHBase):
+                    if n.terminal_close_ts < 0:
+                        n.terminal_close_ts = time.time_ns()
 
     def _node_exists(self, graph_id: str, node_id: str):
         if graph_id not in self.flow_dict:
@@ -585,6 +640,8 @@ class Flow:
                 # print(node.id, self.selected_node_uid == uid, event.line, end="")
                 node.stdout += event.raw
                 node.push_raw_event(event)
+                # we assume node never produce special input strings during
+                # terminal frontend closing.
                 if node.terminal_close_ts >= 0:
                     if event.timestamp > node.terminal_close_ts:
                         evs = node.collect_raw_event_after_ts(event.timestamp)
@@ -621,21 +678,37 @@ class Flow:
             return node.last_event.value
         return CommandEventType.PROMPT_END.value
 
-    def save_terminal_state(self, graph_id: str, node_id: str, state, timestamp_ms: int):
+    async def save_terminal_state(self, graph_id: str, node_id: str, state,
+                                  timestamp_ms: int):
         if len(state) > 0:
             node = self._get_node(graph_id, node_id)
             assert isinstance(node, (NodeWithSSHBase))
+            if node.remote_driver_id != "":
+                driver = self._get_node(graph_id, node.remote_driver_id)
+                assert isinstance(driver, RemoteSSHNode)
+                return await driver.http_remote_call(
+                    serv_names.FLOWWORKER_SET_TERMINAL_STATE, graph_id,
+                    node_id, state, timestamp_ms)
+
             node.terminal_state = state
             node.terminal_close_ts = timestamp_ms * 1000000
+        self.selected_node_uid = ""
 
-    def select_node(self, graph_id: str, node_id: str):
+    async def select_node(self, graph_id: str, node_id: str):
         node = self._get_node(graph_id, node_id)
         assert isinstance(node, (NodeWithSSHBase))
+        if node.remote_driver_id != "":
+            driver = self._get_node(graph_id, node.remote_driver_id)
+            assert isinstance(driver, RemoteSSHNode)
+            return await driver.http_remote_call(
+                serv_names.FLOWWORKER_SELECT_NODE, graph_id,
+                node_id)
+
         self.selected_node_uid = node.get_uid()
         # here we can't use saved stdout because it contains
         # input string and cause problem.
         # we must use state from xterm.js in frontend.
-        # if that terminal closed, we assume no destructive input 
+        # if that terminal closed, we assume no destructive input
         # (have special input charactors) exists
         node.terminal_close_ts = -1
         return node.terminal_state
@@ -644,24 +717,37 @@ class Flow:
         node = self._get_node(graph_id, node_id)
         # print("INPUT", data.encode("utf-8"))
         if (isinstance(node, (NodeWithSSHBase))):
+            if node.remote_driver_id != "":
+                driver = self._get_node(graph_id, node.remote_driver_id)
+                assert isinstance(driver, RemoteSSHNode)
+                return await driver.http_remote_call(
+                    serv_names.FLOWWORKER_SELECT_NODE, graph_id,
+                    node_id)
+
             if node.is_session_started():
                 await node.input_queue.put(data)
 
     async def ssh_change_size(self, graph_id: str, node_id: str, width: int,
                               height: int):
+        # TODO handle remote node
         node = self._get_node(graph_id, node_id)
         if isinstance(node, (NodeWithSSHBase)):
+            if node.remote_driver_id != "":
+                driver = self._get_node(graph_id, node.remote_driver_id)
+                assert isinstance(driver, RemoteSSHNode)
+                return await driver.http_remote_call(
+                    serv_names.FLOWWORKER_SELECT_NODE, graph_id,
+                    node_id)
             if node.is_session_started():
                 req = SSHRequest(SSHRequestType.ChangeSize, (width, height))
                 await node.input_queue.put(req)
             else:
                 node.init_terminal_size = (width, height)
 
-    def remove_node(self):
-        self.selected_node_uid = ""
-
     async def save_graph(self, graph_id: str, flow_data):
         # TODO do we need a async lock here?
+        # TODO we should sync graph to remote worker in every graph update
+        
         ssh_data = flow_data["ssh"]
         flow_data = flow_data["graph"]
         flow_data["ssh"] = ssh_data
@@ -764,19 +850,18 @@ class Flow:
             driver_http_url = node.worker_http_url
             if worker_exists:
                 # query node status.
-                async with aiohttp.ClientSession() as sess:
-                    node_ids = node.outputs
-                    res = await http_remote_call(
-                        sess, driver_http_url,
-                        serv_names.FLOWWORKER_QUERY_STATUS, graph_id, node_ids)
-                    for ev, nid in zip(res, node_ids):
-                        uid = _get_uid(graph_id, nid)
-                        le = CommandEventType(ev["last_event"])
-                        node.last_event = le
-                        node.stdout = ev["stdout"]
-                        await self._user_ev_q.put(
-                            (uid,
-                             UserStatusEvent(_get_status_from_last_event(le))))
+                node_ids = node.outputs
+                res = await http_remote_call(
+                    prim.get_http_client_session(), driver_http_url,
+                    serv_names.FLOWWORKER_QUERY_STATUS, graph_id, node_ids)
+                for ev, nid in zip(res, node_ids):
+                    uid = _get_uid(graph_id, nid)
+                    le = CommandEventType(ev["last_event"])
+                    node.last_event = le
+                    node.stdout = ev["stdout"]
+                    await self._user_ev_q.put(
+                        (uid,
+                         UserStatusEvent(_get_status_from_last_event(le))))
 
     async def start(self, graph_id: str, node_id: str):
         node = self.flow_dict[graph_id].get_node_by_id(node_id)
@@ -788,7 +873,7 @@ class Flow:
             if not node.inputs:
                 print("ERRROROROR")
                 return
-            driver = self._get_node(graph_id, node.inputs[0])
+            driver = self._get_node(graph_id, node.get_input_handles(HandleTypes.Driver.value)[0].target_node_id)
             if isinstance(driver, DirectSSHNode):
                 if not node.is_session_started():
                     # ssh_data = self.flow_dict[graph_id].ssh_data
@@ -832,12 +917,11 @@ class Flow:
                 # we send (may be new) node data to remote worker, then run it.
                 # TODO if node deleted, shutdown them in remote worker
                 print("START REMOTE")
-                async with aiohttp.ClientSession() as sess:
-                    await http_remote_call(
-                        sess, driver_http_url,
-                        serv_names.FLOWWORKER_CREATE_SESSION, node.raw_data,
-                        graph_id, driver.url, driver.username, driver.password,
-                        driver.remote_init_commands, driver.master_grpc_url)
+                await http_remote_call(
+                    prim.get_http_client_session(), driver_http_url,
+                    serv_names.FLOWWORKER_CREATE_SESSION, node.raw_data,
+                    graph_id, driver.url, driver.username, driver.password,
+                    driver.remote_init_commands, driver.master_grpc_url)
             else:
                 print("ERROROROROR")
 
@@ -855,14 +939,15 @@ class Flow:
                 await node.send_ctrl_c()
             # should we stop tmux session?
             return
-        driver = self._get_node(graph_id, node.inputs[0])
+        driver_node_id = node.get_input_handles(HandleTypes.Driver.value)[0].target_node_id
+        driver = self._get_node(graph_id, driver_node_id)
         if isinstance(driver, RemoteSSHNode):
             if driver.is_session_started():
                 driver_http_url = driver.worker_http_url
-                async with aiohttp.ClientSession() as sess:
-                    await http_remote_call(sess, driver_http_url,
-                                           serv_names.FLOWWORKER_STOP,
-                                           graph_id, node_id)
+                await http_remote_call(prim.get_http_client_session(),
+                                       driver_http_url,
+                                       serv_names.FLOWWORKER_STOP, graph_id,
+                                       node_id)
             # TODO raise a exception to front end if driver not start
             return
         if isinstance(node, CommandNode):

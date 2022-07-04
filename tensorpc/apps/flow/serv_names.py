@@ -54,6 +54,11 @@ class _ServiceNames:
         from tensorpc.apps.flow.serv.worker import FlowWorker
         return get_service_key_by_type(FlowWorker,
                                        FlowWorker.create_connection.__name__)
+    @property
+    def FLOWWORKER_CLOSE_CONNECTION(self):
+        from tensorpc.apps.flow.serv.worker import FlowWorker
+        return get_service_key_by_type(FlowWorker,
+                                       FlowWorker.close_grpc_connection.__name__)
 
     @property
     def FLOWWORKER_STOP(self):
@@ -66,8 +71,21 @@ class _ServiceNames:
         return get_service_key_by_type(FlowWorker, FlowWorker.query_nodes_last_event.__name__)
     
     @property
-    def FLOWWORKER_CLOSE_CONNECTION(self):
+    def FLOWWORKER_SELECT_NODE(self):
         from tensorpc.apps.flow.serv.worker import FlowWorker
-        return get_service_key_by_type(FlowWorker, FlowWorker.close_grpc_connection.__name__)
+        return get_service_key_by_type(FlowWorker, FlowWorker.select_node.__name__)
+
+    @property
+    def FLOWWORKER_SET_TERMINAL_STATE(self):
+        from tensorpc.apps.flow.serv.worker import FlowWorker
+        return get_service_key_by_type(FlowWorker, FlowWorker.save_terminal_state.__name__)
+    @property
+    def FLOWWORKER_COMMAND_NODE_INPUT(self):
+        from tensorpc.apps.flow.serv.worker import FlowWorker
+        return get_service_key_by_type(FlowWorker, FlowWorker.command_node_input.__name__)
+    @property
+    def FLOWWORKER_SSH_CHANGE_SIZE(self):
+        from tensorpc.apps.flow.serv.worker import FlowWorker
+        return get_service_key_by_type(FlowWorker, FlowWorker.ssh_change_size.__name__)
 
 serv_names = _ServiceNames()

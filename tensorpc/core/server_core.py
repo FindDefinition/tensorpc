@@ -13,6 +13,8 @@ import traceback
 from typing import (Any, AsyncIterator, Callable, Dict, Iterator, List, Mapping, Optional,
                     Sequence, Union)
 import dataclasses
+
+import aiohttp
 from tensorpc.core.defs import Service, ServiceDef
 from tensorpc import compat
 from tensorpc.core import core_io, serviceunit
@@ -40,6 +42,7 @@ class _ExposedServerProps(object):
         self.local_url = local_url
         self.is_sync = is_sync
         self.server_meta = server_meta
+        self.http_client_session: Optional[aiohttp.ClientSession] = None
 
 
 class ServerContext(object):
@@ -121,6 +124,9 @@ class ServiceCore(object):
     def _init_async_members(self):
         # in future python versions, asyncio event can't be created if no event loop running.
         self.async_shutdown_event = asyncio.Event()
+
+    def init_http_client_session(self, sess: aiohttp.ClientSession):
+        self._exposed_props.http_client_session = sess 
 
     async def exec_exit_funcs(self):
         return await self.service_units.run_exit()
