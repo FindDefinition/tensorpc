@@ -4,15 +4,18 @@ from typing import Any, Dict, List
 
 from tensorpc.autossh.core import Event, event_from_dict
 
+def get_uid(graph_id: str, node_id: str):
+    return f"{graph_id}@{node_id}"
+
 class MessageItemType(enum.Enum):
-    Text = "Text"
-    Image = "Image"
+    Text = 0
+    Image = 1
 
 
 class MessageLevel(enum.Enum):
-    Info = "Info"
-    Warning = "Warning"
-    Error = "Error"
+    Info = 0
+    Warning = 1
+    Error = 2
 
 
 class MessageItem:
@@ -26,6 +29,9 @@ class MessageItem:
             "data": self.data,
         }
 
+    @classmethod
+    def from_dict(cls, data):
+        return cls(MessageItemType(data["type"]), data["data"])
 
 class Message:
     def __init__(self, uid: str, level: MessageLevel, timestamp: int,
@@ -39,19 +45,34 @@ class Message:
         self.node_id = node_id
         self.level = level
 
+    def get_node_uid(self):
+        return get_uid(self.graph_id, self.node_id)
+
     def __hash__(self) -> int:
         return hash(self.uid)
 
-    def to_dict(self):
-        return {
+    def to_dict(self, with_detail: bool = False):
+        res = {
             "uid": self.uid,
             "level": self.level.value,
-            "node_id": self.node_id,
-            "graph_id": self.graph_id,
+            "nodeId": self.node_id,
+            "graphId": self.graph_id,
             "ts": self.timestamp,
             "title": self.title,
-            "items": [n.to_dict() for n in self.items]
+            "items": []
         }
+        if with_detail:
+            res["items"] = [n.to_dict() for n in self.items]
+        return res
+
+    def to_dict_with_detail(self):
+        return self.to_dict(True)
+
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(data["uid"], MessageLevel(data["level"]), data["ts"], data["graphId"],
+            data["nodeId"], data["title"], [MessageItem.from_dict(it) for it in data["items"]])
 
 class MessageEventType(enum.Enum):
     Update = "Update"
@@ -67,6 +88,7 @@ class MessageEvent:
             "type": self.type.value,
             "msgs": self.rawmsgs,
         }
+        
 
 class RelayEventType(enum.Enum):
     UpdateNodeStatus = "UpdateNodeStatus"

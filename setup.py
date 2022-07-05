@@ -46,6 +46,7 @@ EXTRAS = {
         'pytest-cov'
         "sphinx",
         "docutils",
+        "Faker",
     ]
     # 'fancy feature': ['django'],
 }

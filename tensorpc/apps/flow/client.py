@@ -17,7 +17,9 @@ from . import constants
 from .serv_names import serv_names
 from tensorpc.core.httpclient import http_remote_call_request
 import os 
-from tensorpc.apps.flow.coretypes import MessageItem, MessageLevel, RelayUpdateNodeEvent
+import time 
+from tensorpc.apps.flow.coretypes import Message, MessageItem, MessageLevel, RelayUpdateNodeEvent
+import uuid 
 
 def _get_ids_and_url():
     gid = os.getenv(constants.TENSORPC_FLOW_GRAPH_ID)
@@ -32,7 +34,7 @@ def _get_ids_and_url():
         # for direct connection
         ssh_server = os.getenv("SSH_CLIENT")
         if (gid is None or nid is None or ssh_server is None or port is None):
-            raise ValueError("this function can only be called via devflow")
+            raise ValueError("this function can only be called via devflow frontend")
         ssh_server_ip = ssh_server.split(" ")[0]
         url = f"http://{ssh_server_ip}:{port}/api/rpc"
     return gid, nid, is_worker, url
@@ -46,13 +48,15 @@ def update_node_status(content: str):
         assert gid is not None and nid is not None 
         ev = RelayUpdateNodeEvent(gid, nid, content)
         http_remote_call_request(url, serv_names.FLOWWORKER_PUT_WORKER_EVENT_JSON, gid, ev.to_dict())
+    return True 
 
-def add_message(title: str, timestamp: int, level: MessageLevel, items: List[MessageItem]):
+def add_message(title: str, level: MessageLevel, items: List[MessageItem]):
+    timestamp = time.time_ns()
     gid, nid, is_worker, url = _get_ids_and_url()
+    if (gid is None or nid is None):
+        raise ValueError("this function can only be called via devflow frontend")
+    msg = Message(str(uuid.uuid4()), level, timestamp, gid, nid, title, items)
     if not is_worker:
-        http_remote_call_request(url, serv_names.FLOW_UPDATE_NODE_STATUS, gid, nid, content)
+        http_remote_call_request(url, serv_names.FLOW_ADD_MESSAGE, [msg.to_dict()])
     else:
-        # TODO remove this assert
-        assert gid is not None and nid is not None 
-        ev = RelayUpdateNodeEvent(gid, nid, content)
-        http_remote_call_request(url, serv_names.FLOWWORKER_PUT_WORKER_EVENT_JSON, gid, ev.to_dict())
+        http_remote_call_request(url, serv_names.FLOWWORKER_ADD_MESSAGE, gid, [msg.to_dict()])

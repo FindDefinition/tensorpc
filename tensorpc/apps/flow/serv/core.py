@@ -19,11 +19,12 @@ from pathlib import Path
 import traceback
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set, Tuple, Type, Union
 import time
+import uuid
 import aiohttp
 import asyncssh
 import tensorpc
 from tensorpc import marker, prim, http_remote_call, get_http_url
-from tensorpc.apps.flow.coretypes import MessageEventType, UserContentEvent, UserEvent, UserStatusEvent, Message, MessageEvent
+from tensorpc.apps.flow.coretypes import MessageEventType, MessageLevel, UserContentEvent, UserEvent, UserStatusEvent, Message, MessageEvent, get_uid
 from tensorpc.apps.flow.serv_names import serv_names
 from tensorpc.apps.flow.constants import (
     FLOW_DEFAULT_GRAPH_ID, FLOW_FOLDER_PATH, TENSORPC_FLOW_GRAPH_ID,
@@ -53,7 +54,7 @@ def _extract_graph_node_id(uid: str):
 
 
 def _get_uid(graph_id: str, node_id: str):
-    return f"{graph_id}@{node_id}"
+    return get_uid(graph_id, node_id)
 
 
 def _get_status_from_last_event(ev: CommandEventType):
@@ -406,9 +407,6 @@ class RemoteSSHNode(NodeWithSSHBase):
     async def run_command(self):
         if self.init_commands:
             await self.input_queue.put(self.init_commands)
-        # TODO should we run sleep here? or just leave a interactive session to user?
-        # our goal is keep ssh session (port forward) alive. The KeepAliveInterval looks
-        # enough for keep alive usage.
         await self.input_queue.put((
             f"python -m tensorpc.cli.start_worker --name={TENSORPC_FLOW_DEFAULT_TMUX_NAME} "
             f"--port={self.remote_port} "
@@ -567,7 +565,7 @@ class FlowGraph:
                 out_nodes = self.get_output_nodes_of_handle_type(node, HandleTypes.Driver)
                 for n in out_nodes:
                     n.remote_driver_id = node.id
-                    print("WTF", node.readable_id, n.readable_id)
+                    # print("WTF", node.readable_id, n.readable_id)
     def update_nodes(self, nodes: Iterable[Node]):
         self._node_id_to_node = {n.id: n for n in nodes}
         self._node_rid_to_node = {n.readable_id: n for n in nodes}
@@ -727,12 +725,22 @@ class Flow:
         
     async def add_message(self, raw_msgs: List[Any]):
         await self._msg_q.put(MessageEvent(MessageEventType.Update, raw_msgs))
+        for m in raw_msgs:
+            msg = Message.from_dict(m)
+            node = self._get_node(msg.graph_id, msg.node_id)
+            node.messages[msg.uid] = msg 
 
     async def delete_message(self, graph_id: str, node_id: str, message_id: str):
         node = self._get_node(graph_id, node_id)
-        node.messages.pop(message_id)
-    
+        if message_id in node.messages:
+            node.messages.pop(message_id)
+
+    async def query_single_message_detail(self, graph_id: str, node_id: str, message_id: str):
+        node = self._get_node(graph_id, node_id)
+        return node.messages[message_id].to_dict_with_detail()
+
     async def query_message(self, graph_id: str):
+        print("QUERY INIT MESSAGE")
         graph = self.flow_dict[graph_id]
         all_msgs = []
         for node in graph.nodes:
@@ -746,7 +754,7 @@ class Flow:
                     all_msgs.extend(msgs)
             all_msgs.extend(node.get_messages_dict())
         # sort in frontend
-        return all_msgs
+        return {m["uid"]: m for m in all_msgs}
 
     @marker.mark_websocket_event
     async def command_node_event(self):

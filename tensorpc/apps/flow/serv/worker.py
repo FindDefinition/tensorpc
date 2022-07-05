@@ -17,13 +17,13 @@ import asyncio
 import enum
 import os
 import traceback
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 import tensorpc
 from tensorpc.apps.flow import constants as flowconstants
 from tensorpc.apps.flow.serv_names import serv_names
 from tensorpc import prim
 import grpc
-from tensorpc.apps.flow.coretypes import MessageEvent, RelayEvent, RelayEventType, RelaySSHEvent, RelayUpdateNodeEvent, relay_event_from_dict, Message
+from tensorpc.apps.flow.coretypes import MessageEvent, MessageEventType, RelayEvent, RelayEventType, RelaySSHEvent, RelayUpdateNodeEvent, relay_event_from_dict, Message
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, RawEvent,
                                    SSHClient, SSHRequest, SSHRequestType)
@@ -34,11 +34,11 @@ import time
 class FlowClient:
     def __init__(self) -> None:
         self.previous_connection_url = ""
-        self._send_loop: "asyncio.Queue[RelayEvent]" = asyncio.Queue()
+        self._send_loop: "asyncio.Queue[RelayEvent | MessageEvent]" = asyncio.Queue()
         self._send_loop_task: Optional[asyncio.Task] = None
         self.shutdown_ev = asyncio.Event()
         self._cached_nodes: Dict[str, CommandNode] = {}
-        self._need_to_send_env: Optional[RelayEvent] = None
+        self._need_to_send_env: Optional[Union[RelayEvent, MessageEvent]] = None
         self.selected_node_uid = ""
         self.lock = asyncio.Lock()
 
@@ -52,7 +52,7 @@ class FlowClient:
             msgs.extend([v.to_dict() for v in node.messages.values()])
         return msgs
 
-    async def _send_event(self, ev: RelayEvent,
+    async def _send_event(self, ev: Union[RelayEvent, MessageEvent],
                           robj: tensorpc.AsyncRemoteManager):
         if isinstance(ev, RelayUpdateNodeEvent):
             await robj.remote_call(serv_names.FLOW_UPDATE_NODE_STATUS,
@@ -69,8 +69,7 @@ class FlowClient:
 
             await robj.remote_call(serv_names.FLOW_PUT_WORKER_EVENT, ev.event)
         elif isinstance(ev, MessageEvent):
-            await robj.remote_call(serv_names.FLOW_PUT_WORKER_EVENT, ev)
-
+            await robj.remote_call(serv_names.FLOW_ADD_MESSAGE, ev.rawmsgs)
         else:
             raise NotImplementedError
 
@@ -89,7 +88,7 @@ class FlowClient:
                     wait_tasks, return_when=asyncio.FIRST_COMPLETED)
                 if shut_task in done:
                     break
-                ev: RelayEvent = send_task.result()
+                ev: Union[RelayEvent, MessageEvent] = send_task.result()
                 send_task = asyncio.create_task(self._send_loop.get())
                 wait_tasks: List[asyncio.Task] = [shut_task, send_task]
                 try:
@@ -130,9 +129,11 @@ class FlowClient:
         return _get_uid(graph_id, node_id) in self._cached_nodes
 
     async def add_message(self, raw_msgs: List[Any]):
-
-        await self._msg_q.put(MessageEvent(MessageEventType.Update, raw_msgs))
-
+        await self._send_loop.put(MessageEvent(MessageEventType.Update, raw_msgs))
+        for m in raw_msgs:
+            msg = Message.from_dict(m)
+            node = self._get_node(msg.graph_id, msg.node_id)
+            node.messages[msg.uid] = msg 
 
     async def select_node(self, graph_id: str, node_id: str, width: int = -1, height: int = -1):
         node = self._get_node(graph_id, node_id)
@@ -393,3 +394,6 @@ class FlowWorker:
 
     async def query_message(self, graph_id: str):
         return await self._get_client(graph_id).query_message()
+
+    async def add_message(self, graph_id: str, raw_msgs: List[Any]):
+        return await self._get_client(graph_id).add_message(raw_msgs)
