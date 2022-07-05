@@ -128,5 +128,10 @@ class _ServiceNames:
         return get_service_key_by_type(FlowWorker,
                                        FlowWorker.add_message.__name__)
 
+    @property
+    def FLOWWORKER_QUERY_MESSAGE_DETAIL(self):
+        from tensorpc.apps.flow.serv.worker import FlowWorker
+        return get_service_key_by_type(FlowWorker,
+                                       FlowWorker.query_single_message_detail.__name__)
 
 serv_names = _ServiceNames()

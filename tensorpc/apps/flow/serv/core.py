@@ -30,7 +30,8 @@ from tensorpc.apps.flow.constants import (
     FLOW_DEFAULT_GRAPH_ID, FLOW_FOLDER_PATH, TENSORPC_FLOW_GRAPH_ID,
     TENSORPC_FLOW_MASTER_GRPC_PORT, TENSORPC_FLOW_MASTER_HTTP_PORT,
     TENSORPC_FLOW_NODE_ID, TENSORPC_FLOW_NODE_UID,
-    TENSORPC_FLOW_USE_REMOTE_FWD, TENSORPC_FLOW_DEFAULT_TMUX_NAME)
+    TENSORPC_FLOW_USE_REMOTE_FWD, TENSORPC_FLOW_DEFAULT_TMUX_NAME,
+    TENSORPC_FLOW_NODE_READABLE_ID)
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, SSHClient,
                                    RawEvent, SSHRequest, SSHRequestType,
@@ -737,7 +738,15 @@ class Flow:
 
     async def query_single_message_detail(self, graph_id: str, node_id: str, message_id: str):
         node = self._get_node(graph_id, node_id)
-        return node.messages[message_id].to_dict_with_detail()
+        if node.remote_driver_id != "":
+            driver = self._get_node(graph_id, node.remote_driver_id)
+            assert isinstance(driver, RemoteSSHNode)
+            res = await driver.http_remote_call(
+                serv_names.FLOWWORKER_QUERY_MESSAGE_DETAIL, graph_id,
+                node_id, message_id)
+        else:
+            res = node.messages[message_id].to_dict_with_detail()
+        return res
 
     async def query_message(self, graph_id: str):
         print("QUERY INIT MESSAGE")
@@ -876,7 +885,6 @@ class Flow:
 
     async def ssh_change_size(self, graph_id: str, node_id: str, width: int,
                               height: int):
-        # TODO handle remote node
         node = self._get_node(graph_id, node_id)
         if isinstance(node, (NodeWithSSHBase)):
             if node.remote_driver_id != "":
@@ -894,7 +902,6 @@ class Flow:
 
     async def save_graph(self, graph_id: str, flow_data):
         # TODO do we need a async lock here?
-        # TODO we should sync graph to remote worker in every graph update
         
         ssh_data = flow_data["ssh"]
         flow_data = flow_data["graph"]
@@ -966,6 +973,8 @@ class Flow:
             envs[TENSORPC_FLOW_GRAPH_ID] = graph_id
             envs[TENSORPC_FLOW_NODE_ID] = node_id
             envs[TENSORPC_FLOW_NODE_UID] = node.get_uid()
+            envs[TENSORPC_FLOW_NODE_READABLE_ID] = node.readable_id
+
             envs[TENSORPC_FLOW_MASTER_GRPC_PORT] = str(
                 prim.get_server_meta().port)
             envs[TENSORPC_FLOW_MASTER_HTTP_PORT] = str(

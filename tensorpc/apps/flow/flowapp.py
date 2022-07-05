@@ -14,3 +14,18 @@
 
 """Flow APP: simple GUI application in devflow
 """
+
+import asyncio 
+
+async def async_range(start, stop=None, step=1):
+    """same as range but schedule other tasks to run in every iteration
+    """
+    if stop:
+        range_ = range(start, stop, step)
+    else:
+        range_ = range(start)
+    for i in range_:
+        yield i
+        # allow other task run, important for 
+        # long-time loop based sync task
+        await asyncio.sleep(0)

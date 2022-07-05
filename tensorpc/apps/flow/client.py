@@ -16,6 +16,8 @@ from typing import List
 from . import constants
 from .serv_names import serv_names
 from tensorpc.core.httpclient import http_remote_call_request
+import tensorpc
+
 import os 
 import time 
 from tensorpc.apps.flow.coretypes import Message, MessageItem, MessageLevel, RelayUpdateNodeEvent
@@ -24,12 +26,17 @@ import uuid
 def _get_ids_and_url():
     gid = os.getenv(constants.TENSORPC_FLOW_GRAPH_ID)
     nid = os.getenv(constants.TENSORPC_FLOW_NODE_ID)
+    nrid = os.getenv(constants.TENSORPC_FLOW_NODE_READABLE_ID)
+
     port = os.getenv(constants.TENSORPC_FLOW_MASTER_HTTP_PORT)
+    gport = os.getenv(constants.TENSORPC_FLOW_MASTER_GRPC_PORT)
+
     use_rf = os.getenv(constants.TENSORPC_FLOW_USE_REMOTE_FWD)
     is_worker_env = os.getenv(constants.TENSORPC_FLOW_IS_WORKER)
     is_worker = is_worker_env is not None and is_worker_env == "1"
     if (use_rf is not None and use_rf == "1") or is_worker:
         url = f"http://localhost:{port}/api/rpc"
+        grpc_url = f"localhost:{gport}"
     else:
         # for direct connection
         ssh_server = os.getenv("SSH_CLIENT")
@@ -37,10 +44,12 @@ def _get_ids_and_url():
             raise ValueError("this function can only be called via devflow frontend")
         ssh_server_ip = ssh_server.split(" ")[0]
         url = f"http://{ssh_server_ip}:{port}/api/rpc"
-    return gid, nid, is_worker, url
+        grpc_url = f"{ssh_server_ip}:{gport}"
+
+    return gid, nid, nrid, is_worker, url, grpc_url
 
 def update_node_status(content: str):
-    gid, nid, is_worker, url = _get_ids_and_url()
+    gid, nid, nrid, is_worker, url, grpc_url = _get_ids_and_url()
     if not is_worker:
         http_remote_call_request(url, serv_names.FLOW_UPDATE_NODE_STATUS, gid, nid, content)
     else:
@@ -52,11 +61,11 @@ def update_node_status(content: str):
 
 def add_message(title: str, level: MessageLevel, items: List[MessageItem]):
     timestamp = time.time_ns()
-    gid, nid, is_worker, url = _get_ids_and_url()
+    gid, nid, nrid, is_worker, url, grpc_url = _get_ids_and_url()
     if (gid is None or nid is None):
         raise ValueError("this function can only be called via devflow frontend")
-    msg = Message(str(uuid.uuid4()), level, timestamp, gid, nid, title, items)
+    msg = Message(str(uuid.uuid4()), level, timestamp, gid, nid, f"{title} ({nrid})", items)
     if not is_worker:
-        http_remote_call_request(url, serv_names.FLOW_ADD_MESSAGE, [msg.to_dict()])
+        tensorpc.simple_remote_call(grpc_url, serv_names.FLOW_ADD_MESSAGE, [msg.to_dict_with_detail()])
     else:
-        http_remote_call_request(url, serv_names.FLOWWORKER_ADD_MESSAGE, gid, [msg.to_dict()])
+        tensorpc.simple_remote_call(grpc_url, serv_names.FLOWWORKER_ADD_MESSAGE, gid, [msg.to_dict_with_detail()])
