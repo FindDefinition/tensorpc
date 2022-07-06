@@ -23,6 +23,61 @@ import time
 from tensorpc.apps.flow.coretypes import Message, MessageItem, MessageLevel, RelayUpdateNodeEvent
 import uuid 
 
+class MasterMeta:
+    def __init__(self) -> None:
+        gid = os.getenv(constants.TENSORPC_FLOW_GRAPH_ID)
+        nid = os.getenv(constants.TENSORPC_FLOW_NODE_ID)
+        nrid = os.getenv(constants.TENSORPC_FLOW_NODE_READABLE_ID)
+
+        port = os.getenv(constants.TENSORPC_FLOW_MASTER_HTTP_PORT)
+        gport = os.getenv(constants.TENSORPC_FLOW_MASTER_GRPC_PORT)
+
+        use_rf = os.getenv(constants.TENSORPC_FLOW_USE_REMOTE_FWD)
+        is_worker_env = os.getenv(constants.TENSORPC_FLOW_IS_WORKER)
+        is_worker = is_worker_env is not None and is_worker_env == "1"
+        url = ""
+        grpc_url = ""
+        if (use_rf is not None and use_rf == "1") or is_worker:
+            if port is not None:
+                url = f"http://localhost:{port}/api/rpc"
+            if gport is not None:
+                grpc_url = f"localhost:{gport}"
+        else:
+            # for direct connection
+            ssh_server = os.getenv("SSH_CLIENT")
+            if ssh_server is not None:
+                ssh_server_ip = ssh_server.split(" ")[0]
+                if port is not None:
+                    url = f"http://{ssh_server_ip}:{port}/api/rpc"
+                if gport is not None:
+                    grpc_url = f"{ssh_server_ip}:{gport}"
+        self._node_readable_id = nrid 
+        self._graph_id = gid 
+        self._node_id = nid 
+        self.grpc_port = gport 
+        self.http_port = port 
+        self.grpc_url = grpc_url 
+        self.http_url = url
+        self.is_worker = is_worker
+
+        self.is_grpc_valid = grpc_url != ""
+        self.is_http_valid = self.http_url != ""
+        self.is_inside_devflow = gid is not None and nid is not None
+
+    @property 
+    def graph_id(self):
+        assert self._graph_id is not None 
+        return self._graph_id
+    @property 
+    def node_readable_id(self):
+        assert self._node_readable_id is not None 
+        return self._node_readable_id
+    @property 
+    def node_id(self):
+        assert self._node_id is not None 
+        return self._node_id
+
+
 def _get_ids_and_url():
     gid = os.getenv(constants.TENSORPC_FLOW_GRAPH_ID)
     nid = os.getenv(constants.TENSORPC_FLOW_NODE_ID)
@@ -49,15 +104,19 @@ def _get_ids_and_url():
     return gid, nid, nrid, is_worker, url, grpc_url
 
 def update_node_status(content: str):
-    gid, nid, nrid, is_worker, url, grpc_url = _get_ids_and_url()
-    if not is_worker:
-        http_remote_call_request(url, serv_names.FLOW_UPDATE_NODE_STATUS, gid, nid, content)
-    else:
-        # TODO remove this assert
-        assert gid is not None and nid is not None 
-        ev = RelayUpdateNodeEvent(gid, nid, content)
-        http_remote_call_request(url, serv_names.FLOWWORKER_PUT_WORKER_EVENT_JSON, gid, ev.to_dict())
-    return True 
+    meta = MasterMeta()
+    if meta.is_inside_devflow and meta.is_http_valid:
+        # TODO add try catch, if not found, just ignore error.
+        if not meta.is_worker:
+            http_remote_call_request(meta.http_url, serv_names.FLOW_UPDATE_NODE_STATUS, meta.graph_id, meta.node_id, content)
+        else:
+            # TODO remove this assert
+            assert meta.graph_id is not None 
+            assert meta.node_id is not None 
+            ev = RelayUpdateNodeEvent(meta.graph_id, meta.node_id, content)
+            http_remote_call_request(meta.http_url, serv_names.FLOWWORKER_PUT_WORKER_EVENT_JSON, meta.graph_id, ev.to_dict())
+        return True 
+    return False 
 
 def add_message(title: str, level: MessageLevel, items: List[MessageItem]):
     timestamp = time.time_ns()

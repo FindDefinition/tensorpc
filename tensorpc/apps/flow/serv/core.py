@@ -13,35 +13,47 @@
 # limitations under the License.
 
 import asyncio
+import bisect
 import enum
+from functools import partial
+import itertools
 import json
-from pathlib import Path
-import traceback
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set, Tuple, Type, Union
 import time
+import traceback
 import uuid
+from collections import deque
+from pathlib import Path
+from typing import (Any, Awaitable, Callable, Coroutine, Dict, Iterable, List, Optional,
+                    Set, Tuple, Type, Union)
+
 import aiohttp
 import asyncssh
 import tensorpc
-from tensorpc import marker, prim, http_remote_call, get_http_url
-from tensorpc.apps.flow.coretypes import MessageEventType, MessageLevel, UserContentEvent, UserEvent, UserStatusEvent, Message, MessageEvent, get_uid
+import base64
+from tensorpc import get_http_url, http_remote_call, marker, prim
+from tensorpc.apps.flow.constants import (FLOW_DEFAULT_GRAPH_ID,
+                                          FLOW_FOLDER_PATH,
+                                          TENSORPC_FLOW_DEFAULT_TMUX_NAME,
+                                          TENSORPC_FLOW_GRAPH_ID,
+                                          TENSORPC_FLOW_MASTER_GRPC_PORT,
+                                          TENSORPC_FLOW_MASTER_HTTP_PORT,
+                                          TENSORPC_FLOW_NODE_ID,
+                                          TENSORPC_FLOW_NODE_READABLE_ID,
+                                          TENSORPC_FLOW_NODE_UID,
+                                          TENSORPC_FLOW_USE_REMOTE_FWD)
+from tensorpc.apps.flow.coretypes import (Message, MessageEvent,
+                                          MessageEventType, MessageLevel,
+                                          UserContentEvent, UserEvent,
+                                          UserStatusEvent, get_uid)
+from tensorpc.apps.flow.flowapp import AppEvent, app_event_from_data
 from tensorpc.apps.flow.serv_names import serv_names
-from tensorpc.apps.flow.constants import (
-    FLOW_DEFAULT_GRAPH_ID, FLOW_FOLDER_PATH, TENSORPC_FLOW_GRAPH_ID,
-    TENSORPC_FLOW_MASTER_GRPC_PORT, TENSORPC_FLOW_MASTER_HTTP_PORT,
-    TENSORPC_FLOW_NODE_ID, TENSORPC_FLOW_NODE_UID,
-    TENSORPC_FLOW_USE_REMOTE_FWD, TENSORPC_FLOW_DEFAULT_TMUX_NAME,
-    TENSORPC_FLOW_NODE_READABLE_ID)
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
-                                   Event, ExceptionEvent, LineEvent, SSHClient,
-                                   RawEvent, SSHRequest, SSHRequestType,
+                                   Event, ExceptionEvent, LineEvent, RawEvent,
+                                   SSHClient, SSHRequest, SSHRequestType,
                                    remove_ansi_seq)
 from tensorpc.core import get_grpc_url
 from tensorpc.core.asynctools import cancel_task
-from collections import deque
-import bisect
-import itertools
-
+from tensorpc.utils.address import get_url_port
 from tensorpc.utils.registry import HashableRegistry
 
 ALL_NODES = HashableRegistry()
@@ -405,7 +417,7 @@ class RemoteSSHNode(NodeWithSSHBase):
             SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
         return worker_exists
 
-    async def run_command(self):
+    async def run_command(self, get_port: Optional[Callable[[int], Coroutine[Any, Any, List[int]]]] = None):
         if self.init_commands:
             await self.input_queue.put(self.init_commands)
         await self.input_queue.put((
@@ -429,7 +441,7 @@ class CommandNode(NodeWithSSHBase):
         args = self.node_data["args"]
         return [x["value"] for x in filter(lambda x: x["enabled"], args)]
 
-    async def run_command(self):
+    async def run_command(self, get_port: Optional[Callable[[int], Coroutine[Any, Any, List[int]]]] = None):
         await self.input_queue.put(" ".join(self.commands) + "\n")
 
     async def start_session(
@@ -464,6 +476,42 @@ class CommandNode(NodeWithSSHBase):
         await self.input_queue.put(
             SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
 
+@ALL_NODES.register
+class AppNode(CommandNode):
+    def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
+        super().__init__(flow_data, graph_id)
+        self.grpc_port = -1
+        self.http_port = -1
+
+    @property
+    def module_name(self):
+        return self.node_data["module_name"]
+
+    @property
+    def init_config(self):
+        return self.node_data["init_config"]
+
+    async def run_command(self, get_port: Optional[Callable[[int], Coroutine[Any, Any, List[int]]]] = None):
+        assert get_port is not None 
+        ports = await get_port(2)
+        if len(ports) != 2:
+            raise ValueError("get free port failed. exit.")
+        self.grpc_port = ports[0]
+        self.http_port = ports[1]
+        serv_name = "tensorpc.apps.flow.serv.flowapp:FlowApp"
+        cfg = {
+            serv_name: {
+                "module_name": self.module_name,
+                "config": self.init_config,
+            }
+        }
+        cfg_encoded = base64.b64encode(json.dumps(cfg).encode("utf-8")).decode("utf-8")
+        # TODO only use http port
+        cmd = (f"python -m tensorpc.serve {serv_name} "
+               f"--port={ports[0]} --http_port={ports[1]}"
+               f"--serv_config_b64 {cfg_encoded}")
+        await self.input_queue.put(cmd + "\n")
+
 
 _TYPE_TO_NODE_CLS: Dict[str, Type[Node]] = {
     "command": CommandNode,
@@ -471,8 +519,8 @@ _TYPE_TO_NODE_CLS: Dict[str, Type[Node]] = {
     "directssh": DirectSSHNode,
     "input": Node,
     "remotessh": RemoteSSHNode,
+    "app": AppNode,
 }
-
 
 class Edge:
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
@@ -666,12 +714,30 @@ def _empty_flow_graph(graph_id: str = ""):
     return FlowGraph(data, graph_id)
 
 
+async def _get_free_port(count: int, url: str, username: str, password: str):
+    client = SSHClient(url, username, password, None, "")
+    ports = []
+    async with client.simple_connect() as conn:
+        try:
+            result = await conn.run(f'pythom -m tensorpc.cli.free_port {count}', check=True)
+            stdout = result.stdout
+            if stdout is not None:
+                if isinstance(stdout, bytes):
+                    stdout = stdout.decode("utf-8")
+                port_strs = stdout.strip().split(",")
+                ports = list(map(int, port_strs))
+        except asyncssh.process.ProcessError:
+            pass 
+    return ports
+
+
 class Flow:
     def __init__(self, root: Optional[str] = None) -> None:
         self._user_ev_q: "asyncio.Queue[Tuple[str, UserEvent]]" = asyncio.Queue(
         )
         self._ssh_q: "asyncio.Queue[Event]" = asyncio.Queue()
         self._msg_q: "asyncio.Queue[MessageEvent]" = asyncio.Queue()
+        self._app_q: "asyncio.Queue[AppEvent]" = asyncio.Queue()
 
         # self._ssh_stdout_q: "asyncio.Queue[Tuple[str, Event]]" = asyncio.Queue()
         self.selected_node_uid: str = ""
@@ -716,10 +782,38 @@ class Flow:
         return prim.DynamicEvent(uid, userev.to_dict())
 
     @marker.mark_websocket_event
+    async def app_event(self):
+        # ws client wait for this event to get new app event
+        appev = await self._app_q.get()
+        return prim.DynamicEvent(appev.uid, appev.to_dict())
+
+    @marker.mark_websocket_event
     async def message_event(self):
         # ws client wait for this event to get new node update msg
         ev = await self._msg_q.get()
         return ev.to_dict()
+
+    async def put_app_event(self, ev_dict: Dict[str, Any]):
+        await self._app_q.put(app_event_from_data(ev_dict))
+
+    async def run_ui_event(self, graph_id: str, node_id: str, 
+                ui_ev_dict: Dict[str, Any]):
+        node = self._get_node(graph_id, node_id)
+        assert isinstance(node, AppNode)
+        if node.remote_driver_id != "":
+            driver = self._get_node(graph_id, node.remote_driver_id)
+            assert isinstance(driver, RemoteSSHNode)
+            return await driver.http_remote_call(
+                serv_names.FLOWWORKER_RUN_APP_UI_EVENT, graph_id,
+                node_id, ui_ev_dict)
+        sess = prim.get_http_client_session()
+        http_port = node.http_port
+        # get direct ssh driver
+        driver = self._get_node(graph_id, node.get_input_handles(HandleTypes.Driver.value)[0].target_node_id)
+        assert isinstance(driver, DirectSSHNode)
+        durl, _ = get_url_port(driver.url)
+        app_url = f"{durl}:{http_port}"
+        return await http_remote_call(sess, app_url, serv_names.APP_RUN_UI_EVENT, ui_ev_dict)
 
     async def put_event_from_worker(self, ev: Event):
         await self._ssh_q.put(ev)
@@ -1068,7 +1162,8 @@ class Flow:
                         env_port_modifier=self._env_modifier)
                     if driver.init_commands != "":
                         await node.input_queue.put(driver.init_commands)
-                await node.run_command()
+                get_port_cb = partial(_get_free_port, url=driver.url, username=driver.username, password=driver.password)
+                await node.run_command(get_port_cb)
             elif isinstance(driver, RemoteSSHNode):
                 assert (driver.url != "" and driver.username != ""
                         and driver.password != "")

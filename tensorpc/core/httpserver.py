@@ -549,11 +549,13 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
                                   rpc_name="/api/rpc",
                                   ws_name="/api/ws",
                                   is_sync: bool = False,
-                                  rpc_pickle_name: str="/api/rpc_pickle"):
+                                  rpc_pickle_name: str="/api/rpc_pickle",
+                                  client_max_size: int = 4 * 1024 ** 2):
+    # client_max_size 4MB is enough for most image upload.
     http_service = HttpService(server_core)
     server_core._init_async_members()
     ws_service = AllWebsocketHandler(server_core)
-    app = web.Application()
+    app = web.Application(client_max_size=client_max_size)
     # TODO should we create a global client session for all http call in server?
     async with aiohttp.ClientSession() as sess:
         server_core.init_http_client_session(sess)

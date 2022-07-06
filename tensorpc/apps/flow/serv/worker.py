@@ -20,6 +20,7 @@ import traceback
 from typing import Any, Dict, List, Optional, Union
 import tensorpc
 from tensorpc.apps.flow import constants as flowconstants
+from tensorpc.apps.flow.flowapp import AppEvent, app_event_from_data
 from tensorpc.apps.flow.serv_names import serv_names
 from tensorpc import prim
 import grpc
@@ -27,22 +28,31 @@ from tensorpc.apps.flow.coretypes import MessageEvent, MessageEventType, RelayEv
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, RawEvent,
                                    SSHClient, SSHRequest, SSHRequestType)
-from .core import CommandNode, Node, NodeWithSSHBase, _get_uid, node_from_data
+from tensorpc.core.httpclient import http_remote_call
+from tensorpc.utils.address import convert_url_to_local, get_url_port
+from .core import AppNode, CommandNode, Node, NodeWithSSHBase, _get_uid, node_from_data
 import time
+from tensorpc.utils.wait_tools import get_free_ports
+
+ALL_EVENT_TYPES = Union[RelayEvent, MessageEvent, AppEvent]
+
+
+async def _get_free_port(count: int):
+    return get_free_ports(count)
 
 
 class FlowClient:
     def __init__(self) -> None:
         self.previous_connection_url = ""
-        self._send_loop: "asyncio.Queue[RelayEvent | MessageEvent]" = asyncio.Queue(
+        self._send_loop_queue: "asyncio.Queue[ALL_EVENT_TYPES]" = asyncio.Queue(
         )
         self._send_loop_task: Optional[asyncio.Task] = None
         self.shutdown_ev = asyncio.Event()
         self._cached_nodes: Dict[str, CommandNode] = {}
-        self._need_to_send_env: Optional[Union[RelayEvent,
-                                               MessageEvent]] = None
+        self._need_to_send_env: Optional[ALL_EVENT_TYPES] = None
         self.selected_node_uid = ""
         self.lock = asyncio.Lock()
+        self._app_q: "asyncio.Queue[AppEvent]" = asyncio.Queue()
 
     async def delete_message(self, graph_id: str, node_id: str,
                              message_id: str):
@@ -61,11 +71,18 @@ class FlowClient:
         res = node.messages[message_id].to_dict_with_detail()
         return res
 
-    async def _send_event(self, ev: Union[RelayEvent, MessageEvent],
+    async def put_app_event(self, ev_dict: Dict[str, Any]):
+        #
+        await self._app_q.put(app_event_from_data(ev_dict))
+
+    async def _send_event(self, ev: ALL_EVENT_TYPES,
                           robj: tensorpc.AsyncRemoteManager):
         if isinstance(ev, RelayUpdateNodeEvent):
             await robj.remote_call(serv_names.FLOW_UPDATE_NODE_STATUS,
                                    ev.graph_id, ev.node_id, ev.content)
+        elif isinstance(ev, AppEvent):
+            await robj.remote_call(serv_names.FLOW_PUT_APP_EVENT, ev.to_dict())
+
         elif isinstance(ev, RelaySSHEvent):
             if isinstance(ev.event, (EofEvent, ExceptionEvent)):
                 node = self._cached_nodes[ev.uid]
@@ -88,17 +105,17 @@ class FlowClient:
             if self._need_to_send_env is not None:
                 await self._send_event(self._need_to_send_env, robj)
                 self._need_to_send_env = None
-            send_task = asyncio.create_task(self._send_loop.get())
+            send_task = asyncio.create_task(self._send_loop_queue.get())
             wait_tasks: List[asyncio.Task] = [shut_task, send_task]
             while True:
                 # TODO if send fail, save this ev and send after reconnection
-                # ev = await self._send_loop.get()
+                # ev = await self._send_loop_queue.get()
                 (done, pending) = await asyncio.wait(
                     wait_tasks, return_when=asyncio.FIRST_COMPLETED)
                 if shut_task in done:
                     break
-                ev: Union[RelayEvent, MessageEvent] = send_task.result()
-                send_task = asyncio.create_task(self._send_loop.get())
+                ev: ALL_EVENT_TYPES = send_task.result()
+                send_task = asyncio.create_task(self._send_loop_queue.get())
                 wait_tasks: List[asyncio.Task] = [shut_task, send_task]
                 try:
                     await self._send_event(ev, robj)
@@ -137,8 +154,19 @@ class FlowClient:
     def _has_node(self, graph_id: str, node_id: str):
         return _get_uid(graph_id, node_id) in self._cached_nodes
 
+    async def run_ui_event(self, graph_id: str, node_id: str,
+                           ui_ev_dict: Dict[str, Any]):
+        node = self._get_node(graph_id, node_id)
+        assert isinstance(node, AppNode)
+        sess = prim.get_http_client_session()
+        http_port = node.http_port
+        app_url = f"localhost:{http_port}"
+        print("RUN APP UI EVENT", app_url)
+        return await http_remote_call(sess, app_url,
+                                      serv_names.APP_RUN_UI_EVENT, ui_ev_dict)
+
     async def add_message(self, raw_msgs: List[Any]):
-        await self._send_loop.put(
+        await self._send_loop_queue.put(
             MessageEvent(MessageEventType.Update, raw_msgs))
         for m in raw_msgs:
             msg = Message.from_dict(m)
@@ -222,7 +250,8 @@ class FlowClient:
             envs[flowconstants.TENSORPC_FLOW_GRAPH_ID] = graph_id
             envs[flowconstants.TENSORPC_FLOW_NODE_ID] = node_id
             envs[flowconstants.TENSORPC_FLOW_NODE_UID] = node.get_uid()
-            envs[flowconstants.TENSORPC_FLOW_NODE_READABLE_ID] = node.readable_id
+            envs[flowconstants.
+                 TENSORPC_FLOW_NODE_READABLE_ID] = node.readable_id
             envs[flowconstants.TENSORPC_FLOW_MASTER_GRPC_PORT] = str(
                 prim.get_server_meta().port)
             envs[flowconstants.TENSORPC_FLOW_MASTER_HTTP_PORT] = str(
@@ -288,17 +317,17 @@ class FlowClient:
                             node.terminal_close_ts = ev.timestamp
                     if uid != self.selected_node_uid:
                         return
-                await self._send_loop.put(RelaySSHEvent(ev, uid))
+                await self._send_loop_queue.put(RelaySSHEvent(ev, uid))
 
             envs = self._get_node_envs(graph_id, node.id)
             await node.start_session(callback,
-                                     url,
+                                     convert_url_to_local(url),
                                      username,
                                      password,
                                      envs=envs)
             if init_cmds:
                 await node.input_queue.put(init_cmds)
-        await node.run_command()
+        await node.run_command(_get_free_port)
 
     async def stop(self, graph_id: str, node_id: str):
         node = self._cached_nodes[_get_uid(graph_id, node_id)]
@@ -375,10 +404,10 @@ class FlowWorker:
         return await self._get_client(graph_id).stop(graph_id, node_id)
 
     async def put_relay_event(self, graph_id: str, ev: RelayEvent):
-        return await self._get_client(graph_id)._send_loop.put(ev)
+        return await self._get_client(graph_id)._send_loop_queue.put(ev)
 
     async def put_relay_event_json(self, graph_id: str, ev_data: dict):
-        return await self._get_client(graph_id)._send_loop.put(
+        return await self._get_client(graph_id)._send_loop_queue.put(
             relay_event_from_dict(ev_data))
 
     def query_nodes_last_event(self, graph_id: str, node_ids: List[str]):
@@ -425,3 +454,11 @@ class FlowWorker:
                                           message_id: str):
         return await self._get_client(graph_id).query_single_message_detail(
             graph_id, node_id, message_id)
+
+    async def put_app_event(self, graph_id: str, ev_dict: Dict[str, Any]):
+        return await self._get_client(graph_id).put_app_event(ev_dict)
+
+    async def run_ui_event(self, graph_id: str, node_id: str,
+                           ui_ev_dict: Dict[str, Any]):
+        return await self._get_client(graph_id).run_ui_event(
+            graph_id, node_id, ui_ev_dict)

@@ -38,6 +38,11 @@ class _ServiceNames:
         return get_service_key_by_type(Flow,
                                        Flow.add_message.__name__)
 
+    @property
+    def FLOW_PUT_APP_EVENT(self):
+        from tensorpc.apps.flow.serv.core import Flow
+        return get_service_key_by_type(Flow,
+                                       Flow.put_app_event.__name__)
 
     @property
     def FLOWWORKER_PUT_WORKER_EVENT(self):
@@ -133,5 +138,23 @@ class _ServiceNames:
         from tensorpc.apps.flow.serv.worker import FlowWorker
         return get_service_key_by_type(FlowWorker,
                                        FlowWorker.query_single_message_detail.__name__)
+    
+    @property
+    def FLOWWORKER_PUT_APP_EVENT(self):
+        from tensorpc.apps.flow.serv.worker import FlowWorker
+        return get_service_key_by_type(FlowWorker,
+                                       FlowWorker.put_app_event.__name__)
+    @property
+    def FLOWWORKER_RUN_APP_UI_EVENT(self):
+        from tensorpc.apps.flow.serv.worker import FlowWorker
+        return get_service_key_by_type(FlowWorker,
+                                       FlowWorker.run_ui_event.__name__)
+
+    @property
+    def APP_RUN_UI_EVENT(self):
+        from tensorpc.apps.flow.serv.flowapp import FlowApp
+        return get_service_key_by_type(FlowApp,
+                                       FlowApp.run_ui_event.__name__)
+
 
 serv_names = _ServiceNames()

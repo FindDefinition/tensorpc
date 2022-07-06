@@ -2,6 +2,7 @@ import contextlib
 import socket
 import time
 import asyncio
+from typing import List
 
 def wait_until(func, max_retries: int=200, check_interval: float=1, check_func=None):
     while max_retries > 0:
@@ -67,3 +68,10 @@ def get_free_loopback_tcp_port():
         yield address_tuple[1]
     finally:
         tcp_socket.close()
+
+def get_free_ports(count: int):
+    ports: List[int] = []
+    for i in range(count):
+        with get_free_loopback_tcp_port() as port:
+            ports.append(port)
+    return ports

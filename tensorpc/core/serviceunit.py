@@ -90,7 +90,7 @@ class ServFunctionMeta:
         }
 
 
-def _get_cls_obj_from_module_name(module_name: str):
+def get_cls_obj_from_module_name(module_name: str):
     module_cls = module_name.split(":")
     module_path = module_cls[0]
     cls_name = module_cls[1]
@@ -148,7 +148,7 @@ class ServiceUnit:
     """
     def __init__(self, module_name: str, config: Dict[str, Any]) -> None:
         assert config is not None, "please use {} in yaml if config is empty"
-        self.obj_type, self.alias, self.module_key = _get_cls_obj_from_module_name(
+        self.obj_type, self.alias, self.module_key = get_cls_obj_from_module_name(
             module_name)
         members = inspecttools.get_members_by_type(self.obj_type, False)
         self.services: Dict[str, ServFunctionMeta] = {}
