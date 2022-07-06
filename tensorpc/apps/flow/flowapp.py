@@ -86,17 +86,19 @@ class UIEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.UpdateLayout.value)
 class LayoutEvent:
-    def __init__(self, layout: Dict[str, Any]) -> None:
+    def __init__(self, window_size: List[int], layout: List["Component"]) -> None:
+        self.window_size = window_size
         self.layout = layout
 
     def to_dict(self):
         return {
             "layout": self.layout,
+            "windowSize": self.window_size,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]):
-        return cls(data["layout"])
+        return cls(data["windowSize"], data["layout"])
 
 
 def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":
@@ -139,7 +141,11 @@ class Component:
         self.queue = queue
 
     def to_dict(self):
-        return {"type": self.type.value}
+        return {
+            "type": self.type.value,
+            "uid": self.uid,
+            "state": {},
+        }
 
     def create_update_event(self, data: Any):
         ev = UIEvent(self.uid, data)
@@ -148,24 +154,45 @@ class Component:
 
 
 class Images(Component):
+    # TODO keep last event state?
     def __init__(self, uid: str, count: int, queue: asyncio.Queue) -> None:
         super().__init__(uid, UIType.Image, queue)
         self.count = count
+        self.image_str = ""
 
     async def show(self, index: int, image: np.ndarray):
+        encoded = _encode_image(image)
+        self.image_str = encoded
         await self.queue.put(
             self.create_update_event({
                 "index": index,
-                "image": _encode_image(image),
+                "image": encoded,
             }))
+
+    def to_dict(self):
+        res = super().to_dict()
+        res["count"] = self.count
+        res["state"] = {
+            "image": self.image_str,
+        }
+        return res 
 
 
 class Text(Component):
-    def __init__(self, uid: str, queue: asyncio.Queue) -> None:
+    def __init__(self, init: str, uid: str, queue: asyncio.Queue) -> None:
         super().__init__(uid, UIType.Text, queue)
+        self.value = init
 
     async def write(self, content: str):
         await self.queue.put(self.create_update_event(content))
+        self.value = content
+
+    def to_dict(self):
+        res = super().to_dict()
+        res["state"] = {
+            "value": self.value,
+        }
+        return res 
 
 
 class Buttons(Component):
@@ -176,6 +203,10 @@ class Buttons(Component):
         self.names = names
         self.callback = callback
 
+    def to_dict(self):
+        res = super().to_dict()
+        res["names"] = self.names 
+        return res 
 
 class Input(Component):
     def __init__(self, uid: str, label: str,
@@ -185,6 +216,15 @@ class Input(Component):
         self.label = label
         self.callback = callback
 
+        self.value: str = ""
+
+    def to_dict(self):
+        res = super().to_dict()
+        res["label"] = self.label 
+        res["state"] = {
+            "value": self.value,
+        } 
+        return res 
 
 class Switch(Component):
     def __init__(self, uid: str, label: str,
@@ -193,7 +233,15 @@ class Switch(Component):
         super().__init__(uid, UIType.Switch, queue)
         self.label = label
         self.callback = callback
+        self.checked = False
 
+    def to_dict(self):
+        res = super().to_dict()
+        res["label"] = self.label 
+        res["state"] = {
+            "checked": self.checked,
+        } 
+        return res 
 
 class App:
     def __init__(self) -> None:
@@ -213,13 +261,16 @@ class App:
         self._init_size = size
 
     async def _handle_control_event(self, ev: UIEvent):
+        # TODO schedule callback as a task to avoid RPC hang
         comp = self._uid_to_comp[ev.uid]
         if isinstance(comp, Buttons):
             await comp.callback(ev.data)
         elif isinstance(comp, Input):
             await comp.callback(ev.data)
+            comp.value = ev.data
         elif isinstance(comp, Switch):
             await comp.callback(ev.data)
+            comp.checked = ev.data
         else:
             raise NotImplementedError
 
@@ -255,9 +306,9 @@ class App:
         self._uid_to_comp[uid] = ui
         return ui
 
-    def add_text(self):
+    def add_text(self, init: str):
         uid = str(len(self._components))
-        ui = Text(uid, self._queue)
+        ui = Text(init, uid, self._queue)
         self._components.append(ui)
         self._uid_to_comp[uid] = ui
         return ui

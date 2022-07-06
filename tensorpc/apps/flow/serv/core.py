@@ -485,11 +485,11 @@ class AppNode(CommandNode):
 
     @property
     def module_name(self):
-        return self.node_data["module_name"]
+        return self.node_data["module"]
 
     @property
     def init_config(self):
-        return self.node_data["init_config"]
+        return self.node_data["initConfig"]
 
     async def run_command(self, get_port: Optional[Callable[[int], Coroutine[Any, Any, List[int]]]] = None):
         assert get_port is not None 
