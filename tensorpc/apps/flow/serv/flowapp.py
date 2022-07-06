@@ -14,7 +14,7 @@
 
 from typing import Any, Dict, List, Optional
 from tensorpc.apps.flow.coretypes import get_uid
-from tensorpc.apps.flow.flowapp import App, AppEvent, UIEvent
+from tensorpc.apps.flow.flowapp import App, AppEvent, AppEventType, LayoutEvent, UIEvent
 import asyncio
 from tensorpc.core.httpclient import http_remote_call
 from tensorpc.core.serviceunit import get_cls_obj_from_module_name
@@ -47,6 +47,9 @@ class FlowApp:
         self._send_loop_task = asyncio.create_task(self._send_loop())
 
         self._uid = get_uid(self.master_meta.graph_id, self.master_meta.node_id)
+        lay = self.app._get_app_layout()
+        print(lay)
+        asyncio.run_coroutine_threadsafe(self._send_loop_queue.put(AppEvent("", AppEventType.UpdateLayout, LayoutEvent(lay))), loop=asyncio.get_running_loop())
 
     def _get_app(self):
         return self.app

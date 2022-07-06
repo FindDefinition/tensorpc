@@ -165,6 +165,16 @@ class FlowClient:
         return await http_remote_call(sess, app_url,
                                       serv_names.APP_RUN_UI_EVENT, ui_ev_dict)
 
+    async def get_layout(self, graph_id: str, node_id: str):
+        node = self._get_node(graph_id, node_id)
+        assert isinstance(node, AppNode)
+        sess = prim.get_http_client_session()
+        http_port = node.http_port
+        app_url = f"localhost:{http_port}"
+        print("GET LAYOUT", app_url)
+        return await http_remote_call(sess, app_url,
+                                      serv_names.APP_GET_LAYOUT)
+
     async def add_message(self, raw_msgs: List[Any]):
         await self._send_loop_queue.put(
             MessageEvent(MessageEventType.Update, raw_msgs))
@@ -462,3 +472,7 @@ class FlowWorker:
                            ui_ev_dict: Dict[str, Any]):
         return await self._get_client(graph_id).run_ui_event(
             graph_id, node_id, ui_ev_dict)
+
+    async def get_layout(self, graph_id: str, node_id: str):
+        return await self._get_client(graph_id).get_layout(
+            graph_id, node_id)

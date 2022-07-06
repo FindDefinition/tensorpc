@@ -90,13 +90,11 @@ class LayoutEvent:
         self.layout = layout
 
     def to_dict(self):
-        return {
-            "layout": self.layout,
-        }
+        return self.layout
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]):
-        return cls(data["layout"])
+        return cls(data)
 
 
 def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":

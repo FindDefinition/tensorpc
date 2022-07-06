@@ -485,15 +485,18 @@ class AppNode(CommandNode):
 
     @property
     def module_name(self):
-        return self.node_data["module_name"]
+        return self.node_data["module"]
 
     @property
     def init_config(self):
-        return self.node_data["init_config"]
+        if self.node_data["initConfig"] == "":
+            return {}
+        return json.loads(self.node_data["initConfig"])
 
     async def run_command(self, get_port: Optional[Callable[[int], Coroutine[Any, Any, List[int]]]] = None):
         assert get_port is not None 
         ports = await get_port(2)
+        print(ports)
         if len(ports) != 2:
             raise ValueError("get free port failed. exit.")
         self.grpc_port = ports[0]
@@ -508,7 +511,7 @@ class AppNode(CommandNode):
         cfg_encoded = base64.b64encode(json.dumps(cfg).encode("utf-8")).decode("utf-8")
         # TODO only use http port
         cmd = (f"python -m tensorpc.serve {serv_name} "
-               f"--port={ports[0]} --http_port={ports[1]}"
+               f"--port={ports[0]} --http_port={ports[1]} "
                f"--serv_config_b64 {cfg_encoded}")
         await self.input_queue.put(cmd + "\n")
 
@@ -713,21 +716,27 @@ def _empty_flow_graph(graph_id: str = ""):
     }
     return FlowGraph(data, graph_id)
 
-
 async def _get_free_port(count: int, url: str, username: str, password: str):
+    print(url, username, password)
     client = SSHClient(url, username, password, None, "")
     ports = []
+    # res = await client.simple_run_command(f"python -m tensorpc.cli.free_port {count}")
+    # print(res)
     async with client.simple_connect() as conn:
         try:
-            result = await conn.run(f'pythom -m tensorpc.cli.free_port {count}', check=True)
+            cmd = (f"bash -i -c "
+                f'"python -m tensorpc.cli.free_port {count}"')
+            result = await conn.run(cmd, check=True)
             stdout = result.stdout
             if stdout is not None:
                 if isinstance(stdout, bytes):
                     stdout = stdout.decode("utf-8")
                 port_strs = stdout.strip().split(",")
                 ports = list(map(int, port_strs))
-        except asyncssh.process.ProcessError:
-            pass 
+        except asyncssh.process.ProcessError as e:
+            traceback.print_exc()
+            print(e.stdout)
+            print(e.stderr)
     return ports
 
 
@@ -794,26 +803,48 @@ class Flow:
         return ev.to_dict()
 
     async def put_app_event(self, ev_dict: Dict[str, Any]):
+        print(ev_dict)
         await self._app_q.put(app_event_from_data(ev_dict))
 
-    async def run_ui_event(self, graph_id: str, node_id: str, 
-                ui_ev_dict: Dict[str, Any]):
+    def _get_node_and_driver(self, graph_id: str, node_id: str):
         node = self._get_node(graph_id, node_id)
         assert isinstance(node, AppNode)
         if node.remote_driver_id != "":
             driver = self._get_node(graph_id, node.remote_driver_id)
             assert isinstance(driver, RemoteSSHNode)
+            return node, driver
+        driver = self._get_node(graph_id, node.get_input_handles(HandleTypes.Driver.value)[0].target_node_id)
+        assert isinstance(driver, DirectSSHNode)
+        return node, driver
+
+    async def run_ui_event(self, graph_id: str, node_id: str, 
+                ui_ev_dict: Dict[str, Any]):
+        node, driver = self._get_node_and_driver(graph_id, node_id)
+        if isinstance(driver, RemoteSSHNode):
             return await driver.http_remote_call(
                 serv_names.FLOWWORKER_RUN_APP_UI_EVENT, graph_id,
                 node_id, ui_ev_dict)
-        sess = prim.get_http_client_session()
-        http_port = node.http_port
-        # get direct ssh driver
-        driver = self._get_node(graph_id, node.get_input_handles(HandleTypes.Driver.value)[0].target_node_id)
-        assert isinstance(driver, DirectSSHNode)
-        durl, _ = get_url_port(driver.url)
-        app_url = f"{durl}:{http_port}"
-        return await http_remote_call(sess, app_url, serv_names.APP_RUN_UI_EVENT, ui_ev_dict)
+        else:
+            sess = prim.get_http_client_session()
+            http_port = node.http_port
+            durl, _ = get_url_port(driver.url)
+            app_url = f"{durl}:{http_port}"
+            return await http_remote_call(sess, app_url, serv_names.APP_RUN_UI_EVENT, ui_ev_dict)
+
+    async def query_app_state(self, graph_id: str, node_id: str):
+        node, driver = self._get_node_and_driver(graph_id, node_id)
+        if not node.is_session_started():
+            return None
+        if isinstance(driver, RemoteSSHNode):
+            return await driver.http_remote_call(
+                serv_names.FLOWWORKER_APP_GET_LAYOUT, graph_id,
+                node_id)
+        else:
+            sess = prim.get_http_client_session()
+            http_port = node.http_port
+            durl, _ = get_url_port(driver.url)
+            app_url = f"{durl}:{http_port}"
+            return await http_remote_call(sess, app_url, serv_names.APP_GET_LAYOUT)
 
     async def put_event_from_worker(self, ev: Event):
         await self._ssh_q.put(ev)
@@ -843,6 +874,8 @@ class Flow:
         return res
 
     async def query_message(self, graph_id: str):
+        if graph_id == "":
+            return {}
         print("QUERY INIT MESSAGE")
         graph = self.flow_dict[graph_id]
         all_msgs = []
@@ -1128,8 +1161,8 @@ class Flow:
         if isinstance(node, RemoteSSHNode):
             return await self._start_remote_worker(graph_id, node_id)
         if isinstance(node, CommandNode):
-            print("START", graph_id, node_id, node.commands,
-                  node.is_session_started())
+            print("START", graph_id, node_id,
+                  node.is_session_started(), type(node))
             if not node.inputs:
                 print("ERRROROROR")
                 return

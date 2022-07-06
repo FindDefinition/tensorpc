@@ -12,3 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from tensorpc.apps.flow.flowapp import App 
+
+
+import asyncio 
+
+class SampleApp(App):
+    def __init__(self) -> None:
+        super().__init__()
+        self.add_buttons(["A", "B"], self.on_button_click)
+
+    async def on_button_click(self, name: str):
+        print(name)
