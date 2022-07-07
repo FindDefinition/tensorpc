@@ -39,8 +39,7 @@ class FlowApp:
         obj_type, alias, module_key = get_cls_obj_from_module_name(
             module_name)
         self.app: App = obj_type(**self.config)
-        self._send_loop_queue: "asyncio.Queue[AppEvent]" = asyncio.Queue(
-        )
+        self._send_loop_queue: "asyncio.Queue[AppEvent]" = self.app._queue
         self._send_loop_task: Optional[asyncio.Task] = None
         self._need_to_send_env: Optional[AppEvent] = None
         self.shutdown_ev.clear()
@@ -103,6 +102,7 @@ class FlowApp:
             send_task = asyncio.create_task(self._send_loop_queue.get())
             wait_tasks: List[asyncio.Task] = [shut_task, send_task]
             try:
+                print("SEND", ev.to_dict())
                 await self._send_http_event(ev)
             except Exception as e:
                 # remote call may fail by connection broken

@@ -86,12 +86,11 @@ class UIEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.UpdateLayout.value)
 class LayoutEvent:
-    def __init__(self, window_size: List[int], layout: List["Component"]) -> None:
-        self.window_size = window_size
-        self.layout = layout
+    def __init__(self, data) -> None:
+        self.data = data
 
     def to_dict(self):
-        return self.layout
+        return self.data
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]):
@@ -181,7 +180,9 @@ class Text(Component):
         self.value = init
 
     async def write(self, content: str):
-        await self.queue.put(self.create_update_event(content))
+        await self.queue.put(self.create_update_event({
+            "value": self.value
+        }))
         self.value = content
 
     def to_dict(self):

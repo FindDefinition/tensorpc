@@ -803,7 +803,6 @@ class Flow:
         return ev.to_dict()
 
     async def put_app_event(self, ev_dict: Dict[str, Any]):
-        print(ev_dict)
         await self._app_q.put(app_event_from_data(ev_dict))
 
     def _get_node_and_driver(self, graph_id: str, node_id: str):
@@ -828,13 +827,17 @@ class Flow:
             sess = prim.get_http_client_session()
             http_port = node.http_port
             durl, _ = get_url_port(driver.url)
-            app_url = f"{durl}:{http_port}"
+
+            app_url = get_http_url(durl, http_port)
             return await http_remote_call(sess, app_url, serv_names.APP_RUN_UI_EVENT, ui_ev_dict)
 
     async def query_app_state(self, graph_id: str, node_id: str):
         node, driver = self._get_node_and_driver(graph_id, node_id)
+        print(node.last_event)
         if not node.is_session_started():
             return None
+        if node.last_event != CommandEventType.COMMAND_OUTPUT_START:
+            return None 
         if isinstance(driver, RemoteSSHNode):
             return await driver.http_remote_call(
                 serv_names.FLOWWORKER_APP_GET_LAYOUT, graph_id,
@@ -843,7 +846,7 @@ class Flow:
             sess = prim.get_http_client_session()
             http_port = node.http_port
             durl, _ = get_url_port(driver.url)
-            app_url = f"{durl}:{http_port}"
+            app_url = get_http_url(durl, http_port)
             return await http_remote_call(sess, app_url, serv_names.APP_GET_LAYOUT)
 
     async def put_event_from_worker(self, ev: Event):
@@ -1065,9 +1068,7 @@ class Flow:
             if "width" in n:
                 n.pop("width")
             if "height" in n:
-
                 n.pop("height")
-
             if "handleBounds" in n:
                 n.pop("handleBounds")
         # print(json.dumps(flow_data, indent=2))

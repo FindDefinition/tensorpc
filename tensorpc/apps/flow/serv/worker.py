@@ -28,6 +28,7 @@ from tensorpc.apps.flow.coretypes import MessageEvent, MessageEventType, RelayEv
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, RawEvent,
                                    SSHClient, SSHRequest, SSHRequestType)
+from tensorpc.core import get_http_url
 from tensorpc.core.httpclient import http_remote_call
 from tensorpc.utils.address import convert_url_to_local, get_url_port
 from .core import AppNode, CommandNode, Node, NodeWithSSHBase, _get_uid, node_from_data
@@ -160,7 +161,8 @@ class FlowClient:
         assert isinstance(node, AppNode)
         sess = prim.get_http_client_session()
         http_port = node.http_port
-        app_url = f"localhost:{http_port}"
+        app_url = get_http_url("localhost", http_port)
+
         print("RUN APP UI EVENT", app_url)
         return await http_remote_call(sess, app_url,
                                       serv_names.APP_RUN_UI_EVENT, ui_ev_dict)
@@ -170,7 +172,7 @@ class FlowClient:
         assert isinstance(node, AppNode)
         sess = prim.get_http_client_session()
         http_port = node.http_port
-        app_url = f"localhost:{http_port}"
+        app_url = get_http_url("localhost", http_port)
         print("GET LAYOUT", app_url)
         return await http_remote_call(sess, app_url,
                                       serv_names.APP_GET_LAYOUT)
