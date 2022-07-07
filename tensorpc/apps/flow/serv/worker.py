@@ -53,7 +53,6 @@ class FlowClient:
         self._need_to_send_env: Optional[ALL_EVENT_TYPES] = None
         self.selected_node_uid = ""
         self.lock = asyncio.Lock()
-        self._app_q: "asyncio.Queue[AppEvent]" = asyncio.Queue()
 
     async def delete_message(self, graph_id: str, node_id: str,
                              message_id: str):
@@ -73,8 +72,7 @@ class FlowClient:
         return res
 
     async def put_app_event(self, ev_dict: Dict[str, Any]):
-        #
-        await self._app_q.put(app_event_from_data(ev_dict))
+        await self._send_loop_queue.put(app_event_from_data(ev_dict))
 
     async def _send_event(self, ev: ALL_EVENT_TYPES,
                           robj: tensorpc.AsyncRemoteManager):
@@ -336,7 +334,8 @@ class FlowClient:
                                      convert_url_to_local(url),
                                      username,
                                      password,
-                                     envs=envs)
+                                     envs=envs,
+                                     is_worker=True)
             if init_cmds:
                 await node.input_queue.put(init_cmds)
         await node.run_command(_get_free_port)

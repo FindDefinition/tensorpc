@@ -10,6 +10,8 @@ fi
 
 VSCODE_SHELL_INTEGRATION=1
 VSCODE_INJECTION=1
+# enable shell login to get same environment as manual ssh 
+VSCODE_SHELL_LOGIN=1
 # Run relevant rc/profile only if shell integration has been injected, not when run manually
 if [ "$VSCODE_INJECTION" == "1" ]; then
 	if [ -z "$VSCODE_SHELL_LOGIN" ]; then
@@ -85,13 +87,14 @@ __vsc_continuation_end() {
 }
 
 __vsc_command_complete() {
-	local __vsc_history_id=$(builtin history 1 | awk '{print $1;}')
-	if [[ "$__vsc_history_id" == "$__vsc_last_history_id" ]]; then
-		builtin printf "\033]784;D\007"
-	else
-		builtin printf "\033]784;D;%s\007" "$__vsc_status"
-		__vsc_last_history_id=$__vsc_history_id
-	fi
+	# local __vsc_history_id=$(builtin history 1 | awk '{print $1;}')
+	# if [[ "$__vsc_history_id" == "$__vsc_last_history_id" ]]; then
+	# 	builtin printf "\033]784;D\007"
+	# else
+	# 	builtin printf "\033]784;D;%s\007" "$__vsc_status"
+	# 	__vsc_last_history_id=$__vsc_history_id
+	# fi
+	builtin printf "\033]784;D;%s\007" "$__vsc_status"
 	__vsc_update_cwd
 }
 __vsc_update_prompt() {

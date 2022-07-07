@@ -574,7 +574,8 @@ class SSHClient:
             env_port_modifier: Optional[Callable[
                 [List[int], List[int], Dict[str, str]], None]] = None,
             exit_callback: Optional[Callable[[], Awaitable[None]]] = None,
-            client_ip_callback: Optional[Callable[[str], None]] = None):
+            client_ip_callback: Optional[Callable[[str], None]] = None,
+            init_event: Optional[asyncio.Event] = None):
         if env is None:
             env = {}
         # TODO better keepalive
@@ -653,7 +654,8 @@ class SSHClient:
                 # await listener.wait_closed()
                 if env_port_modifier is not None and (rfwd_ports or fwd_ports):
                     env_port_modifier(fwd_ports, rfwd_ports, env)
-
+                if init_event is not None:
+                    init_event.set()
                 if env:
                     cmds: List[str] = []
                     for k, v in env.items():
@@ -683,8 +685,11 @@ class SSHClient:
                 await loop_task
         except Exception as exc:
             await callback(_warp_exception_to_event(exc, self.uid))
-        if exit_callback is not None:
-            await exit_callback()
+        finally:
+            if init_event:
+                init_event.set()
+            if exit_callback is not None:
+                await exit_callback()
 
 
 async def main2():
