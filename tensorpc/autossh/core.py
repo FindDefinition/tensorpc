@@ -21,6 +21,7 @@ import tensorpc
 from tensorpc.apps.flow.constants import TENSORPC_READUNTIL
 from tensorpc.constants import PACKAGE_ROOT
 import getpass
+from asyncssh.scp import scp as asyncsshscp
 # 7-bit C1 ANSI sequences
 ANSI_ESCAPE_REGEX = re.compile(
     br'''
@@ -65,6 +66,8 @@ class CommandEventType(enum.Enum):
     PROMPT_END = "B"
     COMMAND_OUTPUT_START = "C"
     COMMAND_COMPLETE = "D"
+    CURRENT_COMMAND = "E"
+
     UPDATE_CWD = "P"
     CONTINUATION_START = "F"
     CONTINUATION_END = "G"
@@ -77,8 +80,8 @@ _DEFAULT_SEPARATORS = r"(?:\r\n)|(?:\n)|(?:\r)|(?:\033\]784;[ABPCFGD](?:;(.*?))?
 def remove_ansi_seq(string: Union[str, bytes]):
     # https://stackoverflow.com/questions/14693701/how-can-i-remove-the-ansi-escape-sequences-from-a-string-in-python
     if isinstance(string, str):
-        return ANSI_ESCAPE_REGEX.sub(
-            b'', string.encode("utf-8")).decode("utf-8")
+        return ANSI_ESCAPE_REGEX.sub(b'',
+                                     string.encode("utf-8")).decode("utf-8")
     else:
         return ANSI_ESCAPE_REGEX.sub(b'', string).decode("utf-8")
 
@@ -507,10 +510,8 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
             ts = time.time_ns()
             if isinstance(data, bytes):
                 res_str = data.decode("utf-8")
-                # print(data, type(data))
             else:
                 res_str = data
-                # print(data.encode("utf-8"), type(data))
             loop = asyncio.get_running_loop()
             asyncio.run_coroutine_threadsafe(
                 self.callback(RawEvent(ts, res_str, False, self.uid)), loop)
@@ -542,7 +543,7 @@ class SSHClient:
 
     @contextlib.asynccontextmanager
     async def simple_connect(self):
-        async with asyncssh.connect(self.url,
+        async with asyncssh.connection.connect(self.url,
                                     self.port,
                                     username=self.username,
                                     password=self.password,
@@ -550,7 +551,7 @@ class SSHClient:
                                     known_hosts=None) as conn:
             if not self.bash_file_inited:
                 p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
-                await asyncssh.scp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
+                await asyncsshscp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
                 self.bash_file_inited = True
             yield conn
 
@@ -575,12 +576,13 @@ class SSHClient:
                 [List[int], List[int], Dict[str, str]], None]] = None,
             exit_callback: Optional[Callable[[], Awaitable[None]]] = None,
             client_ip_callback: Optional[Callable[[str], None]] = None,
-            init_event: Optional[asyncio.Event] = None):
+            init_event: Optional[asyncio.Event] = None,
+            exit_event: Optional[asyncio.Event] = None):
         if env is None:
             env = {}
         # TODO better keepalive
         try:
-            async with asyncssh.connect(self.url,
+            async with asyncssh.connection.connect(self.url,
                                         self.port,
                                         username=self.username,
                                         password=self.password,
@@ -588,10 +590,11 @@ class SSHClient:
                                         known_hosts=None) as conn:
                 if not self.bash_file_inited:
                     p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
-                    await asyncssh.scp(str(p),
+                    await asyncsshscp(str(p),
                                        (conn, '~/.tensorpc_hooks-bash.sh'))
                     self.bash_file_inited = True
                 if client_ip_callback is not None:
+                    # TODO if fail?
                     result = await conn.run(
                         "echo $SSH_CLIENT | awk '{ print $1}'", check=True)
                     if result.stdout is not None:
@@ -667,6 +670,7 @@ class SSHClient:
                     if shutdown_task in done:
                         for task in pending:
                             await _cancel(task)
+                        await callback(EofEvent(time.time_ns(), uid=self.uid))
                         break
                     if loop_task in done:
                         break
@@ -690,6 +694,8 @@ class SSHClient:
                 init_event.set()
             if exit_callback is not None:
                 await exit_callback()
+        if exit_event is not None:
+            exit_event.set()
 
 
 async def main2():
@@ -714,12 +720,12 @@ async def main2():
 
     username = input("username:")
     password = getpass.getpass("password:")
-    async with asyncssh.connect('localhost',
+    async with asyncssh.connection.connect('localhost',
                                 username=username,
                                 password=password,
                                 known_hosts=None) as conn:
         p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
-        await asyncssh.scp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
+        await asyncsshscp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
         stdin, stdout, stderr = await conn.open_session(
             "bash --init-file ~/.tensorpc_hooks-bash.sh", request_pty="force")
         print(stdin, stdout, stderr)

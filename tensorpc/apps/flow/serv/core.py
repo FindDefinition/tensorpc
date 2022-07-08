@@ -25,7 +25,7 @@ from collections import deque
 from pathlib import Path
 from typing import (Any, Awaitable, Callable, Coroutine, Dict, Iterable, List,
                     Optional, Set, Tuple, Type, Union)
-
+import bcrypt
 import aiohttp
 import asyncssh
 import tensorpc
@@ -40,7 +40,8 @@ from tensorpc.apps.flow.constants import (
 from tensorpc.apps.flow.coretypes import (Message, MessageEvent,
                                           MessageEventType, MessageLevel,
                                           UserContentEvent, UserEvent,
-                                          UserStatusEvent, get_uid)
+                                          UserStatusEvent, get_uid,
+                                          SessionStatus)
 from tensorpc.apps.flow.flowapp import AppEvent, app_event_from_data
 from tensorpc.apps.flow.serv_names import serv_names
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
@@ -59,6 +60,21 @@ ALL_NODES = HashableRegistry()
 class HandleTypes(enum.Enum):
     Driver = "driver"
 
+
+class NodeStatus:
+    def __init__(self, cmd_status: CommandEventType, session_status: SessionStatus) -> None:
+        self.cmd_status = cmd_status
+        self.session_status = session_status
+
+    def to_dict(self):
+        return {
+            "cmdStatus": self.cmd_status.value,
+            "sessionStatus": self.session_status.value,
+        }
+
+    @staticmethod
+    def empty():
+        return NodeStatus(CommandEventType.PROMPT_END, SessionStatus.Stop)
 
 def _extract_graph_node_id(uid: str):
     parts = uid.split("@")
@@ -258,6 +274,9 @@ class NodeWithSSHBase(Node):
         self.terminal_state = ""
         self.terminal_close_ts: int = -1
         self._raw_event_history: "deque[RawEvent]" = deque(maxlen=10000)
+        self.session_status: SessionStatus = SessionStatus.Stop
+
+        self.exit_event = asyncio.Event()
 
     def push_raw_event(self, ev: RawEvent):
         self._raw_event_history.append(ev)
@@ -277,16 +296,41 @@ class NodeWithSSHBase(Node):
             self.shutdown_ev.set()
             await cancel_task(self.task)
             self.task = None
+            self.set_stop_status()
             self.shutdown_ev.clear()
 
+    async def soft_shutdown(self):
+        """only set shutdown event.
+        ssh client will produce a ExitEvent to tell
+        frontend node is stopped.
+        """
+        self.shutdown_ev.set()
+
+    def set_start_status(self):
+        self.session_status = SessionStatus.Running
+
+    def set_stop_status(self):
+        self.session_status = SessionStatus.Stop
+
     def is_session_started(self):
-        return self.task is not None
+        return self.session_status == SessionStatus.Running
+
+    def get_session_status(self):
+        if self.is_session_started():
+            return SessionStatus.Running
+        else:
+            return SessionStatus.Stop
+
+    def get_node_status(self):
+        return UserStatusEvent(_get_status_from_last_event(self.last_event), 
+                self.get_session_status())
 
     @staticmethod
     def _env_port_modifier(fwd_ports: List[int], rfwd_ports: List[int],
                            env: Dict[str, str]):
-        env[TENSORPC_FLOW_MASTER_GRPC_PORT] = str(rfwd_ports[0])
-        env[TENSORPC_FLOW_MASTER_HTTP_PORT] = str(rfwd_ports[1])
+        if (len(rfwd_ports) > 0):
+            env[TENSORPC_FLOW_MASTER_GRPC_PORT] = str(rfwd_ports[0])
+            env[TENSORPC_FLOW_MASTER_HTTP_PORT] = str(rfwd_ports[1])
         env[TENSORPC_FLOW_USE_REMOTE_FWD] = "1"
 
 
@@ -378,6 +422,8 @@ class RemoteSSHNode(NodeWithSSHBase):
         assert self.task is None
         new_sess_name = TENSORPC_FLOW_DEFAULT_TMUX_NAME
         client = SSHClient(url, username, password, None, self.get_uid())
+        self.shutdown_ev.clear()
+        self.exit_event.clear()
         # firstly we check if the tmux worker exists
         # if exists, we need to query some node state from remote.
         worker_exists: bool = False
@@ -400,15 +446,10 @@ class RemoteSSHNode(NodeWithSSHBase):
         # a remote worker.
         # we assume that if this session is started, we
         # can connect to remote worker successfully.
-        async def callback2(ev: Event):
-            # if isinstance(ev, LineEvent):
-            #     self.stdout += ev.line
-            # elif isinstance(ev, CommandEvent):
-            #     self.last_event = ev.type
-            await callback(ev)
 
         async def exit_callback():
             self.task = None
+            self.set_stop_status()
             http_url = self.worker_http_url
             self.last_event = CommandEventType.PROMPT_END
             self.worker_port = -1
@@ -419,13 +460,13 @@ class RemoteSSHNode(NodeWithSSHBase):
             print("SESSION EXIT!!!")
             # TODO send message to disable grpc client in
             # remote worker.
-            try:
-                await http_remote_call(prim.get_http_client_session(),
-                                       http_url,
-                                       serv_names.FLOWWORKER_CLOSE_CONNECTION,
-                                       self.graph_id, self.id)
-            except:
-                traceback.print_exc()
+            # try:
+            #     await http_remote_call(prim.get_http_client_session(),
+            #                            http_url,
+            #                            serv_names.FLOWWORKER_CLOSE_CONNECTION,
+            #                            self.graph_id, self.id)
+            # except:
+            #     traceback.print_exc()
 
         def client_ip_callback(cip: str):
             self._remote_self_ip = cip.strip()
@@ -436,14 +477,17 @@ class RemoteSSHNode(NodeWithSSHBase):
             forward_ports = [self.remote_port, self.remote_http_port]
         self.task = asyncio.create_task(
             client.connect_queue(self.input_queue,
-                                 callback2,
+                                 callback,
                                  sd_task,
                                  forward_ports=forward_ports,
                                  r_forward_ports=rfports,
                                  env_port_modifier=self._env_port_modifier,
                                  exit_callback=exit_callback,
                                  client_ip_callback=client_ip_callback,
-                                 init_event=init_event))
+                                 init_event=init_event,
+                                 exit_event=self.exit_event))
+        self.set_start_status()
+
         await self.input_queue.put(
             SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
         return worker_exists, init_event
@@ -490,7 +534,8 @@ class CommandNode(NodeWithSSHBase):
                             rfports: Optional[List[int]] = None):
         assert self.task is None
         init_event = asyncio.Event()
-
+        self.shutdown_ev.clear()
+        self.exit_event.clear()
         client = SSHClient(url, username, password, None, self.get_uid())
 
         # async def callback(ev: Event):
@@ -498,6 +543,7 @@ class CommandNode(NodeWithSSHBase):
         async def exit_callback():
             self.task = None
             self.last_event = CommandEventType.PROMPT_END
+            self.set_stop_status()
 
         sd_task = asyncio.create_task(self.shutdown_ev.wait())
         self.task = asyncio.create_task(
@@ -508,7 +554,10 @@ class CommandNode(NodeWithSSHBase):
                                  r_forward_ports=rfports,
                                  env_port_modifier=self._env_port_modifier,
                                  exit_callback=exit_callback,
-                                 init_event=init_event))
+                                 init_event=init_event,
+                                 exit_event=self.exit_event))
+        self.set_start_status()
+
         await self.input_queue.put(
             SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
         return True, init_event
@@ -540,11 +589,12 @@ class AppNode(CommandNode):
                             password: str,
                             envs: Dict[str, str],
                             is_worker: bool,
-                            enable_port_fwd: bool,
+                            enable_port_forward: bool,
                             rfports: Optional[List[int]] = None):
         assert self.task is None
         init_event = asyncio.Event()
-
+        self.shutdown_ev.clear()
+        self.exit_event.clear()
         client = SSHClient(url, username, password, None, self.get_uid())
         if not is_worker:
             # query two free port in target via ssh, then use them as app ports
@@ -561,13 +611,15 @@ class AppNode(CommandNode):
         fwd_ports = []
         self.fwd_grpc_port = self.grpc_port
         self.fwd_http_port = self.http_port
-        if enable_port_fwd:
+        if enable_port_forward:
             fwd_ports = ports
         # async def callback(ev: Event):
         #     await msg_q.put(ev)
         async def exit_callback():
             self.task = None
             self.last_event = CommandEventType.PROMPT_END
+            self.set_stop_status()
+
 
         def app_env_port_modifier(fports: List[int], rfports: List[int],
                                   env: Dict[str, str]):
@@ -586,7 +638,9 @@ class AppNode(CommandNode):
                                  r_forward_ports=rfports,
                                  env_port_modifier=app_env_port_modifier,
                                  exit_callback=exit_callback,
-                                 init_event=init_event))
+                                 init_event=init_event,
+                                 exit_event=self.exit_event))
+        self.set_start_status()
         await self.input_queue.put(
             SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
         return True, init_event
@@ -674,6 +728,12 @@ class FlowGraph:
         self.ssh_data = flow_data["ssh"]
 
         self.messages: Dict[str, Message] = {}
+
+        # in-memory per-graph salt that will be 
+        # created when user firstly login devflow frontend.
+        # passwords will be encrypted during save-graph
+        # and saved.
+        self.salt = ""
 
     def _update_connection(self, edges: List[Edge]):
         for k, v in self._node_id_to_node.items():
@@ -957,6 +1017,13 @@ class Flow:
     async def put_event_from_worker(self, ev: Event):
         await self._ssh_q.put(ev)
 
+    def query_salt(self):
+        # TODO finish salt part
+        return self.salt
+        
+    def set_salt(self, salt: str):
+        self.salt = salt
+
     async def add_message(self, raw_msgs: List[Any]):
         await self._msg_q.put(MessageEvent(MessageEventType.Update, raw_msgs))
         for m in raw_msgs:
@@ -1053,13 +1120,14 @@ class Flow:
         ev = UserContentEvent(content)
         asyncio.run_coroutine_threadsafe(self._user_ev_q.put((uid, ev)), loop)
 
-    def query_node_last_event(self, graph_id: str, node_id: str):
+    def query_node_status(self, graph_id: str, node_id: str):
+        # TODO query status in remote
         if not self._node_exists(graph_id, node_id):
-            return CommandEventType.PROMPT_END.value
+            return UserStatusEvent.empty().to_dict()
         node = self._get_node(graph_id, node_id)
         if isinstance(node, (NodeWithSSHBase)):
-            return node.last_event.value
-        return CommandEventType.PROMPT_END.value
+            return node.get_node_status().to_dict()
+        return UserStatusEvent.empty().to_dict()
 
     async def save_terminal_state(self, graph_id: str, node_id: str, state,
                                   timestamp_ms: int):
@@ -1196,11 +1264,8 @@ class Flow:
             for n in graph.nodes:
                 if isinstance(n, (CommandNode, RemoteSSHNode)):
                     uid = _get_uid(graph_id, n.id)
-
                     await self._user_ev_q.put(
-                        (uid,
-                         UserStatusEvent(
-                             _get_status_from_last_event(n.last_event))))
+                        (uid, n.get_node_status()))
         if reload:
             # TODO we should shutdown all session first.
             self.flow_dict[graph_id] = FlowGraph(flow_data, graph_id)
@@ -1264,13 +1329,14 @@ class Flow:
                 [n.to_dict() for n in driv_nodes])
             for ev, node in zip(res, driv_nodes):
                 le = CommandEventType(ev["last_event"])
+                sess_st = SessionStatus(ev["session_status"])
                 raw_msgs = ev["msgs"]
                 await self._msg_q.put(
                     MessageEvent(MessageEventType.Update, raw_msgs))
                 # node.last_event = le
+                ue = UserStatusEvent(_get_status_from_last_event(le), sess_st)
                 await self._user_ev_q.put(
-                    (node.get_uid(),
-                     UserStatusEvent(_get_status_from_last_event(le))))
+                    (node.get_uid(), ue))
 
     async def start(self, graph_id: str, node_id: str):
         node = self.flow_dict[graph_id].get_node_by_id(node_id)
@@ -1330,6 +1396,7 @@ class Flow:
                 # we send (may be new) node data to remote worker, then run it.
                 # TODO if node deleted, shutdown them in remote worker
                 print("START REMOTE", driver_http_url)
+                # TODO add this to remote node setting
                 remote_ssh_url = "localhost:22"
                 await http_remote_call(
                     prim.get_http_client_session(), driver_http_url,
@@ -1368,6 +1435,44 @@ class Flow:
         if isinstance(node, CommandNode):
             if node.is_session_started():
                 await node.send_ctrl_c()
+
+    async def stop_session(self, graph_id: str, node_id: str):
+        print("STOP SESSION", graph_id, node_id)
+        node = self.flow_dict[graph_id].get_node_by_id(node_id)
+        if isinstance(node, RemoteSSHNode):
+            # TODO if command nodes driven by this node still running
+            # raise error that stop them first.
+            driver_http_url = node.worker_http_url
+            # TODO use grpc exit RPC for better exit
+            # stop tmux server
+            print("0")
+
+            await http_remote_call(prim.get_http_client_session(),
+                                    driver_http_url,
+                                    serv_names.FLOWWORKER_EXIT)
+            print("1")
+            if node.is_session_started():
+                await node.soft_shutdown()
+            print("2")
+
+            # should we wait exit event?
+            return
+        
+        driver_node_id = node.get_input_handles(
+            HandleTypes.Driver.value)[0].target_node_id
+        driver = self._get_node(graph_id, driver_node_id)
+        if isinstance(driver, RemoteSSHNode):
+            if driver.is_session_started():
+                driver_http_url = driver.worker_http_url
+                await http_remote_call(prim.get_http_client_session(),
+                                       driver_http_url,
+                                       serv_names.FLOWWORKER_STOP_SESSION, graph_id,
+                                       node_id)
+            # TODO raise a exception to front end if driver not start
+            return
+        if isinstance(node, CommandNode):
+            if node.is_session_started():
+                await node.soft_shutdown()
 
     @marker.mark_exit
     async def _on_exit(self):

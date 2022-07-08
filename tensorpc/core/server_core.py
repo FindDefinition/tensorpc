@@ -43,6 +43,12 @@ class _ExposedServerProps(object):
         self.is_sync = is_sync
         self.server_meta = server_meta
         self.http_client_session: Optional[aiohttp.ClientSession] = None
+        self._async_shutdown_event: Optional[asyncio.Event] = None
+
+    @property
+    def async_shutdown_event(self):
+        assert self._async_shutdown_event is not None 
+        return self._async_shutdown_event
 
 
 class ServerContext(object):
@@ -124,6 +130,7 @@ class ServiceCore(object):
     def _init_async_members(self):
         # in future python versions, asyncio event can't be created if no event loop running.
         self.async_shutdown_event = asyncio.Event()
+        self._exposed_props._async_shutdown_event = self.async_shutdown_event
 
     def init_http_client_session(self, sess: aiohttp.ClientSession):
         self._exposed_props.http_client_session = sess 

@@ -97,12 +97,13 @@ class FlowApp:
             if shut_task in done:
                 break
             ev: AppEvent = send_task.result()
+            print("?????")
             # assign uid here.
             ev.uid = self._uid
             send_task = asyncio.create_task(self._send_loop_queue.get())
             wait_tasks: List[asyncio.Task] = [shut_task, send_task]
             try:
-                print("SEND", ev.to_dict())
+                print("SEND", ev.type)
                 await self._send_http_event(ev)
             except Exception as e:
                 # remote call may fail by connection broken

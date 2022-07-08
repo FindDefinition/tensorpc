@@ -21,6 +21,9 @@ def get_service_units() -> serviceunit.ServiceUnits:
 def get_shutdown_event() -> threading.Event:
     return get_server_exposed_props().shutdown_event
 
+def get_async_shutdown_event() -> asyncio.Event:
+    return get_server_exposed_props().async_shutdown_event
+
 def is_json_call():
     """tell service whether rpc is a json call, used for support client 
     written in other language

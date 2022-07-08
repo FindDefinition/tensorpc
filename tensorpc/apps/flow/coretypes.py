@@ -162,9 +162,9 @@ class UserEventType(enum.Enum):
     3. node submit a new status (currently
         only come from master server)
     """
-    Status = "Status"
-    Content = "Content"
-    Message = "Message"
+    Status = 0
+    Content = 1
+    Message = 2
 
 
 class UserEvent:
@@ -176,20 +176,28 @@ class UserEvent:
             "type": self.type.value,
         }
 
+class SessionStatus(enum.Enum):
+    Running = 0
+    Stop = 1
 
 class UserStatusEvent(UserEvent):
     ALL_STATUS = set(["idle", "running", "error", "success"])
 
-    def __init__(self, status: str):
+    def __init__(self, status: str, session_status: SessionStatus):
         super().__init__(UserEventType.Status)
         assert status in self.ALL_STATUS
         self.status = status
+        self.session_status = session_status
 
     def to_dict(self):
         res = super().to_dict()
         res["status"] = self.status
+        res["sessionStatus"] = self.session_status.value
         return res
 
+    @staticmethod
+    def empty():
+        return UserStatusEvent("idle", SessionStatus.Stop)
 
 class UserContentEvent(UserEvent):
     def __init__(self, content: Any):

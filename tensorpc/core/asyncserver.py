@@ -224,10 +224,7 @@ async def serve_with_http_async(service_def: ServiceDef,
                               max_threads, process_id, credentials)
     http_task = httpserver.serve_service_core_task(server_core, http_port,
                                                    None, is_sync=False)
-    try:
-        return await asyncio.gather(grpc_task, http_task)
-    except KeyboardInterrupt:
-        raise
+    return await asyncio.gather(grpc_task, http_task)
 
 async def serve_async(service_def: ServiceDef,
         wait_time=-1,

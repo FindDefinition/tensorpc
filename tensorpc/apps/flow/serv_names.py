@@ -83,7 +83,7 @@ class _ServiceNames:
     def FLOWWORKER_QUERY_STATUS(self):
         from tensorpc.apps.flow.serv.worker import FlowWorker
         return get_service_key_by_type(
-            FlowWorker, FlowWorker.query_nodes_last_event.__name__)
+            FlowWorker, FlowWorker.query_nodes_status.__name__)
 
     @property
     def FLOWWORKER_SELECT_NODE(self):
@@ -108,6 +108,16 @@ class _ServiceNames:
         from tensorpc.apps.flow.serv.worker import FlowWorker
         return get_service_key_by_type(FlowWorker,
                                        FlowWorker.ssh_change_size.__name__)
+    @property
+    def FLOWWORKER_STOP_SESSION(self):
+        from tensorpc.apps.flow.serv.worker import FlowWorker
+        return get_service_key_by_type(FlowWorker,
+                                       FlowWorker.stop_session.__name__)
+    @property
+    def FLOWWORKER_EXIT(self):
+        from tensorpc.apps.flow.serv.worker import FlowWorker
+        return get_service_key_by_type(FlowWorker,
+                                       FlowWorker.exit.__name__)
 
     @property
     def FLOWWORKER_SYNC_GRAPH(self):

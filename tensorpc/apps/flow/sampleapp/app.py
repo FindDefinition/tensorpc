@@ -28,7 +28,7 @@ class SampleApp(App):
         self.add_input("Image Path", self.on_input_change)
         self.img_ui = self.add_images(1)
         self.img_path = ""
-        self.set_init_window_size([480, 320])
+        self.set_init_window_size([480, 640])
 
     async def on_button_click(self, name: str):
         print(name)

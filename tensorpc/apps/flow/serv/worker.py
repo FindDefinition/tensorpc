@@ -31,15 +31,12 @@ from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
 from tensorpc.core import get_http_url
 from tensorpc.core.httpclient import http_remote_call
 from tensorpc.utils.address import convert_url_to_local, get_url_port
-from .core import AppNode, CommandNode, Node, NodeWithSSHBase, _get_uid, node_from_data
+from .core import AppNode, CommandNode, Node, NodeWithSSHBase, SessionStatus, _get_uid, node_from_data
 import time
 from tensorpc.utils.wait_tools import get_free_ports
 
 ALL_EVENT_TYPES = Union[RelayEvent, MessageEvent, AppEvent]
 
-
-async def _get_free_port(count: int):
-    return get_free_ports(count)
 
 
 class FlowClient:
@@ -236,6 +233,7 @@ class FlowClient:
             res.append({
                 "id": node.id,
                 "last_event": node.last_event.value,
+                "session_status": node.get_session_status().value,
                 "stdout": node.stdout,
                 "msgs": [m.to_dict() for m in msgs.values()],
             })
@@ -270,7 +268,7 @@ class FlowClient:
 
         return envs
 
-    def query_nodes_last_event(self, graph_id: str, node_ids: List[str]):
+    def query_nodes_status(self, graph_id: str, node_ids: List[str]):
         res = []
         for nid in node_ids:
             uid = _get_uid(graph_id, nid)
@@ -279,6 +277,7 @@ class FlowClient:
                 res.append({
                     "id": nid,
                     "last_event": self._cached_nodes[uid].last_event.value,
+                    "session_status": self._cached_nodes[uid].get_session_status().value,
                     "stdout": self._cached_nodes[uid].stdout,
                     "msgs": [m.to_dict() for m in msgs.values()],
                 })
@@ -286,6 +285,7 @@ class FlowClient:
                 res.append({
                     "id": nid,
                     "last_event": CommandEventType.PROMPT_END.value,
+                    "session_status": SessionStatus.Stop.value,
                     "stdout": "",
                     "msgs": [],
                 })
@@ -330,21 +330,28 @@ class FlowClient:
                 await self._send_loop_queue.put(RelaySSHEvent(ev, uid))
 
             envs = self._get_node_envs(graph_id, node.id)
+            # we don't need any port fwd for remote worker.
             await node.start_session(callback,
                                      convert_url_to_local(url),
                                      username,
                                      password,
                                      envs=envs,
+                                     enable_port_forward=False,
                                      is_worker=True)
             if init_cmds:
                 await node.input_queue.put(init_cmds)
-        await node.run_command(_get_free_port)
+        await node.run_command()
 
     async def stop(self, graph_id: str, node_id: str):
         node = self._cached_nodes[_get_uid(graph_id, node_id)]
         if node.is_session_started():
             await node.send_ctrl_c()
         print("STOP", graph_id, node_id, node.is_session_started())
+        
+    async def stop_session(self, graph_id: str, node_id: str):
+        node = self._cached_nodes[_get_uid(graph_id, node_id)]
+        if node.is_session_started():
+            await node.soft_shutdown()
 
     def close_grpc_connection(self):
         self.shutdown_ev.set()
@@ -421,8 +428,8 @@ class FlowWorker:
         return await self._get_client(graph_id)._send_loop_queue.put(
             relay_event_from_dict(ev_data))
 
-    def query_nodes_last_event(self, graph_id: str, node_ids: List[str]):
-        return self._get_client(graph_id).query_nodes_last_event(
+    def query_nodes_status(self, graph_id: str, node_ids: List[str]):
+        return self._get_client(graph_id).query_nodes_status(
             graph_id, node_ids)
 
     def close_grpc_connection(self, graph_id: str):
@@ -477,3 +484,17 @@ class FlowWorker:
     async def get_layout(self, graph_id: str, node_id: str):
         return await self._get_client(graph_id).get_layout(
             graph_id, node_id)
+
+    async def stop_session(self, graph_id: str, node_id: str):
+        return await self._get_client(graph_id).stop_session(
+            graph_id, node_id)
+
+    async def exit(self):
+        for k, v in self._clients.items():
+            for n in v._cached_nodes.values():
+                if isinstance(n, NodeWithSSHBase):
+                    if n.is_session_started():
+                        await n.soft_shutdown()
+                        await n.exit_event.wait()
+        prim.get_async_shutdown_event().set()
+    

@@ -15,8 +15,7 @@ VSCODE_SHELL_LOGIN=1
 # Run relevant rc/profile only if shell integration has been injected, not when run manually
 if [ "$VSCODE_INJECTION" == "1" ]; then
 	if [ -z "$VSCODE_SHELL_LOGIN" ]; then
-		source ~/.bashrc
-
+		. ~/.bashrc
 	else
 		# Imitate -l because --init-file doesn't support it:
 		# run the first of these files that exists
@@ -32,20 +31,12 @@ if [ "$VSCODE_INJECTION" == "1" ]; then
 			. ~/.profile
 		fi
 		builtin unset VSCODE_SHELL_LOGIN
-
 	fi
 	builtin unset VSCODE_INJECTION
 fi
 
 # Disable shell integration if PROMPT_COMMAND is 2+ function calls since that is not handled.
 if [[ "$PROMPT_COMMAND" =~ .*(' '.*\;)|(\;.*' ').* ]]; then
-	builtin unset VSCODE_SHELL_INTEGRATION
-	builtin return
-fi
-
-# Disable shell integration if HISTCONTROL is set to erase duplicate entries as the exit code
-# reporting relies on the duplicates existing
-if [[ "$HISTCONTROL" =~ .*erasedups.* ]]; then
 	builtin unset VSCODE_SHELL_INTEGRATION
 	builtin return
 fi
@@ -60,7 +51,7 @@ __vsc_original_PS2="$PS2"
 __vsc_custom_PS1=""
 __vsc_custom_PS2=""
 __vsc_in_command_execution="1"
-__vsc_last_history_id=$(history 1 | awk '{print $1;}')
+__vsc_current_command=""
 
 __vsc_prompt_start() {
 	builtin printf "\033]784;A\007"
@@ -76,6 +67,7 @@ __vsc_update_cwd() {
 
 __vsc_command_output_start() {
 	builtin printf "\033]784;C\007"
+	builtin printf "\033]784;E;$__vsc_current_command\007"
 }
 
 __vsc_continuation_start() {
@@ -87,14 +79,11 @@ __vsc_continuation_end() {
 }
 
 __vsc_command_complete() {
-	# local __vsc_history_id=$(builtin history 1 | awk '{print $1;}')
-	# if [[ "$__vsc_history_id" == "$__vsc_last_history_id" ]]; then
-	# 	builtin printf "\033]784;D\007"
-	# else
-	# 	builtin printf "\033]784;D;%s\007" "$__vsc_status"
-	# 	__vsc_last_history_id=$__vsc_history_id
-	# fi
-	builtin printf "\033]784;D;%s\007" "$__vsc_status"
+	if [ "$__vsc_current_command" = "" ]; then
+		builtin printf "\033]784;D\007"
+	else
+		builtin printf "\033]784;D;%s\007" "$__vsc_status"
+	fi
 	__vsc_update_cwd
 }
 __vsc_update_prompt() {
@@ -118,6 +107,7 @@ __vsc_update_prompt() {
 
 __vsc_precmd() {
 	__vsc_command_complete "$__vsc_status"
+	__vsc_current_command=""
 	__vsc_update_prompt
 }
 
@@ -125,6 +115,11 @@ __vsc_preexec() {
 	if [ "$__vsc_in_command_execution" = "0" ]; then
 		__vsc_initialized=1
 		__vsc_in_command_execution="1"
+		if [[ ! "$BASH_COMMAND" =~ ^__vsc_prompt* ]]; then
+			__vsc_current_command=$BASH_COMMAND
+		else
+			__vsc_current_command=""
+		fi
 		__vsc_command_output_start
 	fi
 }

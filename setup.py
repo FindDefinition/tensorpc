@@ -38,7 +38,8 @@ REQUIRED = [
     "importlib_metadata; python_version < \"3.8\"",
     "mashumaro",
     "libtmux",
-    "pillow"
+    "pillow",
+    "bcypt",
 ]
 
 # What packages are optional?
