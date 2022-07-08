@@ -47,7 +47,8 @@ class FlowApp:
 
         self._uid = get_uid(self.master_meta.graph_id, self.master_meta.node_id)
         lay = self.app._get_app_layout()
-        print(lay)
+        # print(lay)
+        print(self.master_meta.http_url)
         asyncio.run_coroutine_threadsafe(self._send_loop_queue.put(AppEvent("", AppEventType.UpdateLayout, LayoutEvent(lay))), loop=asyncio.get_running_loop())
 
     def _get_app(self):

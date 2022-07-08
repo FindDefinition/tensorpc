@@ -582,6 +582,13 @@ class AppNode(CommandNode):
             return {}
         return json.loads(self.node_data["initConfig"])
 
+    def _app_env_port_modifier(self, fports: List[int], rfports: List[int],
+                                env: Dict[str, str]):
+        if fports:
+            self.fwd_grpc_port = fports[0]
+            self.fwd_http_port = fports[1]
+        super()._env_port_modifier(fports, rfports, env)
+
     async def start_session(self,
                             callback: Callable[[Event], Awaitable[None]],
                             url: str,
@@ -596,13 +603,15 @@ class AppNode(CommandNode):
         self.shutdown_ev.clear()
         self.exit_event.clear()
         client = SSHClient(url, username, password, None, self.get_uid())
+        # print("APP", url, client.url_no_port, client.port)
         if not is_worker:
             # query two free port in target via ssh, then use them as app ports
-            ports = await _get_free_port(2, client.url, client.username,
-                                         client.password)
+            ports = await _get_free_port(2, url, username,
+                                         password)
         else:
             # query two local ports in flow remote worker, then use them as app ports
             ports = get_free_ports(2)
+        # print("APP PORTS", ports)
         if len(ports) != 2:
             raise ValueError("get free port failed. exit.")
 
@@ -621,12 +630,6 @@ class AppNode(CommandNode):
             self.set_stop_status()
 
 
-        def app_env_port_modifier(fports: List[int], rfports: List[int],
-                                  env: Dict[str, str]):
-            if fports:
-                self.fwd_grpc_port = fports[0]
-                self.fwd_http_port = fports[1]
-            super()._env_port_modifier(fports, rfports, env)
 
         sd_task = asyncio.create_task(self.shutdown_ev.wait())
         self.task = asyncio.create_task(
@@ -636,7 +639,7 @@ class AppNode(CommandNode):
                                  env=envs,
                                  forward_ports=fwd_ports,
                                  r_forward_ports=rfports,
-                                 env_port_modifier=app_env_port_modifier,
+                                 env_port_modifier=self._app_env_port_modifier,
                                  exit_callback=exit_callback,
                                  init_event=init_event,
                                  exit_event=self.exit_event))
@@ -989,7 +992,7 @@ class Flow:
             http_port = node.http_port
             durl, _ = get_url_port(driver.url)
             if driver.enable_port_forward:
-                app_url = get_http_url(durl, http_port)
+                app_url = get_http_url("localhost", node.fwd_http_port)
             else:
                 app_url = get_http_url(durl, http_port)
             return await http_remote_call(sess, app_url,

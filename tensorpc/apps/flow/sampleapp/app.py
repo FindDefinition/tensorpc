@@ -13,12 +13,8 @@
 # limitations under the License.
 
 from pathlib import Path
-
 import cv2
 from tensorpc.apps.flow.flowapp import App 
-
-
-import asyncio 
 
 class SampleApp(App):
     def __init__(self) -> None:
@@ -47,3 +43,4 @@ class SampleApp(App):
     async def on_input_change(self, value: str):
         print(value)
         self.img_path = value
+

@@ -528,11 +528,10 @@ class SSHClient:
                  uid: str = "") -> None:
         url_parts = url.split(":")
         if len(url_parts) == 1:
-
-            self.url = url
+            self.url_no_port = url
             self.port = 22
         else:
-            self.url = url_parts[0]
+            self.url_no_port = url_parts[0]
             self.port = int(url_parts[1])
         self.username = username
         self.password = password
@@ -543,7 +542,7 @@ class SSHClient:
 
     @contextlib.asynccontextmanager
     async def simple_connect(self):
-        async with asyncssh.connection.connect(self.url,
+        async with asyncssh.connection.connect(self.url_no_port,
                                     self.port,
                                     username=self.username,
                                     password=self.password,
@@ -582,7 +581,7 @@ class SSHClient:
             env = {}
         # TODO better keepalive
         try:
-            async with asyncssh.connection.connect(self.url,
+            async with asyncssh.connection.connect(self.url_no_port,
                                         self.port,
                                         username=self.username,
                                         password=self.password,
@@ -641,8 +640,7 @@ class SSHClient:
                         listener = await conn.forward_remote_port(
                             '', 0, 'localhost', p)
                         rfwd_ports.append(listener.get_port())
-                        print('Listening on Remote port %s...' %
-                              listener.get_port())
+                        print(f'Listening on Remote port {p} <- {listener.get_port()}...')
                         wait_tasks.append(
                             asyncio.create_task(listener.wait_closed()))
                 if forward_ports is not None:
@@ -650,8 +648,7 @@ class SSHClient:
                         listener = await conn.forward_local_port(
                             '', 0, 'localhost', p)
                         fwd_ports.append(listener.get_port())
-                        print('Listening on Local port %s...' %
-                              listener.get_port())
+                        print(f'Listening on Local port {listener.get_port()} -> {p}...')
                         wait_tasks.append(
                             asyncio.create_task(listener.wait_closed()))
                 # await listener.wait_closed()
