@@ -39,8 +39,8 @@ from tensorpc.apps.flow.constants import (
     TENSORPC_FLOW_USE_REMOTE_FWD)
 from tensorpc.apps.flow.coretypes import (Message, MessageEvent,
                                           MessageEventType, MessageLevel,
-                                          UserContentEvent, UserEvent,
-                                          UserStatusEvent, get_uid,
+                                          ScheduleEvent, UserContentEvent,
+                                          UserEvent, UserStatusEvent, get_uid,
                                           SessionStatus)
 from tensorpc.apps.flow.flowapp import AppEvent, app_event_from_data
 from tensorpc.apps.flow.serv_names import serv_names
@@ -59,10 +59,14 @@ ALL_NODES = HashableRegistry()
 
 class HandleTypes(enum.Enum):
     Driver = "driver"
+    Input = "input"
+    Output = "output"
 
 
 class NodeStatus:
-    def __init__(self, cmd_status: CommandEventType, session_status: SessionStatus) -> None:
+
+    def __init__(self, cmd_status: CommandEventType,
+                 session_status: SessionStatus) -> None:
         self.cmd_status = cmd_status
         self.session_status = session_status
 
@@ -75,6 +79,7 @@ class NodeStatus:
     @staticmethod
     def empty():
         return NodeStatus(CommandEventType.PROMPT_END, SessionStatus.Stop)
+
 
 def _extract_graph_node_id(uid: str):
     parts = uid.split("@")
@@ -95,6 +100,7 @@ def _get_status_from_last_event(ev: CommandEventType):
 
 
 class Handle:
+
     def __init__(self, target_node_id: str, type: str, edge_id: str) -> None:
         self.target_node_id = target_node_id
         self.type = type
@@ -117,7 +123,11 @@ class Handle:
 
 @ALL_NODES.register
 class Node:
-    def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
+
+    def __init__(self,
+                 flow_data: Dict[str, Any],
+                 graph_id: str = "",
+                 schedulable: bool = False) -> None:
         self._flow_data = flow_data
         self.id: str = flow_data["id"]
         self.graph_id: str = graph_id
@@ -125,6 +135,20 @@ class Node:
         self.outputs: Dict[str, List[Handle]] = {}
         self.remote_driver_id: str = ""
         self.messages: Dict[str, Message] = {}
+
+        self._schedulable = schedulable
+
+    @property
+    def schedulable(self):
+        return self._schedulable
+
+    @property
+    def is_remote(self):
+        return self.remote_driver_id != ""
+
+    def schedule_next(self, ev: ScheduleEvent,
+                      graph: "FlowGraph") -> Dict[str, ScheduleEvent]:
+        return {}
 
     def to_dict(self):
         # currently this method is only used for remote worker.
@@ -240,6 +264,7 @@ def node_from_data(data: Dict[str, Any]) -> Node:
 
 @ALL_NODES.register
 class DirectSSHNode(Node):
+
     @property
     def url(self) -> str:
         return self.node_data["url"]
@@ -263,8 +288,12 @@ class DirectSSHNode(Node):
 
 
 class NodeWithSSHBase(Node):
-    def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
-        super().__init__(flow_data, graph_id)
+
+    def __init__(self,
+                 flow_data: Dict[str, Any],
+                 graph_id: str = "",
+                 schedulable: bool = False) -> None:
+        super().__init__(flow_data, graph_id, schedulable)
         self.shutdown_ev = asyncio.Event()
         self.task: Optional[asyncio.Task] = None
         self.input_queue = asyncio.Queue()
@@ -277,6 +306,8 @@ class NodeWithSSHBase(Node):
         self.session_status: SessionStatus = SessionStatus.Stop
 
         self.exit_event = asyncio.Event()
+
+        self.queued_commands: List[ScheduleEvent] = []
 
     def push_raw_event(self, ev: RawEvent):
         self._raw_event_history.append(ev)
@@ -315,6 +346,9 @@ class NodeWithSSHBase(Node):
     def is_session_started(self):
         return self.session_status == SessionStatus.Running
 
+    def is_running(self):
+        return self.last_event != CommandEventType.PROMPT_END
+
     def get_session_status(self):
         if self.is_session_started():
             return SessionStatus.Running
@@ -322,8 +356,8 @@ class NodeWithSSHBase(Node):
             return SessionStatus.Stop
 
     def get_node_status(self):
-        return UserStatusEvent(_get_status_from_last_event(self.last_event), 
-                self.get_session_status())
+        return UserStatusEvent(_get_status_from_last_event(self.last_event),
+                               self.get_session_status())
 
     @staticmethod
     def _env_port_modifier(fwd_ports: List[int], rfwd_ports: List[int],
@@ -336,6 +370,7 @@ class NodeWithSSHBase(Node):
 
 @ALL_NODES.register
 class RemoteSSHNode(NodeWithSSHBase):
+
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
         super().__init__(flow_data, graph_id)
         self.worker_port: int = -1
@@ -446,7 +481,6 @@ class RemoteSSHNode(NodeWithSSHBase):
         # a remote worker.
         # we assume that if this session is started, we
         # can connect to remote worker successfully.
-
         async def exit_callback():
             self.task = None
             self.set_stop_status()
@@ -492,8 +526,7 @@ class RemoteSSHNode(NodeWithSSHBase):
             SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
         return worker_exists, init_event
 
-    async def run_command(
-        self):
+    async def run_command(self):
         if self.init_commands:
             await self.input_queue.put(self.init_commands)
         await self.input_queue.put((
@@ -511,17 +544,38 @@ class EnvNode(Node):
 
 @ALL_NODES.register
 class CommandNode(NodeWithSSHBase):
+
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
-        super().__init__(flow_data, graph_id)
+        super().__init__(flow_data, graph_id, schedulable=True)
 
     @property
     def commands(self):
         args = self.node_data["args"]
         return [x["value"] for x in filter(lambda x: x["enabled"], args)]
 
-    async def run_command(
-        self):
-        await self.input_queue.put(" ".join(self.commands) + "\n")
+    async def run_command(self, newenvs: Optional[Dict[str, Any]] = None):
+        if not newenvs:
+            await self.input_queue.put(" ".join(self.commands) + "\n")
+        else:
+            envs_stmt = [f"export {k}={v}" for k, v in newenvs.items()]
+            await self.input_queue.put(" && ".join(envs_stmt + [" ".join(self.commands)]) + "\n")
+
+    # async def push_new_envs(self, envs: Dict[str, Any]):
+    #     envs_stmt = [f"export {k}={v}" for k, v in envs.items()]
+    #     await self.input_queue.put(" && ".join(envs_stmt) + "\n")
+
+    def schedule_next(self, ev: ScheduleEvent,
+                      graph: "FlowGraph") -> Dict[str, ScheduleEvent]:
+        next_nodes = graph.get_output_nodes_of_handle_type(
+            self, HandleTypes.Output)
+        res: Dict[str, ScheduleEvent] = {}
+        for n in next_nodes:
+            if n.schedulable:
+                res[n.id] = ev
+        return res
+
+    async def run_schedule_event(self, sche_ev: ScheduleEvent):
+        await self.run_command(sche_ev.envs)
 
     async def start_session(self,
                             callback: Callable[[Event], Awaitable[None]],
@@ -565,6 +619,7 @@ class CommandNode(NodeWithSSHBase):
 
 @ALL_NODES.register
 class AppNode(CommandNode):
+
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
         super().__init__(flow_data, graph_id)
         self.grpc_port = -1
@@ -583,7 +638,7 @@ class AppNode(CommandNode):
         return json.loads(self.node_data["initConfig"])
 
     def _app_env_port_modifier(self, fports: List[int], rfports: List[int],
-                                env: Dict[str, str]):
+                               env: Dict[str, str]):
         if fports:
             self.fwd_grpc_port = fports[0]
             self.fwd_http_port = fports[1]
@@ -606,8 +661,7 @@ class AppNode(CommandNode):
         # print("APP", url, client.url_no_port, client.port)
         if not is_worker:
             # query two free port in target via ssh, then use them as app ports
-            ports = await _get_free_port(2, url, username,
-                                         password)
+            ports = await _get_free_port(2, url, username, password)
         else:
             # query two local ports in flow remote worker, then use them as app ports
             ports = get_free_ports(2)
@@ -628,8 +682,6 @@ class AppNode(CommandNode):
             self.task = None
             self.last_event = CommandEventType.PROMPT_END
             self.set_stop_status()
-
-
 
         sd_task = asyncio.create_task(self.shutdown_ev.wait())
         self.task = asyncio.create_task(
@@ -676,6 +728,7 @@ _TYPE_TO_NODE_CLS: Dict[str, Type[Node]] = {
 
 
 class Edge:
+
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
         self._flow_data = flow_data
         self.id: str = flow_data["id"]
@@ -710,6 +763,7 @@ class Edge:
 
 
 class FlowGraph:
+
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
         graph_data = flow_data
 
@@ -732,7 +786,7 @@ class FlowGraph:
 
         self.messages: Dict[str, Message] = {}
 
-        # in-memory per-graph salt that will be 
+        # in-memory per-graph salt that will be
         # created when user firstly login devflow frontend.
         # passwords will be encrypted during save-graph
         # and saved.
@@ -902,12 +956,13 @@ async def _get_free_port(count: int, url: str, username: str, password: str):
 
 
 class Flow:
+
     def __init__(self, root: Optional[str] = None) -> None:
         self._user_ev_q: "asyncio.Queue[Tuple[str, UserEvent]]" = asyncio.Queue(
         )
         self._ssh_q: "asyncio.Queue[Event]" = asyncio.Queue()
         self._msg_q: "asyncio.Queue[MessageEvent]" = asyncio.Queue()
-        self._app_q: "asyncio.Queue[AppEvent]" = asyncio.Queue()
+        self._app_q: "asyncio.Queue[AppEvent]" = asyncio.Queue(10)
 
         # self._ssh_stdout_q: "asyncio.Queue[Tuple[str, Event]]" = asyncio.Queue()
         self.selected_node_uid: str = ""
@@ -930,6 +985,10 @@ class Flow:
 
     def _get_node(self, graph_id: str, node_id: str):
         return self.flow_dict[graph_id].get_node_by_id(node_id)
+
+    def _get_node_and_graph(self, graph_id: str, node_id: str):
+        graph = self.flow_dict[graph_id]
+        return graph.get_node_by_id(node_id), graph
 
     @marker.mark_websocket_ondisconnect
     def _on_client_disconnect(self, cl):
@@ -955,7 +1014,6 @@ class Flow:
     async def app_event(self):
         # ws client wait for this event to get new app event
         appev = await self._app_q.get()
-        print("SEND APP EVENT", appev.type)
         return prim.DynamicEvent(appev.uid, appev.to_dict())
 
     @marker.mark_websocket_event
@@ -965,7 +1023,40 @@ class Flow:
         return ev.to_dict()
 
     async def put_app_event(self, ev_dict: Dict[str, Any]):
+        # print("APP EVENT RECEIVED")
         await self._app_q.put(app_event_from_data(ev_dict))
+
+    async def schedule_next(self, graph_id: str, node_id: str,
+                            sche_ev_data: Dict[str, Any]):
+        # schedule next node(s) of this node with data.
+        sche_ev = ScheduleEvent.from_dict(sche_ev_data)
+        node, graph = self._get_node_and_graph(graph_id, node_id)
+        # TODO if node is remote, run schedule_next in remote worker
+        assert node.remote_driver_id == "", "TODO"
+        assert node.schedulable, "only command node and scheduler node can be scheduled."
+        next_schedule = node.schedule_next(sche_ev, graph)
+        for node_id, sche_ev in next_schedule.items():
+            sche_node = graph.get_node_by_id(node_id)
+            if node.is_remote:
+                # TODO
+                raise NotImplementedError
+            else:
+                if isinstance(sche_node, CommandNode):
+                    if not sche_node.is_session_started():
+                        driver = self._get_node(
+                            graph_id,
+                            node.get_input_handles(
+                                HandleTypes.Driver.value)[0].target_node_id)
+                        assert isinstance(driver, DirectSSHNode)
+                        await self._start_session_direct(
+                            graph_id, sche_node, driver)
+                    if sche_node.is_running():
+                        sche_node.queued_commands.append(sche_ev)
+                    else:
+                        # TODO if two schedule events come rapidly
+                        await sche_node.run_schedule_event(sche_ev)
+                    pass
+            pass
 
     def _get_app_node_and_driver(self, graph_id: str, node_id: str):
         node = self._get_node(graph_id, node_id)
@@ -1023,7 +1114,7 @@ class Flow:
     def query_salt(self):
         # TODO finish salt part
         return self.salt
-        
+
     def set_salt(self, salt: str):
         self.salt = salt
 
@@ -1087,6 +1178,10 @@ class Flow:
             #     node.stdout += event.line
             #     if uid != self.selected_node_uid:
             #         continue
+            if isinstance(event, LineEvent):
+                # line event is useless for frontend.
+                continue
+
             if isinstance(event, RawEvent):
                 # print(node.id, self.selected_node_uid == uid, event.line, end="")
                 node.stdout += event.raw
@@ -1105,7 +1200,12 @@ class Flow:
 
             elif isinstance(event, (CommandEvent)):
                 node.last_event = event.type
-                # if event.type == CommandEventType.PROMPT_END:
+                if event.type == CommandEventType.PROMPT_END:
+                    # schedule queued tasks here.
+                    if isinstance(node, CommandNode) and node.queued_commands:
+                        await node.run_schedule_event(
+                            node.queued_commands.pop())
+                        # TODO automatic schedule next node if no manually schedule event exists.
                 #     node.stdout += str(event.arg)
 
             elif isinstance(event, (EofEvent, ExceptionEvent)):
@@ -1267,8 +1367,7 @@ class Flow:
             for n in graph.nodes:
                 if isinstance(n, (CommandNode, RemoteSSHNode)):
                     uid = _get_uid(graph_id, n.id)
-                    await self._user_ev_q.put(
-                        (uid, n.get_node_status()))
+                    await self._user_ev_q.put((uid, n.get_node_status()))
         if reload:
             # TODO we should shutdown all session first.
             self.flow_dict[graph_id] = FlowGraph(flow_data, graph_id)
@@ -1338,8 +1437,32 @@ class Flow:
                     MessageEvent(MessageEventType.Update, raw_msgs))
                 # node.last_event = le
                 ue = UserStatusEvent(_get_status_from_last_event(le), sess_st)
-                await self._user_ev_q.put(
-                    (node.get_uid(), ue))
+                await self._user_ev_q.put((node.get_uid(), ue))
+
+    async def _start_session_direct(self, graph_id: str, node: Node,
+                                    driver: Union[RemoteSSHNode,
+                                                  DirectSSHNode]):
+        assert isinstance(node, CommandNode)
+        assert isinstance(driver, DirectSSHNode)
+        assert (driver.url != "" and driver.username != ""
+                and driver.password != "")
+        envs = self._get_node_envs(graph_id, node.id)
+        rfports = []
+        if driver.enable_port_forward:
+            rfports = [prim.get_server_meta().port]
+            if prim.get_server_meta().http_port >= 0:
+                rfports.append(prim.get_server_meta().http_port)
+        await node.start_session(
+            self._cmd_node_callback,
+            driver.url,
+            driver.username,
+            driver.password,
+            is_worker=False,
+            enable_port_forward=driver.enable_port_forward,
+            envs=envs,
+            rfports=rfports)
+        if driver.init_commands != "":
+            await node.input_queue.put(driver.init_commands)
 
     async def start(self, graph_id: str, node_id: str):
         node = self.flow_dict[graph_id].get_node_by_id(node_id)
@@ -1357,33 +1480,7 @@ class Flow:
                     HandleTypes.Driver.value)[0].target_node_id)
             if isinstance(driver, DirectSSHNode):
                 if not node.is_session_started():
-                    # ssh_data = self.flow_dict[graph_id].ssh_data
-
-                    assert (driver.url != "" and driver.username != ""
-                            and driver.password != "")
-
-                    # TODO if graph name changed, session must be restart
-                    # we need to find a way to avoid this.
-                    envs = self._get_node_envs(graph_id, node_id)
-                    # node.start_session(self._ssh_q, ssh_data["url"],
-                    #                 ssh_data["username"], ssh_data["password"],
-                    #                 envs=envs)
-                    rfports = []
-                    if driver.enable_port_forward:
-                        rfports = [prim.get_server_meta().port]
-                        if prim.get_server_meta().http_port >= 0:
-                            rfports.append(prim.get_server_meta().http_port)
-                    await node.start_session(
-                        self._cmd_node_callback,
-                        driver.url,
-                        driver.username,
-                        driver.password,
-                        is_worker=False,
-                        enable_port_forward=driver.enable_port_forward,
-                        envs=envs,
-                        rfports=rfports)
-                    if driver.init_commands != "":
-                        await node.input_queue.put(driver.init_commands)
+                    await self._start_session_direct(graph_id, node, driver)
                 await node.run_command()
             elif isinstance(driver, RemoteSSHNode):
                 assert (driver.url != "" and driver.username != ""
@@ -1451,8 +1548,7 @@ class Flow:
             print("0")
 
             await http_remote_call(prim.get_http_client_session(),
-                                    driver_http_url,
-                                    serv_names.FLOWWORKER_EXIT)
+                                   driver_http_url, serv_names.FLOWWORKER_EXIT)
             print("1")
             if node.is_session_started():
                 await node.soft_shutdown()
@@ -1460,7 +1556,7 @@ class Flow:
 
             # should we wait exit event?
             return
-        
+
         driver_node_id = node.get_input_handles(
             HandleTypes.Driver.value)[0].target_node_id
         driver = self._get_node(graph_id, driver_node_id)
@@ -1469,8 +1565,8 @@ class Flow:
                 driver_http_url = driver.worker_http_url
                 await http_remote_call(prim.get_http_client_session(),
                                        driver_http_url,
-                                       serv_names.FLOWWORKER_STOP_SESSION, graph_id,
-                                       node_id)
+                                       serv_names.FLOWWORKER_STOP_SESSION,
+                                       graph_id, node_id)
             # TODO raise a exception to front end if driver not start
             return
         if isinstance(node, CommandNode):

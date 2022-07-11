@@ -46,6 +46,8 @@ class FlowApp:
         self._send_loop_task = asyncio.create_task(self._send_loop())
 
         self._uid = get_uid(self.master_meta.graph_id, self.master_meta.node_id)
+        self.app._send_callback = self._send_http_event
+
         lay = self.app._get_app_layout()
         # print(lay)
         print(self.master_meta.http_url)
@@ -68,6 +70,7 @@ class FlowApp:
                                       **kwargs)
 
     async def _send_http_event(self, ev: AppEvent):
+        ev.uid = self._uid
         if self.master_meta.is_worker:
             return await self._http_remote_call(serv_names.FLOWWORKER_PUT_APP_EVENT, self.master_meta.graph_id, ev.to_dict())
         else:
@@ -79,11 +82,18 @@ class FlowApp:
         else:
             return await robj.remote_call(serv_names.FLOW_PUT_APP_EVENT, ev.to_dict())
 
+    async def _send_grpc_event_large(self, ev: AppEvent, robj: tensorpc.AsyncRemoteManager):
+        if self.master_meta.is_worker:
+            return await robj.chunked_remote_call(serv_names.FLOWWORKER_PUT_APP_EVENT, self.master_meta.graph_id, ev.to_dict())
+        else:
+            return await robj.chunked_remote_call(serv_names.FLOW_PUT_APP_EVENT, ev.to_dict())
+
     async def _send_loop(self):
         # TODO unlike flowworker, the app shouldn't disconnect to master/worker.
         # so we should just use retry here.
         shut_task = asyncio.create_task(self.shutdown_ev.wait())
-        # async with tensorpc.AsyncRemoteManager(url) as robj:
+        grpc_url = self.master_meta.grpc_url
+        # async with tensorpc.AsyncRemoteManager(grpc_url) as robj:
         if self._need_to_send_env is not None:
             # TODO if this fail?
             await self._send_http_event(self._need_to_send_env)
@@ -98,14 +108,16 @@ class FlowApp:
             if shut_task in done:
                 break
             ev: AppEvent = send_task.result()
-            print("?????")
             # assign uid here.
             ev.uid = self._uid
             send_task = asyncio.create_task(self._send_loop_queue.get())
             wait_tasks: List[asyncio.Task] = [shut_task, send_task]
             try:
-                print("SEND", ev.type)
+                # print("SEND", ev.type)
+                # pass
                 await self._send_http_event(ev)
+                # print("SEND", ev.type, "FINISH")
+
             except Exception as e:
                 # remote call may fail by connection broken
                 # TODO retry for reconnection

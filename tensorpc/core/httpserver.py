@@ -28,6 +28,7 @@ from tensorpc.constants import TENSORPC_WEBSOCKET_MSG_SIZE
 from contextlib import suppress
 import numpy as np
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 LOGGER = df_logging.get_logger()
 JS_MAX_SAFE_INT = 9007199254740991
@@ -82,22 +83,31 @@ class WebsocketClient(object):
         if is_json:
             return await self.ws.send_bytes(core_io.json_only_encode(data, msg_type, req))
         max_size = self.ws._max_msg_size - 128
+        # max_size = 1024 * 1024
         encoder = core_io.SocketMessageEncoder(data)
-        tasks: List[asyncio.Task] = []
+        tasks = []
         # max_size = TENSORPC_WEBSOCKET_MSG_SIZE
+        # t = time.time()
         # chunks = list(encoder.get_message_chunks(msg_type, req, max_size))
+        # print("ENCODE TEIM", len(chunks), time.time() - t)
         # if len(chunks) > 1:
         #     header_rec = core_io.TensoRPCHeader(chunks[0])
         #     rec = core_io.parse_message_chunks(header_rec, chunks[1:])
+        # print("SEND CHUNKS", len(chunks))
+        # if len(chunks) > 1:
+        #     print("BEFORE SEND")
         try:
             for chunk in encoder.get_message_chunks(msg_type, req, max_size):
                 assert len(chunk) <= max_size
+                # tasks.append(self.ws.send_bytes(chunk))
                 await self.ws.send_bytes(chunk)
         except ConnectionResetError:
             print("CLIENT SEND ERROR, RETURN")
             return
-            # tasks.append(self.ws.send_bytes(chunk))
-        # await asyncio.wait(tasks)
+        # await tasks[0]
+        # if len(tasks) > 1:
+        #     tasks = [asyncio.create_task(t) for t in tasks[1:]]
+        #     await asyncio.wait(tasks)
 
     async def send_exception(self, exc: BaseException,
                              type: core_io.SocketMsgType, request_id: int):
@@ -365,10 +375,12 @@ class AllWebsocketHandler:
             wait_del_ev_task,
             self._shutdown_task,
         ]
+
         while True:
             (done,
              pending) = await asyncio.wait(wait_tasks,
                                            return_when=asyncio.FIRST_COMPLETED)
+            # t = time.time()
             if self.shutdown_ev.is_set():
                 for task in pending:
                     await _cancel(task)
@@ -378,6 +390,7 @@ class AllWebsocketHandler:
             wait_tasks = [
                 self._shutdown_task,
             ]
+            # cur_ev =""
             # determine events waited next.
             if self.new_event_ev.is_set():
                 for new_ev in self._new_events:
@@ -404,6 +417,7 @@ class AllWebsocketHandler:
                         new_task = asyncio.create_task(ev.fn(), name=ev_key)
                         new_tasks[ev_key] = new_task
                         new_task_to_ev[new_task] = ev_key
+                        # cur_ev = ev_key
                     else:
                         # this done task is deleted, may due to unsubscribe or client error.
                         # just remove them.
@@ -467,12 +481,14 @@ class AllWebsocketHandler:
             for task in task_to_be_canceled:
                 # TODO better cancel, don't await here.
                 await _cancel(task)
+            # t = time.time()
             if sending_tasks:
                 try:
                     # TODO if this function fail...
                     await asyncio.wait(sending_tasks)
                 except ConnectionResetError:
                     print("Cannot write to closing transport")
+            # print("SEND TIME", cur_ev, time.time() - t)
             task_to_ev = new_task_to_ev
 
 

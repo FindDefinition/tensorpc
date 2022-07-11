@@ -17,7 +17,7 @@
 import asyncio
 import enum
 import numpy as np
-from typing import Any, Awaitable, Callable, Dict, List, Tuple, Union
+from typing import Any, Awaitable, Callable, Coroutine, Dict, List, Optional, Tuple, Union
 from PIL import Image
 
 import base64
@@ -31,10 +31,17 @@ def _encode_image(img: np.ndarray):
     pil_img = Image.fromarray(img)
     buffered = io.BytesIO()
     pil_img.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    b64_bytes = base64.b64encode(buffered.getvalue())
+    img_str = b64_bytes.decode("utf-8")
     img_str = f"data:image/png;base64,{img_str}"
     return img_str
 
+def _encode_image_bytes(img: np.ndarray):
+    pil_img = Image.fromarray(img)
+    buffered = io.BytesIO()
+    pil_img.save(buffered, format="PNG")
+    b64_bytes = base64.b64encode(buffered.getvalue())
+    return b"data:image/png;base64," + b64_bytes
 
 async def async_range(start, stop=None, step=1):
     """same as range but schedule other tasks to run in every iteration
@@ -154,16 +161,32 @@ class Images(Component):
     def __init__(self, uid: str, count: int, queue: asyncio.Queue) -> None:
         super().__init__(uid, UIType.Image, queue)
         self.count = count
-        self.image_str = ""
+        self.image_str: bytes = b""
 
     async def show(self, index: int, image: np.ndarray):
-        encoded = _encode_image(image)
+        encoded = _encode_image_bytes(image)
         self.image_str = encoded
         await self.queue.put(
             self.create_update_event({
                 "index": index,
                 "image": encoded,
             }))
+
+    async def show_raw(self, index: int, image_b64_bytes: bytes):
+        self.image_str = image_b64_bytes
+        await self.queue.put(
+            self.create_update_event({
+                "index": index,
+                "image": image_b64_bytes,
+            }))
+
+    def show_raw_event(self, index: int, image_b64_bytes: bytes):
+        self.image_str = image_b64_bytes
+        
+        return self.create_update_event({
+                "index": index,
+                "image": image_b64_bytes,
+            })
 
     def to_dict(self):
         res = super().to_dict()
@@ -245,9 +268,10 @@ class App:
     def __init__(self) -> None:
         self._components: List[Component] = []
         self._uid_to_comp: Dict[str, Component] = {}
-        self._queue = asyncio.Queue()
+        self._queue = asyncio.Queue(maxsize=10)
 
         self._init_size = [480, 640]
+        self._send_callback: Optional[Callable[[AppEvent], Coroutine[None, None, None]]] = None
 
     def _get_app_layout(self):
         return {

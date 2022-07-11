@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import Executor
 import contextlib
 import ctypes
 import io
@@ -44,6 +45,7 @@ class _ExposedServerProps(object):
         self.server_meta = server_meta
         self.http_client_session: Optional[aiohttp.ClientSession] = None
         self._async_shutdown_event: Optional[asyncio.Event] = None
+        self._executor: Optional[Executor] = None
 
     @property
     def async_shutdown_event(self):

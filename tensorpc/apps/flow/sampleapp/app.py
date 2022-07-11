@@ -13,18 +13,31 @@
 # limitations under the License.
 
 from pathlib import Path
+import traceback
 import cv2
+from tensorpc.apps.flow.coretypes import MessageLevel
 from tensorpc.apps.flow.flowapp import App 
+import imageio
+import io
+import base64
+from tensorpc.apps.flow.client import add_message
+from faker import Faker
+
+import asyncio
+from tensorpc.core import prim
+
+from tensorpc.core.asynctools import cancel_task
 
 class SampleApp(App):
     def __init__(self) -> None:
         super().__init__()
-        self.add_buttons(["A", "B", "LoadImage"], self.on_button_click)
+        self.add_buttons(["LoadImage", "SendMessage", "OpenCam"], self.on_button_click)
         self.add_switch("Switch", self.on_switch)
         self.add_input("Image Path", self.on_input_change)
         self.img_ui = self.add_images(1)
         self.img_path = ""
         self.set_init_window_size([480, 640])
+        self.task = None
 
     async def on_button_click(self, name: str):
         print(name)
@@ -32,10 +45,26 @@ class SampleApp(App):
             path = Path(self.img_path)
             print(path)
             if path.exists():
-                img = cv2.imread(str(path))
-                print(type(img))
-                print(img.shape)
-                await self.img_ui.show(0, img)
+                if path.suffix == ".gif":
+                    with path.open("rb") as f:
+                        data = f.read()
+                    raw = b'data:image/gif;base64,' + base64.b64encode(data)
+                    await self.img_ui.show_raw(0, raw)
+                else:
+                    img = cv2.imread(str(path))
+                    # print(type(img))
+                    # print(img.shape)
+                    await self.img_ui.show(0, img)
+        elif name == "SendMessage":
+            add_message("New Message From App!!!", MessageLevel.Warning, [])
+        elif name == "OpenCam":
+            if self.task is None:
+                loop = asyncio.get_running_loop()
+                self.task = asyncio.create_task(self._video_task())
+            else:
+                await cancel_task(self.task)
+                self.task = None
+            print("?")
 
     async def on_switch(self, checked: bool):
         print(checked)
@@ -43,4 +72,18 @@ class SampleApp(App):
     async def on_input_change(self, value: str):
         print(value)
         self.img_path = value
+
+    async def _video_task(self):
+        import time 
+        cap = cv2.VideoCapture(0)
+        loop = asyncio.get_running_loop()
+        t = time.time()
+        while True:
+            ret, frame = cap.read()
+            suffix = "jpg"
+            _, img_str = cv2.imencode(".{}".format(suffix), frame)
+            await self.img_ui.show_raw(0, b'data:image/jpg;base64,' + base64.b64encode(img_str))
+            # await asyncio.sleep(0)
+            # print(cnt, len(img_str), (time.time() - t) / cnt)
+
 

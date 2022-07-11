@@ -39,6 +39,8 @@ from tensorpc.utils.df_logging import get_logger
 
 LOGGER = get_logger()
 
+class _PlaceHolder:
+    pass
 
 class AsyncRemoteObject(object):
     """
@@ -288,13 +290,13 @@ class AsyncRemoteObject(object):
             yield (args, kwargs)
 
         count = 0
-        res: Optional[Any] = None
+        res: Optional[_PlaceHolder] = _PlaceHolder()
         async for res in self.chunked_stream_remote_call(key,
                                                          stream_generator(),
                                                          rpc_flags=rpc_flags):
             count += 1
         assert count == 1
-        assert res is not None 
+        assert not isinstance(res, _PlaceHolder)
         return res
 
     async def _wait_func(self):

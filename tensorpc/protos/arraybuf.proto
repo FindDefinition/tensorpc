@@ -24,6 +24,7 @@ message dtype {
     bool_ = 11;
     CustomBytes = 12; // just bytes without any specific format.
     Base64 = 13; // just bytes without any specific format.
+
   }
   DataType type = 1;
   ByteOrder byte_order = 2;

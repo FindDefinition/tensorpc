@@ -210,3 +210,19 @@ class UserContentEvent(UserEvent):
         return res
 
 
+class ScheduleEvent:
+    def __init__(self, timestamp: int, data: Any, envs: Dict[str, Any]) -> None:
+        self.data = data
+        self.timestamp = timestamp
+        self.envs = envs
+
+    def to_dict(self):
+        return {
+            "ts": self.timestamp,
+            "data": self.data,
+            "envs": self.envs,
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(data["ts"], data["data"], data["envs"])

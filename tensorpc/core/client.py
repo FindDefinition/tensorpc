@@ -22,6 +22,9 @@ LOGGER = get_logger()
 class RemoteException(RuntimeError):
     pass
 
+class _PlaceHolder:
+    pass
+
 
 def format_stdout(stdout_string: str, prefix: str) -> str:
     lines = stdout_string.split("\n")
@@ -310,13 +313,13 @@ class RemoteObject(object):
             yield (args, kwargs)
 
         count = 0
-        res: Optional[Any] = None
+        res: Optional[_PlaceHolder] = _PlaceHolder()
         for res in self.chunked_stream_remote_call(key,
                                                    stream_generator(),
                                                    rpc_flags=rpc_flags):
             count += 1
         assert count == 1
-        # assert res is not None 
+        assert not isinstance(res, _PlaceHolder)
         return res
 
     def _wait_func(self):

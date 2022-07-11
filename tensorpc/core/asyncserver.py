@@ -263,7 +263,7 @@ def serve(service_def: ServiceDef,
             max_threads=max_threads, process_id=process_id, credentials=credentials))
     except KeyboardInterrupt:
         print("shutdown by keyboard interrupt")
-
+# import uvloop
 def serve_with_http(service_def: ServiceDef,
                     wait_time=-1,
                     port=50051,
@@ -277,6 +277,8 @@ def serve_with_http(service_def: ServiceDef,
         raise NotImplementedError
     url = '[::]:{}'.format(port)
     try:
+        # uvloop.install()
+        # print("UVLOOP")
         asyncio.run(serve_with_http_async(service_def, url, wait_time=wait_time, 
             port=port, http_port=http_port, length=length, is_local=is_local,
             max_threads=max_threads, process_id=process_id, credentials=credentials))

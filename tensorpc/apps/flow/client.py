@@ -128,3 +128,12 @@ def add_message(title: str, level: MessageLevel, items: List[MessageItem]):
         tensorpc.simple_remote_call(grpc_url, serv_names.FLOW_ADD_MESSAGE, [msg.to_dict_with_detail()])
     else:
         tensorpc.simple_remote_call(grpc_url, serv_names.FLOWWORKER_ADD_MESSAGE, gid, [msg.to_dict_with_detail()])
+
+def add_info_message(title: str, items: List[MessageItem]):
+    return add_message(title, MessageLevel.Info, items)
+
+def add_warning_message(title: str, items: List[MessageItem]):
+    return add_message(title, MessageLevel.Warning, items)
+
+def add_error_message(title: str, items: List[MessageItem]):
+    return add_message(title, MessageLevel.Error, items)
