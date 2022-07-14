@@ -1,11 +1,11 @@
 # Copyright 2022 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,7 +20,7 @@ from tensorpc.core.httpclient import http_remote_call
 from tensorpc.core.serviceunit import get_cls_obj_from_module_name
 import tensorpc
 from ..client import MasterMeta
-from tensorpc import prim 
+from tensorpc import prim
 from tensorpc.apps.flow.serv_names import serv_names
 import traceback
 
@@ -28,6 +28,7 @@ import traceback
 class FlowApp:
     """this service must run inside devflow.
     """
+
     def __init__(self, module_name: str, config: Dict[str, Any]) -> None:
         print(module_name, config)
         self.module_name = module_name
@@ -36,8 +37,7 @@ class FlowApp:
         self.master_meta = MasterMeta()
         assert self.master_meta.is_inside_devflow, "this service must run inside devflow"
         assert self.master_meta.is_http_valid
-        obj_type, alias, module_key = get_cls_obj_from_module_name(
-            module_name)
+        obj_type, alias, module_key = get_cls_obj_from_module_name(module_name)
         self.app: App = obj_type(**self.config)
         self._send_loop_queue: "asyncio.Queue[AppEvent]" = self.app._queue
         self._send_loop_task: Optional[asyncio.Task] = None
@@ -45,13 +45,16 @@ class FlowApp:
         self.shutdown_ev.clear()
         self._send_loop_task = asyncio.create_task(self._send_loop())
 
-        self._uid = get_uid(self.master_meta.graph_id, self.master_meta.node_id)
+        self._uid = get_uid(self.master_meta.graph_id,
+                            self.master_meta.node_id)
         self.app._send_callback = self._send_http_event
 
         lay = self.app._get_app_layout()
         # print(lay)
         print(self.master_meta.http_url)
-        asyncio.run_coroutine_threadsafe(self._send_loop_queue.put(AppEvent("", AppEventType.UpdateLayout, LayoutEvent(lay))), loop=asyncio.get_running_loop())
+        asyncio.run_coroutine_threadsafe(self._send_loop_queue.put(
+            AppEvent("", AppEventType.UpdateLayout, LayoutEvent(lay))),
+                                         loop=asyncio.get_running_loop())
 
     def _get_app(self):
         return self.app
@@ -72,21 +75,32 @@ class FlowApp:
     async def _send_http_event(self, ev: AppEvent):
         ev.uid = self._uid
         if self.master_meta.is_worker:
-            return await self._http_remote_call(serv_names.FLOWWORKER_PUT_APP_EVENT, self.master_meta.graph_id, ev.to_dict())
+            return await self._http_remote_call(
+                serv_names.FLOWWORKER_PUT_APP_EVENT, self.master_meta.graph_id,
+                ev.to_dict())
         else:
-            return await self._http_remote_call(serv_names.FLOW_PUT_APP_EVENT, ev.to_dict())
+            return await self._http_remote_call(serv_names.FLOW_PUT_APP_EVENT,
+                                                ev.to_dict())
 
-    async def _send_grpc_event(self, ev: AppEvent, robj: tensorpc.AsyncRemoteManager):
+    async def _send_grpc_event(self, ev: AppEvent,
+                               robj: tensorpc.AsyncRemoteManager):
         if self.master_meta.is_worker:
-            return await robj.remote_call(serv_names.FLOWWORKER_PUT_APP_EVENT, self.master_meta.graph_id, ev.to_dict())
+            return await robj.remote_call(serv_names.FLOWWORKER_PUT_APP_EVENT,
+                                          self.master_meta.graph_id,
+                                          ev.to_dict())
         else:
-            return await robj.remote_call(serv_names.FLOW_PUT_APP_EVENT, ev.to_dict())
+            return await robj.remote_call(serv_names.FLOW_PUT_APP_EVENT,
+                                          ev.to_dict())
 
-    async def _send_grpc_event_large(self, ev: AppEvent, robj: tensorpc.AsyncRemoteManager):
+    async def _send_grpc_event_large(self, ev: AppEvent,
+                                     robj: tensorpc.AsyncRemoteManager):
         if self.master_meta.is_worker:
-            return await robj.chunked_remote_call(serv_names.FLOWWORKER_PUT_APP_EVENT, self.master_meta.graph_id, ev.to_dict())
+            return await robj.chunked_remote_call(
+                serv_names.FLOWWORKER_PUT_APP_EVENT, self.master_meta.graph_id,
+                ev.to_dict())
         else:
-            return await robj.chunked_remote_call(serv_names.FLOW_PUT_APP_EVENT, ev.to_dict())
+            return await robj.chunked_remote_call(
+                serv_names.FLOW_PUT_APP_EVENT, ev.to_dict())
 
     async def _send_loop(self):
         # TODO unlike flowworker, the app shouldn't disconnect to master/worker.
@@ -103,8 +117,9 @@ class FlowApp:
         while True:
             # TODO if send fail, save this ev and send after reconnection
             # ev = await self._send_loop_queue.get()
-            (done, pending) = await asyncio.wait(
-                wait_tasks, return_when=asyncio.FIRST_COMPLETED)
+            (done,
+             pending) = await asyncio.wait(wait_tasks,
+                                           return_when=asyncio.FIRST_COMPLETED)
             if shut_task in done:
                 break
             ev: AppEvent = send_task.result()

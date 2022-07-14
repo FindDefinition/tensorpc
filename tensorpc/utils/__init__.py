@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from typing import Type, TypeVar
-
+from tensorpc.constants import TENSORPC_SPLIT
 
 def get_qualname_of_type(klass: Type) -> str:
     module = klass.__module__
@@ -25,4 +25,4 @@ def get_service_key_by_type(klass: Type, method_name: str):
     splits = qname.split(".")[:-1]
     ns = ".".join(splits)
     type_name = klass.__qualname__
-    return f"{ns}:{type_name}.{method_name}"
+    return f"{ns}{TENSORPC_SPLIT}{type_name}.{method_name}"

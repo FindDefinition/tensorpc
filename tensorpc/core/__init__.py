@@ -13,13 +13,13 @@
 # limitations under the License.
 
 from tensorpc.core.defs import Service, ServiceDef, from_yaml_path
-
+from tensorpc.constants import TENSORPC_SPLIT
 BUILTIN_SERVICES = [ 
-    Service("tensorpc.services.vis:VisService", {}),
-    Service("tensorpc.services.collection:FileOps", {}),
-    Service("tensorpc.apps.flow.serv.core:Flow", {}),
-    Service("tensorpc.apps.flow.serv.worker:FlowWorker", {}),
-    Service("tensorpc.services.collection:Simple", {}),
+    Service(f"tensorpc.services.vis{TENSORPC_SPLIT}VisService", {}),
+    Service(f"tensorpc.services.collection{TENSORPC_SPLIT}FileOps", {}),
+    Service(f"tensorpc.apps.flow.serv.core{TENSORPC_SPLIT}Flow", {}),
+    Service(f"tensorpc.apps.flow.serv.worker{TENSORPC_SPLIT}FlowWorker", {}),
+    Service(f"tensorpc.services.collection{TENSORPC_SPLIT}Simple", {}),
 ]
 
 def get_http_url(url: str, port: int):

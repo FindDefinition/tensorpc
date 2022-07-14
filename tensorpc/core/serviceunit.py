@@ -1,13 +1,16 @@
-import inspect
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
-from enum import Enum
 import dataclasses
-from pathlib import Path
 import importlib
-from tensorpc.constants import TENSORPC_FUNC_META_KEY
+import inspect
+import runpy
 import types
+from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+
+from tensorpc.constants import TENSORPC_FUNC_META_KEY, TENSORPC_SPLIT
 from tensorpc.core import inspecttools
 from tensorpc.core.defs import DynamicEvent
+
 
 class ParamType(Enum):
     PosOnly = "PosOnly"
@@ -91,22 +94,38 @@ class ServFunctionMeta:
 
 
 def get_cls_obj_from_module_name(module_name: str):
-    module_cls = module_name.split(":")
+    """x.y.z::Class::Alias
+    x.y.z::Class
+    x.y.z::Class.f1
+    Alias.f1
+    !/your/path/to/module.py::Class::Alias
+    """
+    module_cls = module_name.split(TENSORPC_SPLIT)
     module_path = module_cls[0]
-    cls_name = module_cls[1]
     alias: Optional[str] = None
     if len(module_cls) == 3:
-        alias = module_cls[2]
+        alias = module_cls[-1]
+        cls_name = module_cls[-2]
+    else:
+        cls_name = module_cls[-1]
     try:
-        mod = importlib.import_module(module_path)
+        if module_path.startswith("!"):
+            # treat module_path as a file path
+            module_path = module_path[1:]
+            assert Path(module_path).exists(), f"your {module_path} not exists"
+            module_dict = runpy.run_path(module_path)
+        else:
+            mod = importlib.import_module(module_path)
+            module_dict = mod.__dict__
     except ImportError:
         print(f"Can't Import {module_name}. Check your project or PWD")
         raise
-    cls_obj = mod.__dict__[cls_name]
-    return cls_obj, alias, f"{module_path}:{cls_name}"
+    cls_obj = module_dict[cls_name]
+    return cls_obj, alias, f"{module_path}{TENSORPC_SPLIT}{cls_name}"
 
 
 class FunctionUserMeta:
+
     def __init__(self,
                  type: ServiceType,
                  event_name: str = "",
@@ -120,7 +139,9 @@ class FunctionUserMeta:
         assert self._event_name != ""
         return self._event_name
 
+
 class EventProvider:
+
     def __init__(self,
                  service_key: str,
                  event_name: str,
@@ -141,11 +162,14 @@ class EventProvider:
 
 
 class ServiceUnit:
-    """x.y.z:Class:Alias
-    x.y.z:Class
-    x.y.z:Class.f1
+    """x.y.z::Class::Alias
+    x.y.z::Class
+    x.y.z::Class.f1
     Alias.f1
+    !/path/to/module.py::Class::Alias
+    !C:\\path\\to\\module.py::Class::Alias
     """
+
     def __init__(self, module_name: str, config: Dict[str, Any]) -> None:
         assert config is not None, "please use {} in yaml if config is empty"
         self.obj_type, self.alias, self.module_key = get_cls_obj_from_module_name(
@@ -307,6 +331,7 @@ class ServiceUnit:
 
 
 class ServiceUnits:
+
     def __init__(self, sus: List[ServiceUnit]) -> None:
         self.sus = sus
         self.key_to_su: Dict[str, ServiceUnit] = {}
@@ -365,5 +390,5 @@ class ServiceUnits:
 
 
 if __name__ == "__main__":
-    su = ServiceUnit("distflow.services.for_test:ServiceForTest:Test", {})
+    su = ServiceUnit("tensorpc.services.for_test::ServiceForTest::Test", {})
     print(su.run_service("Test.add", 1, 2))

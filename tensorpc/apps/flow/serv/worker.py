@@ -16,30 +16,37 @@
 import asyncio
 import enum
 import os
+import time
 import traceback
 from typing import Any, Dict, List, Optional, Union
+
+import grpc
 import tensorpc
+from tensorpc import prim
 from tensorpc.apps.flow import constants as flowconstants
+from tensorpc.apps.flow.coretypes import (Message, MessageEvent,
+                                          MessageEventType, RelayEvent,
+                                          RelayEventType, RelaySSHEvent,
+                                          RelayUpdateNodeEvent,
+                                          relay_event_from_dict)
 from tensorpc.apps.flow.flowapp import AppEvent, app_event_from_data
 from tensorpc.apps.flow.serv_names import serv_names
-from tensorpc import prim
-import grpc
-from tensorpc.apps.flow.coretypes import MessageEvent, MessageEventType, RelayEvent, RelayEventType, RelaySSHEvent, RelayUpdateNodeEvent, relay_event_from_dict, Message
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, RawEvent,
                                    SSHClient, SSHRequest, SSHRequestType)
 from tensorpc.core import get_http_url
 from tensorpc.core.httpclient import http_remote_call
 from tensorpc.utils.address import convert_url_to_local, get_url_port
-from .core import AppNode, CommandNode, Node, NodeWithSSHBase, SessionStatus, _get_uid, node_from_data
-import time
 from tensorpc.utils.wait_tools import get_free_ports
+
+from .core import (AppNode, CommandNode, Node, NodeWithSSHBase, SessionStatus,
+                   _get_uid, node_from_data)
 
 ALL_EVENT_TYPES = Union[RelayEvent, MessageEvent, AppEvent]
 
 
-
 class FlowClient:
+
     def __init__(self) -> None:
         self.previous_connection_url = ""
         self._send_loop_queue: "asyncio.Queue[ALL_EVENT_TYPES]" = asyncio.Queue(
@@ -169,8 +176,7 @@ class FlowClient:
         http_port = node.http_port
         app_url = get_http_url("localhost", http_port)
         print("GET LAYOUT", app_url)
-        return await http_remote_call(sess, app_url,
-                                      serv_names.APP_GET_LAYOUT)
+        return await http_remote_call(sess, app_url, serv_names.APP_GET_LAYOUT)
 
     async def add_message(self, raw_msgs: List[Any]):
         await self._send_loop_queue.put(
@@ -275,10 +281,14 @@ class FlowClient:
             if uid in self._cached_nodes:
                 msgs = self._cached_nodes[uid].messages
                 res.append({
-                    "id": nid,
-                    "last_event": self._cached_nodes[uid].last_event.value,
-                    "session_status": self._cached_nodes[uid].get_session_status().value,
-                    "stdout": self._cached_nodes[uid].stdout,
+                    "id":
+                    nid,
+                    "last_event":
+                    self._cached_nodes[uid].last_event.value,
+                    "session_status":
+                    self._cached_nodes[uid].get_session_status().value,
+                    "stdout":
+                    self._cached_nodes[uid].stdout,
                     "msgs": [m.to_dict() for m in msgs.values()],
                 })
             else:
@@ -347,7 +357,7 @@ class FlowClient:
         if node.is_session_started():
             await node.send_ctrl_c()
         print("STOP", graph_id, node_id, node.is_session_started())
-        
+
     async def stop_session(self, graph_id: str, node_id: str):
         node = self._cached_nodes[_get_uid(graph_id, node_id)]
         if node.is_session_started():
@@ -392,6 +402,7 @@ class FlowClient:
 
 
 class FlowWorker:
+
     def __init__(self) -> None:
         self.worker_port = prim.get_server_grpc_port()
         self._clients: Dict[str, FlowClient] = {}
@@ -482,12 +493,10 @@ class FlowWorker:
             graph_id, node_id, ui_ev_dict)
 
     async def get_layout(self, graph_id: str, node_id: str):
-        return await self._get_client(graph_id).get_layout(
-            graph_id, node_id)
+        return await self._get_client(graph_id).get_layout(graph_id, node_id)
 
     async def stop_session(self, graph_id: str, node_id: str):
-        return await self._get_client(graph_id).stop_session(
-            graph_id, node_id)
+        return await self._get_client(graph_id).stop_session(graph_id, node_id)
 
     async def exit(self):
         for k, v in self._clients.items():
@@ -497,4 +506,3 @@ class FlowWorker:
                         await n.soft_shutdown()
                         await n.exit_event.wait()
         prim.get_async_shutdown_event().set()
-    

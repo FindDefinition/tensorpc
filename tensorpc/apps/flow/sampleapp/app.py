@@ -22,6 +22,7 @@ import io
 import base64
 from tensorpc.apps.flow.client import add_message
 from faker import Faker
+from datetime import datetime
 
 import asyncio
 from tensorpc.core import prim
@@ -38,6 +39,8 @@ class SampleApp(App):
         self.img_path = ""
         self.set_init_window_size([480, 640])
         self.task = None
+
+        self.task_loop = self.add_task_loop("Test", self.on_task_loop)
 
     async def on_button_click(self, name: str):
         print(name)
@@ -73,16 +76,38 @@ class SampleApp(App):
         print(value)
         self.img_path = value
 
+    async def on_task_loop(self):
+        await self.task_loop.update_label("TASK")
+
+        print("TASK START!!!")
+        async for item in self.task_loop.task_loop(range(5), total=5):
+            async for item in self.task_loop.task_loop(range(20), total=20):
+                await asyncio.sleep(0.05)
+        print("TASK END!!!")
+        await self.task_loop.update_label("FINISHED!")
+
     async def _video_task(self):
         import time 
         cap = cv2.VideoCapture(0)
         loop = asyncio.get_running_loop()
         t = time.time()
+        fr = 0
+        dura = 1
+        t = time.time()
+        fr = 0
         while True:
             ret, frame = cap.read()
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            now = datetime.now()
+            dt_string = now.strftime("%H:%M:%S")
+
+            frame = cv2.putText(frame,f'{dt_string} FrameRate={1 / dura:.2f}',(10,30), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
             suffix = "jpg"
             _, img_str = cv2.imencode(".{}".format(suffix), frame)
+
             await self.img_ui.show_raw(0, b'data:image/jpg;base64,' + base64.b64encode(img_str))
+            dura = time.time() - t
+            t = time.time()
             # await asyncio.sleep(0)
             # print(cnt, len(img_str), (time.time() - t) / cnt)
 

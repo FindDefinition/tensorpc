@@ -15,13 +15,17 @@
 """
 
 import asyncio
-import enum
-import numpy as np
-from typing import Any, Awaitable, Callable, Coroutine, Dict, List, Optional, Tuple, Union
-from PIL import Image
-
 import base64
+import enum
 import io
+import time
+import traceback
+from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
+                    Iterable, List, Optional, Tuple, TypeVar, Union)
+
+import numpy as np
+from PIL import Image
+from tensorpc.core.asynctools import cancel_task
 from tensorpc.utils.registry import HashableRegistry
 
 ALL_APP_EVENTS = HashableRegistry()
@@ -36,25 +40,13 @@ def _encode_image(img: np.ndarray):
     img_str = f"data:image/png;base64,{img_str}"
     return img_str
 
+
 def _encode_image_bytes(img: np.ndarray):
     pil_img = Image.fromarray(img)
     buffered = io.BytesIO()
     pil_img.save(buffered, format="PNG")
     b64_bytes = base64.b64encode(buffered.getvalue())
     return b"data:image/png;base64," + b64_bytes
-
-async def async_range(start, stop=None, step=1):
-    """same as range but schedule other tasks to run in every iteration
-    """
-    if stop:
-        range_ = range(start, stop, step)
-    else:
-        range_ = range(start)
-    for i in range_:
-        yield i
-        # allow other task run, important for
-        # long-time loop based sync task
-        await asyncio.sleep(0)
 
 
 class UIType(enum.Enum):
@@ -67,15 +59,29 @@ class UIType(enum.Enum):
     Image = 10
     Text = 11
 
+    # special
+    TaskLoop = 100
+
 
 class AppEventType(enum.Enum):
     # controls
     UIEvent = 0
     UpdateLayout = 1
 
+class UIRunStatus(enum.Enum):
+    Stop = 0
+    Running = 1
+    Pause = 2
+
+class TaskLoopEvent(enum.Enum):
+    Start = 0
+    Stop = 1
+    Pause = 2
+
 
 @ALL_APP_EVENTS.register(key=AppEventType.UIEvent.value)
 class UIEvent:
+
     def __init__(self, uid: str, data: Any) -> None:
         self.uid = uid
         self.data = data
@@ -93,6 +99,7 @@ class UIEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.UpdateLayout.value)
 class LayoutEvent:
+
     def __init__(self, data) -> None:
         self.data = data
 
@@ -123,6 +130,7 @@ def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":
 
 
 class AppEvent:
+
     def __init__(self, uid: str, type: AppEventType,
                  event: Union[UIEvent, LayoutEvent]) -> None:
         self.uid = uid
@@ -138,16 +146,25 @@ class AppEvent:
 
 
 class Component:
+
     def __init__(self, uid: str, type: UIType, queue: asyncio.Queue) -> None:
         self.type = type
         self.uid = uid
         self.queue = queue
 
+        self._status = UIRunStatus.Stop
+        # task for callback of controls
+        # if previous control callback hasn't finished yet,
+        # the new control event will be IGNORED
+        self._task: Optional[asyncio.Task] = None
+
     def to_dict(self):
         return {
             "type": self.type.value,
             "uid": self.uid,
-            "state": {},
+            "state": {
+                "status": self._status.value,
+            },
         }
 
     def create_update_event(self, data: Any):
@@ -155,6 +172,20 @@ class Component:
         # uid is set in flowapp service later.
         return AppEvent("", AppEventType.UIEvent, ev)
 
+    async def run_callback(self, cb: Callable[[], Coroutine[None, None, None]]):
+        self._status = UIRunStatus.Running
+        await self.sync_status()
+        try:
+            await cb()
+        except:
+            traceback.print_exc()
+            raise
+        finally:
+            self._status = UIRunStatus.Stop
+            await self.sync_status()
+
+    async def sync_status(self):
+        await self.queue.put(self.create_update_event({"status": self._status.value}))
 
 class Images(Component):
     # TODO keep last event state?
@@ -182,11 +213,11 @@ class Images(Component):
 
     def show_raw_event(self, index: int, image_b64_bytes: bytes):
         self.image_str = image_b64_bytes
-        
+
         return self.create_update_event({
-                "index": index,
-                "image": image_b64_bytes,
-            })
+            "index": index,
+            "image": image_b64_bytes,
+        })
 
     def to_dict(self):
         res = super().to_dict()
@@ -194,18 +225,17 @@ class Images(Component):
         res["state"] = {
             "image": self.image_str,
         }
-        return res 
+        return res
 
 
 class Text(Component):
+
     def __init__(self, init: str, uid: str, queue: asyncio.Queue) -> None:
         super().__init__(uid, UIType.Text, queue)
         self.value = init
 
     async def write(self, content: str):
-        await self.queue.put(self.create_update_event({
-            "value": self.value
-        }))
+        await self.queue.put(self.create_update_event({"value": self.value}))
         self.value = content
 
     def to_dict(self):
@@ -213,12 +243,13 @@ class Text(Component):
         res["state"] = {
             "value": self.value,
         }
-        return res 
+        return res
 
 
 class Buttons(Component):
+
     def __init__(self, uid: str, names: List[str],
-                 callback: Callable[[str], Awaitable[None]],
+                 callback: Callable[[str], Coroutine[None, None, None]],
                  queue: asyncio.Queue) -> None:
         super().__init__(uid, UIType.Buttons, queue)
         self.names = names
@@ -226,12 +257,17 @@ class Buttons(Component):
 
     def to_dict(self):
         res = super().to_dict()
-        res["names"] = self.names 
-        return res 
+        res["names"] = self.names
+        return res
+
+    # async def run_callback(self, name: str):
+    #     await super().run_callback(lambda: self.callback(name))
+
 
 class Input(Component):
+
     def __init__(self, uid: str, label: str,
-                 callback: Callable[[str], Awaitable[None]],
+                 callback: Callable[[str], Coroutine[None, None, None]],
                  queue: asyncio.Queue) -> None:
         super().__init__(uid, UIType.Input, queue)
         self.label = label
@@ -241,15 +277,19 @@ class Input(Component):
 
     def to_dict(self):
         res = super().to_dict()
-        res["label"] = self.label 
+        res["label"] = self.label
         res["state"] = {
             "value": self.value,
-        } 
-        return res 
+        }
+        return res
+
+    # async def run_callback(self, value: str):
+    #     await super().run_callback(lambda: self.callback(value))
 
 class Switch(Component):
+
     def __init__(self, uid: str, label: str,
-                 callback: Callable[[bool], Awaitable[None]],
+                 callback: Callable[[bool], Coroutine[None, None, None]],
                  queue: asyncio.Queue) -> None:
         super().__init__(uid, UIType.Switch, queue)
         self.label = label
@@ -258,54 +298,150 @@ class Switch(Component):
 
     def to_dict(self):
         res = super().to_dict()
-        res["label"] = self.label 
+        res["label"] = self.label
         res["state"] = {
             "checked": self.checked,
-        } 
-        return res 
+        }
+        return res
+
+    # async def run_callback(self, checked: bool):
+    #     await super().run_callback(lambda: self.callback(checked))
+
+
+_T = TypeVar("_T")
+
+class TaskLoop(Component):
+
+    def __init__(self, uid: str, label: str,
+                 loop_callbcak: Callable[[], Coroutine[None, None, None]],
+                 queue: asyncio.Queue,
+                 update_period: float = 0.2) -> None:
+        super().__init__(uid, UIType.TaskLoop, queue)
+        self.label = label
+        self.loop_callbcak = loop_callbcak
+
+        self.progresses: List[float] = [0.0]
+        self.stack_count = 0
+        self.pause_event = asyncio.Event()
+        self.pause_event.set()
+        self.update_period = update_period
+
+    def to_dict(self):
+        res = super().to_dict()
+        res["state"] = {
+            "label": self.label,
+            "progresses": self.progresses,
+        }
+        return res
+
+    async def task_loop(self, it: Iterable[_T], total: int = -1) -> AsyncGenerator[_T, None]:
+        if isinstance(it, list):
+            total = len(it)
+        try:
+            cnt = 0
+            t = time.time()
+            dura = 0.0
+            if self.stack_count > 0:
+                # keep root progress
+                self.progresses.append(0.0)
+            self.stack_count += 1
+            for item in it:
+                yield item
+                # await asyncio.sleep(0)
+                await self.pause_event.wait()
+                cnt += 1
+                dura += time.time() - t 
+                
+                if total > 0 and dura > self.update_period:
+                    dura = 0
+                    prog = cnt / total
+                    await self.update_progress(prog, self.stack_count - 1)
+                t = time.time()
+            await self.update_progress(1.0, self.stack_count - 1)
+        finally:
+            self.stack_count -= 1
+            self.pause_event.set()
+            if len(self.progresses) > 1:
+                self.progresses.pop()
+        
+    async def update_progress(self, progress: float, index: int):
+        progress = max(0, min(progress, 1))
+        self.progresses[index] = progress
+        await self.queue.put(self.create_update_event({"progresses": self.progresses}))
+
+    async def update_label(self, label: str):
+        await self.queue.put(self.create_update_event({ "label": label}))
+        self.label = label
 
 class App:
+
     def __init__(self) -> None:
         self._components: List[Component] = []
         self._uid_to_comp: Dict[str, Component] = {}
         self._queue = asyncio.Queue(maxsize=10)
 
         self._init_size = [480, 640]
-        self._send_callback: Optional[Callable[[AppEvent], Coroutine[None, None, None]]] = None
+        self._send_callback: Optional[Callable[[AppEvent],
+                                               Coroutine[None, None,
+                                                         None]]] = None
 
     def _get_app_layout(self):
         return {
             "windowSize": self._init_size,
-            "layout": [c.to_dict() for c in self._components],
+            "layout": {
+                c.uid: c.to_dict() for c in self._components
+            },
         }
 
     def set_init_window_size(self, size: List[int]):
         self._init_size = size
 
     async def _handle_control_event(self, ev: UIEvent):
-        # TODO schedule callback as a task to avoid RPC hang
+        # TODO run control fron other component
         comp = self._uid_to_comp[ev.uid]
-        if isinstance(comp, Buttons):
-            await comp.callback(ev.data)
-        elif isinstance(comp, Input):
-            await comp.callback(ev.data)
-            comp.value = ev.data
-        elif isinstance(comp, Switch):
-            await comp.callback(ev.data)
-            comp.checked = ev.data
+        if isinstance(comp, (Buttons, Input, Switch)):
+            if comp._status == UIRunStatus.Running:
+                # TODO send exception if ignored click
+                print("IGNORE EVENT", comp._status)
+                return 
+            elif comp._status == UIRunStatus.Stop:
+                comp._task = asyncio.create_task(comp.run_callback(lambda: comp.callback(ev.data)))
+        elif isinstance(comp, TaskLoop):
+            if ev.data == TaskLoopEvent.Start.value:
+                if comp._status == UIRunStatus.Stop:
+                    comp._task = asyncio.create_task(comp.run_callback(comp.loop_callbcak))
+                else:
+                    print("IGNORE TaskLoop EVENT", comp._status)
+            elif ev.data == TaskLoopEvent.Pause.value:
+                if comp._status == UIRunStatus.Running:
+                    # pause
+                    comp.pause_event.clear()
+                    comp._status = UIRunStatus.Pause
+                elif comp._status == UIRunStatus.Pause:
+                    comp.pause_event.set()
+                    comp._status = UIRunStatus.Running
+                else:
+                    print("IGNORE TaskLoop EVENT", comp._status)
+            elif ev.data == TaskLoopEvent.Stop.value:
+                if comp._status == UIRunStatus.Running:
+                    await cancel_task(comp._task)
+                else:
+                    print("IGNORE TaskLoop EVENT", comp._status)
+            else:
+                raise NotImplementedError
         else:
             raise NotImplementedError
 
     def add_buttons(self, names: List[str],
-                    callback: Callable[[str], Awaitable[None]]):
+                    callback: Callable[[str], Coroutine[None, None, None]]):
         uid = str(len(self._components))
         ui = Buttons(uid, names, callback, self._queue)
         self._components.append(ui)
         self._uid_to_comp[uid] = ui
         return ui
 
-    def add_input(self, label: str, callback: Callable[[str],
-                                                       Awaitable[None]]):
+    def add_input(self, label: str,
+                  callback: Callable[[str], Coroutine[None, None, None]]):
         uid = str(len(self._components))
         ui = Input(uid, label, callback, self._queue)
         self._components.append(ui)
@@ -313,8 +449,8 @@ class App:
 
         return ui
 
-    def add_switch(self, label: str, callback: Callable[[bool],
-                                                        Awaitable[None]]):
+    def add_switch(self, label: str,
+                   callback: Callable[[bool], Coroutine[None, None, None]]):
         uid = str(len(self._components))
         ui = Switch(uid, label, callback, self._queue)
         self._components.append(ui)
@@ -331,6 +467,17 @@ class App:
     def add_text(self, init: str):
         uid = str(len(self._components))
         ui = Text(init, uid, self._queue)
+        self._components.append(ui)
+        self._uid_to_comp[uid] = ui
+        return ui
+
+    def add_task_loop(self, label: str, callback: Callable[[], Coroutine[None, None, None]],
+            update_period: float = 0.2):
+        """use ASYNC LOOP in this ui!!!!!!!!!!!!!
+        DON'T USE OTHER LOOP!!!
+        """
+        uid = str(len(self._components))
+        ui = TaskLoop(uid, label, callback, self._queue, update_period)
         self._components.append(ui)
         self._uid_to_comp[uid] = ui
         return ui

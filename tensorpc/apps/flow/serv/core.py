@@ -13,35 +13,40 @@
 # limitations under the License.
 
 import asyncio
+import base64
 import bisect
 import enum
-from functools import partial
 import itertools
 import json
 import time
 import traceback
 import uuid
 from collections import deque
+from functools import partial
 from pathlib import Path
 from typing import (Any, Awaitable, Callable, Coroutine, Dict, Iterable, List,
                     Optional, Set, Tuple, Type, Union)
-import bcrypt
+
 import aiohttp
 import asyncssh
+import bcrypt
 import tensorpc
-import base64
 from tensorpc import get_http_url, http_remote_call, marker, prim
-from tensorpc.apps.flow.constants import (
-    FLOW_DEFAULT_GRAPH_ID, FLOW_FOLDER_PATH, TENSORPC_FLOW_DEFAULT_TMUX_NAME,
-    TENSORPC_FLOW_GRAPH_ID, TENSORPC_FLOW_MASTER_GRPC_PORT,
-    TENSORPC_FLOW_MASTER_HTTP_PORT, TENSORPC_FLOW_NODE_ID,
-    TENSORPC_FLOW_NODE_READABLE_ID, TENSORPC_FLOW_NODE_UID,
-    TENSORPC_FLOW_USE_REMOTE_FWD)
+from tensorpc.apps.flow.constants import (FLOW_DEFAULT_GRAPH_ID,
+                                          FLOW_FOLDER_PATH,
+                                          TENSORPC_FLOW_DEFAULT_TMUX_NAME,
+                                          TENSORPC_FLOW_GRAPH_ID,
+                                          TENSORPC_FLOW_MASTER_GRPC_PORT,
+                                          TENSORPC_FLOW_MASTER_HTTP_PORT,
+                                          TENSORPC_FLOW_NODE_ID,
+                                          TENSORPC_FLOW_NODE_READABLE_ID,
+                                          TENSORPC_FLOW_NODE_UID,
+                                          TENSORPC_FLOW_USE_REMOTE_FWD)
 from tensorpc.apps.flow.coretypes import (Message, MessageEvent,
                                           MessageEventType, MessageLevel,
-                                          ScheduleEvent, UserContentEvent,
-                                          UserEvent, UserStatusEvent, get_uid,
-                                          SessionStatus)
+                                          ScheduleEvent, SessionStatus,
+                                          UserContentEvent, UserEvent,
+                                          UserStatusEvent, get_uid)
 from tensorpc.apps.flow.flowapp import AppEvent, app_event_from_data
 from tensorpc.apps.flow.serv_names import serv_names
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
@@ -558,7 +563,9 @@ class CommandNode(NodeWithSSHBase):
             await self.input_queue.put(" ".join(self.commands) + "\n")
         else:
             envs_stmt = [f"export {k}={v}" for k, v in newenvs.items()]
-            await self.input_queue.put(" && ".join(envs_stmt + [" ".join(self.commands)]) + "\n")
+            await self.input_queue.put(" && ".join(envs_stmt +
+                                                   [" ".join(self.commands)]) +
+                                       "\n")
 
     # async def push_new_envs(self, envs: Dict[str, Any]):
     #     envs_stmt = [f"export {k}={v}" for k, v in envs.items()]
