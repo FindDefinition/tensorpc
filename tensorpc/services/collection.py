@@ -73,7 +73,7 @@ class FileOps:
 
 
     @marker.mark_client_stream
-    def upload_file(self, gen_iter, path, exist_ok: bool = False, parents: bool = False):
+    async def upload_file(self, gen_iter, path, exist_ok: bool = False, parents: bool = False):
         """service that upload a large file to server.
         you need to use client_stream instead of remote_call.
         for transfer recovery, we need to save states to server
@@ -89,7 +89,7 @@ class FileOps:
                 raise ValueError("{} parent not exist.".format(path))
         try:
             with path.open("wb") as f:
-                for chunk in gen_iter:
+                async for chunk in gen_iter:
                     f.write(chunk)
         except Exception as e:
             path.unlink()

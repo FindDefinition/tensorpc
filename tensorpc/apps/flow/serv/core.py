@@ -31,6 +31,7 @@ import aiohttp
 import asyncssh
 import bcrypt
 import tensorpc
+from tensorpc.constants import TENSORPC_SPLIT
 from tensorpc import get_http_url, http_remote_call, marker, prim
 from tensorpc.apps.flow.constants import (FLOW_DEFAULT_GRAPH_ID,
                                           FLOW_FOLDER_PATH,
@@ -708,7 +709,7 @@ class AppNode(CommandNode):
         return True, init_event
 
     async def run_command(self):
-        serv_name = "tensorpc.apps.flow.serv.flowapp:FlowApp"
+        serv_name = f"tensorpc.apps.flow.serv.flowapp{TENSORPC_SPLIT}FlowApp"
         cfg = {
             serv_name: {
                 "module_name": self.module_name,

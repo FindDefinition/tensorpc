@@ -39,7 +39,7 @@ REQUIRED = [
     "mashumaro",
     "libtmux",
     "pillow",
-    "bcypt",
+    "bcrypt",
 ]
 
 # What packages are optional?

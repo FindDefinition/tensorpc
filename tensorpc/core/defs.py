@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Any
 from pathlib import Path
 import base64 
-import json 
+import json
+
+from tensorpc.constants import TENSORPC_SPLIT 
 
 @dataclass
 class Service(DataClassYAMLMixin):
@@ -37,7 +39,7 @@ def decode_config_b64_and_update(cfg_b64: str, servs: List[Service]):
     key_to_serv: Dict[str, Service] = {}
     for serv in servs:
         key = serv.module_name
-        key = ":".join(key.split(":")[:2])
+        key = TENSORPC_SPLIT.join(key.split(TENSORPC_SPLIT)[:2])
         key_to_serv[key] = serv
     for k, v in serv_config.items():
         assert k in key_to_serv, f"{k} not exist in services"
