@@ -40,6 +40,7 @@ REQUIRED = [
     "libtmux",
     "pillow",
     "bcrypt",
+    "jinja2",
 ]
 
 # What packages are optional?

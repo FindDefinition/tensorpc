@@ -40,7 +40,7 @@ from tensorpc.utils.address import convert_url_to_local, get_url_port
 from tensorpc.utils.wait_tools import get_free_ports
 
 from .core import (AppNode, CommandNode, Node, NodeWithSSHBase, SessionStatus,
-                   _get_uid, node_from_data)
+                   _get_uid, node_from_data, JINJA2_VARIABLE_ENV)
 
 ALL_EVENT_TYPES = Union[RelayEvent, MessageEvent, AppEvent]
 
@@ -57,6 +57,7 @@ class FlowClient:
         self._need_to_send_env: Optional[ALL_EVENT_TYPES] = None
         self.selected_node_uid = ""
         self.lock = asyncio.Lock()
+        self.var_dict: Dict[str, str] = {}
 
     async def delete_message(self, graph_id: str, node_id: str,
                              message_id: str):
@@ -103,6 +104,7 @@ class FlowClient:
             raise NotImplementedError
 
     async def _grpc_send_loop(self, url: str):
+        # TODO support app event merge
         shut_task = asyncio.create_task(self.shutdown_ev.wait())
         async with tensorpc.AsyncRemoteManager(url) as robj:
             if self._need_to_send_env is not None:
@@ -135,6 +137,10 @@ class FlowClient:
                     self.selected_node_uid = ""
                     break
         self._send_loop_task = None
+
+    def render_command(self, cmd: str):
+        template = JINJA2_VARIABLE_ENV.from_string(cmd)
+        return template.render(**self.var_dict)
 
     async def create_connection(self, url: str, timeout: float):
         async with tensorpc.AsyncRemoteManager(url) as robj:
@@ -206,8 +212,8 @@ class FlowClient:
 
         return node.terminal_state
 
-    async def sync_graph(self, graph_id: str, node_datas: List[Dict[str,
-                                                                    Any]]):
+    async def sync_graph(self, graph_id: str, node_datas: List[Dict[str, Any]],
+                         var_dict: Dict[str, str]):
         new_nodes = [node_from_data(d) for d in node_datas]
         # print("EXIST", self._cached_nodes)
         # print("SYNCED NODES", [n.id for n in new_nodes])
@@ -233,6 +239,7 @@ class FlowClient:
                 new_node_dict[k] = v
         async with self.lock:
             self._cached_nodes = new_node_dict
+        self.var_dict = var_dict
         res = []
         for node in new_node_dict.values():
             msgs = node.messages
@@ -349,8 +356,8 @@ class FlowClient:
                                      enable_port_forward=False,
                                      is_worker=True)
             if init_cmds:
-                await node.input_queue.put(init_cmds)
-        await node.run_command()
+                await node.input_queue.put(self.render_command(init_cmds))
+        await node.run_command(cmd_renderer=self.render_command)
 
     async def stop(self, graph_id: str, node_id: str):
         node = self._cached_nodes[_get_uid(graph_id, node_id)]
@@ -413,10 +420,10 @@ class FlowWorker:
             self._clients[graph_id] = FlowClient()
         return self._clients[graph_id]
 
-    async def sync_graph(self, graph_id: str, node_datas: List[Dict[str,
-                                                                    Any]]):
+    async def sync_graph(self, graph_id: str, node_datas: List[Dict[str, Any]],
+                         var_dict: Dict[str, str]):
         return await self._get_client(graph_id).sync_graph(
-            graph_id, node_datas)
+            graph_id, node_datas, var_dict)
 
     async def create_connection(self, graph_id: str, url: str, timeout: float):
         return await self._get_client(graph_id).create_connection(url, timeout)

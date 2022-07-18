@@ -14,6 +14,7 @@
 
 from pathlib import Path
 import traceback
+from typing import Any, Union
 import cv2
 from tensorpc.apps.flow.coretypes import MessageLevel
 from tensorpc.apps.flow.flowapp import App 
@@ -32,15 +33,23 @@ from tensorpc.core.asynctools import cancel_task
 class SampleApp(App):
     def __init__(self) -> None:
         super().__init__()
-        self.add_buttons(["LoadImage", "SendMessage", "OpenCam"], self.on_button_click)
-        self.add_switch("Switch", self.on_switch)
-        self.add_input("Image Path", self.on_input_change)
-        self.img_ui = self.add_images(1)
+        self.root.add_buttons(["LoadImage", "SendMessage", "OpenCam", "RunCode"], self.on_button_click)
+        self.root.add_switch("Switch", self.on_switch)
+        self.root.add_input("Image Path", self.on_input_change)
+        self.img_ui = self.root.add_image()
         self.img_path = ""
         self.set_init_window_size([480, 640])
         self.task = None
 
-        self.task_loop = self.add_task_loop("Test", self.on_task_loop)
+        self.task_loop = self.root.add_task_loop("Test", self.on_task_loop)
+        self.root.add_slider("Slider", 0, 100, 1, self.on_slider_change)
+        self.root.add_select("Select", [("One", 0), ("Two", 1)], self.on_select_change)
+        self.root.add_radio_group(["Option1", "Option2"], True, self.on_radio)
+        self.code = ""
+        self.root.add_code_editor("python", self.on_code_change)
+
+    async def on_radio(self, name: str):
+        print(name)
 
     async def on_button_click(self, name: str):
         print(name)
@@ -52,12 +61,12 @@ class SampleApp(App):
                     with path.open("rb") as f:
                         data = f.read()
                     raw = b'data:image/gif;base64,' + base64.b64encode(data)
-                    await self.img_ui.show_raw(0, raw)
+                    await self.img_ui.show_raw(raw)
                 else:
                     img = cv2.imread(str(path))
                     # print(type(img))
                     # print(img.shape)
-                    await self.img_ui.show(0, img)
+                    await self.img_ui.show(img)
         elif name == "SendMessage":
             add_message("New Message From App!!!", MessageLevel.Warning, [])
         elif name == "OpenCam":
@@ -68,13 +77,25 @@ class SampleApp(App):
                 await cancel_task(self.task)
                 self.task = None
             print("?")
-
+        elif name == "RunCode":
+            exec(self.code)
     async def on_switch(self, checked: bool):
         print(checked)
 
     async def on_input_change(self, value: str):
         print(value)
         self.img_path = value
+
+    async def on_code_change(self, value: str):
+        self.code = value
+        print("CODE CHANGE")
+
+
+    async def on_slider_change(self, value: Union[int, float]):
+        print("SLIDER", value)
+
+    async def on_select_change(self, value: Any):
+        print("SELECT", value)
 
     async def on_task_loop(self):
         await self.task_loop.update_label("TASK")
@@ -105,7 +126,7 @@ class SampleApp(App):
             suffix = "jpg"
             _, img_str = cv2.imencode(".{}".format(suffix), frame)
 
-            await self.img_ui.show_raw(0, b'data:image/jpg;base64,' + base64.b64encode(img_str))
+            await self.img_ui.show_raw(b'data:image/jpg;base64,' + base64.b64encode(img_str))
             dura = time.time() - t
             t = time.time()
             # await asyncio.sleep(0)

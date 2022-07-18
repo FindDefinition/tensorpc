@@ -80,11 +80,11 @@ def vis_in_relay(figs):
     for d in figs:
         assert isinstance(d, figure.Figure)
         datas.append(d.data())
-    simple_chunk_call(DEFAULT_VIS_IP, "tensorpc.services.vis:VisService.send_vis_message", datas)
+    simple_chunk_call(DEFAULT_VIS_IP, "tensorpc.services.vis::VisService.send_vis_message", datas)
 
 
 def vis_pc_in_relay(pc, uid=0, factor=100, **props):
-    simple_chunk_call(DEFAULT_VIS_IP, "tensorpc.services.vis:VisService.send_vis_message",
+    simple_chunk_call(DEFAULT_VIS_IP, "tensorpc.services.vis::VisService.send_vis_message",
                       [get_pc_fig(pc, uid, factor=factor, **props).data()])
 
 

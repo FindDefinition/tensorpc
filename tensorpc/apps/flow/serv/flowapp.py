@@ -23,7 +23,7 @@ from ..client import MasterMeta
 from tensorpc import prim
 from tensorpc.apps.flow.serv_names import serv_names
 import traceback
-
+import time 
 
 class FlowApp:
     """this service must run inside devflow.
@@ -53,7 +53,7 @@ class FlowApp:
         # print(lay)
         print(self.master_meta.http_url)
         asyncio.run_coroutine_threadsafe(self._send_loop_queue.put(
-            AppEvent("", AppEventType.UpdateLayout, LayoutEvent(lay))),
+            AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)})),
                                          loop=asyncio.get_running_loop())
 
     def _get_app(self):
@@ -103,42 +103,48 @@ class FlowApp:
                 serv_names.FLOW_PUT_APP_EVENT, ev.to_dict())
 
     async def _send_loop(self):
-        # TODO unlike flowworker, the app shouldn't disconnect to master/worker.
+        # TODO unlike flowworker, the app shouldn't disconnect to master/flowworker.
         # so we should just use retry here.
         shut_task = asyncio.create_task(self.shutdown_ev.wait())
         grpc_url = self.master_meta.grpc_url
         # async with tensorpc.AsyncRemoteManager(grpc_url) as robj:
-        if self._need_to_send_env is not None:
-            # TODO if this fail?
-            await self._send_http_event(self._need_to_send_env)
-            self._need_to_send_env = None
         send_task = asyncio.create_task(self._send_loop_queue.get())
         wait_tasks: List[asyncio.Task] = [shut_task, send_task]
+        master_disconnect = 0.0
+        retry_duration = 2.0 # 2s
+        previous_event = AppEvent(self._uid, {})
         while True:
-            # TODO if send fail, save this ev and send after reconnection
-            # ev = await self._send_loop_queue.get()
+            # if send fail, MERGE incoming app events, and send again after some time.
+            # all app event is "replace" in frontend.
             (done,
              pending) = await asyncio.wait(wait_tasks,
                                            return_when=asyncio.FIRST_COMPLETED)
             if shut_task in done:
                 break
             ev: AppEvent = send_task.result()
+            ts = time.time()
             # assign uid here.
             ev.uid = self._uid
             send_task = asyncio.create_task(self._send_loop_queue.get())
             wait_tasks: List[asyncio.Task] = [shut_task, send_task]
-            try:
-                # print("SEND", ev.type)
-                # pass
-                await self._send_http_event(ev)
-                # print("SEND", ev.type, "FINISH")
-
-            except Exception as e:
-                # remote call may fail by connection broken
-                # TODO retry for reconnection
-                traceback.print_exc()
-                self._send_loop_task = None
-                self._need_to_send_env = ev
-                # when disconnect to master, enter slient mode
-                break
+            if master_disconnect >= 0:
+                previous_event = previous_event.merge_new(ev)
+                if ts - master_disconnect > retry_duration:
+                    try:
+                        await self._send_http_event(previous_event)
+                        master_disconnect = -1
+                        previous_event = AppEvent(self._uid, {})
+                    except Exception as e:
+                        print("Retry connection Fail.")
+                        master_disconnect = ts                    
+            else:
+                try:
+                    # print("SEND", ev.type)
+                    await self._send_http_event(ev)
+                    # print("SEND", ev.type, "FINISH")
+                except Exception as e:
+                    # remote call may fail by connection broken
+                    # when disconnect to master/remote worker, enter slient mode
+                    previous_event = previous_event.merge_new(ev)
+                    master_disconnect = ts
         self._send_loop_task = None

@@ -264,11 +264,11 @@ async def main():
 
             await client.subscribe("Test.event")
             await client.on("Test.event", lambda x: print(x))
-            await client.subscribe("tensorpc.services.vis:VisService.new_vis_message")
+            await client.subscribe("tensorpc.services.vis::VisService.new_vis_message")
             def onevent(x):
                 hasnan = np.isnan(x[0]["base"]["data"]).any()
                 print("hasnan", hasnan, x[0]["base"]["data"][0])
-            await client.on("tensorpc.services.vis:VisService.new_vis_message", onevent)
+            await client.on("tensorpc.services.vis::VisService.new_vis_message", onevent)
             print("?")
             print(client._name_to_serv_id)
             res = await client.remote_json_call("Test.echo", 5)

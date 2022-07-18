@@ -33,16 +33,12 @@ import bcrypt
 import tensorpc
 from tensorpc.constants import TENSORPC_SPLIT
 from tensorpc import get_http_url, http_remote_call, marker, prim
-from tensorpc.apps.flow.constants import (FLOW_DEFAULT_GRAPH_ID,
-                                          FLOW_FOLDER_PATH,
-                                          TENSORPC_FLOW_DEFAULT_TMUX_NAME,
-                                          TENSORPC_FLOW_GRAPH_ID,
-                                          TENSORPC_FLOW_MASTER_GRPC_PORT,
-                                          TENSORPC_FLOW_MASTER_HTTP_PORT,
-                                          TENSORPC_FLOW_NODE_ID,
-                                          TENSORPC_FLOW_NODE_READABLE_ID,
-                                          TENSORPC_FLOW_NODE_UID,
-                                          TENSORPC_FLOW_USE_REMOTE_FWD)
+from tensorpc.apps.flow.constants import (
+    FLOW_DEFAULT_GRAPH_ID, FLOW_FOLDER_PATH, TENSORPC_FLOW_DEFAULT_TMUX_NAME,
+    TENSORPC_FLOW_GRAPH_ID, TENSORPC_FLOW_MASTER_GRPC_PORT,
+    TENSORPC_FLOW_MASTER_HTTP_PORT, TENSORPC_FLOW_NODE_ID,
+    TENSORPC_FLOW_NODE_READABLE_ID, TENSORPC_FLOW_NODE_UID,
+    TENSORPC_FLOW_USE_REMOTE_FWD)
 from tensorpc.apps.flow.coretypes import (Message, MessageEvent,
                                           MessageEventType, MessageLevel,
                                           ScheduleEvent, SessionStatus,
@@ -59,6 +55,11 @@ from tensorpc.core.asynctools import cancel_task
 from tensorpc.utils.address import get_url_port
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.wait_tools import get_free_ports
+from jinja2 import BaseLoader, Environment, Template
+
+JINJA2_VARIABLE_ENV = Environment(loader=BaseLoader,
+                                  variable_start_string="{{",
+                                  variable_end_string="}}")
 
 ALL_NODES = HashableRegistry()
 
@@ -532,9 +533,14 @@ class RemoteSSHNode(NodeWithSSHBase):
             SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
         return worker_exists, init_event
 
-    async def run_command(self):
-        if self.init_commands:
-            await self.input_queue.put(self.init_commands)
+    async def run_command(self,
+                          newenvs: Optional[Dict[str, Any]] = None,
+                          cmd_renderer: Optional[Callable[[str], str]] = None):
+        init_cmd = self.init_commands
+        if cmd_renderer is not None and init_cmd:
+            init_cmd = cmd_renderer(init_cmd)
+        if init_cmd:
+            await self.input_queue.put(init_cmd)
         await self.input_queue.put((
             f"python -m tensorpc.cli.start_worker --name={TENSORPC_FLOW_DEFAULT_TMUX_NAME} "
             f"--port={self.remote_port} "
@@ -545,7 +551,14 @@ class RemoteSSHNode(NodeWithSSHBase):
 
 @ALL_NODES.register
 class EnvNode(Node):
-    pass
+
+    @property
+    def key(self):
+        return self.node_data["key"]
+
+    @property
+    def value(self):
+        return self.node_data["value"]
 
 
 @ALL_NODES.register
@@ -559,13 +572,18 @@ class CommandNode(NodeWithSSHBase):
         args = self.node_data["args"]
         return [x["value"] for x in filter(lambda x: x["enabled"], args)]
 
-    async def run_command(self, newenvs: Optional[Dict[str, Any]] = None):
+    async def run_command(self,
+                          newenvs: Optional[Dict[str, Any]] = None,
+                          cmd_renderer: Optional[Callable[[str], str]] = None):
+        cmd = " ".join(self.commands)
+        if cmd_renderer:
+            cmd = cmd_renderer(cmd)
         if not newenvs:
-            await self.input_queue.put(" ".join(self.commands) + "\n")
+            await self.input_queue.put(cmd + "\n")
         else:
             envs_stmt = [f"export {k}={v}" for k, v in newenvs.items()]
             await self.input_queue.put(" && ".join(envs_stmt +
-                                                   [" ".join(self.commands)]) +
+                                                   [cmd]) +
                                        "\n")
 
     # async def push_new_envs(self, envs: Dict[str, Any]):
@@ -708,7 +726,9 @@ class AppNode(CommandNode):
             SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
         return True, init_event
 
-    async def run_command(self):
+    async def run_command(self,
+                          newenvs: Optional[Dict[str, Any]] = None,
+                          cmd_renderer: Optional[Callable[[str], str]] = None):
         serv_name = f"tensorpc.apps.flow.serv.flowapp{TENSORPC_SPLIT}FlowApp"
         cfg = {
             serv_name: {
@@ -799,6 +819,19 @@ class FlowGraph:
         # passwords will be encrypted during save-graph
         # and saved.
         self.salt = ""
+
+        self.variable_dict = self._get_jinja_variable_dict(nodes)
+
+    def render_command(self, cmd: str):
+        template = JINJA2_VARIABLE_ENV.from_string(cmd)
+        return template.render(**self.variable_dict)
+
+    def _get_jinja_variable_dict(self, nodes: List[Node]):
+        variable_dict: Dict[str, str] = {}
+        for n in nodes:
+            if isinstance(n, EnvNode):
+                variable_dict[n.key] = n.value
+        return variable_dict
 
     def _update_connection(self, edges: List[Edge]):
         for k, v in self._node_id_to_node.items():
@@ -918,6 +951,7 @@ class FlowGraph:
         self._edge_id_to_edge = {n.id: n for n in edges}
         self._update_connection(edges)
         self._update_driver()
+        self.variable_dict = self._get_jinja_variable_dict(nodes)
         return
 
 
@@ -1347,7 +1381,7 @@ class Flow:
                         node, HandleTypes.Driver)
                     await node.http_remote_call(
                         serv_names.FLOWWORKER_SYNC_GRAPH, graph_id,
-                        [n.to_dict() for n in driv_nodes])
+                        [n.to_dict() for n in driv_nodes], graph.variable_dict)
 
     async def load_default_graph(self):
         return await self.load_graph(FLOW_DEFAULT_GRAPH_ID, force_reload=False)
@@ -1402,7 +1436,7 @@ class Flow:
         await self._ssh_q.put(ev)
 
     async def _start_remote_worker(self, graph_id: str, node_id: str):
-        node = self.flow_dict[graph_id].get_node_by_id(node_id)
+        node, graph = self._get_node_and_graph(graph_id, node_id)
         if isinstance(node, RemoteSSHNode):
             worker_exists: bool = False
             if not node.is_session_started():
@@ -1422,7 +1456,7 @@ class Flow:
                     node.password,
                     rfports=rfports)
                 await ssh_init_event.wait()
-            await node.run_command()
+            await node.run_command(cmd_renderer=graph.render_command)
             # wait for ssh session init
             if not worker_exists:
                 # wait for channel ready, then sync graph
@@ -1436,7 +1470,7 @@ class Flow:
                     node, HandleTypes.Driver)
             res = await node.http_remote_call(
                 serv_names.FLOWWORKER_SYNC_GRAPH, graph_id,
-                [n.to_dict() for n in driv_nodes])
+                [n.to_dict() for n in driv_nodes], graph.variable_dict)
             for ev, node in zip(res, driv_nodes):
                 le = CommandEventType(ev["last_event"])
                 sess_st = SessionStatus(ev["session_status"])
@@ -1473,7 +1507,7 @@ class Flow:
             await node.input_queue.put(driver.init_commands)
 
     async def start(self, graph_id: str, node_id: str):
-        node = self.flow_dict[graph_id].get_node_by_id(node_id)
+        node, graph = self._get_node_and_graph(graph_id, node_id)
         if isinstance(node, RemoteSSHNode):
             return await self._start_remote_worker(graph_id, node_id)
         if isinstance(node, CommandNode):
@@ -1489,7 +1523,7 @@ class Flow:
             if isinstance(driver, DirectSSHNode):
                 if not node.is_session_started():
                     await self._start_session_direct(graph_id, node, driver)
-                await node.run_command()
+                await node.run_command(cmd_renderer=graph.render_command)
             elif isinstance(driver, RemoteSSHNode):
                 assert (driver.url != "" and driver.username != ""
                         and driver.password != "")
