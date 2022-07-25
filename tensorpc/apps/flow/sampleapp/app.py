@@ -17,7 +17,7 @@ import traceback
 from typing import Any, Union
 import cv2
 from tensorpc.apps.flow.coretypes import MessageLevel
-from tensorpc.apps.flow.flowapp import App, Button, HBox, ListItemButton, ListItemText, Text, VBox, VList 
+from tensorpc.apps.flow.flowapp import App, Button, HBox, ListItemButton, ListItemText, Text, VBox, VList, Plotly
 import imageio
 import io
 import base64
@@ -161,3 +161,71 @@ class SampleDictApp(App):
     async def _ppend_list(self):
         await self.vlist.update_childs({f"text{self.cnt}": ListItemText(str(self.cnt))})
         self.cnt += 1
+
+
+class SamplePlotApp(App):
+    def __init__(self) -> None:
+        super().__init__()
+        data = [
+          {
+            "x": [1, 2, 3],
+            "y": [2, 6, 3],
+            "type": 'scatter',
+            "mode": 'lines+markers',
+            "marker": {"color": 'red'},
+          },
+        ]
+        layout = {
+            "height": 240,
+            "autosize": 'true',
+             "margin": {
+              "l": 0,
+              "r": 0,
+              "b": 0,
+              "t": 0,
+            #   "pad": 0
+            },
+            #  "margin": {
+            # #   "l": 0,
+            # #   "r": 0,
+            # #   "b": 0,
+            #   "t": 20,
+            # #   "pad": 0
+            # },
+
+            "yaxis": {
+                "automargin": True,
+            },
+            "xaxis": {
+                "automargin": True,
+            },
+
+
+        }
+
+        self.plot = Plotly(data=data, layout=layout)
+        self.root.add_layout({
+            "plot0": self.plot,
+            "btn": Button("Show", self._show_plot)
+        })
+        self.set_init_window_size([480, 320])
+
+    async def _show_plot(self):
+        data = [
+          {
+            "x": [1, 2, 3],
+            "y": [3, 2, 1],
+            "type": 'scatter',
+            "mode": 'lines+markers',
+            "marker": {"color": 'red'},
+          },
+        ]
+        layout = {"width": 320, "height": 240,
+            "yaxis": {
+                "automargin": True,
+            },
+            "xaxis": {
+                "automargin": True,
+            }
+        }
+        await self.plot.show_raw(data, layout)

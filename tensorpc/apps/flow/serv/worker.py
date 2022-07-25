@@ -356,7 +356,7 @@ class FlowClient:
                                      enable_port_forward=False,
                                      is_worker=True)
             if init_cmds:
-                await node.input_queue.put(self.render_command(init_cmds))
+                await node.input_queue.put(self.render_command(init_cmds) + "\n")
         await node.run_command(cmd_renderer=self.render_command)
 
     async def stop(self, graph_id: str, node_id: str):

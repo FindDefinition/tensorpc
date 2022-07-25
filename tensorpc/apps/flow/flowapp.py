@@ -67,6 +67,7 @@ class UIType(enum.Enum):
     # outputs
     Image = 10
     Text = 11
+    Plotly = 12
 
     # special
     TaskLoop = 100
@@ -382,6 +383,36 @@ class Images(Component):
         state["image"] = self.image_str
         return state
 
+class Plotly(Component):
+
+    def __init__(self,
+                data: Optional[list] = None,
+                layout: Optional[dict] = None,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 flex: Optional[Union[int, str]] = None,
+                 align_self: Optional[str] = None) -> None:
+        super().__init__(uid, UIType.Plotly, queue, flex, align_self)
+        if data is None:
+            data = []
+        if layout is None:
+            layout = {}
+        self.data = data
+        self.layout = layout
+
+
+    async def show_raw(self, data: list, layout: Any):
+        await self.queue.put(
+            self.create_update_event({
+                "data": data,
+                "layout": layout,
+            }))
+
+    def get_state(self):
+        state = super().get_state()
+        state["data"] = self.data
+        state["layout"] = self.layout
+        return state
 
 class Text(Component):
 
@@ -598,6 +629,7 @@ class FlexBox(Component):
                       add_to_state: bool = True,
                       anonymous: bool = False):
         uid = self._get_uid_with_ns(name)
+        print(uid)
         if anonymous:
             uid = self._pool(uid)
         comp.uid = uid

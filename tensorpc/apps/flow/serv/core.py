@@ -290,7 +290,7 @@ class DirectSSHNode(Node):
 
     @property
     def init_commands(self) -> str:
-        cmds = self.node_data["initCommands"].strip() + "\n"
+        cmds = self.node_data["initCommands"].strip()
         return cmds
 
 
@@ -437,12 +437,12 @@ class RemoteSSHNode(NodeWithSSHBase):
 
     @property
     def init_commands(self) -> str:
-        cmds = self.node_data["initCommands"].strip() + "\n"
+        cmds = self.node_data["initCommands"].strip()
         return cmds
 
     @property
     def remote_init_commands(self) -> str:
-        cmds = self.node_data["remoteInitCommands"].strip() + "\n"
+        cmds = self.node_data["remoteInitCommands"].strip()
         return cmds
 
     def _env_port_modifier(self, fports: List[int], rfports: List[int],
@@ -611,7 +611,8 @@ class CommandNode(NodeWithSSHBase):
                             envs: Dict[str, str],
                             is_worker: bool,
                             enable_port_forward: bool,
-                            rfports: Optional[List[int]] = None):
+                            rfports: Optional[List[int]] = None,
+                            init_cmds: str = ""):
         assert self.task is None
         init_event = asyncio.Event()
         self.shutdown_ev.clear()
@@ -678,7 +679,8 @@ class AppNode(CommandNode):
                             envs: Dict[str, str],
                             is_worker: bool,
                             enable_port_forward: bool,
-                            rfports: Optional[List[int]] = None):
+                            rfports: Optional[List[int]] = None,
+                            init_cmds: str = ""):
         assert self.task is None
         init_event = asyncio.Event()
         self.shutdown_ev.clear()
@@ -687,7 +689,7 @@ class AppNode(CommandNode):
         # print("APP", url, client.url_no_port, client.port)
         if not is_worker:
             # query two free port in target via ssh, then use them as app ports
-            ports = await _get_free_port(2, url, username, password)
+            ports = await _get_free_port(2, url, username, password, init_cmds)
         else:
             # query two local ports in flow remote worker, then use them as app ports
             ports = get_free_ports(2)
@@ -974,15 +976,19 @@ def _empty_flow_graph(graph_id: str = ""):
     return FlowGraph(data, graph_id)
 
 
-async def _get_free_port(count: int, url: str, username: str, password: str):
+async def _get_free_port(count: int, url: str, username: str, password: str, init_cmds: str = ""):
     client = SSHClient(url, username, password, None, "")
     ports = []
     # res = await client.simple_run_command(f"python -m tensorpc.cli.free_port {count}")
     # print(res)
     async with client.simple_connect() as conn:
         try:
-            cmd = (f"bash -i -c "
-                   f'"python -m tensorpc.cli.free_port {count}"')
+            if init_cmds:
+                cmd = (f"bash -i -c "
+                    f'"{init_cmds} && python -m tensorpc.cli.free_port {count}"')
+            else:
+                cmd = (f"bash -i -c "
+                    f'"python -m tensorpc.cli.free_port {count}"')
             result = await conn.run(cmd, check=True)
             stdout = result.stdout
             if stdout is not None:
@@ -1494,6 +1500,7 @@ class Flow:
             rfports = [prim.get_server_meta().port]
             if prim.get_server_meta().http_port >= 0:
                 rfports.append(prim.get_server_meta().http_port)
+        # TODO render init commands
         await node.start_session(
             self._cmd_node_callback,
             driver.url,
@@ -1502,9 +1509,10 @@ class Flow:
             is_worker=False,
             enable_port_forward=driver.enable_port_forward,
             envs=envs,
-            rfports=rfports)
+            rfports=rfports,
+            init_cmds=driver.init_commands)
         if driver.init_commands != "":
-            await node.input_queue.put(driver.init_commands)
+            await node.input_queue.put(driver.init_commands + "\n")
 
     async def start(self, graph_id: str, node_id: str):
         node, graph = self._get_node_and_graph(graph_id, node_id)
