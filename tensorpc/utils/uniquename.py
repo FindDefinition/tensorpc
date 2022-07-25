@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Set
+
+
 def _make_unique_name(unique_set, name, max_count=10000):
     if name not in unique_set:
         unique_set.add(name)
@@ -27,10 +30,13 @@ def _make_unique_name(unique_set, name, max_count=10000):
 class UniqueNamePool:
     def __init__(self, max_count=10000):
         self.max_count = max_count
-        self.unique_set = set()
+        self.unique_set: Set[str] = set()
 
     def __call__(self, name):
         return _make_unique_name(self.unique_set, name, self.max_count)
 
-    def __contains__(self, key):
+    def __contains__(self, key: str):
         return key in self.unique_set
+
+    def pop(self, key: str):
+        self.unique_set.remove(key)

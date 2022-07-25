@@ -17,7 +17,7 @@ import traceback
 from typing import Any, Union
 import cv2
 from tensorpc.apps.flow.coretypes import MessageLevel
-from tensorpc.apps.flow.flowapp import App 
+from tensorpc.apps.flow.flowapp import App, Button, HBox, ListItemButton, ListItemText, Text, VBox, VList 
 import imageio
 import io
 import base64
@@ -133,3 +133,31 @@ class SampleApp(App):
             # print(cnt, len(img_str), (time.time() - t) / cnt)
 
 
+class SampleDictApp(App):
+    def __init__(self) -> None:
+        super().__init__()
+        self.vlist = VList({
+            "text0": ListItemText("0"),
+            "text1": ListItemText("1"),
+        }, flex=1)
+        self.cnt = 2
+        self.root.add_layout({
+            "btn0": Button("CLICK ME", lambda: print("HELLO BTN")),
+            # "vlist0": VList({
+            #     "btn0": ListItemButton("wtf1", lambda: print("HELLO List BTN1")),
+            #     "btn1": ListItemButton("wtf2", lambda: print("HELLO List BTN2")),
+            # }),
+            "layout0": HBox({
+                "btn0": Button("CLICK ME1", lambda: print("HELLO BTN1"), flex=1),
+                "btn1": Button("Add", self._ppend_list, flex=1),
+            }),
+            "l0": HBox({
+                "items": self.vlist,
+                "text": Text("content", flex=3),
+            }, height="100%"),
+        })
+        self.set_init_window_size([480, 640])
+
+    async def _ppend_list(self):
+        await self.vlist.update_childs({f"text{self.cnt}": ListItemText(str(self.cnt))})
+        self.cnt += 1
