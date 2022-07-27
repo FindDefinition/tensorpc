@@ -17,7 +17,7 @@ import traceback
 from typing import Any, Union
 import cv2
 from tensorpc.apps.flow.coretypes import MessageLevel
-from tensorpc.apps.flow.flowapp import App, Button, HBox, ListItemButton, ListItemText, Text, VBox, VList, Plotly
+from tensorpc.apps.flow.flowapp import App, Button, HBox, ListItemButton, ListItemText, Text, VBox, VList, Plotly, ChartJSLine
 import imageio
 import io
 import base64
@@ -229,3 +229,77 @@ class SamplePlotApp(App):
             }
         }
         await self.plot.show_raw(data, layout)
+
+class SampleChartJSApp(App):
+    def __init__(self) -> None:
+        super().__init__()
+        options = {
+            "responsive": True,
+            "devicePixelRatio": 1.5,
+            "plugins": {
+                "legend": {
+                "position": 'top',
+                },
+                "title": {
+                "display": True,
+                "text": 'Chart.js Line Chart',
+                },
+            },
+        }
+        labels =  ['January', 'February', 'March', 'April', 'May', 'June', 'July']
+        data = {
+           "labels": labels,
+            "datasets": [
+                {
+                "label": 'Dataset 1',
+                "data": list(range(len(labels))),
+                "borderColor": 'rgb(255, 99, 132)',
+                "backgroundColor": 'rgba(255, 99, 132, 0.5)',
+                },
+                {
+                "label": 'Dataset 2',
+                "data": list(range(len(labels))),
+                "borderColor": 'rgb(53, 162, 235)',
+                "backgroundColor": 'rgba(53, 162, 235, 0.5)',
+                },
+            ],
+        }
+        self.plot = ChartJSLine(data=data, options=options)
+        self.root.add_layout({
+            "plot0": self.plot,
+            "btn": Button("Show", self._show_plot)
+        })
+        self.set_init_window_size([480, 320])
+
+    async def _show_plot(self):
+        options = {
+            "responsive": True,
+            "plugins": {
+                "legend": {
+                "position": 'top',
+                },
+                "title": {
+                "display": True,
+                "text": 'Chart.js Line Chart',
+                },
+            },
+        }
+        labels =  ['0', '1', '2', '3', '4', '5', '6']
+        data = {
+           "labels": labels,
+            "datasets": [
+                {
+                "label": 'Dataset 1',
+                "data": list(range(len(labels))),
+                "borderColor": 'rgb(255, 99, 132)',
+                "backgroundColor": 'rgba(255, 99, 132, 0.5)',
+                },
+                {
+                "label": 'Dataset 2',
+                "data": list(range(len(labels))),
+                "borderColor": 'rgb(53, 162, 235)',
+                "backgroundColor": 'rgba(53, 162, 235, 0.5)',
+                },
+            ],
+        }
+        await self.plot.show_raw(data, options)

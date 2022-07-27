@@ -68,6 +68,7 @@ class UIType(enum.Enum):
     Image = 10
     Text = 11
     Plotly = 12
+    ChartJSLine = 13
 
     # special
     TaskLoop = 100
@@ -339,6 +340,9 @@ class Component:
         else:
             await self.queue.put(
                 self.create_update_event({"status": self._status.value}))
+    
+    async def sync_state(self):
+        return await self.sync_status(True)
 
     def get_sync_event(self, sync_state: bool = False):
         if sync_state:
@@ -412,6 +416,37 @@ class Plotly(Component):
         state = super().get_state()
         state["data"] = self.data
         state["layout"] = self.layout
+        return state
+
+class ChartJSLine(Component):
+
+    def __init__(self,
+                data: Optional[Any] = None,
+                options: Optional[Any] = None,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 flex: Optional[Union[int, str]] = None,
+                 align_self: Optional[str] = None) -> None:
+        super().__init__(uid, UIType.ChartJSLine, queue, flex, align_self)
+        if data is None:
+            data = {}
+        if options is None:
+            options = {}
+        self.data = data
+        self.options = options
+
+
+    async def show_raw(self, data: list, options: Any):
+        await self.queue.put(
+            self.create_update_event({
+                "data": data,
+                "options": options,
+            }))
+
+    def get_state(self):
+        state = super().get_state()
+        state["data"] = self.data
+        state["options"] = self.options
         return state
 
 class Text(Component):
@@ -567,23 +602,26 @@ class FlexBox(Component):
 
         self.inited = inited
 
-    def _attach_to_app(self, ns: str, queue: asyncio.Queue,
-                       uid_to_comp: Dict[str, Component]):
+    def _attach_to_app(self, queue: asyncio.Queue):
+        # update queue of this and childs
         if not self.inited:
             self._queue = queue
-            prev_uid_to_comp = self._uid_to_comp
-            self._uid_to_comp = uid_to_comp
-            # update all name
-            for k, v in prev_uid_to_comp.items():
+            for k, v in self._uid_to_comp.items():
                 v._queue = queue
                 if isinstance(v, FlexBox):
-                    v._uid_to_comp = uid_to_comp
                     v.inited = True
-                new_name = f"{ns}.{k}"
-                v.uid = new_name
-                assert new_name not in uid_to_comp
-                uid_to_comp[new_name] = v
             self.inited = True
+
+    def _update_child_ns_and_comp_dict(self, ns: str, uid_to_comp: Dict[str, Component]):
+        prev_uid_to_comp = self._uid_to_comp
+        self._uid_to_comp = uid_to_comp
+        for k, v in prev_uid_to_comp.items():
+            new_name = f"{ns}.{k}"
+            v.uid = new_name
+            uid_to_comp[v.uid] = v 
+            if isinstance(v, FlexBox):
+                v._uid_to_comp = uid_to_comp
+        
 
     def __getitem__(self, key: str):
         assert key in self._childs
@@ -629,7 +667,6 @@ class FlexBox(Component):
                       add_to_state: bool = True,
                       anonymous: bool = False):
         uid = self._get_uid_with_ns(name)
-        print(uid)
         if anonymous:
             uid = self._pool(uid)
         comp.uid = uid
@@ -669,14 +706,18 @@ class FlexBox(Component):
             if not isinstance(v, FlexBox):
                 self.add_component(k, v, anonymous=False)
             else:
-                if not v.inited and self.inited:
-                    v._attach_to_app(f"{self.uid}.{k}", self._queue,
-                                     self._uid_to_comp)
-                self.add_component(k, v, anonymous=False)
                 if v._init_dict is not None:
-                    # msg = "you must use VBox/HBox/Box instead in dict layout"
-                    # assert v._init_dict is not None, msg
+                    # consume this _init_dict
                     v.add_layout(v._init_dict)
+                    v._init_dict = None
+                # update uids of childs of v, 
+                ns = f"{k}"
+                if self.uid != "":
+                    ns = f"{self.uid}.{k}"
+                v._update_child_ns_and_comp_dict(ns, self._uid_to_comp)
+                if not v.inited and self.inited:
+                    v._attach_to_app(self._queue)
+                self.add_component(k, v, anonymous=False)
 
     def to_dict(self):
         res = super().to_dict()

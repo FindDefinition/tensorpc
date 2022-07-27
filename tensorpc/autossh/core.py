@@ -323,6 +323,9 @@ def _warp_exception_to_event(exc: Exception, uid: str):
     ts = time.time_ns()
     return ExceptionEvent(ts, exc, uid=uid, traceback_str=tb_str.getvalue())
 
+_ENCODE = "utf-8"
+# _ENCODE = "latin-1"
+
 
 class PeerSSHClient:
     """
@@ -360,14 +363,14 @@ class PeerSSHClient:
             if reader._session._encoding:
                 separators = separators
             else:
-                separators = separators.encode("utf-8")
+                separators = separators.encode(_ENCODE)
         else:
             separators = []
             for separator in self.separators:
                 if reader._session._encoding:
                     separator = separator
                 else:
-                    separator = separator.encode("utf-8")
+                    separator = separator.encode(_ENCODE)
                 separators.append(separator)
         try:
             # print(separators)
@@ -509,7 +512,7 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
         if self.callback is not None:
             ts = time.time_ns()
             if isinstance(data, bytes):
-                res_str = data.decode("utf-8")
+                res_str = data.decode(_ENCODE)
             else:
                 res_str = data
             loop = asyncio.get_running_loop()
@@ -570,7 +573,7 @@ class SSHClient:
             shutdown_task: asyncio.Task,
             env: Optional[Dict[str, str]] = None,
             forward_ports: Optional[List[int]] = None,
-            r_forward_ports: Optional[List[int]] = None,
+            r_forward_ports: Optional[List[Union[Tuple[int, int], int]]] = None,
             env_port_modifier: Optional[Callable[
                 [List[int], List[int], Dict[str, str]], None]] = None,
             exit_callback: Optional[Callable[[], Awaitable[None]]] = None,
@@ -599,13 +602,14 @@ class SSHClient:
                     if result.stdout is not None:
                         stdout_content = result.stdout
                         if isinstance(stdout_content, bytes):
-                            stdout_content = stdout_content.decode("utf-8")
+                            stdout_content = stdout_content.decode(_ENCODE)
                         client_ip_callback(stdout_content)
 
                 chan, session = await conn.create_session(
                     MySSHClientStreamSession,
                     "bash --init-file ~/.tensorpc_hooks-bash.sh",
-                    request_pty="force")  # type: ignore
+                    request_pty="force",
+                    encoding=_ENCODE)  # type: ignore
                 # chan, session = await conn.create_session(
                 #             MySSHClientStreamSession, request_pty="force") # type: ignore
 
@@ -637,8 +641,13 @@ class SSHClient:
 
                 if r_forward_ports is not None:
                     for p in r_forward_ports:
-                        listener = await conn.forward_remote_port(
-                            '', 0, 'localhost', p)
+                        if isinstance(p, (tuple, list)):
+                            listener = await conn.forward_remote_port(
+                                '', p[0], 'localhost', p[1])
+                        else:
+                            listener = await conn.forward_remote_port(
+                                '', 0, 'localhost', p)
+
                         rfwd_ports.append(listener.get_port())
                         print(f'Listening on Remote port {p} <- {listener.get_port()}...')
                         wait_tasks.append(
@@ -689,10 +698,10 @@ class SSHClient:
         finally:
             if init_event:
                 init_event.set()
+            if exit_event is not None:
+                exit_event.set()
             if exit_callback is not None:
                 await exit_callback()
-        if exit_event is not None:
-            exit_event.set()
 
 
 async def main2():

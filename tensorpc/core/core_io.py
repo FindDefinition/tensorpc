@@ -766,7 +766,6 @@ class SocketMessageEncoder:
 
         # req2 = wsdef_pb2.Header()
         # req2.ParseFromString(res_header_binary[5:req_msg_size + 5])
-
         chunk = bytearray(chunk_size)
         if type == SocketMsgType.Event:
             chunk[0] = SocketMsgType.EventChunk.value
@@ -777,8 +776,8 @@ class SocketMessageEncoder:
         chunk[5:header_msg_size + 5] = chunk_header.SerializeToString()
         chunk_idx = 0
         start = header_msg_size + 5
-        chunk_remain_size = chunk_size - header_msg_size - 5
-        remain_msg_size = num_chunks * (header_msg_size + 5) + self._total_size
+        remain_msg_size = num_chunks * (header_msg_size + 5) + self.get_total_array_binary_size()
+        chunk_remain_size = min(remain_msg_size, chunk_size) - header_msg_size - 5
         for arr in self.arrays:
             if isinstance(arr, np.ndarray):
                 size = arr.nbytes

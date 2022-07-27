@@ -445,6 +445,11 @@ class RemoteSSHNode(NodeWithSSHBase):
         cmds = self.node_data["remoteInitCommands"].strip()
         return cmds
 
+    @property
+    def rfport_pairs(self) -> str:
+        ports_str = self.node_data.get("remoteForwardPorts", "").strip()
+        return ports_str
+
     def _env_port_modifier(self, fports: List[int], rfports: List[int],
                            env: Dict[str, str]):
         if fports:
@@ -516,12 +521,24 @@ class RemoteSSHNode(NodeWithSSHBase):
         forward_ports = []
         if self.enable_port_forward:
             forward_ports = [self.remote_port, self.remote_http_port]
+        try:
+            new_rfports: Optional[List[Union[Tuple[int, int], int]]] = None
+            if rfports is not None:
+                new_rfports = [*rfports]
+
+                ports_str = self.rfport_pairs
+                if ports_str:
+                    pair_strs = ports_str.split(",")
+                    pair_ports = [(int(p.split(":")[0]), int(p.split(":")[1])) for p in pair_strs]
+                    new_rfports.extend(pair_ports)
+        except:
+            traceback.print_exc()
         self.task = asyncio.create_task(
             client.connect_queue(self.input_queue,
                                  callback,
                                  sd_task,
                                  forward_ports=forward_ports,
-                                 r_forward_ports=rfports,
+                                 r_forward_ports=new_rfports,
                                  env_port_modifier=self._env_port_modifier,
                                  exit_callback=exit_callback,
                                  client_ip_callback=client_ip_callback,
@@ -540,7 +557,7 @@ class RemoteSSHNode(NodeWithSSHBase):
         if cmd_renderer is not None and init_cmd:
             init_cmd = cmd_renderer(init_cmd)
         if init_cmd:
-            await self.input_queue.put(init_cmd)
+            await self.input_queue.put(init_cmd + "\n")
         await self.input_queue.put((
             f"python -m tensorpc.cli.start_worker --name={TENSORPC_FLOW_DEFAULT_TMUX_NAME} "
             f"--port={self.remote_port} "
@@ -548,6 +565,19 @@ class RemoteSSHNode(NodeWithSSHBase):
             # f"--http_port={self.remote_http_port}\n"
         ))
 
+@ALL_NODES.register
+class PortalSourceNode(Node):
+    @property
+    def portal_label(self):
+        return self.node_data["portalLabel"]
+
+    @property
+    def top_ids(self) -> List[str]:
+        return self.node_data["topIds"]
+
+    @property
+    def bottom_ids(self) -> List[str]:
+        return self.node_data["bottomIds"]
 
 @ALL_NODES.register
 class EnvNode(Node):
