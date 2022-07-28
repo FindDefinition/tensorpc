@@ -510,6 +510,7 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
         res = super().data_received(data, datatype)
         if self.callback is not None:
             ts = time.time_ns()
+            res_str = data
             if self.encoding is not None:
                 if isinstance(data, bytes):
                     res_str = data.decode(_ENCODE)
