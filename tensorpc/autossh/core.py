@@ -73,7 +73,7 @@ class CommandEventType(enum.Enum):
     CONTINUATION_END = "G"
 
 
-_DEFAULT_SEPARATORS = r"(?:\r\n)|(?:\n)|(?:\r)|(?:\033\]784;[ABPCFGD](?:;(.*?))?\007)"
+_DEFAULT_SEPARATORS = rb"(?:\r\n)|(?:\n)|(?:\r)|(?:\033\]784;[ABPCFGD](?:;(.*?))?\007)"
 # _DEFAULT_SEPARATORS = "\n"
 
 
@@ -206,16 +206,19 @@ class RawEvent(Event):
 
     def __init__(self,
                  timestamp: int,
-                 raw: str,
+                 raw: Union[str, bytes],
                  is_stderr=False,
                  uid: str = ""):
         super().__init__(timestamp, is_stderr, uid)
         self.raw = raw
 
     def __repr__(self):
+        r = self.raw
+        if not isinstance(r, bytes):
+            r = r.encode("utf-8")
         return "{}({}|{}|raw={})".format(self.name, self.is_stderr,
                                          self.timestamp,
-                                         self.raw.encode('utf-8'))
+                                         r)
 
     def to_dict(self):
         res = super().to_dict()
@@ -259,7 +262,7 @@ class CommandEvent(Event):
     def __init__(self,
                  timestamp: int,
                  type: str,
-                 arg: Optional[str],
+                 arg: Optional[Union[str, bytes]],
                  is_stderr=False,
                  uid: str = ""):
         super().__init__(timestamp, is_stderr, uid)
@@ -338,17 +341,23 @@ class PeerSSHClient:
                  stdin: asyncssh.stream.SSHWriter,
                  stdout: asyncssh.stream.SSHReader,
                  stderr: asyncssh.stream.SSHReader,
-                 separators: str = _DEFAULT_SEPARATORS,
-                 uid: str = ""):
+                 separators: bytes = _DEFAULT_SEPARATORS,
+                 uid: str = "",
+                 encoding: Optional[str] = None):
         self.stdin = stdin
         self.stdout = stdout
         self.stderr = stderr
         # stdout/err history
         # create read tasks. they should exists during peer open.
-        self.separators = separators
+        if encoding is None:
+            self.separators = separators
+            self._vsc_re = re.compile(rb"\033\]784;([ABPCFGD])(?:;(.*))?\007")
+        else:
+            self.separators = separators.decode("utf-8")
+            self._vsc_re = re.compile(r"\033\]784;([ABPCFGD])(?:;(.*))?\007")
+
         self.uid = uid
 
-        self._vsc_re = re.compile(r"\033\]784;([ABPCFGD])(?:;(.*))?\007")
 
     async def send(self, content: str):
         self.stdin.write(content)
@@ -358,23 +367,9 @@ class PeerSSHClient:
         return await self.send('\x03')
 
     async def _readuntil(self, reader: asyncssh.stream.SSHReader):
-        if isinstance(self.separators, str):
-            separators = self.separators
-            if reader._session._encoding:
-                separators = separators
-            else:
-                separators = separators.encode(_ENCODE)
-        else:
-            separators = []
-            for separator in self.separators:
-                if reader._session._encoding:
-                    separator = separator
-                else:
-                    separator = separator.encode(_ENCODE)
-                separators.append(separator)
         try:
             # print(separators)
-            res = await reader.readuntil(separators)
+            res = await reader.readuntil(self.separators)
             is_eof = reader.at_eof()
             return ReadResult(res, is_eof, False)
         except asyncio.IncompleteReadError as exc:
@@ -411,8 +406,11 @@ class PeerSSHClient:
                 cmd_type = match.group(1)
                 additional = match.group(2)
                 data_line = data[:match.start()]
+                cmd_type_s = cmd_type
+                if isinstance(cmd_type_s, bytes):
+                    cmd_type_s = cmd_type_s.decode("utf-8")
                 ce = CommandEvent(ts,
-                                  cmd_type,
+                                  cmd_type_s,
                                   additional,
                                   is_stderr,
                                   uid=self.uid)
@@ -506,15 +504,17 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
         super().__init__()
         self.callback: Optional[Callable[[Event], Awaitable[None]]] = None
         self.uid = ""
+        self.encoding: Optional[str] = None
 
     def data_received(self, data: AnyStr, datatype) -> None:
         res = super().data_received(data, datatype)
         if self.callback is not None:
             ts = time.time_ns()
-            if isinstance(data, bytes):
-                res_str = data.decode(_ENCODE)
-            else:
-                res_str = data
+            if self.encoding is not None:
+                if isinstance(data, bytes):
+                    res_str = data.decode(_ENCODE)
+                else:
+                    res_str = data
             loop = asyncio.get_running_loop()
             asyncio.run_coroutine_threadsafe(
                 self.callback(RawEvent(ts, res_str, False, self.uid)), loop)
@@ -528,7 +528,8 @@ class SSHClient:
                  username: str,
                  password: str,
                  known_hosts,
-                 uid: str = "") -> None:
+                 uid: str = "",
+                 encoding: Optional[str] = None) -> None:
         url_parts = url.split(":")
         if len(url_parts) == 1:
             self.url_no_port = url
@@ -542,6 +543,7 @@ class SSHClient:
         self.uid = uid
 
         self.bash_file_inited: bool = False
+        self.encoding = encoding
 
     @contextlib.asynccontextmanager
     async def simple_connect(self):
@@ -609,7 +611,7 @@ class SSHClient:
                     MySSHClientStreamSession,
                     "bash --init-file ~/.tensorpc_hooks-bash.sh",
                     request_pty="force",
-                    encoding=_ENCODE)  # type: ignore
+                    encoding=self.encoding)  # type: ignore
                 # chan, session = await conn.create_session(
                 #             MySSHClientStreamSession, request_pty="force") # type: ignore
 
@@ -629,7 +631,8 @@ class SSHClient:
                 peer_client = PeerSSHClient(stdin,
                                             stdout,
                                             stderr,
-                                            uid=self.uid)
+                                            uid=self.uid,
+                                            encoding=self.encoding)
                 loop_task = asyncio.create_task(
                     peer_client.wait_loop_queue(callback, shutdown_task))
                 wait_tasks = [
@@ -666,10 +669,16 @@ class SSHClient:
                 if init_event is not None:
                     init_event.set()
                 if env:
-                    cmds: List[str] = []
-                    for k, v in env.items():
-                        cmds.append(f"export {k}={v}")
-                    stdin.write(" && ".join(cmds) + "\n")
+                    if self.encoding is None:
+                        cmds2: List[bytes] = []
+                        for k, v in env.items():
+                            cmds2.append(f"export {k}={v}".encode("utf-8"))
+                        stdin.write(b" && ".join(cmds2) + b"\n")
+                    else:
+                        cmds: List[str] = []
+                        for k, v in env.items():
+                            cmds.append(f"export {k}={v}")
+                        stdin.write(" && ".join(cmds) + "\n")
                 while True:
                     done, pending = await asyncio.wait(
                         wait_tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -688,7 +697,11 @@ class SSHClient:
                                                       text.data[1])
                     else:
                         # print("INPUTWTF", text.encode("utf-8"))
-                        stdin.write(text)
+                        if self.encoding is None:
+                            stdin.write(text.encode("utf-8"))
+                        else:
+                            stdin.write(text)
+
                     wait_tasks = [
                         asyncio.create_task(inp_queue.get()), shutdown_task
                     ]

@@ -87,6 +87,8 @@ class NodeStatus:
     def empty():
         return NodeStatus(CommandEventType.PROMPT_END, SessionStatus.Stop)
 
+ENCODING = "utf-8"
+ENCODING = None
 
 def _extract_graph_node_id(uid: str):
     parts = uid.split("@")
@@ -305,9 +307,17 @@ class NodeWithSSHBase(Node):
         self.task: Optional[asyncio.Task] = None
         self.input_queue = asyncio.Queue()
         self.last_event: CommandEventType = CommandEventType.PROMPT_END
-        self.stdout = ""
+        if ENCODING is None:
+            self.stdout = b""
+        else:
+            self.stdout = ""
+
         self.init_terminal_size: Tuple[int, int] = (34, 16)
-        self.terminal_state = ""
+        if ENCODING is None:
+            self.terminal_state = b""
+        else:
+            self.terminal_state = ""
+
         self.terminal_close_ts: int = -1
         self._raw_event_history: "deque[RawEvent]" = deque(maxlen=10000)
         self.session_status: SessionStatus = SessionStatus.Stop
@@ -468,7 +478,7 @@ class RemoteSSHNode(NodeWithSSHBase):
                             rfports: Optional[List[int]] = None):
         assert self.task is None
         new_sess_name = TENSORPC_FLOW_DEFAULT_TMUX_NAME
-        client = SSHClient(url, username, password, None, self.get_uid())
+        client = SSHClient(url, username, password, None, self.get_uid(), ENCODING)
         self.shutdown_ev.clear()
         self.exit_event.clear()
         # firstly we check if the tmux worker exists
@@ -521,18 +531,15 @@ class RemoteSSHNode(NodeWithSSHBase):
         forward_ports = []
         if self.enable_port_forward:
             forward_ports = [self.remote_port, self.remote_http_port]
-        try:
-            new_rfports: Optional[List[Union[Tuple[int, int], int]]] = None
-            if rfports is not None:
-                new_rfports = [*rfports]
+        new_rfports: Optional[List[Union[Tuple[int, int], int]]] = None
+        if rfports is not None:
+            new_rfports = [*rfports]
 
-                ports_str = self.rfport_pairs
-                if ports_str:
-                    pair_strs = ports_str.split(",")
-                    pair_ports = [(int(p.split(":")[0]), int(p.split(":")[1])) for p in pair_strs]
-                    new_rfports.extend(pair_ports)
-        except:
-            traceback.print_exc()
+            ports_str = self.rfport_pairs
+            if ports_str:
+                pair_strs = ports_str.split(",")
+                pair_ports = [(int(p.split(":")[0]), int(p.split(":")[1])) for p in pair_strs]
+                new_rfports.extend(pair_ports)
         self.task = asyncio.create_task(
             client.connect_queue(self.input_queue,
                                  callback,
@@ -641,13 +648,13 @@ class CommandNode(NodeWithSSHBase):
                             envs: Dict[str, str],
                             is_worker: bool,
                             enable_port_forward: bool,
-                            rfports: Optional[List[int]] = None,
+                            rfports: Optional[List[Union[int, Tuple[int, int]]]] = None,
                             init_cmds: str = ""):
         assert self.task is None
         init_event = asyncio.Event()
         self.shutdown_ev.clear()
         self.exit_event.clear()
-        client = SSHClient(url, username, password, None, self.get_uid())
+        client = SSHClient(url, username, password, None, self.get_uid(), ENCODING)
 
         # async def callback(ev: Event):
         #     await msg_q.put(ev)
@@ -709,13 +716,13 @@ class AppNode(CommandNode):
                             envs: Dict[str, str],
                             is_worker: bool,
                             enable_port_forward: bool,
-                            rfports: Optional[List[int]] = None,
+                            rfports: Optional[List[Union[int, Tuple[int, int]]]] = None,
                             init_cmds: str = ""):
         assert self.task is None
         init_event = asyncio.Event()
         self.shutdown_ev.clear()
         self.exit_event.clear()
-        client = SSHClient(url, username, password, None, self.get_uid())
+        client = SSHClient(url, username, password, None, self.get_uid(), ENCODING)
         # print("APP", url, client.url_no_port, client.port)
         if not is_worker:
             # query two free port in target via ssh, then use them as app ports
@@ -1007,7 +1014,7 @@ def _empty_flow_graph(graph_id: str = ""):
 
 
 async def _get_free_port(count: int, url: str, username: str, password: str, init_cmds: str = ""):
-    client = SSHClient(url, username, password, None, "")
+    client = SSHClient(url, username, password, None, "", "utf-8")
     ports = []
     # res = await client.simple_run_command(f"python -m tensorpc.cli.free_port {count}")
     # print(res)
@@ -1269,7 +1276,10 @@ class Flow:
                 if node.terminal_close_ts >= 0:
                     if event.timestamp > node.terminal_close_ts:
                         evs = node.collect_raw_event_after_ts(event.timestamp)
-                        node.terminal_state += "".join(ev.raw for ev in evs)
+                        if isinstance(node.terminal_state, bytes):
+                            node.terminal_state += b"".join(ev.raw for ev in evs)
+                        else:
+                            node.terminal_state += "".join(ev.raw for ev in evs)
                         node.terminal_close_ts = event.timestamp
                         # print("NODE APPEND STATE")
 
@@ -1525,7 +1535,7 @@ class Flow:
         assert (driver.url != "" and driver.username != ""
                 and driver.password != "")
         envs = self._get_node_envs(graph_id, node.id)
-        rfports = []
+        rfports: List[Union[int, Tuple[int, int]]] = []
         if driver.enable_port_forward:
             rfports = [prim.get_server_meta().port]
             if prim.get_server_meta().http_port >= 0:
