@@ -142,7 +142,7 @@ class Node:
         self.graph_id: str = graph_id
         self.inputs: Dict[str, List[Handle]] = {}
         self.outputs: Dict[str, List[Handle]] = {}
-        self.remote_driver_id: str = ""
+        # self.remote_driver_id: str = ""
         self.messages: Dict[str, Message] = {}
 
         self._schedulable = schedulable
@@ -151,9 +151,9 @@ class Node:
     def schedulable(self):
         return self._schedulable
 
-    @property
-    def is_remote(self):
-        return self.remote_driver_id != ""
+    # @property
+    # def is_remote(self):
+    #     return self.remote_driver_id != ""
 
     def schedule_next(self, ev: ScheduleEvent,
                       graph: "FlowGraph") -> Dict[str, ScheduleEvent]:
@@ -166,7 +166,7 @@ class Node:
             "tensorpc_flow": {
                 "graph_id": self.graph_id,
                 "type": type(self).__name__,
-                "remote_driver_id": self.remote_driver_id,
+                # "remote_driver_id": self.remote_driver_id,
                 "inputs": {
                     n: [vv.to_dict() for vv in v]
                     for n, v in self.inputs.items()
@@ -192,7 +192,7 @@ class Node:
     def from_dict(cls, data: Dict[str, Any]):
         extra_data = data["tensorpc_flow"]
         node = cls(data, extra_data["graph_id"])
-        node.remote_driver_id = extra_data['remote_driver_id']
+        # node.remote_driver_id = extra_data['remote_driver_id']
         node.inputs = {
             n: [Handle.from_dict(vv) for vv in v]
             for n, v in extra_data["inputs"].items()
@@ -243,7 +243,7 @@ class Node:
         if "tensorpc_flow" in flow_data:
             # for remote workers
             extra_data = flow_data["tensorpc_flow"]
-            self.remote_driver_id = extra_data['remote_driver_id']
+            # self.remote_driver_id = extra_data['remote_driver_id']
             self.inputs = {
                 n: [Handle.from_dict(vv) for vv in v]
                 for n, v in extra_data["inputs"].items()
@@ -262,6 +262,15 @@ class Node:
     def clear_connections(self):
         self.inputs.clear()
         self.outputs.clear()
+
+    @property 
+    def driver_id(self) -> str:
+        return self._flow_data["data"].get("driver", "")
+
+class RunnableNodeBase(Node):
+    pass
+    
+
 
 
 def node_from_data(data: Dict[str, Any]) -> Node:
@@ -296,7 +305,7 @@ class DirectSSHNode(Node):
         return cmds
 
 
-class NodeWithSSHBase(Node):
+class NodeWithSSHBase(RunnableNodeBase):
 
     def __init__(self,
                  flow_data: Dict[str, Any],
@@ -902,17 +911,7 @@ class FlowGraph:
             self.get_node_by_id(h.target_node_id) for h in out_handles
         ]
         return out_nodes
-
-    def _update_driver(self, ):
-        for k, v in self._node_id_to_node.items():
-            v.remote_driver_id = ""
-        for node in self.nodes:
-            if isinstance(node, RemoteSSHNode):
-                out_nodes = self.get_output_nodes_of_handle_type(
-                    node, HandleTypes.Driver)
-                for n in out_nodes:
-                    n.remote_driver_id = node.id
-                    # print("WTF", node.readable_id, n.readable_id)
+                    
     def update_nodes(self, nodes: Iterable[Node]):
         self._node_id_to_node = {n.id: n for n in nodes}
         self._node_rid_to_node = {n.readable_id: n for n in nodes}
@@ -939,6 +938,9 @@ class FlowGraph:
     @property
     def edges(self):
         return self._edge_id_to_edge.values()
+
+    def get_driver_nodes(self, driver: Node):
+        return list(filter(lambda x: x.driver_id == driver.id, self.nodes))
 
     def to_dict(self):
         return {
@@ -975,21 +977,26 @@ class FlowGraph:
         # handle deleted node
         for node in self._node_id_to_node.values():
             if node.id not in new_node_id_to_node:
-                if node.remote_driver_id == "":
-                    # shutdown this node
-                    await node.shutdown()
-                else:
-                    # if node is a remote node,
-                    # shutdown process will be handled
-                    # in sync_graph RPC.
-                    pass
+                if isinstance(node, RunnableNodeBase):
+                    if node.driver_id == "":
+                        # shutdown this node
+                        await node.shutdown()
+                    else:
+                        # if node is a remote node,
+                        # shutdown process will be handled
+                        # in sync_graph RPC.
+                        if self.node_exists(node.driver_id):
+                            driver = self.get_node_by_id(node.driver_id)
+                            if isinstance(driver, DirectSSHNode):
+                                await node.shutdown()
+
 
         self.update_nodes(new_node_id_to_node.values())
         # we assume edges don't contain any state, so just update them.
         # we may need to handle this in future.
         self._edge_id_to_edge = {n.id: n for n in edges}
         self._update_connection(edges)
-        self._update_driver()
+        # self._update_driver()
         self.variable_dict = self._get_jinja_variable_dict(nodes)
         return
 
@@ -1039,6 +1046,16 @@ async def _get_free_port(count: int, url: str, username: str, password: str, ini
             print(e.stderr)
     return ports
 
+class NodeDesp:
+    def __init__(self, node: Node, graph: FlowGraph, driver: Optional[Node]) -> None:
+        self.node = node
+        self.driver = driver
+        self.graph = graph
+        self.has_remote_driver = isinstance(driver, RemoteSSHNode)
+
+    def get_remote_driver(self):
+        assert self.driver is not None and isinstance(self.driver, RemoteSSHNode)
+        return self.driver
 
 class Flow:
 
@@ -1068,12 +1085,16 @@ class Flow:
             self.flow_dict[flow_path.stem] = FlowGraph(flow_data,
                                                        flow_path.stem)
 
-    def _get_node(self, graph_id: str, node_id: str):
-        return self.flow_dict[graph_id].get_node_by_id(node_id)
-
-    def _get_node_and_graph(self, graph_id: str, node_id: str):
-        graph = self.flow_dict[graph_id]
-        return graph.get_node_by_id(node_id), graph
+    def _get_node_desp(self, graph_id: str, node_id: str):
+        assert graph_id in self.flow_dict, f"can't find graph {graph_id}"
+        gh = self.flow_dict[graph_id]
+        assert gh.node_exists(node_id), f"can't find node {node_id}"
+        node = gh.get_node_by_id(node_id)
+        driver: Optional[Node] = None
+        if node.driver_id != "":
+            if gh.node_exists(node.driver_id):
+                driver = gh.get_node_by_id(node.driver_id)
+        return NodeDesp(node, gh, driver)
 
     @marker.mark_websocket_ondisconnect
     def _on_client_disconnect(self, cl):
@@ -1115,7 +1136,9 @@ class Flow:
                             sche_ev_data: Dict[str, Any]):
         # schedule next node(s) of this node with data.
         sche_ev = ScheduleEvent.from_dict(sche_ev_data)
-        node, graph = self._get_node_and_graph(graph_id, node_id)
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node
+        
         # TODO if node is remote, run schedule_next in remote worker
         assert node.remote_driver_id == "", "TODO"
         assert node.schedulable, "only command node and scheduler node can be scheduled."
@@ -1128,7 +1151,7 @@ class Flow:
             else:
                 if isinstance(sche_node, CommandNode):
                     if not sche_node.is_session_started():
-                        driver = self._get_node(
+                        driver = self._get_node_desp(
                             graph_id,
                             node.get_input_handles(
                                 HandleTypes.Driver.value)[0].target_node_id)
@@ -1144,17 +1167,17 @@ class Flow:
             pass
 
     def _get_app_node_and_driver(self, graph_id: str, node_id: str):
-        node = self._get_node(graph_id, node_id)
-        assert isinstance(node, AppNode)
-        if node.remote_driver_id != "":
-            driver = self._get_node(graph_id, node.remote_driver_id)
-            assert isinstance(driver, RemoteSSHNode)
-            return node, driver
-        driver = self._get_node(
-            graph_id,
-            node.get_input_handles(HandleTypes.Driver.value)[0].target_node_id)
-        assert isinstance(driver, DirectSSHNode)
-        return node, driver
+        node_desp = self._get_node_desp(graph_id, node_id)
+        assert isinstance(node_desp.node, AppNode)
+        assert node_desp.driver is not None, f"you must select a driver for app node first"
+        assert isinstance(node_desp.driver, (RemoteSSHNode, DirectSSHNode))
+        return node_desp.node, node_desp.driver
+
+        # driver = self._get_node_desp(
+        #     graph_id,
+        #     node.get_input_handles(HandleTypes.Driver.value)[0].target_node_id)
+        # assert isinstance(driver, DirectSSHNode)
+        # return node, driver
 
     async def run_ui_event(self, graph_id: str, node_id: str,
                            ui_ev_dict: Dict[str, Any]):
@@ -1207,26 +1230,24 @@ class Flow:
         await self._msg_q.put(MessageEvent(MessageEventType.Update, raw_msgs))
         for m in raw_msgs:
             msg = Message.from_dict(m)
-            node = self._get_node(msg.graph_id, msg.node_id)
-            node.messages[msg.uid] = msg
+            node_desp = self._get_node_desp(msg.graph_id, msg.node_id)
+            node_desp.node.messages[msg.uid] = msg
 
     async def delete_message(self, graph_id: str, node_id: str,
                              message_id: str):
-        node = self._get_node(graph_id, node_id)
-        if message_id in node.messages:
-            node.messages.pop(message_id)
+        node_desp = self._get_node_desp(graph_id, node_id)
+        if message_id in node_desp.node.messages:
+            node_desp.node.messages.pop(message_id)
 
     async def query_single_message_detail(self, graph_id: str, node_id: str,
                                           message_id: str):
-        node = self._get_node(graph_id, node_id)
-        if node.remote_driver_id != "":
-            driver = self._get_node(graph_id, node.remote_driver_id)
-            assert isinstance(driver, RemoteSSHNode)
-            res = await driver.http_remote_call(
+        node_desp = self._get_node_desp(graph_id, node_id)
+        if node_desp.has_remote_driver:
+            res = await node_desp.get_remote_driver().http_remote_call(
                 serv_names.FLOWWORKER_QUERY_MESSAGE_DETAIL, graph_id, node_id,
                 message_id)
         else:
-            res = node.messages[message_id].to_dict_with_detail()
+            res = node_desp.node.messages[message_id].to_dict_with_detail()
         return res
 
     async def query_message(self, graph_id: str):
@@ -1236,9 +1257,12 @@ class Flow:
         graph = self.flow_dict[graph_id]
         all_msgs = []
         for node in graph.nodes:
-            if node.remote_driver_id != "":
-                # handle remote node in remote driver
-                continue
+            if node.driver_id != "":
+                if self._node_exists(graph_id, node.driver_id):
+                    driver_desp = self._get_node_desp(graph_id, node.driver_id)
+                    if isinstance(driver_desp.node, RemoteSSHNode):
+                        # handle remote node in remote driver
+                        continue
             if isinstance(node, RemoteSSHNode):
                 if node.is_session_started():
                     msgs = await node.http_remote_call(
@@ -1256,7 +1280,8 @@ class Flow:
             uid = event.uid
             # print(event, f"uid={uid}", self.selected_node_uid)
             graph_id, node_id = _extract_graph_node_id(uid)
-            node = self._get_node(graph_id, node_id)
+            node_desp = self._get_node_desp(graph_id, node_id)
+            node = node_desp.node
             assert isinstance(node, (CommandNode, RemoteSSHNode))
             # if isinstance(event, LineEvent):
             #     # print(node.id, self.selected_node_uid == uid, event.line, end="")
@@ -1315,22 +1340,20 @@ class Flow:
         # TODO query status in remote
         if not self._node_exists(graph_id, node_id):
             return UserStatusEvent.empty().to_dict()
-        node = self._get_node(graph_id, node_id)
-        if isinstance(node, (NodeWithSSHBase)):
-            return node.get_node_status().to_dict()
+        node_desp = self._get_node_desp(graph_id, node_id)
+        if isinstance(node_desp.node, (NodeWithSSHBase)):
+            return node_desp.node.get_node_status().to_dict()
         return UserStatusEvent.empty().to_dict()
 
     async def save_terminal_state(self, graph_id: str, node_id: str, state,
                                   timestamp_ms: int):
         if len(state) > 0:
-            node = self._get_node(graph_id, node_id)
+            node_desp = self._get_node_desp(graph_id, node_id)
+            node = node_desp.node
             assert isinstance(node, (NodeWithSSHBase))
-            print("node.remote_driver_id", node.remote_driver_id)
-            if node.remote_driver_id != "":
-                driver = self._get_node(graph_id, node.remote_driver_id)
-                assert isinstance(driver, RemoteSSHNode)
+            if node_desp.has_remote_driver:
                 self.selected_node_uid = ""
-                return await driver.http_remote_call(
+                return await node_desp.get_remote_driver().http_remote_call(
                     serv_names.FLOWWORKER_SET_TERMINAL_STATE, graph_id,
                     node_id, state, timestamp_ms)
 
@@ -1343,13 +1366,11 @@ class Flow:
                           node_id: str,
                           width: int = -1,
                           height: int = -1):
-        node = self._get_node(graph_id, node_id)
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node 
         assert isinstance(node, (NodeWithSSHBase))
-        drv_nodes = self.flow_dict[graph_id].get_input_nodes_of_handle_type(
-            node, HandleTypes.Driver)
-        if node.remote_driver_id != "":
-            driver = self._get_node(graph_id, node.remote_driver_id)
-            assert isinstance(driver, RemoteSSHNode)
+        if node_desp.has_remote_driver:
+            driver = node_desp.get_remote_driver()
             if driver.is_session_started():
                 res = await driver.http_remote_call(
                     serv_names.FLOWWORKER_SELECT_NODE, graph_id, node_id,
@@ -1370,26 +1391,27 @@ class Flow:
         return node.terminal_state
 
     async def command_node_input(self, graph_id: str, node_id: str, data: str):
-        node = self._get_node(graph_id, node_id)
+        node_desp = self._get_node_desp(graph_id, node_id)
         # print("INPUT", data.encode("utf-8"))
+        node = node_desp.node 
         if (isinstance(node, (NodeWithSSHBase))):
-            if node.remote_driver_id != "":
-                driver = self._get_node(graph_id, node.remote_driver_id)
-                assert isinstance(driver, RemoteSSHNode)
+            if node_desp.has_remote_driver:
+                driver = node_desp.get_remote_driver()
                 if driver.is_session_started():
                     return await driver.http_remote_call(
                         serv_names.FLOWWORKER_COMMAND_NODE_INPUT, graph_id,
                         node_id, data)
-
             if node.is_session_started():
                 await node.input_queue.put(data)
 
     async def ssh_change_size(self, graph_id: str, node_id: str, width: int,
                               height: int):
-        node = self._get_node(graph_id, node_id)
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node 
+
         if isinstance(node, (NodeWithSSHBase)):
-            if node.remote_driver_id != "":
-                driver = self._get_node(graph_id, node.remote_driver_id)
+            if node_desp.has_remote_driver:
+                driver = node_desp.get_remote_driver()
                 assert isinstance(driver, RemoteSSHNode)
                 if driver.is_session_started():
                     return await driver.http_remote_call(
@@ -1400,6 +1422,7 @@ class Flow:
                 await node.input_queue.put(req)
             else:
                 node.init_terminal_size = (width, height)
+
 
     async def save_graph(self, graph_id: str, flow_data):
         # TODO do we need a async lock here?
@@ -1423,8 +1446,7 @@ class Flow:
             if isinstance(node, RemoteSSHNode):
                 # sync graph node to remote
                 if node.is_session_started():
-                    driv_nodes = graph.get_output_nodes_of_handle_type(
-                        node, HandleTypes.Driver)
+                    driv_nodes = graph.get_driver_nodes(node)
                     await node.http_remote_call(
                         serv_names.FLOWWORKER_SYNC_GRAPH, graph_id,
                         [n.to_dict() for n in driv_nodes], graph.variable_dict)
@@ -1482,7 +1504,9 @@ class Flow:
         await self._ssh_q.put(ev)
 
     async def _start_remote_worker(self, graph_id: str, node_id: str):
-        node, graph = self._get_node_and_graph(graph_id, node_id)
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node 
+        graph = node_desp.graph
         if isinstance(node, RemoteSSHNode):
             worker_exists: bool = False
             if not node.is_session_started():
@@ -1555,19 +1579,17 @@ class Flow:
             await node.input_queue.put(driver.init_commands + "\n")
 
     async def start(self, graph_id: str, node_id: str):
-        node, graph = self._get_node_and_graph(graph_id, node_id)
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node 
+        graph = node_desp.graph
         if isinstance(node, RemoteSSHNode):
             return await self._start_remote_worker(graph_id, node_id)
         if isinstance(node, CommandNode):
+            if node_desp.driver is None:
+                raise ValueError("you need to assign a driver to node first", node.readable_id)
             print("START", graph_id, node_id, node.is_session_started(),
                   type(node))
-            if not node.inputs:
-                print("ERRROROROR")
-                return
-            driver = self._get_node(
-                graph_id,
-                node.get_input_handles(
-                    HandleTypes.Driver.value)[0].target_node_id)
+            driver = node_desp.driver
             if isinstance(driver, DirectSSHNode):
                 if not node.is_session_started():
                     await self._start_session_direct(graph_id, node, driver)
@@ -1594,7 +1616,7 @@ class Flow:
                     graph_id, remote_ssh_url, driver.username, driver.password,
                     driver.remote_init_commands, driver.master_grpc_url)
             else:
-                print("ERROROROROR")
+                raise NotImplementedError
 
     def pause(self, graph_id: str, node_id: str):
         # currently not supported.
@@ -1602,7 +1624,8 @@ class Flow:
 
     async def stop(self, graph_id: str, node_id: str):
         print("STOP", graph_id, node_id)
-        node = self.flow_dict[graph_id].get_node_by_id(node_id)
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node
         if isinstance(node, RemoteSSHNode):
             # TODO if command nodes driven by this node still running
             # raise error that stop them first.
@@ -1610,47 +1633,41 @@ class Flow:
                 await node.send_ctrl_c()
             # should we stop tmux session?
             return
-        driver_node_id = node.get_input_handles(
-            HandleTypes.Driver.value)[0].target_node_id
-        driver = self._get_node(graph_id, driver_node_id)
-        if isinstance(driver, RemoteSSHNode):
+        if node_desp.has_remote_driver:
+            driver = node_desp.get_remote_driver()
             if driver.is_session_started():
                 driver_http_url = driver.worker_http_url
                 await http_remote_call(prim.get_http_client_session(),
-                                       driver_http_url,
-                                       serv_names.FLOWWORKER_STOP, graph_id,
-                                       node_id)
+                                        driver_http_url,
+                                        serv_names.FLOWWORKER_STOP, graph_id,
+                                        node_id)
             # TODO raise a exception to front end if driver not start
             return
         if isinstance(node, CommandNode):
             if node.is_session_started():
                 await node.send_ctrl_c()
+            return
+        else:
+            raise NotImplementedError
 
     async def stop_session(self, graph_id: str, node_id: str):
         print("STOP SESSION", graph_id, node_id)
-        node = self.flow_dict[graph_id].get_node_by_id(node_id)
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node
         if isinstance(node, RemoteSSHNode):
             # TODO if command nodes driven by this node still running
             # raise error that stop them first.
             driver_http_url = node.worker_http_url
             # TODO use grpc exit RPC for better exit
             # stop tmux server
-            print("0")
-
             await http_remote_call(prim.get_http_client_session(),
                                    driver_http_url, serv_names.FLOWWORKER_EXIT)
-            print("1")
             if node.is_session_started():
                 await node.soft_shutdown()
-            print("2")
-
             # should we wait exit event?
             return
-
-        driver_node_id = node.get_input_handles(
-            HandleTypes.Driver.value)[0].target_node_id
-        driver = self._get_node(graph_id, driver_node_id)
-        if isinstance(driver, RemoteSSHNode):
+        if node_desp.has_remote_driver:
+            driver = node_desp.get_remote_driver()
             if driver.is_session_started():
                 driver_http_url = driver.worker_http_url
                 await http_remote_call(prim.get_http_client_session(),
@@ -1662,6 +1679,8 @@ class Flow:
         if isinstance(node, CommandNode):
             if node.is_session_started():
                 await node.soft_shutdown()
+        else:
+            raise NotImplementedError
 
     @marker.mark_exit
     async def _on_exit(self):
