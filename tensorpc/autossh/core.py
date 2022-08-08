@@ -504,16 +504,16 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
         super().__init__()
         self.callback: Optional[Callable[[Event], Awaitable[None]]] = None
         self.uid = ""
-        self.encoding: Optional[str] = None
+        self._tensorpc_encoding: Optional[str] = None
 
     def data_received(self, data: AnyStr, datatype) -> None:
         res = super().data_received(data, datatype)
         if self.callback is not None:
             ts = time.time_ns()
             res_str = data
-            if self.encoding is not None:
+            if self._tensorpc_encoding is not None:
                 if isinstance(data, bytes):
-                    res_str = data.decode(_ENCODE)
+                    res_str = data.decode(self._tensorpc_encoding)
                 else:
                     res_str = data
             loop = asyncio.get_running_loop()
@@ -607,7 +607,7 @@ class SSHClient:
                         if isinstance(stdout_content, bytes):
                             stdout_content = stdout_content.decode(_ENCODE)
                         client_ip_callback(stdout_content)
-
+                assert self.encoding is None
                 chan, session = await conn.create_session(
                     MySSHClientStreamSession,
                     "bash --init-file ~/.tensorpc_hooks-bash.sh",
@@ -619,6 +619,7 @@ class SSHClient:
                 session: MySSHClientStreamSession
                 session.uid = self.uid
                 session.callback = callback
+                session._tensorpc_encoding = self.encoding
                 # stdin, stdout, stderr = await conn.open_session(
                 #     "bash --init-file ~/.tensorpc_hooks-bash.sh",
                 #     request_pty="force")
@@ -628,7 +629,6 @@ class SSHClient:
                     asyncssh.stream.SSHReader(
                         session, chan,
                         asyncssh.constants.EXTENDED_DATA_STDERR))
-
                 peer_client = PeerSSHClient(stdin,
                                             stdout,
                                             stderr,

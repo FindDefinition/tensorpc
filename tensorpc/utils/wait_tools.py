@@ -3,6 +3,7 @@ import socket
 import time
 import asyncio
 from typing import List
+from async_timeout import timeout
 
 def wait_until(func, max_retries: int=200, check_interval: float=1, check_func=None):
     while max_retries > 0:
@@ -30,6 +31,17 @@ async def wait_until_async(func,
         max_retries -= 1
     raise TimeoutError
 
+async def wait_blocking_async(blocking_func,
+                           max_retries: int=200,
+                           check_interval: float=1,
+                           check_func=None):
+    while max_retries > 0:
+        async with timeout(check_interval) as status:
+            await blocking_func()
+        if not status.expired:
+            return 
+        max_retries -= 1
+    raise TimeoutError
 
 def wait_until_noexcept_call(func,
                              *args,

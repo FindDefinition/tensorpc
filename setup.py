@@ -41,6 +41,7 @@ REQUIRED = [
     "pillow",
     "bcrypt",
     "jinja2",
+    "async-timeout",
 ]
 
 # What packages are optional?

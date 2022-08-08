@@ -34,7 +34,7 @@ from tensorpc.protos import rpc_message_pb2
 
 from tensorpc.protos import \
     remote_object_pb2_grpc as remote_object_pb2_grpc
-from tensorpc.utils.wait_tools import wait_until, wait_until_async
+from tensorpc.utils.wait_tools import wait_blocking_async, wait_until, wait_until_async
 from tensorpc.utils.df_logging import get_logger
 
 LOGGER = get_logger()
@@ -349,11 +349,19 @@ class AsyncRemoteManager(AsyncRemoteObject):
                 self.url, options=self._channel_options)
         await self.wait_for_remote_ready(timeout, max_retries)
 
-    async def wait_for_channel_ready(self, timeout: float=10):
-        await self.health_check(wait_for_ready=True, timeout=timeout)
+    async def wait_for_channel_ready(self, timeout: float=10, max_retries=20):
+        assert self.channel is not None 
+        try:
+            await wait_blocking_async(self.channel.channel_ready, max_retries,
+                                   timeout / max_retries)
+        except TimeoutError as e:
+
+            LOGGER.error("server timeout.")
+            raise e
+        # await self.health_check(wait_for_ready=True, timeout=timeout)
 
     async def wait_for_remote_ready(self, timeout: float=10, max_retries=20):
-        await self.wait_for_channel_ready(timeout)
+        # await self.wait_for_channel_ready(timeout)
         await super().wait_for_remote_ready(timeout, max_retries)
 
     async def available(self, timeout=10, max_retries=20):
