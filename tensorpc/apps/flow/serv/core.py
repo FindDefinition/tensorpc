@@ -334,6 +334,7 @@ class NodeWithSSHBase(RunnableNodeBase):
         self.exit_event = asyncio.Event()
 
         self.queued_commands: List[ScheduleEvent] = []
+        self.running_driver_id = ""
 
     def push_raw_event(self, ev: RawEvent):
         self._raw_event_history.append(ev)
@@ -658,7 +659,8 @@ class CommandNode(NodeWithSSHBase):
                             is_worker: bool,
                             enable_port_forward: bool,
                             rfports: Optional[List[Union[int, Tuple[int, int]]]] = None,
-                            init_cmds: str = ""):
+                            init_cmds: str = "",
+                            running_driver_id: str = ""):
         assert self.task is None
         init_event = asyncio.Event()
         self.shutdown_ev.clear()
@@ -667,10 +669,12 @@ class CommandNode(NodeWithSSHBase):
 
         # async def callback(ev: Event):
         #     await msg_q.put(ev)
+        self.running_driver_id = running_driver_id
         async def exit_callback():
             self.task = None
             self.last_event = CommandEventType.PROMPT_END
             self.set_stop_status()
+            self.running_driver_id = ""
 
         sd_task = asyncio.create_task(self.shutdown_ev.wait())
         self.task = asyncio.create_task(
@@ -726,7 +730,8 @@ class AppNode(CommandNode):
                             is_worker: bool,
                             enable_port_forward: bool,
                             rfports: Optional[List[Union[int, Tuple[int, int]]]] = None,
-                            init_cmds: str = ""):
+                            init_cmds: str = "",
+                            running_driver_id: str = ""):
         assert self.task is None
         init_event = asyncio.Event()
         self.shutdown_ev.clear()
@@ -752,10 +757,12 @@ class AppNode(CommandNode):
             fwd_ports = ports
         # async def callback(ev: Event):
         #     await msg_q.put(ev)
+        self.running_driver_id = running_driver_id
         async def exit_callback():
             self.task = None
             self.last_event = CommandEventType.PROMPT_END
             self.set_stop_status()
+            self.running_driver_id = ""
 
         sd_task = asyncio.create_task(self.shutdown_ev.wait())
         self.task = asyncio.create_task(
@@ -855,7 +862,6 @@ class FlowGraph:
 
         self._edge_id_to_edge = {n.id: n for n in edges}
         self._update_connection(edges)
-        self._update_driver()
 
         self.graph_id = graph_id
         self.ssh_data = flow_data["ssh"]
@@ -971,6 +977,13 @@ class FlowGraph:
                 self._node_id_to_node[node.id].update_data(
                     graph_id, node.raw_data)
                 new_node_id_to_node[node.id] = self._node_id_to_node[node.id]
+                prev_node = self._node_id_to_node[node.id]
+                if isinstance(prev_node, CommandNode) and prev_node.driver_id != "":
+                    if self.node_exists(prev_node.driver_id):
+                        driver = self.get_node_by_id(prev_node.driver_id)
+                        if isinstance(driver, DirectSSHNode):
+                            if prev_node.running_driver_id and prev_node.running_driver_id != driver.id:
+                                await prev_node.shutdown()
             else:
                 # new node. just append to node
                 new_node_id_to_node[node.id] = node
@@ -1574,7 +1587,8 @@ class Flow:
             enable_port_forward=driver.enable_port_forward,
             envs=envs,
             rfports=rfports,
-            init_cmds=driver.init_commands)
+            init_cmds=driver.init_commands,
+            running_driver_id=driver.id)
         if driver.init_commands != "":
             await node.input_queue.put(driver.init_commands + "\n")
 

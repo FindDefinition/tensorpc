@@ -27,9 +27,10 @@ import time
 
 class FlowApp:
     """this service must run inside devflow.
+    if headless is enabled, all event sent to frontend will be ignored.
     """
 
-    def __init__(self, module_name: str, config: Dict[str, Any]) -> None:
+    def __init__(self, module_name: str, config: Dict[str, Any], headless: bool = False) -> None:
         print(module_name, config)
         self.module_name = module_name
         self.config = config
@@ -37,9 +38,6 @@ class FlowApp:
         self.master_meta = MasterMeta()
         assert self.master_meta.is_inside_devflow, "this service must run inside devflow"
         assert self.master_meta.is_http_valid
-        obj_type, alias, module_key = get_cls_obj_from_module_name(module_name)
-        self.app: App = obj_type(**self.config)
-        self._send_loop_queue: "asyncio.Queue[AppEvent]" = self.app._queue
         self._send_loop_task: Optional[asyncio.Task] = None
         self._need_to_send_env: Optional[AppEvent] = None
         self.shutdown_ev.clear()
@@ -47,6 +45,10 @@ class FlowApp:
 
         self._uid = get_uid(self.master_meta.graph_id,
                             self.master_meta.node_id)
+        self.headless = headless
+        obj_type, alias, module_key = get_cls_obj_from_module_name(module_name)
+        self.app: App = obj_type(**self.config)
+        self._send_loop_queue: "asyncio.Queue[AppEvent]" = self.app._queue
         self.app._send_callback = self._send_http_event
 
         lay = self.app._get_app_layout()
@@ -122,6 +124,8 @@ class FlowApp:
             if shut_task in done:
                 break
             ev: AppEvent = send_task.result()
+            if self.headless:
+                continue 
             ts = time.time()
             # assign uid here.
             ev.uid = self._uid

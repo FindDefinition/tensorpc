@@ -46,7 +46,6 @@ class SampleApp(App):
         self.root.add_select("Select", [("One", 0), ("Two", 1)], self.on_select_change)
         self.root.add_radio_group(["Option1", "Option2"], True, self.on_radio)
         self.code = ""
-        self.root.add_code_editor("python", self.on_code_change)
 
     async def on_radio(self, name: str):
         print(name)

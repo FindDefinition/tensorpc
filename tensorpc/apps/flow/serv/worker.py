@@ -222,7 +222,8 @@ class FlowClient:
             uid = new_node.get_uid()
             if uid in self._cached_nodes:
                 old_node = self._cached_nodes[uid]
-                if old_node.remote_driver_id != new_node.remote_driver_id:
+
+                if old_node.driver_id != new_node.driver_id:
                     # remote driver changed. stop this node.
                     await old_node.shutdown()
             assert isinstance(new_node, CommandNode)

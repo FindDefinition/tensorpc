@@ -59,7 +59,7 @@ class UIType(enum.Enum):
     Select = 3
     Slider = 4
     RadioGroup = 5
-    CodeEditor = 6
+    # CodeEditor = 6
     Button = 7
     ListItemButton = 8
     ListItemText = 9
@@ -526,6 +526,11 @@ class Button(Component):
         res["name"] = self.name
         return res
 
+    async def headless_click(self):
+        return await self.queue.put(UIEvent({
+            self.uid: self.name
+        }))
+
 
 class ListItemButton(Component):
 
@@ -545,6 +550,11 @@ class ListItemButton(Component):
         res["name"] = self.name
         return res
 
+    async def headless_click(self):
+        return await self.queue.put(UIEvent({
+            self.uid: self.name
+        }))
+
 
 class Buttons(Component):
 
@@ -563,6 +573,11 @@ class Buttons(Component):
         res = super().to_dict()
         res["names"] = self.names
         return res
+
+    async def headless_click(self, index: int):
+        return await self.queue.put(UIEvent({
+            self.uid: self.names[index]
+        }))
 
 
 class FlexBox(Component):
@@ -866,16 +881,16 @@ class FlexBox(Component):
         self.add_component("inp", ui)
         return ui
 
-    def add_code_editor(self,
-                        language: str,
-                        callback: Optional[Callable[[str],
-                                                    Coroutine[None, None,
-                                                              None]]] = None,
-                        flex: Optional[Union[int, str]] = None,
-                        align_self: Optional[str] = None):
-        ui = CodeEditor(language, callback, "", self.queue, flex, align_self)
-        self.add_component("code", ui)
-        return ui
+    # def add_code_editor(self,
+    #                     language: str,
+    #                     callback: Optional[Callable[[str],
+    #                                                 Coroutine[None, None,
+    #                                                           None]]] = None,
+    #                     flex: Optional[Union[int, str]] = None,
+    #                     align_self: Optional[str] = None):
+    #     ui = CodeEditor(language, callback, "", self.queue, flex, align_self)
+    #     self.add_component("code", ui)
+    #     return ui
 
     def add_switch(self,
                    label: str,
@@ -1123,6 +1138,11 @@ class RadioGroup(Component):
         await self.queue.put(self.create_update_event({"value": value}))
         self.value = value
 
+    async def headless_click(self, index: int):
+        return await self.queue.put(UIEvent({
+            self.uid: self.names[index]
+        }))
+
 
 class Input(Component):
 
@@ -1153,30 +1173,35 @@ class Input(Component):
     def state_change_callback(self, data: str):
         self.value = data
 
+    async def headless_write(self, content: str):
+        return await self.queue.put(UIEvent({
+            self.uid: content
+        }))
 
-class CodeEditor(Component):
 
-    def __init__(self,
-                 language: str,
-                 callback: Optional[Callable[[str], Coroutine[None, None,
-                                                              None]]] = None,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.CodeEditor, queue, flex, align_self)
-        self.language = language
-        self.callback = callback
-        self.value: str = ""
+# class CodeEditor(Component):
 
-    def get_state(self):
-        state = super().get_state()
-        state["language"] = self.language
-        state["value"] = self.value
-        return state
+#     def __init__(self,
+#                  language: str,
+#                  callback: Optional[Callable[[str], Coroutine[None, None,
+#                                                               None]]] = None,
+#                  uid: str = "",
+#                  queue: Optional[asyncio.Queue] = None,
+#                  flex: Optional[Union[int, str]] = None,
+#                  align_self: Optional[str] = None) -> None:
+#         super().__init__(uid, UIType.CodeEditor, queue, flex, align_self)
+#         self.language = language
+#         self.callback = callback
+#         self.value: str = ""
 
-    def state_change_callback(self, data: str):
-        self.value = data
+#     def get_state(self):
+#         state = super().get_state()
+#         state["language"] = self.language
+#         state["value"] = self.value
+#         return state
+
+#     def state_change_callback(self, data: str):
+#         self.value = data
 
 
 class Switch(Component):
@@ -1207,6 +1232,10 @@ class Switch(Component):
     def state_change_callback(self, data: bool):
         self.checked = data
 
+    async def headless_write(self, checked: bool):
+        return await self.queue.put(UIEvent({
+            self.uid: checked
+        }))
 
 class Select(Component):
 
@@ -1258,6 +1287,10 @@ class Select(Component):
     def state_change_callback(self, value: Any):
         self.value = value
 
+    async def headless_select(self, value: Any):
+        return await self.queue.put(UIEvent({
+            self.uid: value
+        }))
 
 class Slider(Component):
 
@@ -1306,6 +1339,10 @@ class Slider(Component):
     def state_change_callback(self, value: Union[int, float]):
         self.value = value
 
+    async def headless_change(self, value: Union[int, float]):
+        return await self.queue.put(UIEvent({
+            self.uid: value
+        }))
 
 _T = TypeVar("_T")
 
@@ -1378,6 +1415,10 @@ class TaskLoop(Component):
         await self.queue.put(self.create_update_event({"label": label}))
         self.label = label
 
+    async def headless_run(self):
+        return await self.queue.put(UIEvent({
+            self.uid: TaskLoopEvent.Start.value
+        }))
 
 _ROOT = "root"
 
@@ -1416,6 +1457,21 @@ class App:
         self.root.width = size[0]
         self.root.height = size[1]
 
+    async def headless_main(self):
+        """override this method to support headless mode.
+        you can use headless methods for control UIs such as 
+        btn.headless_click and inp.headless_write to trigger
+        callbacks.
+        """
+        raise NotImplementedError("headless_main not exists. "
+            "override headless_main to run in headless mode.")
+
+    async def flow_run(self):
+        """override this method to support flow. output data will be 
+        sent to all child nodes if not None.
+        """
+        return None
+
     async def _handle_control_event(self, ev: UIEvent):
         # TODO run control fron other component
         for uid, data in ev.uid_to_data.items():
@@ -1439,7 +1495,7 @@ class App:
                     else:
                         await comp.sync_status(True)
             # no sync state
-            elif isinstance(comp, (Input, CodeEditor)):
+            elif isinstance(comp, (Input, )):
                 if comp._status == UIRunStatus.Running:
                     # TODO send exception if ignored click
                     print("IGNORE EVENT", comp._status)
