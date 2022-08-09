@@ -41,7 +41,6 @@ class FlowApp:
         self._send_loop_task: Optional[asyncio.Task] = None
         self._need_to_send_env: Optional[AppEvent] = None
         self.shutdown_ev.clear()
-        self._send_loop_task = asyncio.create_task(self._send_loop())
 
         self._uid = get_uid(self.master_meta.graph_id,
                             self.master_meta.node_id)
@@ -50,6 +49,7 @@ class FlowApp:
         self.app: App = obj_type(**self.config)
         self._send_loop_queue: "asyncio.Queue[AppEvent]" = self.app._queue
         self.app._send_callback = self._send_http_event
+        self._send_loop_task = asyncio.create_task(self._send_loop())
 
         lay = self.app._get_app_layout()
         # print(lay)

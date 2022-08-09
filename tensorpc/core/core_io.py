@@ -717,6 +717,8 @@ class SocketMessageEncoder:
                            chunk_size: int):
         req.data = self._ser_skeleton
         req_msg_size = req.ByteSize()
+        if req_msg_size + 5 > chunk_size:
+            print(req_msg_size, self._ser_skeleton)
         final_size = 5 + req_msg_size + self.get_total_array_binary_size()
         cnt_arr = np.array([0], np.int32)
         if final_size < chunk_size:

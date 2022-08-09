@@ -64,8 +64,11 @@ class ServerContext(object):
         self.json_call = json_call
 
 class ServerGlobalContext(object):
-    def __init__(self):
+    def __init__(self, local_url: str, is_sync: bool, server_meta: ServerMeta):
         self.http_client_session: Optional[aiohttp.ClientSession] = None
+        self.local_url = local_url
+        self.is_sync = is_sync
+        self.server_meta = server_meta
 
 SERVER_RPC_CONTEXT = {}
 
@@ -144,7 +147,7 @@ class ServiceCore(object):
             self._exec_lock, self.service_units, self.shutdown_event,
             self.local_url, is_sync, server_meta)
 
-        self._global_context = ServerGlobalContext()
+        self._global_context = ServerGlobalContext(self.local_url, is_sync, server_meta)
 
     def _init_async_members(self):
         # in future python versions, asyncio event can't be created if no event loop running.

@@ -677,6 +677,12 @@ class CommandNode(NodeWithSSHBase):
     def get_previous_cmd_result(self):
         return CommandResult(self._previous_cmd, [l.line for l in self._current_line_events], self._previous_ret_code)
 
+    def clear_previous_cmd(self):
+        self._start_record_stdout = False 
+        self._previous_cmd = ""
+        self._previous_ret_code = -1
+        self._current_line_events.clear()
+
     @property
     def commands(self):
         args = self.node_data["args"]
@@ -688,7 +694,7 @@ class CommandNode(NodeWithSSHBase):
         cmd = " ".join(self.commands)
         if cmd_renderer:
             cmd = cmd_renderer(cmd)
-        self._start_record_stdout = True
+        # self._start_record_stdout = True
         if newenvs:
             envs_stmt = [f"export {k}={v}" for k, v in newenvs.items()]
             cmd = " && ".join(envs_stmt +
@@ -960,11 +966,11 @@ class FlowGraph:
             src_handle = Handle(source, edge.source_handle, edge.id)
             tgt_handle = Handle(target, edge.target_handle, edge.id)
             source_outs = self._node_id_to_node[source].outputs
-            if tgt_handle.type not in source_outs:
+            if src_handle.type not in source_outs:
                 source_outs[src_handle.type] = []
             source_outs[src_handle.type].append(tgt_handle)
             target_outs = self._node_id_to_node[target].inputs
-            if src_handle.type not in target_outs:
+            if tgt_handle.type not in target_outs:
                 target_outs[tgt_handle.type] = []
             target_outs[tgt_handle.type].append(src_handle)
 
@@ -1242,7 +1248,7 @@ class Flow:
                 drv = node_desp.graph.get_node_by_id(sche_node.driver_id)
                 assert isinstance(drv, (RemoteSSHNode, DirectSSHNode))
                 sche_driv = drv
-                sche_node_remote = not isinstance(sche_driv, RemoteSSHNode)
+                sche_node_remote = isinstance(sche_driv, RemoteSSHNode)
             if sche_driv is None:
                 print(f"node {sche_node.readable_id} don't have driver.")
                 continue
@@ -1425,6 +1431,11 @@ class Flow:
 
             elif isinstance(event, (CommandEvent)):
                 node.last_event = event.type
+                if event.type == CommandEventType.CURRENT_COMMAND:
+                    if isinstance(node, CommandNode):
+                        current_cmd = event.arg.decode("utf-8")
+                        if node._previous_cmd.strip() == current_cmd.strip():
+                            node._start_record_stdout = True 
                 if event.type == CommandEventType.COMMAND_COMPLETE:
                     if isinstance(node, CommandNode):
                         if node._start_record_stdout:
@@ -1433,8 +1444,7 @@ class Flow:
                                 res.return_code = int(event.arg)
                             print(res.cmd, res.return_code)
                             sch_ev = ScheduleEvent(time.time_ns(), res.to_dict(), {})
-                            node._current_line_events.clear()
-                            node._start_record_stdout = False
+                            node.clear_previous_cmd()
                             await self.schedule_next(graph_id, node_id, sch_ev.to_dict())
                 if event.type == CommandEventType.PROMPT_END:
                     # schedule queued tasks here.

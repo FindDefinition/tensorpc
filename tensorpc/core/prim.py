@@ -48,11 +48,11 @@ def get_current_service_key():
 
 
 def get_local_url():
-    return get_server_exposed_props().local_url
+    return get_global_context().local_url
 
 
 def get_server_meta():
-    return get_server_exposed_props().server_meta
+    return get_global_context().server_meta
 
 
 def get_server_grpc_port():

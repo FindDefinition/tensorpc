@@ -73,7 +73,7 @@ class CommandEventType(enum.Enum):
     CONTINUATION_END = "G"
 
 
-_DEFAULT_SEPARATORS = rb"(?:\r\n)|(?:\n)|(?:\r)|(?:\033\]784;[ABPCFGD](?:;(.*?))?\007)"
+_DEFAULT_SEPARATORS = rb"(?:\r\n)|(?:\n)|(?:\r)|(?:\033\]784;[ABPCEFGD](?:;(.*?))?\007)"
 # _DEFAULT_SEPARATORS = "\n"
 
 
@@ -351,10 +351,10 @@ class PeerSSHClient:
         # create read tasks. they should exists during peer open.
         if encoding is None:
             self.separators = separators
-            self._vsc_re = re.compile(rb"\033\]784;([ABPCFGD])(?:;(.*))?\007")
+            self._vsc_re = re.compile(rb"\033\]784;([ABPCEFGD])(?:;(.*))?\007")
         else:
             self.separators = separators.decode("utf-8")
-            self._vsc_re = re.compile(r"\033\]784;([ABPCFGD])(?:;(.*))?\007")
+            self._vsc_re = re.compile(r"\033\]784;([ABPCEFGD])(?:;(.*))?\007")
 
         self.uid = uid
 
