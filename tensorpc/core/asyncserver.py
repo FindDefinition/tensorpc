@@ -33,6 +33,7 @@ from tensorpc.protos import \
     remote_object_pb2_grpc as remote_object_pb2_grpc
 from tensorpc.utils.df_logging import get_logger
 from tensorpc.core import httpserver
+import aiohttp
 
 LOGGER = get_logger()
 
@@ -216,15 +217,18 @@ async def serve_with_http_async(service_def: ServiceDef,
 
     server_core = ProtobufServiceCore(url, service_def, False, smeta)
 
-    
-    url = '[::]:{}'.format(port)
-    server_core._init_async_members()
-    service = AsyncRemoteObjectService(server_core, is_local, length)
-    grpc_task = serve_service(service, wait_time, port, length, is_local,
-                              max_threads, process_id, credentials)
-    http_task = httpserver.serve_service_core_task(server_core, http_port,
-                                                   None, is_sync=False)
-    return await asyncio.gather(grpc_task, http_task)
+    async with aiohttp.ClientSession() as sess:
+        server_core.init_http_client_session(sess)
+
+        url = '[::]:{}'.format(port)
+        server_core._init_async_members()
+        with server_core.enter_global_context():
+            service = AsyncRemoteObjectService(server_core, is_local, length)
+            grpc_task = serve_service(service, wait_time, port, length, is_local,
+                                    max_threads, process_id, credentials)
+            http_task = httpserver.serve_service_core_task(server_core, http_port,
+                                                        None, is_sync=False)
+            return await asyncio.gather(grpc_task, http_task)
 
 async def serve_async(service_def: ServiceDef,
         wait_time=-1,

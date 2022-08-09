@@ -16,7 +16,7 @@ from pathlib import Path
 import traceback
 from typing import Any, Union
 import cv2
-from tensorpc.apps.flow.coretypes import MessageLevel
+from tensorpc.apps.flow.coretypes import MessageLevel, ScheduleEvent
 from tensorpc.apps.flow.flowapp import App, Button, HBox, ListItemButton, ListItemText, Text, VBox, VList, Plotly, ChartJSLine
 import imageio
 import io
@@ -302,3 +302,16 @@ class SampleChartJSApp(App):
             ],
         }
         await self.plot.show_raw(data, options)
+
+class SampleFlowApp(App):
+    def __init__(self) -> None:
+        super().__init__()
+        self.text = Text("")
+        self.root.add_layout({
+            "text": self.text,
+        })
+        self.set_init_window_size([480, 320])
+
+    async def flow_run(self, ev: ScheduleEvent):
+        await self.text.write(str(b"\n".join(ev.data)))
+        return None

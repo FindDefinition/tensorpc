@@ -573,15 +573,13 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
     ws_service = AllWebsocketHandler(server_core)
     app = web.Application(client_max_size=client_max_size)
     # TODO should we create a global client session for all http call in server?
-    async with aiohttp.ClientSession() as sess:
-        server_core.init_http_client_session(sess)
-        loop_task = asyncio.create_task(ws_service.event_provide_executor())
-        app.router.add_post(rpc_name, http_service.remote_json_call_http)
-        app.router.add_post(rpc_pickle_name, http_service.remote_pickle_call_http)
-        app.router.add_get(ws_name, ws_service.handle_new_connection)
-        return await asyncio.gather(
-            serve_app(app, port, server_core.shutdown_event,
-                    server_core.async_shutdown_event, is_sync), loop_task)
+    loop_task = asyncio.create_task(ws_service.event_provide_executor())
+    app.router.add_post(rpc_name, http_service.remote_json_call_http)
+    app.router.add_post(rpc_pickle_name, http_service.remote_pickle_call_http)
+    app.router.add_get(ws_name, ws_service.handle_new_connection)
+    return await asyncio.gather(
+        serve_app(app, port, server_core.shutdown_event,
+                server_core.async_shutdown_event, is_sync), loop_task)
 
 
 def serve_service_core(server_core: ProtobufServiceCore,

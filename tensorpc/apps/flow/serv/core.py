@@ -44,7 +44,7 @@ from tensorpc.apps.flow.coretypes import (Message, MessageEvent,
                                           ScheduleEvent, SessionStatus,
                                           UserContentEvent, UserEvent,
                                           UserStatusEvent, get_uid)
-from tensorpc.apps.flow.flowapp import AppEvent, app_event_from_data
+from tensorpc.apps.flow.flowapp import AppEvent, AppEventType, ScheduleNextForApp, app_event_from_data
 from tensorpc.apps.flow.serv_names import serv_names
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, RawEvent,
@@ -66,8 +66,8 @@ ALL_NODES = HashableRegistry()
 
 class HandleTypes(enum.Enum):
     Driver = "driver"
-    Input = "input"
-    Output = "output"
+    Input = "inputs"
+    Output = "outputs"
 
 
 class NodeStatus:
@@ -408,6 +408,39 @@ class RemoteSSHNode(NodeWithSSHBase):
         self.remote_http_port = 54052
         self._remote_self_ip = ""
 
+    def to_dict(self):
+        res = super().to_dict()
+        res["worker_port"] = self.worker_port 
+        res["worker_http_port"] = self.worker_http_port 
+        res["remote_master_port"] = self.remote_master_port 
+        res["remote_master_http_port"] = self.remote_master_http_port 
+        res["remote_port"] = self.remote_port 
+        res["remote_http_port"] = self.remote_http_port 
+        res["_remote_self_ip"] = self._remote_self_ip 
+        return res 
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        extra_data = data["tensorpc_flow"]
+        node = cls(data, extra_data["graph_id"])
+        # node.remote_driver_id = extra_data['remote_driver_id']
+        node.inputs = {
+            n: [Handle.from_dict(vv) for vv in v]
+            for n, v in extra_data["inputs"].items()
+        }
+        node.outputs = {
+            n: [Handle.from_dict(vv) for vv in v]
+            for n, v in extra_data["outputs"].items()
+        }
+        node.worker_port = data["worker_port"]
+        node.worker_http_port = data["worker_http_port"]
+        node.remote_master_port = data["remote_master_port"]
+        node.remote_master_http_port = data["remote_master_http_port"]
+        node.remote_port = data["remote_port"]
+        node.remote_http_port = data["remote_http_port"]
+        node._remote_self_ip = data["_remote_self_ip"]
+        return node
+
     @property
     def worker_http_url(self) -> str:
         if self.enable_port_forward:
@@ -608,11 +641,41 @@ class EnvNode(Node):
         return self.node_data["value"]
 
 
+class CommandResult:
+    def __init__(self, cmd: str, stdouts: List[bytes], return_code: int) -> None:
+        self.cmd = cmd 
+        self.stdouts = stdouts
+        self.return_code = return_code
+
+
+    def to_dict(self):
+        return {
+            "cmd": self.cmd ,
+            "stdouts": self.stdouts,
+            "return_code": self.return_code,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        return cls(data["cmd"], data["stdouts"], data["return_code"])
+        
+
 @ALL_NODES.register
 class CommandNode(NodeWithSSHBase):
 
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
         super().__init__(flow_data, graph_id, schedulable=True)
+        self._start_record_stdout: bool = False
+        self._previous_cmd = ""
+        self._previous_ret_code = -1
+        self._current_line_events: List[LineEvent] = []
+
+    def push_command(self, ev: LineEvent):
+        if self._start_record_stdout:
+            self._current_line_events.append(ev)
+
+    def get_previous_cmd_result(self):
+        return CommandResult(self._previous_cmd, [l.line for l in self._current_line_events], self._previous_ret_code)
 
     @property
     def commands(self):
@@ -625,13 +688,13 @@ class CommandNode(NodeWithSSHBase):
         cmd = " ".join(self.commands)
         if cmd_renderer:
             cmd = cmd_renderer(cmd)
-        if not newenvs:
-            await self.input_queue.put(cmd + "\n")
-        else:
+        self._start_record_stdout = True
+        if newenvs:
             envs_stmt = [f"export {k}={v}" for k, v in newenvs.items()]
-            await self.input_queue.put(" && ".join(envs_stmt +
-                                                   [cmd]) +
-                                       "\n")
+            cmd = " && ".join(envs_stmt +
+                                                   [cmd])
+        self._previous_cmd = cmd
+        await self.input_queue.put(cmd + "\n")
 
     # async def push_new_envs(self, envs: Dict[str, Any]):
     #     envs_stmt = [f"export {k}={v}" for k, v in envs.items()]
@@ -641,6 +704,7 @@ class CommandNode(NodeWithSSHBase):
                       graph: "FlowGraph") -> Dict[str, ScheduleEvent]:
         next_nodes = graph.get_output_nodes_of_handle_type(
             self, HandleTypes.Output)
+        # print("NEXT NODES", next_nodes, self.outputs, self.inputs)
         res: Dict[str, ScheduleEvent] = {}
         for n in next_nodes:
             if n.schedulable:
@@ -897,12 +961,12 @@ class FlowGraph:
             tgt_handle = Handle(target, edge.target_handle, edge.id)
             source_outs = self._node_id_to_node[source].outputs
             if tgt_handle.type not in source_outs:
-                source_outs[tgt_handle.type] = []
-            source_outs[tgt_handle.type].append(tgt_handle)
+                source_outs[src_handle.type] = []
+            source_outs[src_handle.type].append(tgt_handle)
             target_outs = self._node_id_to_node[target].inputs
             if src_handle.type not in target_outs:
-                target_outs[src_handle.type] = []
-            target_outs[src_handle.type].append(src_handle)
+                target_outs[tgt_handle.type] = []
+            target_outs[tgt_handle.type].append(src_handle)
 
     def get_input_nodes_of_handle_type(self, node: Node, type: HandleTypes):
         out_handles = node.get_input_handles(type.value)
@@ -1143,41 +1207,72 @@ class Flow:
 
     async def put_app_event(self, ev_dict: Dict[str, Any]):
         # print("APP EVENT RECEIVED")
-        await self._app_q.put(app_event_from_data(ev_dict))
+        ev = app_event_from_data(ev_dict)
+        new_t2e = {}
+        for k, v in ev.type_to_event.items():
+            if k == AppEventType.ScheduleNext:
+                assert isinstance(v, ScheduleNextForApp)
+                gid, nid = _extract_graph_node_id(ev.uid)
+                await self.schedule_next(gid, nid, v.data)
+            else:
+                new_t2e[k] = v
+        ev.type_to_event = new_t2e
+        if new_t2e:
+            await self._app_q.put(ev)
 
     async def schedule_next(self, graph_id: str, node_id: str,
                             sche_ev_data: Dict[str, Any]):
         # schedule next node(s) of this node with data.
-        sche_ev = ScheduleEvent.from_dict(sche_ev_data)
+        cur_sche_ev = ScheduleEvent.from_dict(sche_ev_data)
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
         
         # TODO if node is remote, run schedule_next in remote worker
-        assert node.remote_driver_id == "", "TODO"
+        assert not node_desp.has_remote_driver, "TODO"
         assert node.schedulable, "only command node and scheduler node can be scheduled."
-        next_schedule = node.schedule_next(sche_ev, graph)
+        next_schedule = node.schedule_next(cur_sche_ev, node_desp.graph)
+        # print("ENTER SCHEDULE", next_schedule)
+
         for node_id, sche_ev in next_schedule.items():
-            sche_node = graph.get_node_by_id(node_id)
-            if node.is_remote:
+            # print(node_id)
+            sche_node = node_desp.graph.get_node_by_id(node_id)
+            sche_node_remote = False
+            sche_driv: Optional[Union[RemoteSSHNode, DirectSSHNode]] = None
+            if node_desp.graph.node_exists(sche_node.driver_id):
+                drv = node_desp.graph.get_node_by_id(sche_node.driver_id)
+                assert isinstance(drv, (RemoteSSHNode, DirectSSHNode))
+                sche_driv = drv
+                sche_node_remote = not isinstance(sche_driv, RemoteSSHNode)
+            if sche_driv is None:
+                print(f"node {sche_node.readable_id} don't have driver.")
+                continue
+            if sche_node_remote:
                 # TODO
                 raise NotImplementedError
             else:
-                if isinstance(sche_node, CommandNode):
+                if isinstance(sche_node, CommandNode) and not isinstance(sche_node, AppNode):
                     if not sche_node.is_session_started():
-                        driver = self._get_node_desp(
-                            graph_id,
-                            node.get_input_handles(
-                                HandleTypes.Driver.value)[0].target_node_id)
-                        assert isinstance(driver, DirectSSHNode)
+                        assert isinstance(sche_driv, DirectSSHNode)
                         await self._start_session_direct(
-                            graph_id, sche_node, driver)
+                            graph_id, sche_node, sche_driv)
                     if sche_node.is_running():
                         sche_node.queued_commands.append(sche_ev)
                     else:
                         # TODO if two schedule events come rapidly
                         await sche_node.run_schedule_event(sche_ev)
-                    pass
-            pass
+                elif isinstance(sche_node, AppNode):
+                    if sche_node.is_running():
+                        sess = prim.get_http_client_session()
+                        http_port = sche_node.http_port
+                        durl, _ = get_url_port(sche_driv.url)
+                        if sche_driv.enable_port_forward:
+                            app_url = get_http_url("localhost", sche_node.fwd_http_port)
+                        else:
+                            app_url = get_http_url(durl, http_port)
+                        await http_remote_call(sess, app_url,
+                                                serv_names.APP_RUN_SCHEDULE_EVENT,
+                                                sche_ev.to_dict())
+
 
     def _get_app_node_and_driver(self, graph_id: str, node_id: str):
         node_desp = self._get_node_desp(graph_id, node_id)
@@ -1303,6 +1398,10 @@ class Flow:
             #         continue
             if isinstance(event, LineEvent):
                 # line event is useless for frontend.
+                # we gather it as node output
+                if isinstance(node, CommandNode):
+                    if node._start_record_stdout:
+                        node._current_line_events.append(event)
                 continue
 
             if isinstance(event, RawEvent):
@@ -1326,6 +1425,17 @@ class Flow:
 
             elif isinstance(event, (CommandEvent)):
                 node.last_event = event.type
+                if event.type == CommandEventType.COMMAND_COMPLETE:
+                    if isinstance(node, CommandNode):
+                        if node._start_record_stdout:
+                            res = node.get_previous_cmd_result()
+                            if event.arg is not None:
+                                res.return_code = int(event.arg)
+                            print(res.cmd, res.return_code)
+                            sch_ev = ScheduleEvent(time.time_ns(), res.to_dict(), {})
+                            node._current_line_events.clear()
+                            node._start_record_stdout = False
+                            await self.schedule_next(graph_id, node_id, sch_ev.to_dict())
                 if event.type == CommandEventType.PROMPT_END:
                     # schedule queued tasks here.
                     if isinstance(node, CommandNode) and node.queued_commands:
@@ -1460,8 +1570,9 @@ class Flow:
                 # sync graph node to remote
                 if node.is_session_started():
                     driv_nodes = graph.get_driver_nodes(node)
+
                     await node.http_remote_call(
-                        serv_names.FLOWWORKER_SYNC_GRAPH, graph_id,
+                        serv_names.FLOWWORKER_SYNC_GRAPH, graph_id, node.to_dict(),
                         [n.to_dict() for n in driv_nodes], graph.variable_dict)
 
     async def load_default_graph(self):
@@ -1627,8 +1738,7 @@ class Flow:
                 await http_remote_call(
                     prim.get_http_client_session(), driver_http_url,
                     serv_names.FLOWWORKER_CREATE_SESSION, node.raw_data,
-                    graph_id, remote_ssh_url, driver.username, driver.password,
-                    driver.remote_init_commands, driver.master_grpc_url)
+                    graph_id)
             else:
                 raise NotImplementedError
 

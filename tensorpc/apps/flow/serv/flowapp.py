@@ -13,8 +13,8 @@
 # limitations under the License.
 
 from typing import Any, Dict, List, Optional
-from tensorpc.apps.flow.coretypes import get_uid
-from tensorpc.apps.flow.flowapp import App, AppEvent, AppEventType, LayoutEvent, UIEvent
+from tensorpc.apps.flow.coretypes import ScheduleEvent, get_uid
+from tensorpc.apps.flow.flowapp import App, AppEvent, AppEventType, LayoutEvent, ScheduleNextForApp, UIEvent
 import asyncio
 from tensorpc.core.httpclient import http_remote_call
 from tensorpc.core.serviceunit import get_cls_obj_from_module_name
@@ -65,6 +65,20 @@ class FlowApp:
         ev = UIEvent.from_dict(data)
         return await self.app._handle_control_event(ev)
         # await self.app._queue.put(UIEvent.from_dict(data))
+
+    async def _run_schedule_event_task(self, data):
+        ev = ScheduleEvent.from_dict(data)
+        res = await self.app.flow_run(ev)
+        if res is not None:
+            ev = ScheduleEvent(time.time_ns(), res, {})
+            appev = ScheduleNextForApp(ev.to_dict())
+            await self._send_loop_queue.put(AppEvent(self._uid, {
+                AppEventType.ScheduleNext: appev,
+            }))
+
+    async def run_schedule_event(self, data):
+        # we shouldn't block master.
+        asyncio.create_task(self._run_schedule_event_task(data))
 
     def get_layout(self):
         return self.app._get_app_layout()
@@ -152,3 +166,4 @@ class FlowApp:
                     previous_event = previous_event.merge_new(ev)
                     master_disconnect = ts
         self._send_loop_task = None
+

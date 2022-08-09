@@ -3,7 +3,9 @@ import threading
 
 from tensorpc.core import serviceunit
 from tensorpc.core.server_core import (get_server_context,
-                                       is_in_server_context)
+                                       is_in_server_context,
+                                       get_global_context,
+                                       is_in_global_context)
 from tensorpc.core.defs import DynamicEvent
 
 
@@ -62,11 +64,11 @@ def get_server_http_port():
 
 
 def has_http_client_session():
-    return get_server_exposed_props().http_client_session is not None
+    return get_global_context().http_client_session is not None
 
 
 def get_http_client_session():
-    sess = get_server_exposed_props().http_client_session
+    sess = get_global_context().http_client_session
     if sess is not None:
         return sess
     raise ValueError("only async server support global session")

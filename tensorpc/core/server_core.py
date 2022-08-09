@@ -23,6 +23,7 @@ from tensorpc.protos import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos import rpc_message_pb2 as rpc_msg_pb2
 
 from tensorpc.utils import df_logging
+import contextvars
 
 LOGGER = df_logging.get_logger()
 
@@ -62,27 +63,29 @@ class ServerContext(object):
         self.service_key = service_key
         self.json_call = json_call
 
+class ServerGlobalContext(object):
+    def __init__(self):
+        self.http_client_session: Optional[aiohttp.ClientSession] = None
 
-SERVER_GLOBAL_CONTEXT = {}
+SERVER_RPC_CONTEXT = {}
 
 CONTEXT_LOCK = threading.Lock()
 
-SERVER_GLOBAL_CONTEXT_VAR = None
-if compat.Python3_7AndLater:
-    import contextvars
-    # we need contextvars to support service context in asyncio
-    SERVER_GLOBAL_CONTEXT_VAR = contextvars.ContextVar("service_context",
-                                                       default=None)
-
+# we need contextvars to support service context in asyncio
+SERVER_RPC_CONTEXT_VAR = contextvars.ContextVar("service_rpc_context",
+                                                    default=None)
+# we need contextvars to support service context in asyncio
+SERVER_GLOBAL_CONTEXT_VAR = contextvars.ContextVar("service_context",
+                                                    default=None)
 
 def is_in_server_context() -> bool:
     if compat.Python3_7AndLater:
-        assert SERVER_GLOBAL_CONTEXT_VAR is not None
-        return SERVER_GLOBAL_CONTEXT_VAR.get() is not None
+        assert SERVER_RPC_CONTEXT_VAR is not None
+        return SERVER_RPC_CONTEXT_VAR.get() is not None
     tid = threading.get_ident()
     exist = True
     with CONTEXT_LOCK:
-        if tid not in SERVER_GLOBAL_CONTEXT:
+        if tid not in SERVER_RPC_CONTEXT:
             exist = False
     return exist
 
@@ -90,8 +93,8 @@ def is_in_server_context() -> bool:
 def get_server_context() -> ServerContext:
     ctx = None
     if compat.Python3_7AndLater:
-        assert SERVER_GLOBAL_CONTEXT_VAR is not None
-        ctx = SERVER_GLOBAL_CONTEXT_VAR.get()
+        assert SERVER_RPC_CONTEXT_VAR is not None
+        ctx = SERVER_RPC_CONTEXT_VAR.get()
         if ctx is None:
             raise ValueError(
                 "you can't call primitives outside server context.")
@@ -99,13 +102,25 @@ def get_server_context() -> ServerContext:
     tid = threading.get_ident()
     notexist = False
     with CONTEXT_LOCK:
-        if tid not in SERVER_GLOBAL_CONTEXT:
+        if tid not in SERVER_RPC_CONTEXT:
             notexist = True
         else:
-            ctx = SERVER_GLOBAL_CONTEXT[tid]
+            ctx = SERVER_RPC_CONTEXT[tid]
     if notexist:
         raise ValueError("you can't call primitives outside server context.")
     assert ctx is not None
+    return ctx
+
+def is_in_global_context() -> bool:
+    assert SERVER_GLOBAL_CONTEXT_VAR is not None
+    return SERVER_GLOBAL_CONTEXT_VAR.get() is not None
+
+def get_global_context() -> ServerGlobalContext:
+    assert SERVER_GLOBAL_CONTEXT_VAR is not None
+    ctx = SERVER_GLOBAL_CONTEXT_VAR.get()
+    if ctx is None:
+        raise ValueError(
+            "you can't call primitives outside server global context.")
     return ctx
 
 
@@ -129,13 +144,15 @@ class ServiceCore(object):
             self._exec_lock, self.service_units, self.shutdown_event,
             self.local_url, is_sync, server_meta)
 
+        self._global_context = ServerGlobalContext()
+
     def _init_async_members(self):
         # in future python versions, asyncio event can't be created if no event loop running.
         self.async_shutdown_event = asyncio.Event()
         self._exposed_props._async_shutdown_event = self.async_shutdown_event
 
     def init_http_client_session(self, sess: aiohttp.ClientSession):
-        self._exposed_props.http_client_session = sess 
+        self._global_context.http_client_session = sess 
 
     async def exec_exit_funcs(self):
         return await self.service_units.run_exit()
@@ -168,17 +185,24 @@ class ServiceCore(object):
         if compat.Python3_7AndLater:
             # we need contextvars in async code. so we drop websocket
             # support before python 3.7.
-            assert SERVER_GLOBAL_CONTEXT_VAR is not None 
-            token = SERVER_GLOBAL_CONTEXT_VAR.set(ctx)
+            assert SERVER_RPC_CONTEXT_VAR is not None 
+            token = SERVER_RPC_CONTEXT_VAR.set(ctx)
             yield ctx
-            SERVER_GLOBAL_CONTEXT_VAR.reset(token)
+            SERVER_RPC_CONTEXT_VAR.reset(token)
         else:
             tid = threading.get_ident()
             with CONTEXT_LOCK:
-                SERVER_GLOBAL_CONTEXT[tid] = ctx
+                SERVER_RPC_CONTEXT[tid] = ctx
             yield ctx
             with CONTEXT_LOCK:
-                SERVER_GLOBAL_CONTEXT[tid] = None
+                SERVER_RPC_CONTEXT[tid] = None
+                
+    @contextlib.contextmanager
+    def enter_global_context(self):
+        assert SERVER_GLOBAL_CONTEXT_VAR is not None 
+        token = SERVER_GLOBAL_CONTEXT_VAR.set(self._global_context)
+        yield self._global_context
+        SERVER_GLOBAL_CONTEXT_VAR.reset(token)
 
     def execute_service(self,
                         service_key,

@@ -177,5 +177,10 @@ class _ServiceNames:
         return get_service_key_by_type(FlowApp,
                                        FlowApp.get_layout.__name__)
 
+    @property
+    def APP_RUN_SCHEDULE_EVENT(self):
+        from tensorpc.apps.flow.serv.flowapp import FlowApp
+        return get_service_key_by_type(FlowApp,
+                                       FlowApp.run_schedule_event.__name__)
 
 serv_names = _ServiceNames()

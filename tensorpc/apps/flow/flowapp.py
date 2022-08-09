@@ -22,6 +22,7 @@ import time
 import traceback
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Tuple, TypeVar, Union)
+from tensorpc.apps.flow.coretypes import ScheduleEvent
 from tensorpc.utils.uniquename import UniqueNamePool
 import numpy as np
 from PIL import Image
@@ -87,7 +88,10 @@ class AppEventType(enum.Enum):
     UIEvent = 10
     # clipboard
     CopyToClipboard = 20
-
+    # schedule event, won't be sent to frontend.
+    ScheduleNext = 100
+    # special UI event
+    CodeEditor = 200
 
 class UIRunStatus(enum.Enum):
     Stop = 0
@@ -202,9 +206,26 @@ class CopyToClipboardEvent:
         assert isinstance(new, CopyToClipboardEvent)
         return new
 
+@ALL_APP_EVENTS.register(key=AppEventType.ScheduleNext.value)
+class ScheduleNextForApp:
+
+    def __init__(self, data) -> None:
+        self.data = data
+
+    def to_dict(self):
+        return self.data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        return cls(data)
+
+    def merge_new(self, new):
+        assert isinstance(new, ScheduleNextForApp)
+        return new
 
 APP_EVENT_TYPES = Union[UIEvent, LayoutEvent, CopyToClipboardEvent,
-                        UpdateComponentsEvent, DeleteComponentsEvent]
+                        UpdateComponentsEvent, DeleteComponentsEvent,
+                        ScheduleNextForApp]
 
 
 def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":
@@ -1466,7 +1487,7 @@ class App:
         raise NotImplementedError("headless_main not exists. "
             "override headless_main to run in headless mode.")
 
-    async def flow_run(self):
+    async def flow_run(self, event: ScheduleEvent):
         """override this method to support flow. output data will be 
         sent to all child nodes if not None.
         """
