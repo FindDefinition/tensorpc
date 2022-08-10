@@ -111,6 +111,7 @@ class AppEditorEventType(enum.Enum):
 class AppEditorFrontendEventType(enum.Enum):
     Save = 0
     Change = 1
+    SaveEditorState = 2
 
 class AppEditorFrontendEvent:
 
@@ -1497,6 +1498,7 @@ class AppEditor:
         self._value: str = init_value
         self.__freeze_language = False
         self._init_line_number = 1
+        self._monaco_state: Optional[Any] = None
 
     def set_init_line_number(self, val: int):
         self._init_line_number = val
@@ -1527,7 +1529,7 @@ class AppEditor:
         state = {}
         state["language"] = self._language
         state["value"] = self._value
-        state["monacoEditorState"] = None
+        state["monacoEditorState"] = self._monaco_state
         state["initLineNumber"] = self._init_line_number
         return state
 
@@ -1588,6 +1590,12 @@ class App:
         sent to all child nodes if not None.
         """
         return None
+
+    async def _handle_code_editor_event_system(self, event: AppEditorFrontendEvent):
+        if event.type == AppEditorFrontendEventType.SaveEditorState:
+            self.code_editor._monaco_state = event.data
+            return 
+        return await self.handle_code_editor_event(event)
 
     async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
         """override this method to support vscode editor.
@@ -1707,17 +1715,17 @@ class App:
 class EditableApp(App):
     def __init__(self, flex_flow: Optional[str] = "column nowrap", justify_content: Optional[str] = None, align_items: Optional[str] = None, maxqsize: int = 10) -> None:
         super().__init__(flex_flow, justify_content, align_items, maxqsize)
-        with open(inspect.getfile(type(self)), "r") as f:
-            data = f.read()
-        self.code_editor.value = data 
+        lines, lineno = inspect.findsource(type(self))
+        self.code_editor.value = "".join(lines) 
         self.code_editor.language = "python"
+        self.code_editor.set_init_line_number(lineno)
         self.code_editor.freeze()
 
     async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
         """override this method to support vscode editor.
         """
         if event.type == AppEditorFrontendEventType.Save:
-            # _, lineno = inspect.findsource(type(self))
             with open(inspect.getfile(type(self)), "w") as f:
                 f.write(event.data)
+            self.code_editor.value = event.data
         return

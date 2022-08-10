@@ -68,7 +68,7 @@ class FlowApp:
 
     async def run_app_editor_event(self, data):
         ev = AppEditorFrontendEvent.from_dict(data)
-        return await self.app.handle_code_editor_event(ev)
+        return await self.app._handle_code_editor_event_system(ev)
 
     async def _run_schedule_event_task(self, data):
         ev = ScheduleEvent.from_dict(data)

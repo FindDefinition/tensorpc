@@ -131,6 +131,13 @@ class D3Layer(Layer3d):
         obj = objects.Polygon3d(polygon, color, width, opacity, closed)
         return self.add_object(obj)
 
+    def mesh_array(self, mesh, color: str, width=4, opacity=0.5):
+        # mesh_array: [N, 9]
+        mesh = mesh.reshape(-1, 3, 3)
+        lines = np.stack([mesh[:, [0, 1]], mesh[:, [1, 2]], mesh[:, [2, 0]]], axis=1).reshape(-1, 2, 3)
+        obj = objects.Lines3d(lines, color, width, opacity)
+        return self.add_object(obj)
+
     def bound(self) -> Optional[List[float]]:
         bounds = [] # type: List[List[float]]
         for obj in self.objects:

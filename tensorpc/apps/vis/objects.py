@@ -302,7 +302,7 @@ class Lines3d(FigureObject3d):
     def data(self) -> dict:
         return {
             "type": self.Type,
-            "lines": self.lines.reshape(-1).tolist(),
+            "lines": self.lines,
             "color": self.color,
             "width": self.width,
             "opacity": self.opacity,
