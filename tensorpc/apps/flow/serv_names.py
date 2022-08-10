@@ -166,10 +166,22 @@ class _ServiceNames:
                                        FlowWorker.get_layout.__name__)
 
     @property
+    def FLOWWORKER_RUN_APP_EDITOR_EVENT(self):
+        from tensorpc.apps.flow.serv.worker import FlowWorker
+        return get_service_key_by_type(FlowWorker,
+                                       FlowWorker.run_app_editor_event.__name__)
+
+    @property
     def APP_RUN_UI_EVENT(self):
         from tensorpc.apps.flow.serv.flowapp import FlowApp
         return get_service_key_by_type(FlowApp,
                                        FlowApp.run_ui_event.__name__)
+
+    @property
+    def APP_RUN_APP_EDITOR_EVENT(self):
+        from tensorpc.apps.flow.serv.flowapp import FlowApp
+        return get_service_key_by_type(FlowApp,
+                                       FlowApp.run_app_editor_event.__name__)
 
     @property
     def APP_GET_LAYOUT(self):

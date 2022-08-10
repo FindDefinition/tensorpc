@@ -257,10 +257,18 @@ class FlowClient:
         sess = prim.get_http_client_session()
         http_port = node.http_port
         app_url = get_http_url("localhost", http_port)
-
-        print("RUN APP UI EVENT", app_url)
         return await http_remote_call(sess, app_url,
                                       serv_names.APP_RUN_UI_EVENT, ui_ev_dict)
+
+    async def run_app_editor_event(self, graph_id: str, node_id: str,
+                           ui_ev_dict: Dict[str, Any]):
+        node = self._get_node(graph_id, node_id)
+        assert isinstance(node, AppNode)
+        sess = prim.get_http_client_session()
+        http_port = node.http_port
+        app_url = get_http_url("localhost", http_port)
+        return await http_remote_call(sess, app_url,
+                                      serv_names.APP_RUN_APP_EDITOR_EVENT, ui_ev_dict)
 
     async def get_layout(self, graph_id: str, node_id: str):
         node = self._get_node(graph_id, node_id)
@@ -591,6 +599,11 @@ class FlowWorker:
     async def run_ui_event(self, graph_id: str, node_id: str,
                            ui_ev_dict: Dict[str, Any]):
         return await self._get_client(graph_id).run_ui_event(
+            graph_id, node_id, ui_ev_dict)
+
+    async def run_app_editor_event(self, graph_id: str, node_id: str,
+                           ui_ev_dict: Dict[str, Any]):
+        return await self._get_client(graph_id).run_app_editor_event(
             graph_id, node_id, ui_ev_dict)
 
     async def get_layout(self, graph_id: str, node_id: str):

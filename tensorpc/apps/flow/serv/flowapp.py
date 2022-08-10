@@ -14,7 +14,7 @@
 
 from typing import Any, Dict, List, Optional
 from tensorpc.apps.flow.coretypes import ScheduleEvent, get_uid
-from tensorpc.apps.flow.flowapp import App, AppEvent, AppEventType, LayoutEvent, ScheduleNextForApp, UIEvent
+from tensorpc.apps.flow.flowapp import App, AppEditorFrontendEvent, AppEvent, AppEventType, LayoutEvent, ScheduleNextForApp, UIEvent
 import asyncio
 from tensorpc.core.httpclient import http_remote_call
 from tensorpc.core.serviceunit import get_cls_obj_from_module_name
@@ -65,6 +65,10 @@ class FlowApp:
         ev = UIEvent.from_dict(data)
         return await self.app._handle_control_event(ev)
         # await self.app._queue.put(UIEvent.from_dict(data))
+
+    async def run_app_editor_event(self, data):
+        ev = AppEditorFrontendEvent.from_dict(data)
+        return await self.app.handle_code_editor_event(ev)
 
     async def _run_schedule_event_task(self, data):
         ev = ScheduleEvent.from_dict(data)

@@ -17,7 +17,7 @@ import traceback
 from typing import Any, Union
 import cv2
 from tensorpc.apps.flow.coretypes import MessageLevel, ScheduleEvent
-from tensorpc.apps.flow.flowapp import App, Button, HBox, ListItemButton, ListItemText, Text, VBox, VList, Plotly, ChartJSLine
+from tensorpc.apps.flow.flowapp import App, Button, EditableApp, HBox, ListItemButton, ListItemText, Text, VBox, VList, Plotly, ChartJSLine
 import imageio
 import io
 import base64
@@ -315,3 +315,13 @@ class SampleFlowApp(App):
     async def flow_run(self, ev: ScheduleEvent):
         await self.text.write(str(b"\n".join(ev.data)))
         return None
+
+class SampleEditorApp(EditableApp):
+    def __init__(self) -> None:
+        super().__init__()
+        self.text = Text("WTF")
+        self.root.add_layout({
+            "text": self.text,
+        })
+        self.set_init_window_size([480, 320])
+        self.init_enable_editor()

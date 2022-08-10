@@ -100,7 +100,7 @@ def _get_uid(graph_id: str, node_id: str):
 
 
 def _get_status_from_last_event(ev: CommandEventType):
-    if ev == CommandEventType.COMMAND_OUTPUT_START:
+    if ev == CommandEventType.CURRENT_COMMAND:
         return "running"
     elif ev == CommandEventType.COMMAND_COMPLETE:
         return "success"
@@ -1293,12 +1293,20 @@ class Flow:
         # assert isinstance(driver, DirectSSHNode)
         # return node, driver
 
-    async def run_ui_event(self, graph_id: str, node_id: str,
-                           ui_ev_dict: Dict[str, Any]):
+    async def _run_ui_or_app_event(self, graph_id: str, node_id: str,
+                           ui_ev_dict: Dict[str, Any], is_ui_event: bool):
+        if is_ui_event:
+            worker_key = serv_names.FLOWWORKER_RUN_APP_UI_EVENT
+            app_key = serv_names.APP_RUN_UI_EVENT
+        else:
+            worker_key = serv_names.FLOWWORKER_RUN_APP_EDITOR_EVENT
+            app_key = serv_names.APP_RUN_APP_EDITOR_EVENT
+
+
         node, driver = self._get_app_node_and_driver(graph_id, node_id)
         if isinstance(driver, RemoteSSHNode):
             return await driver.http_remote_call(
-                serv_names.FLOWWORKER_RUN_APP_UI_EVENT, graph_id, node_id,
+                worker_key, graph_id, node_id,
                 ui_ev_dict)
         else:
             sess = prim.get_http_client_session()
@@ -1309,15 +1317,25 @@ class Flow:
             else:
                 app_url = get_http_url(durl, http_port)
             return await http_remote_call(sess, app_url,
-                                          serv_names.APP_RUN_UI_EVENT,
+                                          app_key,
                                           ui_ev_dict)
+
+    async def run_ui_event(self, graph_id: str, node_id: str,
+                           ui_ev_dict: Dict[str, Any]):
+        return await self._run_ui_or_app_event(graph_id, node_id, ui_ev_dict, True)
+
+    async def run_app_editor_event(self, graph_id: str, node_id: str,
+                           ui_ev_dict: Dict[str, Any]):
+        return await self._run_ui_or_app_event(graph_id, node_id, ui_ev_dict, False)
+
+
 
     async def query_app_state(self, graph_id: str, node_id: str):
         node, driver = self._get_app_node_and_driver(graph_id, node_id)
         print(node.last_event)
         if not node.is_session_started():
             return None
-        if node.last_event != CommandEventType.COMMAND_OUTPUT_START:
+        if node.last_event != CommandEventType.CURRENT_COMMAND:
             return None
         if isinstance(driver, RemoteSSHNode):
             return await driver.http_remote_call(

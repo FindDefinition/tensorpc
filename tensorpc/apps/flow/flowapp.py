@@ -60,7 +60,7 @@ class UIType(enum.Enum):
     Select = 3
     Slider = 4
     RadioGroup = 5
-    # CodeEditor = 6
+    CodeEditor = 6
     Button = 7
     ListItemButton = 8
     ListItemText = 9
@@ -91,7 +91,7 @@ class AppEventType(enum.Enum):
     # schedule event, won't be sent to frontend.
     ScheduleNext = 100
     # special UI event
-    CodeEditor = 200
+    AppEditor = 200
 
 class UIRunStatus(enum.Enum):
     Stop = 0
@@ -104,6 +104,29 @@ class TaskLoopEvent(enum.Enum):
     Stop = 1
     Pause = 2
 
+class AppEditorEventType(enum.Enum):
+    SetValue = 0
+    RevealLine = 1
+
+class AppEditorFrontendEventType(enum.Enum):
+    Save = 0
+    Change = 1
+
+class AppEditorFrontendEvent:
+
+    def __init__(self, type: AppEditorFrontendEventType, data: Any) -> None:
+        self.type = type
+        self.data = data
+
+    def to_dict(self):
+        return {
+            "type": self.type.value,
+            "data": self.data,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        return cls(AppEditorFrontendEventType(data["type"]), data["data"])
 
 @ALL_APP_EVENTS.register(key=AppEventType.UIEvent.value)
 class UIEvent:
@@ -128,6 +151,27 @@ class UIEvent:
                 res_uid_to_data[k] = v
         return UIEvent(res_uid_to_data)
 
+
+@ALL_APP_EVENTS.register(key=AppEventType.AppEditor.value)
+class AppEditorEvent:
+
+    def __init__(self, type: AppEditorEventType, data) -> None:
+        self.data = data
+        self.type = type
+
+    def to_dict(self):
+        return {
+            "type": self.type.value,
+            "data": self.data,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        return cls(AppEditorEventType(data["type"]), data["data"])
+
+    def merge_new(self, new):
+        assert isinstance(new, AppEditorEvent)
+        return new
 
 @ALL_APP_EVENTS.register(key=AppEventType.UpdateLayout.value)
 class LayoutEvent:
@@ -225,7 +269,7 @@ class ScheduleNextForApp:
 
 APP_EVENT_TYPES = Union[UIEvent, LayoutEvent, CopyToClipboardEvent,
                         UpdateComponentsEvent, DeleteComponentsEvent,
-                        ScheduleNextForApp]
+                        ScheduleNextForApp, AppEditorEvent]
 
 
 def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":
@@ -1443,6 +1487,50 @@ class TaskLoop(Component):
 
 _ROOT = "root"
 
+class AppEditor:
+
+    def __init__(self,
+                init_value: str,
+                 language: str,
+                 ) -> None:
+        self._language = language
+        self._value: str = init_value
+        self.__freeze_language = False
+        self._init_line_number = 1
+
+    def set_init_line_number(self, val: int):
+        self._init_line_number = val
+
+    def freeze(self):
+        self.__freeze_language = True
+
+    @property 
+    def value(self):
+        return self._value
+
+    @value.setter 
+    def value(self, val: str):
+        self._value = val 
+
+    @property 
+    def language(self):
+        return self._language
+
+    @language.setter 
+    def language(self, val: str):
+        if not self.__freeze_language:
+            self._language = val 
+        else:
+            raise ValueError("language freezed, you can't change it.")
+
+    def get_state(self):
+        state = {}
+        state["language"] = self._language
+        state["value"] = self._value
+        state["monacoEditorState"] = None
+        state["initLineNumber"] = self._init_line_number
+        return state
+
 
 class App:
     # TODO find a way to sync state to frontend uncontrolled elements.
@@ -1467,12 +1555,20 @@ class App:
         self._uid_to_comp[_ROOT] = root
 
         self.root = root
+        self._enable_editor = False
+
+        self.code_editor = AppEditor("", "python")
 
     def _get_app_layout(self):
         return {
             "layout": {u: c.to_dict()
                        for u, c in self._uid_to_comp.items()},
+            "enableEditor": self._enable_editor,
+            "codeEditor": self.code_editor.get_state(),
         }
+
+    def init_enable_editor(self):
+        self._enable_editor = True
 
     def set_init_window_size(self, size: List[Union[int, None]]):
         self.root.width = size[0]
@@ -1492,6 +1588,25 @@ class App:
         sent to all child nodes if not None.
         """
         return None
+
+    async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
+        """override this method to support vscode editor.
+        """
+        return
+
+    async def _send_editor_event(self, event: AppEditorEvent):
+        await self._queue.put(AppEvent("", {AppEventType.AppEditor: event}))
+
+    async def set_editor_value(self, value: str, language: str):
+        """use this method to set editor value and language.
+        """
+        self.code_editor.value = value 
+        self.code_editor.language = language 
+        app_ev = AppEditorEvent(AppEditorEventType.SetValue, {
+            "value": value,
+            "language": language,
+        })
+        await self._send_editor_event(app_ev)
 
     async def _handle_control_event(self, ev: UIEvent):
         # TODO run control fron other component
@@ -1588,3 +1703,21 @@ class App:
             AppEvent(
                 "",
                 {AppEventType.CopyToClipboard: CopyToClipboardEvent(text)}))
+
+class EditableApp(App):
+    def __init__(self, flex_flow: Optional[str] = "column nowrap", justify_content: Optional[str] = None, align_items: Optional[str] = None, maxqsize: int = 10) -> None:
+        super().__init__(flex_flow, justify_content, align_items, maxqsize)
+        with open(inspect.getfile(type(self)), "r") as f:
+            data = f.read()
+        self.code_editor.value = data 
+        self.code_editor.language = "python"
+        self.code_editor.freeze()
+
+    async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
+        """override this method to support vscode editor.
+        """
+        if event.type == AppEditorFrontendEventType.Save:
+            # _, lineno = inspect.findsource(type(self))
+            with open(inspect.getfile(type(self)), "w") as f:
+                f.write(event.data)
+        return
