@@ -67,6 +67,7 @@ class ServFunctionMeta:
     is_async: bool
     is_static: bool
     is_binded: bool
+    code: str =""
 
     def __init__(self, fn: Callable, name: str, type: ServiceType,
                  sig: inspect.Signature, is_gen: bool, is_async: bool,
@@ -81,6 +82,7 @@ class ServFunctionMeta:
         self.is_static = is_static
         self.is_binded = is_binded
         self.fn = fn
+        self.code = ""
 
     def to_json(self):
         return {
@@ -90,7 +92,105 @@ class ServFunctionMeta:
             "is_gen": self.is_gen,
             "is_async": self.is_async,
             "is_static": self.is_static,
+            "is_binded": self.is_binded,
+            "code": self.code,
         }
+
+class DynamicClass:
+    def __init__(self, module_name: str, ) -> None:
+        self.module_name = module_name
+        module_cls = module_name.split(TENSORPC_SPLIT)
+        self.module_path = module_cls[0]
+        self.alias: Optional[str] = None
+        self.is_standard_module = False
+        self.standard_module: Optional[types.ModuleType] = None
+        if len(module_cls) == 3:
+            self.alias = module_cls[-1]
+            self.cls_name = module_cls[-2]
+        else:
+            self.cls_name = module_cls[-1]
+        try:
+            if self.module_path.startswith("!"):
+                # treat module_path as a file path
+                self.module_path = self.module_path[1:]
+                assert Path(self.module_path).exists(), f"your {self.module_path} not exists"
+                self.module_dict = runpy.run_path(self.module_path)
+                self.is_standard_module = False
+            else:
+                self.standard_module = importlib.import_module(self.module_path)
+                self.module_dict = self.standard_module.__dict__
+                self.is_standard_module = True
+        except ImportError:
+            print(f"Can't Import {module_name}. Check your project or PWD")
+            raise
+        cls_obj = self.module_dict[self.cls_name]
+        self.cls_obj = cls_obj
+        self.module_key =  f"{self.module_path}{TENSORPC_SPLIT}{self.cls_name}"
+
+
+class ReloadableDynamicClass(DynamicClass):
+    def __init__(self, module_name: str, ) -> None:
+        super().__init__(module_name)
+        self.serv_metas = self.get_metas_of_regular_methods(self.cls_obj)
+
+    @staticmethod
+    def get_metas_of_regular_methods(type_obj):
+        serv_metas: List[ServFunctionMeta] = []
+        members = inspecttools.get_members_by_type(type_obj, True)
+        for k, v in members:
+            if inspecttools.isclassmethod(v) or inspecttools.isproperty(v):
+                # ignore property and classmethod
+                continue
+            if k.startswith("__"):
+                # ignore all magic methods
+                continue
+            is_gen = inspect.isgeneratorfunction(v)
+            is_async_gen = inspect.isasyncgenfunction(v)
+            is_async = inspect.iscoroutinefunction(v) or is_async_gen
+            is_static = inspecttools.isstaticmethod(type_obj, k)
+            if is_async:
+                is_gen = is_async_gen
+            v_sig = inspect.signature(v)
+            serv_meta = ServFunctionMeta(v, k, ServiceType.Normal, v_sig, is_gen,
+                                         is_async, is_static, False)
+            code, _ = inspect.getsourcelines(v)
+            serv_meta.code = "".join(code)
+            serv_metas.append(serv_meta)
+        return serv_metas
+
+
+    def reload_obj_methods(self, obj, callback_dict: Optional[Dict[str, Any]] = None):
+        # reload regular methods/static methods
+        new_cb: Dict[str, Any] = {}
+        if callback_dict is None:
+            callback_dict = {}
+        callback_inv_dict = {v: k for k, v in callback_dict.items()}
+        if self.is_standard_module and self.standard_module is not None:
+            importlib.reload(self.standard_module) 
+            self.module_dict = self.standard_module.__dict__
+        else:
+            self.module_dict = runpy.run_path(self.module_path)
+        new_obj_type = self.module_dict[self.cls_name]
+        new_metas = self.get_metas_of_regular_methods(new_obj_type)
+        # new_name_to_meta = {m.name: m for m in new_metas}
+        name_to_meta = {m.name: m for m in self.serv_metas}
+
+        for new_meta in new_metas:
+            if not new_meta.is_static:
+                new_method =  types.MethodType(new_meta.fn, obj)
+            else:
+                new_method = new_meta.fn
+            if new_meta.name in name_to_meta:
+                meta = name_to_meta[new_meta.name]
+                method = getattr(obj, meta.name)
+                setattr(obj, new_meta.name, new_method)
+                if method in callback_inv_dict:
+                    new_cb[callback_inv_dict[method]] = new_method
+            else:
+                setattr(obj, new_meta.name, new_method)
+        self.serv_metas = new_metas
+        self.cls_obj = new_obj_type
+        return new_cb
 
 
 def get_cls_obj_from_module_name(module_name: str):
@@ -100,28 +200,8 @@ def get_cls_obj_from_module_name(module_name: str):
     Alias.f1
     !/your/path/to/module.py::Class::Alias
     """
-    module_cls = module_name.split(TENSORPC_SPLIT)
-    module_path = module_cls[0]
-    alias: Optional[str] = None
-    if len(module_cls) == 3:
-        alias = module_cls[-1]
-        cls_name = module_cls[-2]
-    else:
-        cls_name = module_cls[-1]
-    try:
-        if module_path.startswith("!"):
-            # treat module_path as a file path
-            module_path = module_path[1:]
-            assert Path(module_path).exists(), f"your {module_path} not exists"
-            module_dict = runpy.run_path(module_path)
-        else:
-            mod = importlib.import_module(module_path)
-            module_dict = mod.__dict__
-    except ImportError:
-        print(f"Can't Import {module_name}. Check your project or PWD")
-        raise
-    cls_obj = module_dict[cls_name]
-    return cls_obj, alias, f"{module_path}{TENSORPC_SPLIT}{cls_name}"
+    rc = DynamicClass(module_name)
+    return rc.cls_obj, rc.alias, rc.module_key
 
 
 class FunctionUserMeta:
@@ -159,6 +239,8 @@ class EventProvider:
     def copy(self):
         return EventProvider(self.service_key, self.event_name, self.fn,
                              self.is_static, self.is_dynamic)
+
+
 
 
 class ServiceUnit:
@@ -390,5 +472,12 @@ class ServiceUnits:
 
 
 if __name__ == "__main__":
-    su = ServiceUnit("tensorpc.services.for_test::ServiceForTest::Test", {})
+    su = ServiceUnit("tensorpc.services.for_test::Service1::Test", {})
     print(su.run_service("Test.add", 1, 2))
+
+    cl = ReloadableDynamicClass("tensorpc.services.for_test::Service1::Test")
+    obj = cl.cls_obj()
+    print(obj.add(1, 2))
+    print(input("hold"))
+    cl.reload_obj_methods(obj)
+    print(obj.add(1, 2))

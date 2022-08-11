@@ -615,19 +615,6 @@ class RemoteSSHNode(NodeWithSSHBase):
             # f"--http_port={self.remote_http_port}\n"
         ))
 
-@ALL_NODES.register
-class PortalSourceNode(Node):
-    @property
-    def portal_label(self):
-        return self.node_data["portalLabel"]
-
-    @property
-    def top_ids(self) -> List[str]:
-        return self.node_data["topIds"]
-
-    @property
-    def bottom_ids(self) -> List[str]:
-        return self.node_data["bottomIds"]
 
 @ALL_NODES.register
 class EnvNode(Node):
@@ -639,6 +626,17 @@ class EnvNode(Node):
     @property
     def value(self):
         return self.node_data["value"]
+
+@ALL_NODES.register
+class DataStorageNode(Node):
+    def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
+        super().__init__(flow_data, graph_id, True)
+
+        self.stored_data: Optional[Any] = None 
+
+    @property
+    def full(self):
+        return self.stored_data is not None
 
 
 class CommandResult:
@@ -877,6 +875,7 @@ _TYPE_TO_NODE_CLS: Dict[str, Type[Node]] = {
     "input": Node,
     "remotessh": RemoteSSHNode,
     "app": AppNode,
+    "datastorage": DataStorageNode,
 }
 
 

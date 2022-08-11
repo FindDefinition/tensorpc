@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from pathlib import Path
+import time
 import traceback
 from typing import Any, Union
 import cv2
@@ -322,6 +323,21 @@ class SampleEditorApp(EditableApp):
         self.text = Text("WTF")
         self.root.add_layout({
             "text": self.text,
+            "btn": Button("runCB", self.example_cb),
+            "btn2": Button("ShowTS", self.show_ts),
+
         })
         self.set_init_window_size([480, 320])
         self.init_enable_editor()
+
+
+    def example_cb(self):
+        print("dynamic loadable APP!!!")
+        print("example cb 2")
+        self.new_method()
+
+    async def show_ts(self):
+        await self.text.write(str(time.time_ns()))
+
+    def new_method(self):
+        print("new method")

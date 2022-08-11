@@ -17,7 +17,7 @@ from tensorpc.apps.flow.coretypes import ScheduleEvent, get_uid
 from tensorpc.apps.flow.flowapp import App, AppEditorFrontendEvent, AppEvent, AppEventType, LayoutEvent, ScheduleNextForApp, UIEvent
 import asyncio
 from tensorpc.core.httpclient import http_remote_call
-from tensorpc.core.serviceunit import get_cls_obj_from_module_name
+from tensorpc.core.serviceunit import ReloadableDynamicClass
 import tensorpc
 from ..client import MasterMeta
 from tensorpc import prim
@@ -45,8 +45,9 @@ class FlowApp:
         self._uid = get_uid(self.master_meta.graph_id,
                             self.master_meta.node_id)
         self.headless = headless
-        obj_type, alias, module_key = get_cls_obj_from_module_name(module_name)
-        self.app: App = obj_type(**self.config)
+        self.dynamic_app_cls = ReloadableDynamicClass(module_name)
+        self.app: App = self.dynamic_app_cls.cls_obj(**self.config)
+        self.app._app_dynamic_cls = self.dynamic_app_cls
         self._send_loop_queue: "asyncio.Queue[AppEvent]" = self.app._queue
         self.app._send_callback = self._send_http_event
         self._send_loop_task = asyncio.create_task(self._send_loop())

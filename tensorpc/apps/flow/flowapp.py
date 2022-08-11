@@ -23,6 +23,7 @@ import traceback
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Tuple, TypeVar, Union)
 from tensorpc.apps.flow.coretypes import ScheduleEvent
+from tensorpc.core.serviceunit import ReloadableDynamicClass
 from tensorpc.utils.uniquename import UniqueNamePool
 import numpy as np
 from PIL import Image
@@ -343,6 +344,12 @@ class Component:
         self._align_self = align_self
         self.parent = ""
 
+    def get_callback(self) -> Optional[Callable]:
+        return None 
+
+    def set_callback(self, val: Any):
+        return  
+
     def to_dict(self):
         res = {
             "type": self.type.value,
@@ -597,6 +604,11 @@ class Button(Component):
             self.uid: self.name
         }))
 
+    def get_callback(self):
+        return self.callback 
+
+    def set_callback(self, val: Any):
+        self.callback = val  
 
 class ListItemButton(Component):
 
@@ -621,6 +633,11 @@ class ListItemButton(Component):
             self.uid: self.name
         }))
 
+    def get_callback(self):
+        return self.callback 
+
+    def set_callback(self, val: Any):
+        self.callback = val  
 
 class Buttons(Component):
 
@@ -645,6 +662,11 @@ class Buttons(Component):
             self.uid: self.names[index]
         }))
 
+    def get_callback(self):
+        return self.callback 
+
+    def set_callback(self, val: Any):
+        self.callback = val  
 
 class FlexBox(Component):
 
@@ -1209,6 +1231,11 @@ class RadioGroup(Component):
             self.uid: self.names[index]
         }))
 
+    def get_callback(self):
+        return self.callback 
+
+    def set_callback(self, val: Any):
+        self.callback = val  
 
 class Input(Component):
 
@@ -1244,6 +1271,11 @@ class Input(Component):
             self.uid: content
         }))
 
+    def get_callback(self):
+        return self.callback 
+
+    def set_callback(self, val: Any):
+        self.callback = val  
 
 # class CodeEditor(Component):
 
@@ -1303,6 +1335,12 @@ class Switch(Component):
             self.uid: checked
         }))
 
+    def get_callback(self):
+        return self.callback 
+
+    def set_callback(self, val: Any):
+        self.callback = val  
+
 class Select(Component):
 
     def __init__(self,
@@ -1358,6 +1396,12 @@ class Select(Component):
             self.uid: value
         }))
 
+    def get_callback(self):
+        return self.callback 
+
+    def set_callback(self, val: Any):
+        self.callback = val  
+
 class Slider(Component):
 
     def __init__(self,
@@ -1409,6 +1453,12 @@ class Slider(Component):
         return await self.queue.put(UIEvent({
             self.uid: value
         }))
+
+    def get_callback(self):
+        return self.callback 
+
+    def set_callback(self, val: Any):
+        self.callback = val  
 
 _T = TypeVar("_T")
 
@@ -1486,6 +1536,12 @@ class TaskLoop(Component):
             self.uid: TaskLoopEvent.Start.value
         }))
 
+    def get_callback(self):
+        return self.callback 
+
+    def set_callback(self, val: Any):
+        self.callback = val  
+
 _ROOT = "root"
 
 class AppEditor:
@@ -1560,6 +1616,13 @@ class App:
         self._enable_editor = False
 
         self.code_editor = AppEditor("", "python")
+        self._app_dynamic_cls: Optional[ReloadableDynamicClass] = None
+        # loaded if you connect app node with a full data storage
+        self._data_storage: Dict[str, Any] = {}
+
+    def _get_app_dynamic_cls(self):
+        assert self._app_dynamic_cls is not None 
+        return self._app_dynamic_cls
 
     def _get_app_layout(self):
         return {
@@ -1724,8 +1787,19 @@ class EditableApp(App):
     async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
         """override this method to support vscode editor.
         """
+        # TODO if other editor change app code?
         if event.type == AppEditorFrontendEventType.Save:
             with open(inspect.getfile(type(self)), "w") as f:
                 f.write(event.data)
             self.code_editor.value = event.data
+            comps = self._uid_to_comp
+            callback_dict = {}
+            for k, v in comps.items():
+                cb = v.get_callback()
+                if cb is not None:
+                    callback_dict[k] = cb
+            new_cb = self._get_app_dynamic_cls().reload_obj_methods(self, callback_dict)
+            for k, v in comps.items():
+                if k in new_cb:
+                    v.set_callback(new_cb[k])
         return
