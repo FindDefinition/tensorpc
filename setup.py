@@ -32,7 +32,6 @@ REQUIRED = [
     "numpy",
     "msgpack",
     "requests",
-    "prompt_toolkit",
     "aiohttp",
     "asyncssh",
     "importlib_metadata; python_version < \"3.8\"",
@@ -42,6 +41,7 @@ REQUIRED = [
     "bcrypt",
     "jinja2",
     "async-timeout",
+    "watchdog",
 ]
 
 # What packages are optional?

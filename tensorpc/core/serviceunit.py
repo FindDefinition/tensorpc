@@ -104,6 +104,7 @@ class DynamicClass:
         self.alias: Optional[str] = None
         self.is_standard_module = False
         self.standard_module: Optional[types.ModuleType] = None
+        self.file_path = ""
         if len(module_cls) == 3:
             self.alias = module_cls[-1]
             self.cls_name = module_cls[-2]
@@ -113,11 +114,15 @@ class DynamicClass:
             if self.module_path.startswith("!"):
                 # treat module_path as a file path
                 self.module_path = self.module_path[1:]
+                self.file_path = self.module_path
                 assert Path(self.module_path).exists(), f"your {self.module_path} not exists"
                 self.module_dict = runpy.run_path(self.module_path)
                 self.is_standard_module = False
             else:
                 self.standard_module = importlib.import_module(self.module_path)
+                file_path = inspect.getfile(self.standard_module)
+                assert file_path is not None, f"don't support compiled library, {file_path} must be .py"
+                self.file_path = file_path
                 self.module_dict = self.standard_module.__dict__
                 self.is_standard_module = True
         except ImportError:

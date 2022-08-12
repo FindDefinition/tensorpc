@@ -18,6 +18,7 @@ import base64
 import enum
 import inspect
 import io
+import threading
 import time
 import traceback
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
@@ -29,6 +30,9 @@ import numpy as np
 from PIL import Image
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.utils.registry import HashableRegistry
+import watchdog 
+import watchdog.events
+from watchdog.observers import Observer
 
 ALL_APP_EVENTS = HashableRegistry()
 
@@ -1620,6 +1624,11 @@ class App:
         # loaded if you connect app node with a full data storage
         self._data_storage: Dict[str, Any] = {}
 
+    def app_initialize(self):
+        """override this to init app before server start
+        """
+        pass 
+
     def _get_app_dynamic_cls(self):
         assert self._app_dynamic_cls is not None 
         return self._app_dynamic_cls
@@ -1668,14 +1677,15 @@ class App:
     async def _send_editor_event(self, event: AppEditorEvent):
         await self._queue.put(AppEvent("", {AppEventType.AppEditor: event}))
 
-    async def set_editor_value(self, value: str, language: str):
+    async def set_editor_value(self, value: str, language: str = ""):
         """use this method to set editor value and language.
         """
         self.code_editor.value = value 
-        self.code_editor.language = language 
+        if language:
+            self.code_editor.language = language 
         app_ev = AppEditorEvent(AppEditorEventType.SetValue, {
-            "value": value,
-            "language": language,
+            "value": self.code_editor.value,
+            "language": self.code_editor.language,
         })
         await self._send_editor_event(app_ev)
 
@@ -1775,6 +1785,16 @@ class App:
                 "",
                 {AppEventType.CopyToClipboard: CopyToClipboardEvent(text)}))
 
+_WATCHDOG_MODIFY_EVENT_TYPES = Union[watchdog.events.DirModifiedEvent, watchdog.events.FileModifiedEvent]
+
+class _WatchDogForAppFile(watchdog.events.FileSystemEventHandler):
+    def __init__(self, on_modified: Callable[[_WATCHDOG_MODIFY_EVENT_TYPES], None]) -> None:
+        super().__init__()
+        self._on_modified = on_modified
+
+    def on_modified(self, event: _WATCHDOG_MODIFY_EVENT_TYPES):
+        return self._on_modified(event)
+
 class EditableApp(App):
     def __init__(self, flex_flow: Optional[str] = "column nowrap", justify_content: Optional[str] = None, align_items: Optional[str] = None, maxqsize: int = 10) -> None:
         super().__init__(flex_flow, justify_content, align_items, maxqsize)
@@ -1784,22 +1804,50 @@ class EditableApp(App):
         self.code_editor.set_init_line_number(lineno)
         self.code_editor.freeze()
 
+    def app_initialize(self):
+        dcls = self._get_app_dynamic_cls()
+        path = dcls.file_path
+        observer = Observer()
+        self._watch = _WatchDogForAppFile(self._watchdog_on_modified)
+        observer.schedule(self._watch, path, recursive=False)
+        observer.start()
+        self.observer = observer
+        self._watchdog_ignore_next = False
+        self._loop = asyncio.get_running_loop()
+        self._watch_lock = threading.Lock()
+
+    def _watchdog_on_modified(self, ev: _WATCHDOG_MODIFY_EVENT_TYPES):
+        if isinstance(ev, watchdog.events.FileModifiedEvent):
+            with self._watch_lock:
+                if self._watchdog_ignore_next:
+                    self._watchdog_ignore_next = False 
+                    return
+                with open(ev.src_path, "r") as f:
+                    new_data = f.read()
+                fut = asyncio.run_coroutine_threadsafe(self.set_editor_value(new_data), self._loop)
+                fut.result()
+                self._reload_app_file()
+
+    def _reload_app_file(self):
+        comps = self._uid_to_comp
+        callback_dict = {}
+        for k, v in comps.items():
+            cb = v.get_callback()
+            if cb is not None:
+                callback_dict[k] = cb
+        new_cb = self._get_app_dynamic_cls().reload_obj_methods(self, callback_dict)
+        for k, v in comps.items():
+            if k in new_cb:
+                v.set_callback(new_cb[k])
+
     async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
         """override this method to support vscode editor.
         """
-        # TODO if other editor change app code?
         if event.type == AppEditorFrontendEventType.Save:
-            with open(inspect.getfile(type(self)), "w") as f:
-                f.write(event.data)
-            self.code_editor.value = event.data
-            comps = self._uid_to_comp
-            callback_dict = {}
-            for k, v in comps.items():
-                cb = v.get_callback()
-                if cb is not None:
-                    callback_dict[k] = cb
-            new_cb = self._get_app_dynamic_cls().reload_obj_methods(self, callback_dict)
-            for k, v in comps.items():
-                if k in new_cb:
-                    v.set_callback(new_cb[k])
+            with self._watch_lock:
+                self._watchdog_ignore_next = True
+                with open(inspect.getfile(type(self)), "w") as f:
+                    f.write(event.data)
+                self.code_editor.value = event.data
+                self._reload_app_file()
         return
