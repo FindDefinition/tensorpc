@@ -44,7 +44,7 @@ import watchdog.events
 from PIL import Image
 from tensorpc.apps.flow.coretypes import ScheduleEvent
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.core.serviceunit import ReloadableDynamicClass
+from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceUnit
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.uniquename import UniqueNamePool
 from watchdog.observers import Observer
@@ -134,6 +134,9 @@ class App:
 
         self.code_editor = AppEditor("", "python")
         self._app_dynamic_cls: Optional[ReloadableDynamicClass] = None
+        # other app can call app methods via service_unit
+        self._app_service_unit: Optional[ServiceUnit] = None
+
         # loaded if you connect app node with a full data storage
         self._data_storage: Dict[str, Any] = {}
 
@@ -145,6 +148,10 @@ class App:
     def _get_app_dynamic_cls(self):
         assert self._app_dynamic_cls is not None
         return self._app_dynamic_cls
+
+    def _get_app_service_unit(self):
+        assert self._app_service_unit is not None
+        return self._app_service_unit
 
     def _get_app_layout(self):
         return {
@@ -366,6 +373,7 @@ class EditableApp(App):
             cb = v.get_callback()
             if cb is not None:
                 callback_dict[k] = cb
+        self._get_app_service_unit().reload_obj_methods(self)
         new_cb = self._get_app_dynamic_cls().reload_obj_methods(
             self, callback_dict)
         for k, v in comps.items():

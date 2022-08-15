@@ -24,6 +24,7 @@ from typing import Any, Union
 import cv2
 import imageio
 from faker import Faker
+import tensorpc
 from tensorpc.apps.flow.client import add_message
 from tensorpc.apps.flow.coretypes import MessageLevel, ScheduleEvent
 from tensorpc.apps.flow.flowapp import App, EditableApp
@@ -362,27 +363,38 @@ class SampleThreeApp(EditableApp):
             "d3v": VBox({
                 "d3": self.canvas,
                 "btn": Button("showRandomPC", self.show_Random_pc),
+                "btn2": Button("rpcTest", self.rpc_test),
+
             }, height="100%", width="100%"),
 
         })
         self.set_init_window_size([480, 320])
         self.init_enable_editor()
 
-        print(self.root.to_dict())
-
 
     async def show_Random_pc(self):
-        print("dynamic loadable APP!!!")
-        print("example cb 5")
+        data = np.load("/home/tusimple/tusimple/spconv/test/data/benchmark-pc.npz")
+        pc = np.ascontiguousarray(data["pc"])
 
-        # data = np.load("/home/yy/Projects/spconv-release/spconv/test/data/benchmark-pc.npz")
-        # pc = np.ascontiguousarray(data["pc"])
-
-        num = 5
-        pc = np.random.uniform(-5, 5, size=[num, 3]).astype(np.float32)
-        for i in range(num):
-            pc[i] = i
-        print(pc)
-        print(pc.shape)
-        attrs = [str(i) for i in range(num)]
+        # num = 50
+        # pc = np.random.uniform(-5, 5, size=[num, 3]).astype(np.float32)
+        # # for i in range(num):
+        # #     pc[i] = i
+        # # print(pc)
+        # # print(pc.shape)
+        # attrs = [str(i) for i in range(num)]
         await self.points.update_points(pc)
+
+    async def show_pc_with_props(self, pc, props):
+        await self.points.update_points(pc, props=props)
+
+    async def show_pc(self, pc):
+        print("???")
+        await self.points.update_points(pc)
+
+    async def rpc_test(self):
+        data = np.load("/home/tusimple/tusimple/spconv/test/data/benchmark-pc.npz")
+        pc = np.ascontiguousarray(data["pc"])
+        addr = "localhost:43727"
+        await tensorpc.simple_chunk_call_async(addr, "tensorpc.apps.flow.serv.flowapp::FlowApp.run_app_service", "tensorpc.apps.flow.sampleapp.app::SampleThreeApp.show_pc", pc)
+

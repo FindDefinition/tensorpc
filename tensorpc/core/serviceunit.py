@@ -128,15 +128,15 @@ class DynamicClass:
         except ImportError:
             print(f"Can't Import {module_name}. Check your project or PWD")
             raise
-        cls_obj = self.module_dict[self.cls_name]
-        self.cls_obj = cls_obj
+        obj_type = self.module_dict[self.cls_name]
+        self.obj_type = obj_type
         self.module_key =  f"{self.module_path}{TENSORPC_SPLIT}{self.cls_name}"
 
 
 class ReloadableDynamicClass(DynamicClass):
     def __init__(self, module_name: str, ) -> None:
         super().__init__(module_name)
-        self.serv_metas = self.get_metas_of_regular_methods(self.cls_obj)
+        self.serv_metas = self.get_metas_of_regular_methods(self.obj_type)
 
     @staticmethod
     def get_metas_of_regular_methods(type_obj):
@@ -194,7 +194,7 @@ class ReloadableDynamicClass(DynamicClass):
             else:
                 setattr(obj, new_meta.name, new_method)
         self.serv_metas = new_metas
-        self.cls_obj = new_obj_type
+        self.obj_type = new_obj_type
         return new_cb
 
 
@@ -206,7 +206,7 @@ def get_cls_obj_from_module_name(module_name: str):
     !/your/path/to/module.py::Class::Alias
     """
     rc = DynamicClass(module_name)
-    return rc.cls_obj, rc.alias, rc.module_key
+    return rc.obj_type, rc.alias, rc.module_key
 
 
 class FunctionUserMeta:
@@ -246,9 +246,7 @@ class EventProvider:
                              self.is_static, self.is_dynamic)
 
 
-
-
-class ServiceUnit:
+class ServiceUnit(DynamicClass):
     """x.y.z::Class::Alias
     x.y.z::Class
     x.y.z::Class.f1
@@ -258,16 +256,62 @@ class ServiceUnit:
     """
 
     def __init__(self, module_name: str, config: Dict[str, Any]) -> None:
+        super().__init__(module_name)
         assert config is not None, "please use {} in yaml if config is empty"
-        self.obj_type, self.alias, self.module_key = get_cls_obj_from_module_name(
-            module_name)
-        members = inspecttools.get_members_by_type(self.obj_type, False)
+        # self.obj_type, self.alias, self.module_key = get_cls_obj_from_module_name(
+        #     module_name)
         self.services: Dict[str, ServFunctionMeta] = {}
         self.exit_fn: Optional[Any] = None
         self._is_exit_fn_async: bool = False
         self.ws_onconn_fn: Optional[Callable[[Any], None]] = None
         self.ws_ondisconn_fn: Optional[Callable[[Any], None]] = None
         self.name_to_events: Dict[str, EventProvider] = {}
+        self.serv_metas = self._init_all_metas(self.obj_type)
+        assert len(
+            self.services
+        ) > 0, f"your service {module_name} must have at least one valid method"
+        # self.obj = self.obj_type(**config)
+        self.obj: Optional[Any] = None
+        self.config = config
+
+    def reload_obj_methods(self, obj, callback_dict: Optional[Dict[str, Any]] = None):
+        # reload regular methods/static methods
+        new_cb: Dict[str, Any] = {}
+        if callback_dict is None:
+            callback_dict = {}
+        callback_inv_dict = {v: k for k, v in callback_dict.items()}
+        if self.is_standard_module and self.standard_module is not None:
+            importlib.reload(self.standard_module) 
+            self.module_dict = self.standard_module.__dict__
+        else:
+            self.module_dict = runpy.run_path(self.module_path)
+        new_obj_type = self.module_dict[self.cls_name]
+        new_metas = self._init_all_metas(new_obj_type)
+        # new_name_to_meta = {m.name: m for m in new_metas}
+        name_to_meta = {m.name: m for m in self.serv_metas}
+
+        for new_meta in new_metas:
+            if not new_meta.is_static:
+                new_method =  types.MethodType(new_meta.fn, obj)
+            else:
+                new_method = new_meta.fn
+            if new_meta.name in name_to_meta:
+                meta = name_to_meta[new_meta.name]
+                method = getattr(obj, meta.name)
+                setattr(obj, new_meta.name, new_method)
+                if method in callback_inv_dict:
+                    new_cb[callback_inv_dict[method]] = new_method
+            else:
+                setattr(obj, new_meta.name, new_method)
+        self.serv_metas = new_metas
+        self.obj_type = new_obj_type
+        return new_cb
+
+    def _init_all_metas(self, obj_type) -> List[ServFunctionMeta]:
+        members = inspecttools.get_members_by_type(obj_type, False)
+        self.services.clear()
+        self.name_to_events.clear()
+        new_metas: List[ServFunctionMeta] = []
         for k, v in members:
             if inspecttools.isclassmethod(v) or inspecttools.isproperty(v):
                 # ignore property and classmethod
@@ -281,11 +325,11 @@ class ServiceUnit:
             is_gen = inspect.isgeneratorfunction(v)
             is_async_gen = inspect.isasyncgenfunction(v)
             is_async = inspect.iscoroutinefunction(v) or is_async_gen
-            is_static = inspecttools.isstaticmethod(self.obj_type, k)
+            is_static = inspecttools.isstaticmethod(obj_type, k)
             if is_async:
                 is_gen = is_async_gen
             # TODO Why?
-            v_static = inspect.getattr_static(self.obj_type, k)
+            v_static = inspect.getattr_static(obj_type, k)
             v_sig = inspect.signature(v)
             ev_provider: Optional[EventProvider] = None
             if hasattr(v_static, TENSORPC_FUNC_META_KEY):
@@ -319,7 +363,7 @@ class ServiceUnit:
             # if module_name == "distflow.services.for_test:Service2:Test3" and k == "client_stream":
             #     print(dir(v))
             # print(module_name, serv_meta, is_async, is_async_gen)
-
+            new_metas.append(serv_meta)
             assert serv_key not in self.services
             self.services[serv_key] = serv_meta
             if ev_provider is not None:
@@ -331,18 +375,16 @@ class ServiceUnit:
                 if ev_provider is not None:
                     ev_provider.service_key = alias_key
                     self.name_to_events[alias_key] = ev_provider
+        return new_metas
+            
 
-        assert len(
-            self.services
-        ) > 0, f"your service {module_name} must have at least one valid method"
-        # self.obj = self.obj_type(**config)
-        self.obj: Optional[Any] = None
-        self.config = config
-
-    def init_service(self):
+    def init_service(self, external_obj: Optional[Any] = None):
         # lazy init
         if self.obj is None:
-            self.obj = self.obj_type(**self.config)
+            if external_obj is not None:
+                self.obj = external_obj
+            else:
+                self.obj = self.obj_type(**self.config)
             if self.exit_fn is not None:
                 self.exit_fn = types.MethodType(self.exit_fn, self.obj)
             if self.ws_onconn_fn is not None:
@@ -481,7 +523,7 @@ if __name__ == "__main__":
     print(su.run_service("Test.add", 1, 2))
 
     cl = ReloadableDynamicClass("tensorpc.services.for_test::Service1::Test")
-    obj = cl.cls_obj()
+    obj = cl.obj_type()
     print(obj.add(1, 2))
     print(input("hold"))
     cl.reload_obj_methods(obj)

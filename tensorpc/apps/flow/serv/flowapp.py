@@ -18,7 +18,7 @@ from tensorpc.apps.flow.flowapp.core import AppEditorFrontendEvent, AppEvent, Ap
 from tensorpc.apps.flow.flowapp.app import App
 import asyncio
 from tensorpc.core.httpclient import http_remote_call
-from tensorpc.core.serviceunit import ReloadableDynamicClass
+from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceUnit
 import tensorpc
 from ..client import MasterMeta
 from tensorpc import prim
@@ -47,8 +47,13 @@ class FlowApp:
                             self.master_meta.node_id)
         self.headless = headless
         self.dynamic_app_cls = ReloadableDynamicClass(module_name)
-        self.app: App = self.dynamic_app_cls.cls_obj(**self.config)
+        self.app: App = self.dynamic_app_cls.obj_type(**self.config)
+        # TODO reloadable app_su
+        self.app_su = ServiceUnit(module_name, config)
+        self.app_su.init_service(self.app)
         self.app._app_dynamic_cls = self.dynamic_app_cls
+        self.app._app_service_unit = self.app_su
+
         self._send_loop_queue: "asyncio.Queue[AppEvent]" = self.app._queue
         self.app._send_callback = self._send_http_event
         self._send_loop_task = asyncio.create_task(self._send_loop())
@@ -67,6 +72,15 @@ class FlowApp:
         ev = UIEvent.from_dict(data)
         return await self.app._handle_control_event(ev)
         # await self.app._queue.put(UIEvent.from_dict(data))
+
+    async def run_app_service(self, key: str, *args, **kwargs):
+        print(self.app_su.services.keys())
+        serv, meta = self.app_su.get_service_and_meta(key)
+        res_or_coro = serv(*args, **kwargs)
+        if meta.is_async:
+            return await res_or_coro
+        else:
+            return res_or_coro
 
     async def run_app_editor_event(self, data):
         ev = AppEditorFrontendEvent.from_dict(data)
