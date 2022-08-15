@@ -12,24 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from pathlib import Path
+import asyncio
+import base64
+import io
 import time
 import traceback
-from typing import Any, Union
-import cv2
-from tensorpc.apps.flow.coretypes import MessageLevel, ScheduleEvent
-from tensorpc.apps.flow.flowapp import App, Button, EditableApp, HBox, ListItemButton, ListItemText, Text, VBox, VList, Plotly, ChartJSLine
-import imageio
-import io
-import base64
-from tensorpc.apps.flow.client import add_message
-from faker import Faker
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Union
 
-import asyncio
+import cv2
+import imageio
+from faker import Faker
+from tensorpc.apps.flow.client import add_message
+from tensorpc.apps.flow.coretypes import MessageLevel, ScheduleEvent
+from tensorpc.apps.flow.flowapp import App, EditableApp
+from tensorpc.apps.flow.flowapp.components.mui import (Button, ChartJSLine,
+                                                       HBox, ListItemButton,
+                                                       ListItemText, Plotly,
+                                                       Text, VBox, VList)
 from tensorpc.core import prim
-
 from tensorpc.core.asynctools import cancel_task
+from tensorpc.apps.flow.flowapp.components import three
+import numpy as np 
 
 class SampleApp(App):
     def __init__(self) -> None:
@@ -341,3 +346,43 @@ class SampleEditorApp(EditableApp):
 
     def new_method(self):
         print("new method")
+
+
+class SampleThreeApp(EditableApp):
+    def __init__(self) -> None:
+        super().__init__()
+        self.points = three.Points(200000)
+        self.canvas = three.ThreeCanvas({
+                    "cam": three.PerspectiveCamera(True, [-10, 0, 5], [0, 0, 1], 75, 0, 0.1, 1000),
+                    "points": self.points,
+                    "ctrl": three.MapControl(True, 0.25, 1, 100),
+                    "box": three.BoundingBox([2, 5, 2], [0, 10, 0], [0, 0, 0.5])
+                })
+        self.root.add_layout({
+            "d3v": VBox({
+                "d3": self.canvas,
+                "btn": Button("showRandomPC", self.show_Random_pc),
+            }, height="100%", width="100%"),
+
+        })
+        self.set_init_window_size([480, 320])
+        self.init_enable_editor()
+
+        print(self.root.to_dict())
+
+
+    async def show_Random_pc(self):
+        print("dynamic loadable APP!!!")
+        print("example cb 5")
+
+        # data = np.load("/home/yy/Projects/spconv-release/spconv/test/data/benchmark-pc.npz")
+        # pc = np.ascontiguousarray(data["pc"])
+
+        num = 5
+        pc = np.random.uniform(-5, 5, size=[num, 3]).astype(np.float32)
+        for i in range(num):
+            pc[i] = i
+        print(pc)
+        print(pc.shape)
+        attrs = [str(i) for i in range(num)]
+        await self.points.update_points(pc)

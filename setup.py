@@ -36,7 +36,6 @@ REQUIRED = [
     "asyncssh",
     "importlib_metadata; python_version < \"3.8\"",
     "mashumaro",
-    "libtmux",
     "pillow",
     "bcrypt",
     "jinja2",

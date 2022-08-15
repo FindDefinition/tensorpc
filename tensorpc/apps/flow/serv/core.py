@@ -44,7 +44,7 @@ from tensorpc.apps.flow.coretypes import (Message, MessageEvent,
                                           ScheduleEvent, SessionStatus,
                                           UserContentEvent, UserEvent,
                                           UserStatusEvent, get_uid)
-from tensorpc.apps.flow.flowapp import AppEvent, AppEventType, ScheduleNextForApp, app_event_from_data
+from tensorpc.apps.flow.flowapp.core import AppEvent, AppEventType, ScheduleNextForApp, app_event_from_data
 from tensorpc.apps.flow.serv_names import serv_names
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, RawEvent,
@@ -1622,6 +1622,9 @@ class Flow:
             reload = True
         else:
             reload = graph_id not in self.flow_dict
+        if "viewport" in flow_data:
+            flow_data["viewport"]["zoom"] = 1
+
         if graph_id in self.flow_dict:
             graph = self.flow_dict[graph_id]
             # update node status

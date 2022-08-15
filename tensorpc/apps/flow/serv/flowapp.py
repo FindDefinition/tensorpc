@@ -14,7 +14,8 @@
 
 from typing import Any, Dict, List, Optional
 from tensorpc.apps.flow.coretypes import ScheduleEvent, get_uid
-from tensorpc.apps.flow.flowapp import App, AppEditorFrontendEvent, AppEvent, AppEventType, LayoutEvent, ScheduleNextForApp, UIEvent
+from tensorpc.apps.flow.flowapp.core import AppEditorFrontendEvent, AppEvent, AppEventType, LayoutEvent, ScheduleNextForApp, UIEvent
+from tensorpc.apps.flow.flowapp.app import App
 import asyncio
 from tensorpc.core.httpclient import http_remote_call
 from tensorpc.core.serviceunit import ReloadableDynamicClass

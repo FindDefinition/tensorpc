@@ -29,7 +29,7 @@ from tensorpc.apps.flow.coretypes import (Message, MessageEvent,
                                           RelayEventType, RelaySSHEvent,
                                           RelayUpdateNodeEvent, ScheduleEvent,
                                           relay_event_from_dict)
-from tensorpc.apps.flow.flowapp import AppEvent, AppEventType, ScheduleNextForApp, app_event_from_data
+from tensorpc.apps.flow.flowapp.core import AppEvent, AppEventType, ScheduleNextForApp, app_event_from_data
 from tensorpc.apps.flow.serv_names import serv_names
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, RawEvent,
