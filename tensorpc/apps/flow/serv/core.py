@@ -1354,14 +1354,25 @@ class Flow:
         if node.last_event != CommandEventType.CURRENT_COMMAND:
             return None
         if isinstance(driver, RemoteSSHNode):
-            return (driver.worker_grpc_url, driver.worker_http_url, True)
+            return {
+                "grpc_url": driver.worker_grpc_url,
+                "http_url": driver.worker_http_url,
+                "is_remote": True,
+                "module_name": node.module_name,
+            }
+            return (driver.worker_grpc_url, driver.worker_http_url, True, node.module_name)
         else:
             http_port = node.http_port
             grpc_port = node.grpc_port
             durl, _ = get_url_port(driver.url)
             app_url = get_http_url(durl, http_port)
-            app_grpc_url = get_http_url(durl, grpc_port)
-            return (app_grpc_url, app_url, False)
+            app_grpc_url = get_grpc_url(durl, grpc_port)
+            return {
+                "grpc_url": app_grpc_url,
+                "http_url": app_url,
+                "is_remote": False,
+                "module_name": node.module_name,
+            }
 
     async def put_event_from_worker(self, ev: Event):
         await self._ssh_q.put(ev)

@@ -286,6 +286,7 @@ class ServiceUnit(DynamicClass):
         new_metas = self._init_all_metas(new_obj_type)
         self.serv_metas = new_metas
         self.obj_type = new_obj_type
+        self.init_service(rebind=True)
         return new_cb
 
     def _init_all_metas(self, obj_type) -> List[ServFunctionMeta]:
@@ -359,13 +360,16 @@ class ServiceUnit(DynamicClass):
         return new_metas
             
 
-    def init_service(self, external_obj: Optional[Any] = None):
+    def init_service(self, external_obj: Optional[Any] = None, rebind: bool = False):
         # lazy init
-        if self.obj is None:
-            if external_obj is not None:
-                self.obj = external_obj
+        if self.obj is None or rebind:
+            if not rebind:
+                if external_obj is not None:
+                    self.obj = external_obj
+                else:
+                    self.obj = self.obj_type(**self.config)
             else:
-                self.obj = self.obj_type(**self.config)
+                assert self.obj is not None
             if self.exit_fn is not None:
                 self.exit_fn = types.MethodType(self.exit_fn, self.obj)
             if self.ws_onconn_fn is not None:
@@ -374,7 +378,6 @@ class ServiceUnit(DynamicClass):
             if self.ws_ondisconn_fn is not None:
                 self.ws_ondisconn_fn = types.MethodType(
                     self.ws_ondisconn_fn, self.obj)
-
             for k, meta in self.services.items():
                 # bind fn if not static
                 if not meta.is_static and not meta.is_binded:

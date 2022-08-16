@@ -45,8 +45,10 @@ class Points(ThreeComponentBase):
         self.limit = limit
         self.intensity: Optional[np.ndarray] = None
         self.color: Optional[np.ndarray] = None
-        self.props: Optional[List[str]] = None
+        self.attrs: Optional[np.ndarray] = None
         self.sizeAttenuation = False
+        self.attrs: Optional[np.ndarray] = None
+        self.attr_fields: Optional[List[str]] = None
 
     def to_dict(self):
         res = super().to_dict()
@@ -57,7 +59,8 @@ class Points(ThreeComponentBase):
                             points: np.ndarray,
                             intensity: Optional[np.ndarray] = None,
                             color: Optional[np.ndarray] = None,
-                            props: Optional[List[str]] = None):
+                            attrs: Optional[np.ndarray] = None,
+                            attr_fields: Optional[List[str]] = None):
         assert points.shape[0] <= self.limit, f"your points size must smaller than limit {self.limit}"
         upd: Dict[str, Any] = {
             "points": points,
@@ -66,13 +69,19 @@ class Points(ThreeComponentBase):
             upd["intensity"] = intensity
         if color is not None:
             upd["color"] = color
-        if props is not None:
-            upd["props"] = props
+        if attrs is not None:
+            if attrs.ndim == 1:
+                attrs = attrs.reshape(-1, 1)
+            if attr_fields is None:
+                attr_fields = [f"{i}" for i in range(attrs.shape[1])]
+            upd["attrs"] = attrs
+            upd["attrFields"] = attr_fields
+
         self.points = points
         self.intensity = intensity
         self.color = color
-        self.props = props
-
+        self.attrs = attrs
+        self.attr_fields = attr_fields
         await self.queue.put(self.create_update_event(upd))
 
     def get_state(self):
@@ -84,8 +93,11 @@ class Points(ThreeComponentBase):
             state["intensity"] = self.intensity
         if self.color is not None:
             state["color"] = self.color
-        if self.props is not None:
-            state["props"] = self.props
+        if self.attrs is not None:
+            assert self.attr_fields is not None, "you must provide attr fields"
+            state["attrs"] = self.attrs
+            state["attrFields"] = self.attr_fields
+
         return state
 
 class BoundingBox(ThreeComponentBase):

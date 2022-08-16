@@ -25,7 +25,7 @@ import cv2
 import imageio
 from faker import Faker
 import tensorpc
-from tensorpc.apps.flow.client import add_message
+from tensorpc.apps.flow.client import AsyncAppClient, add_message, AppClient
 from tensorpc.apps.flow.coretypes import MessageLevel, ScheduleEvent
 from tensorpc.apps.flow.flowapp import App, EditableApp
 from tensorpc.apps.flow.flowapp.components.mui import (Button, ChartJSLine,
@@ -352,12 +352,12 @@ class SampleEditorApp(EditableApp):
 class SampleThreeApp(EditableApp):
     def __init__(self) -> None:
         super().__init__()
-        self.points = three.Points(200000)
+        self.points = three.Points(2000000)
         self.canvas = three.ThreeCanvas({
                     "cam": three.PerspectiveCamera(True, [-10, 0, 5], [0, 0, 1], 75, 0, 0.1, 1000),
                     "points": self.points,
                     "ctrl": three.MapControl(True, 0.25, 1, 100),
-                    "box": three.BoundingBox([2, 5, 2], [0, 10, 0], [0, 0, 0.5])
+                    # "box": three.BoundingBox([2, 5, 2], [0, 10, 0], [0, 0, 0.5])
                 })
         self.root.add_layout({
             "d3v": VBox({
@@ -368,33 +368,57 @@ class SampleThreeApp(EditableApp):
             }, height="100%", width="100%"),
 
         })
-        self.set_init_window_size([480, 320])
+        self.set_init_window_size([1280, 720])
         self.init_enable_editor()
 
 
     async def show_Random_pc(self):
         data = np.load("/home/tusimple/tusimple/spconv/test/data/benchmark-pc.npz")
         pc = np.ascontiguousarray(data["pc"])
-
         # num = 50
         # pc = np.random.uniform(-5, 5, size=[num, 3]).astype(np.float32)
-        # # for i in range(num):
-        # #     pc[i] = i
-        # # print(pc)
-        # # print(pc.shape)
+        # for i in range(num):
+        #     pc[i] = i
+        # print(pc)
+        # print(pc.shape)
         # attrs = [str(i) for i in range(num)]
-        await self.points.update_points(pc)
-
-    async def show_pc_with_props(self, pc, props):
-        await self.points.update_points(pc, props=props)
+        attrs = pc 
+        attr_fields = ["x", "y", "z"]
+        # print("???", pc.size * pc.itemsize)
+        await self.points.update_points(pc, attrs=attrs, attr_fields=attr_fields)
+        print("???????")
 
     async def show_pc(self, pc):
-        print("???")
-        await self.points.update_points(pc)
+        intensity = None 
+        if pc.shape[1] == 4:
+            intensity = pc[:, 3]
+        await self.points.update_points(pc, intensity=intensity)
+    
+    async def show_pc_with_attrs(self, pc, attrs, attr_fields):
+        intensity = None 
+        is_nan_mask = np.isnan(pc).any(1)
+        is_not_nan_mask = np.logical_not(is_nan_mask)
+        num_nan = is_nan_mask.sum()
+        if (num_nan) > 0:
+            print("NUM NAN", num_nan)
+        if pc.shape[1] == 4:
+            intensity = np.ascontiguousarray(pc[:, 3])[is_not_nan_mask]
+            pc = np.ascontiguousarray(pc[:, :3])[is_not_nan_mask]
+        await self.points.update_points(pc, intensity=intensity, 
+            attrs=attrs[is_not_nan_mask], attr_fields=attr_fields)
 
     async def rpc_test(self):
+        print(self._get_app_dynamic_cls().module_key)
+        print("???")
         data = np.load("/home/tusimple/tusimple/spconv/test/data/benchmark-pc.npz")
         pc = np.ascontiguousarray(data["pc"])
+        print(pc.shape)
+        # tmp = pc[:, 0].copy()
+        # pc[:, 0] = pc[:, 1]
+        # pc[:, 1] = tmp
         addr = "localhost:43727"
-        await tensorpc.simple_chunk_call_async(addr, "tensorpc.apps.flow.serv.flowapp::FlowApp.run_app_service", "tensorpc.apps.flow.sampleapp.app::SampleThreeApp.show_pc", pc)
+        master_addr = "10.130.51.54:51051"
+        # we can't use sync code here which will cause deadlock
+        async with AsyncAppClient(master_addr, "default_flow", "D3VisApp") as client:
+            await client.app_remote_call("show_pc", pc)
 

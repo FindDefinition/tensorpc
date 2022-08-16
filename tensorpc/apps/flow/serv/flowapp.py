@@ -74,8 +74,8 @@ class FlowApp:
         # await self.app._queue.put(UIEvent.from_dict(data))
 
     async def run_app_service(self, key: str, *args, **kwargs):
-        print(self.app_su.services.keys())
         serv, meta = self.app_su.get_service_and_meta(key)
+        print(key, args, kwargs)
         res_or_coro = serv(*args, **kwargs)
         if meta.is_async:
             return await res_or_coro
@@ -143,47 +143,50 @@ class FlowApp:
         # so we should just use retry here.
         shut_task = asyncio.create_task(self.shutdown_ev.wait())
         grpc_url = self.master_meta.grpc_url
-        # async with tensorpc.AsyncRemoteManager(grpc_url) as robj:
-        send_task = asyncio.create_task(self._send_loop_queue.get())
-        wait_tasks: List[asyncio.Task] = [shut_task, send_task]
-        master_disconnect = 0.0
-        retry_duration = 2.0 # 2s
-        previous_event = AppEvent(self._uid, {})
-        while True:
-            # if send fail, MERGE incoming app events, and send again after some time.
-            # all app event is "replace" in frontend.
-            (done,
-             pending) = await asyncio.wait(wait_tasks,
-                                           return_when=asyncio.FIRST_COMPLETED)
-            if shut_task in done:
-                break
-            ev: AppEvent = send_task.result()
-            if self.headless:
-                continue 
-            ts = time.time()
-            # assign uid here.
-            ev.uid = self._uid
+        async with tensorpc.AsyncRemoteManager(grpc_url) as robj:
             send_task = asyncio.create_task(self._send_loop_queue.get())
             wait_tasks: List[asyncio.Task] = [shut_task, send_task]
-            if master_disconnect >= 0:
-                previous_event = previous_event.merge_new(ev)
-                if ts - master_disconnect > retry_duration:
-                    try:
-                        await self._send_http_event(previous_event)
-                        master_disconnect = -1
-                        previous_event = AppEvent(self._uid, {})
-                    except Exception as e:
-                        print("Retry connection Fail.")
-                        master_disconnect = ts                    
-            else:
-                try:
-                    # print("SEND", ev.type)
-                    await self._send_http_event(ev)
-                    # print("SEND", ev.type, "FINISH")
-                except Exception as e:
-                    # remote call may fail by connection broken
-                    # when disconnect to master/remote worker, enter slient mode
+            master_disconnect = 0.0
+            retry_duration = 2.0 # 2s
+            previous_event = AppEvent(self._uid, {})
+            while True:
+                # if send fail, MERGE incoming app events, and send again after some time.
+                # all app event is "replace" in frontend.
+                (done,
+                pending) = await asyncio.wait(wait_tasks,
+                                            return_when=asyncio.FIRST_COMPLETED)
+                if shut_task in done:
+                    break
+                ev: AppEvent = send_task.result()
+                if self.headless:
+                    continue 
+                ts = time.time()
+                # assign uid here.
+                ev.uid = self._uid
+                send_task = asyncio.create_task(self._send_loop_queue.get())
+                wait_tasks: List[asyncio.Task] = [shut_task, send_task]
+                if master_disconnect >= 0:
                     previous_event = previous_event.merge_new(ev)
-                    master_disconnect = ts
+                    if ts - master_disconnect > retry_duration:
+                        try:
+                            # await self._send_http_event(previous_event)
+                            await self._send_grpc_event_large(previous_event, robj)
+                            master_disconnect = -1
+                            previous_event = AppEvent(self._uid, {})
+                        except Exception as e:
+                            print("Retry connection Fail.")
+                            master_disconnect = ts                    
+                else:
+                    try:
+                        # print("SEND", ev.type)
+                        # await self._send_http_event(ev)
+                        await self._send_grpc_event_large(ev, robj)
+                        # print("SEND", ev.type, "FINISH")
+                    except Exception as e:
+                        traceback.print_exc()
+                        # remote call may fail by connection broken
+                        # when disconnect to master/remote worker, enter slient mode
+                        previous_event = previous_event.merge_new(ev)
+                        master_disconnect = ts
         self._send_loop_task = None
 

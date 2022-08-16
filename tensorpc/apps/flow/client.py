@@ -163,19 +163,23 @@ def add_error_message(title: str, items: List[MessageItem]):
 
 
 def query_app_urls(master_url: str, graph_id: str,
-                   node_id: str) -> Tuple[Tuple[str, str], bool]:
+                   node_id: str) -> Tuple[Tuple[str, str], bool, str]:
     master_addr, _ = get_url_port(master_url)
     res = tensorpc.simple_remote_call(master_url,
                                       serv_names.FLOW_QUERY_APP_NODE_URLS,
                                       graph_id, node_id)
     assert res is not None
-    grpc_url, http_url, is_remote = res
+    grpc_url = res["grpc_url"]
+    http_url = res["http_url"]
+    is_remote = res["is_remote"]
+    module_name = res["module_name"]
+
     res_urls = []
     for url in [grpc_url, http_url]:
         if "localhost" in url:
             url = url.replace("localhost", master_addr)
         res_urls.append(url)
-    return tuple(res_urls), is_remote
+    return tuple(res_urls), is_remote, module_name
 
 
 class AppClient(tensorpc.RemoteManager):
@@ -188,14 +192,19 @@ class AppClient(tensorpc.RemoteManager):
                  channel_options=None,
                  credentials=None,
                  print_stdout=True):
-        app_urls, is_remote = query_app_urls(master_url, graph_id, node_id)
+        app_urls, is_remote, module_key = query_app_urls(master_url, graph_id, node_id)
         super().__init__(app_urls[0], name, channel_options, credentials,
                          print_stdout)
         self.graph_id = graph_id
         self.node_id = node_id
-        self.remote_url = "tensorpc.apps.flow.serv.flowapp::FlowApp.run_app_service"
+        self.is_remote = is_remote
+        self.module_key = module_key
+        self.remote_key = "tensorpc.apps.flow.serv.flowapp::FlowApp.run_app_service"
         if is_remote:
-            self.remote_url = "tensorpc.apps.flow.serv.worker::FlowWorker.run_app_service"
+            self.remote_key = "tensorpc.apps.flow.serv.worker::FlowWorker.run_app_service"
+        self.graph_args = []
+        if self.is_remote:
+            self.graph_args = [self.graph_id, self.node_id]
 
     def app_remote_call(self,
                         key: str,
@@ -204,9 +213,9 @@ class AppClient(tensorpc.RemoteManager):
                         rpc_callback="",
                         rpc_flags: int = rpc_message_pb2.PickleArray,
                         **kwargs):
-        return self.remote_call(self.remote_url,
-                                key,
-                                self.graph_id, self.node_id, *args,
+        return self.remote_call(self.remote_key,
+                                self.module_key + "." + key,
+                                *self.graph_args, *args,
                                 timeout=timeout,
                                 rpc_callback=rpc_callback,
                                 rpc_flags=rpc_flags,
@@ -219,10 +228,61 @@ class AppClient(tensorpc.RemoteManager):
                                 rpc_callback="",
                                 rpc_flags: int = rpc_message_pb2.PickleArray,
                                 **kwargs):
-        return self.chunked_remote_call(self.remote_url,
-                                        key,
-                                        self.graph_id, self.node_id, *args,
-                                        timeout=timeout,
-                                        rpc_callback=rpc_callback,
+        return self.chunked_remote_call(self.remote_key,
+                                self.module_key + "." + key,
+                                        *self.graph_args, *args,
+                                        rpc_flags=rpc_flags,
+                                        **kwargs)
+
+class AsyncAppClient(tensorpc.AsyncRemoteManager):
+
+    def __init__(self,
+                 master_url: str,
+                 graph_id: str,
+                 node_id: str,
+                 name="",
+                 channel_options=None,
+                 credentials=None,
+                 print_stdout=True):
+        app_urls, is_remote, module_key = query_app_urls(master_url, graph_id, node_id)
+        super().__init__(app_urls[0], name, channel_options, credentials,
+                         print_stdout)
+        self.graph_id = graph_id
+        self.node_id = node_id
+        self.is_remote = is_remote
+        self.remote_key = "tensorpc.apps.flow.serv.flowapp::FlowApp.run_app_service"
+        if is_remote:
+            self.remote_key = "tensorpc.apps.flow.serv.worker::FlowWorker.run_app_service"
+        self.graph_args = []
+        if self.is_remote:
+            self.graph_args = [self.graph_id, self.node_id]
+        self.module_key = module_key
+
+    async def app_remote_call(self,
+                        key: str,
+                        *args,
+                        timeout: Optional[int] = None,
+                        rpc_callback="",
+                        rpc_flags: int = rpc_message_pb2.PickleArray,
+                        **kwargs):
+
+        return await self.remote_call(self.remote_key,
+                                self.module_key + "." + key,
+                                *self.graph_args, *args,
+                                timeout=timeout,
+                                rpc_callback=rpc_callback,
+                                rpc_flags=rpc_flags,
+                                **kwargs)
+
+    async def app_chunked_remote_call(self,
+                                key: str,
+                                *args,
+                                timeout: Optional[int] = None,
+                                rpc_callback="",
+                                rpc_flags: int = rpc_message_pb2.PickleArray,
+                                **kwargs):
+        return await self.chunked_remote_call(self.remote_key,
+                                self.module_key + "." + key,
+                                        *self.graph_args, *args,
                                         rpc_flags=rpc_flags,
                                         **kwargs)

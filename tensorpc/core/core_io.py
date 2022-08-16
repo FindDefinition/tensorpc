@@ -640,6 +640,7 @@ class SocketMsgType(Enum):
     QueryServiceIds = 0x06
     Notification = 0x07
     EventChunk = 0x08
+    HeaderChunk = 0x09
 
     EventError = 0x10
     RPCError = 0x20
@@ -719,6 +720,7 @@ class SocketMessageEncoder:
         req_msg_size = req.ByteSize()
         if req_msg_size + 5 > chunk_size:
             print(req_msg_size, self._ser_skeleton)
+        
         final_size = 5 + req_msg_size + self.get_total_array_binary_size()
         cnt_arr = np.array([0], np.int32)
         if final_size < chunk_size:
