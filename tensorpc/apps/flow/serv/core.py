@@ -256,6 +256,9 @@ class Node:
     def get_uid(self):
         return _get_uid(self.graph_id, self.id)
 
+    def get_readable_uid(self):
+        return _get_uid(self.graph_id, self.readable_id)
+
     async def shutdown(self):
         return
 
@@ -270,8 +273,6 @@ class Node:
 class RunnableNodeBase(Node):
     pass
     
-
-
 
 def node_from_data(data: Dict[str, Any]) -> Node:
     for k, v in ALL_NODES.items():
@@ -445,7 +446,6 @@ class RemoteSSHNode(NodeWithSSHBase):
     def worker_http_url(self) -> str:
         if self.enable_port_forward:
             assert self.worker_http_port >= 0
-
             return get_http_url("localhost", self.worker_http_port)
 
         return get_http_url(self.url, self.remote_http_port)
@@ -1347,6 +1347,22 @@ class Flow:
             return await http_remote_call(sess, app_url,
                                           serv_names.APP_GET_LAYOUT)
 
+    def query_app_node_urls(self, graph_id: str, node_id: str):
+        node, driver = self._get_app_node_and_driver(graph_id, node_id)
+        if not node.is_session_started():
+            return None
+        if node.last_event != CommandEventType.CURRENT_COMMAND:
+            return None
+        if isinstance(driver, RemoteSSHNode):
+            return (driver.worker_grpc_url, driver.worker_http_url, True)
+        else:
+            http_port = node.http_port
+            grpc_port = node.grpc_port
+            durl, _ = get_url_port(driver.url)
+            app_url = get_http_url(durl, http_port)
+            app_grpc_url = get_http_url(durl, grpc_port)
+            return (app_grpc_url, app_url, False)
+
     async def put_event_from_worker(self, ev: Event):
         await self._ssh_q.put(ev)
 
@@ -1494,6 +1510,7 @@ class Flow:
         if isinstance(node_desp.node, (NodeWithSSHBase)):
             return node_desp.node.get_node_status().to_dict()
         return UserStatusEvent.empty().to_dict()
+
 
     async def save_terminal_state(self, graph_id: str, node_id: str, state,
                                   timestamp_ms: int):

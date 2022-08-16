@@ -1,29 +1,35 @@
 # Copyright 2022 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List
+from typing import List, Optional, Tuple
+
+from tensorpc.protos import rpc_message_pb2
+
+from ...utils.address import get_url_port
 from . import constants
 from .serv_names import serv_names
 from tensorpc.core.httpclient import http_remote_call_request
 import tensorpc
 
-import os 
-import time 
+import os
+import time
 from tensorpc.apps.flow.coretypes import Message, MessageItem, MessageLevel, RelayUpdateNodeEvent
-import uuid 
+import uuid
+
 
 class MasterMeta:
+
     def __init__(self) -> None:
         gid = os.getenv(constants.TENSORPC_FLOW_GRAPH_ID)
         nid = os.getenv(constants.TENSORPC_FLOW_NODE_ID)
@@ -51,12 +57,12 @@ class MasterMeta:
                     url = f"http://{ssh_server_ip}:{port}/api/rpc"
                 if gport is not None:
                     grpc_url = f"{ssh_server_ip}:{gport}"
-        self._node_readable_id = nrid 
-        self._graph_id = gid 
-        self._node_id = nid 
-        self.grpc_port = gport 
-        self.http_port = port 
-        self.grpc_url = grpc_url 
+        self._node_readable_id = nrid
+        self._graph_id = gid
+        self._node_id = nid
+        self.grpc_port = gport
+        self.http_port = port
+        self.grpc_url = grpc_url
         self.http_url = url
         self.is_worker = is_worker
 
@@ -64,17 +70,19 @@ class MasterMeta:
         self.is_http_valid = self.http_url != ""
         self.is_inside_devflow = gid is not None and nid is not None
 
-    @property 
+    @property
     def graph_id(self):
-        assert self._graph_id is not None 
+        assert self._graph_id is not None
         return self._graph_id
-    @property 
+
+    @property
     def node_readable_id(self):
-        assert self._node_readable_id is not None 
+        assert self._node_readable_id is not None
         return self._node_readable_id
-    @property 
+
+    @property
     def node_id(self):
-        assert self._node_id is not None 
+        assert self._node_id is not None
         return self._node_id
 
 
@@ -96,44 +104,125 @@ def _get_ids_and_url():
         # for direct connection
         ssh_server = os.getenv("SSH_CLIENT")
         if (gid is None or nid is None or ssh_server is None or port is None):
-            raise ValueError("this function can only be called via devflow frontend")
+            raise ValueError(
+                "this function can only be called via devflow frontend")
         ssh_server_ip = ssh_server.split(" ")[0]
         url = f"http://{ssh_server_ip}:{port}/api/rpc"
         grpc_url = f"{ssh_server_ip}:{gport}"
 
     return gid, nid, nrid, is_worker, url, grpc_url
 
+
 def update_node_status(content: str):
     meta = MasterMeta()
     if meta.is_inside_devflow and meta.is_http_valid:
         # TODO add try catch, if not found, just ignore error.
         if not meta.is_worker:
-            http_remote_call_request(meta.http_url, serv_names.FLOW_UPDATE_NODE_STATUS, meta.graph_id, meta.node_id, content)
+            http_remote_call_request(meta.http_url,
+                                     serv_names.FLOW_UPDATE_NODE_STATUS,
+                                     meta.graph_id, meta.node_id, content)
         else:
             # TODO remove this assert
-            assert meta.graph_id is not None 
-            assert meta.node_id is not None 
+            assert meta.graph_id is not None
+            assert meta.node_id is not None
             ev = RelayUpdateNodeEvent(meta.graph_id, meta.node_id, content)
-            http_remote_call_request(meta.http_url, serv_names.FLOWWORKER_PUT_WORKER_EVENT_JSON, meta.graph_id, ev.to_dict())
-        return True 
-    return False 
+            http_remote_call_request(
+                meta.http_url, serv_names.FLOWWORKER_PUT_WORKER_EVENT_JSON,
+                meta.graph_id, ev.to_dict())
+        return True
+    return False
+
 
 def add_message(title: str, level: MessageLevel, items: List[MessageItem]):
     timestamp = time.time_ns()
     gid, nid, nrid, is_worker, url, grpc_url = _get_ids_and_url()
     if (gid is None or nid is None):
-        raise ValueError("this function can only be called via devflow frontend")
-    msg = Message(str(uuid.uuid4()), level, timestamp, gid, nid, f"{title} ({nrid})", items)
+        raise ValueError(
+            "this function can only be called via devflow frontend")
+    msg = Message(str(uuid.uuid4()), level, timestamp, gid, nid,
+                  f"{title} ({nrid})", items)
     if not is_worker:
-        tensorpc.simple_remote_call(grpc_url, serv_names.FLOW_ADD_MESSAGE, [msg.to_dict_with_detail()])
+        tensorpc.simple_remote_call(grpc_url, serv_names.FLOW_ADD_MESSAGE,
+                                    [msg.to_dict_with_detail()])
     else:
-        tensorpc.simple_remote_call(grpc_url, serv_names.FLOWWORKER_ADD_MESSAGE, gid, [msg.to_dict_with_detail()])
+        tensorpc.simple_remote_call(grpc_url,
+                                    serv_names.FLOWWORKER_ADD_MESSAGE, gid,
+                                    [msg.to_dict_with_detail()])
+
 
 def add_info_message(title: str, items: List[MessageItem]):
     return add_message(title, MessageLevel.Info, items)
 
+
 def add_warning_message(title: str, items: List[MessageItem]):
     return add_message(title, MessageLevel.Warning, items)
 
+
 def add_error_message(title: str, items: List[MessageItem]):
     return add_message(title, MessageLevel.Error, items)
+
+
+def query_app_urls(master_url: str, graph_id: str,
+                   node_id: str) -> Tuple[Tuple[str, str], bool]:
+    master_addr, _ = get_url_port(master_url)
+    res = tensorpc.simple_remote_call(master_url,
+                                      serv_names.FLOW_QUERY_APP_NODE_URLS,
+                                      graph_id, node_id)
+    assert res is not None
+    grpc_url, http_url, is_remote = res
+    res_urls = []
+    for url in [grpc_url, http_url]:
+        if "localhost" in url:
+            url = url.replace("localhost", master_addr)
+        res_urls.append(url)
+    return tuple(res_urls), is_remote
+
+
+class AppClient(tensorpc.RemoteManager):
+
+    def __init__(self,
+                 master_url: str,
+                 graph_id: str,
+                 node_id: str,
+                 name="",
+                 channel_options=None,
+                 credentials=None,
+                 print_stdout=True):
+        app_urls, is_remote = query_app_urls(master_url, graph_id, node_id)
+        super().__init__(app_urls[0], name, channel_options, credentials,
+                         print_stdout)
+        self.graph_id = graph_id
+        self.node_id = node_id
+        self.remote_url = "tensorpc.apps.flow.serv.flowapp::FlowApp.run_app_service"
+        if is_remote:
+            self.remote_url = "tensorpc.apps.flow.serv.worker::FlowWorker.run_app_service"
+
+    def app_remote_call(self,
+                        key: str,
+                        *args,
+                        timeout: Optional[int] = None,
+                        rpc_callback="",
+                        rpc_flags: int = rpc_message_pb2.PickleArray,
+                        **kwargs):
+        return self.remote_call(self.remote_url,
+                                key,
+                                self.graph_id, self.node_id, *args,
+                                timeout=timeout,
+                                rpc_callback=rpc_callback,
+                                rpc_flags=rpc_flags,
+                                **kwargs)
+
+    def app_chunked_remote_call(self,
+                                key: str,
+                                *args,
+                                timeout: Optional[int] = None,
+                                rpc_callback="",
+                                rpc_flags: int = rpc_message_pb2.PickleArray,
+                                **kwargs):
+        return self.chunked_remote_call(self.remote_url,
+                                        key,
+                                        self.graph_id, self.node_id, *args,
+                                        timeout=timeout,
+                                        rpc_callback=rpc_callback,
+                                        rpc_flags=rpc_flags,
+                                        **kwargs)

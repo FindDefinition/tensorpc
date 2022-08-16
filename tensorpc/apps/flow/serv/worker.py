@@ -34,7 +34,8 @@ from tensorpc.apps.flow.serv_names import serv_names
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, RawEvent,
                                    SSHClient, SSHRequest, SSHRequestType)
-from tensorpc.core import get_http_url
+from tensorpc.core import get_grpc_url, get_http_url
+from ....core.client import simple_chunk_call
 from tensorpc.core.httpclient import http_remote_call
 from tensorpc.utils.address import convert_url_to_local, get_url_port
 from tensorpc.utils.wait_tools import get_free_ports
@@ -54,6 +55,7 @@ class FlowClient:
         self._send_loop_task: Optional[asyncio.Task] = None
         self.shutdown_ev = asyncio.Event()
         self._cached_nodes: Dict[str, CommandNode] = {}
+        self._readable_node_map: Dict[str, str] = {}
         self._need_to_send_env: Optional[ALL_EVENT_TYPES] = None
         self.selected_node_uid = ""
         self.lock = asyncio.Lock()
@@ -245,10 +247,16 @@ class FlowClient:
         return self._send_loop_task is not None
 
     def _get_node(self, graph_id: str, node_id: str):
-        return self._cached_nodes[_get_uid(graph_id, node_id)]
+        uid = _get_uid(graph_id, node_id)
+        if uid in self._readable_node_map:
+            uid = self._readable_node_map[uid]
+        return self._cached_nodes[uid]
 
     def _has_node(self, graph_id: str, node_id: str):
-        return _get_uid(graph_id, node_id) in self._cached_nodes
+        uid = _get_uid(graph_id, node_id)
+        if uid in self._readable_node_map:
+            uid = self._readable_node_map[uid]
+        return uid in self._cached_nodes
 
     async def run_ui_event(self, graph_id: str, node_id: str,
                            ui_ev_dict: Dict[str, Any]):
@@ -269,6 +277,13 @@ class FlowClient:
         app_url = get_http_url("localhost", http_port)
         return await http_remote_call(sess, app_url,
                                       serv_names.APP_RUN_APP_EDITOR_EVENT, ui_ev_dict)
+    
+    async def run_app_service(self, graph_id: str, node_id: str, key: str, *args, **kwargs):
+        node = self._get_node(graph_id, node_id)
+        assert isinstance(node, AppNode)
+        port = node.grpc_port
+        app_url = get_grpc_url("localhost", port)
+        return await tensorpc.simple_chunk_call_async(app_url, key, *args, **kwargs)
 
     async def get_layout(self, graph_id: str, node_id: str):
         node = self._get_node(graph_id, node_id)
@@ -313,6 +328,8 @@ class FlowClient:
         # print("EXIST", self._cached_nodes)
         # print("SYNCED NODES", [n.id for n in new_nodes])
         new_node_dict: Dict[str, CommandNode] = {}
+        new_readable_node_dict: Dict[str, str] = {}
+
         for new_node in new_nodes:
             uid = new_node.get_uid()
             if uid in self._cached_nodes:
@@ -323,6 +340,8 @@ class FlowClient:
                     await old_node.shutdown()
             assert isinstance(new_node, CommandNode)
             new_node_dict[uid] = new_node
+            new_readable_node_dict[new_node.get_readable_uid()] = uid
+
         driver_node = RemoteSSHNode.from_dict(driver_data)
         self._driver_node = driver_node
         for k, v in self._cached_nodes.items():
@@ -337,6 +356,7 @@ class FlowClient:
                 new_node_dict[k] = v
         async with self.lock:
             self._cached_nodes = new_node_dict
+            self._readable_node_map = new_readable_node_dict
         self.var_dict = var_dict
         res = []
         for node in new_node_dict.values():
@@ -595,6 +615,17 @@ class FlowWorker:
 
     async def put_app_event(self, graph_id: str, ev_dict: Dict[str, Any]):
         return await self._get_client(graph_id).put_app_event(ev_dict)
+
+    async def run_app_service(self, graph_id: str, node_id: str, key: str, *args, **kwargs):
+        return await self._get_client(graph_id).run_app_service(graph_id, node_id, key, *args, **kwargs)
+
+        print(self.app_su.services.keys())
+        serv, meta = self.app_su.get_service_and_meta(key)
+        res_or_coro = serv(*args, **kwargs)
+        if meta.is_async:
+            return await res_or_coro
+        else:
+            return res_or_coro
 
     async def run_ui_event(self, graph_id: str, node_id: str,
                            ui_ev_dict: Dict[str, Any]):

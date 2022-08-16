@@ -274,12 +274,9 @@ class ServiceUnit(DynamicClass):
         self.obj: Optional[Any] = None
         self.config = config
 
-    def reload_obj_methods(self, obj, callback_dict: Optional[Dict[str, Any]] = None):
+    def reload_metas(self):
         # reload regular methods/static methods
         new_cb: Dict[str, Any] = {}
-        if callback_dict is None:
-            callback_dict = {}
-        callback_inv_dict = {v: k for k, v in callback_dict.items()}
         if self.is_standard_module and self.standard_module is not None:
             importlib.reload(self.standard_module) 
             self.module_dict = self.standard_module.__dict__
@@ -287,22 +284,6 @@ class ServiceUnit(DynamicClass):
             self.module_dict = runpy.run_path(self.module_path)
         new_obj_type = self.module_dict[self.cls_name]
         new_metas = self._init_all_metas(new_obj_type)
-        # new_name_to_meta = {m.name: m for m in new_metas}
-        name_to_meta = {m.name: m for m in self.serv_metas}
-
-        for new_meta in new_metas:
-            if not new_meta.is_static:
-                new_method =  types.MethodType(new_meta.fn, obj)
-            else:
-                new_method = new_meta.fn
-            if new_meta.name in name_to_meta:
-                meta = name_to_meta[new_meta.name]
-                method = getattr(obj, meta.name)
-                setattr(obj, new_meta.name, new_method)
-                if method in callback_inv_dict:
-                    new_cb[callback_inv_dict[method]] = new_method
-            else:
-                setattr(obj, new_meta.name, new_method)
         self.serv_metas = new_metas
         self.obj_type = new_obj_type
         return new_cb

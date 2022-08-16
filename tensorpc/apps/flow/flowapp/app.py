@@ -373,9 +373,9 @@ class EditableApp(App):
             cb = v.get_callback()
             if cb is not None:
                 callback_dict[k] = cb
-        self._get_app_service_unit().reload_obj_methods(self)
         new_cb = self._get_app_dynamic_cls().reload_obj_methods(
             self, callback_dict)
+        self._get_app_service_unit().reload_metas()
         for k, v in comps.items():
             if k in new_cb:
                 v.set_callback(new_cb[k])

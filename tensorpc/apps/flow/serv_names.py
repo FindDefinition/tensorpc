@@ -39,6 +39,12 @@ class _ServiceNames:
                                        Flow.add_message.__name__)
 
     @property
+    def FLOW_QUERY_APP_NODE_URLS(self):
+        from tensorpc.apps.flow.serv.core import Flow
+        return get_service_key_by_type(Flow,
+                                       Flow.query_app_node_urls.__name__)
+
+    @property
     def FLOW_PUT_APP_EVENT(self):
         from tensorpc.apps.flow.serv.core import Flow
         return get_service_key_by_type(Flow,
