@@ -147,17 +147,18 @@ class App:
         self._force_special_layout_method = True 
         self.root._prevent_add_layout = True
 
-    async def _app_run_layout_function(self, send_layout_ev: bool = False):
+    async def _app_run_layout_function(self, send_layout_ev: bool = False, with_code_editor: bool = True):
         self.root._prevent_add_layout = False 
         await self.root._clear()
+        self.root.uid = _ROOT
         res = self.app_create_layout()
-        print(res)
+        # print(res)
         self.root.add_layout(res)
         self._uid_to_comp[_ROOT] = self.root
         self.root._prevent_add_layout = True 
-        print(self.root._uid_to_comp)
+        # print(self.root._uid_to_comp)
         if send_layout_ev:
-            ev = AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(self._get_app_layout())})
+            ev = AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(self._get_app_layout(with_code_editor))})
             await self._queue.put(ev)
 
     def app_initialize(self):
@@ -178,13 +179,18 @@ class App:
         assert self._app_service_unit is not None
         return self._app_service_unit
 
-    def _get_app_layout(self):
-        return {
+    def _get_app_layout(self, with_code_editor: bool = True):
+        res = {
             "layout": {u: c.to_dict()
                        for u, c in self._uid_to_comp.items()},
             "enableEditor": self._enable_editor,
-            "codeEditor": self.code_editor.get_state(),
+
         }
+        if with_code_editor:
+            res.update({
+                "codeEditor": self.code_editor.get_state(),
+            })
+        return res
 
     def init_enable_editor(self):
         self._enable_editor = True
@@ -383,6 +389,7 @@ class EditableApp(App):
 
     def _watchdog_on_modified(self, ev: _WATCHDOG_MODIFY_EVENT_TYPES):
         if isinstance(ev, watchdog.events.FileModifiedEvent):
+            # print("WATCHDOG", self._watchdog_ignore_next)
             with self._watch_lock:
                 if self._watchdog_ignore_next:
                     self._watchdog_ignore_next = False
@@ -395,7 +402,7 @@ class EditableApp(App):
                 layout_func_changed = self._reload_app_file()
                 if layout_func_changed:
                     fut = asyncio.run_coroutine_threadsafe(
-                        self._app_run_layout_function(True), self._loop)
+                        self._app_run_layout_function(True, with_code_editor=False), self._loop)
                     fut.result()
 
     def _reload_app_file(self):
@@ -425,5 +432,5 @@ class EditableApp(App):
                 self.code_editor.value = event.data
                 layout_func_changed = self._reload_app_file()
                 if layout_func_changed:
-                    await self._app_run_layout_function(True)
+                    await self._app_run_layout_function(True, with_code_editor=False)
         return

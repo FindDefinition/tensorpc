@@ -149,10 +149,11 @@ class ServiceCore(object):
 
         self._global_context = ServerGlobalContext(self.local_url, is_sync, server_meta)
 
-    def _init_async_members(self):
+    async def _init_async_members(self):
         # in future python versions, asyncio event can't be created if no event loop running.
         self.async_shutdown_event = asyncio.Event()
         self._exposed_props._async_shutdown_event = self.async_shutdown_event
+        await self.service_units.run_async_init()
 
     def init_http_client_session(self, sess: aiohttp.ClientSession):
         self._global_context.http_client_session = sess 

@@ -27,6 +27,10 @@ def mark_exit(func=None):
     meta = FunctionUserMeta(ServiceType.Exit)
     return meta_decorator(func, meta)
 
+def mark_async_init(func=None):
+    meta = FunctionUserMeta(ServiceType.AsyncInit)
+    return meta_decorator(func, meta)
+
 def mark_client_stream(func=None):
     meta = FunctionUserMeta(ServiceType.ClientStream)
     return meta_decorator(func, meta)

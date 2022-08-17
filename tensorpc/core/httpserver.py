@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import io
 import json
 import sys
@@ -566,20 +567,26 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
                                   ws_name="/api/ws",
                                   is_sync: bool = False,
                                   rpc_pickle_name: str="/api/rpc_pickle",
-                                  client_max_size: int = 4 * 1024 ** 2):
+                                  client_max_size: int = 4 * 1024 ** 2,
+                                  standalone: bool = True):
     # client_max_size 4MB is enough for most image upload.
     http_service = HttpService(server_core)
-    server_core._init_async_members()
-    ws_service = AllWebsocketHandler(server_core)
-    app = web.Application(client_max_size=client_max_size)
-    # TODO should we create a global client session for all http call in server?
-    loop_task = asyncio.create_task(ws_service.event_provide_executor())
-    app.router.add_post(rpc_name, http_service.remote_json_call_http)
-    app.router.add_post(rpc_pickle_name, http_service.remote_pickle_call_http)
-    app.router.add_get(ws_name, ws_service.handle_new_connection)
-    return await asyncio.gather(
-        serve_app(app, port, server_core.shutdown_event,
-                server_core.async_shutdown_event, is_sync), loop_task)
+    ctx = contextlib.nullcontext()
+    if standalone:
+        ctx = server_core.enter_global_context()
+    with ctx:
+        if standalone:
+            await server_core._init_async_members()
+        ws_service = AllWebsocketHandler(server_core)
+        app = web.Application(client_max_size=client_max_size)
+        # TODO should we create a global client session for all http call in server?
+        loop_task = asyncio.create_task(ws_service.event_provide_executor())
+        app.router.add_post(rpc_name, http_service.remote_json_call_http)
+        app.router.add_post(rpc_pickle_name, http_service.remote_pickle_call_http)
+        app.router.add_get(ws_name, ws_service.handle_new_connection)
+        return await asyncio.gather(
+            serve_app(app, port, server_core.shutdown_event,
+                    server_core.async_shutdown_event, is_sync), loop_task)
 
 
 def serve_service_core(server_core: ProtobufServiceCore,
@@ -587,7 +594,7 @@ def serve_service_core(server_core: ProtobufServiceCore,
                        credentials=None,
                        rpc_name="/api/rpc",
                        ws_name="/api/ws"):
-    http_task = serve_service_core_task(server_core, port, None, is_sync=True)
+    http_task = serve_service_core_task(server_core, port, None, is_sync=True, standalone=True)
     try:
         asyncio.run(http_task)
     except KeyboardInterrupt:

@@ -55,12 +55,17 @@ class UIType(enum.Enum):
     ThreePoints = 0x1001
 
     ThreePerspectiveCamera = 0x1002
+    ThreeGroup = 0x1003
+    ThreeOrthographicCamera = 0x1004
 
     ThreeMapControl = 0x1010
     ThreeOrbitControl = 0x1011
 
     ThreeBoundingBox = 0x1020
-    
+    ThreeAxesHelper = 0x1021
+    ThreeInfiniteGridHelper = 0x1022
+    ThreeSegments = 0x1023
+
 class AppEventType(enum.Enum):
     # layout events
     UpdateLayout = 0
@@ -334,7 +339,7 @@ class Component:
 
     async def _clear(self):
         self.uid = ""
-        self._queue = None 
+        # self._queue = None 
         if self._task is not None:
             await _cancel(self._task)
         self.parent = ""
@@ -567,3 +572,57 @@ class ContainerBase(Component):
         state = super().get_state()
         state["childs"] = self._get_all_child_comp_uids()
         return state
+    
+    async def set_new_layout(self, layout: Dict[str, Component]):
+        # remove all first
+        # TODO we may need to stop task of a comp
+        comps_to_remove: List[Component] = []
+        for c in self._childs:
+            comps_to_remove.extend(self._get_all_nested_child(c))
+        for c in comps_to_remove:
+            await c._clear()
+            self._uid_to_comp.pop(c.uid)
+        self._childs.clear()
+        # TODO should we merge two events to one?
+        await self.queue.put(
+            self.create_delete_comp_event([c.uid for c in comps_to_remove]))
+        self.add_layout(layout)
+        comps_frontend = {
+            c.uid: c.to_dict()
+            for c in self._get_all_nested_childs()
+        }
+        # make sure all child of this box is rerendered.
+        comps_frontend[self.uid] = self.to_dict()
+        await self.queue.put(self.create_update_comp_event(comps_frontend))
+
+    async def remove_childs_by_keys(self, keys: List[str]):
+        comps_to_remove: List[Component] = []
+        for c in keys:
+            comps_to_remove.extend(self._get_all_nested_child(c))
+        for c in comps_to_remove:
+            await c._clear()
+            self._uid_to_comp.pop(c.uid)
+        for k in keys:
+            self._childs.remove(k)
+        # make sure all child of this box is rerendered.
+        await self.queue.put(
+            self.create_delete_comp_event([c.uid for c in comps_to_remove]))
+        # TODO combine two event to one
+        await self.queue.put(
+            self.create_update_comp_event({self.uid: self.to_dict()}))
+
+    async def update_childs(self, layout: Dict[str, Component]):
+        new_comps = self._extract_layout(layout)
+        update_comps_frontend = {c.uid: c.to_dict() for c in new_comps}
+        for c in new_comps:
+            if c.uid in self._uid_to_comp:
+                item = self._uid_to_comp.pop(c.uid)
+                item.parent = ""  # mark invalid
+            self._uid_to_comp[c.uid] = c
+        for n in layout.keys():
+            if n not in self._childs:
+                self._childs.append(n)
+        # make sure all child of this box is rerendered.
+        update_comps_frontend[self.uid] = self.to_dict()
+        await self.queue.put(
+            self.create_update_comp_event(update_comps_frontend))

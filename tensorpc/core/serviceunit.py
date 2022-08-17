@@ -5,7 +5,7 @@ import runpy
 import types
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple
 
 from tensorpc.constants import TENSORPC_FUNC_META_KEY, TENSORPC_SPLIT
 from tensorpc.core import inspecttools
@@ -49,6 +49,7 @@ class ParamMeta(object):
 class ServiceType(Enum):
     Normal = "Normal"
     Exit = "Exit"
+    AsyncInit = "AsyncInit"
     BiStream = "BidirectinoalStream"  # only support grpc for now
     ClientStream = "ClientStream"  # only support grpc for now
     AsyncWebSocket = "AsyncWebSocket"  # only support ws
@@ -267,6 +268,7 @@ class ServiceUnit(DynamicClass):
         self.exit_fn: Optional[Any] = None
         self._is_exit_fn_async: bool = False
         self.ws_onconn_fn: Optional[Callable[[Any], None]] = None
+        self.async_init: Optional[Callable[[], Coroutine[None, None, None]]] = None
         self.ws_ondisconn_fn: Optional[Callable[[Any], None]] = None
         self.name_to_events: Dict[str, EventProvider] = {}
         self.serv_metas = self._init_all_metas(self.obj_type)
@@ -336,6 +338,9 @@ class ServiceUnit(DynamicClass):
                 assert self.exit_fn is None, "you can only register one exit"
                 self.exit_fn = v
                 self._is_exit_fn_async = is_async
+            if serv_type == ServiceType.AsyncInit:
+                assert self.async_init is None, "you can only register one exit"
+                self.async_init = v
             if serv_type == ServiceType.WebSocketOnConnect:
                 assert self.ws_onconn_fn is None, "you can only register one ws_onconn_fn"
                 self.ws_onconn_fn = v
@@ -375,6 +380,8 @@ class ServiceUnit(DynamicClass):
                 assert self.obj is not None
             if self.exit_fn is not None:
                 self.exit_fn = types.MethodType(self.exit_fn, self.obj)
+            if self.async_init is not None:
+                self.async_init = types.MethodType(self.async_init, self.obj)
             if self.ws_onconn_fn is not None:
                 self.ws_onconn_fn = types.MethodType(self.ws_onconn_fn,
                                                      self.obj)
@@ -430,6 +437,10 @@ class ServiceUnit(DynamicClass):
     def websocket_ondisconnect(self, client):
         if self.ws_ondisconn_fn is not None:
             self.ws_ondisconn_fn(client)
+
+    async def run_async_init(self):
+        if self.async_init is not None:
+            await self.async_init()
 
     async def run_exit(self):
         if self.exit_fn is not None:
@@ -504,6 +515,10 @@ class ServiceUnits:
             res.update(su.get_all_event_providers())
         return res
 
+    async def run_async_init(self):
+        self.init_service()
+        for s in self.sus:
+            await s.run_async_init()
 
 if __name__ == "__main__":
     su = ServiceUnit("tensorpc.services.for_test::Service1::Test", {})

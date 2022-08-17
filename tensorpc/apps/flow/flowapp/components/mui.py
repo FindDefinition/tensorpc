@@ -1,11 +1,11 @@
 # Copyright 2022 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -26,6 +26,7 @@ from ..core import AppEvent, Component, TaskLoopEvent, UIEvent, UIType, Containe
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
 
+
 def _encode_image_bytes(img: np.ndarray):
     pil_img = Image.fromarray(img)
     buffered = io.BytesIO()
@@ -35,7 +36,6 @@ def _encode_image_bytes(img: np.ndarray):
 
 
 class Images(Component):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
@@ -70,11 +70,11 @@ class Images(Component):
         state["image"] = self.image_str
         return state
 
-class Plotly(Component):
 
+class Plotly(Component):
     def __init__(self,
-                data: Optional[list] = None,
-                layout: Optional[dict] = None,
+                 data: Optional[list] = None,
+                 layout: Optional[dict] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  flex: Optional[Union[int, str]] = None,
@@ -86,7 +86,6 @@ class Plotly(Component):
             layout = {}
         self.data = data
         self.layout = layout
-
 
     async def show_raw(self, data: list, layout: Any):
         await self.queue.put(
@@ -101,11 +100,11 @@ class Plotly(Component):
         state["layout"] = self.layout
         return state
 
-class ChartJSLine(Component):
 
+class ChartJSLine(Component):
     def __init__(self,
-                data: Optional[Any] = None,
-                options: Optional[Any] = None,
+                 data: Optional[Any] = None,
+                 options: Optional[Any] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  flex: Optional[Union[int, str]] = None,
@@ -117,7 +116,6 @@ class ChartJSLine(Component):
             options = {}
         self.data = data
         self.options = options
-
 
     async def show_raw(self, data: list, options: Any):
         await self.queue.put(
@@ -132,8 +130,8 @@ class ChartJSLine(Component):
         state["options"] = self.options
         return state
 
-class Text(Component):
 
+class Text(Component):
     def __init__(self,
                  init: str,
                  uid: str = "",
@@ -154,7 +152,6 @@ class Text(Component):
 
 
 class ListItemText(Component):
-
     def __init__(self,
                  init: str,
                  uid: str = "",
@@ -175,7 +172,6 @@ class ListItemText(Component):
 
 
 class Divider(Component):
-
     def __init__(self,
                  orientation: str = "horizontal",
                  uid: str = "",
@@ -192,7 +188,6 @@ class Divider(Component):
 
 
 class Button(Component):
-
     def __init__(self,
                  name: str,
                  callback: Callable[[], _CORO_NONE],
@@ -210,18 +205,16 @@ class Button(Component):
         return res
 
     async def headless_click(self):
-        return await self.queue.put(UIEvent({
-            self.uid: self.name
-        }))
+        return await self.queue.put(UIEvent({self.uid: self.name}))
 
     def get_callback(self):
-        return self.callback 
+        return self.callback
 
     def set_callback(self, val: Any):
-        self.callback = val  
+        self.callback = val
+
 
 class ListItemButton(Component):
-
     def __init__(self,
                  name: str,
                  callback: Callable[[], _CORO_NONE],
@@ -239,18 +232,16 @@ class ListItemButton(Component):
         return res
 
     async def headless_click(self):
-        return await self.queue.put(UIEvent({
-            self.uid: self.name
-        }))
+        return await self.queue.put(UIEvent({self.uid: self.name}))
 
     def get_callback(self):
-        return self.callback 
+        return self.callback
 
     def set_callback(self, val: Any):
-        self.callback = val  
+        self.callback = val
+
 
 class Buttons(Component):
-
     def __init__(self,
                  names: List[str],
                  callback: Callable[[str], _CORO_NONE],
@@ -268,18 +259,16 @@ class Buttons(Component):
         return res
 
     async def headless_click(self, index: int):
-        return await self.queue.put(UIEvent({
-            self.uid: self.names[index]
-        }))
+        return await self.queue.put(UIEvent({self.uid: self.names[index]}))
 
     def get_callback(self):
-        return self.callback 
+        return self.callback
 
     def set_callback(self, val: Any):
-        self.callback = val  
+        self.callback = val
+
 
 class Points(Component):
-
     def __init__(self,
                  names: List[str],
                  callback: Callable[[str], _CORO_NONE],
@@ -297,20 +286,16 @@ class Points(Component):
         return res
 
     async def headless_click(self, index: int):
-        return await self.queue.put(UIEvent({
-            self.uid: self.names[index]
-        }))
+        return await self.queue.put(UIEvent({self.uid: self.names[index]}))
 
     def get_callback(self):
-        return self.callback 
+        return self.callback
 
     def set_callback(self, val: Any):
-        self.callback = val  
-
+        self.callback = val
 
 
 class FlexBox(ContainerBase):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
@@ -323,16 +308,21 @@ class FlexBox(ContainerBase):
                  width: Optional[Union[str, int]] = None,
                  height: Optional[Union[str, int]] = None,
                  overflow: Optional[str] = None,
+                 min_width: Optional[Union[str, int]] = None,
+                 min_height: Optional[Union[str, int]] = None,
                  _init_dict: Optional[Dict[str, Component]] = None,
                  base_type: UIType = UIType.FlexBox,
                  inited: bool = False) -> None:
-        super().__init__(UIType.FlexBox, uid, queue, flex, align_self, uid_to_comp, _init_dict, inited)
+        super().__init__(UIType.FlexBox, uid, queue, flex, align_self,
+                         uid_to_comp, _init_dict, inited)
         self.flex_flow = flex_flow
         self.justify_content = justify_content
         self.align_items = align_items
         self.width = width
         self.height = height
         self.overflow = overflow
+        self.min_width = min_width
+        self.min_height = min_height
 
     def to_dict(self):
         res = super().to_dict()
@@ -346,10 +336,13 @@ class FlexBox(ContainerBase):
             res["width"] = self.width
         if self.height is not None:
             res["height"] = self.height
+        if self.min_height is not None:
+            res["minHeight"] = self.min_height
         if self.overflow is not None:
             res["overflow"] = self.overflow
+        if self.min_width is not None:
+            res["minWidth"] = self.min_width
         return res
-
 
     # async def update_child(self, comps: List[Union[Component, str]]):
     #     newchilds: List[str] = []
@@ -364,57 +357,6 @@ class FlexBox(ContainerBase):
     #     self._childs = newchilds
     #     await self.queue.put(self.create_update_comp_event(self.get_state()))
 
-    async def set_new_layout(self, layout: Dict[str, Component]):
-        # remove all first
-        comps_to_remove: List[Component] = []
-        for c in self._childs:
-            comps_to_remove.extend(self._get_all_nested_child(c))
-        for c in comps_to_remove:
-            self._uid_to_comp.pop(c.uid)
-        self._childs.clear()
-        # TODO should we merge two events to one?
-        await self.queue.put(
-            self.create_delete_comp_event([c.uid for c in comps_to_remove]))
-        self.add_layout(layout)
-        comps_frontend = {
-            c.uid: c.to_dict()
-            for c in self._get_all_nested_childs()
-        }
-        # make sure all child of this box is rerendered.
-        comps_frontend[self.uid] = self.to_dict()
-        await self.queue.put(self.create_update_comp_event(comps_frontend))
-
-    async def remove_childs_by_keys(self, keys: List[str]):
-        comps_to_remove: List[Component] = []
-        for c in keys:
-            comps_to_remove.extend(self._get_all_nested_child(c))
-        for c in comps_to_remove:
-            self._uid_to_comp.pop(c.uid)
-        for k in keys:
-            self._childs.remove(k)
-        # make sure all child of this box is rerendered.
-        await self.queue.put(
-            self.create_delete_comp_event([c.uid for c in comps_to_remove]))
-        # TODO combine two event to one
-        await self.queue.put(
-            self.create_update_comp_event({self.uid: self.to_dict()}))
-
-    async def update_childs(self, layout: Dict[str, Component]):
-        new_comps = self._extract_layout(layout)
-        update_comps_frontend = {c.uid: c.to_dict() for c in new_comps}
-        for c in new_comps:
-            if c.uid in self._uid_to_comp:
-                item = self._uid_to_comp.pop(c.uid)
-                item.parent = ""  # mark invalid
-            self._uid_to_comp[c.uid] = c
-        for n in layout.keys():
-            if n not in self._childs:
-                self._childs.append(n)
-        # make sure all child of this box is rerendered.
-        update_comps_frontend[self.uid] = self.to_dict()
-        await self.queue.put(
-            self.create_update_comp_event(update_comps_frontend))
-
     def add_flex_box(self,
                      flex_flow: Optional[str] = None,
                      justify_content: Optional[str] = None,
@@ -423,7 +365,9 @@ class FlexBox(ContainerBase):
                      align_self: Optional[str] = None,
                      width: Optional[Union[str, int]] = None,
                      height: Optional[Union[str, int]] = None,
-                     overflow: Optional[str] = None):
+                     overflow: Optional[str] = None,
+                     min_width: Optional[Union[str, int]] = None,
+                     min_height: Optional[Union[str, int]] = None):
         ui = FlexBox("",
                      self.queue,
                      self._uid_to_comp,
@@ -435,6 +379,8 @@ class FlexBox(ContainerBase):
                      width,
                      height,
                      overflow,
+                     min_width,
+                     min_height,
                      inited=self.inited)
         self.add_component("box", ui)
         return ui
@@ -584,7 +530,6 @@ class FlexBox(ContainerBase):
 
 
 class MUIList(FlexBox):
-
     def __init__(self,
                  uid: str,
                  queue: asyncio.Queue,
@@ -594,6 +539,8 @@ class MUIList(FlexBox):
                  width: Optional[Union[str, int]] = None,
                  height: Optional[Union[str, int]] = None,
                  overflow: Optional[str] = None,
+                 min_width: Optional[Union[str, int]] = None,
+                 min_height: Optional[Union[str, int]] = None,
                  _init_dict: Optional[Dict[str, Component]] = None,
                  subheader: str = "",
                  inited: bool = False) -> None:
@@ -605,6 +552,8 @@ class MUIList(FlexBox):
                          width=width,
                          height=height,
                          overflow=overflow,
+                         min_width=min_width,
+                         min_height=min_height,
                          _init_dict=_init_dict,
                          base_type=UIType.MUIList,
                          inited=inited)
@@ -623,7 +572,9 @@ def VBox(layout: Dict[str, Component],
          align_self: Optional[str] = None,
          width: Optional[Union[str, int]] = None,
          height: Optional[Union[str, int]] = None,
-         overflow: Optional[str] = None):
+         overflow: Optional[str] = None,
+         min_width: Optional[Union[str, int]] = None,
+         min_height: Optional[Union[str, int]] = None):
     return FlexBox("",
                    asyncio.Queue(), {},
                    flex_flow="column nowrap",
@@ -634,6 +585,8 @@ def VBox(layout: Dict[str, Component],
                    width=width,
                    height=height,
                    overflow=overflow,
+                   min_width=min_width,
+                   min_height=min_height,
                    _init_dict=layout)
 
 
@@ -644,7 +597,9 @@ def HBox(layout: Dict[str, Component],
          align_self: Optional[str] = None,
          width: Optional[Union[str, int]] = None,
          height: Optional[Union[str, int]] = None,
-         overflow: Optional[str] = None):
+         overflow: Optional[str] = None,
+         min_width: Optional[Union[str, int]] = None,
+         min_height: Optional[Union[str, int]] = None):
     return FlexBox("",
                    asyncio.Queue(), {},
                    flex_flow="row nowrap",
@@ -655,6 +610,8 @@ def HBox(layout: Dict[str, Component],
                    width=width,
                    height=height,
                    overflow=overflow,
+                   min_width=min_width,
+                   min_height=min_height,
                    _init_dict=layout)
 
 
@@ -666,7 +623,9 @@ def Box(layout: Dict[str, Component],
         align_self: Optional[str] = None,
         width: Optional[Union[str, int]] = None,
         height: Optional[Union[str, int]] = None,
-        overflow: Optional[str] = None):
+        overflow: Optional[str] = None,
+        min_width: Optional[Union[str, int]] = None,
+        min_height: Optional[Union[str, int]] = None):
     return FlexBox("",
                    asyncio.Queue(), {},
                    flex_flow=flex_flow,
@@ -677,6 +636,8 @@ def Box(layout: Dict[str, Component],
                    width=width,
                    height=height,
                    overflow=overflow,
+                   min_width=min_width,
+                   min_height=min_height,
                    _init_dict=layout)
 
 
@@ -686,6 +647,8 @@ def VList(layout: Dict[str, Component],
           align_self: Optional[str] = None,
           width: Optional[Union[str, int]] = None,
           height: Optional[Union[str, int]] = None,
+          min_width: Optional[Union[str, int]] = None,
+          min_height: Optional[Union[str, int]] = None,
           overflow: Optional[str] = None):
     return MUIList("",
                    asyncio.Queue(), {},
@@ -695,11 +658,12 @@ def VList(layout: Dict[str, Component],
                    subheader=subheader,
                    width=width,
                    height=height,
+                   min_width=min_width,
+                   min_height=min_height,
                    _init_dict=layout)
 
 
 class RadioGroup(Component):
-
     def __init__(self,
                  names: List[str],
                  row: bool,
@@ -735,18 +699,16 @@ class RadioGroup(Component):
         self.value = value
 
     async def headless_click(self, index: int):
-        return await self.queue.put(UIEvent({
-            self.uid: self.names[index]
-        }))
+        return await self.queue.put(UIEvent({self.uid: self.names[index]}))
 
     def get_callback(self):
-        return self.callback 
+        return self.callback
 
     def set_callback(self, val: Any):
-        self.callback = val  
+        self.callback = val
+
 
 class Input(Component):
-
     def __init__(self,
                  label: str,
                  callback: Optional[Callable[[str], Coroutine[None, None,
@@ -775,15 +737,14 @@ class Input(Component):
         self.value = data
 
     async def headless_write(self, content: str):
-        return await self.queue.put(UIEvent({
-            self.uid: content
-        }))
+        return await self.queue.put(UIEvent({self.uid: content}))
 
     def get_callback(self):
-        return self.callback 
+        return self.callback
 
     def set_callback(self, val: Any):
-        self.callback = val  
+        self.callback = val
+
 
 # class CodeEditor(Component):
 
@@ -811,7 +772,6 @@ class Input(Component):
 
 
 class Switch(Component):
-
     def __init__(self,
                  label: str,
                  callback: Optional[Callable[[bool], Coroutine[None, None,
@@ -839,18 +799,16 @@ class Switch(Component):
         self.checked = data
 
     async def headless_write(self, checked: bool):
-        return await self.queue.put(UIEvent({
-            self.uid: checked
-        }))
+        return await self.queue.put(UIEvent({self.uid: checked}))
 
     def get_callback(self):
-        return self.callback 
+        return self.callback
 
     def set_callback(self, val: Any):
-        self.callback = val  
+        self.callback = val
+
 
 class Select(Component):
-
     def __init__(self,
                  label: str,
                  items: List[Tuple[str, Any]],
@@ -900,18 +858,16 @@ class Select(Component):
         self.value = value
 
     async def headless_select(self, value: Any):
-        return await self.queue.put(UIEvent({
-            self.uid: value
-        }))
+        return await self.queue.put(UIEvent({self.uid: value}))
 
     def get_callback(self):
-        return self.callback 
+        return self.callback
 
     def set_callback(self, val: Any):
-        self.callback = val  
+        self.callback = val
+
 
 class Slider(Component):
-
     def __init__(self,
                  label: str,
                  begin: Union[int, float],
@@ -958,21 +914,19 @@ class Slider(Component):
         self.value = value
 
     async def headless_change(self, value: Union[int, float]):
-        return await self.queue.put(UIEvent({
-            self.uid: value
-        }))
+        return await self.queue.put(UIEvent({self.uid: value}))
 
     def get_callback(self):
-        return self.callback 
+        return self.callback
 
     def set_callback(self, val: Any):
-        self.callback = val  
+        self.callback = val
+
 
 _T = TypeVar("_T")
 
 
 class TaskLoop(Component):
-
     def __init__(self,
                  label: str,
                  loop_callbcak: Callable[[], _CORO_NONE],
@@ -1040,12 +994,11 @@ class TaskLoop(Component):
         self.label = label
 
     async def headless_run(self):
-        return await self.queue.put(UIEvent({
-            self.uid: TaskLoopEvent.Start.value
-        }))
+        return await self.queue.put(
+            UIEvent({self.uid: TaskLoopEvent.Start.value}))
 
     def get_callback(self):
-        return self.callback 
+        return self.callback
 
     def set_callback(self, val: Any):
-        self.callback = val  
+        self.callback = val

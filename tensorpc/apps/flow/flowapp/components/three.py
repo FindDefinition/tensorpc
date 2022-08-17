@@ -31,9 +31,8 @@ class ThreeComponentBase(Component):
 
 
 class Points(ThreeComponentBase):
-
     def __init__(self,
-                limit: int,
+                 limit: int,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  flex: Optional[Union[int, str]] = None,
@@ -61,7 +60,8 @@ class Points(ThreeComponentBase):
                             color: Optional[np.ndarray] = None,
                             attrs: Optional[np.ndarray] = None,
                             attr_fields: Optional[List[str]] = None):
-        assert points.shape[0] <= self.limit, f"your points size must smaller than limit {self.limit}"
+        assert points.shape[
+            0] <= self.limit, f"your points size must smaller than limit {self.limit}"
         upd: Dict[str, Any] = {
             "points": points,
         }
@@ -100,18 +100,80 @@ class Points(ThreeComponentBase):
 
         return state
 
-class BoundingBox(ThreeComponentBase):
-
+class Segments(ThreeComponentBase):
     def __init__(self,
-                dim: list,
-                pos: list,
-                rot: list,
-                edgeWidth: float = 4,
-                edgeColor: str = "green",
-                emissive: str = "red",
-                color: str = "red",
-                opacity: float =  0.5,
-                edgeOpacity: float = 0.5,
+                 limit: int,
+                 line_width: float = 1.0,
+                 color: Optional[str] = "black",
+                 transparent: bool = True ,
+                 opacity: float = 0.5,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 flex: Optional[Union[int, str]] = None,
+                 align_self: Optional[str] = None) -> None:
+        super().__init__(uid, UIType.ThreeSegments, queue, flex, align_self)
+        self.lines = np.zeros((0, 2, 3), np.float32)
+        self.line_width = line_width
+        self.limit = limit
+        self.colors: Optional[np.ndarray] = None
+        self.color = color
+        self.transparent = transparent
+        self.opacity = opacity
+
+
+    def to_dict(self):
+        res = super().to_dict()
+        res["limit"] = self.limit
+        return res
+
+    async def update_lines(self,
+                         lines: np.ndarray,
+                         colors: Optional[np.ndarray] = None,
+                         line_width: Optional[float] = None,
+                         color: Optional[str] = None):
+        assert lines.ndim == 3 and lines.shape[1] == 2 and lines.shape[
+            2] == 3, f"{lines.shape}"
+        
+        assert lines.shape[
+            0] <= self.limit, f"your points size must smaller than limit {self.limit}"
+        upd: Dict[str, Any] = {
+            "lines": lines,
+        }
+        if colors is not None:
+            upd["colors"] = colors
+        if color is not None:
+            upd["color"] = color
+            self.color = color
+        if line_width is not None:
+            upd["lineWidth"] = line_width
+            self.line_width = line_width
+
+        self.lines = lines.astype(np.float32)
+        self.colors = colors
+        await self.queue.put(self.create_update_event(upd))
+
+    def get_state(self):
+        state = super().get_state()
+        state["lines"] = self.lines
+        state["lineWidth"] = self.line_width
+        if self.colors is not None:
+            state["colors"] = self.colors
+        state["opacity"] = self.opacity
+        state["transparent"] = self.transparent
+        state["color"] = self.color
+        return state
+
+class BoundingBox(ThreeComponentBase):
+    def __init__(self,
+                 dim: list,
+                 pos: list,
+                 rot: list,
+                 edgeWidth: float = 4,
+                 edgeColor: str = "green",
+                 emissive: str = "red",
+                 color: str = "red",
+                 opacity: float = 0.5,
+                 edgeOpacity: float = 0.5,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  flex: Optional[Union[int, str]] = None,
@@ -143,10 +205,101 @@ class BoundingBox(ThreeComponentBase):
         })
         return state
 
-class PerspectiveCamera(ThreeComponentBase):
 
+class AxesHelper(ThreeComponentBase):
     def __init__(self,
-                makeDefault: bool,
+                 length: float,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 flex: Optional[Union[int, str]] = None,
+                 align_self: Optional[str] = None) -> None:
+        super().__init__(uid, UIType.ThreeAxesHelper, queue, flex, align_self)
+        self.length = length
+
+    def to_dict(self):
+        res = super().to_dict()
+        res["length"] = self.length
+        return res
+
+
+class InfiniteGridHelper(ThreeComponentBase):
+    def __init__(self,
+                 size1: float,
+                 size2: float,
+                 color: str,
+                 distance: float = 8000,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 flex: Optional[Union[int, str]] = None,
+                 align_self: Optional[str] = None) -> None:
+        super().__init__(uid, UIType.ThreeInfiniteGridHelper, queue, flex,
+                         align_self)
+        self.size1 = size1
+        self.size2 = size2
+        self.color = color
+        self.distance = distance
+
+    def to_dict(self):
+        res = super().to_dict()
+        res["size1"] = self.size1
+        res["size2"] = self.size2
+        res["color"] = self.color
+        res["distance"] = self.distance
+        return res
+
+
+class Group(ContainerBase):
+    def __init__(self,
+                 position: Optional[Tuple[float, float, float]] = None,
+                 rotation: Optional[Tuple[float, float, float]] = None,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 uid_to_comp: Optional[Dict[str, Component]] = None,
+                 _init_dict: Optional[Dict[str, Component]] = None,
+                 inited: bool = False) -> None:
+        super().__init__(UIType.ThreeGroup, uid, queue, None, None,
+                         uid_to_comp, _init_dict, inited)
+        self.visible = True
+        self.position = position
+        self.rotation = rotation
+
+    def get_state(self):
+        state = super().get_state()
+        state.update({
+            "visible": self.visible,
+        })
+        if self.position is not None:
+            state["position"] = self.position
+        if self.rotation is not None:
+            state["rotation"] = self.rotation
+        return state
+
+    async def change_visible(self, visible: bool):
+        self.visible = visible
+        await self.queue.put(
+            self.create_update_event({"visible": self.visible}))
+
+    async def change_pose(self, position: Optional[Tuple[float, float, float]],
+                          rotation: Optional[Tuple[float, float, float]]):
+
+        self.position = position
+        self.rotation = rotation
+
+        await self.queue.put(
+            self.create_update_event({
+                "position": self.position,
+                "rotation": self.rotation,
+            }))
+
+
+def group(init_dict: Dict[str, Union[ThreeComponentBase, Group]]):
+    init_dict_anno: Dict[str, Component] = {**init_dict}
+    return Group(_init_dict=init_dict_anno)
+
+
+class PerspectiveCamera(ThreeComponentBase):
+    def __init__(self,
+                 makeDefault: bool,
                  position: List[float],
                  up: List[float],
                  fov: float,
@@ -157,7 +310,8 @@ class PerspectiveCamera(ThreeComponentBase):
                  queue: Optional[asyncio.Queue] = None,
                  flex: Optional[Union[int, str]] = None,
                  align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.ThreePerspectiveCamera, queue, flex, align_self)
+        super().__init__(uid, UIType.ThreePerspectiveCamera, queue, flex,
+                         align_self)
         self.position = position
         self.up = up
         self.fov = fov
@@ -171,7 +325,6 @@ class PerspectiveCamera(ThreeComponentBase):
         res = super().to_dict()
         res["makeDefault"] = self.makeDefault
         return res
-
 
     async def update_parameters(self, position: List[float], up: List[float],
                                 fov: float, aspect: float, near: float,
@@ -201,13 +354,75 @@ class PerspectiveCamera(ThreeComponentBase):
             "aspect": self.aspect,
             "near": self.near,
             "far": self.far,
-
         })
         return state
 
+class OrthographicCamera(ThreeComponentBase):
+    def __init__(self,
+                 makeDefault: bool,
+                 position: List[float],
+                 up: Optional[List[float]] = None,
+                 near: Optional[float] = None,
+                 far: Optional[float] = None,
+                 zoom: Optional[float] = None,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 flex: Optional[Union[int, str]] = None,
+                 align_self: Optional[str] = None) -> None:
+        super().__init__(uid, UIType.ThreeOrthographicCamera, queue, flex,
+                         align_self)
+        self.position = position
+        self.zoom = zoom
+        self.position = position
+        self.up = up
+        self.near = near
+        self.far = far
+        self.makeDefault = makeDefault
+
+    # TODO from camera matrix and intrinsics
+    def to_dict(self):
+        res = super().to_dict()
+        res["makeDefault"] = self.makeDefault
+        return res
+
+    async def update_parameters(self, position: List[float], up: List[float],
+                                zoom: float, near: float,
+                                far: float):
+        upd: Dict[str, Any] = {
+            "position": position,
+            "up": up,
+            "zoom": zoom,
+            "near": near,
+            "far": far,
+        }
+        self.position = position
+        self.up = up
+        self.zoom = zoom
+        self.near = near
+        self.far = far
+        await self.queue.put(self.create_update_event(upd))
+
+    def get_state(self):
+        state = super().get_state()
+        state.update({
+            "position": self.position,
+            "up": self.up,
+            "zoom": self.zoom,
+            "near": self.near,
+            "far": self.far,
+        })
+        if self.up is not None:
+            state["up"] = self.up
+        if self.zoom is not None:
+            state["zoom"] = self.zoom
+        if self.near is not None:
+            state["near"] = self.near
+        if self.far is not None:
+            state["far"] = self.far
+
+        return state
 
 class MapControl(ThreeComponentBase):
-
     def __init__(self,
                  enableDamping: bool,
                  dampingFactor: float,
@@ -258,9 +473,63 @@ class MapControl(ThreeComponentBase):
         })
         return state
 
+class OrbitControl(ThreeComponentBase):
+    def __init__(self,
+                 enableDamping: bool,
+                 dampingFactor: float,
+                 minDistance: float,
+                 maxDistance: float,
+                 maxPolarAngle: float = np.pi,
+                 screenSpacePanning: bool = False,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 flex: Optional[Union[int, str]] = None,
+                 align_self: Optional[str] = None) -> None:
+        super().__init__(uid, UIType.ThreeOrbitControl, queue, flex, align_self)
+        self.enableDamping = enableDamping
+        self.dampingFactor = dampingFactor
+        self.minDistance = minDistance
+        self.maxDistance = maxDistance
+        self.maxPolarAngle = maxPolarAngle
+        self.screenSpacePanning = screenSpacePanning
+
+    # TODO from camera matrix and intrinsics
+
+    async def update_parameters(self,
+                                enableDamping: bool,
+                                dampingFactor: float,
+                                minDistance: float,
+                                maxDistance: float,
+                                maxPolarAngle: float = np.pi,
+                                screenSpacePanning: bool = False):
+        upd: Dict[str, Any] = {
+            "enableDamping": enableDamping,
+            "dampingFactor": dampingFactor,
+            "minDistance": minDistance,
+            "maxDistance": maxDistance,
+            "maxPolarAngle": maxPolarAngle,
+            "screenSpacePanning": screenSpacePanning,
+        }
+        self.enableDamping = enableDamping
+        self.dampingFactor = dampingFactor
+        self.minDistance = minDistance
+        self.maxDistance = maxDistance
+        self.maxPolarAngle = maxPolarAngle
+        await self.queue.put(self.create_update_event(upd))
+
+    def get_state(self):
+        state = super().get_state()
+        state.update({
+            "enableDamping": self.enableDamping,
+            "dampingFactor": self.dampingFactor,
+            "minDistance": self.minDistance,
+            "maxDistance": self.maxDistance,
+            "maxPolarAngle": self.maxPolarAngle,
+            "screenSpacePanning": self.screenSpacePanning,
+        })
+        return state
 
 class ThreeCanvas(ContainerBase):
-
     def __init__(self,
                  init_dict: Dict[str, ThreeComponentBase],
                  uid: str = "",

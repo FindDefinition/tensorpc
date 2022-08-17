@@ -17,6 +17,7 @@ from tensorpc.apps.flow.coretypes import ScheduleEvent, get_uid
 from tensorpc.apps.flow.flowapp.core import AppEditorFrontendEvent, AppEvent, AppEventType, LayoutEvent, ScheduleNextForApp, UIEvent
 from tensorpc.apps.flow.flowapp.app import App
 import asyncio
+from tensorpc.core import marker
 from tensorpc.core.httpclient import http_remote_call
 from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceUnit
 import tensorpc
@@ -48,8 +49,6 @@ class FlowApp:
         self.headless = headless
         self.dynamic_app_cls = ReloadableDynamicClass(module_name)
         self.app: App = self.dynamic_app_cls.obj_type(**self.config)
-        if self.app._force_special_layout_method:
-            self.app._app_run_layout_function()
         # TODO reloadable app_su
         self.app_su = ServiceUnit(module_name, config)
         self.app_su.init_service(self.app)
@@ -59,14 +58,17 @@ class FlowApp:
         self._send_loop_queue: "asyncio.Queue[AppEvent]" = self.app._queue
         self.app._send_callback = self._send_http_event
         self._send_loop_task = asyncio.create_task(self._send_loop())
-        self.app.app_initialize()
-        lay = self.app._get_app_layout()
         # print(lay)
         print(self.master_meta.http_url)
-        fut = asyncio.run_coroutine_threadsafe(self._send_loop_queue.put(
-            AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)})),
-                                         loop=asyncio.get_running_loop())
-        # fut.result()
+
+    @marker.mark_async_init
+    async def init(self):
+        self.app.app_initialize()
+        if self.app._force_special_layout_method:
+            await self.app._app_run_layout_function()
+        lay = self.app._get_app_layout()
+        await self._send_loop_queue.put(
+            AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)}))
 
     def _get_app(self):
         return self.app
