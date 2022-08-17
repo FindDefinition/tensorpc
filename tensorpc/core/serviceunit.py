@@ -179,7 +179,7 @@ class ReloadableDynamicClass(DynamicClass):
         new_metas = self.get_metas_of_regular_methods(new_obj_type)
         # new_name_to_meta = {m.name: m for m in new_metas}
         name_to_meta = {m.name: m for m in self.serv_metas}
-
+        code_changed_cb: List[str] = []
         for new_meta in new_metas:
             if not new_meta.is_static:
                 new_method =  types.MethodType(new_meta.fn, obj)
@@ -191,11 +191,14 @@ class ReloadableDynamicClass(DynamicClass):
                 setattr(obj, new_meta.name, new_method)
                 if method in callback_inv_dict:
                     new_cb[callback_inv_dict[method]] = new_method
+                if new_meta.code != meta.code:
+                    code_changed_cb.append(new_meta.name)
             else:
                 setattr(obj, new_meta.name, new_method)
         self.serv_metas = new_metas
         self.obj_type = new_obj_type
-        return new_cb
+
+        return new_cb, code_changed_cb
 
 
 def get_cls_obj_from_module_name(module_name: str):

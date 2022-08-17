@@ -19,7 +19,7 @@ import time
 import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Dict, Union
 
 import cv2
 import imageio
@@ -32,6 +32,7 @@ from tensorpc.apps.flow.flowapp.components.mui import (Button, ChartJSLine,
                                                        HBox, ListItemButton,
                                                        ListItemText, Plotly,
                                                        Text, VBox, VList)
+from ..flowapp.core import Component
 from tensorpc.core import prim
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.apps.flow.flowapp.components import three
@@ -272,7 +273,9 @@ class SampleChartJSApp(App):
         }
         self.plot = ChartJSLine(data=data, options=options)
         self.root.add_layout({
-            "plot0": self.plot,
+            "plot0": VBox({
+                "asd": self.plot,
+            }, flex=1),
             "btn": Button("Show", self._show_plot)
         })
         self.set_init_window_size([480, 320])
@@ -351,7 +354,15 @@ class SampleEditorApp(EditableApp):
 
 class SampleThreeApp(EditableApp):
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(reloadable_layout=True)
+        self.set_init_window_size([1280, 720])
+        self.init_enable_editor()
+        # self.root.add_layout(self.app_create_layout())
+
+        print(self.root._uid_to_comp)
+
+
+    def app_create_layout(self) -> Dict[str, Component]:
         self.points = three.Points(2000000)
         self.canvas = three.ThreeCanvas({
                     "cam": three.PerspectiveCamera(True, [-10, 0, 5], [0, 0, 1], 75, 0, 0.1, 1000),
@@ -359,21 +370,19 @@ class SampleThreeApp(EditableApp):
                     "ctrl": three.MapControl(True, 0.25, 1, 100),
                     # "box": three.BoundingBox([2, 5, 2], [0, 10, 0], [0, 0, 0.5])
                 })
-        self.root.add_layout({
+
+        return {
             "d3v": VBox({
                 "d3": self.canvas,
-                "btn": Button("showRandomPC", self.show_Random_pc),
                 "btn2": Button("rpcTest", self.rpc_test),
 
             }, height="100%", width="100%"),
-
-        })
-        self.set_init_window_size([1280, 720])
-        self.init_enable_editor()
-
+        }
 
     async def show_Random_pc(self):
-        data = np.load("/home/tusimple/tusimple/spconv/test/data/benchmark-pc.npz")
+        # data = np.load("/home/tusimple/tusimple/spconv/test/data/benchmark-pc.npz")
+        data = np.load("/home/yy/Projects/spconv-release/spconv/test/data/benchmark-pc.npz")
+
         pc = np.ascontiguousarray(data["pc"])
         # num = 50
         # pc = np.random.uniform(-5, 5, size=[num, 3]).astype(np.float32)
@@ -422,3 +431,13 @@ class SampleThreeApp(EditableApp):
         async with AsyncAppClient(master_addr, "default_flow", "D3VisApp") as client:
             await client.app_remote_call("show_pc", pc)
 
+class SampleTestApp(App):
+    def __init__(self) -> None:
+        super().__init__()
+        self.root.add_layout({
+            "plot0": VBox({
+                "asd": Text("Hello"),
+            }, flex=1),
+            "btn": Button("Show", lambda: print("?"))
+        })
+        self.set_init_window_size([480, 320])

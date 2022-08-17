@@ -48,6 +48,8 @@ class FlowApp:
         self.headless = headless
         self.dynamic_app_cls = ReloadableDynamicClass(module_name)
         self.app: App = self.dynamic_app_cls.obj_type(**self.config)
+        if self.app._force_special_layout_method:
+            self.app._app_run_layout_function()
         # TODO reloadable app_su
         self.app_su = ServiceUnit(module_name, config)
         self.app_su.init_service(self.app)
@@ -61,9 +63,10 @@ class FlowApp:
         lay = self.app._get_app_layout()
         # print(lay)
         print(self.master_meta.http_url)
-        asyncio.run_coroutine_threadsafe(self._send_loop_queue.put(
+        fut = asyncio.run_coroutine_threadsafe(self._send_loop_queue.put(
             AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)})),
                                          loop=asyncio.get_running_loop())
+        # fut.result()
 
     def _get_app(self):
         return self.app

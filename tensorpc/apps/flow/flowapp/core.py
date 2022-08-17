@@ -17,7 +17,8 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Tuple, TypeVar, Union)
 import asyncio
 import traceback
-import inspect 
+import inspect
+from ....autossh.core import _cancel 
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.uniquename import UniqueNamePool
 
@@ -331,6 +332,13 @@ class Component:
     def set_callback(self, val: Any):
         return  
 
+    async def _clear(self):
+        self.uid = ""
+        self._queue = None 
+        if self._task is not None:
+            await _cancel(self._task)
+        self.parent = ""
+
     def to_dict(self):
         res = {
             "type": self.type.value,
@@ -428,6 +436,13 @@ class ContainerBase(Component):
         self._childs: List[str] = []
 
         self.inited = inited
+        self._prevent_add_layout = False
+
+    async def _clear(self):
+        await super()._clear()
+        self._uid_to_comp.clear()
+        self._childs.clear()
+        self._pool.unique_set.clear()
 
     def _attach_to_app(self, queue: asyncio.Queue):
         # update queue of this and childs
@@ -528,6 +543,8 @@ class ContainerBase(Component):
             }, flex...),
         }
         """
+        if self._prevent_add_layout:
+            raise ValueError("you must init layout in app_create_layout")
         # we assume layout is a ordered dict (python >= 3.7)
         for k, v in layout.items():
             if not isinstance(v, ContainerBase):

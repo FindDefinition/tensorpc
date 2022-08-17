@@ -29,6 +29,7 @@
 
 import asyncio
 import base64
+import contextlib
 import enum
 import inspect
 import io
@@ -52,7 +53,7 @@ from watchdog.observers import Observer
 from .components import mui, three
 from .core import (AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
                    AppEditorFrontendEventType, AppEvent, AppEventType,
-                   Component, CopyToClipboardEvent, TaskLoopEvent, UIEvent,
+                   Component, CopyToClipboardEvent, LayoutEvent, TaskLoopEvent, UIEvent,
                    UIRunStatus, UIType)
 
 ALL_APP_EVENTS = HashableRegistry()
@@ -140,10 +141,34 @@ class App:
         # loaded if you connect app node with a full data storage
         self._data_storage: Dict[str, Any] = {}
 
+        self._force_special_layout_method = False
+
+    def _app_force_use_layout_function(self):
+        self._force_special_layout_method = True 
+        self.root._prevent_add_layout = True
+
+    async def _app_run_layout_function(self, send_layout_ev: bool = False):
+        self.root._prevent_add_layout = False 
+        await self.root._clear()
+        res = self.app_create_layout()
+        print(res)
+        self.root.add_layout(res)
+        self._uid_to_comp[_ROOT] = self.root
+        self.root._prevent_add_layout = True 
+        print(self.root._uid_to_comp)
+        if send_layout_ev:
+            ev = AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(self._get_app_layout())})
+            await self._queue.put(ev)
+
     def app_initialize(self):
         """override this to init app before server start
         """
         pass
+
+    def app_create_layout(self) -> Dict[str, Component]:
+        """override this in EditableApp to support reloadable layout
+        """
+        return {}
 
     def _get_app_dynamic_cls(self):
         assert self._app_dynamic_cls is not None
@@ -330,6 +355,7 @@ class _WatchDogForAppFile(watchdog.events.FileSystemEventHandler):
 class EditableApp(App):
 
     def __init__(self,
+                 reloadable_layout: bool = False,
                  flex_flow: Optional[str] = "column nowrap",
                  justify_content: Optional[str] = None,
                  align_items: Optional[str] = None,
@@ -340,7 +366,9 @@ class EditableApp(App):
         self.code_editor.language = "python"
         self.code_editor.set_init_line_number(lineno)
         self.code_editor.freeze()
-
+        if reloadable_layout:
+            self._app_force_use_layout_function()
+        
     def app_initialize(self):
         dcls = self._get_app_dynamic_cls()
         path = dcls.file_path
@@ -364,7 +392,11 @@ class EditableApp(App):
                 fut = asyncio.run_coroutine_threadsafe(
                     self.set_editor_value(new_data), self._loop)
                 fut.result()
-                self._reload_app_file()
+                layout_func_changed = self._reload_app_file()
+                if layout_func_changed:
+                    fut = asyncio.run_coroutine_threadsafe(
+                        self._app_run_layout_function(True), self._loop)
+                    fut.result()
 
     def _reload_app_file(self):
         comps = self._uid_to_comp
@@ -373,12 +405,14 @@ class EditableApp(App):
             cb = v.get_callback()
             if cb is not None:
                 callback_dict[k] = cb
-        new_cb = self._get_app_dynamic_cls().reload_obj_methods(
+        new_cb, code_changed = self._get_app_dynamic_cls().reload_obj_methods(
             self, callback_dict)
         self._get_app_service_unit().reload_metas()
+
         for k, v in comps.items():
             if k in new_cb:
                 v.set_callback(new_cb[k])
+        return App.app_create_layout.__name__ in code_changed
 
     async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
         """override this method to support vscode editor.
@@ -389,5 +423,7 @@ class EditableApp(App):
                 with open(inspect.getfile(type(self)), "w") as f:
                     f.write(event.data)
                 self.code_editor.value = event.data
-                self._reload_app_file()
+                layout_func_changed = self._reload_app_file()
+                if layout_func_changed:
+                    await self._app_run_layout_function(True)
         return
