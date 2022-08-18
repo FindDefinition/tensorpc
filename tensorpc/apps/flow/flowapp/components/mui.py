@@ -268,33 +268,6 @@ class Buttons(Component):
         self.callback = val
 
 
-class Points(Component):
-    def __init__(self,
-                 names: List[str],
-                 callback: Callable[[str], _CORO_NONE],
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.Buttons, queue, flex, align_self)
-        self.names = names
-        self.callback = callback
-
-    def to_dict(self):
-        res = super().to_dict()
-        res["names"] = self.names
-        return res
-
-    async def headless_click(self, index: int):
-        return await self.queue.put(UIEvent({self.uid: self.names[index]}))
-
-    def get_callback(self):
-        return self.callback
-
-    def set_callback(self, val: Any):
-        self.callback = val
-
-
 class FlexBox(ContainerBase):
     def __init__(self,
                  uid: str = "",
@@ -415,11 +388,13 @@ class FlexBox(ContainerBase):
 
     def add_input(self,
                   label: str,
+                  multiline: bool = False,
+                  password: bool = False,
                   callback: Optional[Callable[[str], Coroutine[None, None,
                                                                None]]] = None,
                   flex: Optional[Union[int, str]] = None,
                   align_self: Optional[str] = None):
-        ui = Input(label, callback, "", self.queue, flex, align_self)
+        ui = Input(label, multiline, password, callback, "", self.queue, flex, align_self)
         self.add_component("inp", ui)
         return ui
 
@@ -690,6 +665,12 @@ class RadioGroup(Component):
         state["value"] = self.value
         return state
 
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        # noexcept here.
+        if state["value"] in self.names:
+            self.value = state["value"]
+
     def state_change_callback(self, data: str):
         self.value = data
 
@@ -711,6 +692,8 @@ class RadioGroup(Component):
 class Input(Component):
     def __init__(self,
                  label: str,
+                 multiline: bool = False,
+                 password: bool = False,
                  callback: Optional[Callable[[str], Coroutine[None, None,
                                                               None]]] = None,
                  uid: str = "",
@@ -722,16 +705,24 @@ class Input(Component):
         self.label = label
         self.callback = callback
         self.value: str = init
+        self.multiline = multiline
+        self.password = password 
 
     def to_dict(self):
         res = super().to_dict()
         res["label"] = self.label
+        res["multiline"] = self.multiline
+        res["password"] = self.password
         return res
 
     def get_state(self):
         state = super().get_state()
         state["value"] = self.value
         return state
+
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        self.value = state["value"]
 
     def state_change_callback(self, data: str):
         self.value = data
@@ -795,6 +786,10 @@ class Switch(Component):
         state["checked"] = self.checked
         return state
 
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        self.checked = state["checked"]
+
     def state_change_callback(self, data: bool):
         self.checked = data
 
@@ -823,6 +818,7 @@ class Select(Component):
         self.callback = callback
         assert len(items) > 0
         self.items = items
+        # item value must implement eq/ne
         self.value = items[0][1]
 
     def to_dict(self):
@@ -835,6 +831,14 @@ class Select(Component):
         state["items"] = self.items
         state["value"] = self.value
         return state
+
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        value = state["value"]
+        ranges = state["ranges"]
+        if ranges == self.items:
+            self.value = value
+            self.ranges = ranges
 
     async def update_items(self, items: List[Tuple[str, Any]], selected: int):
         await self.queue.put(
@@ -896,6 +900,11 @@ class Slider(Component):
         state["ranges"] = self.ranges
         state["value"] = self.value
         return state
+
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        self.value = state["value"]
+        self.ranges = state["ranges"]
 
     async def update_ranges(self, begin: Union[int, float],
                             end: Union[int, float], step: Union[int, float]):

@@ -12,5 +12,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .app import App, EditableApp
+from .app import App, EditableApp, EditableLayoutApp
 from .components import mui, three

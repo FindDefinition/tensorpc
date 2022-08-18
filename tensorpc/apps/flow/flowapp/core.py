@@ -363,6 +363,9 @@ class Component:
             "status": self._status.value,
         }
 
+    def set_state(self, state: Dict[str, Any]):
+        self._status = UIRunStatus(state["status"])
+
     @property
     def queue(self):
         assert self._queue is not None, "you must add ui by flexbox.add_xxx"

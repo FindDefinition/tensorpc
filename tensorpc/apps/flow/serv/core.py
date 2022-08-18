@@ -772,6 +772,8 @@ class AppNode(CommandNode):
         self.fwd_grpc_port = -1
         self.fwd_http_port = -1
 
+        self.state: Optional[dict] = None
+
     @property
     def module_name(self):
         return self.node_data["module"]
@@ -1827,6 +1829,10 @@ class Flow:
             return
         if isinstance(node, CommandNode):
             if node.is_session_started():
+                if isinstance(node, AppNode):
+                    # query simple app state and save on 
+                    # master memory (inputs, switchs, etc)
+                    pass
                 await node.send_ctrl_c()
             return
         else:

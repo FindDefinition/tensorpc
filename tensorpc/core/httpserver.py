@@ -598,4 +598,5 @@ def serve_service_core(server_core: ProtobufServiceCore,
     try:
         asyncio.run(http_task)
     except KeyboardInterrupt:
+        
         print("shutdown by keyboard interrupt")

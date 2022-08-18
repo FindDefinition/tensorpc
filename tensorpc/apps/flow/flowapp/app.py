@@ -143,6 +143,28 @@ class App:
 
         self._force_special_layout_method = False
 
+    def _get_simple_app_state(self):
+        """get state of Input/Switch/Radio/Slider/Select
+        """
+        state: Dict[str, Any] = {}
+        for comp in self.root._get_all_nested_childs():
+            if isinstance(comp, (mui.Input, mui.Switch, mui.RadioGroup, mui.Slider, mui.Select)):
+                state[comp.uid] = {
+                    "type": comp.type.value,
+                    "state": comp.get_state(),
+                }
+        return state
+
+    def _restore_simple_app_state(self, state: Dict[str, Any]):
+        """try to restore state of Input/Switch/Radio/Slider/Select
+        no exception if fail.
+        """
+        for k, s in state.items():
+            if k in self.root._uid_to_comp:
+                comp_to_restore = self.root._uid_to_comp[k]
+                if comp_to_restore.type.value == s["type"]:
+                    comp_to_restore.set_state(s["state"])
+
     def _app_force_use_layout_function(self):
         self._force_special_layout_method = True 
         self.root._prevent_add_layout = True
@@ -439,3 +461,12 @@ class EditableApp(App):
                 if layout_func_changed:
                     await self._app_run_layout_function(True, with_code_editor=False)
         return
+
+
+class EditableLayoutApp(EditableApp):
+    def __init__(self,
+                 flex_flow: Optional[str] = "column nowrap",
+                 justify_content: Optional[str] = None,
+                 align_items: Optional[str] = None,
+                 maxqsize: int = 10) -> None:
+        super().__init__(True, flex_flow, justify_content, align_items, maxqsize)
