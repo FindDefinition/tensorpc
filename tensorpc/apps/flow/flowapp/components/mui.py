@@ -20,7 +20,7 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Tuple, TypeVar, Union)
 
 import numpy as np
-from PIL import Image
+from PIL import Image as PILImage
 
 from ..core import AppEvent, Component, TaskLoopEvent, UIEvent, UIType, ContainerBase
 
@@ -28,7 +28,7 @@ _CORO_NONE = Union[Coroutine[None, None, None], None]
 
 
 def _encode_image_bytes(img: np.ndarray):
-    pil_img = Image.fromarray(img)
+    pil_img = PILImage.fromarray(img)
     buffered = io.BytesIO()
     pil_img.save(buffered, format="PNG")
     b64_bytes = base64.b64encode(buffered.getvalue())

@@ -20,11 +20,10 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Tuple, TypeVar, Union)
 
 import numpy as np
-from PIL import Image
 from tensorpc.utils.uniquename import UniqueNamePool
 
 from ..core import AppEvent, Component, TaskLoopEvent, UIEvent, UIType, ContainerBase
-
+from .mui import _encode_image_bytes
 
 class ThreeComponentBase(Component):
     pass
@@ -295,6 +294,42 @@ class Group(ContainerBase):
 def group(init_dict: Dict[str, Union[ThreeComponentBase, Group]]):
     init_dict_anno: Dict[str, Component] = {**init_dict}
     return Group(_init_dict=init_dict_anno)
+
+class Image(ThreeComponentBase):
+    def __init__(self,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 flex: Optional[Union[int, str]] = None,
+                 align_self: Optional[str] = None) -> None:
+        super().__init__(uid, UIType.ThreeImage, queue, flex,
+                         align_self)
+        self.image_str: bytes = b""
+
+    async def show(self, image: np.ndarray):
+        encoded = _encode_image_bytes(image)
+        self.image_str = encoded
+        await self.queue.put(self.create_update_event({
+            "image": encoded,
+        }))
+
+    async def show_raw(self, image_b64_bytes: bytes):
+        self.image_str = image_b64_bytes
+        await self.queue.put(
+            self.create_update_event({
+                "image": image_b64_bytes,
+            }))
+
+    def show_raw_event(self, image_b64_bytes: bytes):
+        self.image_str = image_b64_bytes
+
+        return self.create_update_event({
+            "image": image_b64_bytes,
+        })
+
+    def get_state(self):
+        state = super().get_state()
+        state["image"] = self.image_str
+        return state
 
 
 class PerspectiveCamera(ThreeComponentBase):

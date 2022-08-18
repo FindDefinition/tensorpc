@@ -372,6 +372,7 @@ class EditableApp(App):
         self.code_editor.language = "python"
         self.code_editor.set_init_line_number(lineno)
         self.code_editor.freeze()
+        self._watchdog_prev_content = ""
         if reloadable_layout:
             self._app_force_use_layout_function()
         
@@ -396,14 +397,17 @@ class EditableApp(App):
                     return
                 with open(ev.src_path, "r") as f:
                     new_data = f.read()
-                fut = asyncio.run_coroutine_threadsafe(
-                    self.set_editor_value(new_data), self._loop)
-                fut.result()
-                layout_func_changed = self._reload_app_file()
-                if layout_func_changed:
+                # we have no way to distringuish save event and external save.
+                # so we compare data with previous saved result.
+                if new_data != self._watchdog_prev_content:
                     fut = asyncio.run_coroutine_threadsafe(
-                        self._app_run_layout_function(True, with_code_editor=False), self._loop)
+                        self.set_editor_value(new_data), self._loop)
                     fut.result()
+                    layout_func_changed = self._reload_app_file()
+                    if layout_func_changed:
+                        fut = asyncio.run_coroutine_threadsafe(
+                            self._app_run_layout_function(True, with_code_editor=False), self._loop)
+                        fut.result()
 
     def _reload_app_file(self):
         comps = self._uid_to_comp
@@ -430,6 +434,7 @@ class EditableApp(App):
                 with open(inspect.getfile(type(self)), "w") as f:
                     f.write(event.data)
                 self.code_editor.value = event.data
+                self._watchdog_prev_content = event.data
                 layout_func_changed = self._reload_app_file()
                 if layout_func_changed:
                     await self._app_run_layout_function(True, with_code_editor=False)

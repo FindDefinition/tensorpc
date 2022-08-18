@@ -40,6 +40,7 @@ import numpy as np
 
 
 class SampleApp(App):
+
     def __init__(self) -> None:
         super().__init__()
         self.root.add_buttons(
@@ -148,6 +149,7 @@ class SampleApp(App):
 
 
 class SampleDictApp(App):
+
     def __init__(self) -> None:
         super().__init__()
         self.vlist = VList(
@@ -186,6 +188,7 @@ class SampleDictApp(App):
 
 
 class SamplePlotApp(App):
+
     def __init__(self) -> None:
         super().__init__()
         data = [
@@ -257,6 +260,7 @@ class SamplePlotApp(App):
 
 
 class SampleChartJSApp(App):
+
     def __init__(self) -> None:
         super().__init__()
         options = {
@@ -338,6 +342,7 @@ class SampleChartJSApp(App):
 
 
 class SampleFlowApp(App):
+
     def __init__(self) -> None:
         super().__init__()
         self.text = Text("")
@@ -352,6 +357,7 @@ class SampleFlowApp(App):
 
 
 class SampleEditorApp(EditableApp):
+
     def __init__(self) -> None:
         super().__init__()
         self.text = Text("WTF")
@@ -376,6 +382,7 @@ class SampleEditorApp(EditableApp):
 
 
 class SampleThreeApp(EditableApp):
+
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([1280, 720])
@@ -391,17 +398,18 @@ class SampleThreeApp(EditableApp):
                                       1000)
         # cam = three.OrthographicCamera(True, [0, 0, 10], [0, 0, 1], 0.1, 1000,
         #                               8.0)
-
+        self.img = three.Image()
         ctrl = three.MapControl(True, 0.25, 1, 100)
         # ctrl = three.OrbitControl(True, 0.25, 1, 100)
-
+        infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.canvas = three.ThreeCanvas({
             "cam": cam,
             "points": self.points,
             "lines": self.lines,
             "ctrl": ctrl,
             "axes": three.AxesHelper(10),
-            "infgrid": three.InfiniteGridHelper(5, 50, "gray"),
+            "infgrid": infgrid,
+            "img": self.img,
             # "box": three.BoundingBox([2, 5, 2], [0, 10, 0], [0, 0, 0.5])
         })
         btn_random_pc = Button("showRandomRPC", self.show_Random_pc)
@@ -409,26 +417,27 @@ class SampleThreeApp(EditableApp):
             "d3v":
             VBox(
                 {
-                    # "d3":
-                    # VBox({
-                    #     "d32": self.canvas,
-                    # },
-                    #      flex=1,
-                    #      min_height=0,
-                    #      min_width=0),
+                    "d3":
+                    VBox({
+                        "d32": self.canvas,
+                    },
+                         flex=1,
+                         min_height=0,
+                         min_width=0),
                     "btn":
                     btn_random_pc,
                     "btn2":
                     Button("rpcTest", self.rpc_test),
+
                 },
                 flex=1,
                 min_height=0),
         }
 
     async def show_Random_pc(self):
-        data = np.load(
-            "/home/tusimple/tusimple/spconv/test/data/benchmark-pc.npz")
-        # data = np.load("/home/yy/Projects/spconv-release/spconv/test/data/benchmark-pc.npz")
+        # data = np.load(
+            # "/home/tusimple/tusimple/spconv/test/data/benchmark-pc.npz")
+        data = np.load("/home/yy/Projects/spconv-release/spconv/test/data/benchmark-pc.npz")
 
         pc = np.ascontiguousarray(data["pc"])
         # num = 50
@@ -444,10 +453,17 @@ class SampleThreeApp(EditableApp):
         await self.points.update_points(pc,
                                         attrs=attrs,
                                         attr_fields=attr_fields)
-        
-        random_lines = np.random.uniform(-5, 5, size=[5, 2, 3]).astype(np.float32)
-        await self.lines.update_lines(random_lines, line_width=1, color="green")
+
+        random_lines = np.random.uniform(-5, 5, size=[5, 2,
+                                                      3]).astype(np.float32)
+        await self.lines.update_lines(random_lines,
+                                      line_width=1,
+                                      color="green")
         # print("???????", random_lines)
+        with open("/home/yy/Pictures/Screenshot from 2022-02-11 15-10-06.png", "rb") as f:
+            raw = b'data:image/png;base64,' + base64.b64encode(f.read())
+
+            await self.img.show_raw(raw)
 
     async def show_pc(self, pc):
         intensity = None
@@ -489,6 +505,7 @@ class SampleThreeApp(EditableApp):
 
 
 class SampleTestApp(App):
+
     def __init__(self) -> None:
         super().__init__()
         self.root.add_layout({

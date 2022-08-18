@@ -65,6 +65,7 @@ class UIType(enum.Enum):
     ThreeAxesHelper = 0x1021
     ThreeInfiniteGridHelper = 0x1022
     ThreeSegments = 0x1023
+    ThreeImage = 0x1024
 
 class AppEventType(enum.Enum):
     # layout events
