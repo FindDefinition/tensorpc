@@ -195,3 +195,7 @@ class FlowApp:
                         master_disconnect = ts
         self._send_loop_task = None
 
+    @marker.mark_exit
+    async def on_exit(self):
+        # save simple state to master
+        pass 

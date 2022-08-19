@@ -231,7 +231,7 @@ async def serve_with_http_async(service_def: ServiceDef,
                                                         None, is_sync=False, standalone=False)
             return await asyncio.gather(grpc_task, http_task)
 
-async def serve_async(service_def: ServiceDef,
+async def serve_async(sc: ProtobufServiceCore,
         wait_time=-1,
         port=50051,
         length=-1,
@@ -242,10 +242,7 @@ async def serve_async(service_def: ServiceDef,
     if not compat.Python3_7AndLater:
         raise NotImplementedError
 
-    url = '[::]:{}'.format(port)
-    smeta = ServerMeta(port=port, http_port=-1)
-
-    server_core = ProtobufServiceCore(url, service_def, False, smeta)
+    server_core = sc
     with server_core.enter_global_context():
         await server_core._init_async_members()
         service = AsyncRemoteObjectService(server_core, is_local, length)
@@ -263,12 +260,17 @@ def serve(service_def: ServiceDef,
           credentials=None):
     if not compat.Python3_7AndLater:
         raise NotImplementedError
+    url = '[::]:{}'.format(port)
+    smeta = ServerMeta(port=port, http_port=-1)
+    server_core = ProtobufServiceCore(url, service_def, False, smeta)
     try:
-        asyncio.run(serve_async(service_def, 
+        asyncio.run(serve_async(server_core, 
             port=port, length=length, is_local=is_local,
             max_threads=max_threads, process_id=process_id, credentials=credentials))
     except KeyboardInterrupt:
+        asyncio.run(server_core.exec_exit_funcs())
         print("shutdown by keyboard interrupt")
+    
 # import uvloop
 def serve_with_http(service_def: ServiceDef,
                     wait_time=-1,
