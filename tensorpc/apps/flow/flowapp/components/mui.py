@@ -51,18 +51,14 @@ class Images(Component):
             "image": encoded,
         }))
 
-    async def show_raw(self, image_b64_bytes: bytes):
-        self.image_str = image_b64_bytes
-        await self.queue.put(
-            self.create_update_event({
-                "image": image_b64_bytes,
-            }))
+    async def show_raw(self, image_bytes: bytes, suffix: str):
+        await self.queue.put(self.show_raw_event(image_bytes, suffix))
 
-    def show_raw_event(self, image_b64_bytes: bytes):
-        self.image_str = image_b64_bytes
-
+    def show_raw_event(self, image_bytes: bytes, suffix: str):
+        raw = b'data:image/' + suffix.encode("utf-8") + b';base64,' + base64.b64encode(image_bytes)
+        self.image_str = raw
         return self.create_update_event({
-            "image": image_b64_bytes,
+            "image": raw,
         })
 
     def get_state(self):

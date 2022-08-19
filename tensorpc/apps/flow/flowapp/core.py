@@ -27,6 +27,12 @@ ALL_APP_EVENTS = HashableRegistry()
 _CORO_NONE = Union[Coroutine[None, None, None], None]
 
 
+class Undefined:
+    pass
+
+# DON'T MODIFY THIS VALUE!!!
+undefined = Undefined()
+
 class UIType(enum.Enum):
     # controls
     Buttons = 0x0
@@ -75,6 +81,7 @@ class AppEventType(enum.Enum):
 
     # ui event
     UIEvent = 10
+    UIUpdateEvent = 11
     # clipboard
     CopyToClipboard = 20
     # schedule event, won't be sent to frontend.
@@ -132,15 +139,31 @@ class UIEvent:
         return cls(data)
 
     def merge_new(self, new):
-        assert isinstance(new, UIEvent)
-        res_uid_to_data: Dict[str, Any] = self.uid_to_data.copy()
-        for k, v in new.uid_to_data.items():
-            if k in self.uid_to_data:
-                res_uid_to_data[k] = {**v, **self.uid_to_data[k]}
+        return new
+
+@ALL_APP_EVENTS.register(key=AppEventType.UIUpdateEvent.value)
+class UIUpdateEvent:
+
+    def __init__(self, uid_to_data_undefined: Dict[str, Tuple[Dict[str, Any], List[str]]]) -> None:
+        self.uid_to_data_undefined = uid_to_data_undefined
+
+    def to_dict(self):
+        return self.uid_to_data_undefined
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        return cls(data)
+
+    def merge_new(self, new):
+        assert isinstance(new, UIUpdateEvent)
+        res_uid_to_data: Dict[str, Any] = self.uid_to_data_undefined.copy()
+        for k, v in new.uid_to_data_undefined.items():
+            if k in self.uid_to_data_undefined:
+                res_uid_to_data[k] = ({**v[0], **self.uid_to_data_undefined[k][0]}, 
+                    [*v[1], *self.uid_to_data_undefined[k][1]])
             else:
                 res_uid_to_data[k] = v
-        return UIEvent(res_uid_to_data)
-
+        return UIUpdateEvent(res_uid_to_data)
 
 @ALL_APP_EVENTS.register(key=AppEventType.AppEditor.value)
 class AppEditorEvent:
@@ -259,7 +282,8 @@ class ScheduleNextForApp:
 
 APP_EVENT_TYPES = Union[UIEvent, LayoutEvent, CopyToClipboardEvent,
                         UpdateComponentsEvent, DeleteComponentsEvent,
-                        ScheduleNextForApp, AppEditorEvent]
+                        ScheduleNextForApp, AppEditorEvent,
+                        UIUpdateEvent]
 
 
 def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":
@@ -346,11 +370,18 @@ class Component:
         self.parent = ""
 
     def to_dict(self):
+        """undefined will be removed here.
+        """
+        state = self.get_state()
+        new_state = {}
+        for k, s in state.items():
+            if s is not undefined:
+                new_state[k] = s
         res = {
             "type": self.type.value,
             "uid": self.uid,
             # "parent": self.parent,
-            "state": self.get_state(),
+            "state": new_state,
         }
         if self._flex is not None:
             res["flex"] = self._flex
@@ -371,10 +402,17 @@ class Component:
     def state_change_callback(self, data: Any):
         pass
 
-    def create_update_event(self, data: Any):
-        ev = UIEvent({self.uid: data})
+    def create_update_event(self, data: Dict[str, Union[Any, Undefined]]):
+        data_no_und = {}
+        data_unds = []
+        for k, v in data.items():
+            if v is undefined:
+                data_unds.append(k)
+            else:
+                data_no_und[k] = v
+        ev = UIUpdateEvent({self.uid: (data_no_und, data_unds)})
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.UIEvent: ev})
+        return AppEvent("", {AppEventType.UIUpdateEvent: ev})
 
     def create_update_comp_event(self, updates: Dict[str, Any]):
         ev = UpdateComponentsEvent(updates)

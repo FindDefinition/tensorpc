@@ -72,8 +72,7 @@ class SampleApp(App):
                 if path.suffix == ".gif":
                     with path.open("rb") as f:
                         data = f.read()
-                    raw = b'data:image/gif;base64,' + base64.b64encode(data)
-                    await self.img_ui.show_raw(raw)
+                    await self.img_ui.show_raw(data, "gif")
                 else:
                     img = cv2.imread(str(path))
                     # print(type(img))
@@ -140,8 +139,7 @@ class SampleApp(App):
             suffix = "jpg"
             _, img_str = cv2.imencode(".{}".format(suffix), frame)
 
-            await self.img_ui.show_raw(b'data:image/jpg;base64,' +
-                                       base64.b64encode(img_str))
+            await self.img_ui.show_raw(img_str, "jpg")
             dura = time.time() - t
             t = time.time()
             # await asyncio.sleep(0)
@@ -394,10 +392,10 @@ class SampleThreeApp(EditableApp):
         self.lines = three.Segments(20000)
 
     def app_create_layout(self) -> Dict[str, Component]:
-        cam = three.PerspectiveCamera(True, [0, 0, 20], [0, 0, 1], 75, 0, 0.1,
-                                      1000)
-        # cam = three.OrthographicCamera(True, [0, 0, 10], [0, 0, 1], 0.1, 1000,
-        #                               8.0)
+        cam = three.PerspectiveCamera(True, position=(0, 0, 20), up=(0, 0, 1), fov=75, near=0.1,
+                                      far=1000)
+        # cam = three.OrthographicCamera(True, position=[0, 0, 10], up=[0, 0, 1], near=0.1, far=1000,
+        #                               zoom=8.0)
         self.img = three.Image()
         ctrl = three.MapControl(True, 0.25, 1, 100)
         # ctrl = three.OrbitControl(True, 0.25, 1, 100)
@@ -461,9 +459,7 @@ class SampleThreeApp(EditableApp):
                                       color="green")
         # print("???????", random_lines)
         with open("/home/yy/Pictures/Screenshot from 2022-02-11 15-10-06.png", "rb") as f:
-            raw = b'data:image/png;base64,' + base64.b64encode(f.read())
-
-            await self.img.show_raw(raw)
+            await self.img.show_raw(f.read(), "png")
 
     async def show_pc(self, pc):
         intensity = None

@@ -53,8 +53,8 @@ from watchdog.observers import Observer
 from .components import mui, three
 from .core import (AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
                    AppEditorFrontendEventType, AppEvent, AppEventType,
-                   Component, CopyToClipboardEvent, LayoutEvent, TaskLoopEvent, UIEvent,
-                   UIRunStatus, UIType)
+                   Component, CopyToClipboardEvent, LayoutEvent, TaskLoopEvent,
+                   UIEvent, UIRunStatus, UIType)
 
 ALL_APP_EVENTS = HashableRegistry()
 
@@ -184,7 +184,6 @@ class App:
             "layout": {u: c.to_dict()
                        for u, c in self._uid_to_comp.items()},
             "enableEditor": self._enable_editor,
-
         }
         if with_code_editor:
             res.update({
