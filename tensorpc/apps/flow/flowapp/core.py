@@ -1,11 +1,11 @@
 # Copyright 2022 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,24 +14,36 @@
 
 import enum
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
-                    Iterable, List, Optional, Tuple, TypeVar, Union)
+                    Generic, Iterable, List, Optional, Tuple, Type, TypeVar,
+                    Union)
 import asyncio
 import traceback
 import inspect
-from ....autossh.core import _cancel 
+from ....autossh.core import _cancel
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.uniquename import UniqueNamePool
+import dataclasses
+import re
 
 ALL_APP_EVENTS = HashableRegistry()
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
 
+__COMPONENT_SPECIAL_KEY = "__tensorpc_component_special_key"
+
 
 class Undefined:
     pass
 
+
+class NoDefault:
+    pass
+
+
 # DON'T MODIFY THIS VALUE!!!
 undefined = Undefined()
+nodefault = NoDefault()
+
 
 class UIType(enum.Enum):
     # controls
@@ -64,14 +76,24 @@ class UIType(enum.Enum):
     ThreeGroup = 0x1003
     ThreeOrthographicCamera = 0x1004
 
+    ThreeFlex = 0x1005
+    ThreeFlexItemBox = 0x1006
+    ThreeHtml = 0x1007
+
     ThreeMapControl = 0x1010
     ThreeOrbitControl = 0x1011
+    ThreePointerLockControl = 0x1012
+    ThreeFirstPersonControl = 0x1013
 
     ThreeBoundingBox = 0x1020
     ThreeAxesHelper = 0x1021
     ThreeInfiniteGridHelper = 0x1022
     ThreeSegments = 0x1023
     ThreeImage = 0x1024
+    ThreeBoxes2D = 0x1025
+
+    ThreeText = 0x1026
+
 
 class AppEventType(enum.Enum):
     # layout events
@@ -89,6 +111,7 @@ class AppEventType(enum.Enum):
     # special UI event
     AppEditor = 200
 
+
 class UIRunStatus(enum.Enum):
     Stop = 0
     Running = 1
@@ -100,14 +123,17 @@ class TaskLoopEvent(enum.Enum):
     Stop = 1
     Pause = 2
 
+
 class AppEditorEventType(enum.Enum):
     SetValue = 0
     RevealLine = 1
+
 
 class AppEditorFrontendEventType(enum.Enum):
     Save = 0
     Change = 1
     SaveEditorState = 2
+
 
 class AppEditorFrontendEvent:
 
@@ -125,6 +151,7 @@ class AppEditorFrontendEvent:
     def from_dict(cls, data: Dict[str, Any]):
         return cls(AppEditorFrontendEventType(data["type"]), data["data"])
 
+
 @ALL_APP_EVENTS.register(key=AppEventType.UIEvent.value)
 class UIEvent:
 
@@ -141,10 +168,14 @@ class UIEvent:
     def merge_new(self, new):
         return new
 
+
 @ALL_APP_EVENTS.register(key=AppEventType.UIUpdateEvent.value)
 class UIUpdateEvent:
 
-    def __init__(self, uid_to_data_undefined: Dict[str, Tuple[Dict[str, Any], List[str]]]) -> None:
+    def __init__(
+        self, uid_to_data_undefined: Dict[str, Tuple[Dict[str, Any],
+                                                     List[str]]]
+    ) -> None:
         self.uid_to_data_undefined = uid_to_data_undefined
 
     def to_dict(self):
@@ -159,11 +190,14 @@ class UIUpdateEvent:
         res_uid_to_data: Dict[str, Any] = self.uid_to_data_undefined.copy()
         for k, v in new.uid_to_data_undefined.items():
             if k in self.uid_to_data_undefined:
-                res_uid_to_data[k] = ({**v[0], **self.uid_to_data_undefined[k][0]}, 
-                    [*v[1], *self.uid_to_data_undefined[k][1]])
+                res_uid_to_data[k] = ({
+                    **v[0],
+                    **self.uid_to_data_undefined[k][0]
+                }, [*v[1], *self.uid_to_data_undefined[k][1]])
             else:
                 res_uid_to_data[k] = v
         return UIUpdateEvent(res_uid_to_data)
+
 
 @ALL_APP_EVENTS.register(key=AppEventType.AppEditor.value)
 class AppEditorEvent:
@@ -185,6 +219,7 @@ class AppEditorEvent:
     def merge_new(self, new):
         assert isinstance(new, AppEditorEvent)
         return new
+
 
 @ALL_APP_EVENTS.register(key=AppEventType.UpdateLayout.value)
 class LayoutEvent:
@@ -263,6 +298,7 @@ class CopyToClipboardEvent:
         assert isinstance(new, CopyToClipboardEvent)
         return new
 
+
 @ALL_APP_EVENTS.register(key=AppEventType.ScheduleNext.value)
 class ScheduleNextForApp:
 
@@ -280,10 +316,10 @@ class ScheduleNextForApp:
         assert isinstance(new, ScheduleNextForApp)
         return new
 
+
 APP_EVENT_TYPES = Union[UIEvent, LayoutEvent, CopyToClipboardEvent,
                         UpdateComponentsEvent, DeleteComponentsEvent,
-                        ScheduleNextForApp, AppEditorEvent,
-                        UIUpdateEvent]
+                        ScheduleNextForApp, AppEditorEvent, UIUpdateEvent]
 
 
 def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":
@@ -335,36 +371,136 @@ class AppEvent:
         return AppEvent(self.uid, new_type_to_event)
 
 
-class Component:
+def camel_to_snake(name: str):
+    name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+    name = re.sub('__([A-Z])', r'_\1', name)
+    name = re.sub('([a-z0-9])([A-Z])', r'\1_\2', name)
+    return name.lower()
+
+
+def snake_to_camel(name: str):
+    res = ''.join(word.title() for word in name.split('_'))
+    res = res[0].lower() + res[1:]
+    return res
+
+
+T = TypeVar("T")
+
+
+@dataclasses.dataclass
+class BasicProps:
+    status: int = UIRunStatus.Stop.value
+
+    def get_dict_and_undefined(self, state: Dict[str, Any]):
+        this_type = type(self)
+        res = {}
+        ref_dict = dataclasses.asdict(self)
+        res_und = []
+        for field in dataclasses.fields(this_type):
+            if field.name in state:
+                continue
+            res_camel = snake_to_camel(field.name)
+            val = ref_dict[field.name]
+            if val is undefined:
+                res_und.append(res_camel)
+            else:
+                res[res_camel] = val
+        return res, res_und
+
+    def get_dict(self):
+        this_type = type(self)
+        res = {}
+        ref_dict = dataclasses.asdict(self)
+        for field in dataclasses.fields(this_type):
+            res_camel = snake_to_camel(field.name)
+            val = ref_dict[field.name]
+            res[res_camel] = val
+        return res
+
+
+@dataclasses.dataclass
+class ComponentBaseProps(BasicProps):
+    """all props must have a default value, 
+    manage state by your self.
+    """
+    flex: Union[int, str, Undefined] = undefined
+    align_self: Union[str, Undefined] = undefined
+    flex_grow: Union[str, Undefined] = undefined
+    flex_shrink: Union[str, Undefined] = undefined
+    flex_basis: Union[str, Undefined] = undefined
+
+    height: Union[int, str, Undefined] = undefined
+    width: Union[int, str, Undefined] = undefined
+    max_height: Union[int, str, Undefined] = undefined
+    max_width: Union[int, str, Undefined] = undefined
+    min_height: Union[int, str, Undefined] = undefined
+    min_width: Union[int, str, Undefined] = undefined
+    padding: Union[int, str, Undefined] = undefined
+    padding_top: Union[int, str, Undefined] = undefined
+    padding_bottom: Union[int, str, Undefined] = undefined
+    padding_left: Union[int, str, Undefined] = undefined
+    padding_right: Union[int, str, Undefined] = undefined
+    margin: Union[int, str, Undefined] = undefined
+    margin_top: Union[int, str, Undefined] = undefined
+    margin_left: Union[int, str, Undefined] = undefined
+    margin_right: Union[int, str, Undefined] = undefined
+    margin_bottom: Union[int, str, Undefined] = undefined
+
+
+class Component(Generic[T]):
 
     def __init__(self,
                  uid: str,
                  type: UIType,
-                 queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        self.type = type
-        self.uid = uid
+                 prop_cls: Type[T],
+                 queue: Optional[asyncio.Queue] = None) -> None:
         self._queue = queue
-
-        self._status = UIRunStatus.Stop
+        self.uid = uid
+        self.type = type
+        # self._status = UIRunStatus.Stop
         # task for callback of controls
         # if previous control callback hasn't finished yet,
         # the new control event will be IGNORED
         self._task: Optional[asyncio.Task] = None
-        self._flex = flex
-        self._align_self = align_self
         self.parent = ""
+        self.__props = prop_cls()
+        self.__prop_cls = prop_cls
+
+    # def get_state_fields(self) -> List[str]:
+    #     return ["status"]
+
+    @property
+    def props(self) -> T:
+        return self.__props  # type: ignore
+
+    @property
+    def newprop(self) -> Type[T]:
+        """create a new props object.
+        we can't use partially set due to
+        limitation of python type annotation system.
+        """
+        def _init_decorator(func):
+
+            def wrapper(self2, *args, **kwargs):
+                func(self2, *args, **kwargs)
+                self.__props = self2
+                setattr(self2, __COMPONENT_SPECIAL_KEY, self)
+
+            return wrapper
+
+        cls = self.__prop_cls
+        cls.__init__ = _init_decorator(cls.__init__)
+        return cls
 
     def get_callback(self) -> Optional[Callable]:
-        return None 
+        return None
 
     def set_callback(self, val: Any):
-        return  
+        return
 
     async def _clear(self):
         self.uid = ""
-        # self._queue = None 
+        # self._queue = None
         if self._task is not None:
             await _cancel(self._task)
         self.parent = ""
@@ -373,29 +509,19 @@ class Component:
         """undefined will be removed here.
         """
         state = self.get_state()
-        new_state = {}
-        for k, s in state.items():
-            if s is not undefined:
-                new_state[k] = s
-        res = {
-            "type": self.type.value,
-            "uid": self.uid,
-            # "parent": self.parent,
-            "state": new_state,
-        }
-        if self._flex is not None:
-            res["flex"] = self._flex
-        if self._align_self is not None:
-            res["alignSelf"] = self._align_self
-        return res
+        # TODO better way to resolve type anno problem
+        static, _ = self.__props.get_dict_and_undefined(state) # type: ignore
+        static["state"] = state
+        static["uid"] = self.uid
+        static["type"] = self.type.value
+        return static
 
-    def get_state(self):
-        return {
-            "status": self._status.value,
-        }
+    def get_state(self) -> Dict[str, Any]:
+        return {"status": self.__props.status} # type: ignore
 
     def set_state(self, state: Dict[str, Any]):
-        self._status = UIRunStatus(state["status"])
+        if "status" in state:
+            self._status = UIRunStatus(state["status"])
 
     @property
     def queue(self):
@@ -430,7 +556,7 @@ class Component:
     async def run_callback(self,
                            cb: Callable[[], _CORO_NONE],
                            sync_state: bool = False):
-        self._status = UIRunStatus.Running
+        self.__props.status = UIRunStatus.Running.value # type: ignore
         await self.sync_status(sync_state)
         try:
             coro = cb()
@@ -440,7 +566,7 @@ class Component:
             traceback.print_exc()
             raise
         finally:
-            self._status = UIRunStatus.Stop
+            self.__props.status = UIRunStatus.Stop.value # type: ignore
             await self.sync_status(sync_state)
 
     async def sync_status(self, sync_state: bool = False):
@@ -448,8 +574,8 @@ class Component:
             await self.queue.put(self.create_update_event(self.get_state()))
         else:
             await self.queue.put(
-                self.create_update_event({"status": self._status.value}))
-    
+                self.create_update_event({"status": self.__props.status})) # type: ignore
+
     async def sync_state(self):
         return await self.sync_status(True)
 
@@ -457,21 +583,21 @@ class Component:
         if sync_state:
             return self.create_update_event(self.get_state())
         else:
-            return self.create_update_event({"status": self._status.value})
+            return self.create_update_event({"status": self.__props.status}) # type: ignore
 
-class ContainerBase(Component):
+
+class ContainerBase(Component[T]):
 
     def __init__(self,
-                base_type: UIType,
+                 base_type: UIType,
+                 prop_cls: Type[T],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
-                 _init_dict: Optional[Dict[str, Component]] = None,
-                 
+                 _init_dict: Optional[Dict[str, Union[Component,
+                                                      BasicProps]]] = None,
                  inited: bool = False) -> None:
-        super().__init__(uid, base_type, queue, flex, align_self)
+        super().__init__(uid, base_type, prop_cls, queue)
         if inited:
             assert queue is not None and uid_to_comp is not None
         if uid_to_comp is None:
@@ -484,6 +610,9 @@ class ContainerBase(Component):
 
         self.inited = inited
         self._prevent_add_layout = False
+
+    def get_prop_cls(self):
+        return ComponentBaseProps
 
     async def _clear(self):
         await super()._clear()
@@ -501,16 +630,16 @@ class ContainerBase(Component):
                     v.inited = True
             self.inited = True
 
-    def _update_child_ns_and_comp_dict(self, ns: str, uid_to_comp: Dict[str, Component]):
+    def _update_child_ns_and_comp_dict(self, ns: str,
+                                       uid_to_comp: Dict[str, Component]):
         prev_uid_to_comp = self._uid_to_comp
         self._uid_to_comp = uid_to_comp
         for k, v in prev_uid_to_comp.items():
             new_name = f"{ns}.{k}"
             v.uid = new_name
-            uid_to_comp[v.uid] = v 
+            uid_to_comp[v.uid] = v
             if isinstance(v, ContainerBase):
                 v._uid_to_comp = uid_to_comp
-        
 
     def __getitem__(self, key: str):
         assert key in self._childs
@@ -568,12 +697,16 @@ class ContainerBase(Component):
             self._childs.append(name)
         return comp
 
-    def _extract_layout(self, layout: Dict[str, Component]):
+    def _extract_layout(self, layout: Dict[str, Union[Component, BasicProps]]):
         """ get all components without add to app state.
         """
         # we assume layout is a ordered dict (python >= 3.7)
         comps: List[Component] = []
-        for k, v in layout.items():
+        for k, v1 in layout.items():
+            if isinstance(v1, BasicProps):
+                v: Component = getattr(v, __COMPONENT_SPECIAL_KEY)
+            else:
+                v = v1
             comps.append(self.add_component(k, v, False, anonymous=False))
             if isinstance(v, ContainerBase):
                 msg = "you must use VBox/HBox/Box instead in dict layout"
@@ -581,7 +714,7 @@ class ContainerBase(Component):
                 comps.extend(v._extract_layout(v._init_dict))
         return comps
 
-    def add_layout(self, layout: Dict[str, Component]):
+    def add_layout(self, layout: Dict[str, Union[Component, BasicProps]]):
         """ {
             btn0: Button(...),
             box0: VBox({
@@ -593,7 +726,11 @@ class ContainerBase(Component):
         if self._prevent_add_layout:
             raise ValueError("you must init layout in app_create_layout")
         # we assume layout is a ordered dict (python >= 3.7)
-        for k, v in layout.items():
+        for k, v1 in layout.items():
+            if isinstance(v1, BasicProps):
+                v: Component[T] = getattr(v, __COMPONENT_SPECIAL_KEY)
+            else:
+                v = v1
             if not isinstance(v, ContainerBase):
                 self.add_component(k, v, anonymous=False)
             else:
@@ -601,7 +738,7 @@ class ContainerBase(Component):
                     # consume this _init_dict
                     v.add_layout(v._init_dict)
                     v._init_dict = None
-                # update uids of childs of v, 
+                # update uids of childs of v,
                 ns = f"{k}"
                 if self.uid != "":
                     ns = f"{self.uid}.{k}"
@@ -614,8 +751,9 @@ class ContainerBase(Component):
         state = super().get_state()
         state["childs"] = self._get_all_child_comp_uids()
         return state
-    
-    async def set_new_layout(self, layout: Dict[str, Component]):
+
+    async def set_new_layout(self, layout: Dict[str, Union[Component,
+                                                           BasicProps]]):
         # remove all first
         # TODO we may need to stop task of a comp
         comps_to_remove: List[Component] = []
@@ -653,7 +791,8 @@ class ContainerBase(Component):
         await self.queue.put(
             self.create_update_comp_event({self.uid: self.to_dict()}))
 
-    async def update_childs(self, layout: Dict[str, Component]):
+    async def update_childs(self, layout: Dict[str, Union[Component,
+                                                          BasicProps]]):
         new_comps = self._extract_layout(layout)
         update_comps_frontend = {c.uid: c.to_dict() for c in new_comps}
         for c in new_comps:

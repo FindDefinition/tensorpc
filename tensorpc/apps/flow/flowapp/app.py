@@ -52,9 +52,9 @@ from watchdog.observers import Observer
 
 from .components import mui, three
 from .core import (AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
-                   AppEditorFrontendEventType, AppEvent, AppEventType,
+                   AppEditorFrontendEventType, AppEvent, AppEventType, BasicProps,
                    Component, CopyToClipboardEvent, LayoutEvent, TaskLoopEvent,
-                   UIEvent, UIRunStatus, UIType)
+                   UIEvent, UIRunStatus, UIType, Undefined, undefined)
 
 ALL_APP_EVENTS = HashableRegistry()
 
@@ -111,9 +111,9 @@ class AppEditor:
 class App:
     # TODO find a way to sync state to frontend uncontrolled elements.
     def __init__(self,
-                 flex_flow: Optional[str] = "column nowrap",
-                 justify_content: Optional[str] = None,
-                 align_items: Optional[str] = None,
+                 flex_flow: Union[str, Undefined] = "column nowrap",
+                 justify_content: Union[str, Undefined] = undefined,
+                 align_items: Union[str, Undefined] = undefined,
                  maxqsize: int = 10) -> None:
         self._uid_to_comp: Dict[str, Component] = {}
         self._queue = asyncio.Queue(maxsize=maxqsize)
@@ -124,10 +124,8 @@ class App:
         root = mui.FlexBox(_ROOT,
                            self._queue,
                            self._uid_to_comp,
-                           flex_flow,
-                           justify_content,
-                           align_items,
                            inited=True)
+        root.newprop(flex_flow=flex_flow, justify_content=justify_content, align_items=align_items)
         self._uid_to_comp[_ROOT] = root
 
         self.root = root
@@ -175,7 +173,8 @@ class App:
         self.root.uid = _ROOT
         res = self.app_create_layout()
         # print(res)
-        self.root.add_layout(res)
+        res_anno: Dict[str, Union[Component, BasicProps]] = {**res}
+        self.root.add_layout(res_anno)
         self._uid_to_comp[_ROOT] = self.root
         self.root._prevent_add_layout = True 
         # print(self.root._uid_to_comp)
@@ -188,7 +187,7 @@ class App:
         """
         pass
 
-    def app_create_layout(self) -> Dict[str, Component]:
+    def app_create_layout(self) -> Dict[str, mui.MUIComponentType]:
         """override this in EditableApp to support reloadable layout
         """
         return {}
@@ -216,9 +215,9 @@ class App:
     def init_enable_editor(self):
         self._enable_editor = True
 
-    def set_init_window_size(self, size: List[Union[int, None]]):
-        self.root.width = size[0]
-        self.root.height = size[1]
+    def set_init_window_size(self, size: List[Union[int, Undefined]]):
+        self.root.props.width = size[0]
+        self.root.props.height = size[1]
 
     async def headless_main(self):
         """override this method to support headless mode.
@@ -383,9 +382,9 @@ class EditableApp(App):
 
     def __init__(self,
                  reloadable_layout: bool = False,
-                 flex_flow: Optional[str] = "column nowrap",
-                 justify_content: Optional[str] = None,
-                 align_items: Optional[str] = None,
+                 flex_flow: Union[str, Undefined] = "column nowrap",
+                 justify_content: Union[str, Undefined] = undefined,
+                 align_items: Union[str, Undefined] = undefined,
                  maxqsize: int = 10) -> None:
         super().__init__(flex_flow, justify_content, align_items, maxqsize)
         lines, lineno = inspect.findsource(type(self))
@@ -464,8 +463,8 @@ class EditableApp(App):
 
 class EditableLayoutApp(EditableApp):
     def __init__(self,
-                 flex_flow: Optional[str] = "column nowrap",
-                 justify_content: Optional[str] = None,
-                 align_items: Optional[str] = None,
+                 flex_flow: Union[str, Undefined] = "column nowrap",
+                 justify_content: Union[str, Undefined] = undefined,
+                 align_items: Union[str, Undefined] = undefined,
                  maxqsize: int = 10) -> None:
         super().__init__(True, flex_flow, justify_content, align_items, maxqsize)

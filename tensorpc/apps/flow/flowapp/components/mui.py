@@ -14,15 +14,18 @@
 
 import asyncio
 import base64
+import dataclasses
 import io
 import time
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
-                    Iterable, List, Optional, Tuple, TypeVar, Union)
+                    Iterable, List, Optional, Tuple, Type, TypeVar, Union)
 
 import numpy as np
 from PIL import Image as PILImage
 
-from ..core import AppEvent, Component, TaskLoopEvent, UIEvent, UIType, ContainerBase
+from ..core import (AppEvent, BasicProps, Component, ComponentBaseProps,
+                    ContainerBase, TaskLoopEvent, UIEvent, UIType, Undefined,
+                    undefined, T)
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
 
@@ -35,13 +38,52 @@ def _encode_image_bytes(img: np.ndarray):
     return b"data:image/png;base64," + b64_bytes
 
 
-class Images(Component):
+@dataclasses.dataclass
+class MUIBasicProps(BasicProps):
+    pass
+
+
+@dataclasses.dataclass
+class MUIComponentBaseProps(ComponentBaseProps):
+    pass
+
+
+class MUIComponentBase(Component[T]):
+    pass
+
+
+class MUIContainerBase(ContainerBase[T]):
+    pass
+
+
+@dataclasses.dataclass
+class FlexBoxProps(ComponentBaseProps):
+    # TODO add literal here.
+    align_content: Union[str, Undefined] = undefined
+    align_items: Union[str, Undefined] = undefined
+    justify_content: Union[str, Undefined] = undefined
+    flex_direction: Union[str, Undefined] = undefined
+    flex_wrap: Union[str, Undefined] = undefined
+    flex_flow: Union[str, Undefined] = undefined
+    overflow: Union[str, Undefined] = undefined
+
+
+# we can't let mui use three component.
+@dataclasses.dataclass
+class MUIFlexBoxProps(FlexBoxProps):
+    pass
+
+
+MUIComponentType = Union[MUIBasicProps, MUIComponentBase, MUIContainerBase,
+                         MUIFlexBoxProps, MUIComponentBaseProps]
+
+
+class Images(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.Image, queue, flex, align_self)
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.Image, MUIComponentBaseProps, queue)
         self.image_str: bytes = b""
 
     async def show(self, image: np.ndarray):
@@ -55,7 +97,8 @@ class Images(Component):
         await self.queue.put(self.show_raw_event(image_bytes, suffix))
 
     def show_raw_event(self, image_bytes: bytes, suffix: str):
-        raw = b'data:image/' + suffix.encode("utf-8") + b';base64,' + base64.b64encode(image_bytes)
+        raw = b'data:image/' + suffix.encode(
+            "utf-8") + b';base64,' + base64.b64encode(image_bytes)
         self.image_str = raw
         return self.create_update_event({
             "image": raw,
@@ -67,15 +110,14 @@ class Images(Component):
         return state
 
 
-class Plotly(Component):
+class Plotly(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  data: Optional[list] = None,
                  layout: Optional[dict] = None,
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.Plotly, queue, flex, align_self)
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.Plotly, MUIComponentBaseProps, queue)
         if data is None:
             data = []
         if layout is None:
@@ -97,15 +139,14 @@ class Plotly(Component):
         return state
 
 
-class ChartJSLine(Component):
+class ChartJSLine(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  data: Optional[Any] = None,
                  options: Optional[Any] = None,
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.ChartJSLine, queue, flex, align_self)
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.ChartJSLine, MUIComponentBaseProps, queue)
         if data is None:
             data = {}
         if options is None:
@@ -127,14 +168,13 @@ class ChartJSLine(Component):
         return state
 
 
-class Text(Component):
+class Text(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  init: str,
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.Text, queue, flex, align_self)
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.Text, MUIComponentBaseProps, queue)
         self.value = init
 
     async def write(self, content: str):
@@ -147,14 +187,14 @@ class Text(Component):
         return state
 
 
-class ListItemText(Component):
+class ListItemText(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  init: str,
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.ListItemText, queue, flex, align_self)
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.ListItemText, MUIComponentBaseProps,
+                         queue)
         self.value = init
 
     async def write(self, content: str):
@@ -167,14 +207,13 @@ class ListItemText(Component):
         return state
 
 
-class Divider(Component):
+class Divider(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  orientation: str = "horizontal",
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.Divider, queue, flex, align_self)
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.Divider, MUIComponentBaseProps, queue)
         self.orientation = orientation
         assert orientation == "horizontal" or orientation == "vertical"
 
@@ -183,15 +222,14 @@ class Divider(Component):
         res["orientation"] = self.orientation
 
 
-class Button(Component):
+class Button(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  name: str,
                  callback: Callable[[], _CORO_NONE],
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.Button, queue, flex, align_self)
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.Button, MUIComponentBaseProps, queue)
         self.name = name
         self.callback = callback
 
@@ -210,15 +248,15 @@ class Button(Component):
         self.callback = val
 
 
-class ListItemButton(Component):
+class ListItemButton(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  name: str,
                  callback: Callable[[], _CORO_NONE],
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.ListItemButton, queue, flex, align_self)
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.ListItemButton, MUIComponentBaseProps,
+                         queue)
         self.name = name
         self.callback = callback
 
@@ -237,15 +275,14 @@ class ListItemButton(Component):
         self.callback = val
 
 
-class Buttons(Component):
+class Buttons(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  names: List[str],
                  callback: Callable[[str], _CORO_NONE],
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.Buttons, queue, flex, align_self)
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.Buttons, MUIComponentBaseProps, queue)
         self.names = names
         self.callback = callback
 
@@ -264,269 +301,36 @@ class Buttons(Component):
         self.callback = val
 
 
-class FlexBox(ContainerBase):
+class FlexBox(MUIContainerBase[MUIFlexBoxProps]):
+
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
-                 flex_flow: Optional[str] = None,
-                 justify_content: Optional[str] = None,
-                 align_items: Optional[str] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None,
-                 width: Optional[Union[str, int]] = None,
-                 height: Optional[Union[str, int]] = None,
-                 overflow: Optional[str] = None,
-                 min_width: Optional[Union[str, int]] = None,
-                 min_height: Optional[Union[str, int]] = None,
-                 _init_dict: Optional[Dict[str, Component]] = None,
+                 _init_dict: Optional[Dict[str, Union[Component,
+                                                      BasicProps]]] = None,
                  base_type: UIType = UIType.FlexBox,
                  inited: bool = False) -> None:
-        super().__init__(UIType.FlexBox, uid, queue, flex, align_self,
-                         uid_to_comp, _init_dict, inited)
-        self.flex_flow = flex_flow
-        self.justify_content = justify_content
-        self.align_items = align_items
-        self.width = width
-        self.height = height
-        self.overflow = overflow
-        self.min_width = min_width
-        self.min_height = min_height
-
-    def to_dict(self):
-        res = super().to_dict()
-        if self.flex_flow is not None:
-            res["flexFlow"] = self.flex_flow
-        if self.justify_content is not None:
-            res["justifyContent"] = self.justify_content
-        if self.align_items is not None:
-            res["alignItems"] = self.align_items
-        if self.width is not None:
-            res["width"] = self.width
-        if self.height is not None:
-            res["height"] = self.height
-        if self.min_height is not None:
-            res["minHeight"] = self.min_height
-        if self.overflow is not None:
-            res["overflow"] = self.overflow
-        if self.min_width is not None:
-            res["minWidth"] = self.min_width
-        return res
-
-    # async def update_child(self, comps: List[Union[Component, str]]):
-    #     newchilds: List[str] = []
-    #     for c in comps:
-    #         uid = ""
-    #         if isinstance(c, "str"):
-    #             uid = c
-    #         else:
-    #             uid = c.uid
-    #         assert uid in self._uid_to_comp
-    #         newchilds.append(uid)
-    #     self._childs = newchilds
-    #     await self.queue.put(self.create_update_comp_event(self.get_state()))
-
-    def add_flex_box(self,
-                     flex_flow: Optional[str] = None,
-                     justify_content: Optional[str] = None,
-                     align_items: Optional[str] = None,
-                     flex: Optional[Union[int, str]] = None,
-                     align_self: Optional[str] = None,
-                     width: Optional[Union[str, int]] = None,
-                     height: Optional[Union[str, int]] = None,
-                     overflow: Optional[str] = None,
-                     min_width: Optional[Union[str, int]] = None,
-                     min_height: Optional[Union[str, int]] = None):
-        ui = FlexBox("",
-                     self.queue,
-                     self._uid_to_comp,
-                     flex_flow,
-                     justify_content,
-                     align_items,
-                     flex,
-                     align_self,
-                     width,
-                     height,
-                     overflow,
-                     min_width,
-                     min_height,
-                     inited=self.inited)
-        self.add_component("box", ui)
-        return ui
-
-    def add_buttons(self,
-                    names: List[str],
-                    callback: Callable[[str], _CORO_NONE],
-                    flex: Optional[Union[int, str]] = None,
-                    align_self: Optional[str] = None):
-        ui = Buttons(names, callback, "", self.queue, flex, align_self)
-        self.add_component("btns", ui)
-        return ui
-
-    def add_button(self,
-                   name: str,
-                   callback: Callable[[], _CORO_NONE],
-                   flex: Optional[Union[int, str]] = None,
-                   align_self: Optional[str] = None):
-        ui = Button(name, callback, "", self.queue, flex, align_self)
-        self.add_component("btn", ui)
-        return ui
-
-    def add_list_item_button(self,
-                             name: str,
-                             callback: Callable[[], _CORO_NONE],
-                             flex: Optional[Union[int, str]] = None,
-                             align_self: Optional[str] = None):
-        # TODO check parent must be list or collapse
-        ui = ListItemButton(name, callback, "", self.queue, flex, align_self)
-        self.add_component("lbtn", ui)
-        return ui
-
-    def add_input(self,
-                  label: str,
-                  multiline: bool = False,
-                  password: bool = False,
-                  callback: Optional[Callable[[str], Coroutine[None, None,
-                                                               None]]] = None,
-                  flex: Optional[Union[int, str]] = None,
-                  align_self: Optional[str] = None):
-        ui = Input(label, multiline, password, callback, "", self.queue, flex, align_self)
-        self.add_component("inp", ui)
-        return ui
-
-    # def add_code_editor(self,
-    #                     language: str,
-    #                     callback: Optional[Callable[[str],
-    #                                                 Coroutine[None, None,
-    #                                                           None]]] = None,
-    #                     flex: Optional[Union[int, str]] = None,
-    #                     align_self: Optional[str] = None):
-    #     ui = CodeEditor(language, callback, "", self.queue, flex, align_self)
-    #     self.add_component("code", ui)
-    #     return ui
-
-    def add_switch(self,
-                   label: str,
-                   callback: Optional[Callable[[bool],
-                                               Coroutine[None, None,
-                                                         None]]] = None,
-                   flex: Optional[Union[int, str]] = None,
-                   align_self: Optional[str] = None):
-        ui = Switch(label, callback, "", self.queue, flex, align_self)
-        self.add_component("switch", ui)
-        return ui
-
-    def add_image(self,
-                  flex: Optional[Union[int, str]] = None,
-                  align_self: Optional[str] = None):
-        ui = Images("", self.queue, flex, align_self)
-        self.add_component("img", ui)
-        return ui
-
-    def add_text(self,
-                 init: str,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None):
-        ui = Text(init, "", self.queue, flex, align_self)
-        self.add_component("text", ui)
-        return ui
-
-    def add_list_item_text(self,
-                           init: str,
-                           flex: Optional[Union[int, str]] = None,
-                           align_self: Optional[str] = None):
-        ui = ListItemText(init, "", self.queue, flex, align_self)
-        self.add_component("ltext", ui)
-        return ui
-
-    def add_radio_group(self,
-                        names: List[str],
-                        row: bool,
-                        callback: Optional[Callable[[str],
-                                                    Coroutine[None, None,
-                                                              None]]] = None,
-                        flex: Optional[Union[int, str]] = None,
-                        align_self: Optional[str] = None):
-        ui = RadioGroup(names, row, callback, "", self.queue, flex, align_self)
-        self.add_component("radio", ui)
-        return ui
-
-    def add_select(self,
-                   label: str,
-                   items: List[Tuple[str, Any]],
-                   callback: Optional[Callable[[Any], Coroutine[None, None,
-                                                                None]]] = None,
-                   flex: Optional[Union[int, str]] = None,
-                   align_self: Optional[str] = None):
-        ui = Select(label, items, callback, "", self.queue, flex, align_self)
-        self.add_component("select", ui)
-        return ui
-
-    def add_slider(self,
-                   label: str,
-                   begin: Union[int, float],
-                   end: Union[int, float],
-                   step: Union[int, float],
-                   callback: Optional[Callable[[Union[int, float]],
-                                               Coroutine[None, None,
-                                                         None]]] = None,
-                   flex: Optional[Union[int, str]] = None,
-                   align_self: Optional[str] = None):
-        ui = Slider(label, begin, end, step, callback, "", self.queue, flex,
-                    align_self)
-        self.add_component("slider", ui)
-        return ui
-
-    def add_divider(self,
-                    orientation: str = "horizontal",
-                    flex: Optional[Union[int, str]] = None,
-                    align_self: Optional[str] = None):
-        ui = Divider(orientation, "", self.queue, flex, align_self)
-        self.add_component("divider", ui)
-        return ui
-
-    def add_task_loop(self,
-                      label: str,
-                      callback: Callable[[], _CORO_NONE],
-                      update_period: float = 0.2,
-                      flex: Optional[Union[int, str]] = None,
-                      align_self: Optional[str] = None):
-        """use ASYNC LOOP in this ui!!!!!!!!!!!!!
-        DON'T USE OTHER LOOP!!!
-        """
-        ui = TaskLoop(label, callback, "", self.queue, update_period, flex,
-                      align_self)
-        self.add_component("task", ui)
-        return ui
+        super().__init__(base_type, MUIFlexBoxProps, uid, queue, uid_to_comp,
+                         _init_dict, inited)
 
 
-class MUIList(FlexBox):
+class MUIList(MUIContainerBase[MUIFlexBoxProps]):
+
     def __init__(self,
                  uid: str,
                  queue: asyncio.Queue,
                  uid_to_comp: Dict[str, Component],
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None,
-                 width: Optional[Union[str, int]] = None,
-                 height: Optional[Union[str, int]] = None,
-                 overflow: Optional[str] = None,
-                 min_width: Optional[Union[str, int]] = None,
-                 min_height: Optional[Union[str, int]] = None,
-                 _init_dict: Optional[Dict[str, Component]] = None,
+                 _init_dict: Optional[Dict[str, Union[Component,
+                                                      BasicProps]]] = None,
                  subheader: str = "",
                  inited: bool = False) -> None:
-        super().__init__(uid,
+        super().__init__(UIType.MUIList,
+                         MUIFlexBoxProps,
+                         uid,
                          queue=queue,
                          uid_to_comp=uid_to_comp,
-                         flex=flex,
-                         align_self=align_self,
-                         width=width,
-                         height=height,
-                         overflow=overflow,
-                         min_width=min_width,
-                         min_height=min_height,
                          _init_dict=_init_dict,
-                         base_type=UIType.MUIList,
                          inited=inited)
         self.subheader = subheader
 
@@ -536,115 +340,40 @@ class MUIList(FlexBox):
         return state
 
 
-def VBox(layout: Dict[str, Component],
-         justify_content: Optional[str] = None,
-         align_items: Optional[str] = None,
-         flex: Optional[Union[int, str]] = None,
-         align_self: Optional[str] = None,
-         width: Optional[Union[str, int]] = None,
-         height: Optional[Union[str, int]] = None,
-         overflow: Optional[str] = None,
-         min_width: Optional[Union[str, int]] = None,
-         min_height: Optional[Union[str, int]] = None):
-    return FlexBox("",
-                   asyncio.Queue(), {},
-                   flex_flow="column nowrap",
-                   justify_content=justify_content,
-                   align_items=align_items,
-                   flex=flex,
-                   align_self=align_self,
-                   width=width,
-                   height=height,
-                   overflow=overflow,
-                   min_width=min_width,
-                   min_height=min_height,
-                   _init_dict=layout)
+def VBox(layout: Dict[str, Union[Component, BasicProps]]):
+    res = FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
+    res.newprop(flex_flow="column nowrap")
+    return res
 
 
-def HBox(layout: Dict[str, Component],
-         justify_content: Optional[str] = None,
-         align_items: Optional[str] = None,
-         flex: Optional[Union[int, str]] = None,
-         align_self: Optional[str] = None,
-         width: Optional[Union[str, int]] = None,
-         height: Optional[Union[str, int]] = None,
-         overflow: Optional[str] = None,
-         min_width: Optional[Union[str, int]] = None,
-         min_height: Optional[Union[str, int]] = None):
-    return FlexBox("",
-                   asyncio.Queue(), {},
-                   flex_flow="row nowrap",
-                   justify_content=justify_content,
-                   align_items=align_items,
-                   flex=flex,
-                   align_self=align_self,
-                   width=width,
-                   height=height,
-                   overflow=overflow,
-                   min_width=min_width,
-                   min_height=min_height,
-                   _init_dict=layout)
+def HBox(layout: Dict[str, Union[Component, BasicProps]], ):
+    res = FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
+    res.newprop(flex_flow="row nowrap")
+    return res
 
 
-def Box(layout: Dict[str, Component],
-        flex_flow: Optional[str] = None,
-        justify_content: Optional[str] = None,
-        align_items: Optional[str] = None,
-        flex: Optional[Union[int, str]] = None,
-        align_self: Optional[str] = None,
-        width: Optional[Union[str, int]] = None,
-        height: Optional[Union[str, int]] = None,
-        overflow: Optional[str] = None,
-        min_width: Optional[Union[str, int]] = None,
-        min_height: Optional[Union[str, int]] = None):
-    return FlexBox("",
-                   asyncio.Queue(), {},
-                   flex_flow=flex_flow,
-                   justify_content=justify_content,
-                   align_items=align_items,
-                   flex=flex,
-                   align_self=align_self,
-                   width=width,
-                   height=height,
-                   overflow=overflow,
-                   min_width=min_width,
-                   min_height=min_height,
-                   _init_dict=layout)
+def Box(layout: Dict[str, Union[Component, BasicProps]]):
+    return FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
 
 
-def VList(layout: Dict[str, Component],
-          subheader: str = "",
-          flex: Optional[Union[int, str]] = None,
-          align_self: Optional[str] = None,
-          width: Optional[Union[str, int]] = None,
-          height: Optional[Union[str, int]] = None,
-          min_width: Optional[Union[str, int]] = None,
-          min_height: Optional[Union[str, int]] = None,
-          overflow: Optional[str] = None):
+def VList(layout: Dict[str, Union[Component, BasicProps]],
+          subheader: str = ""):
     return MUIList("",
                    asyncio.Queue(), {},
-                   flex=flex,
-                   align_self=align_self,
-                   overflow=overflow,
                    subheader=subheader,
-                   width=width,
-                   height=height,
-                   min_width=min_width,
-                   min_height=min_height,
                    _init_dict=layout)
 
 
-class RadioGroup(Component):
+class RadioGroup(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  names: List[str],
                  row: bool,
                  callback: Optional[Callable[[str], Coroutine[None, None,
                                                               None]]] = None,
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.RadioGroup, queue, flex, align_self)
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.RadioGroup, MUIComponentBaseProps, queue)
         self.names = names
         self.callback = callback
         self.row = row
@@ -685,7 +414,8 @@ class RadioGroup(Component):
         self.callback = val
 
 
-class Input(Component):
+class Input(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  label: str,
                  multiline: bool = False,
@@ -694,15 +424,13 @@ class Input(Component):
                                                               None]]] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None,
                  init: str = "") -> None:
-        super().__init__(uid, UIType.Input, queue, flex, align_self)
+        super().__init__(uid, UIType.Input, MUIComponentBaseProps, queue)
         self.label = label
         self.callback = callback
         self.value: str = init
         self.multiline = multiline
-        self.password = password 
+        self.password = password
 
     def to_dict(self):
         res = super().to_dict()
@@ -733,7 +461,7 @@ class Input(Component):
         self.callback = val
 
 
-# class CodeEditor(Component):
+# class CodeEditor(MUIComponentBase[MUIComponentBaseProps]):
 
 #     def __init__(self,
 #                  language: str,
@@ -741,8 +469,8 @@ class Input(Component):
 #                                                               None]]] = None,
 #                  uid: str = "",
 #                  queue: Optional[asyncio.Queue] = None,
-#                  flex: Optional[Union[int, str]] = None,
-#                  align_self: Optional[str] = None) -> None:
+#                  flex: Union[int, str, Undefined] = undefined,
+#                  align_self: Union[str, Undefined] = undefined) -> None:
 #         super().__init__(uid, UIType.CodeEditor, queue, flex, align_self)
 #         self.language = language
 #         self.callback = callback
@@ -758,16 +486,15 @@ class Input(Component):
 #         self.value = data
 
 
-class Switch(Component):
+class Switch(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  label: str,
                  callback: Optional[Callable[[bool], Coroutine[None, None,
                                                                None]]] = None,
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.Switch, queue, flex, align_self)
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.Switch, MUIComponentBaseProps, queue)
         self.label = label
         self.callback = callback
         self.checked = False
@@ -799,17 +526,16 @@ class Switch(Component):
         self.callback = val
 
 
-class Select(Component):
+class Select(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  label: str,
                  items: List[Tuple[str, Any]],
                  callback: Optional[Callable[[Any], Coroutine[None, None,
                                                               None]]] = None,
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.Select, queue, flex, align_self)
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.Select, MUIComponentBaseProps, queue)
         self.label = label
         self.callback = callback
         assert len(items) > 0
@@ -867,7 +593,8 @@ class Select(Component):
         self.callback = val
 
 
-class Slider(Component):
+class Slider(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  label: str,
                  begin: Union[int, float],
@@ -876,10 +603,8 @@ class Slider(Component):
                  callback: Optional[Callable[[Union[int, float]],
                                              _CORO_NONE]] = None,
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.Slider, queue, flex, align_self)
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.Slider, MUIComponentBaseProps, queue)
         self.label = label
         self.callback = callback
         assert end > begin and step < end - begin
@@ -931,16 +656,15 @@ class Slider(Component):
 _T = TypeVar("_T")
 
 
-class TaskLoop(Component):
+class TaskLoop(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  label: str,
                  loop_callbcak: Callable[[], _CORO_NONE],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
-                 update_period: float = 0.2,
-                 flex: Optional[Union[int, str]] = None,
-                 align_self: Optional[str] = None) -> None:
-        super().__init__(uid, UIType.TaskLoop, queue, flex, align_self)
+                 update_period: float = 0.2) -> None:
+        super().__init__(uid, UIType.TaskLoop, MUIComponentBaseProps, queue)
         self.label = label
         self.loop_callbcak = loop_callbcak
 
@@ -955,6 +679,9 @@ class TaskLoop(Component):
         state["label"] = self.label
         state["progresses"] = self.progresses
         return state
+
+    def get_callback(self):
+        return self.loop_callbcak
 
     async def task_loop(self,
                         it: Iterable[_T],
@@ -1002,8 +729,5 @@ class TaskLoop(Component):
         return await self.queue.put(
             UIEvent({self.uid: TaskLoopEvent.Start.value}))
 
-    def get_callback(self):
-        return self.callback
-
     def set_callback(self, val: Any):
-        self.callback = val
+        self.loop_callbcak = val

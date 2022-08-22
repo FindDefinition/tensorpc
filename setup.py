@@ -41,6 +41,7 @@ REQUIRED = [
     "jinja2",
     "async-timeout",
     "watchdog",
+    "typing_extensions; python_version < \"3.8\"",
 ]
 
 # What packages are optional?

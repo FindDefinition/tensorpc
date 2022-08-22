@@ -28,14 +28,13 @@ import tensorpc
 from tensorpc.apps.flow.client import AsyncAppClient, add_message, AppClient
 from tensorpc.apps.flow.coretypes import MessageLevel, ScheduleEvent
 from tensorpc.apps.flow.flowapp import App, EditableApp
-from tensorpc.apps.flow.flowapp.components.mui import (Button, ChartJSLine,
-                                                       HBox, ListItemButton,
-                                                       ListItemText, Plotly,
-                                                       Text, VBox, VList)
+from tensorpc.apps.flow.flowapp.components.mui import (
+    Button, ChartJSLine, HBox, ListItemButton, ListItemText, MUIComponentType,
+    Plotly, Text, VBox, VList)
 from ..flowapp.core import Component
 from tensorpc.core import prim
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.apps.flow.flowapp.components import three
+from tensorpc.apps.flow.flowapp.components import three, mui
 import numpy as np
 
 
@@ -43,21 +42,23 @@ class SampleApp(App):
 
     def __init__(self) -> None:
         super().__init__()
-        self.root.add_buttons(
-            ["LoadImage", "SendMessage", "OpenCam", "RunCode"],
-            self.on_button_click)
-        self.root.add_switch("Switch", self.on_switch)
-        self.root.add_input("Image Path", self.on_input_change)
-        self.img_ui = self.root.add_image()
+        self.img_ui = mui.Images()
+        self.task_loop = mui.TaskLoop("Test", self.on_task_loop)
+        self.root.add_layout({
+            "btn": mui.Buttons(["LoadImage", "SendMessage", "OpenCam", "RunCode"],
+            self.on_button_click),
+            "swi": mui.Switch("Switch", self.on_switch),
+            "inp": mui.Input("Image Path", callback=self.on_input_change),
+            "img_ui": self.img_ui,
+            "taskloop": self.task_loop,
+            "slider": mui.Slider("Slider", 0, 100, 1, self.on_slider_change),
+            "select": mui.Select("Select", [("One", 0), ("Two", 1)],
+                             self.on_select_change),
+            "rg": mui.RadioGroup(["Option1", "Option2"], True, self.on_radio),
+        })
         self.img_path = ""
         self.set_init_window_size([480, 640])
         self.task = None
-
-        self.task_loop = self.root.add_task_loop("Test", self.on_task_loop)
-        self.root.add_slider("Slider", 0, 100, 1, self.on_slider_change)
-        self.root.add_select("Select", [("One", 0), ("Two", 1)],
-                             self.on_select_change)
-        self.root.add_radio_group(["Option1", "Option2"], True, self.on_radio)
         self.code = ""
 
     async def on_radio(self, name: str):
@@ -150,11 +151,11 @@ class SampleDictApp(App):
 
     def __init__(self) -> None:
         super().__init__()
-        self.vlist = VList(
-            {
-                "text0": ListItemText("0"),
-                "text1": ListItemText("1"),
-            }, flex=1)
+        self.vlist = VList({
+            "text0": ListItemText("0"),
+            "text1": ListItemText("1"),
+        })
+        self.vlist.newprop(flex=1)
         self.cnt = 2
         self.root.add_layout({
             "btn0":
@@ -166,16 +167,16 @@ class SampleDictApp(App):
             "layout0":
             HBox({
                 "btn0":
-                Button("CLICK ME1", lambda: print("HELLO BTN1"), flex=1),
+                Button("CLICK ME1",
+                       lambda: print("HELLO BTN1")).newprop(flex=1),
                 "btn1":
-                Button("Add", self._ppend_list, flex=1),
+                Button("Add", self._ppend_list).newprop(flex=1),
             }),
             "l0":
             HBox({
                 "items": self.vlist,
-                "text": Text("content", flex=3),
-            },
-                 height="100%"),
+                "text": Text("content").newprop(flex=3),
+            }).newprop(height="100%"),
         })
         self.set_init_window_size([480, 640])
 
@@ -385,21 +386,24 @@ class SampleThreeApp(EditableApp):
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([1280, 720])
         # makesure three canvas size fit parent.
-        self.root.min_height = 0
+        self.root.props.min_height = 0
         # store components here if you want to keep
         # data after reload layout.
         self.points = three.Points(2000000)
         self.lines = three.Segments(20000)
 
-    def app_create_layout(self) -> Dict[str, Component]:
-        cam = three.PerspectiveCamera(True, position=(0, 0, 20), up=(0, 0, 1), fov=75, near=0.1,
-                                      far=1000)
+    def app_create_layout(self) -> Dict[str, MUIComponentType]:
+        cam = three.PerspectiveCamera(True, fov=75, near=0.1, far=1000)
+        cam.newprop(position=(0, 0, 20), up=(0, 0, 1))
         # cam = three.OrthographicCamera(True, position=[0, 0, 10], up=[0, 0, 1], near=0.1, far=1000,
         #                               zoom=8.0)
         self.img = three.Image()
         ctrl = three.MapControl(True, 0.25, 1, 100)
+        # ctrl2 = three.PointerLockControl()
+
         # ctrl = three.OrbitControl(True, 0.25, 1, 100)
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
+        self.b2d = three.Boxes2D(1000)
         self.canvas = three.ThreeCanvas({
             "cam": cam,
             "points": self.points,
@@ -408,34 +412,30 @@ class SampleThreeApp(EditableApp):
             "axes": three.AxesHelper(10),
             "infgrid": infgrid,
             "img": self.img,
+            "b2d": self.b2d,
             # "box": three.BoundingBox([2, 5, 2], [0, 10, 0], [0, 0, 0.5])
         })
         btn_random_pc = Button("showRandomRPC", self.show_Random_pc)
         return {
             "d3v":
-            VBox(
-                {
-                    "d3":
-                    VBox({
-                        "d32": self.canvas,
-                    },
-                         flex=1,
-                         min_height=0,
-                         min_width=0),
-                    "btn":
-                    btn_random_pc,
-                    "btn2":
-                    Button("rpcTest", self.rpc_test),
-
-                },
-                flex=1,
-                min_height=0),
+            VBox({
+                "d3":
+                VBox({
+                    "d32": self.canvas,
+                }).newprop(flex=1, min_height=0, min_width=0),
+                "btn":
+                btn_random_pc,
+                "btn2":
+                Button("rpcTest", self.rpc_test),
+            }).newprop(flex=1, min_height=0),
         }
 
     async def show_Random_pc(self):
         # data = np.load(
-            # "/home/tusimple/tusimple/spconv/test/data/benchmark-pc.npz")
-        data = np.load("/home/yy/Projects/spconv-release/spconv/test/data/benchmark-pc.npz")
+        #     "/home/tusimple/tusimple/spconv/test/data/benchmark-pc.npz")
+        data = np.load(
+            "/home/yy/Projects/spconv-release/spconv/test/data/benchmark-pc.npz"
+        )
 
         pc = np.ascontiguousarray(data["pc"])
         # num = 50
@@ -448,9 +448,9 @@ class SampleThreeApp(EditableApp):
         attrs = pc
         attr_fields = ["x", "y", "z"]
         # print("???", pc.size * pc.itemsize)
-        await self.points.update_points(pc,
-                                        attrs=attrs,
-                                        attr_fields=attr_fields)
+        # await self.points.update_points(pc,
+        #                                 attrs=attrs,
+        #                                 attr_fields=attr_fields)
 
         random_lines = np.random.uniform(-5, 5, size=[5, 2,
                                                       3]).astype(np.float32)
@@ -458,8 +458,16 @@ class SampleThreeApp(EditableApp):
                                       line_width=1,
                                       color="green")
         # print("???????", random_lines)
-        with open("/home/yy/Pictures/Screenshot from 2022-02-11 15-10-06.png", "rb") as f:
-            await self.img.show_raw(f.read(), "png")
+        # with open("/home/yy/Pictures/Screenshot from 2022-02-11 15-10-06.png", "rb") as f:
+        #     await self.img.show_raw(f.read(), "png")
+        centers = np.array([[0, 0], [2, 2], [3, 3]], np.float32)
+        dimersions = np.array([[1, 1], [1, 1], [1, 1]], np.float32)
+        attrs = [str(i) for i in range(centers.shape[0])]
+        await self.b2d.update_boxes(centers,
+                                    dimersions,
+                                    color="red",
+                                    alpha=0.5)
+        await self.b2d.update_object3d(position=(0, 0, 1))
 
     async def show_pc(self, pc):
         intensity = None
@@ -507,7 +515,7 @@ class SampleTestApp(App):
         self.root.add_layout({
             "plot0": VBox({
                 "asd": Text("Hello"),
-            }, flex=1),
+            }).newprop(flex=1),
             "btn": Button("Show", lambda: print("?"))
         })
         self.set_init_window_size([480, 320])
