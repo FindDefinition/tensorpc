@@ -109,6 +109,10 @@ class Images(MUIComponentBase[MUIComponentBaseProps]):
         state["image"] = self.image_str
         return state
 
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        if "image" in state:
+            self.image_str = state["image"]
 
 class Plotly(MUIComponentBase[MUIComponentBaseProps]):
 
@@ -138,6 +142,12 @@ class Plotly(MUIComponentBase[MUIComponentBaseProps]):
         state["layout"] = self.layout
         return state
 
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        if "data" in state:
+            self.data = state["data"]
+        if "layout" in state:
+            self.layout = state["layout"]
 
 class ChartJSLine(MUIComponentBase[MUIComponentBaseProps]):
 
@@ -167,6 +177,12 @@ class ChartJSLine(MUIComponentBase[MUIComponentBaseProps]):
         state["options"] = self.options
         return state
 
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        if "data" in state:
+            self.data = state["data"]
+        if "options" in state:
+            self.options = state["options"]
 
 class Text(MUIComponentBase[MUIComponentBaseProps]):
 
@@ -186,6 +202,10 @@ class Text(MUIComponentBase[MUIComponentBaseProps]):
         state["value"] = self.value
         return state
 
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        if "value" in state:
+            self.value = state["value"]
 
 class ListItemText(MUIComponentBase[MUIComponentBaseProps]):
 
@@ -206,6 +226,10 @@ class ListItemText(MUIComponentBase[MUIComponentBaseProps]):
         state["value"] = self.value
         return state
 
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        if "value" in state:
+            self.value = state["value"]
 
 class Divider(MUIComponentBase[MUIComponentBaseProps]):
 
@@ -339,16 +363,20 @@ class MUIList(MUIContainerBase[MUIFlexBoxProps]):
         state["subheader"] = self.subheader
         return state
 
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        if "subheader" in state:
+            self.subheader = state["subheader"]
 
 def VBox(layout: Dict[str, Union[Component, BasicProps]]):
     res = FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
-    res.newprop(flex_flow="column nowrap")
+    res.prop(flex_flow="column nowrap")
     return res
 
 
 def HBox(layout: Dict[str, Union[Component, BasicProps]], ):
     res = FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
-    res.newprop(flex_flow="row nowrap")
+    res.prop(flex_flow="row nowrap")
     return res
 
 
@@ -511,7 +539,8 @@ class Switch(MUIComponentBase[MUIComponentBaseProps]):
 
     def set_state(self, state: Dict[str, Any]):
         super().set_state(state)
-        self.checked = state["checked"]
+        if "checked" in state:
+            self.checked = state["checked"]
 
     def state_change_callback(self, data: bool):
         self.checked = data
@@ -556,11 +585,12 @@ class Select(MUIComponentBase[MUIComponentBaseProps]):
 
     def set_state(self, state: Dict[str, Any]):
         super().set_state(state)
-        value = state["value"]
-        ranges = state["ranges"]
-        if ranges == self.items:
-            self.value = value
-            self.ranges = ranges
+        if "value" in state and "ranges" in state:
+            value = state["value"]
+            ranges = state["ranges"]
+            if ranges == self.items:
+                self.value = value
+                self.ranges = ranges
 
     async def update_items(self, items: List[Tuple[str, Any]], selected: int):
         await self.queue.put(
@@ -624,8 +654,9 @@ class Slider(MUIComponentBase[MUIComponentBaseProps]):
 
     def set_state(self, state: Dict[str, Any]):
         super().set_state(state)
-        self.value = state["value"]
-        self.ranges = state["ranges"]
+        if "value" in state and "ranges" in state:
+            self.value = state["value"]
+            self.ranges = state["ranges"]
 
     async def update_ranges(self, begin: Union[int, float],
                             end: Union[int, float], step: Union[int, float]):

@@ -24,12 +24,15 @@ from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.uniquename import UniqueNamePool
 import dataclasses
 import re
+from tensorpc.compat import Python3_10AndLater
+import sys
+from typing_extensions import ParamSpec, Concatenate
 
 ALL_APP_EVENTS = HashableRegistry()
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
 
-__COMPONENT_SPECIAL_KEY = "__tensorpc_component_special_key"
+__COMPONENT_SPECIAL_KEY = "_tensorpc_component_special_key"
 
 
 class Undefined:
@@ -389,19 +392,22 @@ T = TypeVar("T")
 
 @dataclasses.dataclass
 class BasicProps:
-    status: int = UIRunStatus.Stop.value
-
+    _tensorpc_component_special_key: Optional[Any] = None
     def get_dict_and_undefined(self, state: Dict[str, Any]):
         this_type = type(self)
         res = {}
+        self._tensorpc_component_special_key = None
         ref_dict = dataclasses.asdict(self)
+        ref_dict.pop("_tensorpc_component_special_key")
         res_und = []
         for field in dataclasses.fields(this_type):
             if field.name in state:
                 continue
+            if field.name == "_tensorpc_component_special_key":
+                continue
             res_camel = snake_to_camel(field.name)
             val = ref_dict[field.name]
-            if val is undefined:
+            if isinstance(val, Undefined):
                 res_und.append(res_camel)
             else:
                 res[res_camel] = val
@@ -447,6 +453,30 @@ class ComponentBaseProps(BasicProps):
     margin_bottom: Union[int, str, Undefined] = undefined
 
 
+P = ParamSpec('P')
+T2 = TypeVar('T2')
+T3 = TypeVar('T3')
+
+
+def init_anno_fwd(this: Callable[P, Any], val: Optional[T3] = None) -> Callable[[Callable], Callable[P, T3]]:
+    def decorator(real_function: Callable) -> Callable[P, T3]:
+        def new_function(*args: P.args, **kwargs: P.kwargs) -> T3:
+            return real_function(*args, **kwargs)
+        return new_function
+    return decorator
+
+# @init_anno_fwd(ComponentBaseProps)
+# def open_for_writing(*args, **kwargs):
+#     kwargs['mode'] = 'w'
+#     return open(*args, **kwargs)
+
+
+# open_for_writing()
+# open_for_writing(file='')
+
+P2 = ParamSpec('P2')
+
+
 class Component(Generic[T]):
 
     def __init__(self,
@@ -457,7 +487,7 @@ class Component(Generic[T]):
         self._queue = queue
         self.uid = uid
         self.type = type
-        # self._status = UIRunStatus.Stop
+        self._status = UIRunStatus.Stop
         # task for callback of controls
         # if previous control callback hasn't finished yet,
         # the new control event will be IGNORED
@@ -466,31 +496,34 @@ class Component(Generic[T]):
         self.__props = prop_cls()
         self.__prop_cls = prop_cls
 
-    # def get_state_fields(self) -> List[str]:
-    #     return ["status"]
-
     @property
     def props(self) -> T:
-        return self.__props  # type: ignore
+        return self.__props 
+
+    # @property
+    # def propcls(self) -> Type[T]:
+    #     return self.__prop_cls 
 
     @property
-    def newprop(self) -> Type[T]:
-        """create a new props object.
-        we can't use partially set due to
-        limitation of python type annotation system.
-        """
-        def _init_decorator(func):
-
-            def wrapper(self2, *args, **kwargs):
-                func(self2, *args, **kwargs)
-                self.__props = self2
-                setattr(self2, __COMPONENT_SPECIAL_KEY, self)
-
-            return wrapper
-
-        cls = self.__prop_cls
-        cls.__init__ = _init_decorator(cls.__init__)
-        return cls
+    def prop(self) -> Type[T]:
+        """set some prop of this component"""
+        @init_anno_fwd(self.__prop_cls)
+        def wrapper(**kwargs):
+            self.__props._tensorpc_component_special_key = self # type: ignore
+            for k, v in kwargs.items():
+                setattr(self.__props, k, v)
+            return self.__props
+        return wrapper # type: ignore
+    
+    # @property
+    # def prop2(self):
+    #     """set some prop of this component"""
+    #     @init_anno_fwd(self.__prop_cls, self)
+    #     def wrapper(*args, **kwargs):
+    #         for k, v in kwargs.items():
+    #             setattr(self.__props, k, v)
+    #         return self
+    #     return wrapper 
 
     def get_callback(self) -> Optional[Callable]:
         return None
@@ -509,15 +542,19 @@ class Component(Generic[T]):
         """undefined will be removed here.
         """
         state = self.get_state()
+        newstate = {}
+        for k, v in state.items():
+            if not isinstance(v, Undefined):
+                newstate[k] = v
         # TODO better way to resolve type anno problem
         static, _ = self.__props.get_dict_and_undefined(state) # type: ignore
-        static["state"] = state
+        static["state"] = newstate
         static["uid"] = self.uid
         static["type"] = self.type.value
         return static
 
     def get_state(self) -> Dict[str, Any]:
-        return {"status": self.__props.status} # type: ignore
+        return {"status": self._status.value} # type: ignore
 
     def set_state(self, state: Dict[str, Any]):
         if "status" in state:
@@ -535,7 +572,7 @@ class Component(Generic[T]):
         data_no_und = {}
         data_unds = []
         for k, v in data.items():
-            if v is undefined:
+            if isinstance(v, Undefined):
                 data_unds.append(k)
             else:
                 data_no_und[k] = v
@@ -615,9 +652,11 @@ class ContainerBase(Component[T]):
         return ComponentBaseProps
 
     async def _clear(self):
-        await super()._clear()
-        self._uid_to_comp.clear()
+        for c in self._childs:
+            cc = self[c]
+            await cc._clear()
         self._childs.clear()
+        await super()._clear()
         self._pool.unique_set.clear()
 
     def _attach_to_app(self, queue: asyncio.Queue):
@@ -642,7 +681,7 @@ class ContainerBase(Component[T]):
                 v._uid_to_comp = uid_to_comp
 
     def __getitem__(self, key: str):
-        assert key in self._childs
+        assert key in self._childs, f"{key}, {self._childs}"
         return self._uid_to_comp[self._get_uid_with_ns(key)]
 
     def _get_all_nested_child_recursive(self, name: str, res: List[Component]):
@@ -704,7 +743,9 @@ class ContainerBase(Component[T]):
         comps: List[Component] = []
         for k, v1 in layout.items():
             if isinstance(v1, BasicProps):
-                v: Component = getattr(v, __COMPONENT_SPECIAL_KEY)
+                assert v1._tensorpc_component_special_key is not None
+                v: Component = v1._tensorpc_component_special_key # type: ignore
+                v1._tensorpc_component_special_key = None
             else:
                 v = v1
             comps.append(self.add_component(k, v, False, anonymous=False))
@@ -728,7 +769,9 @@ class ContainerBase(Component[T]):
         # we assume layout is a ordered dict (python >= 3.7)
         for k, v1 in layout.items():
             if isinstance(v1, BasicProps):
-                v: Component[T] = getattr(v, __COMPONENT_SPECIAL_KEY)
+                assert v1._tensorpc_component_special_key is not None
+                v: Component[T] = v1._tensorpc_component_special_key # type: ignore
+                v1._tensorpc_component_special_key = None
             else:
                 v = v1
             if not isinstance(v, ContainerBase):

@@ -28,6 +28,7 @@ import tensorpc
 from tensorpc.apps.flow.client import AsyncAppClient, add_message, AppClient
 from tensorpc.apps.flow.coretypes import MessageLevel, ScheduleEvent
 from tensorpc.apps.flow.flowapp import App, EditableApp
+from tensorpc.apps.flow.flowapp.app import EditableLayoutApp
 from tensorpc.apps.flow.flowapp.components.mui import (
     Button, ChartJSLine, HBox, ListItemButton, ListItemText, MUIComponentType,
     Plotly, Text, VBox, VList)
@@ -155,7 +156,7 @@ class SampleDictApp(App):
             "text0": ListItemText("0"),
             "text1": ListItemText("1"),
         })
-        self.vlist.newprop(flex=1)
+        self.vlist.prop(flex=1)
         self.cnt = 2
         self.root.add_layout({
             "btn0":
@@ -168,15 +169,15 @@ class SampleDictApp(App):
             HBox({
                 "btn0":
                 Button("CLICK ME1",
-                       lambda: print("HELLO BTN1")).newprop(flex=1),
+                       lambda: print("HELLO BTN1")).prop(flex=1),
                 "btn1":
-                Button("Add", self._ppend_list).newprop(flex=1),
+                Button("Add", self._ppend_list).prop(flex=1),
             }),
             "l0":
             HBox({
                 "items": self.vlist,
-                "text": Text("content").newprop(flex=3),
-            }).newprop(height="100%"),
+                "text": Text("content").prop(flex=3),
+            }).prop(height="100%"),
         })
         self.set_init_window_size([480, 640])
 
@@ -365,6 +366,7 @@ class SampleEditorApp(EditableApp):
             "btn": Button("runCB", self.example_cb),
             "btn2": Button("ShowTS", self.show_ts),
         })
+        self.root._get_all_nested_childs()
         self.set_init_window_size([480, 320])
         self.init_enable_editor()
 
@@ -379,12 +381,43 @@ class SampleEditorApp(EditableApp):
     def new_method(self):
         print("new method")
 
+class SampleEditorAppV2(EditableApp):
+
+    def __init__(self) -> None:
+        super().__init__(reloadable_layout=True)
+        self.text = Text("WTF")
+        # self.root.add_layout({
+        #     "text": self.text,
+        #     "btn": Button("runCB", self.example_cb),
+        #     "btn2": Button("ShowTS", self.show_ts),
+        # })
+        # self.root._get_all_nested_childs()
+        self.set_init_window_size([480, 320])
+        # self.init_enable_editor()
+
+    def app_create_layout(self) -> Dict[str, mui.MUIComponentType]:
+        return {
+            "text": self.text,
+            "btn": Button("runCB", self.example_cb),
+            "btn2": Button("ShowTS", self.show_ts),
+        }
+
+    def example_cb(self):
+        print("dynamic loadable APP!!!")
+        print("example cb 5")
+        self.new_method()
+
+    async def show_ts(self):
+        await self.text.write(str(time.time_ns()))
+
+    def new_method(self):
+        print("new method")
 
 class SampleThreeApp(EditableApp):
 
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
-        self.set_init_window_size([1280, 720])
+        self.set_init_window_size([800, 600])
         # makesure three canvas size fit parent.
         self.root.props.min_height = 0
         # store components here if you want to keep
@@ -394,7 +427,7 @@ class SampleThreeApp(EditableApp):
 
     def app_create_layout(self) -> Dict[str, MUIComponentType]:
         cam = three.PerspectiveCamera(True, fov=75, near=0.1, far=1000)
-        cam.newprop(position=(0, 0, 20), up=(0, 0, 1))
+        cam.prop(position=(0, 0, 20), up=(0, 0, 1))
         # cam = three.OrthographicCamera(True, position=[0, 0, 10], up=[0, 0, 1], near=0.1, far=1000,
         #                               zoom=8.0)
         self.img = three.Image()
@@ -407,7 +440,7 @@ class SampleThreeApp(EditableApp):
         self.canvas = three.ThreeCanvas({
             "cam": cam,
             "points": self.points,
-            "lines": self.lines,
+            # "lines": self.lines,
             "ctrl": ctrl,
             "axes": three.AxesHelper(10),
             "infgrid": infgrid,
@@ -415,6 +448,7 @@ class SampleThreeApp(EditableApp):
             "b2d": self.b2d,
             # "box": three.BoundingBox([2, 5, 2], [0, 10, 0], [0, 0, 0.5])
         })
+
         btn_random_pc = Button("showRandomRPC", self.show_Random_pc)
         return {
             "d3v":
@@ -422,20 +456,19 @@ class SampleThreeApp(EditableApp):
                 "d3":
                 VBox({
                     "d32": self.canvas,
-                }).newprop(flex=1, min_height=0, min_width=0),
-                "btn":
-                btn_random_pc,
+                }).prop(flex=1, min_height=0, min_width=0),
+                "btn": btn_random_pc,
                 "btn2":
                 Button("rpcTest", self.rpc_test),
-            }).newprop(flex=1, min_height=0),
+            }).prop(flex=1, min_height=0),
         }
 
     async def show_Random_pc(self):
-        # data = np.load(
-        #     "/home/tusimple/tusimple/spconv/test/data/benchmark-pc.npz")
         data = np.load(
-            "/home/yy/Projects/spconv-release/spconv/test/data/benchmark-pc.npz"
-        )
+            "/home/tusimple/tusimple/spconv/test/data/benchmark-pc.npz")
+        # data = np.load(
+        #     "/home/yy/Projects/spconv-release/spconv/test/data/benchmark-pc.npz"
+        # )
 
         pc = np.ascontiguousarray(data["pc"])
         # num = 50
@@ -448,9 +481,9 @@ class SampleThreeApp(EditableApp):
         attrs = pc
         attr_fields = ["x", "y", "z"]
         # print("???", pc.size * pc.itemsize)
-        # await self.points.update_points(pc,
-        #                                 attrs=attrs,
-        #                                 attr_fields=attr_fields)
+        await self.points.update_points(pc,
+                                        attrs=attrs,
+                                        attr_fields=attr_fields)
 
         random_lines = np.random.uniform(-5, 5, size=[5, 2,
                                                       3]).astype(np.float32)
@@ -515,7 +548,7 @@ class SampleTestApp(App):
         self.root.add_layout({
             "plot0": VBox({
                 "asd": Text("Hello"),
-            }).newprop(flex=1),
+            }).prop(flex=1),
             "btn": Button("Show", lambda: print("?"))
         })
         self.set_init_window_size([480, 320])

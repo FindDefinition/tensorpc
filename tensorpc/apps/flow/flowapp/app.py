@@ -125,9 +125,8 @@ class App:
                            self._queue,
                            self._uid_to_comp,
                            inited=True)
-        root.newprop(flex_flow=flex_flow, justify_content=justify_content, align_items=align_items)
+        root.prop(flex_flow=flex_flow, justify_content=justify_content, align_items=align_items)
         self._uid_to_comp[_ROOT] = root
-
         self.root = root
         self._enable_editor = False
 
@@ -167,17 +166,31 @@ class App:
         self._force_special_layout_method = True 
         self.root._prevent_add_layout = True
 
-    async def _app_run_layout_function(self, send_layout_ev: bool = False, with_code_editor: bool = True):
+    async def _app_run_layout_function(self, send_layout_ev: bool = False, with_code_editor: bool = True, reload: bool = False):
         self.root._prevent_add_layout = False 
+        for k,v in self._uid_to_comp.items():
+            print(k, v.to_dict())
+
+        # prev_comps_vec = self.root._get_all_nested_childs()
+        prev_comps = {}
+        if reload:
+            prev_comps = {u: c.to_dict()
+                        for u, c in self._uid_to_comp.items()}
         await self.root._clear()
+        self._uid_to_comp.clear()
         self.root.uid = _ROOT
         res = self.app_create_layout()
-        # print(res)
         res_anno: Dict[str, Union[Component, BasicProps]] = {**res}
         self.root.add_layout(res_anno)
         self._uid_to_comp[_ROOT] = self.root
         self.root._prevent_add_layout = True 
-        # print(self.root._uid_to_comp)
+        if reload:
+            comps = self.root._get_all_nested_childs()
+            for comp in comps:
+                if comp.uid in prev_comps:
+                    if comp.type.value == prev_comps[comp.uid]["type"]:
+                        comp.set_state(prev_comps[comp.uid]["state"])
+            del prev_comps
         if send_layout_ev:
             ev = AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(self._get_app_layout(with_code_editor))})
             await self._queue.put(ev)
@@ -426,7 +439,7 @@ class EditableApp(App):
                     layout_func_changed = self._reload_app_file()
                     if layout_func_changed:
                         fut = asyncio.run_coroutine_threadsafe(
-                            self._app_run_layout_function(True, with_code_editor=False), self._loop)
+                            self._app_run_layout_function(True, with_code_editor=False, reload=True), self._loop)
                         fut.result()
 
     def _reload_app_file(self):
@@ -457,7 +470,7 @@ class EditableApp(App):
                 self._watchdog_prev_content = event.data
                 layout_func_changed = self._reload_app_file()
                 if layout_func_changed:
-                    await self._app_run_layout_function(True, with_code_editor=False)
+                    await self._app_run_layout_function(True, with_code_editor=False, reload=True)
         return
 
 

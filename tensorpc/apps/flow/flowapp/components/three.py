@@ -82,17 +82,30 @@ class Object3dBase(ThreeComponentBase[Object3dBaseProps]):
 
     def get_state(self):
         state = super().get_state()
-        if self.props.position is not undefined:
+        if not isinstance(self.props.position, Undefined):
             state["position"] = self.props.position
-        if self.props.rotation is not undefined:
+        if not isinstance(self.props.rotation, Undefined):
             state["rotation"] = self.props.rotation
-        if self.props.scale is not undefined:
+        if not isinstance(self.props.scale, Undefined):
             state["scale"] = self.props.scale
-        if self.props.up is not undefined:
+        if not isinstance(self.props.up, Undefined):
             state["up"] = self.props.up
-        if self.props.visible is not undefined:
+        if not isinstance(self.props.visible, Undefined):
             state["visible"] = self.props.visible
         return state
+
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        if "position" in state:
+            self.position = state["position"]
+        if "rotation" in state:
+            self.rotation = state["rotation"]
+        if "scale" in state:
+            self.scale = state["scale"]
+        if "up" in state:
+            self.up = state["up"]
+        if "visible" in state:
+            self.visible = state["visible"]
 
     def update_object3d_event(self,
                               position: Optional[Union[Vector3Type,
@@ -211,6 +224,24 @@ class Points(ThreeComponentBase[ThreeBasicProps]):
 
         return state
 
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        if "points" in state:
+            if state["points"].shape[0] <= self.limit:
+                self.points = state["points"]
+                if "intensity" in state:
+                    self.intensity = state["intensity"]
+                if "colors" in state:
+                    self.colors = state["colors"]
+                if "attrs" in state:
+                    self.attrs = state["attrs"]
+                if "attrFields" in state:
+                    self.attrs = state["attrFields"]
+                if "size" in state:
+                    self.size = state["size"]
+                if "sizeAttenuation" in state:
+                    self.sizeAttenuation = state["sizeAttenuation"]
+
 
 class Segments(ThreeComponentBase[ThreeBasicProps]):
 
@@ -272,6 +303,18 @@ class Segments(ThreeComponentBase[ThreeBasicProps]):
         state["color"] = self.color
         return state
 
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        if "lines" in state:
+            if state["lines"].shape[0] <= self.limit:
+                self.lines = state["lines"]
+                self.lineWidth = state["lineWidth"]
+                self.opacity = state["opacity"]
+                self.transparent = state["transparent"]
+                self.color = state["color"]
+                if "colors" in state:
+                    self.colors = state["colors"]
+                
 
 class Boxes2D(Object3dBase):
 
@@ -344,6 +387,18 @@ class Boxes2D(Object3dBase):
         })
         return state
 
+
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        if "centers" in state:
+            if state["centers"].shape[0] <= self.limit:
+                self.centers = state["centers"]
+                self.dimersions = state["dimersions"]
+                self.alpha = state["alpha"] if "alpha" in state else undefined 
+                self.opacity = state["opacity"] if "opacity" in state else undefined 
+                self.color = state["color"] if "color" in state else undefined 
+                self.colors = state["colors"] if "colors" in state else undefined 
+                self.attrs = state["attrs"] if "attrs" in state else undefined 
 
 class BoundingBox(Object3dBase):
 
@@ -611,7 +666,6 @@ class OrthographicCamera(Object3dBase):
         })
         return state
 
-
 class MapControl(ThreeComponentBase[ThreeBasicProps]):
 
     def __init__(self,
@@ -735,11 +789,11 @@ class PointerLockControl(ThreeComponentBase[ThreeBasicProps]):
 
     def to_dict(self):
         res = super().to_dict()
-        if self.enabled is not undefined:
+        if not isinstance(self.enabled, Undefined):
             res["enabled"] = self.enabled
-        if self.minPolarAngle is not undefined:
+        if not isinstance(self.minPolarAngle, Undefined):
             res["minPolarAngle"] = self.minPolarAngle
-        if self.maxPolarAngle is not undefined:
+        if not isinstance(self.maxPolarAngle, Undefined):
             res["maxPolarAngle"] = self.maxPolarAngle
         return res
 
@@ -791,7 +845,7 @@ class ThreeCanvas(ContainerBase[ThreeBasicProps]):
 
     def to_dict(self):
         res = super().to_dict()
-        if self.background is not undefined:
+        if not isinstance(self.background, Undefined):
             res["backgroundColor"] = self.background
         return res
 
