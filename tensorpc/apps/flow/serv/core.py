@@ -44,7 +44,7 @@ from tensorpc.apps.flow.coretypes import (Message, MessageEvent,
                                           ScheduleEvent, SessionStatus,
                                           UserContentEvent, UserEvent,
                                           UserStatusEvent, get_uid)
-from tensorpc.apps.flow.flowapp.core import AppEvent, AppEventType, ScheduleNextForApp, app_event_from_data
+from tensorpc.apps.flow.flowapp.core import AppEvent, AppEventType, NotifyEvent, NotifyType, ScheduleNextForApp, UISaveStateEvent, app_event_from_data
 from tensorpc.apps.flow.serv_names import serv_names
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, RawEvent,
@@ -1216,11 +1216,22 @@ class Flow:
         # print("APP EVENT RECEIVED")
         ev = app_event_from_data(ev_dict)
         new_t2e = {}
+        gid, nid = _extract_graph_node_id(ev.uid)
+        app_node, _ = self._get_app_node_and_driver(gid, nid)
         for k, v in ev.type_to_event.items():
             if k == AppEventType.ScheduleNext:
                 assert isinstance(v, ScheduleNextForApp)
                 gid, nid = _extract_graph_node_id(ev.uid)
                 await self.schedule_next(gid, nid, v.data)
+            elif k == AppEventType.UISaveStateEvent:
+                assert isinstance(v, UISaveStateEvent)
+                app_node.state = v.uid_to_data
+            elif k == AppEventType.Notify:
+                assert isinstance(v, NotifyEvent)
+                if v.type == NotifyType.AppStart and app_node.state is not None:
+                    save_ev = UISaveStateEvent(app_node.state)
+                    print(save_ev.to_dict())
+                    await self.run_single_event(gid, nid, AppEventType.UISaveStateEvent.value, save_ev.to_dict())
             else:
                 new_t2e[k] = v
         ev.type_to_event = new_t2e
@@ -1269,16 +1280,7 @@ class Flow:
                         await sche_node.run_schedule_event(sche_ev)
                 elif isinstance(sche_node, AppNode):
                     if sche_node.is_running():
-                        sess = prim.get_http_client_session()
-                        http_port = sche_node.http_port
-                        durl, _ = get_url_port(sche_driv.url)
-                        if sche_driv.enable_port_forward:
-                            app_url = get_http_url("localhost", sche_node.fwd_http_port)
-                        else:
-                            app_url = get_http_url(durl, http_port)
-                        await http_remote_call(sess, app_url,
-                                                serv_names.APP_RUN_SCHEDULE_EVENT,
-                                                sche_ev.to_dict())
+                        await self.run_single_event(graph_id, node_id, AppEventType.ScheduleNext.value, sche_ev.to_dict())
 
 
     def _get_app_node_and_driver(self, graph_id: str, node_id: str):
@@ -1294,21 +1296,17 @@ class Flow:
         # assert isinstance(driver, DirectSSHNode)
         # return node, driver
 
-    async def _run_ui_or_app_event(self, graph_id: str, node_id: str,
-                           ui_ev_dict: Dict[str, Any], is_ui_event: bool):
-        if is_ui_event:
-            worker_key = serv_names.FLOWWORKER_RUN_APP_UI_EVENT
-            app_key = serv_names.APP_RUN_UI_EVENT
-        else:
-            worker_key = serv_names.FLOWWORKER_RUN_APP_EDITOR_EVENT
-            app_key = serv_names.APP_RUN_APP_EDITOR_EVENT
-
+    async def run_single_event(self, graph_id: str, node_id: str,
+                           type: int, ui_ev_dict: Dict[str, Any]):
+        worker_key = serv_names.FLOWWORKER_RUN_APP_SINGLE_EVENT
+        app_key = serv_names.APP_RUN_SINGLE_EVENT
 
         node, driver = self._get_app_node_and_driver(graph_id, node_id)
+
         if isinstance(driver, RemoteSSHNode):
             return await driver.http_remote_call(
                 worker_key, graph_id, node_id,
-                ui_ev_dict)
+                type, ui_ev_dict)
         else:
             sess = prim.get_http_client_session()
             http_port = node.http_port
@@ -1319,17 +1317,15 @@ class Flow:
                 app_url = get_http_url(durl, http_port)
             return await http_remote_call(sess, app_url,
                                           app_key,
-                                          ui_ev_dict)
+                                          type, ui_ev_dict)
 
     async def run_ui_event(self, graph_id: str, node_id: str,
                            ui_ev_dict: Dict[str, Any]):
-        return await self._run_ui_or_app_event(graph_id, node_id, ui_ev_dict, True)
+        return await self.run_single_event(graph_id, node_id, AppEventType.UIEvent.value, ui_ev_dict)
 
     async def run_app_editor_event(self, graph_id: str, node_id: str,
                            ui_ev_dict: Dict[str, Any]):
-        return await self._run_ui_or_app_event(graph_id, node_id, ui_ev_dict, False)
-
-
+        return await self.run_single_event(graph_id, node_id, AppEventType.AppEditor.value, ui_ev_dict)
 
     async def query_app_state(self, graph_id: str, node_id: str):
         node, driver = self._get_app_node_and_driver(graph_id, node_id)

@@ -107,6 +107,8 @@ class AppEventType(enum.Enum):
     # ui event
     UIEvent = 10
     UIUpdateEvent = 11
+    UISaveStateEvent = 12
+    Notify = 13
     # clipboard
     CopyToClipboard = 20
     # schedule event, won't be sent to frontend.
@@ -171,6 +173,47 @@ class UIEvent:
     def merge_new(self, new):
         return new
 
+class NotifyType(enum.Enum):
+    AppStart = 0
+    AppStop = 1
+
+
+@ALL_APP_EVENTS.register(key=AppEventType.Notify.value)
+class NotifyEvent:
+
+    def __init__(self, type: NotifyType) -> None:
+        self.type = type
+
+    def to_dict(self):
+        return self.type.value
+
+    @classmethod
+    def from_dict(cls, data: int):
+        return cls(NotifyType(data))
+
+    def merge_new(self, new):
+        assert isinstance(new, NotifyEvent)
+        return new
+
+@ALL_APP_EVENTS.register(key=AppEventType.UISaveStateEvent.value)
+class UISaveStateEvent:
+
+    def __init__(self, uid_to_data: Dict[str, Any]) -> None:
+        self.uid_to_data = uid_to_data
+
+    def to_dict(self):
+        return self.uid_to_data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        return cls(data)
+
+    def merge_new(self, new):
+        assert isinstance(new, UISaveStateEvent)
+        return UISaveStateEvent({
+            **new.uid_to_data,
+            **self.uid_to_data,
+        })
 
 @ALL_APP_EVENTS.register(key=AppEventType.UIUpdateEvent.value)
 class UIUpdateEvent:
@@ -322,7 +365,8 @@ class ScheduleNextForApp:
 
 APP_EVENT_TYPES = Union[UIEvent, LayoutEvent, CopyToClipboardEvent,
                         UpdateComponentsEvent, DeleteComponentsEvent,
-                        ScheduleNextForApp, AppEditorEvent, UIUpdateEvent]
+                        ScheduleNextForApp, AppEditorEvent, UIUpdateEvent,
+                        UISaveStateEvent, NotifyEvent]
 
 
 def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":
@@ -689,7 +733,7 @@ class ContainerBase(Component[T]):
         res.append(comp)
         if isinstance(comp, ContainerBase):
             for child in comp._childs:
-                self._get_all_nested_child_recursive(child, res)
+                comp._get_all_nested_child_recursive(child, res)
 
     def _get_all_nested_child(self, name: str):
         res: List[Component] = []

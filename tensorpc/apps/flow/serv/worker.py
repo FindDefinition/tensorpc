@@ -258,25 +258,15 @@ class FlowClient:
             uid = self._readable_node_map[uid]
         return uid in self._cached_nodes
 
-    async def run_ui_event(self, graph_id: str, node_id: str,
-                           ui_ev_dict: Dict[str, Any]):
+    async def run_single_event(self, graph_id: str, node_id: str,
+                           type: int, ui_ev_dict: Dict[str, Any]):
         node = self._get_node(graph_id, node_id)
         assert isinstance(node, AppNode)
         sess = prim.get_http_client_session()
         http_port = node.http_port
         app_url = get_http_url("localhost", http_port)
         return await http_remote_call(sess, app_url,
-                                      serv_names.APP_RUN_UI_EVENT, ui_ev_dict)
-
-    async def run_app_editor_event(self, graph_id: str, node_id: str,
-                           ui_ev_dict: Dict[str, Any]):
-        node = self._get_node(graph_id, node_id)
-        assert isinstance(node, AppNode)
-        sess = prim.get_http_client_session()
-        http_port = node.http_port
-        app_url = get_http_url("localhost", http_port)
-        return await http_remote_call(sess, app_url,
-                                      serv_names.APP_RUN_APP_EDITOR_EVENT, ui_ev_dict)
+                                      serv_names.APP_RUN_SINGLE_EVENT, type, ui_ev_dict)
     
     async def run_app_service(self, graph_id: str, node_id: str, key: str, *args, **kwargs):
         node = self._get_node(graph_id, node_id)
@@ -619,23 +609,11 @@ class FlowWorker:
     async def run_app_service(self, graph_id: str, node_id: str, key: str, *args, **kwargs):
         return await self._get_client(graph_id).run_app_service(graph_id, node_id, key, *args, **kwargs)
 
-        print(self.app_su.services.keys())
-        serv, meta = self.app_su.get_service_and_meta(key)
-        res_or_coro = serv(*args, **kwargs)
-        if meta.is_async:
-            return await res_or_coro
-        else:
-            return res_or_coro
+    async def run_single_event(self, graph_id: str, node_id: str,
+                           type: int, ui_ev_dict: Dict[str, Any]):
+        return await self._get_client(graph_id).run_single_event(
+            graph_id, node_id, type, ui_ev_dict)
 
-    async def run_ui_event(self, graph_id: str, node_id: str,
-                           ui_ev_dict: Dict[str, Any]):
-        return await self._get_client(graph_id).run_ui_event(
-            graph_id, node_id, ui_ev_dict)
-
-    async def run_app_editor_event(self, graph_id: str, node_id: str,
-                           ui_ev_dict: Dict[str, Any]):
-        return await self._get_client(graph_id).run_app_editor_event(
-            graph_id, node_id, ui_ev_dict)
 
     async def get_layout(self, graph_id: str, node_id: str):
         return await self._get_client(graph_id).get_layout(graph_id, node_id)

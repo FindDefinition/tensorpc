@@ -14,7 +14,7 @@
 
 from typing import Any, Dict, List, Optional
 from tensorpc.apps.flow.coretypes import ScheduleEvent, get_uid
-from tensorpc.apps.flow.flowapp.core import AppEditorFrontendEvent, AppEvent, AppEventType, LayoutEvent, ScheduleNextForApp, UIEvent
+from tensorpc.apps.flow.flowapp.core import AppEditorFrontendEvent, AppEvent, AppEventType, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UISaveStateEvent
 from tensorpc.apps.flow.flowapp.app import App
 import asyncio
 from tensorpc.core import marker
@@ -69,27 +69,32 @@ class FlowApp:
         lay = self.app._get_app_layout()
         await self._send_loop_queue.put(
             AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)}))
+        await self._send_loop_queue.put(
+            AppEvent("", {AppEventType.Notify: NotifyEvent(NotifyType.AppStart)}))
 
     def _get_app(self):
         return self.app
 
-    async def run_ui_event(self, data):
-        ev = UIEvent.from_dict(data)
-        return await self.app._handle_control_event(ev)
-        # await self.app._queue.put(UIEvent.from_dict(data))
+    async def run_single_event(self, type, data):
+        if type == AppEventType.AppEditor.value:
+            ev = AppEditorFrontendEvent.from_dict(data)
+            return await self.app._handle_code_editor_event_system(ev)
+        elif type == AppEventType.UIEvent.value:
+            ev = UIEvent.from_dict(data)
+            return await self.app._handle_control_event(ev)
+        elif type == AppEventType.ScheduleNext.value:
+            asyncio.create_task(self._run_schedule_event_task(data))
+        elif type == AppEventType.UISaveStateEvent.value:
+            ev = UISaveStateEvent.from_dict(data)
+            return await self.app._restore_simple_app_state(ev.uid_to_data)
 
     async def run_app_service(self, key: str, *args, **kwargs):
         serv, meta = self.app_su.get_service_and_meta(key)
-        print(key, args, kwargs)
         res_or_coro = serv(*args, **kwargs)
         if meta.is_async:
             return await res_or_coro
         else:
             return res_or_coro
-
-    async def run_app_editor_event(self, data):
-        ev = AppEditorFrontendEvent.from_dict(data)
-        return await self.app._handle_code_editor_event_system(ev)
 
     async def _run_schedule_event_task(self, data):
         ev = ScheduleEvent.from_dict(data)
@@ -100,10 +105,6 @@ class FlowApp:
             await self._send_loop_queue.put(AppEvent(self._uid, {
                 AppEventType.ScheduleNext: appev,
             }))
-
-    async def run_schedule_event(self, data):
-        # we shouldn't block master.
-        asyncio.create_task(self._run_schedule_event_task(data))
 
     def get_layout(self):
         return self.app._get_app_layout()
@@ -198,4 +199,11 @@ class FlowApp:
     @marker.mark_exit
     async def on_exit(self):
         # save simple state to master
-        pass 
+        print("????????????????")
+        try:
+            uiev = UISaveStateEvent(self.app._get_simple_app_state())
+            ev = AppEvent(self._uid, {AppEventType.UISaveStateEvent: uiev})
+            print(ev)
+            await self._send_http_event(ev)
+        except:
+            traceback.print_exc()

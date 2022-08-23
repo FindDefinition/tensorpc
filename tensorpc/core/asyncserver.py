@@ -201,7 +201,7 @@ async def serve_service(service: AsyncRemoteObjectService,
 #         # loop.run_until_complete(coro)
 #         print("shutdown by keyboard interrupt")
 
-async def serve_with_http_async(service_def: ServiceDef,
+async def serve_with_http_async(server_core: ProtobufServiceCore,
                     url: str,
                     wait_time=-1,
                     port=50051,
@@ -215,7 +215,7 @@ async def serve_with_http_async(service_def: ServiceDef,
         raise NotImplementedError
     smeta = ServerMeta(port=port, http_port=http_port)
 
-    server_core = ProtobufServiceCore(url, service_def, False, smeta)
+    # server_core = ProtobufServiceCore(url, service_def, False, smeta)
 
     async with aiohttp.ClientSession() as sess:
         server_core.init_http_client_session(sess)
@@ -230,6 +230,13 @@ async def serve_with_http_async(service_def: ServiceDef,
             http_task = httpserver.serve_service_core_task(server_core, http_port,
                                                         None, is_sync=False, standalone=False)
             return await asyncio.gather(grpc_task, http_task)
+
+async def run_exit_async(server_core: ProtobufServiceCore):
+    async with aiohttp.ClientSession() as sess:
+        server_core.init_http_client_session(sess)
+        with server_core.enter_global_context():
+            await server_core.exec_exit_funcs()
+
 
 async def serve_async(sc: ProtobufServiceCore,
         wait_time=-1,
@@ -268,7 +275,7 @@ def serve(service_def: ServiceDef,
             port=port, length=length, is_local=is_local,
             max_threads=max_threads, process_id=process_id, credentials=credentials))
     except KeyboardInterrupt:
-        asyncio.run(server_core.exec_exit_funcs())
+        asyncio.run(run_exit_async(server_core))
         print("shutdown by keyboard interrupt")
     
 # import uvloop
@@ -284,11 +291,14 @@ def serve_with_http(service_def: ServiceDef,
     if not compat.Python3_7AndLater:
         raise NotImplementedError
     url = '[::]:{}'.format(port)
+    smeta = ServerMeta(port=port, http_port=http_port)
+    server_core = ProtobufServiceCore(url, service_def, False, smeta)
     try:
         # uvloop.install()
         # print("UVLOOP")
-        asyncio.run(serve_with_http_async(service_def, url, wait_time=wait_time, 
+        asyncio.run(serve_with_http_async(server_core, url, wait_time=wait_time, 
             port=port, http_port=http_port, length=length, is_local=is_local,
             max_threads=max_threads, process_id=process_id, credentials=credentials))
     except KeyboardInterrupt:
+        asyncio.run(run_exit_async(server_core))
         print("shutdown by keyboard interrupt")

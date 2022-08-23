@@ -401,6 +401,7 @@ class SampleEditorAppV2(EditableApp):
             "btn": Button("runCB", self.example_cb),
             "btn2": Button("ShowTS", self.show_ts),
         }
+        
 
     def example_cb(self):
         print("dynamic loadable APP!!!")
@@ -437,6 +438,7 @@ class SampleThreeApp(EditableApp):
         # ctrl = three.OrbitControl(True, 0.25, 1, 100)
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.b2d = three.Boxes2D(1000)
+
         self.canvas = three.ThreeCanvas({
             "cam": cam,
             "points": self.points,
@@ -448,7 +450,6 @@ class SampleThreeApp(EditableApp):
             "b2d": self.b2d,
             # "box": three.BoundingBox([2, 5, 2], [0, 10, 0], [0, 0, 0.5])
         })
-
         btn_random_pc = Button("showRandomRPC", self.show_Random_pc)
         return {
             "d3v":
@@ -462,13 +463,14 @@ class SampleThreeApp(EditableApp):
                 Button("rpcTest", self.rpc_test),
             }).prop(flex=1, min_height=0),
         }
+        
 
     async def show_Random_pc(self):
-        data = np.load(
-            "/home/tusimple/tusimple/spconv/test/data/benchmark-pc.npz")
         # data = np.load(
-        #     "/home/yy/Projects/spconv-release/spconv/test/data/benchmark-pc.npz"
-        # )
+        #     "/home/tusimple/tusimple/spconv/test/data/benchmark-pc.npz")
+        data = np.load(
+            "/home/yy/Projects/spconv-release/spconv/test/data/benchmark-pc.npz"
+        )
 
         pc = np.ascontiguousarray(data["pc"])
         # num = 50

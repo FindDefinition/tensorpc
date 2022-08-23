@@ -161,10 +161,11 @@ class _ServiceNames:
         return get_service_key_by_type(FlowWorker,
                                        FlowWorker.put_app_event.__name__)
     @property
-    def FLOWWORKER_RUN_APP_UI_EVENT(self):
+    def FLOWWORKER_RUN_APP_SINGLE_EVENT(self):
         from tensorpc.apps.flow.serv.worker import FlowWorker
         return get_service_key_by_type(FlowWorker,
-                                       FlowWorker.run_ui_event.__name__)
+                                       FlowWorker.run_single_event.__name__)
+
     @property
     def FLOWWORKER_APP_GET_LAYOUT(self):
         from tensorpc.apps.flow.serv.worker import FlowWorker
@@ -172,33 +173,15 @@ class _ServiceNames:
                                        FlowWorker.get_layout.__name__)
 
     @property
-    def FLOWWORKER_RUN_APP_EDITOR_EVENT(self):
-        from tensorpc.apps.flow.serv.worker import FlowWorker
-        return get_service_key_by_type(FlowWorker,
-                                       FlowWorker.run_app_editor_event.__name__)
-
-    @property
-    def APP_RUN_UI_EVENT(self):
+    def APP_RUN_SINGLE_EVENT(self):
         from tensorpc.apps.flow.serv.flowapp import FlowApp
         return get_service_key_by_type(FlowApp,
-                                       FlowApp.run_ui_event.__name__)
-
-    @property
-    def APP_RUN_APP_EDITOR_EVENT(self):
-        from tensorpc.apps.flow.serv.flowapp import FlowApp
-        return get_service_key_by_type(FlowApp,
-                                       FlowApp.run_app_editor_event.__name__)
+                                       FlowApp.run_single_event.__name__)
 
     @property
     def APP_GET_LAYOUT(self):
         from tensorpc.apps.flow.serv.flowapp import FlowApp
         return get_service_key_by_type(FlowApp,
                                        FlowApp.get_layout.__name__)
-
-    @property
-    def APP_RUN_SCHEDULE_EVENT(self):
-        from tensorpc.apps.flow.serv.flowapp import FlowApp
-        return get_service_key_by_type(FlowApp,
-                                       FlowApp.run_schedule_event.__name__)
 
 serv_names = _ServiceNames()

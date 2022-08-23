@@ -152,15 +152,18 @@ class App:
                 }
         return state
 
-    def _restore_simple_app_state(self, state: Dict[str, Any]):
+    async def _restore_simple_app_state(self, state: Dict[str, Any]):
         """try to restore state of Input/Switch/Radio/Slider/Select
         no exception if fail.
         """
+        print(state)
         for k, s in state.items():
             if k in self.root._uid_to_comp:
                 comp_to_restore = self.root._uid_to_comp[k]
                 if comp_to_restore.type.value == s["type"]:
+                    print(s["state"], k)
                     comp_to_restore.set_state(s["state"])
+                    await comp_to_restore.sync_state()
 
     def _app_force_use_layout_function(self):
         self._force_special_layout_method = True 
@@ -168,10 +171,6 @@ class App:
 
     async def _app_run_layout_function(self, send_layout_ev: bool = False, with_code_editor: bool = True, reload: bool = False):
         self.root._prevent_add_layout = False 
-        for k,v in self._uid_to_comp.items():
-            print(k, v.to_dict())
-
-        # prev_comps_vec = self.root._get_all_nested_childs()
         prev_comps = {}
         if reload:
             prev_comps = {u: c.to_dict()
@@ -185,8 +184,8 @@ class App:
         self._uid_to_comp[_ROOT] = self.root
         self.root._prevent_add_layout = True 
         if reload:
-            comps = self.root._get_all_nested_childs()
-            for comp in comps:
+            # comps = self.root._get_all_nested_childs()
+            for comp in self._uid_to_comp.values():
                 if comp.uid in prev_comps:
                     if comp.type.value == prev_comps[comp.uid]["type"]:
                         comp.set_state(prev_comps[comp.uid]["state"])
