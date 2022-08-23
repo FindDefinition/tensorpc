@@ -52,9 +52,10 @@ from watchdog.observers import Observer
 
 from .components import mui, three
 from .core import (AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
-                   AppEditorFrontendEventType, AppEvent, AppEventType, BasicProps,
-                   Component, CopyToClipboardEvent, LayoutEvent, TaskLoopEvent,
-                   UIEvent, UIRunStatus, UIType, Undefined, undefined)
+                   AppEditorFrontendEventType, AppEvent, AppEventType,
+                   BasicProps, Component, CopyToClipboardEvent, LayoutEvent,
+                   TaskLoopEvent, UIEvent, UIRunStatus, UIType, UIUpdateEvent,
+                   Undefined, undefined)
 
 ALL_APP_EVENTS = HashableRegistry()
 
@@ -62,7 +63,6 @@ _ROOT = "root"
 
 
 class AppEditor:
-
     def __init__(
         self,
         init_value: str,
@@ -121,11 +121,10 @@ class App:
         self._send_callback: Optional[Callable[[AppEvent],
                                                Coroutine[None, None,
                                                          None]]] = None
-        root = mui.FlexBox(_ROOT,
-                           self._queue,
-                           self._uid_to_comp,
-                           inited=True)
-        root.prop(flex_flow=flex_flow, justify_content=justify_content, align_items=align_items)
+        root = mui.FlexBox(_ROOT, self._queue, self._uid_to_comp, inited=True)
+        root.prop(flex_flow=flex_flow,
+                  justify_content=justify_content,
+                  align_items=align_items)
         self._uid_to_comp[_ROOT] = root
         self.root = root
         self._enable_editor = False
@@ -145,7 +144,8 @@ class App:
         """
         state: Dict[str, Any] = {}
         for comp in self.root._get_all_nested_childs():
-            if isinstance(comp, (mui.Input, mui.Switch, mui.RadioGroup, mui.Slider, mui.Select)):
+            if isinstance(comp, (mui.Input, mui.Switch, mui.RadioGroup,
+                                 mui.Slider, mui.Select, mui.MultipleSelect)):
                 state[comp.uid] = {
                     "type": comp.type.value,
                     "state": comp.get_state(),
@@ -156,25 +156,27 @@ class App:
         """try to restore state of Input/Switch/Radio/Slider/Select
         no exception if fail.
         """
-        print(state)
+        ev = AppEvent("", {})
         for k, s in state.items():
             if k in self.root._uid_to_comp:
                 comp_to_restore = self.root._uid_to_comp[k]
                 if comp_to_restore.type.value == s["type"]:
-                    print(s["state"], k)
                     comp_to_restore.set_state(s["state"])
-                    await comp_to_restore.sync_state()
+                    ev = ev.merge_new(comp_to_restore.get_sync_event(True))
+        await self._queue.put(ev)
 
     def _app_force_use_layout_function(self):
-        self._force_special_layout_method = True 
+        self._force_special_layout_method = True
         self.root._prevent_add_layout = True
 
-    async def _app_run_layout_function(self, send_layout_ev: bool = False, with_code_editor: bool = True, reload: bool = False):
-        self.root._prevent_add_layout = False 
+    async def _app_run_layout_function(self,
+                                       send_layout_ev: bool = False,
+                                       with_code_editor: bool = True,
+                                       reload: bool = False):
+        self.root._prevent_add_layout = False
         prev_comps = {}
         if reload:
-            prev_comps = {u: c.to_dict()
-                        for u, c in self._uid_to_comp.items()}
+            prev_comps = {u: c.to_dict() for u, c in self._uid_to_comp.items()}
         await self.root._clear()
         self._uid_to_comp.clear()
         self.root.uid = _ROOT
@@ -182,7 +184,7 @@ class App:
         res_anno: Dict[str, Union[Component, BasicProps]] = {**res}
         self.root.add_layout(res_anno)
         self._uid_to_comp[_ROOT] = self.root
-        self.root._prevent_add_layout = True 
+        self.root._prevent_add_layout = True
         if reload:
             # comps = self.root._get_all_nested_childs()
             for comp in self._uid_to_comp.values():
@@ -191,7 +193,11 @@ class App:
                         comp.set_state(prev_comps[comp.uid]["state"])
             del prev_comps
         if send_layout_ev:
-            ev = AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(self._get_app_layout(with_code_editor))})
+            ev = AppEvent(
+                "", {
+                    AppEventType.UpdateLayout:
+                    LayoutEvent(self._get_app_layout(with_code_editor))
+                })
             await self._queue.put(ev)
 
     def app_initialize(self):
@@ -280,9 +286,8 @@ class App:
         for uid, data in ev.uid_to_data.items():
             comp = self._uid_to_comp[uid]
             # sync state after every callback
-            if isinstance(
-                    comp,
-                (mui.Switch, mui.Select, mui.Slider, mui.RadioGroup)):
+            if isinstance(comp, (mui.Switch, mui.Select, mui.MultipleSelect,
+                                 mui.Slider, mui.RadioGroup)):
                 if comp._status == UIRunStatus.Running:
                     # TODO send exception if ignored click
                     print("IGNORE EVENT", comp._status)
@@ -379,7 +384,6 @@ _WATCHDOG_MODIFY_EVENT_TYPES = Union[watchdog.events.DirModifiedEvent,
 
 
 class _WatchDogForAppFile(watchdog.events.FileSystemEventHandler):
-
     def __init__(
             self, on_modified: Callable[[_WATCHDOG_MODIFY_EVENT_TYPES],
                                         None]) -> None:
@@ -391,7 +395,6 @@ class _WatchDogForAppFile(watchdog.events.FileSystemEventHandler):
 
 
 class EditableApp(App):
-
     def __init__(self,
                  reloadable_layout: bool = False,
                  flex_flow: Union[str, Undefined] = "column nowrap",
@@ -407,7 +410,7 @@ class EditableApp(App):
         self._watchdog_prev_content = ""
         if reloadable_layout:
             self._app_force_use_layout_function()
-        
+
     def app_initialize(self):
         dcls = self._get_app_dynamic_cls()
         path = dcls.file_path
@@ -438,7 +441,9 @@ class EditableApp(App):
                     layout_func_changed = self._reload_app_file()
                     if layout_func_changed:
                         fut = asyncio.run_coroutine_threadsafe(
-                            self._app_run_layout_function(True, with_code_editor=False, reload=True), self._loop)
+                            self._app_run_layout_function(
+                                True, with_code_editor=False, reload=True),
+                            self._loop)
                         fut.result()
 
     def _reload_app_file(self):
@@ -469,7 +474,9 @@ class EditableApp(App):
                 self._watchdog_prev_content = event.data
                 layout_func_changed = self._reload_app_file()
                 if layout_func_changed:
-                    await self._app_run_layout_function(True, with_code_editor=False, reload=True)
+                    await self._app_run_layout_function(True,
+                                                        with_code_editor=False,
+                                                        reload=True)
         return
 
 
@@ -479,4 +486,5 @@ class EditableLayoutApp(EditableApp):
                  justify_content: Union[str, Undefined] = undefined,
                  align_items: Union[str, Undefined] = undefined,
                  maxqsize: int = 10) -> None:
-        super().__init__(True, flex_flow, justify_content, align_items, maxqsize)
+        super().__init__(True, flex_flow, justify_content, align_items,
+                         maxqsize)

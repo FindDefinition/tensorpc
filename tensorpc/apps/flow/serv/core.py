@@ -1230,7 +1230,6 @@ class Flow:
                 assert isinstance(v, NotifyEvent)
                 if v.type == NotifyType.AppStart and app_node.state is not None:
                     save_ev = UISaveStateEvent(app_node.state)
-                    print(save_ev.to_dict())
                     await self.run_single_event(gid, nid, AppEventType.UISaveStateEvent.value, save_ev.to_dict())
             else:
                 new_t2e[k] = v

@@ -60,12 +60,11 @@ class UIType(enum.Enum):
     Button = 0x7
     ListItemButton = 0x8
     ListItemText = 0x9
-
-    # outputs
     Image = 0xa
     Text = 0xb
     Plotly = 0xc
     ChartJSLine = 0xd
+    MultipleSelect = 0xe
 
     # special
     TaskLoop = 0x100
@@ -141,7 +140,6 @@ class AppEditorFrontendEventType(enum.Enum):
 
 
 class AppEditorFrontendEvent:
-
     def __init__(self, type: AppEditorFrontendEventType, data: Any) -> None:
         self.type = type
         self.data = data
@@ -159,7 +157,6 @@ class AppEditorFrontendEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.UIEvent.value)
 class UIEvent:
-
     def __init__(self, uid_to_data: Dict[str, Any]) -> None:
         self.uid_to_data = uid_to_data
 
@@ -173,6 +170,7 @@ class UIEvent:
     def merge_new(self, new):
         return new
 
+
 class NotifyType(enum.Enum):
     AppStart = 0
     AppStop = 1
@@ -180,7 +178,6 @@ class NotifyType(enum.Enum):
 
 @ALL_APP_EVENTS.register(key=AppEventType.Notify.value)
 class NotifyEvent:
-
     def __init__(self, type: NotifyType) -> None:
         self.type = type
 
@@ -195,9 +192,9 @@ class NotifyEvent:
         assert isinstance(new, NotifyEvent)
         return new
 
+
 @ALL_APP_EVENTS.register(key=AppEventType.UISaveStateEvent.value)
 class UISaveStateEvent:
-
     def __init__(self, uid_to_data: Dict[str, Any]) -> None:
         self.uid_to_data = uid_to_data
 
@@ -215,9 +212,9 @@ class UISaveStateEvent:
             **self.uid_to_data,
         })
 
+
 @ALL_APP_EVENTS.register(key=AppEventType.UIUpdateEvent.value)
 class UIUpdateEvent:
-
     def __init__(
         self, uid_to_data_undefined: Dict[str, Tuple[Dict[str, Any],
                                                      List[str]]]
@@ -247,7 +244,6 @@ class UIUpdateEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.AppEditor.value)
 class AppEditorEvent:
-
     def __init__(self, type: AppEditorEventType, data) -> None:
         self.data = data
         self.type = type
@@ -269,7 +265,6 @@ class AppEditorEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.UpdateLayout.value)
 class LayoutEvent:
-
     def __init__(self, data) -> None:
         self.data = data
 
@@ -288,7 +283,6 @@ class LayoutEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.UpdateComponents.value)
 class UpdateComponentsEvent:
-
     def __init__(self, data: Dict[str, Any]) -> None:
         self.data = data
 
@@ -309,7 +303,6 @@ class UpdateComponentsEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.DeleteComponents.value)
 class DeleteComponentsEvent:
-
     def __init__(self, data: List[str]) -> None:
         self.data = data
 
@@ -327,7 +320,6 @@ class DeleteComponentsEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.CopyToClipboard.value)
 class CopyToClipboardEvent:
-
     def __init__(self, text: str) -> None:
         self.text = text
 
@@ -347,7 +339,6 @@ class CopyToClipboardEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.ScheduleNext.value)
 class ScheduleNextForApp:
-
     def __init__(self, data) -> None:
         self.data = data
 
@@ -394,11 +385,15 @@ def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":
 
 
 class AppEvent:
-
-    def __init__(self, uid: str, type_to_event: Dict[AppEventType,
-                                                     APP_EVENT_TYPES]) -> None:
+    def __init__(self,
+                 uid: str,
+                 type_to_event: Dict[AppEventType, APP_EVENT_TYPES],
+                 sent_event: Optional[asyncio.Event] = None) -> None:
         self.uid = uid
         self.type_to_event = type_to_event
+        # event that indicate this app event is sent
+        # used for callback
+        self.sent_event = sent_event
 
     def to_dict(self):
         # here we don't use dict for typeToEvents due to frontend key type limit.
@@ -437,6 +432,7 @@ T = TypeVar("T")
 @dataclasses.dataclass
 class BasicProps:
     _tensorpc_component_special_key: Optional[Any] = None
+
     def get_dict_and_undefined(self, state: Dict[str, Any]):
         this_type = type(self)
         res = {}
@@ -502,18 +498,22 @@ T2 = TypeVar('T2')
 T3 = TypeVar('T3')
 
 
-def init_anno_fwd(this: Callable[P, Any], val: Optional[T3] = None) -> Callable[[Callable], Callable[P, T3]]:
+def init_anno_fwd(
+        this: Callable[P, Any],
+        val: Optional[T3] = None) -> Callable[[Callable], Callable[P, T3]]:
     def decorator(real_function: Callable) -> Callable[P, T3]:
         def new_function(*args: P.args, **kwargs: P.kwargs) -> T3:
             return real_function(*args, **kwargs)
+
         return new_function
+
     return decorator
+
 
 # @init_anno_fwd(ComponentBaseProps)
 # def open_for_writing(*args, **kwargs):
 #     kwargs['mode'] = 'w'
 #     return open(*args, **kwargs)
-
 
 # open_for_writing()
 # open_for_writing(file='')
@@ -522,7 +522,6 @@ P2 = ParamSpec('P2')
 
 
 class Component(Generic[T]):
-
     def __init__(self,
                  uid: str,
                  type: UIType,
@@ -542,23 +541,24 @@ class Component(Generic[T]):
 
     @property
     def props(self) -> T:
-        return self.__props 
+        return self.__props
 
     # @property
     # def propcls(self) -> Type[T]:
-    #     return self.__prop_cls 
+    #     return self.__prop_cls
 
     @property
     def prop(self) -> Type[T]:
         """set some prop of this component"""
         @init_anno_fwd(self.__prop_cls)
         def wrapper(**kwargs):
-            self.__props._tensorpc_component_special_key = self # type: ignore
+            self.__props._tensorpc_component_special_key = self  # type: ignore
             for k, v in kwargs.items():
                 setattr(self.__props, k, v)
             return self.__props
-        return wrapper # type: ignore
-    
+
+        return wrapper  # type: ignore
+
     # @property
     # def prop2(self):
     #     """set some prop of this component"""
@@ -567,7 +567,7 @@ class Component(Generic[T]):
     #         for k, v in kwargs.items():
     #             setattr(self.__props, k, v)
     #         return self
-    #     return wrapper 
+    #     return wrapper
 
     def get_callback(self) -> Optional[Callable]:
         return None
@@ -578,8 +578,16 @@ class Component(Generic[T]):
     async def _clear(self):
         self.uid = ""
         # self._queue = None
+        # ignore all task error here.
         if self._task is not None:
-            await _cancel(self._task)
+            self._task.cancel()
+            try:
+                await self._task
+            except:
+                traceback.print_exc()
+
+            # await _cancel(self._task)
+            self._task = None
         self.parent = ""
 
     def to_dict(self):
@@ -591,14 +599,14 @@ class Component(Generic[T]):
             if not isinstance(v, Undefined):
                 newstate[k] = v
         # TODO better way to resolve type anno problem
-        static, _ = self.__props.get_dict_and_undefined(state) # type: ignore
+        static, _ = self.__props.get_dict_and_undefined(state)  # type: ignore
         static["state"] = newstate
         static["uid"] = self.uid
         static["type"] = self.type.value
         return static
 
     def get_state(self) -> Dict[str, Any]:
-        return {"status": self._status.value} # type: ignore
+        return {"status": self._status.value}  # type: ignore
 
     def set_state(self, state: Dict[str, Any]):
         if "status" in state:
@@ -637,8 +645,10 @@ class Component(Generic[T]):
     async def run_callback(self,
                            cb: Callable[[], _CORO_NONE],
                            sync_state: bool = False):
-        self.__props.status = UIRunStatus.Running.value # type: ignore
-        await self.sync_status(sync_state)
+        self.__props.status = UIRunStatus.Running.value  # type: ignore
+        ev = asyncio.Event()
+        await self.sync_status(sync_state, ev)
+        await ev.wait()
         try:
             coro = cb()
             if inspect.iscoroutine(coro):
@@ -647,28 +657,33 @@ class Component(Generic[T]):
             traceback.print_exc()
             raise
         finally:
-            self.__props.status = UIRunStatus.Stop.value # type: ignore
+            self.__props.status = UIRunStatus.Stop.value  # type: ignore
             await self.sync_status(sync_state)
 
-    async def sync_status(self, sync_state: bool = False):
+    async def sync_status(self,
+                          sync_state: bool = False,
+                          sent_event: Optional[asyncio.Event] = None):
         if sync_state:
-            await self.queue.put(self.create_update_event(self.get_state()))
+            ev = self.create_update_event(self.get_state())
+            ev.sent_event = sent_event
+            await self.queue.put(ev)
         else:
-            await self.queue.put(
-                self.create_update_event({"status": self.__props.status})) # type: ignore
+            ev = self.create_update_event({"status": self.__props.status})
+            ev.sent_event = sent_event
+            await self.queue.put(ev)
 
-    async def sync_state(self):
-        return await self.sync_status(True)
+    async def sync_state(self, sent_event: Optional[asyncio.Event] = None):
+        return await self.sync_status(True, sent_event)
 
     def get_sync_event(self, sync_state: bool = False):
         if sync_state:
             return self.create_update_event(self.get_state())
         else:
-            return self.create_update_event({"status": self.__props.status}) # type: ignore
+            return self.create_update_event({"status": self.__props.status
+                                             })  # type: ignore
 
 
 class ContainerBase(Component[T]):
-
     def __init__(self,
                  base_type: UIType,
                  prop_cls: Type[T],
@@ -788,7 +803,7 @@ class ContainerBase(Component[T]):
         for k, v1 in layout.items():
             if isinstance(v1, BasicProps):
                 assert v1._tensorpc_component_special_key is not None
-                v: Component = v1._tensorpc_component_special_key # type: ignore
+                v: Component = v1._tensorpc_component_special_key  # type: ignore
                 v1._tensorpc_component_special_key = None
             else:
                 v = v1
@@ -814,7 +829,8 @@ class ContainerBase(Component[T]):
         for k, v1 in layout.items():
             if isinstance(v1, BasicProps):
                 assert v1._tensorpc_component_special_key is not None
-                v: Component[T] = v1._tensorpc_component_special_key # type: ignore
+                v: Component[
+                    T] = v1._tensorpc_component_special_key  # type: ignore
                 v1._tensorpc_component_special_key = None
             else:
                 v = v1

@@ -73,7 +73,6 @@ class Object3dBaseProps(ThreeFlexItemBoxProps):
 
 
 class Object3dBase(ThreeComponentBase[Object3dBaseProps]):
-
     def __init__(self,
                  base_type: UIType,
                  uid: str = "",
@@ -156,7 +155,6 @@ class Object3dBase(ThreeComponentBase[Object3dBaseProps]):
 
 
 class Points(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  limit: int,
                  uid: str = "",
@@ -186,6 +184,10 @@ class Points(ThreeComponentBase[ThreeBasicProps]):
                             attr_fields: Optional[List[str]] = None):
         assert points.shape[
             0] <= self.limit, f"your points size must smaller than limit {self.limit}"
+        if points.shape[1] == 4 and intensity is None:
+            intensity = points[:, 3]
+            points = points[:, :3]
+
         upd: Dict[str, Any] = {
             "points": points,
         }
@@ -244,7 +246,6 @@ class Points(ThreeComponentBase[ThreeBasicProps]):
 
 
 class Segments(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  limit: int,
                  line_width: float = 1.0,
@@ -314,10 +315,9 @@ class Segments(ThreeComponentBase[ThreeBasicProps]):
                 self.color = state["color"]
                 if "colors" in state:
                     self.colors = state["colors"]
-                
+
 
 class Boxes2D(Object3dBase):
-
     def __init__(self,
                  limit: int,
                  uid: str = "",
@@ -387,21 +387,22 @@ class Boxes2D(Object3dBase):
         })
         return state
 
-
     def set_state(self, state: Dict[str, Any]):
         super().set_state(state)
         if "centers" in state:
             if state["centers"].shape[0] <= self.limit:
                 self.centers = state["centers"]
                 self.dimersions = state["dimersions"]
-                self.alpha = state["alpha"] if "alpha" in state else undefined 
-                self.opacity = state["opacity"] if "opacity" in state else undefined 
-                self.color = state["color"] if "color" in state else undefined 
-                self.colors = state["colors"] if "colors" in state else undefined 
-                self.attrs = state["attrs"] if "attrs" in state else undefined 
+                self.alpha = state["alpha"] if "alpha" in state else undefined
+                self.opacity = state[
+                    "opacity"] if "opacity" in state else undefined
+                self.color = state["color"] if "color" in state else undefined
+                self.colors = state[
+                    "colors"] if "colors" in state else undefined
+                self.attrs = state["attrs"] if "attrs" in state else undefined
+
 
 class BoundingBox(Object3dBase):
-
     def __init__(self,
                  dimersion: Vector3Type,
                  edgeWidth: float = 4,
@@ -436,7 +437,6 @@ class BoundingBox(Object3dBase):
 
 
 class AxesHelper(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  length: float,
                  uid: str = "",
@@ -451,7 +451,6 @@ class AxesHelper(ThreeComponentBase[ThreeBasicProps]):
 
 
 class InfiniteGridHelper(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  size1: float,
                  size2: float,
@@ -476,7 +475,6 @@ class InfiniteGridHelper(ThreeComponentBase[ThreeBasicProps]):
 
 
 class Group(ContainerBase[Object3dBaseProps]):
-
     def __init__(self,
                  init_dict: Dict[str, ThreeComponentType],
                  uid: str = "",
@@ -534,7 +532,6 @@ class Group(ContainerBase[Object3dBaseProps]):
 
 
 class Image(Object3dBase):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -566,7 +563,6 @@ class Image(Object3dBase):
 
 
 class PerspectiveCamera(Object3dBase):
-
     def __init__(self,
                  makeDefault: bool,
                  fov: Union[float, Undefined] = undefined,
@@ -621,7 +617,6 @@ class PerspectiveCamera(Object3dBase):
 
 
 class OrthographicCamera(Object3dBase):
-
     def __init__(self,
                  makeDefault: bool,
                  near: Optional[float] = None,
@@ -666,8 +661,8 @@ class OrthographicCamera(Object3dBase):
         })
         return state
 
-class MapControl(ThreeComponentBase[ThreeBasicProps]):
 
+class MapControl(ThreeComponentBase[ThreeBasicProps]):
     def __init__(self,
                  enableDamping: bool,
                  dampingFactor: float,
@@ -718,7 +713,6 @@ class MapControl(ThreeComponentBase[ThreeBasicProps]):
 
 
 class OrbitControl(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  enableDamping: bool,
                  dampingFactor: float,
@@ -774,7 +768,6 @@ class OrbitControl(ThreeComponentBase[ThreeBasicProps]):
 
 
 class PointerLockControl(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  enabled: Union[bool, Undefined] = undefined,
                  minPolarAngle: Union[float, Undefined] = undefined,
@@ -817,7 +810,6 @@ class FirstPersonControlProps(ThreeBasicProps):
 
 
 class FirstPersonControl(ThreeComponentBase[FirstPersonControlProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -826,7 +818,6 @@ class FirstPersonControl(ThreeComponentBase[FirstPersonControlProps]):
 
 
 class ThreeCanvas(ContainerBase[ThreeBasicProps]):
-
     def __init__(self,
                  init_dict: Dict[str, Union[ThreeComponentBase,
                                             ThreeBasicProps]],
@@ -860,7 +851,6 @@ class ThreeFlexProps(ThreeFlexPropsBase):
 
 
 class Flex(ContainerBase[ThreeFlexProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
@@ -879,7 +869,6 @@ class ItemBox(ContainerBase[ThreeFlexItemBoxProps]):
     """if a three item have flex item prop enabled, it will
     be wrapped with a ItemBox automatically.
     """
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
@@ -921,7 +910,6 @@ class HtmlProps(Object3dBaseProps):
 class Html(ContainerBase[HtmlProps]):
     """we can use MUI components only in Html.
     """
-
     def __init__(self,
                  init_dict: Dict[str, MUIComponentType],
                  uid: str = "",

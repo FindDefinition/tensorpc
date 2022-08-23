@@ -181,7 +181,7 @@ class FlowApp:
                             previous_event = AppEvent(self._uid, {})
                         except Exception as e:
                             print("Retry connection Fail.")
-                            master_disconnect = ts                    
+                            master_disconnect = ts   
                 else:
                     try:
                         # print("SEND", ev.type)
@@ -194,6 +194,10 @@ class FlowApp:
                         # when disconnect to master/remote worker, enter slient mode
                         previous_event = previous_event.merge_new(ev)
                         master_disconnect = ts
+                # trigger sent event here.
+                if ev.sent_event is not None:
+                    ev.sent_event.set()
+
         self._send_loop_task = None
 
     @marker.mark_exit
