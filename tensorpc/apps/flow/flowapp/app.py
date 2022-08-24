@@ -425,7 +425,7 @@ class EditableApp(App):
 
     def _watchdog_on_modified(self, ev: _WATCHDOG_MODIFY_EVENT_TYPES):
         if isinstance(ev, watchdog.events.FileModifiedEvent):
-            # print("WATCHDOG", self._watchdog_ignore_next)
+            print("WATCHDOG", ev)
             with self._watch_lock:
                 if self._watchdog_ignore_next:
                     self._watchdog_ignore_next = False

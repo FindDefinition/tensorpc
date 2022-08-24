@@ -49,7 +49,6 @@ class FlowApp:
         self.headless = headless
         self.dynamic_app_cls = ReloadableDynamicClass(module_name)
         self.app: App = self.dynamic_app_cls.obj_type(**self.config)
-        # TODO reloadable app_su
         self.app_su = ServiceUnit(module_name, config)
         self.app_su.init_service(self.app)
         self.app._app_dynamic_cls = self.dynamic_app_cls

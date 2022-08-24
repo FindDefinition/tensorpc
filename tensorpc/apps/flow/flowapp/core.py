@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import abc
 import enum
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Generic, Iterable, List, Optional, Tuple, Type, TypeVar,
@@ -26,14 +27,16 @@ import dataclasses
 import re
 from tensorpc.compat import Python3_10AndLater
 import sys
-from typing_extensions import ParamSpec, Concatenate
+from typing_extensions import Literal, ParamSpec, Concatenate, TypeAlias, Protocol
 
 ALL_APP_EVENTS = HashableRegistry()
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
 
 __COMPONENT_SPECIAL_KEY = "_tensorpc_component_special_key"
+ValueType: TypeAlias = Union[int, float, str]
 
+NumberType: TypeAlias = Union[int, float]
 
 class Undefined:
     pass
@@ -95,6 +98,8 @@ class UIType(enum.Enum):
     ThreeBoxes2D = 0x1025
 
     ThreeText = 0x1026
+    ThreeShape = 0x1027
+    ThreeMeshMaterial = 0x1028
 
 
 class AppEventType(enum.Enum):
@@ -426,7 +431,6 @@ def snake_to_camel(name: str):
     return res
 
 
-T = TypeVar("T")
 
 
 @dataclasses.dataclass
@@ -463,38 +467,43 @@ class BasicProps:
             res[res_camel] = val
         return res
 
+TBaseComp = TypeVar("TBaseComp", bound=BasicProps)
+
+_OverflowType = Union[Literal["visible"], Literal["hidden"], Literal["scroll"], Literal["auto"]]
 
 @dataclasses.dataclass
 class ComponentBaseProps(BasicProps):
     """all props must have a default value, 
     manage state by your self.
     """
-    flex: Union[int, str, Undefined] = undefined
+    flex: Union[ValueType, Undefined] = undefined
     align_self: Union[str, Undefined] = undefined
     flex_grow: Union[str, Undefined] = undefined
     flex_shrink: Union[str, Undefined] = undefined
     flex_basis: Union[str, Undefined] = undefined
 
-    height: Union[int, str, Undefined] = undefined
-    width: Union[int, str, Undefined] = undefined
-    max_height: Union[int, str, Undefined] = undefined
-    max_width: Union[int, str, Undefined] = undefined
-    min_height: Union[int, str, Undefined] = undefined
-    min_width: Union[int, str, Undefined] = undefined
-    padding: Union[int, str, Undefined] = undefined
-    padding_top: Union[int, str, Undefined] = undefined
-    padding_bottom: Union[int, str, Undefined] = undefined
-    padding_left: Union[int, str, Undefined] = undefined
-    padding_right: Union[int, str, Undefined] = undefined
-    margin: Union[int, str, Undefined] = undefined
-    margin_top: Union[int, str, Undefined] = undefined
-    margin_left: Union[int, str, Undefined] = undefined
-    margin_right: Union[int, str, Undefined] = undefined
-    margin_bottom: Union[int, str, Undefined] = undefined
+    height: Union[ValueType, Undefined] = undefined
+    width: Union[ValueType, Undefined] = undefined
+    max_height: Union[ValueType, Undefined] = undefined
+    max_width: Union[ValueType, Undefined] = undefined
+    min_height: Union[ValueType, Undefined] = undefined
+    min_width: Union[ValueType, Undefined] = undefined
+    padding: Union[ValueType, Undefined] = undefined
+    padding_top: Union[ValueType, Undefined] = undefined
+    padding_bottom: Union[ValueType, Undefined] = undefined
+    padding_left: Union[ValueType, Undefined] = undefined
+    padding_right: Union[ValueType, Undefined] = undefined
+    margin: Union[ValueType, Undefined] = undefined
+    margin_top: Union[ValueType, Undefined] = undefined
+    margin_left: Union[ValueType, Undefined] = undefined
+    margin_right: Union[ValueType, Undefined] = undefined
+    margin_bottom: Union[ValueType, Undefined] = undefined
 
+    overflow: Union[_OverflowType, Undefined] = undefined
+    overflow_y: Union[_OverflowType, Undefined] = undefined
+    overflow_x: Union[_OverflowType, Undefined] = undefined
 
 P = ParamSpec('P')
-T2 = TypeVar('T2')
 T3 = TypeVar('T3')
 
 
@@ -519,13 +528,44 @@ def init_anno_fwd(
 # open_for_writing(file='')
 
 P2 = ParamSpec('P2')
+# TProp = TypeVar('TProp', covariant=True)
+
+# class IComponent(Protocol[TProp]):
+#     @property
+#     def props(self) -> TProp: ...
+#     # @property
+#     # def prop(self) -> Type[TProp]: ...
+#     def get_callback(self) -> Optional[Callable]: ...
+#     def set_callback(self, val: Any): ...
+#     async def _clear(self): ...
+#     def to_dict(self) -> Dict[str, Any]: ...
+#     def get_state(self) -> Dict[str, Any]: ...
+#     def set_state(self, state: Dict[str, Any]): ...
+#     @property
+#     def queue(self) -> asyncio.Queue[AppEvent]: ...
+#     def state_change_callback(self, data: Any): ...
+#     def create_update_event(self, data: Dict[str, Union[Any, Undefined]]): ...
+#     async def send_app_event_and_wait(self, ev: AppEvent): ...
+#     def create_update_comp_event(self, updates: Dict[str, Any]): ...
+#     def create_delete_comp_event(self, deletes: List[str]): ...
+#     async def run_callback(self,
+#                            cb: Callable[[], _CORO_NONE],
+#                            sync_state: bool = False): ...
+#     async def sync_status(self,
+#                           sync_state: bool = False,
+#                           sent_event: Optional[asyncio.Event] = None): ...
+#     async def sync_state(self, sent_event: Optional[asyncio.Event] = None): ...
+#     def get_sync_event(self, sync_state: bool = False): ...
 
 
-class Component(Generic[T]):
+T_child = TypeVar("T_child")
+
+
+class Component(Generic[TBaseComp, T_child]):
     def __init__(self,
                  uid: str,
                  type: UIType,
-                 prop_cls: Type[T],
+                 prop_cls: Type[TBaseComp],
                  queue: Optional[asyncio.Queue] = None) -> None:
         self._queue = queue
         self.uid = uid
@@ -540,7 +580,7 @@ class Component(Generic[T]):
         self.__prop_cls = prop_cls
 
     @property
-    def props(self) -> T:
+    def props(self) -> TBaseComp:
         return self.__props
 
     # @property
@@ -548,7 +588,7 @@ class Component(Generic[T]):
     #     return self.__prop_cls
 
     @property
-    def prop(self) -> Type[T]:
+    def prop(self) -> Type[TBaseComp]:
         """set some prop of this component"""
         @init_anno_fwd(self.__prop_cls)
         def wrapper(**kwargs):
@@ -632,6 +672,12 @@ class Component(Generic[T]):
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UIUpdateEvent: ev})
 
+    async def send_app_event_and_wait(self, ev: AppEvent):
+        if ev.sent_event is None:
+            ev.sent_event = asyncio.Event()
+        await self.queue.put(ev)
+        await ev.sent_event.wait()
+
     def create_update_comp_event(self, updates: Dict[str, Any]):
         ev = UpdateComponentsEvent(updates)
         # uid is set in flowapp service later.
@@ -668,7 +714,7 @@ class Component(Generic[T]):
             ev.sent_event = sent_event
             await self.queue.put(ev)
         else:
-            ev = self.create_update_event({"status": self.__props.status})
+            ev = self.create_update_event({"status": self._status.value})
             ev.sent_event = sent_event
             await self.queue.put(ev)
 
@@ -679,19 +725,18 @@ class Component(Generic[T]):
         if sync_state:
             return self.create_update_event(self.get_state())
         else:
-            return self.create_update_event({"status": self.__props.status
+            return self.create_update_event({"status": self._status.value
                                              })  # type: ignore
 
 
-class ContainerBase(Component[T]):
+class ContainerBase(Component[TBaseComp, T_child]):
     def __init__(self,
                  base_type: UIType,
-                 prop_cls: Type[T],
+                 prop_cls: Type[TBaseComp],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
-                 _init_dict: Optional[Dict[str, Union[Component,
-                                                      BasicProps]]] = None,
+                 _init_dict: Optional[Dict[str, T_child]] = None,
                  inited: bool = False) -> None:
         super().__init__(uid, base_type, prop_cls, queue)
         if inited:

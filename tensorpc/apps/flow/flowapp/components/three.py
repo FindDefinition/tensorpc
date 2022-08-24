@@ -14,21 +14,23 @@
 
 import asyncio
 import base64
+import enum
 import io
 import time
 from tensorpc import compat
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
-                    Iterable, List, Optional, Tuple, TypeVar, Union)
+                    Iterable, List, Optional, Tuple, Type, TypeVar, Union)
 
 if compat.Python3_8AndLater:
     from typing import Literal
 else:
     from typing_extensions import Literal
+from typing_extensions import Protocol
 
 import numpy as np
 from tensorpc.utils.uniquename import UniqueNamePool
 import dataclasses
-from ..core import AppEvent, BasicProps, Component, TaskLoopEvent, UIEvent, UIType, ContainerBase, Undefined, undefined, ComponentBaseProps, T
+from ..core import AppEvent, BasicProps, Component, NumberType, T_child, TaskLoopEvent, UIEvent, UIType, ContainerBase, Undefined, ValueType, undefined, ComponentBaseProps, TBaseComp
 from .mui import FlexBoxProps, _encode_image_bytes, MUIComponentType
 
 Vector3Type = Tuple[float, float, float]
@@ -49,19 +51,40 @@ class ThreeBasicProps(BasicProps):
 class ThreeFlexPropsBase(FlexBoxProps):
     pass
 
+class Side(enum.Enum):
+    FrontSide = 0
+    BackSide = 1
+    DoubleSide = 2
 
-class ThreeComponentBase(Component[T]):
+SideType = Literal[0, 1, 2]
+
+@dataclasses.dataclass
+class ThreeMaterialPropsBase(BasicProps):
+    devflow_material_type: int = 0
+    transparent: Union[bool, Undefined] = undefined 
+    opacity: Union[NumberType, Undefined] = undefined 
+    depth_test: Union[bool, Undefined] = undefined 
+    depth_write: Union[bool, Undefined] = undefined 
+    alpha_test: Union[NumberType, Undefined] = undefined 
+    visible: Union[bool, Undefined] = undefined 
+    side: Union[SideType, Undefined] = undefined 
+
+class ThreeComponentBase(Component[TBaseComp, "ThreeComponentType"]):
     pass
 
-
-class ThreeContainerBase(ContainerBase[T]):
+class ThreeContainerBase(ContainerBase[TBaseComp, "ThreeComponentType"]):
     pass
 
+class ThreeMaterialBase(Component[TBaseComp, "ThreeComponentType"]):
+    pass
 
-ThreeComponentType = Union[ThreeComponentBase, ThreeContainerBase,
+T_material_prop = TypeVar("T_material_prop", bound=ThreeMaterialPropsBase)
+
+ThreeComponentType = Union[ThreeComponentBase[TBaseComp], ThreeContainerBase[TBaseComp],
                            ThreeBasicProps, ThreeFlexPropsBase,
                            ThreeFlexItemBoxProps]
 
+ThreeMaterialType = Union[ThreeMaterialBase[TBaseComp], ThreeMaterialPropsBase]
 
 @dataclasses.dataclass
 class Object3dBaseProps(ThreeFlexItemBoxProps):
@@ -71,13 +94,15 @@ class Object3dBaseProps(ThreeFlexItemBoxProps):
     scale: Union[Vector3Type, Undefined] = undefined
     visible: Union[bool, Undefined] = undefined
 
+TO3dProp = TypeVar("TO3dProp", bound=Object3dBaseProps)
 
-class Object3dBase(ThreeComponentBase[Object3dBaseProps]):
+class Object3dBase(ThreeComponentBase[TO3dProp]):
     def __init__(self,
                  base_type: UIType,
+                 prop_cls: Type[TO3dProp],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, base_type, Object3dBaseProps, queue)
+        super().__init__(uid, base_type, prop_cls, queue)
 
     def get_state(self):
         state = super().get_state()
@@ -150,9 +175,96 @@ class Object3dBase(ThreeComponentBase[Object3dBaseProps]):
                                                       bool]] = None):
         """if not none, updated
         """
-        await self.queue.put(
+        await self.send_app_event_and_wait(
             self.update_object3d_event(position, rotation, up, scale, visible))
 
+
+class Object3dContainerBase(ContainerBase[TO3dProp, T_child]):
+    def __init__(self,
+                base_type: UIType,
+                     prop_cls: Type[TO3dProp],
+                 init_dict: Dict[str, T_child],
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 uid_to_comp: Optional[Dict[str, Component]] = None,
+                 inited: bool = False) -> None:
+        super().__init__(base_type, prop_cls, uid, queue,
+                         uid_to_comp, init_dict, inited)
+
+
+    def get_state(self):
+        state = super().get_state()
+        if not isinstance(self.props.position, Undefined):
+            state["position"] = self.props.position
+        if not isinstance(self.props.rotation, Undefined):
+            state["rotation"] = self.props.rotation
+        if not isinstance(self.props.scale, Undefined):
+            state["scale"] = self.props.scale
+        if not isinstance(self.props.up, Undefined):
+            state["up"] = self.props.up
+        if not isinstance(self.props.visible, Undefined):
+            state["visible"] = self.props.visible
+        return state
+
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        if "position" in state:
+            self.position = state["position"]
+        if "rotation" in state:
+            self.rotation = state["rotation"]
+        if "scale" in state:
+            self.scale = state["scale"]
+        if "up" in state:
+            self.up = state["up"]
+        if "visible" in state:
+            self.visible = state["visible"]
+
+    def update_object3d_event(self,
+                              position: Optional[Union[Vector3Type,
+                                                       Undefined]] = None,
+                              rotation: Optional[Union[Vector3Type,
+                                                       Undefined]] = None,
+                              up: Optional[Union[Vector3Type,
+                                                 Undefined]] = None,
+                              scale: Optional[Union[Vector3Type,
+                                                    Undefined]] = None,
+                              visible: Optional[Union[Undefined,
+                                                      bool]] = None):
+        """if not none, updated
+        """
+        upd: Dict[str, Any] = {}
+        if position is not None:
+            self.props.position = position
+            upd["position"] = position
+        if rotation is not None:
+            self.props.rotation = rotation
+            upd["rotation"] = rotation
+        if up is not None:
+            self.props.up = up
+            upd["up"] = up
+        if scale is not None:
+            self.props.scale = scale
+            upd["scale"] = scale
+        if visible is not None:
+            self.props.visible = visible
+            upd["visible"] = visible
+        return self.create_update_event(upd)
+
+    async def update_object3d(self,
+                              position: Optional[Union[Vector3Type,
+                                                       Undefined]] = None,
+                              rotation: Optional[Union[Vector3Type,
+                                                       Undefined]] = None,
+                              up: Optional[Union[Vector3Type,
+                                                 Undefined]] = None,
+                              scale: Optional[Union[Vector3Type,
+                                                    Undefined]] = None,
+                              visible: Optional[Union[Undefined,
+                                                      bool]] = None):
+        """if not none, updated
+        """
+        await self.send_app_event_and_wait(
+            self.update_object3d_event(position, rotation, up, scale, visible))
 
 class Points(ThreeComponentBase[ThreeBasicProps]):
     def __init__(self,
@@ -208,7 +320,7 @@ class Points(ThreeComponentBase[ThreeBasicProps]):
         self.colors = colors
         self.attrs = attrs
         self.attr_fields = attr_fields
-        await self.queue.put(self.create_update_event(upd))
+        await self.send_app_event_and_wait(self.create_update_event(upd))
 
     def get_state(self):
         state = super().get_state()
@@ -238,7 +350,7 @@ class Points(ThreeComponentBase[ThreeBasicProps]):
                 if "attrs" in state:
                     self.attrs = state["attrs"]
                 if "attrFields" in state:
-                    self.attrs = state["attrFields"]
+                    self.attr_fields = state["attrFields"]
                 if "size" in state:
                     self.size = state["size"]
                 if "sizeAttenuation" in state:
@@ -291,7 +403,7 @@ class Segments(ThreeComponentBase[ThreeBasicProps]):
 
         self.lines = lines.astype(np.float32)
         self.colors = colors
-        await self.queue.put(self.create_update_event(upd))
+        await self.send_app_event_and_wait(self.create_update_event(upd))
 
     def get_state(self):
         state = super().get_state()
@@ -317,12 +429,12 @@ class Segments(ThreeComponentBase[ThreeBasicProps]):
                     self.colors = state["colors"]
 
 
-class Boxes2D(Object3dBase):
+class Boxes2D(Object3dBase[Object3dBaseProps]):
     def __init__(self,
                  limit: int,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(UIType.ThreeBoxes2D, uid, queue)
+        super().__init__(UIType.ThreeBoxes2D, Object3dBaseProps, uid, queue)
         self.centers = np.zeros((0, 2), np.float32)
         self.dimersions = np.zeros((0, 2), np.float32)
         self.colors: Union[np.ndarray, Undefined] = undefined
@@ -373,7 +485,7 @@ class Boxes2D(Object3dBase):
             self.alpha = alpha
             upd["alpha"] = alpha
 
-        await self.queue.put(self.create_update_event(upd))
+        await self.send_app_event_and_wait(self.create_update_event(upd))
 
     def get_state(self):
         state = super().get_state()
@@ -402,7 +514,7 @@ class Boxes2D(Object3dBase):
                 self.attrs = state["attrs"] if "attrs" in state else undefined
 
 
-class BoundingBox(Object3dBase):
+class BoundingBox(Object3dBase[Object3dBaseProps]):
     def __init__(self,
                  dimersion: Vector3Type,
                  edgeWidth: float = 4,
@@ -413,7 +525,7 @@ class BoundingBox(Object3dBase):
                  edgeOpacity: float = 0.5,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(UIType.ThreeBoundingBox, uid, queue)
+        super().__init__(UIType.ThreeBoundingBox, Object3dBaseProps, uid, queue)
         self.dimersion = dimersion
         self.edgeWidth = edgeWidth
         self.edgeColor = edgeColor
@@ -474,79 +586,33 @@ class InfiniteGridHelper(ThreeComponentBase[ThreeBasicProps]):
         return res
 
 
-class Group(ContainerBase[Object3dBaseProps]):
+class Group(Object3dContainerBase[Object3dBaseProps, ThreeComponentType]):
     def __init__(self,
                  init_dict: Dict[str, ThreeComponentType],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        _init_dict_anno: Optional[Dict[str, Union[Component,
-                                                  BasicProps]]] = None
-        if init_dict is not None:
-            _init_dict_anno = {**init_dict}
-        super().__init__(UIType.ThreeGroup, Object3dBaseProps, uid, queue,
-                         uid_to_comp, _init_dict_anno, inited)
-
-    def get_state(self):
-        state = super().get_state()
-        state.update({
-            "position": self.props.position,
-            "rotation": self.props.rotation,
-            "scale": self.props.scale,
-            "up": self.props.up,
-            "visible": self.props.visible,
-        })
-        return state
-
-    async def update_object3d(self,
-                              position: Optional[Union[Vector3Type,
-                                                       Undefined]] = None,
-                              rotation: Optional[Union[Vector3Type,
-                                                       Undefined]] = None,
-                              up: Optional[Union[Vector3Type,
-                                                 Undefined]] = None,
-                              scale: Optional[Union[Vector3Type,
-                                                    Undefined]] = None,
-                              visible: Optional[Union[Undefined,
-                                                      bool]] = None):
-        """if not none, updated
-        """
-        upd: Dict[str, Any] = {}
-        if position is not None:
-            self.props.position = position
-            upd["position"] = position
-        if rotation is not None:
-            self.props.rotation = rotation
-            upd["rotation"] = rotation
-        if up is not None:
-            self.props.up = up
-            upd["up"] = up
-        if scale is not None:
-            self.props.scale = scale
-            upd["scale"] = scale
-        if visible is not None:
-            self.props.visible = visible
-            upd["visible"] = visible
-        await self.queue.put(self.create_update_event(upd))
+        super().__init__(UIType.ThreeGroup, Object3dBaseProps, init_dict, uid, queue,
+                         uid_to_comp, inited)
 
 
-class Image(Object3dBase):
+class Image(Object3dBase[Object3dBaseProps]):
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(UIType.ThreeImage, uid, queue)
+        super().__init__(UIType.ThreeImage, Object3dBaseProps, uid, queue)
         self.image_str: bytes = b""
 
     async def show(self, image: np.ndarray):
         encoded = _encode_image_bytes(image)
         self.image_str = encoded
-        await self.queue.put(self.create_update_event({
+        await self.send_app_event_and_wait(self.create_update_event({
             "image": encoded,
         }))
 
     async def show_raw(self, image_bytes: bytes, suffix: str):
-        await self.queue.put(self.show_raw_event(image_bytes, suffix))
+        await self.send_app_event_and_wait(self.show_raw_event(image_bytes, suffix))
 
     def show_raw_event(self, image_bytes: bytes, suffix: str):
         raw = b'data:image/' + suffix.encode(
@@ -562,7 +628,7 @@ class Image(Object3dBase):
         return state
 
 
-class PerspectiveCamera(Object3dBase):
+class PerspectiveCamera(Object3dBase[Object3dBaseProps]):
     def __init__(self,
                  makeDefault: bool,
                  fov: Union[float, Undefined] = undefined,
@@ -571,7 +637,7 @@ class PerspectiveCamera(Object3dBase):
                  far: Union[float, Undefined] = undefined,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(UIType.ThreePerspectiveCamera, uid, queue)
+        super().__init__(UIType.ThreePerspectiveCamera, Object3dBaseProps, uid, queue)
         self.fov = fov
         self.aspect = aspect
         self.near = near
@@ -603,7 +669,7 @@ class PerspectiveCamera(Object3dBase):
         if far is not None:
             self.far = far
             upd["far"] = far
-        await self.queue.put(self.create_update_event(upd))
+        await self.send_app_event_and_wait(self.create_update_event(upd))
 
     def get_state(self):
         state = super().get_state()
@@ -616,7 +682,7 @@ class PerspectiveCamera(Object3dBase):
         return state
 
 
-class OrthographicCamera(Object3dBase):
+class OrthographicCamera(Object3dBase[Object3dBaseProps]):
     def __init__(self,
                  makeDefault: bool,
                  near: Optional[float] = None,
@@ -624,7 +690,7 @@ class OrthographicCamera(Object3dBase):
                  zoom: Optional[float] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(UIType.ThreeOrthographicCamera, uid, queue)
+        super().__init__(UIType.ThreeOrthographicCamera, Object3dBaseProps, uid, queue)
         self.zoom = zoom
         self.near = near
         self.far = far
@@ -650,7 +716,7 @@ class OrthographicCamera(Object3dBase):
         if far is not None:
             self.far = far
             upd["far"] = far
-        await self.queue.put(self.create_update_event(upd))
+        await self.send_app_event_and_wait(self.create_update_event(upd))
 
     def get_state(self):
         state = super().get_state()
@@ -698,7 +764,7 @@ class MapControl(ThreeComponentBase[ThreeBasicProps]):
         self.minDistance = minDistance
         self.maxDistance = maxDistance
         self.maxPolarAngle = maxPolarAngle
-        await self.queue.put(self.create_update_event(upd))
+        await self.send_app_event_and_wait(self.create_update_event(upd))
 
     def get_state(self):
         state = super().get_state()
@@ -752,7 +818,7 @@ class OrbitControl(ThreeComponentBase[ThreeBasicProps]):
         self.minDistance = minDistance
         self.maxDistance = maxDistance
         self.maxPolarAngle = maxPolarAngle
-        await self.queue.put(self.create_update_event(upd))
+        await self.send_app_event_and_wait(self.create_update_event(upd))
 
     def get_state(self):
         state = super().get_state()
@@ -813,25 +879,20 @@ class FirstPersonControl(ThreeComponentBase[FirstPersonControlProps]):
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.ThreePointerLockControl,
+        super().__init__(uid, UIType.ThreeFirstPersonControl,
                          FirstPersonControlProps, queue)
 
 
-class ThreeCanvas(ContainerBase[ThreeBasicProps]):
+class ThreeCanvas(ContainerBase[ThreeBasicProps, ThreeComponentType]):
     def __init__(self,
-                 init_dict: Dict[str, Union[ThreeComponentBase,
-                                            ThreeBasicProps]],
+                 init_dict: Dict[str, ThreeComponentType],
                  background: Union[str, Undefined] = undefined,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        _init_dict_anno: Optional[Dict[str, Union[Component,
-                                                  BasicProps]]] = None
-        if init_dict is not None:
-            _init_dict_anno = {**init_dict}
         super().__init__(UIType.ThreeCanvas, ThreeBasicProps, uid, queue,
-                         uid_to_comp, _init_dict_anno, inited)
+                         uid_to_comp, init_dict, inited)
         self.background = background
 
     def to_dict(self):
@@ -850,22 +911,18 @@ class ThreeFlexProps(ThreeFlexPropsBase):
     scale_factor: Union[int, Undefined] = undefined
 
 
-class Flex(ContainerBase[ThreeFlexProps]):
+class Flex(ContainerBase[ThreeFlexProps, ThreeComponentType]):
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  _init_dict: Optional[Dict[str, ThreeComponentType]] = None,
                  inited: bool = False) -> None:
-        _init_dict_anno: Optional[Dict[str, Union[Component,
-                                                  BasicProps]]] = None
-        if _init_dict is not None:
-            _init_dict_anno = {**_init_dict}
         super().__init__(UIType.ThreeFlex, ThreeFlexProps, uid, queue,
-                         uid_to_comp, _init_dict_anno, inited)
+                         uid_to_comp, _init_dict, inited)
 
 
-class ItemBox(ContainerBase[ThreeFlexItemBoxProps]):
+class ItemBox(ContainerBase[ThreeFlexItemBoxProps, ThreeComponentType]):
     """if a three item have flex item prop enabled, it will
     be wrapped with a ItemBox automatically.
     """
@@ -875,12 +932,8 @@ class ItemBox(ContainerBase[ThreeFlexItemBoxProps]):
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  _init_dict: Optional[Dict[str, ThreeComponentType]] = None,
                  inited: bool = False) -> None:
-        _init_dict_anno: Optional[Dict[str, Union[Component,
-                                                  BasicProps]]] = None
-        if _init_dict is not None:
-            _init_dict_anno = {**_init_dict}
         super().__init__(UIType.ThreeFlexItemBox, ThreeFlexItemBoxProps, uid,
-                         queue, uid_to_comp, _init_dict_anno, inited)
+                         queue, uid_to_comp, _init_dict, inited)
 
 
 PointerEventsProperties = Union[Literal["auto"], Literal["none"],
@@ -907,7 +960,7 @@ class HtmlProps(Object3dBaseProps):
     occlude: Union[bool, Undefined] = undefined
 
 
-class Html(ContainerBase[HtmlProps]):
+class Html(Object3dContainerBase[HtmlProps, MUIComponentType]):
     """we can use MUI components only in Html.
     """
     def __init__(self,
@@ -916,51 +969,98 @@ class Html(ContainerBase[HtmlProps]):
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        _init_dict_anno: Optional[Dict[str, Union[Component,
-                                                  BasicProps]]] = None
-        if init_dict is not None:
-            _init_dict_anno = {**init_dict}
-        super().__init__(UIType.ThreeHtml, HtmlProps, uid, queue, uid_to_comp,
-                         _init_dict_anno, inited)
+        super().__init__(UIType.ThreeHtml, HtmlProps, init_dict, uid, queue, uid_to_comp, inited)
+
+
+@dataclasses.dataclass
+class TextProps(Object3dBaseProps):
+    characters: Union[str, Undefined] = undefined 
+    color: Union[str, Undefined] = undefined 
+    font_size: Union[NumberType, Undefined] = undefined
+    max_width: Union[NumberType, Undefined] = undefined
+    line_height: Union[NumberType, Undefined] = undefined
+    letter_spacing: Union[NumberType, Undefined] = undefined
+    text_align: Union[Literal["left", "right", "center", "justify"], Undefined] = undefined
+    font: Union[str, Undefined] = undefined
+    anchor_x: Union[NumberType, Literal["left", "center", "right"], Undefined] = undefined
+    anchor_y: Union[NumberType, Literal["top", "top-baseline", "middle", "bottom-baseline", "bottom"], Undefined] = undefined
+    clip_rect: Union[Tuple[NumberType, NumberType, NumberType, NumberType], Undefined] = undefined
+    depth_offset: Union[NumberType, Undefined] = undefined
+    direction: Union[Literal["auto", "ltr", "rtl"], Undefined] = undefined
+    overflow_wrap: Union[Literal["normal", "break-word"], Undefined] = undefined
+    white_space: Union[Literal['normal', 'overflowWrap'], Undefined] = undefined
+    outline_width: Union[ValueType, Undefined] = undefined
+    outline_offsetX: Union[ValueType, Undefined] = undefined
+    outline_offsetY: Union[ValueType, Undefined] = undefined
+    outline_blur: Union[ValueType, Undefined] = undefined
+    outline_color: Union[str, Undefined] = undefined
+    outline_opacity: Union[NumberType, Undefined] = undefined
+    stroke_width: Union[ValueType, Undefined] = undefined
+    stroke_color: Union[NumberType, Undefined] = undefined
+    stroke_opacity: Union[NumberType, Undefined] = undefined
+    fill_opacity: Union[NumberType, Undefined] = undefined
+
+class Text(ThreeComponentBase[TextProps]):
+    """we can use MUI components only in Html.
+    """
+    def __init__(self,
+                init: str,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.ThreeText,
+                         TextProps, queue)
+        self.value = init
 
     def get_state(self):
         state = super().get_state()
         state.update({
-            "position": self.props.position,
-            "rotation": self.props.rotation,
-            "scale": self.props.scale,
-            "up": self.props.up,
-            "visible": self.props.visible,
+            "value": self.props.position,
         })
         return state
 
-    async def update_object3d(self,
-                              position: Optional[Union[Vector3Type,
-                                                       Undefined]] = None,
-                              rotation: Optional[Union[Vector3Type,
-                                                       Undefined]] = None,
-                              up: Optional[Union[Vector3Type,
-                                                 Undefined]] = None,
-                              scale: Optional[Union[Vector3Type,
-                                                    Undefined]] = None,
-                              visible: Optional[Union[Undefined,
-                                                      bool]] = None):
-        """if not none, updated
-        """
-        upd: Dict[str, Any] = {}
-        if position is not None:
-            self.props.position = position
-            upd["position"] = position
-        if rotation is not None:
-            self.props.rotation = rotation
-            upd["rotation"] = rotation
-        if up is not None:
-            self.props.up = up
-            upd["up"] = up
-        if scale is not None:
-            self.props.scale = scale
-            upd["scale"] = scale
-        if visible is not None:
-            self.props.visible = visible
-            upd["visible"] = visible
-        await self.queue.put(self.create_update_event(upd))
+    async def update_value(self,
+                              value: str):
+        self.value = value 
+        upd: Dict[str, Any] = {"value": value}
+        await self.send_app_event_and_wait(self.create_update_event(upd))
+
+
+
+ShapeTypes = Literal["box", "circle", "cone", "cylinder", "sphere", "plane", "tube", "torus", "torusKnot",
+    "tetrahedron", "ring", "polyhedron", "icosahedron", "octahedron", "dodecahedron", "extrude", "lathe", "capsule"]
+
+
+@dataclasses.dataclass
+class ShapeProps(Object3dBaseProps):
+    shape_type: ShapeTypes = "box" 
+    shape_args: Union[List[Union[int, float, bool]], Undefined] = undefined 
+
+class Shape(Object3dContainerBase[ShapeProps, ThreeMaterialBase[T_material_prop]]):
+    """we can use MUI components only in Html.
+    """
+    def __init__(self,
+                 type: ShapeTypes,
+                 material: Dict[str, ThreeMaterialBase[T_material_prop]],
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 uid_to_comp: Optional[Dict[str, Component]] = None,
+                 inited: bool = False) -> None:
+        assert len(material) == 1, "only one material allowed"
+        super().__init__(UIType.ThreeShape, ShapeProps, material, uid, queue, uid_to_comp,
+                         inited)
+        self.props.shape_type = type
+
+@dataclasses.dataclass
+class MeshBasicMaterialProps(ThreeMaterialPropsBase):
+    color: Union[str, Undefined] = undefined 
+    wire_frame: Union[bool, Undefined] = undefined 
+    vertex_colors: Union[bool, Undefined] = undefined 
+    fog: Union[bool, Undefined] = undefined 
+
+@dataclasses.dataclass
+class MeshStandardMaterialProps(MeshBasicMaterialProps):
+    emissive: Union[str, Undefined] = undefined 
+    roughness: Union[NumberType, Undefined] = undefined 
+    metalness: Union[NumberType, Undefined] = undefined 
+    flag_shading: Union[bool, Undefined] = undefined 
+

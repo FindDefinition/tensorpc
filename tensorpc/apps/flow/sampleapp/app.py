@@ -433,7 +433,7 @@ class SampleThreeApp(EditableApp):
         #                               zoom=8.0)
         self.img = three.Image()
         ctrl = three.MapControl(True, 0.25, 1, 100)
-        # ctrl2 = three.PointerLockControl()
+        # ctrl = three.FirstPersonControl()
 
         # ctrl = three.OrbitControl(True, 0.25, 1, 100)
         infgrid = three.InfiniteGridHelper(5, 50, "gray")

@@ -19,16 +19,15 @@ import io
 import time
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Tuple, Type, TypeVar, Union)
-from typing_extensions import TypeAlias
+from typing_extensions import Literal, TypeAlias
 import numpy as np
 from PIL import Image as PILImage
 import json
 from ..core import (AppEvent, BasicProps, Component, ComponentBaseProps,
                     ContainerBase, TaskLoopEvent, UIEvent, UIType, Undefined,
-                    undefined, T)
+                    undefined, TBaseComp, ValueType)
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
-ValueType: TypeAlias = Union[int, float, str]
 
 
 def _encode_image_bytes(img: np.ndarray):
@@ -49,11 +48,11 @@ class MUIComponentBaseProps(ComponentBaseProps):
     pass
 
 
-class MUIComponentBase(Component[T]):
+class MUIComponentBase(Component[TBaseComp, "MUIComponentType"]):
     pass
 
 
-class MUIContainerBase(ContainerBase[T]):
+class MUIContainerBase(ContainerBase[TBaseComp, "MUIComponentType"]):
     pass
 
 
@@ -66,7 +65,6 @@ class FlexBoxProps(ComponentBaseProps):
     flex_direction: Union[str, Undefined] = undefined
     flex_wrap: Union[str, Undefined] = undefined
     flex_flow: Union[str, Undefined] = undefined
-    overflow: Union[str, Undefined] = undefined
 
 
 # we can't let mui use three component.
@@ -75,7 +73,7 @@ class MUIFlexBoxProps(FlexBoxProps):
     pass
 
 
-MUIComponentType = Union[MUIBasicProps, MUIComponentBase, MUIContainerBase,
+MUIComponentType: TypeAlias = Union[MUIBasicProps, MUIComponentBase[TBaseComp], MUIContainerBase[TBaseComp],
                          MUIFlexBoxProps, MUIComponentBaseProps]
 
 
@@ -234,7 +232,7 @@ class ListItemText(MUIComponentBase[MUIComponentBaseProps]):
 
 class Divider(MUIComponentBase[MUIComponentBaseProps]):
     def __init__(self,
-                 orientation: str = "horizontal",
+                 orientation: Union[Literal["horizontal"], Literal["vertical"]] = "horizontal",
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
         super().__init__(uid, UIType.Divider, MUIComponentBaseProps, queue)
@@ -244,7 +242,7 @@ class Divider(MUIComponentBase[MUIComponentBaseProps]):
     def to_dict(self):
         res = super().to_dict()
         res["orientation"] = self.orientation
-
+        return res 
 
 class Button(MUIComponentBase[MUIComponentBaseProps]):
     def __init__(self,
@@ -327,8 +325,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps]):
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
-                 _init_dict: Optional[Dict[str, Union[Component,
-                                                      BasicProps]]] = None,
+                 _init_dict: Optional[Dict[str, MUIComponentType]] = None,
                  base_type: UIType = UIType.FlexBox,
                  inited: bool = False) -> None:
         super().__init__(base_type, MUIFlexBoxProps, uid, queue, uid_to_comp,
@@ -340,8 +337,7 @@ class MUIList(MUIContainerBase[MUIFlexBoxProps]):
                  uid: str,
                  queue: asyncio.Queue,
                  uid_to_comp: Dict[str, Component],
-                 _init_dict: Optional[Dict[str, Union[Component,
-                                                      BasicProps]]] = None,
+                 _init_dict: Optional[Dict[str, MUIComponentType]] = None,
                  subheader: str = "",
                  inited: bool = False) -> None:
         super().__init__(UIType.MUIList,
@@ -364,23 +360,23 @@ class MUIList(MUIContainerBase[MUIFlexBoxProps]):
             self.subheader = state["subheader"]
 
 
-def VBox(layout: Dict[str, Union[Component, BasicProps]]):
+def VBox(layout: Dict[str, MUIComponentType]):
     res = FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
     res.prop(flex_flow="column nowrap")
     return res
 
 
-def HBox(layout: Dict[str, Union[Component, BasicProps]], ):
+def HBox(layout: Dict[str, MUIComponentType], ):
     res = FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
     res.prop(flex_flow="row nowrap")
     return res
 
 
-def Box(layout: Dict[str, Union[Component, BasicProps]]):
+def Box(layout: Dict[str, MUIComponentType]):
     return FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
 
 
-def VList(layout: Dict[str, Union[Component, BasicProps]],
+def VList(layout: Dict[str, MUIComponentType],
           subheader: str = ""):
     return MUIList("",
                    asyncio.Queue(), {},
