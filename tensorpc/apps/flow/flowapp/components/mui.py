@@ -23,8 +23,10 @@ from typing_extensions import Literal, TypeAlias
 import numpy as np
 from PIL import Image as PILImage
 import json
+
+from tensorpc.core.asynctools import cancel_task
 from ..core import (AppEvent, BasicProps, Component, ComponentBaseProps,
-                    ContainerBase, TaskLoopEvent, UIEvent, UIType, Undefined,
+                    ContainerBase, TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
                     undefined, TBaseComp, ValueType)
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
@@ -71,6 +73,34 @@ class FlexBoxProps(ComponentBaseProps):
 @dataclasses.dataclass
 class MUIFlexBoxProps(FlexBoxProps):
     pass
+
+async def _handle_standard_event(comp: Component, data: Any):
+    if comp._status == UIRunStatus.Running:
+        # TODO send exception if ignored click
+        print("IGNORE EVENT", comp._status)
+        return
+    elif comp._status == UIRunStatus.Stop:
+        cb1 = comp.get_callback()
+        comp.state_change_callback(data)
+        if cb1 is not None:
+
+            def ccb(cb):
+                return lambda: cb(data)
+
+            comp._task = asyncio.create_task(
+                comp.run_callback(ccb(cb1), True))
+        else:
+            await comp.sync_status(True)
+
+async def _handle_button_event(comp: Union["Button", "ListItemButton"], data: Any):
+    if comp._status == UIRunStatus.Running:
+        # TODO send exception if ignored click
+        print("IGNORE EVENT", comp._status)
+        return
+    elif comp._status == UIRunStatus.Stop:
+        cb2 = comp.callback
+        comp._task = asyncio.create_task(
+            comp.run_callback(lambda: cb2()))
 
 
 MUIComponentType: TypeAlias = Union[MUIBasicProps, MUIComponentBase[TBaseComp], MUIContainerBase[TBaseComp],
@@ -268,7 +298,10 @@ class Button(MUIComponentBase[MUIComponentBaseProps]):
     def set_callback(self, val: Any):
         self.callback = val
 
+    async def handle_event(self, ev: Any):
+        await _handle_button_event(self, ev)
 
+    
 class ListItemButton(MUIComponentBase[MUIComponentBaseProps]):
     def __init__(self,
                  name: str,
@@ -294,6 +327,8 @@ class ListItemButton(MUIComponentBase[MUIComponentBaseProps]):
     def set_callback(self, val: Any):
         self.callback = val
 
+    async def handle_event(self, ev: Any):
+        await _handle_button_event(self, ev)
 
 class Buttons(MUIComponentBase[MUIComponentBaseProps]):
     def __init__(self,
@@ -319,6 +354,14 @@ class Buttons(MUIComponentBase[MUIComponentBaseProps]):
     def set_callback(self, val: Any):
         self.callback = val
 
+    async def handle_event(self, ev: Any):
+        if self._status == UIRunStatus.Running:
+            # TODO send exception if ignored click
+            print("IGNORE EVENT", self._status)
+            return
+        elif self._status == UIRunStatus.Stop:
+            self._task = asyncio.create_task(
+                self.run_callback(lambda: self.callback(ev)))
 
 class FlexBox(MUIContainerBase[MUIFlexBoxProps]):
     def __init__(self,
@@ -432,6 +475,8 @@ class RadioGroup(MUIComponentBase[MUIComponentBaseProps]):
     def set_callback(self, val: Any):
         self.callback = val
 
+    async def handle_event(self, ev: Any):
+        await _handle_standard_event(self, ev)
 
 class Input(MUIComponentBase[MUIComponentBaseProps]):
     def __init__(self,
@@ -487,6 +532,23 @@ class Input(MUIComponentBase[MUIComponentBaseProps]):
     def int(self):
         return int(self.value)
 
+    async def handle_event(self, ev: Any):
+
+        if self._status == UIRunStatus.Running:
+            # TODO send exception if ignored click
+            print("IGNORE EVENT", self._status)
+            return
+        elif self._status == UIRunStatus.Stop:
+            cb = self.callback
+            self.state_change_callback(ev)
+            # we can't update input state
+            # because input is an uncontrolled
+            # component.
+            if cb is not None:
+                def ccb(cb):
+                    return lambda: cb(ev)
+                self._task = asyncio.create_task(
+                    self.run_callback(ccb(cb)))
 
 # class CodeEditor(MUIComponentBase[MUIComponentBaseProps]):
 
@@ -555,6 +617,8 @@ class Switch(MUIComponentBase[MUIComponentBaseProps]):
     def __bool__(self):
         return self.checked
 
+    async def handle_event(self, ev: Any):
+        await _handle_standard_event(self, ev)
 
 class Select(MUIComponentBase[MUIComponentBaseProps]):
     def __init__(self,
@@ -624,6 +688,8 @@ class Select(MUIComponentBase[MUIComponentBaseProps]):
     def set_callback(self, val: Any):
         self.callback = val
 
+    async def handle_event(self, ev: Any):
+        await _handle_standard_event(self, ev)
 
 class MultipleSelect(MUIComponentBase[MUIComponentBaseProps]):
     def __init__(self,
@@ -699,6 +765,8 @@ class MultipleSelect(MUIComponentBase[MUIComponentBaseProps]):
     def set_callback(self, val: Any):
         self.callback = val
 
+    async def handle_event(self, ev: Any):
+        await _handle_standard_event(self, ev)
 
 class Slider(MUIComponentBase[MUIComponentBaseProps]):
     def __init__(self,
@@ -759,6 +827,8 @@ class Slider(MUIComponentBase[MUIComponentBaseProps]):
     def set_callback(self, val: Any):
         self.callback = val
 
+    async def handle_event(self, ev: Any):
+        await _handle_standard_event(self, ev)
 
 _T = TypeVar("_T")
 
@@ -837,3 +907,28 @@ class TaskLoop(MUIComponentBase[MUIComponentBaseProps]):
 
     def set_callback(self, val: Any):
         self.loop_callbcak = val
+
+    async def handle_event(self, data: Any):
+        if data == TaskLoopEvent.Start.value:
+            if self._status == UIRunStatus.Stop:
+                self._task = asyncio.create_task(
+                    self.run_callback(self.loop_callbcak))
+            else:
+                print("IGNORE TaskLoop EVENT", self._status)
+        elif data == TaskLoopEvent.Pause.value:
+            if self._status == UIRunStatus.Running:
+                # pause
+                self.pause_event.clear()
+                self._status = UIRunStatus.Pause
+            elif self._status == UIRunStatus.Pause:
+                self.pause_event.set()
+                self._status = UIRunStatus.Running
+            else:
+                print("IGNORE TaskLoop EVENT", self._status)
+        elif data == TaskLoopEvent.Stop.value:
+            if self._status == UIRunStatus.Running:
+                await cancel_task(self._task)
+            else:
+                print("IGNORE TaskLoop EVENT", self._status)
+        else:
+            raise NotImplementedError

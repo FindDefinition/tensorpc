@@ -281,95 +281,11 @@ class App:
             })
         await self._send_editor_event(app_ev)
 
-    async def _handle_control_event(self, ev: UIEvent):
-        # TODO run control fron other component
+    async def handle_event(self, ev: UIEvent):
+        # TODO run control from other component
         for uid, data in ev.uid_to_data.items():
             comp = self._uid_to_comp[uid]
-            # sync state after every callback
-            if isinstance(comp, (mui.Switch, mui.Select, mui.MultipleSelect,
-                                 mui.Slider, mui.RadioGroup)):
-                if comp._status == UIRunStatus.Running:
-                    # TODO send exception if ignored click
-                    print("IGNORE EVENT", comp._status)
-                    return
-                elif comp._status == UIRunStatus.Stop:
-                    cb1 = comp.callback
-                    comp.state_change_callback(data)
-                    if cb1 is not None:
-
-                        def ccb(cb):
-                            return lambda: cb(data)
-
-                        comp._task = asyncio.create_task(
-                            comp.run_callback(ccb(cb1), True))
-                    else:
-                        await comp.sync_status(True)
-            # no sync state
-            elif isinstance(comp, (mui.Input, )):
-                if comp._status == UIRunStatus.Running:
-                    # TODO send exception if ignored click
-                    print("IGNORE EVENT", comp._status)
-                    return
-                elif comp._status == UIRunStatus.Stop:
-                    cb = comp.callback
-                    comp.state_change_callback(data)
-                    # we can't update input state
-                    # because input is an uncontrolled
-                    # component.
-                    if cb is not None:
-
-                        def ccb(cb):
-                            return lambda: cb(data)
-
-                        comp._task = asyncio.create_task(
-                            comp.run_callback(ccb(cb)))
-                    # else:
-                    #     await comp.sync_status(True)
-
-            elif isinstance(comp, (mui.Button, mui.ListItemButton)):
-                if comp._status == UIRunStatus.Running:
-                    # TODO send exception if ignored click
-                    print("IGNORE EVENT", comp._status)
-                    return
-                elif comp._status == UIRunStatus.Stop:
-                    cb2 = comp.callback
-                    comp._task = asyncio.create_task(
-                        comp.run_callback(lambda: cb2()))
-            elif isinstance(comp, (mui.Buttons)):
-                if comp._status == UIRunStatus.Running:
-                    # TODO send exception if ignored click
-                    print("IGNORE EVENT", comp._status)
-                    return
-                elif comp._status == UIRunStatus.Stop:
-                    cb3 = comp.callback
-                    comp._task = asyncio.create_task(
-                        comp.run_callback(lambda: cb3(data)))
-            elif isinstance(comp, mui.TaskLoop):
-                if data == TaskLoopEvent.Start.value:
-                    if comp._status == UIRunStatus.Stop:
-                        comp._task = asyncio.create_task(
-                            comp.run_callback(comp.loop_callbcak))
-                    else:
-                        print("IGNORE TaskLoop EVENT", comp._status)
-                elif data == TaskLoopEvent.Pause.value:
-                    if comp._status == UIRunStatus.Running:
-                        # pause
-                        comp.pause_event.clear()
-                        comp._status = UIRunStatus.Pause
-                    elif comp._status == UIRunStatus.Pause:
-                        comp.pause_event.set()
-                        comp._status = UIRunStatus.Running
-                    else:
-                        print("IGNORE TaskLoop EVENT", comp._status)
-                elif data == TaskLoopEvent.Stop.value:
-                    if comp._status == UIRunStatus.Running:
-                        await cancel_task(comp._task)
-                    else:
-                        print("IGNORE TaskLoop EVENT", comp._status)
-                else:
-                    raise NotImplementedError
-            else:
-                raise NotImplementedError
+            await comp.handle_event(data)
 
     async def copy_text_to_clipboard(self, text: str):
         """copy to clipboard in frontend."""

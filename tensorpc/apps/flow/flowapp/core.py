@@ -84,6 +84,8 @@ class UIType(enum.Enum):
     ThreeFlex = 0x1005
     ThreeFlexItemBox = 0x1006
     ThreeHtml = 0x1007
+    
+    ThreeHud = 0x1008
 
     ThreeMapControl = 0x1010
     ThreeOrbitControl = 0x1011
@@ -100,6 +102,8 @@ class UIType(enum.Enum):
     ThreeText = 0x1026
     ThreeShape = 0x1027
     ThreeMeshMaterial = 0x1028
+    ThreeMesh = 0x1029
+    ThreeBufferGeometry = 0x102a
 
 
 class AppEventType(enum.Enum):
@@ -615,6 +619,9 @@ class Component(Generic[TBaseComp, T_child]):
     def set_callback(self, val: Any):
         return
 
+    async def handle_event(self, ev: Any):
+        pass
+
     async def _clear(self):
         self.uid = ""
         # self._queue = None
@@ -632,12 +639,14 @@ class Component(Generic[TBaseComp, T_child]):
 
     def to_dict(self):
         """undefined will be removed here.
+        if you reimplement to_dict, you need to use 
+        camel name, no conversion provided.
         """
         state = self.get_state()
         newstate = {}
         for k, v in state.items():
             if not isinstance(v, Undefined):
-                newstate[k] = v
+                newstate[snake_to_camel(k)] = v
         # TODO better way to resolve type anno problem
         static, _ = self.__props.get_dict_and_undefined(state)  # type: ignore
         static["state"] = newstate
@@ -664,6 +673,7 @@ class Component(Generic[TBaseComp, T_child]):
         data_no_und = {}
         data_unds = []
         for k, v in data.items():
+            k = snake_to_camel(k)
             if isinstance(v, Undefined):
                 data_unds.append(k)
             else:
@@ -701,6 +711,8 @@ class Component(Generic[TBaseComp, T_child]):
                 await coro
         except:
             traceback.print_exc()
+            # TODO send exception to frontend
+            
             raise
         finally:
             self.__props.status = UIRunStatus.Stop.value  # type: ignore
