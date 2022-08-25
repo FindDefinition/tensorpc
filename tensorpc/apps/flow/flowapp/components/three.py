@@ -145,12 +145,6 @@ class Object3dBaseProps(ThreeFlexItemBoxProps):
     #   type
     #   stopPropagation
     # }
-    used_events: Union[List[dict], Undefined] = undefined
-
-
-@dataclasses.dataclass
-class O3dWithEventBaseProps(Object3dBaseProps):
-    used_events: Union[List[dict], Undefined] = undefined
 
 
 @dataclasses.dataclass
@@ -159,11 +153,9 @@ class MeshProps(Object3dBaseProps):
 
 
 T_o3d_prop = TypeVar("T_o3d_prop", bound=Object3dBaseProps)
-T_o3d_ev_prop = TypeVar("T_o3d_ev_prop", bound=O3dWithEventBaseProps)
 
 
 class Object3dBase(ThreeComponentBase[T_o3d_prop]):
-
     def __init__(self,
                  base_type: UIType,
                  prop_cls: Type[T_o3d_prop],
@@ -257,7 +249,6 @@ class Object3dBase(ThreeComponentBase[T_o3d_prop]):
 
 
 class EventCallback:
-
     def __init__(self,
                  cb: Callable[[Any], _CORO_NONE],
                  stop_propagation: bool = False) -> None:
@@ -268,11 +259,10 @@ class EventCallback:
 PointerEventCBType: TypeAlias = EventCallback
 
 
-class Object3dWithEventBase(Object3dBase[T_o3d_ev_prop]):
-
+class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
     def __init__(self,
                  base_type: UIType,
-                 prop_cls: Type[T_o3d_ev_prop],
+                 prop_cls: Type[T_o3d_prop],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
         super().__init__(base_type, prop_cls, uid, queue)
@@ -293,13 +283,13 @@ class Object3dWithEventBase(Object3dBase[T_o3d_ev_prop]):
 
     def to_dict(self):
         res = super().to_dict()
-        evs = {}
+        evs = []
         for k, v in self._pointer_event_map.items():
             if not isinstance(v, Undefined):
-                evs[k] = {
+                evs.append({
                     "type": k.value,
                     "stopPropagation": v.stop_propagation
-                }
+                })
         res["usedEvents"] = evs
         return res
 
@@ -349,21 +339,16 @@ class Object3dWithEventBase(Object3dBase[T_o3d_ev_prop]):
             print("IGNORE EVENT", self._status)
             return
         elif self._status == UIRunStatus.Stop:
-            cb1 = self.get_callback()
             self.state_change_callback(data)
-            if cb1 is not None:
 
-                def ccb(cb):
-                    return lambda: cb(data)
+            def ccb(cb):
+                return lambda: cb(data)
 
-                self._task = asyncio.create_task(
-                    self.run_callback(ccb(handler.cb), True))
-            else:
-                await self.sync_status(True)
+            self._task = asyncio.create_task(
+                self.run_callback(ccb(handler.cb), True))
 
 
 class Object3dContainerBase(ContainerBase[T_o3d_prop, T_child]):
-
     def __init__(self,
                  base_type: UIType,
                  prop_cls: Type[T_o3d_prop],
@@ -460,11 +445,10 @@ class Object3dContainerBase(ContainerBase[T_o3d_prop, T_child]):
             self.update_object3d_event(position, rotation, up, scale, visible))
 
 
-class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_ev_prop, T_child]):
-
+class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_prop, T_child]):
     def __init__(self,
                  base_type: UIType,
-                 prop_cls: Type[T_o3d_ev_prop],
+                 prop_cls: Type[T_o3d_prop],
                  init_dict: Dict[str, T_child],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
@@ -489,13 +473,13 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_ev_prop, T_child]):
 
     def to_dict(self):
         res = super().to_dict()
-        evs = {}
+        evs = []
         for k, v in self._pointer_event_map.items():
             if not isinstance(v, Undefined):
-                evs[k] = {
+                evs.append({
                     "type": k.value,
                     "stopPropagation": v.stop_propagation
-                }
+                })
         res["usedEvents"] = evs
         return res
 
@@ -545,21 +529,17 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_ev_prop, T_child]):
             print("IGNORE EVENT", self._status)
             return
         elif self._status == UIRunStatus.Stop:
-            cb1 = self.get_callback()
             self.state_change_callback(data)
-            if cb1 is not None:
 
-                def ccb(cb):
-                    return lambda: cb(data)
+            def ccb(cb):
+                return lambda: cb(data)
 
-                self._task = asyncio.create_task(
-                    self.run_callback(ccb(handler.cb), True))
-            else:
-                await self.sync_status(True)
+            print(self._status)
+            self._task = asyncio.create_task(
+                self.run_callback(ccb(handler.cb), True))
 
 
 class Points(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  limit: int,
                  uid: str = "",
@@ -651,7 +631,6 @@ class Points(ThreeComponentBase[ThreeBasicProps]):
 
 
 class Segments(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  limit: int,
                  line_width: float = 1.0,
@@ -723,14 +702,12 @@ class Segments(ThreeComponentBase[ThreeBasicProps]):
                     self.colors = state["colors"]
 
 
-class Boxes2D(Object3dWithEventBase[O3dWithEventBaseProps]):
-
+class Boxes2D(Object3dWithEventBase[Object3dBaseProps]):
     def __init__(self,
                  limit: int,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(UIType.ThreeBoxes2D, O3dWithEventBaseProps, uid,
-                         queue)
+        super().__init__(UIType.ThreeBoxes2D, Object3dBaseProps, uid, queue)
         self.centers = np.zeros((0, 2), np.float32)
         self.dimersions = np.zeros((0, 2), np.float32)
         self.colors: Union[np.ndarray, Undefined] = undefined
@@ -810,8 +787,7 @@ class Boxes2D(Object3dWithEventBase[O3dWithEventBaseProps]):
                 self.attrs = state["attrs"] if "attrs" in state else undefined
 
 
-class BoundingBox(Object3dWithEventBase[O3dWithEventBaseProps]):
-
+class BoundingBox(Object3dWithEventBase[Object3dBaseProps]):
     def __init__(self,
                  dimersion: Vector3Type,
                  edgeWidth: float = 4,
@@ -822,7 +798,7 @@ class BoundingBox(Object3dWithEventBase[O3dWithEventBaseProps]):
                  edgeOpacity: float = 0.5,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(UIType.ThreeBoundingBox, O3dWithEventBaseProps, uid,
+        super().__init__(UIType.ThreeBoundingBox, Object3dBaseProps, uid,
                          queue)
         self.dimersion = dimersion
         self.edgeWidth = edgeWidth
@@ -847,7 +823,6 @@ class BoundingBox(Object3dWithEventBase[O3dWithEventBaseProps]):
 
 
 class AxesHelper(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  length: float,
                  uid: str = "",
@@ -862,7 +837,6 @@ class AxesHelper(ThreeComponentBase[ThreeBasicProps]):
 
 
 class InfiniteGridHelper(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  size1: float,
                  size2: float,
@@ -898,12 +872,11 @@ class Group(Object3dContainerBase[Object3dBaseProps, ThreeComponentType]):
                          queue, uid_to_comp, inited)
 
 
-class Image(Object3dWithEventBase[O3dWithEventBaseProps]):
-
+class Image(Object3dWithEventBase[Object3dBaseProps]):
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(UIType.ThreeImage, O3dWithEventBaseProps, uid, queue)
+        super().__init__(UIType.ThreeImage, Object3dBaseProps, uid, queue)
         self.image_str: bytes = b""
 
     async def show(self, image: np.ndarray):
@@ -933,7 +906,6 @@ class Image(Object3dWithEventBase[O3dWithEventBaseProps]):
 
 
 class PerspectiveCamera(Object3dBase[Object3dBaseProps]):
-
     def __init__(self,
                  makeDefault: bool,
                  fov: Union[float, Undefined] = undefined,
@@ -989,7 +961,6 @@ class PerspectiveCamera(Object3dBase[Object3dBaseProps]):
 
 
 class OrthographicCamera(Object3dBase[Object3dBaseProps]):
-
     def __init__(self,
                  makeDefault: bool,
                  near: Optional[float] = None,
@@ -1037,7 +1008,6 @@ class OrthographicCamera(Object3dBase[Object3dBaseProps]):
 
 
 class MapControl(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  enableDamping: bool,
                  dampingFactor: float,
@@ -1088,7 +1058,6 @@ class MapControl(ThreeComponentBase[ThreeBasicProps]):
 
 
 class OrbitControl(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  enableDamping: bool,
                  dampingFactor: float,
@@ -1144,7 +1113,6 @@ class OrbitControl(ThreeComponentBase[ThreeBasicProps]):
 
 
 class PointerLockControl(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  enabled: Union[bool, Undefined] = undefined,
                  minPolarAngle: Union[float, Undefined] = undefined,
@@ -1187,7 +1155,6 @@ class FirstPersonControlProps(ThreeBasicProps):
 
 
 class FirstPersonControl(ThreeComponentBase[FirstPersonControlProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1196,7 +1163,6 @@ class FirstPersonControl(ThreeComponentBase[FirstPersonControlProps]):
 
 
 class ThreeCanvas(ContainerBase[ThreeBasicProps, ThreeComponentType]):
-
     def __init__(self,
                  init_dict: Dict[str, ThreeComponentType],
                  background: Union[str, Undefined] = undefined,
@@ -1225,7 +1191,6 @@ class ThreeFlexProps(ThreeFlexPropsBase):
 
 
 class Flex(ContainerBase[ThreeFlexProps, ThreeComponentType]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
@@ -1240,7 +1205,6 @@ class ItemBox(ContainerBase[ThreeFlexItemBoxProps, ThreeComponentType]):
     """if a three item have flex item prop enabled, it will
     be wrapped with a ItemBox automatically.
     """
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
@@ -1278,7 +1242,6 @@ class HtmlProps(Object3dBaseProps):
 class Html(Object3dContainerBase[HtmlProps, MUIComponentType]):
     """we can use MUI components only in Html.
     """
-
     def __init__(self,
                  init_dict: Dict[str, MUIComponentType],
                  uid: str = "",
@@ -1290,7 +1253,7 @@ class Html(Object3dContainerBase[HtmlProps, MUIComponentType]):
 
 
 @dataclasses.dataclass
-class TextProps(O3dWithEventBaseProps):
+class TextProps(Object3dBaseProps):
     characters: Union[str, Undefined] = undefined
     color: Union[str, Undefined] = undefined
     font_size: Union[NumberType, Undefined] = undefined
@@ -1328,7 +1291,6 @@ class TextProps(O3dWithEventBaseProps):
 class Text(Object3dWithEventBase[TextProps]):
     """we can use MUI components only in Html.
     """
-
     def __init__(self,
                  init: str,
                  uid: str = "",
@@ -1357,16 +1319,16 @@ class ShapeType(enum.Enum):
     Plane = 4
     Tube = 5
     Torus = 6
-    TorusKnot = 8
-    Tetrahedron = 9
-    Ring = 10
-    Polyhedron = 11
-    Icosahedron = 12
-    Octahedron = 13
-    Dodecahedron = 14
-    Extrude = 15
-    Lathe = 16
-    Capsule = 17
+    TorusKnot = 7
+    Tetrahedron = 8
+    Ring = 9
+    Polyhedron = 10
+    Icosahedron = 11
+    Octahedron = 12
+    Dodecahedron = 13
+    Extrude = 14
+    Lathe = 15
+    Capsule = 16
 
 
 @dataclasses.dataclass
@@ -1376,7 +1338,6 @@ class ShapeProps(ThreeGeometryPropsBase):
 
 
 class Shape(ThreeGeometryBase[ShapeProps]):
-
     def __init__(self,
                  type: ShapeType,
                  args: List[Union[int, float, bool]],
@@ -1388,11 +1349,10 @@ class Shape(ThreeGeometryBase[ShapeProps]):
 
 
 class BoxGeometry(Shape):
-
     def __init__(self,
-                 width: NumberType = 1,
-                 height: NumberType = 1,
-                 depth: NumberType = 1,
+                 width: float = 1,
+                 height: float = 1,
+                 depth: float = 1,
                  width_segments: int = 1,
                  height_segments: int = 1,
                  depth_segments: int = 1,
@@ -1406,18 +1366,49 @@ class BoxGeometry(Shape):
 
 
 class CapsuleGeometry(Shape):
-
     def __init__(self,
                  radius: float = 1,
                  length: float = 1,
-                 capSubdivisions: int = 4,
-                 radialSegments: int = 8,
+                 cap_subdivisions: int = 4,
+                 radial_segments: int = 8,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
         args: List[Union[int, float, bool]] = [
-            radius, length, capSubdivisions, radialSegments
+            radius, length, cap_subdivisions, radial_segments
         ]
         super().__init__(ShapeType.Capsule, args, uid, queue)
+
+
+class CircleGeometry(Shape):
+    def __init__(self,
+                 radius: float = 1,
+                 segments: int = 8,
+                 theta_start: float = 0,
+                 theta_length: float = np.pi * 2,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        args: List[Union[int, float, bool]] = [
+            radius, segments, theta_start, theta_length
+        ]
+        super().__init__(ShapeType.Circle, args, uid, queue)
+
+
+class ConeGeometry(Shape):
+    def __init__(self,
+                 radius: float = 1,
+                 height: float = 1,
+                 radial_segments: int = 8,
+                 height_segments: int = 1,
+                 open_ended: bool = False,
+                 theta_start: float = 0,
+                 theta_length: float = np.pi * 2,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        args: List[Union[int, float, bool]] = [
+            radius, height, radial_segments, height_segments, open_ended,
+            theta_start, theta_length
+        ]
+        super().__init__(ShapeType.Cone, args, uid, queue)
 
 
 @dataclasses.dataclass
@@ -1475,7 +1466,6 @@ class MeshToonMaterialProps(ThreeMaterialPropsBase):
 
 
 class MeshBasicMaterial(ThreeMaterialBase[MeshBasicMaterialProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1485,7 +1475,6 @@ class MeshBasicMaterial(ThreeMaterialBase[MeshBasicMaterialProps]):
 
 
 class MeshStandardMaterial(ThreeMaterialBase[MeshStandardMaterialProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1495,7 +1484,6 @@ class MeshStandardMaterial(ThreeMaterialBase[MeshStandardMaterialProps]):
 
 
 class MeshLambertMaterial(ThreeMaterialBase[MeshLambertMaterialProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1505,7 +1493,6 @@ class MeshLambertMaterial(ThreeMaterialBase[MeshLambertMaterialProps]):
 
 
 class MeshMatcapMaterial(ThreeMaterialBase[MeshMatcapMaterialProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1515,7 +1502,6 @@ class MeshMatcapMaterial(ThreeMaterialBase[MeshMatcapMaterialProps]):
 
 
 class MeshNormalMaterial(ThreeMaterialBase[MeshNormalMaterialProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1525,7 +1511,6 @@ class MeshNormalMaterial(ThreeMaterialBase[MeshNormalMaterialProps]):
 
 
 class MeshPhongMaterial(ThreeMaterialBase[MeshPhongMaterialProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1535,7 +1520,6 @@ class MeshPhongMaterial(ThreeMaterialBase[MeshPhongMaterialProps]):
 
 
 class MeshPhysicalMaterial(ThreeMaterialBase[MeshPhysicalMaterialProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1545,7 +1529,6 @@ class MeshPhysicalMaterial(ThreeMaterialBase[MeshPhysicalMaterialProps]):
 
 
 class MeshToonMaterial(ThreeMaterialBase[MeshToonMaterialProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1558,8 +1541,7 @@ MeshChildType: TypeAlias = Union[ThreeMaterialBase, ThreeMaterialPropsBase,
                                  ThreeGeometryPropsBase, ThreeGeometryBase]
 
 
-class Mesh(O3dContainerWithEventBase[O3dWithEventBaseProps, MeshChildType]):
-
+class Mesh(O3dContainerWithEventBase[Object3dBaseProps, MeshChildType]):
     def __init__(self,
                  geometry: ThreeGeometryBase,
                  material: ThreeMaterialBase,
@@ -1573,5 +1555,5 @@ class Mesh(O3dContainerWithEventBase[O3dWithEventBaseProps, MeshChildType]):
             "geometry": geometry,
             "material": material,
         }
-        super().__init__(UIType.ThreeMesh, O3dWithEventBaseProps, init_dict,
-                         uid, queue, uid_to_comp, inited)
+        super().__init__(UIType.ThreeMesh, Object3dBaseProps, init_dict, uid,
+                         queue, uid_to_comp, inited)

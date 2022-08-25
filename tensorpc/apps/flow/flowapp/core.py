@@ -74,6 +74,10 @@ class UIType(enum.Enum):
     FlexBox = 0x101
     MUIList = 0x102
     Divider = 0x103
+
+    MASK_THREE = 0x1000
+    MASK_THREE_GEOMETRY = 0x0100
+    
     ThreeCanvas = 0x1000
     ThreePoints = 0x1001
 
@@ -100,11 +104,11 @@ class UIType(enum.Enum):
     ThreeBoxes2D = 0x1025
 
     ThreeText = 0x1026
-    ThreeShape = 0x1027
     ThreeMeshMaterial = 0x1028
     ThreeMesh = 0x1029
     ThreeBufferGeometry = 0x102a
 
+    ThreeShape = 0x1101
 
 class AppEventType(enum.Enum):
     # layout events

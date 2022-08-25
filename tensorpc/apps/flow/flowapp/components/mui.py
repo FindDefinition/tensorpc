@@ -781,7 +781,7 @@ class Slider(MUIComponentBase[MUIComponentBaseProps]):
         super().__init__(uid, UIType.Slider, MUIComponentBaseProps, queue)
         self.label = label
         self.callback = callback
-        assert end > begin and step < end - begin
+        assert end > begin and step <= end - begin
         self.ranges = (begin, end, step)
         self.value = begin
 
@@ -804,11 +804,11 @@ class Slider(MUIComponentBase[MUIComponentBaseProps]):
 
     async def update_ranges(self, begin: Union[int, float],
                             end: Union[int, float], step: Union[int, float]):
-        await self.queue.put(
-            self.create_update_event({"ranges": (begin, end, step)}))
         self.ranges = (begin, end, step)
         assert end > begin and step < end - begin
         self.value = begin
+        await self.queue.put(
+            self.create_update_event({"ranges": (begin, end, step), "value": self.value}))
 
     async def update_value(self, value: Union[int, float]):
         assert value >= self.ranges[0] and value <= self.ranges[1]

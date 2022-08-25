@@ -438,6 +438,8 @@ class SampleThreeApp(EditableApp):
         # ctrl = three.OrbitControl(True, 0.25, 1, 100)
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.b2d = three.Boxes2D(1000)
+        mesh = three.Mesh(three.BoxGeometry(), three.MeshBasicMaterial())
+        mesh.set_callback(on_click=three.EventCallback(lambda x: print(x)))
 
         self.canvas = three.ThreeCanvas({
             "cam": cam,
@@ -448,6 +450,7 @@ class SampleThreeApp(EditableApp):
             "infgrid": infgrid,
             "img": self.img,
             "b2d": self.b2d,
+            "mesh": mesh,
             # "box": three.BoundingBox([2, 5, 2], [0, 10, 0], [0, 0, 0.5])
         })
         btn_random_pc = Button("showRandomRPC", self.show_Random_pc)
