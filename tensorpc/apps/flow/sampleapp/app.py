@@ -46,8 +46,10 @@ class SampleApp(App):
         self.img_ui = mui.Images()
         self.task_loop = mui.TaskLoop("Test", self.on_task_loop)
         self.root.add_layout({
-            "btn": mui.Buttons(["LoadImage", "SendMessage", "OpenCam", "RunCode"],
+            "btn": mui.Buttons(["LoadImage", "SendMessage", "OpenCam", "Sleep"],
             self.on_button_click),
+            "btn2": mui.Button("Sleep", self.on_one_button_click),
+
             "swi": mui.Switch("Switch", self.on_switch),
             "inp": mui.Input("Image Path", callback=self.on_input_change),
             "img_ui": self.img_ui,
@@ -64,6 +66,10 @@ class SampleApp(App):
 
     async def on_radio(self, name: str):
         print(name)
+    # on_one_button_click
+    async def on_one_button_click(self):
+        await asyncio.sleep(3)
+        print("SLEEP FINISHED")
 
     async def on_button_click(self, name: str):
         print(name)
@@ -90,8 +96,9 @@ class SampleApp(App):
                 await cancel_task(self.task)
                 self.task = None
             print("?")
-        elif name == "RunCode":
-            exec(self.code)
+        elif name == "Sleep":
+            await asyncio.sleep(3)
+            print("SLEEP FINISHED")
 
     async def on_switch(self, checked: bool):
         print(checked)

@@ -705,7 +705,7 @@ class Component(Generic[TBaseComp, T_child]):
     async def run_callback(self,
                            cb: Callable[[], _CORO_NONE],
                            sync_state: bool = False):
-        self.__props.status = UIRunStatus.Running.value  # type: ignore
+        self._status = UIRunStatus.Running  
         ev = asyncio.Event()
         await self.sync_status(sync_state, ev)
         await ev.wait()
@@ -719,7 +719,7 @@ class Component(Generic[TBaseComp, T_child]):
             
             raise
         finally:
-            self.__props.status = UIRunStatus.Stop.value  # type: ignore
+            self._status = UIRunStatus.Stop 
             await self.sync_status(sync_state)
 
     async def sync_status(self,

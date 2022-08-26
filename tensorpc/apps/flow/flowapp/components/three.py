@@ -871,6 +871,20 @@ class Group(Object3dContainerBase[Object3dBaseProps, ThreeComponentType]):
         super().__init__(UIType.ThreeGroup, Object3dBaseProps, init_dict, uid,
                          queue, uid_to_comp, inited)
 
+@dataclasses.dataclass
+class HudProps(ThreeBasicProps):
+    render_priority: Union[int, Undefined] = undefined
+
+class Hud(ThreeContainerBase[HudProps]):
+    # TODO can/should group accept event?
+    def __init__(self,
+                 init_dict: Dict[str, ThreeComponentType],
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 uid_to_comp: Optional[Dict[str, Component]] = None,
+                 inited: bool = False) -> None:
+        super().__init__(UIType.ThreeHud, HudProps, uid,
+                         queue, uid_to_comp, init_dict, inited)
 
 class Image(Object3dWithEventBase[Object3dBaseProps]):
     def __init__(self,
