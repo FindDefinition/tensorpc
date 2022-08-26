@@ -475,7 +475,7 @@ class BasicProps:
             res[res_camel] = val
         return res
 
-TBaseComp = TypeVar("TBaseComp", bound=BasicProps)
+T_base_props = TypeVar("T_base_props", bound=BasicProps)
 
 _OverflowType = Union[Literal["visible"], Literal["hidden"], Literal["scroll"], Literal["auto"]]
 
@@ -569,11 +569,11 @@ P2 = ParamSpec('P2')
 T_child = TypeVar("T_child")
 
 
-class Component(Generic[TBaseComp, T_child]):
+class Component(Generic[T_base_props, T_child]):
     def __init__(self,
                  uid: str,
                  type: UIType,
-                 prop_cls: Type[TBaseComp],
+                 prop_cls: Type[T_base_props],
                  queue: Optional[asyncio.Queue] = None) -> None:
         self._queue = queue
         self.uid = uid
@@ -588,7 +588,7 @@ class Component(Generic[TBaseComp, T_child]):
         self.__prop_cls = prop_cls
 
     @property
-    def props(self) -> TBaseComp:
+    def props(self) -> T_base_props:
         return self.__props
 
     # @property
@@ -596,7 +596,7 @@ class Component(Generic[TBaseComp, T_child]):
     #     return self.__prop_cls
 
     @property
-    def prop(self) -> Type[TBaseComp]:
+    def prop(self) -> Type[T_base_props]:
         """set some prop of this component"""
         @init_anno_fwd(self.__prop_cls)
         def wrapper(**kwargs):
@@ -745,10 +745,10 @@ class Component(Generic[TBaseComp, T_child]):
                                              })  # type: ignore
 
 
-class ContainerBase(Component[TBaseComp, T_child]):
+class ContainerBase(Component[T_base_props, T_child]):
     def __init__(self,
                  base_type: UIType,
-                 prop_cls: Type[TBaseComp],
+                 prop_cls: Type[T_base_props],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,

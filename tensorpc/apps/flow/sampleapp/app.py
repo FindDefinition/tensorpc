@@ -447,7 +447,6 @@ class SampleThreeApp(EditableApp):
         self.b2d = three.Boxes2D(1000)
         mesh = three.Mesh(three.BoxGeometry(), three.MeshBasicMaterial())
         mesh.set_callback(on_click=three.EventCallback(lambda x: print(x)))
-
         self.canvas = three.ThreeCanvas({
             "cam": cam,
             "points": self.points,
@@ -564,3 +563,53 @@ class SampleTestApp(App):
             "btn": Button("Show", lambda: print("?"))
         })
         self.set_init_window_size([480, 320])
+
+class SampleThreeHudApp(EditableApp):
+
+    def __init__(self) -> None:
+        super().__init__(reloadable_layout=True)
+        self.set_init_window_size([800, 600])
+        # makesure three canvas size fit parent.
+        self.root.props.min_height = 0
+        # store components here if you want to keep
+        # data after reload layout.
+        self.points = three.Points(2000000)
+        self.lines = three.Segments(20000)
+
+    def app_create_layout(self) -> Dict[str, MUIComponentType]:
+        cam = three.PerspectiveCamera(True, fov=75, near=0.1, far=1000)
+        cam.prop(position=(0, 0, 20), up=(0, 0, 1))
+        # cam = three.OrthographicCamera(True, position=[0, 0, 10], up=[0, 0, 1], near=0.1, far=1000,
+        #                               zoom=8.0)
+        self.img = three.Image()
+        ctrl = three.MapControl(True, 0.25, 1, 100)
+        # ctrl = three.FirstPersonControl()
+
+        # ctrl = three.OrbitControl(True, 0.25, 1, 100)
+        infgrid = three.InfiniteGridHelper(5, 50, "gray")
+        self.b2d = three.Boxes2D(1000)
+        mesh = three.Mesh(three.BoxGeometry(), three.MeshBasicMaterial())
+        mesh.set_callback(on_click=three.EventCallback(lambda x: print(x)))
+        self.canvas = three.ThreeCanvas({
+            "cam": cam,
+            "points": self.points,
+            # "lines": self.lines,
+            "ctrl": ctrl,
+            "axes": three.AxesHelper(10),
+            "infgrid": infgrid,
+            "img": self.img,
+            "b2d": self.b2d,
+            # "mesh": mesh,
+            "text": three.Text("WTF").prop(color="red", font_size=2),
+            # "box": three.BoundingBox([2, 5, 2], [0, 10, 0], [0, 0, 0.5])
+            "hud": three.Hud({
+                "mesh": mesh,
+            }).prop(render_priority=2)
+        }, background="black")
+        return {
+            "d3v":
+            VBox({
+                "d3": self.canvas,
+            }).prop(flex=1, min_height=0),
+        }
+        

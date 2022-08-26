@@ -30,18 +30,13 @@ from typing_extensions import TypeAlias
 import numpy as np
 from tensorpc.utils.uniquename import UniqueNamePool
 import dataclasses
-from ..core import AppEvent, BasicProps, Component, NumberType, T_child, TaskLoopEvent, UIEvent, UIRunStatus, UIType, ContainerBase, Undefined, ValueType, undefined, ComponentBaseProps, TBaseComp
+from ..core import AppEvent, BasicProps, Component, NumberType, T_child, TaskLoopEvent, UIEvent, UIRunStatus, UIType, ContainerBase, Undefined, ValueType, undefined, ComponentBaseProps, T_base_props
 from .mui import FlexBoxProps, _encode_image_bytes, MUIComponentType
 
 Vector3Type: TypeAlias = Tuple[float, float, float]
 
 _CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
 
-
-@dataclasses.dataclass
-class ThreeFlexItemBoxProps(ComponentBaseProps):
-    center_anchor: Union[bool, Undefined] = undefined  # false
-    enable_flex: Union[bool, Undefined] = undefined  # false
 
 
 @dataclasses.dataclass
@@ -76,7 +71,7 @@ class MeshMaterialType(enum.Enum):
 
 
 @dataclasses.dataclass
-class ThreeMaterialPropsBase(BasicProps):
+class ThreeMaterialPropsBase(ThreeBasicProps):
     material_type: int = 0
     transparent: Union[bool, Undefined] = undefined
     opacity: Union[NumberType, Undefined] = undefined
@@ -87,34 +82,35 @@ class ThreeMaterialPropsBase(BasicProps):
     side: Union[SideType, Undefined] = undefined
 
 
-class ThreeComponentBase(Component[TBaseComp, "ThreeComponentType"]):
+class ThreeComponentBase(Component[T_base_props, "ThreeComponentType"]):
     pass
 
 
-class ThreeContainerBase(ContainerBase[TBaseComp, "ThreeComponentType"]):
+class ThreeContainerBase(ContainerBase[T_base_props, T_child]):
     pass
 
 
-class ThreeMaterialBase(Component[TBaseComp, "ThreeComponentType"]):
+class ThreeMaterialBase(ThreeComponentBase[T_base_props]):
     pass
 
 
-class ThreeGeometryBase(Component[TBaseComp, "ThreeComponentType"]):
+class ThreeGeometryBase(ThreeComponentBase[T_base_props]):
     pass
 
 
 @dataclasses.dataclass
-class ThreeGeometryPropsBase(BasicProps):
+class ThreeGeometryPropsBase(ThreeBasicProps):
     pass
 
 
 T_material_prop = TypeVar("T_material_prop", bound=ThreeMaterialPropsBase)
+T_geometry_prop = TypeVar("T_geometry_prop", bound=ThreeGeometryPropsBase)
 
-ThreeComponentType = Union[ThreeComponentBase[TBaseComp],
-                           ThreeContainerBase[TBaseComp], ThreeBasicProps,
-                           ThreeFlexPropsBase, ThreeFlexItemBoxProps]
+ThreeComponentType = Union[ThreeComponentBase,
+                           ThreeContainerBase, ThreeBasicProps,
+                           ThreeFlexPropsBase]
 
-ThreeMaterialType = Union[ThreeMaterialBase[TBaseComp], ThreeMaterialPropsBase]
+ThreeMaterialType = Union[ThreeMaterialBase[T_base_props], ThreeMaterialPropsBase]
 
 
 class PointerEventType(enum.Enum):
@@ -133,7 +129,7 @@ class PointerEventType(enum.Enum):
 
 
 @dataclasses.dataclass
-class Object3dBaseProps(ThreeFlexItemBoxProps):
+class Object3dBaseProps(ThreeBasicProps):
     position: Union[Vector3Type, Undefined] = undefined
     rotation: Union[Vector3Type, Undefined] = undefined
     up: Union[Vector3Type, Undefined] = undefined
@@ -348,7 +344,7 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
                 self.run_callback(ccb(handler.cb), True))
 
 
-class Object3dContainerBase(ContainerBase[T_o3d_prop, T_child]):
+class Object3dContainerBase(ThreeContainerBase[T_o3d_prop, T_child]):
     def __init__(self,
                  base_type: UIType,
                  prop_cls: Type[T_o3d_prop],
@@ -875,7 +871,7 @@ class Group(Object3dContainerBase[Object3dBaseProps, ThreeComponentType]):
 class HudProps(ThreeBasicProps):
     render_priority: Union[int, Undefined] = undefined
 
-class Hud(ThreeContainerBase[HudProps]):
+class Hud(ThreeContainerBase[HudProps, ThreeComponentType]):
     # TODO can/should group accept event?
     def __init__(self,
                  init_dict: Dict[str, ThreeComponentType],
@@ -1214,11 +1210,11 @@ class Flex(ContainerBase[ThreeFlexProps, ThreeComponentType]):
         super().__init__(UIType.ThreeFlex, ThreeFlexProps, uid, queue,
                          uid_to_comp, _init_dict, inited)
 
+@dataclasses.dataclass
+class ThreeFlexItemBoxProps(ComponentBaseProps):
+    center_anchor: Union[bool, Undefined] = undefined  # false
 
 class ItemBox(ContainerBase[ThreeFlexItemBoxProps, ThreeComponentType]):
-    """if a three item have flex item prop enabled, it will
-    be wrapped with a ItemBox automatically.
-    """
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
@@ -1291,8 +1287,8 @@ class TextProps(Object3dBaseProps):
     white_space: Union[Literal['normal', 'overflowWrap'],
                        Undefined] = undefined
     outline_width: Union[ValueType, Undefined] = undefined
-    outline_offsetX: Union[ValueType, Undefined] = undefined
-    outline_offsetY: Union[ValueType, Undefined] = undefined
+    outline_offset_x: Union[ValueType, Undefined] = undefined
+    outline_offset_y: Union[ValueType, Undefined] = undefined
     outline_blur: Union[ValueType, Undefined] = undefined
     outline_color: Union[str, Undefined] = undefined
     outline_opacity: Union[NumberType, Undefined] = undefined
@@ -1315,7 +1311,7 @@ class Text(Object3dWithEventBase[TextProps]):
     def get_state(self):
         state = super().get_state()
         state.update({
-            "value": self.props.position,
+            "value": self.value,
         })
         return state
 
@@ -1555,7 +1551,7 @@ MeshChildType: TypeAlias = Union[ThreeMaterialBase, ThreeMaterialPropsBase,
                                  ThreeGeometryPropsBase, ThreeGeometryBase]
 
 
-class Mesh(O3dContainerWithEventBase[Object3dBaseProps, MeshChildType]):
+class Mesh(O3dContainerWithEventBase[Object3dBaseProps, ThreeComponentType]):
     def __init__(self,
                  geometry: ThreeGeometryBase,
                  material: ThreeMaterialBase,
@@ -1565,7 +1561,7 @@ class Mesh(O3dContainerWithEventBase[Object3dBaseProps, MeshChildType]):
                  inited: bool = False) -> None:
         self.geometry = geometry
         self.material = material
-        init_dict = {
+        init_dict: Dict[str, ThreeComponentType] = {
             "geometry": geometry,
             "material": material,
         }

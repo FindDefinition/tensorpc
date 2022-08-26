@@ -18,7 +18,7 @@ import dataclasses
 import io
 import time
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
-                    Iterable, List, Optional, Tuple, Type, TypeVar, Union)
+                    Iterable, List, Optional, Tuple, Type, TypeVar, Union, TYPE_CHECKING)
 from typing_extensions import Literal, TypeAlias
 import numpy as np
 from PIL import Image as PILImage
@@ -27,7 +27,10 @@ import json
 from tensorpc.core.asynctools import cancel_task
 from ..core import (AppEvent, BasicProps, Component, ComponentBaseProps,
                     ContainerBase, TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
-                    undefined, TBaseComp, ValueType)
+                    undefined, T_base_props, ValueType)
+
+if TYPE_CHECKING:
+    from .three import ThreeCanvas
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
 
@@ -50,11 +53,11 @@ class MUIComponentBaseProps(ComponentBaseProps):
     pass
 
 
-class MUIComponentBase(Component[TBaseComp, "MUIComponentType"]):
+class MUIComponentBase(Component[T_base_props, "MUIComponentType[T_base_props]"]):
     pass
 
 
-class MUIContainerBase(ContainerBase[TBaseComp, "MUIComponentType"]):
+class MUIContainerBase(ContainerBase[T_base_props, Union["MUIComponentType[T_base_props]", "ThreeCanvas"]]):
     pass
 
 
@@ -103,7 +106,7 @@ async def _handle_button_event(comp: Union["Button", "ListItemButton"], data: An
             comp.run_callback(lambda: cb2()))
 
 
-MUIComponentType: TypeAlias = Union[MUIBasicProps, MUIComponentBase[TBaseComp], MUIContainerBase[TBaseComp],
+MUIComponentType: TypeAlias = Union[MUIBasicProps, MUIComponentBase[T_base_props], MUIContainerBase[T_base_props],
                          MUIFlexBoxProps, MUIComponentBaseProps]
 
 
@@ -368,7 +371,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps]):
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
-                 _init_dict: Optional[Dict[str, MUIComponentType]] = None,
+                 _init_dict: Optional[Dict[str, Union[MUIComponentType[MUIBasicProps], "ThreeCanvas"]]] = None,
                  base_type: UIType = UIType.FlexBox,
                  inited: bool = False) -> None:
         super().__init__(base_type, MUIFlexBoxProps, uid, queue, uid_to_comp,
@@ -380,7 +383,7 @@ class MUIList(MUIContainerBase[MUIFlexBoxProps]):
                  uid: str,
                  queue: asyncio.Queue,
                  uid_to_comp: Dict[str, Component],
-                 _init_dict: Optional[Dict[str, MUIComponentType]] = None,
+                 _init_dict: Optional[Dict[str, Union[MUIComponentType[MUIBasicProps], "ThreeCanvas"]]] = None,
                  subheader: str = "",
                  inited: bool = False) -> None:
         super().__init__(UIType.MUIList,
@@ -403,23 +406,23 @@ class MUIList(MUIContainerBase[MUIFlexBoxProps]):
             self.subheader = state["subheader"]
 
 
-def VBox(layout: Dict[str, MUIComponentType]):
+def VBox(layout: Dict[str, Union["MUIComponentType", "ThreeCanvas"]]):
     res = FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
     res.prop(flex_flow="column nowrap")
     return res
 
 
-def HBox(layout: Dict[str, MUIComponentType], ):
+def HBox(layout: Dict[str, Union["MUIComponentType", "ThreeCanvas"]], ):
     res = FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
     res.prop(flex_flow="row nowrap")
     return res
 
 
-def Box(layout: Dict[str, MUIComponentType]):
+def Box(layout: Dict[str, Union["MUIComponentType", "ThreeCanvas"]]):
     return FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
 
 
-def VList(layout: Dict[str, MUIComponentType],
+def VList(layout: Dict[str, Union["MUIComponentType", "ThreeCanvas"]],
           subheader: str = ""):
     return MUIList("",
                    asyncio.Queue(), {},
