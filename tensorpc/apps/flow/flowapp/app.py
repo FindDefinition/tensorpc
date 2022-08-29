@@ -79,7 +79,6 @@ def _enter_app_conetxt(app: "App"):
     token = APP_CONTEXT_VAR.set(ctx)
     try:
         yield ctx
-        APP_CONTEXT_VAR.reset(token)
     finally:
         APP_CONTEXT_VAR.reset(token)
 
@@ -283,8 +282,8 @@ class App:
         if event.type == AppEditorFrontendEventType.SaveEditorState:
             self.code_editor._monaco_state = event.data
             return
-        with _enter_app_conetxt(self):
-            return await self.handle_code_editor_event(event)
+        # with _enter_app_conetxt(self):
+        return await self.handle_code_editor_event(event)
 
     async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
         """override this method to support vscode editor.

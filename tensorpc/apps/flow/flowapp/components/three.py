@@ -31,7 +31,7 @@ import numpy as np
 from tensorpc.utils.uniquename import UniqueNamePool
 import dataclasses
 from ..core import AppEvent, BasicProps, Component, NumberType, T_child, TaskLoopEvent, UIEvent, UIRunStatus, UIType, ContainerBase, Undefined, ValueType, undefined, ComponentBaseProps, T_base_props
-from .mui import FlexBoxProps, MUIContainerBase, _encode_image_bytes, MUIComponentType
+from .mui import FlexBoxProps, MUIContainerBase, _encode_image_bytes, MUIComponentType, _handle_button_event
 
 Vector3Type: TypeAlias = Tuple[float, float, float]
 
@@ -131,6 +131,8 @@ class PointerEventType(enum.Enum):
     Up = 6
     Down = 7
     ContextMenu = 8
+    # special method for three 2d UI.
+    Change = 9
 
 
 @dataclasses.dataclass
@@ -148,16 +150,11 @@ class Object3dBaseProps(ThreeBasicProps):
     # }
 
 
-@dataclasses.dataclass
-class MeshProps(Object3dBaseProps):
-    childs: Union[List[str], Undefined] = undefined  # this can't be undefined
-
 
 T_o3d_prop = TypeVar("T_o3d_prop", bound=Object3dBaseProps)
 
 
 class Object3dBase(ThreeComponentBase[T_o3d_prop]):
-
     def __init__(self,
                  base_type: UIType,
                  prop_cls: Type[T_o3d_prop],
@@ -251,7 +248,6 @@ class Object3dBase(ThreeComponentBase[T_o3d_prop]):
 
 
 class EventCallback:
-
     def __init__(self,
                  cb: Callable[[Any], _CORO_NONE],
                  stop_propagation: bool = False) -> None:
@@ -263,7 +259,6 @@ PointerEventCBType: TypeAlias = EventCallback
 
 
 class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
-
     def __init__(self,
                  base_type: UIType,
                  prop_cls: Type[T_o3d_prop],
@@ -283,12 +278,16 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
                                           PointerEventType.Down: undefined,
                                           PointerEventType.ContextMenu:
                                           undefined,
+                                          PointerEventType.Change:
+                                          undefined,
                                       }
 
     def to_dict(self):
         res = super().to_dict()
         evs = []
         for k, v in self._pointer_event_map.items():
+            if k == PointerEventType.Change:
+                continue 
             if not isinstance(v, Undefined):
                 evs.append({
                     "type": k.value,
@@ -297,7 +296,7 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
         res["usedEvents"] = evs
         return res
 
-    def set_callback(self,
+    def set_pointer_callback(self,
                      on_click: Optional[Union[PointerEventCBType,
                                               Undefined]] = None,
                      on_double_click: Optional[Union[PointerEventCBType,
@@ -315,6 +314,8 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
                      on_down: Optional[Union[PointerEventCBType,
                                              Undefined]] = None,
                      on_context_menu: Optional[Union[PointerEventCBType,
+                                                     Undefined]] = None,
+                     on_change: Optional[Union[PointerEventCBType,
                                                      Undefined]] = None):
         pointer_event_map = {
             PointerEventType.Click: on_click,
@@ -326,6 +327,7 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
             PointerEventType.Up: on_up,
             PointerEventType.Down: on_down,
             PointerEventType.ContextMenu: on_context_menu,
+            PointerEventType.Change: on_change,
         }
         for k, v in pointer_event_map.items():
             if v is not None:
@@ -353,7 +355,6 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
 
 
 class Object3dContainerBase(ThreeContainerBase[T_o3d_prop, T_child]):
-
     def __init__(self,
                  base_type: UIType,
                  prop_cls: Type[T_o3d_prop],
@@ -451,7 +452,6 @@ class Object3dContainerBase(ThreeContainerBase[T_o3d_prop, T_child]):
 
 
 class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_prop, T_child]):
-
     def __init__(self,
                  base_type: UIType,
                  prop_cls: Type[T_o3d_prop],
@@ -475,12 +475,16 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_prop, T_child]):
                                           PointerEventType.Down: undefined,
                                           PointerEventType.ContextMenu:
                                           undefined,
+                                          PointerEventType.Change:
+                                          undefined,
                                       }
 
     def to_dict(self):
         res = super().to_dict()
         evs = []
         for k, v in self._pointer_event_map.items():
+            if k == PointerEventType.Change:
+                continue 
             if not isinstance(v, Undefined):
                 evs.append({
                     "type": k.value,
@@ -489,7 +493,7 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_prop, T_child]):
         res["usedEvents"] = evs
         return res
 
-    def set_callback(self,
+    def set_pointer_callback(self,
                      on_click: Optional[Union[PointerEventCBType,
                                               Undefined]] = None,
                      on_double_click: Optional[Union[PointerEventCBType,
@@ -507,6 +511,8 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_prop, T_child]):
                      on_down: Optional[Union[PointerEventCBType,
                                              Undefined]] = None,
                      on_context_menu: Optional[Union[PointerEventCBType,
+                                                     Undefined]] = None,
+                     on_change: Optional[Union[PointerEventCBType,
                                                      Undefined]] = None):
         pointer_event_map = {
             PointerEventType.Click: on_click,
@@ -518,6 +524,7 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_prop, T_child]):
             PointerEventType.Up: on_up,
             PointerEventType.Down: on_down,
             PointerEventType.ContextMenu: on_context_menu,
+            PointerEventType.Change: on_change,
         }
         for k, v in pointer_event_map.items():
             if v is not None:
@@ -545,7 +552,6 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_prop, T_child]):
 
 
 class Points(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  limit: int,
                  uid: str = "",
@@ -637,7 +643,6 @@ class Points(ThreeComponentBase[ThreeBasicProps]):
 
 
 class Segments(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  limit: int,
                  line_width: float = 1.0,
@@ -710,7 +715,6 @@ class Segments(ThreeComponentBase[ThreeBasicProps]):
 
 
 class Boxes2D(Object3dWithEventBase[Object3dBaseProps]):
-
     def __init__(self,
                  limit: int,
                  uid: str = "",
@@ -748,7 +752,10 @@ class Boxes2D(Object3dWithEventBase[Object3dBaseProps]):
             assert dimensions.shape[
                 0] <= self.limit, f"your dimensions size must smaller than limit {self.limit}"
             self.dimensions = dimensions
+            if dimensions.shape != self.centers.shape:
+                dimensions = np.broadcast_to(dimensions, self.centers.shape)
             upd["dimensions"] = dimensions
+
 
         if colors is not None:
             if not isinstance(colors, Undefined):
@@ -770,11 +777,14 @@ class Boxes2D(Object3dWithEventBase[Object3dBaseProps]):
 
     def get_state(self):
         state = super().get_state()
+        dims = self.dimensions
+        if self.dimensions.shape != self.centers.shape:
+            dims = np.broadcast_to(dims, self.centers.shape)
         state.update({
             "colors": self.colors,
             "color": self.color,
             "centers": self.centers,
-            "dimensions": self.dimensions,
+            "dimensions": dims,
             "attrs": self.attrs,
             "alpha": self.alpha,
         })
@@ -796,7 +806,6 @@ class Boxes2D(Object3dWithEventBase[Object3dBaseProps]):
 
 
 class BoundingBox(Object3dWithEventBase[Object3dBaseProps]):
-
     def __init__(self,
                  dimension: Vector3Type,
                  edgeWidth: float = 4,
@@ -832,7 +841,6 @@ class BoundingBox(Object3dWithEventBase[Object3dBaseProps]):
 
 
 class AxesHelper(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  length: float,
                  uid: str = "",
@@ -847,7 +855,6 @@ class AxesHelper(ThreeComponentBase[ThreeBasicProps]):
 
 
 class InfiniteGridHelper(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  size1: float,
                  size2: float,
@@ -884,7 +891,6 @@ class Group(Object3dContainerBase[Object3dBaseProps, ThreeComponentType]):
 
 
 class Image(Object3dWithEventBase[Object3dBaseProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -922,7 +928,6 @@ class Image(Object3dWithEventBase[Object3dBaseProps]):
 
 
 class PerspectiveCamera(Object3dBase[Object3dBaseProps]):
-
     def __init__(self,
                  makeDefault: bool,
                  fov: Union[float, Undefined] = undefined,
@@ -978,7 +983,6 @@ class PerspectiveCamera(Object3dBase[Object3dBaseProps]):
 
 
 class OrthographicCamera(Object3dBase[Object3dBaseProps]):
-
     def __init__(self,
                  makeDefault: bool,
                  near: Optional[float] = None,
@@ -1026,7 +1030,6 @@ class OrthographicCamera(Object3dBase[Object3dBaseProps]):
 
 
 class MapControl(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  enableDamping: bool,
                  dampingFactor: float,
@@ -1077,7 +1080,6 @@ class MapControl(ThreeComponentBase[ThreeBasicProps]):
 
 
 class OrbitControl(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  enableDamping: bool,
                  dampingFactor: float,
@@ -1133,7 +1135,6 @@ class OrbitControl(ThreeComponentBase[ThreeBasicProps]):
 
 
 class PointerLockControl(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  enabled: Union[bool, Undefined] = undefined,
                  minPolarAngle: Union[float, Undefined] = undefined,
@@ -1176,7 +1177,6 @@ class FirstPersonControlProps(ThreeBasicProps):
 
 
 class FirstPersonControl(ThreeComponentBase[FirstPersonControlProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1185,7 +1185,6 @@ class FirstPersonControl(ThreeComponentBase[FirstPersonControlProps]):
 
 
 class FlexAutoReflow(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1194,7 +1193,6 @@ class FlexAutoReflow(ThreeComponentBase[ThreeBasicProps]):
 
 
 class ThreeCanvas(MUIContainerBase[BasicProps, ThreeComponentType]):
-
     def __init__(self,
                  init_dict: Dict[str, ThreeComponentType],
                  background: Union[str, Undefined] = undefined,
@@ -1223,7 +1221,6 @@ class ThreeFlexProps(ThreeFlexPropsBase):
 
 
 class Flex(ThreeContainerBase[ThreeFlexProps, ThreeComponentType]):
-
     def __init__(self,
                  init_dict: Dict[str, ThreeComponentType],
                  uid: str = "",
@@ -1240,7 +1237,6 @@ class ThreeFlexItemBoxProps(ThreeFlexItemPropsBase):
 
 
 class ItemBox(ThreeContainerBase[ThreeFlexItemBoxProps, ThreeComponentType]):
-
     def __init__(self,
                  init_dict: Dict[str, ThreeComponentType],
                  uid: str = "",
@@ -1284,7 +1280,6 @@ class HtmlProps(Object3dBaseProps):
 class Html(Object3dContainerBase[HtmlProps, MUIComponentType]):
     """we can use MUI components only in Html.
     """
-
     def __init__(self,
                  init_dict: Dict[str, MUIComponentType],
                  uid: str = "",
@@ -1334,7 +1329,6 @@ class TextProps(Object3dBaseProps):
 class Text(Object3dWithEventBase[TextProps]):
     """we can use MUI components only in Html.
     """
-
     def __init__(self,
                  init: str,
                  uid: str = "",
@@ -1398,7 +1392,6 @@ class PathShapeProps(ThreeGeometryPropsBase):
 
 
 class Shape:
-
     def __init__(self) -> None:
         self.ops: List[Tuple[int, List[Union[float, bool]]]] = []
 
@@ -1437,7 +1430,6 @@ class Shape:
 
 
 class ShapeGeometry(ThreeGeometryBase[PathShapeProps]):
-
     def __init__(self,
                  shape: Shape,
                  uid: str = "",
@@ -1446,8 +1438,43 @@ class ShapeGeometry(ThreeGeometryBase[PathShapeProps]):
         self.props.path_ops = shape.ops
 
 
-class SimpleGeometry(ThreeGeometryBase[SimpleGeometryProps]):
+def _rounded_shape(x: float, y: float, w: float, h: float, r: float):
+    ctx = Shape()
+    ctx.move_to(x, y + r)
+    ctx.line_to(x, y + h - r)
+    ctx.quadratic_curve_to(x, y + h, x + r, y + h)
+    ctx.line_to(x + w - r, y + h)
+    ctx.quadratic_curve_to(x + w, y + h, x + w, y + h - r)
+    ctx.line_to(x + w, y + r)
+    ctx.quadratic_curve_to(x + w, y, x + w - r, y)
+    ctx.line_to(x + r, y)
+    ctx.quadratic_curve_to(x, y, x, y + r)
+    return ctx
 
+
+def _rounded_shape_v2(x: float, y: float, w: float, h: float, r: float):
+    ctx = Shape()
+    eps = 1e-5
+    r -= eps
+    ctx.absarc(eps, eps, eps, -np.pi / 2, -np.pi, True)
+    ctx.absarc(eps, h - r * 2, eps, np.pi, np.pi / 2, True)
+    ctx.absarc(w - r * 2, h - r * 2, eps, np.pi / 2, 0, True)
+    ctx.absarc(w - r * 2, eps, eps, 0, -np.pi / 2, True)
+    return ctx
+
+
+class RoundedRectGeometry(ShapeGeometry):
+    def __init__(self,
+                 width: float,
+                 height: float,
+                 radius: float,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        shape = _rounded_shape(-width / 2, -height / 2, width, height, radius)
+        super().__init__(shape, uid, queue)
+
+
+class SimpleGeometry(ThreeGeometryBase[SimpleGeometryProps]):
     def __init__(self,
                  type: GeometryType,
                  args: List[Union[int, float, bool]],
@@ -1460,7 +1487,6 @@ class SimpleGeometry(ThreeGeometryBase[SimpleGeometryProps]):
 
 
 class BoxGeometry(SimpleGeometry):
-
     def __init__(self,
                  width: float = 1,
                  height: float = 1,
@@ -1478,7 +1504,6 @@ class BoxGeometry(SimpleGeometry):
 
 
 class CapsuleGeometry(SimpleGeometry):
-
     def __init__(self,
                  radius: float = 1,
                  length: float = 1,
@@ -1493,7 +1518,6 @@ class CapsuleGeometry(SimpleGeometry):
 
 
 class CircleGeometry(SimpleGeometry):
-
     def __init__(self,
                  radius: float = 1,
                  segments: int = 8,
@@ -1508,7 +1532,6 @@ class CircleGeometry(SimpleGeometry):
 
 
 class ConeGeometry(SimpleGeometry):
-
     def __init__(self,
                  radius: float = 1,
                  height: float = 1,
@@ -1581,7 +1604,6 @@ class MeshToonMaterialProps(ThreeMaterialPropsBase):
 
 
 class MeshBasicMaterial(ThreeMaterialBase[MeshBasicMaterialProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1591,7 +1613,6 @@ class MeshBasicMaterial(ThreeMaterialBase[MeshBasicMaterialProps]):
 
 
 class MeshStandardMaterial(ThreeMaterialBase[MeshStandardMaterialProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1601,7 +1622,6 @@ class MeshStandardMaterial(ThreeMaterialBase[MeshStandardMaterialProps]):
 
 
 class MeshLambertMaterial(ThreeMaterialBase[MeshLambertMaterialProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1611,7 +1631,6 @@ class MeshLambertMaterial(ThreeMaterialBase[MeshLambertMaterialProps]):
 
 
 class MeshMatcapMaterial(ThreeMaterialBase[MeshMatcapMaterialProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1621,7 +1640,6 @@ class MeshMatcapMaterial(ThreeMaterialBase[MeshMatcapMaterialProps]):
 
 
 class MeshNormalMaterial(ThreeMaterialBase[MeshNormalMaterialProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1631,7 +1649,6 @@ class MeshNormalMaterial(ThreeMaterialBase[MeshNormalMaterialProps]):
 
 
 class MeshPhongMaterial(ThreeMaterialBase[MeshPhongMaterialProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1641,7 +1658,6 @@ class MeshPhongMaterial(ThreeMaterialBase[MeshPhongMaterialProps]):
 
 
 class MeshPhysicalMaterial(ThreeMaterialBase[MeshPhysicalMaterialProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1651,7 +1667,6 @@ class MeshPhysicalMaterial(ThreeMaterialBase[MeshPhysicalMaterialProps]):
 
 
 class MeshToonMaterial(ThreeMaterialBase[MeshToonMaterialProps]):
-
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -1663,9 +1678,13 @@ class MeshToonMaterial(ThreeMaterialBase[MeshToonMaterialProps]):
 MeshChildType: TypeAlias = Union[ThreeMaterialBase, ThreeMaterialPropsBase,
                                  ThreeGeometryPropsBase, ThreeGeometryBase]
 
+@dataclasses.dataclass
+class MeshProps(Object3dBaseProps):
+    hover_color: Union[str, Undefined] = undefined 
+    click_color: Union[str, Undefined] = undefined
+    toggle_mode: Union[bool, Undefined] = undefined
 
-class Mesh(O3dContainerWithEventBase[Object3dBaseProps, ThreeComponentType]):
-
+class Mesh(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
     def __init__(self,
                  geometry: ThreeGeometryBase,
                  material: ThreeMaterialBase,
@@ -1679,7 +1698,7 @@ class Mesh(O3dContainerWithEventBase[Object3dBaseProps, ThreeComponentType]):
             "geometry": geometry,
             "material": material,
         }
-        super().__init__(UIType.ThreeMesh, Object3dBaseProps, init_dict, uid,
+        super().__init__(UIType.ThreeMesh, MeshProps, init_dict, uid,
                          queue, uid_to_comp, inited)
 
 
@@ -1698,3 +1717,108 @@ class Hud(ThreeContainerBase[HudProps, ThreeComponentType]):
                  inited: bool = False) -> None:
         super().__init__(UIType.ThreeHud, HudProps, uid, queue, uid_to_comp,
                          init_dict, inited)
+
+class Button(Group):
+
+    def __init__(self,
+                 name: str,
+                 width: float,
+                 height: float, 
+                 callback: Callable[[Any], _CORO_NONE],
+                 radius: Optional[float] = None,
+                 font_size: Optional[float] = None,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        if radius is None:
+            radius = min(width, height) * 0.25
+        if font_size is None:
+            font_size = min(width, height) * 0.5
+        material = MeshBasicMaterial()
+        material.prop(color="#393939")
+        mesh = Mesh(RoundedRectGeometry(width, height, radius), material)
+        mesh.set_pointer_callback(on_click=EventCallback(callback, True))
+        mesh.prop(hover_color="#222222", click_color="#009A63")
+        self.mesh = mesh
+        text = Text(name)
+        text.prop(font_size=font_size, color="white", position=(0, 0, 0), max_width=width)
+        init_dict = {
+            "mesh": mesh,
+            "text": text,
+        }
+        super().__init__(init_dict, uid, queue)
+        self.name = name
+        # self.callback = callback
+
+    def to_dict(self):
+        res = super().to_dict()
+        res["name"] = self.name
+        return res
+
+    async def headless_click(self):
+        return await self.queue.put(UIEvent({self.uid: [PointerEventType.Click, self.name]}))
+
+    def get_callback(self):
+        res = self.mesh._pointer_event_map[PointerEventType.Click]
+        assert not isinstance(res, Undefined)
+        return res.cb
+
+    def set_callback(self, val: Any):
+        self.mesh.set_pointer_callback(on_click=EventCallback(val, True))
+        # self.callback = val
+
+    async def handle_event(self, ev: Any):
+        if self._status == UIRunStatus.Running:
+            # TODO send exception if ignored click
+            print("IGNORE EVENT", self._status)
+            return
+        elif self._status == UIRunStatus.Stop:
+            cb2 = self.get_callback()
+            self._task = asyncio.create_task(self.run_callback(lambda: cb2(ev)))
+
+class ToggleButton(Group):
+
+    def __init__(self,
+                 name: str,
+                 width: float,
+                 height: float, 
+                 callback: Callable[[Any], _CORO_NONE],
+                 radius: Optional[float] = None,
+                 font_size: Optional[float] = None,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        if radius is None:
+            radius = min(width, height) * 0.25
+        if font_size is None:
+            font_size = min(width, height) * 0.5
+        material = MeshBasicMaterial()
+        material.prop(color="#393939")
+        mesh = Mesh(RoundedRectGeometry(width, height, radius), material)
+        mesh.set_pointer_callback(on_change=EventCallback(callback, True))
+
+        mesh.prop(hover_color="#222222", click_color="#009A63", toggle_mode=True)
+        self.mesh = mesh
+    
+        text = Text(name)
+        text.prop(font_size=font_size, color="white", position=(0, 0, 0), max_width=width)
+        init_dict = {
+            "mesh": mesh,
+            "text": text,
+        }
+        super().__init__(init_dict, uid, queue)
+        self.name = name
+
+    def to_dict(self):
+        res = super().to_dict()
+        res["name"] = self.name
+        return res
+
+    async def headless_toggle(self):
+        return await self.queue.put(UIEvent({self.uid: [PointerEventType.Change, self.name]}))
+
+    def get_callback(self):
+        res = self.mesh._pointer_event_map[PointerEventType.Change]
+        assert not isinstance(res, Undefined)
+        return res.cb
+
+    def set_callback(self, val: Any):
+        self.mesh.set_pointer_callback(on_click=EventCallback(val, True))

@@ -450,7 +450,7 @@ class SampleThreeApp(EditableApp):
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.b2d = three.Boxes2D(1000)
         mesh = three.Mesh(three.BoxGeometry(), three.MeshBasicMaterial())
-        mesh.set_callback(on_click=three.EventCallback(lambda x: print(x)))
+        mesh.set_pointer_callback(on_click=three.EventCallback(lambda x: print(x)))
         self.canvas = three.ThreeCanvas({
             "cam": cam,
             "points": self.points,
@@ -593,24 +593,23 @@ class SampleThreeHudApp(EditableApp):
         # ctrl = three.OrbitControl(True, 0.25, 1, 100)
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.b2d = three.Boxes2D(1000)
-        mesh = three.Mesh(three.BoxGeometry(), three.MeshBasicMaterial())
-        mesh.set_callback(on_click=three.EventCallback(lambda x: print(1)))
+        mesh = three.Mesh(three.RoundedRectGeometry(2, 1.5, 0.5), three.MeshBasicMaterial().prop(color="#393939"))
+        mesh.set_pointer_callback(on_click=three.EventCallback(lambda x: print(1), True))
+        mesh.prop(hover_color="#222222", click_color="#009A63")
         text = three.Text("WTF")
         text.prop(color="red", font_size=2)
-        text.set_callback(on_click=three.EventCallback(lambda x: print(2)))
+        text.set_pointer_callback(on_click=three.EventCallback(lambda x: print(2)))
 
         self.text2 = three.Text("T")
-        self.text2.prop(color="red", font_size=2)
-        self.text2.set_callback(on_click=three.EventCallback(lambda x: print(3)))
+        self.text2.prop(color="red", font_size=0.5)
+        self.text2.set_pointer_callback(on_click=three.EventCallback(lambda x: print(3)))
         material = three.MeshBasicMaterial()
         material.prop(wireframe=True, color="hotpink")
         mesh2 = three.Mesh(three.BoxGeometry(), material)
-        mesh2.set_callback(on_click=three.EventCallback(lambda x: print(4)))
-        with open("/home/yy/Pictures/Screenshot from 2022-02-11 15-10-06.png", "rb") as f:
-            img_str = f.read()
+        mesh2.set_pointer_callback(on_click=three.EventCallback(lambda x: print(4)))
+        self.img_path = mui.Input("Image Path")
         self.img = three.Image()
-        self.img.image_str = self.img.encode_raw_to_web(img_str, "jpg")
-        self.img.set_callback(on_click=three.EventCallback(lambda x: print("IMAGE!!!")))
+        self.img.set_pointer_callback(on_click=three.EventCallback(lambda x: print("IMAGE!!!", self.img_path.value)))
         self.img.prop(scale=(4, 4, 1))
         self.html = three.Html({
             "btn": mui.Button("RTX", lambda: print("RTX1"))
@@ -652,8 +651,12 @@ class SampleThreeHudApp(EditableApp):
             # "text0": self.html,
             "hud": three.Hud({
                 "mesh": three.ItemBox({
-                    "mesh0": mesh,
+                    "mesh0": three.Button("RTX", 2, 1, lambda x: print("HELLO")),
                 }).prop(center_anchor=True),
+                "mesh1": three.ItemBox({
+                    "mesh0": three.ToggleButton("RTX2", 2, 1, lambda x: print("HELLO2", x)),
+                }).prop(center_anchor=True),
+
                 "text": three.ItemBox({
                     "text0": self.text2,
                 }).prop(center_anchor=True),
@@ -671,9 +674,8 @@ class SampleThreeHudApp(EditableApp):
             VBox({
                 "d3": self.canvas,
                 "hud": mui.VBox({
+                    "inp": self.img_path,
                     "btn1": mui.Button("Read Image", self.on_read_img),
-
-                    "btn": mui.Button("Read Image2", self.on_read_img2),
                     "btn3": mui.Text("Inp", )
 
 
@@ -682,16 +684,59 @@ class SampleThreeHudApp(EditableApp):
         }
         
     async def on_read_img(self):
-        path = "/home/yy/Pictures/Screenshot from 2022-02-11 15-10-06.png"
+        path = self.img_path.value
         with open(path, "rb") as f:
             img_str = f.read()
         await self.img.show_raw(img_str, "jpg")
         await self.text2.update_value("WTF1")
 
-    async def on_read_img2(self):
-        path = "/home/yy/Pictures/Screenshot from 2022-07-23 17-44-39.png"
-        with open(path, "rb") as f:
-            img_str = f.read()
+class SampleThree2DApp(EditableApp):
+
+    def __init__(self) -> None:
+        super().__init__(reloadable_layout=True)
+        self.set_init_window_size([800, 600])
+        # makesure three canvas size fit parent.
+        self.root.props.min_height = 0
+        # store components here if you want to keep
+        # data after reload layout.
+        self.box2d = three.Boxes2D(20000)
+
+
+    def app_create_layout(self) -> Dict[str, MUIComponentType]:
+        cam = three.OrthographicCamera(True, near=0.1, far=1000,
+                                      zoom=50.0)
+        cam.prop(position=[0, 0, 10], up=[0, 0, 1])
+        ctrl = three.MapControl(True, 0.25, 1, 100)
+        # ctrl = three.FirstPersonControl()
+
+        self.canvas = three.ThreeCanvas({
+            "cam": cam,
+            "ctrl": ctrl,
+            "b2d": self.box2d,
+            # "axes": three.AxesHelper(10),
+            "btn0": three.Button("RTX", 2, 1, self.on_box2d_update)
+        })
+        return {
+            "d3v":
+            VBox({
+                "d3": self.canvas,
+                "hud": mui.VBox({
+                    # "update": mui.Button("Box2d", self.on_box2d_update),
+                    "btn3": mui.Text("Inp", )
+                }).prop(position="absolute", top=0, right=0, z_index=5, justify_content="flex-end")
+            }).prop(position="relative", flex=1, min_height=0),
+        }
         
-        await self.img.show_raw(img_str, "jpg")
-        await self.text2.update_value("WTF")
+    async def on_box2d_update(self, ev = None):
+        centers = np.random.randint(1, 10, size=[128 * 32, 2]).astype(np.float32)
+        centers = np.arange(0, 128 * 32).astype(np.int32)
+        centers = np.stack([centers // 32, centers % 32], axis=1).astype(np.float32)
+        centers += [3, 0]
+        # centers = np.array([[0, 0], [2, 2], [3, 3]], np.float32)
+        dimensions = np.ones((1,), np.float32) #  - 0.1
+        attrs = [str(i) for i in range(centers.shape[0])]
+        await self.box2d.update_boxes(centers,
+                                    dimensions,
+                                    color="red",
+                                    alpha=0.0,
+                                    attrs=attrs)
