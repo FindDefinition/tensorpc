@@ -18,7 +18,8 @@ import dataclasses
 import io
 import time
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
-                    Iterable, List, Optional, Tuple, Type, TypeVar, Union, TYPE_CHECKING)
+                    Iterable, List, Optional, Tuple, Type, TypeVar, Union,
+                    TYPE_CHECKING)
 from typing_extensions import Literal, TypeAlias
 import numpy as np
 from PIL import Image as PILImage
@@ -26,8 +27,9 @@ import json
 
 from tensorpc.core.asynctools import cancel_task
 from ..core import (AppEvent, BasicProps, Component, ComponentBaseProps,
-                    ContainerBase, TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
-                    undefined, T_base_props, ValueType)
+                    ContainerBase, NumberType, T_child, TaskLoopEvent, UIEvent,
+                    UIRunStatus, UIType, Undefined, undefined, T_base_props,
+                    ValueType)
 
 if TYPE_CHECKING:
     from .three import ThreeCanvas
@@ -53,11 +55,11 @@ class MUIComponentBaseProps(ComponentBaseProps):
     pass
 
 
-class MUIComponentBase(Component[T_base_props, "MUIComponentType[T_base_props]"]):
+class MUIComponentBase(Component[T_base_props, "MUIComponentType"]):
     pass
 
 
-class MUIContainerBase(ContainerBase[T_base_props, Union["MUIComponentType[T_base_props]", "ThreeCanvas"]]):
+class MUIContainerBase(ContainerBase[T_base_props, T_child]):
     pass
 
 
@@ -77,6 +79,7 @@ class FlexBoxProps(ComponentBaseProps):
 class MUIFlexBoxProps(FlexBoxProps):
     pass
 
+
 async def _handle_standard_event(comp: Component, data: Any):
     if comp._status == UIRunStatus.Running:
         # TODO send exception if ignored click
@@ -90,27 +93,29 @@ async def _handle_standard_event(comp: Component, data: Any):
             def ccb(cb):
                 return lambda: cb(data)
 
-            comp._task = asyncio.create_task(
-                comp.run_callback(ccb(cb1), True))
+            comp._task = asyncio.create_task(comp.run_callback(ccb(cb1), True))
         else:
             await comp.sync_status(True)
 
-async def _handle_button_event(comp: Union["Button", "ListItemButton"], data: Any):
+
+async def _handle_button_event(comp: Union["Button", "ListItemButton"],
+                               data: Any):
     if comp._status == UIRunStatus.Running:
         # TODO send exception if ignored click
         print("IGNORE EVENT", comp._status)
         return
     elif comp._status == UIRunStatus.Stop:
         cb2 = comp.callback
-        comp._task = asyncio.create_task(
-            comp.run_callback(lambda: cb2()))
+        comp._task = asyncio.create_task(comp.run_callback(lambda: cb2()))
 
 
-MUIComponentType: TypeAlias = Union[MUIBasicProps, MUIComponentBase[T_base_props], MUIContainerBase[T_base_props],
-                         MUIFlexBoxProps, MUIComponentBaseProps]
+MUIComponentType: TypeAlias = Union[MUIBasicProps, MUIComponentBase,
+                                    MUIContainerBase, MUIFlexBoxProps,
+                                    MUIComponentBaseProps]
 
 
 class Images(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -147,6 +152,7 @@ class Images(MUIComponentBase[MUIComponentBaseProps]):
 
 
 class Plotly(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  data: Optional[list] = None,
                  layout: Optional[dict] = None,
@@ -182,6 +188,7 @@ class Plotly(MUIComponentBase[MUIComponentBaseProps]):
 
 
 class ChartJSLine(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  data: Optional[Any] = None,
                  options: Optional[Any] = None,
@@ -217,6 +224,7 @@ class ChartJSLine(MUIComponentBase[MUIComponentBaseProps]):
 
 
 class Text(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  init: str,
                  uid: str = "",
@@ -240,6 +248,7 @@ class Text(MUIComponentBase[MUIComponentBaseProps]):
 
 
 class ListItemText(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  init: str,
                  uid: str = "",
@@ -264,8 +273,10 @@ class ListItemText(MUIComponentBase[MUIComponentBaseProps]):
 
 
 class Divider(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
-                 orientation: Union[Literal["horizontal"], Literal["vertical"]] = "horizontal",
+                 orientation: Union[Literal["horizontal"],
+                                    Literal["vertical"]] = "horizontal",
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
         super().__init__(uid, UIType.Divider, MUIComponentBaseProps, queue)
@@ -275,9 +286,11 @@ class Divider(MUIComponentBase[MUIComponentBaseProps]):
     def to_dict(self):
         res = super().to_dict()
         res["orientation"] = self.orientation
-        return res 
+        return res
+
 
 class Button(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  name: str,
                  callback: Callable[[], _CORO_NONE],
@@ -304,8 +317,9 @@ class Button(MUIComponentBase[MUIComponentBaseProps]):
     async def handle_event(self, ev: Any):
         await _handle_button_event(self, ev)
 
-    
+
 class ListItemButton(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  name: str,
                  callback: Callable[[], _CORO_NONE],
@@ -333,57 +347,27 @@ class ListItemButton(MUIComponentBase[MUIComponentBaseProps]):
     async def handle_event(self, ev: Any):
         await _handle_button_event(self, ev)
 
-class Buttons(MUIComponentBase[MUIComponentBaseProps]):
-    def __init__(self,
-                 names: List[str],
-                 callback: Callable[[str], _CORO_NONE],
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Buttons, MUIComponentBaseProps, queue)
-        self.names = names
-        self.callback = callback
 
-    def to_dict(self):
-        res = super().to_dict()
-        res["names"] = self.names
-        return res
+class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
 
-    async def headless_click(self, index: int):
-        return await self.queue.put(UIEvent({self.uid: self.names[index]}))
-
-    def get_callback(self):
-        return self.callback
-
-    def set_callback(self, val: Any):
-        self.callback = val
-
-    async def handle_event(self, ev: Any):
-        if self._status == UIRunStatus.Running:
-            # TODO send exception if ignored click
-            print("IGNORE EVENT", self._status)
-            return
-        elif self._status == UIRunStatus.Stop:
-            self._task = asyncio.create_task(
-                self.run_callback(lambda: self.callback(ev)))
-
-class FlexBox(MUIContainerBase[MUIFlexBoxProps]):
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
-                 _init_dict: Optional[Dict[str, Union[MUIComponentType[MUIBasicProps], "ThreeCanvas"]]] = None,
+                 _init_dict: Optional[Dict[str, MUIComponentType]] = None,
                  base_type: UIType = UIType.FlexBox,
                  inited: bool = False) -> None:
         super().__init__(base_type, MUIFlexBoxProps, uid, queue, uid_to_comp,
                          _init_dict, inited)
 
 
-class MUIList(MUIContainerBase[MUIFlexBoxProps]):
+class MUIList(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
+
     def __init__(self,
                  uid: str,
                  queue: asyncio.Queue,
                  uid_to_comp: Dict[str, Component],
-                 _init_dict: Optional[Dict[str, Union[MUIComponentType[MUIBasicProps], "ThreeCanvas"]]] = None,
+                 _init_dict: Optional[Dict[str, MUIComponentType]] = None,
                  subheader: str = "",
                  inited: bool = False) -> None:
         super().__init__(UIType.MUIList,
@@ -406,24 +390,23 @@ class MUIList(MUIContainerBase[MUIFlexBoxProps]):
             self.subheader = state["subheader"]
 
 
-def VBox(layout: Dict[str, Union["MUIComponentType", "ThreeCanvas"]]):
+def VBox(layout: Dict[str, MUIComponentType]):
     res = FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
     res.prop(flex_flow="column nowrap")
     return res
 
 
-def HBox(layout: Dict[str, Union["MUIComponentType", "ThreeCanvas"]], ):
+def HBox(layout: Dict[str, MUIComponentType], ):
     res = FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
     res.prop(flex_flow="row nowrap")
     return res
 
 
-def Box(layout: Dict[str, Union["MUIComponentType", "ThreeCanvas"]]):
+def Box(layout: Dict[str, MUIComponentType]):
     return FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
 
 
-def VList(layout: Dict[str, Union["MUIComponentType", "ThreeCanvas"]],
-          subheader: str = ""):
+def VList(layout: Dict[str, MUIComponentType], subheader: str = ""):
     return MUIList("",
                    asyncio.Queue(), {},
                    subheader=subheader,
@@ -431,6 +414,7 @@ def VList(layout: Dict[str, Union["MUIComponentType", "ThreeCanvas"]],
 
 
 class RadioGroup(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  names: List[str],
                  row: bool,
@@ -481,7 +465,9 @@ class RadioGroup(MUIComponentBase[MUIComponentBaseProps]):
     async def handle_event(self, ev: Any):
         await _handle_standard_event(self, ev)
 
+
 class Input(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  label: str,
                  multiline: bool = False,
@@ -548,10 +534,12 @@ class Input(MUIComponentBase[MUIComponentBaseProps]):
             # because input is an uncontrolled
             # component.
             if cb is not None:
+
                 def ccb(cb):
                     return lambda: cb(ev)
-                self._task = asyncio.create_task(
-                    self.run_callback(ccb(cb)))
+
+                self._task = asyncio.create_task(self.run_callback(ccb(cb)))
+
 
 # class CodeEditor(MUIComponentBase[MUIComponentBaseProps]):
 
@@ -579,6 +567,7 @@ class Input(MUIComponentBase[MUIComponentBaseProps]):
 
 
 class Switch(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  label: str,
                  callback: Optional[Callable[[bool], Coroutine[None, None,
@@ -623,7 +612,9 @@ class Switch(MUIComponentBase[MUIComponentBaseProps]):
     async def handle_event(self, ev: Any):
         await _handle_standard_event(self, ev)
 
+
 class Select(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  label: str,
                  items: List[Tuple[str, ValueType]],
@@ -694,7 +685,9 @@ class Select(MUIComponentBase[MUIComponentBaseProps]):
     async def handle_event(self, ev: Any):
         await _handle_standard_event(self, ev)
 
+
 class MultipleSelect(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  label: str,
                  items: List[Tuple[str, ValueType]],
@@ -771,7 +764,9 @@ class MultipleSelect(MUIComponentBase[MUIComponentBaseProps]):
     async def handle_event(self, ev: Any):
         await _handle_standard_event(self, ev)
 
+
 class Slider(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  label: str,
                  begin: Union[int, float],
@@ -811,7 +806,10 @@ class Slider(MUIComponentBase[MUIComponentBaseProps]):
         assert end > begin and step < end - begin
         self.value = begin
         await self.queue.put(
-            self.create_update_event({"ranges": (begin, end, step), "value": self.value}))
+            self.create_update_event({
+                "ranges": (begin, end, step),
+                "value": self.value
+            }))
 
     async def update_value(self, value: Union[int, float]):
         assert value >= self.ranges[0] and value <= self.ranges[1]
@@ -833,10 +831,12 @@ class Slider(MUIComponentBase[MUIComponentBaseProps]):
     async def handle_event(self, ev: Any):
         await _handle_standard_event(self, ev)
 
+
 _T = TypeVar("_T")
 
 
 class TaskLoop(MUIComponentBase[MUIComponentBaseProps]):
+
     def __init__(self,
                  label: str,
                  loop_callbcak: Callable[[], _CORO_NONE],
@@ -935,3 +935,162 @@ class TaskLoop(MUIComponentBase[MUIComponentBaseProps]):
                 print("IGNORE TaskLoop EVENT", self._status)
         else:
             raise NotImplementedError
+
+
+_TypographyVarient: TypeAlias = Literal['body1', 'body2', 'button', 'caption',
+                                        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                                        'inherit', 'overline', 'subtitle1',
+                                        'subtitle2']
+
+_StdColor: TypeAlias = Literal['default', 'primary', 'secondary', 'error',
+                               'info', 'success', 'warning']
+
+
+@dataclasses.dataclass
+class TypographyProps(ComponentBaseProps):
+    align: Union[Literal["center", "inherit", "justify", "left", "right"],
+                 Undefined] = undefined
+    gutter_bottom: Union[bool, Undefined] = undefined
+    no_wrap: Union[bool, Undefined] = undefined
+    variant: Union[_TypographyVarient, Undefined] = undefined
+    paragraph: Union[bool, Undefined] = undefined
+
+
+class Typography(MUIComponentBase[ComponentBaseProps]):
+
+    def __init__(self,
+                 init: str,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.Typography, ComponentBaseProps, queue)
+        self.value = init
+
+    async def write(self, content: str):
+        self.value = content
+        await self.queue.put(self.create_update_event({"value": self.value}))
+
+    def get_state(self):
+        state = super().get_state()
+        state["value"] = self.value
+        return state
+
+    def set_state(self, state: Dict[str, Any]):
+        super().set_state(state)
+        if "value" in state:
+            self.value = state["value"]
+
+
+@dataclasses.dataclass
+class PaperProps(FlexBoxProps):
+    elevation: Union[int, Undefined] = undefined
+    square: Union[bool, Undefined] = undefined
+    variant: Union[Literal["elevation", "outlined"], Undefined] = undefined
+
+
+class Paper(MUIContainerBase[PaperProps, MUIComponentType]):
+
+    def __init__(self,
+                 init_dict: Dict[str, MUIComponentType],
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 uid_to_comp: Optional[Dict[str, Component]] = None,
+                 inited: bool = False) -> None:
+        super().__init__(UIType.Paper, PaperProps, uid, queue, uid_to_comp,
+                         init_dict, inited)
+
+
+_BtnGroupColor: TypeAlias = Literal['inherit', 'primary', 'secondary', 'error',
+                                    'info', 'success', 'warning']
+
+
+@dataclasses.dataclass
+class ButtonGroupProps(FlexBoxProps):
+    color: Union[_BtnGroupColor, str, Undefined] = undefined
+    disabled: Union[bool, Undefined] = undefined
+    full_width: Union[bool, Undefined] = undefined
+    orientation: Union[Literal["horizontal", "vertical"],
+                       Undefined] = undefined
+    size: Union[Literal["small", "medium", "large"], Undefined] = undefined
+    variant: Union[Literal["contained", "outlined", "text"],
+                   Undefined] = undefined
+
+
+class ButtonGroup(MUIContainerBase[ButtonGroupProps, Button]):
+
+    def __init__(self,
+                 init_dict: Dict[str, Button],
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 uid_to_comp: Optional[Dict[str, Component]] = None,
+                 inited: bool = False) -> None:
+        super().__init__(UIType.ButtonGroup, ButtonGroupProps, uid, queue,
+                         uid_to_comp, init_dict, inited)
+        for v in init_dict.values():
+            assert isinstance(v, Button), "all childs must be button"
+
+
+@dataclasses.dataclass
+class CollapseProps(FlexBoxProps):
+    orientation: Union[Literal["horizontal", "vertical"],
+                       Undefined] = undefined
+    timeout: Union[NumberType, Undefined] = undefined
+
+
+class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
+
+    def __init__(self,
+                 init_dict: Dict[str, MUIComponentType],
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 uid_to_comp: Optional[Dict[str, Component]] = None,
+                 inited: bool = False) -> None:
+        super().__init__(UIType.Collapse, CollapseProps, uid, queue,
+                         uid_to_comp, init_dict, inited)
+
+
+@dataclasses.dataclass
+class ChipProps(ComponentBaseProps):
+    color: Union[_StdColor, str, Undefined] = undefined
+    clickable: Union[bool, Undefined] = undefined
+    size: Union[Literal["small", "medium"], Undefined] = undefined
+    variant: Union[Literal["filled", "outlined"], Undefined] = undefined
+
+
+class Chip(MUIComponentBase[ChipProps]):
+
+    def __init__(self,
+                 label: str,
+                 callback: Optional[Callable[[], _CORO_NONE]] = None,
+                 delete_callback: Optional[Callable[[], _CORO_NONE]] = None,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.Chip, ChipProps, queue)
+        self.label = label
+        self.callback = callback
+        self.delete_callback = delete_callback
+
+    def to_dict(self):
+        res = super().to_dict()
+        res["label"] = self.label
+        return res
+
+    async def headless_click(self):
+        return await self.queue.put(UIEvent({self.uid: self.label}))
+
+    def get_callback(self):
+        return self.callback
+
+    def set_callback(self, val: Any):
+        self.callback = val
+
+    async def handle_event(self, ev: Any):
+        # TODO add delete support
+        if self._status == UIRunStatus.Running:
+            # TODO send exception if ignored click
+            print("IGNORE EVENT", self._status)
+            return
+        elif self._status == UIRunStatus.Stop:
+            cb2 = self.get_callback()
+            if cb2 is not None:
+                self._task = asyncio.create_task(
+                    self.run_callback(lambda: cb2()))

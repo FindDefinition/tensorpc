@@ -49,6 +49,7 @@ from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceUnit
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.uniquename import UniqueNamePool
 from watchdog.observers import Observer
+import contextvars
 
 from .components import mui, three
 from .core import (AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
@@ -59,10 +60,34 @@ from .core import (AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
 
 ALL_APP_EVENTS = HashableRegistry()
 
+
+class AppContext:
+
+    def __init__(self, app: "App") -> None:
+        self.app = app
+
+
+APP_CONTEXT_VAR: contextvars.ContextVar[
+    Optional[AppContext]] = contextvars.ContextVar("flowapp_context",
+                                                   default=None)
+def get_app_context() -> Optional[AppContext]:
+    return APP_CONTEXT_VAR.get()
+
+@contextlib.contextmanager
+def _enter_app_conetxt(app: "App"):
+    ctx = AppContext(app)
+    token = APP_CONTEXT_VAR.set(ctx)
+    try:
+        yield ctx
+        APP_CONTEXT_VAR.reset(token)
+    finally:
+        APP_CONTEXT_VAR.reset(token)
+
 _ROOT = "root"
 
 
 class AppEditor:
+
     def __init__(
         self,
         init_value: str,
@@ -258,7 +283,8 @@ class App:
         if event.type == AppEditorFrontendEventType.SaveEditorState:
             self.code_editor._monaco_state = event.data
             return
-        return await self.handle_code_editor_event(event)
+        with _enter_app_conetxt(self):
+            return await self.handle_code_editor_event(event)
 
     async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
         """override this method to support vscode editor.
@@ -282,10 +308,16 @@ class App:
         await self._send_editor_event(app_ev)
 
     async def handle_event(self, ev: UIEvent):
-        # TODO run control from other component
         for uid, data in ev.uid_to_data.items():
             comp = self._uid_to_comp[uid]
             await comp.handle_event(data)
+
+    async def _handle_event_with_ctx(self, ev: UIEvent):
+        # TODO run control from other component
+        with _enter_app_conetxt(self):
+            for uid, data in ev.uid_to_data.items():
+                comp = self._uid_to_comp[uid]
+                await comp.handle_event(data)
 
     async def copy_text_to_clipboard(self, text: str):
         """copy to clipboard in frontend."""
@@ -300,6 +332,7 @@ _WATCHDOG_MODIFY_EVENT_TYPES = Union[watchdog.events.DirModifiedEvent,
 
 
 class _WatchDogForAppFile(watchdog.events.FileSystemEventHandler):
+
     def __init__(
             self, on_modified: Callable[[_WATCHDOG_MODIFY_EVENT_TYPES],
                                         None]) -> None:
@@ -311,6 +344,7 @@ class _WatchDogForAppFile(watchdog.events.FileSystemEventHandler):
 
 
 class EditableApp(App):
+
     def __init__(self,
                  reloadable_layout: bool = False,
                  flex_flow: Union[str, Undefined] = "column nowrap",
@@ -397,6 +431,7 @@ class EditableApp(App):
 
 
 class EditableLayoutApp(EditableApp):
+
     def __init__(self,
                  flex_flow: Union[str, Undefined] = "column nowrap",
                  justify_content: Union[str, Undefined] = undefined,

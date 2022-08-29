@@ -53,7 +53,7 @@ nodefault = NoDefault()
 
 class UIType(enum.Enum):
     # controls
-    Buttons = 0x0
+    ButtonGroup = 0x0
     Input = 0x1
     Switch = 0x2
     Select = 0x3
@@ -68,6 +68,12 @@ class UIType(enum.Enum):
     Plotly = 0xc
     ChartJSLine = 0xd
     MultipleSelect = 0xe
+    Paper = 0xf
+    Typography = 0x10
+    Collapse = 0x11
+    Card = 0x12
+    Chip = 0x13
+
 
     # special
     TaskLoop = 0x100
@@ -107,8 +113,10 @@ class UIType(enum.Enum):
     ThreeMeshMaterial = 0x1028
     ThreeMesh = 0x1029
     ThreeBufferGeometry = 0x102a
+    ThreeFlexAutoReflow = 0x102b
 
-    ThreeShape = 0x1101
+    ThreeSimpleGeometry = 0x1101
+    ThreeShape = 0x1102
 
 class AppEventType(enum.Enum):
     # layout events
@@ -484,6 +492,13 @@ class ComponentBaseProps(BasicProps):
     """all props must have a default value, 
     manage state by your self.
     """
+    position: Union[Literal["absolute", "relative"], Undefined] = undefined
+    top: Union[ValueType, Undefined] = undefined
+    bottom: Union[ValueType, Undefined] = undefined
+    left: Union[ValueType, Undefined] = undefined
+    right: Union[ValueType, Undefined] = undefined
+    z_index: Union[ValueType, Undefined] = undefined
+
     flex: Union[ValueType, Undefined] = undefined
     align_self: Union[str, Undefined] = undefined
     flex_grow: Union[str, Undefined] = undefined

@@ -14,6 +14,7 @@
 
 import asyncio
 import base64
+from functools import partial
 import io
 import time
 import traceback
@@ -38,7 +39,6 @@ from tensorpc.core.asynctools import cancel_task
 from tensorpc.apps.flow.flowapp.components import three, mui
 import numpy as np
 
-
 class SampleApp(App):
 
     def __init__(self) -> None:
@@ -46,8 +46,12 @@ class SampleApp(App):
         self.img_ui = mui.Images()
         self.task_loop = mui.TaskLoop("Test", self.on_task_loop)
         self.root.add_layout({
-            "btn": mui.Buttons(["LoadImage", "SendMessage", "OpenCam", "Sleep"],
-            self.on_button_click),
+            "btn": mui.ButtonGroup({
+                "btn0": mui.Button("LoadImage", partial(self.on_button_click, name="LoadImage")),
+                "btn1": mui.Button("SendMessage", partial(self.on_button_click, name="SendMessage")),
+                "btn2": mui.Button("OpenCam", partial(self.on_button_click, name="OpenCam")),
+                "btn3": mui.Button("Sleep", partial(self.on_button_click, name="Sleep")),
+            }),
             "btn2": mui.Button("Sleep", self.on_one_button_click),
 
             "swi": mui.Switch("Switch", self.on_switch),
@@ -505,10 +509,10 @@ class SampleThreeApp(EditableApp):
         # with open("/home/yy/Pictures/Screenshot from 2022-02-11 15-10-06.png", "rb") as f:
         #     await self.img.show_raw(f.read(), "png")
         centers = np.array([[0, 0], [2, 2], [3, 3]], np.float32)
-        dimersions = np.array([[1, 1], [1, 1], [1, 1]], np.float32)
+        dimensions = np.array([[1, 1], [1, 1], [1, 1]], np.float32)
         attrs = [str(i) for i in range(centers.shape[0])]
         await self.b2d.update_boxes(centers,
-                                    dimersions,
+                                    dimensions,
                                     color="red",
                                     alpha=0.5)
         await self.b2d.update_object3d(position=(0, 0, 1))
@@ -579,37 +583,115 @@ class SampleThreeHudApp(EditableApp):
     def app_create_layout(self) -> Dict[str, MUIComponentType]:
         cam = three.PerspectiveCamera(True, fov=75, near=0.1, far=1000)
         cam.prop(position=(0, 0, 20), up=(0, 0, 1))
-        # cam = three.OrthographicCamera(True, position=[0, 0, 10], up=[0, 0, 1], near=0.1, far=1000,
+        # cam = three.OrthographicCamera(True, near=0.1, far=1000,
         #                               zoom=8.0)
-        self.img = three.Image()
+        # cam.prop(position=[0, 0, 10], up=[0, 0, 1])
         ctrl = three.MapControl(True, 0.25, 1, 100)
         # ctrl = three.FirstPersonControl()
+
 
         # ctrl = three.OrbitControl(True, 0.25, 1, 100)
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.b2d = three.Boxes2D(1000)
         mesh = three.Mesh(three.BoxGeometry(), three.MeshBasicMaterial())
-        mesh.set_callback(on_click=three.EventCallback(lambda x: print(x)))
+        mesh.set_callback(on_click=three.EventCallback(lambda x: print(1)))
+        text = three.Text("WTF")
+        text.prop(color="red", font_size=2)
+        text.set_callback(on_click=three.EventCallback(lambda x: print(2)))
+
+        self.text2 = three.Text("T")
+        self.text2.prop(color="red", font_size=2)
+        self.text2.set_callback(on_click=three.EventCallback(lambda x: print(3)))
+        material = three.MeshBasicMaterial()
+        material.prop(wireframe=True, color="hotpink")
+        mesh2 = three.Mesh(three.BoxGeometry(), material)
+        mesh2.set_callback(on_click=three.EventCallback(lambda x: print(4)))
+        with open("/home/yy/Pictures/Screenshot from 2022-02-11 15-10-06.png", "rb") as f:
+            img_str = f.read()
+        self.img = three.Image()
+        self.img.image_str = self.img.encode_raw_to_web(img_str, "jpg")
+        self.img.set_callback(on_click=three.EventCallback(lambda x: print("IMAGE!!!")))
+        self.img.prop(scale=(4, 4, 1))
+        self.html = three.Html({
+            "btn": mui.Button("RTX", lambda: print("RTX1"))
+        })
+        self.html.prop(transform=True, center=False, enable_reflow=True)
+        self.html2 = three.Html({
+        })
+        self.html2.prop(transform=True, center=False, enable_reflow=True, pointer_events="none")
+
         self.canvas = three.ThreeCanvas({
             "cam": cam,
             "points": self.points,
             # "lines": self.lines,
+            # "flexdev": three.Flex({
+            #     "box1": three.ItemBox({
+            #         "text0": three.Text("WTF1").prop(color="red", font_size=2),
+            #     }).prop(center_anchor=True),
+            #     "box2": three.ItemBox({
+            #         "text0": three.Text("WTF2").prop(color="red", font_size=2),
+            #     }).prop(center_anchor=True),
+            #     "box3": three.ItemBox({
+            #         "text0": three.Text("WTF3").prop(color="red", font_size=2),
+            #     }).prop(center_anchor=True),
+            #     "box4": three.ItemBox({
+            #         "text0": three.Text("WTF4").prop(color="red", font_size=2),
+            #     }).prop(center_anchor=True),
+
+            # }).prop(flex_direction="row", size=(20, 20, 0), position=(-20, -20, 0), flex_wrap="wrap"),
+
             "ctrl": ctrl,
             "axes": three.AxesHelper(10),
             "infgrid": infgrid,
-            "img": self.img,
             "b2d": self.b2d,
-            # "mesh": mesh,
+            "mesh": mesh2,
+            # "img": self.img,
             "text": three.Text("WTF").prop(color="red", font_size=2),
-            # "box": three.BoundingBox([2, 5, 2], [0, 10, 0], [0, 0, 0.5])
+            "box": three.BoundingBox([2, 5, 2]).prop(position=(5, 0, 0)),
+            # 
+            # "text0": self.html,
             "hud": three.Hud({
-                "mesh": mesh,
-            }).prop(render_priority=2)
-        }, background="black")
+                "mesh": three.ItemBox({
+                    "mesh0": mesh,
+                }).prop(center_anchor=True),
+                "text": three.ItemBox({
+                    "text0": self.text2,
+                }).prop(center_anchor=True),
+                "text4": three.ItemBox({
+                    "text0": self.img,
+                }).prop(center_anchor=True),
+                "text3": three.ItemBox({
+                    "text0": three.BoundingBox([2, 5, 2]),
+                }).prop(center_anchor=True),
+                "autoreflow": three.FlexAutoReflow(),
+            }).prop(render_priority=1, flex_direction="row", justify_content="flex-start")
+        })
         return {
             "d3v":
             VBox({
                 "d3": self.canvas,
-            }).prop(flex=1, min_height=0),
+                "hud": mui.VBox({
+                    "btn1": mui.Button("Read Image", self.on_read_img),
+
+                    "btn": mui.Button("Read Image2", self.on_read_img2),
+                    "btn3": mui.Text("Inp", )
+
+
+                }).prop(position="absolute", top=0, right=0, z_index=5, justify_content="flex-end")
+            }).prop(position="relative", flex=1, min_height=0),
         }
         
+    async def on_read_img(self):
+        path = "/home/yy/Pictures/Screenshot from 2022-02-11 15-10-06.png"
+        with open(path, "rb") as f:
+            img_str = f.read()
+        await self.img.show_raw(img_str, "jpg")
+        await self.text2.update_value("WTF1")
+
+    async def on_read_img2(self):
+        path = "/home/yy/Pictures/Screenshot from 2022-07-23 17-44-39.png"
+        with open(path, "rb") as f:
+            img_str = f.read()
+        
+        await self.img.show_raw(img_str, "jpg")
+        await self.text2.update_value("WTF")

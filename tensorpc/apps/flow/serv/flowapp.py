@@ -80,7 +80,7 @@ class FlowApp:
             return await self.app._handle_code_editor_event_system(ev)
         elif type == AppEventType.UIEvent.value:
             ev = UIEvent.from_dict(data)
-            return await self.app.handle_event(ev)
+            return await self.app._handle_event_with_ctx(ev)
         elif type == AppEventType.ScheduleNext.value:
             asyncio.create_task(self._run_schedule_event_task(data))
         elif type == AppEventType.UISaveStateEvent.value:
