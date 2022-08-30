@@ -324,18 +324,30 @@ class NodeWithSSHBase(RunnableNodeBase):
 
         self.init_terminal_size: Tuple[int, int] = (34, 16)
         if ENCODING is None:
-            self.terminal_state = b""
+            self._terminal_state = b""
         else:
-            self.terminal_state = ""
+            self._terminal_state = ""
 
         self.terminal_close_ts: int = -1
-        self._raw_event_history: "deque[RawEvent]" = deque(maxlen=10000)
+        self._raw_event_history: "deque[RawEvent]" = deque()
         self.session_status: SessionStatus = SessionStatus.Stop
 
         self.exit_event = asyncio.Event()
 
         self.queued_commands: List[ScheduleEvent] = []
         self.running_driver_id = ""
+
+    @property 
+    def terminal_state(self):
+        if self._raw_event_history:
+            self._terminal_state += b"".join([ev.raw for ev in self._raw_event_history])
+            self._raw_event_history.clear()
+        return self._terminal_state
+
+    @terminal_state.setter 
+    def terminal_state(self, val: bytes):
+        self._terminal_state = val
+        self._raw_event_history.clear()
 
     def push_raw_event(self, ev: RawEvent):
         self._raw_event_history.append(ev)
@@ -1453,20 +1465,10 @@ class Flow:
 
             if isinstance(event, RawEvent):
                 # print(node.id, self.selected_node_uid == uid, event.line, end="")
-                node.stdout += event.raw
-                node.push_raw_event(event)
+                # node.stdout += event.raw
                 # we assume node never produce special input strings during
                 # terminal frontend closing.
-                if node.terminal_close_ts >= 0:
-                    if event.timestamp > node.terminal_close_ts:
-                        evs = node.collect_raw_event_after_ts(event.timestamp)
-                        if isinstance(node.terminal_state, bytes):
-                            node.terminal_state += b"".join(ev.raw for ev in evs)
-                        else:
-                            node.terminal_state += "".join(ev.raw for ev in evs)
-                        node.terminal_close_ts = event.timestamp
-                        # print("NODE APPEND STATE")
-
+                node.push_raw_event(event)
                 if uid != self.selected_node_uid:
                     continue
 
@@ -1563,6 +1565,7 @@ class Flow:
         node.terminal_close_ts = -1
         if width >= 0 and height >= 0:
             await self.ssh_change_size(graph_id, node_id, width, height)
+        print("TERMINAL STATE SIZE", len(node.terminal_state) / 1024 / 1024)
         return node.terminal_state
 
     async def command_node_input(self, graph_id: str, node_id: str, data: str):

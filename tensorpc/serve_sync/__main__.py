@@ -15,7 +15,9 @@ def serve_in_terminal(*modules: str,
                       http_port=None,
                       length=-1,
                       serv_def_file: Optional[str] = None,
-                      max_threads=10):
+                      max_threads=10,
+                      ssl_key_path: str = "",
+                      ssl_crt_path: str = ""):
     if serv_def_file is not None:
         service_def = from_yaml_path(serv_def_file)
     else:

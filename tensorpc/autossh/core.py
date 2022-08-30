@@ -516,6 +516,7 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
                     res_str = data.decode(self._tensorpc_encoding)
                 else:
                     res_str = data
+            # print(len(res_str), res_str)
             loop = asyncio.get_running_loop()
             asyncio.run_coroutine_threadsafe(
                 self.callback(RawEvent(ts, res_str, False, self.uid)), loop)

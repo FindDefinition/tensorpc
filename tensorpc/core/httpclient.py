@@ -50,7 +50,7 @@ def http_remote_call_request(url: str, key: str,
         callback="")
     res = requests.post(url, data=request.SerializeToString())
     if res.status_code != 200:
-        raise ValueError(f"Http Post {url} {key} Failed with Status {resp.status}")
+        raise ValueError(f"Http Post {url} {key} Failed with Status {res.status_code}")
     resp_pb = rpc_message_pb2.RemoteJsonCallReply()
     resp_pb.ParseFromString(res.content)
     if resp_pb.exception != "":
@@ -281,5 +281,5 @@ async def main():
 
 if __name__ == "__main__":
     # asyncio.run(main())
-    data = http_remote_call_request("http://localhost:54052/api/rpc", "tensorpc.services.collection:Simple.echo", 5)
+    data = http_remote_call_request("https://localhost:51052/api/rpc", "tensorpc.services.collection:Simple.echo", 5)
     print(data, type(data))

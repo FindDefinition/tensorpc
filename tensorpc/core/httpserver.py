@@ -18,7 +18,7 @@ from tensorpc.core.client import RemoteException, format_stdout
 from tensorpc.core.serviceunit import ServiceType
 import ssl
 from tensorpc.core.server_core import ProtobufServiceCore, ServiceCore, ServerMeta
-from pathlib import Path 
+from pathlib import Path
 from tensorpc.protos import remote_object_pb2
 from tensorpc.protos import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos import rpc_message_pb2
@@ -33,6 +33,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 LOGGER = df_logging.get_logger()
 JS_MAX_SAFE_INT = 9007199254740991
+
 
 class WebsocketClient(object):
     # TODO peer client use a async queue instead of recv because
@@ -79,10 +80,12 @@ class WebsocketClient(object):
                                    data=json.dumps(data),
                                    rpc_id=request_id)
         else:
-            req = wsdef_pb2.Header(service_id=sid, rpc_id=request_id,
-                dynamic_key=dynamic_key)
+            req = wsdef_pb2.Header(service_id=sid,
+                                   rpc_id=request_id,
+                                   dynamic_key=dynamic_key)
         if is_json:
-            return await self.ws.send_bytes(core_io.json_only_encode(data, msg_type, req))
+            return await self.ws.send_bytes(
+                core_io.json_only_encode(data, msg_type, req))
         max_size = self.ws._max_msg_size - 128
         # max_size = 1024 * 1024
         encoder = core_io.SocketMessageEncoder(data)
@@ -128,7 +131,7 @@ class WebsocketClient(object):
                                      request_id: int):
         return await self.send_error_string(err, detail,
                                             core_io.SocketMsgType.UserError,
-                                            request_id,)
+                                            request_id)
 
     async def send_user_error(self, exc, request_id: int):
         return await self.send_exception(exc, core_io.SocketMsgType.UserError,
@@ -205,8 +208,11 @@ class AllWebsocketHandler:
             res = json.dumps({"error": exc_str, "detail": ""})
         if is_exception:
             msg_type = core_io.SocketMsgType.RPCError
-            await client.send(json.loads(res), msg_type=msg_type, request_id=req_id, is_json=True)
-            return 
+            await client.send(json.loads(res),
+                              msg_type=msg_type,
+                              request_id=req_id,
+                              is_json=True)
+            return
         else:
             msg_type = core_io.SocketMsgType.RPC
         if is_notification:
@@ -228,9 +234,9 @@ class AllWebsocketHandler:
         try:
             # send serv ids first
             await client.send(self._name_to_serv_id,
-                                core_io.SocketMsgType.QueryServiceIds,
-                                request_id=0,
-                                is_json=True)
+                              core_io.SocketMsgType.QueryServiceIds,
+                              request_id=0,
+                              is_json=True)
             # TODO we should wait shutdown here
             # TODO handle send error
             async for ws_msg in ws:
@@ -260,7 +266,7 @@ class AllWebsocketHandler:
                         continue
                     serv_key: str = self._serv_id_to_name[req.service_id]
                     assert req.chunk_index == 0, "this should't happen"
-                    
+
                     if msg_type == core_io.SocketMsgType.Subscribe:
                         event_key: str = serv_key
                         if event_key not in self.all_ev_providers:
@@ -281,7 +287,9 @@ class AllWebsocketHandler:
                             self.client_to_events[client].add(event_key)
                         # send OK
                         # TODO send error if this event is already subscribed
-                        await client.send([], msg_type=msg_type, request_id=req.rpc_id)
+                        await client.send([],
+                                          msg_type=msg_type,
+                                          request_id=req.rpc_id)
 
                     elif msg_type == core_io.SocketMsgType.UnSubscribe:
                         event_key: str = serv_key
@@ -308,14 +316,16 @@ class AllWebsocketHandler:
                                 self.delete_event_ev.set()
                             # if event_key isn't exists, the client_to_events
                             # shouldn't have this event too.
-                            
+
                             client_evs = self.client_to_events[client]
                             client_evs.remove(event_key)
                             if not client_evs:
                                 self.client_to_events.pop(client)
                         # TODO send error if this event is already subscribed
                         # send OK
-                        await client.send([], msg_type=msg_type, request_id=req.rpc_id)
+                        await client.send([],
+                                          msg_type=msg_type,
+                                          request_id=req.rpc_id)
 
                     elif msg_type == core_io.SocketMsgType.RPC:
                         arg_data = core_io.parse_message_chunks(header, [data])
@@ -333,7 +343,9 @@ class AllWebsocketHandler:
                     else:
                         raise NotImplementedError
                 elif ws_msg.type == aiohttp.WSMsgType.ERROR:
-                    print("ERROR")
+                    print("ERROR", ws_msg)
+                    print("ERROR", ws_msg.data)
+
                 else:
                     raise NotImplementedError
         finally:
@@ -443,7 +455,7 @@ class AllWebsocketHandler:
                 # done may contains deleted tasks. they will be removed in task_to_ev before.
                 if task in task_to_ev:
                     exc = task.exception()
-                    
+
                     ev_str = task_to_ev[task]
 
                     if exc is not None:
@@ -451,22 +463,23 @@ class AllWebsocketHandler:
                         ss = io.StringIO()
                         task.print_stack(file=ss)
                         detail = ss.getvalue()
-                        res = self.service_core._remote_exception_dict(exc, detail)
+                        res = self.service_core._remote_exception_dict(
+                            exc, detail)
                     else:
                         msg_type = core_io.SocketMsgType.Event
                         res = task.result()
                     if isinstance(res, serviceunit.DynamicEvent):
-                        data = res.data 
+                        data = res.data
                         dynamic_key = res.name
                     else:
                         data = res
-                        dynamic_key = "" 
-                    # this event may be deleted before. 
+                        dynamic_key = ""
+                    # this event may be deleted before.
                     if exc is None:
                         data_to_send = [data]
                     else:
                         data_to_send = data
-                    
+
                     ev_clients = self.event_to_clients[ev_str]
                     # we need to generate a rpc id for event
                     for client in ev_clients:
@@ -537,6 +550,7 @@ class HttpService:
         res = web.Response(body=byte, headers=headers)
         return res
 
+
 async def _await_shutdown(shutdown_ev, loop):
     return await loop.run_in_executor(None, shutdown_ev.wait)
 
@@ -563,16 +577,14 @@ async def serve_app(app,
 
 async def serve_service_core_task(server_core: ProtobufServiceCore,
                                   port=50052,
-                                  credentials=None,
                                   rpc_name="/api/rpc",
                                   ws_name="/api/ws",
                                   is_sync: bool = False,
-                                  rpc_pickle_name: str="/api/rpc_pickle",
-                                  client_max_size: int = 4 * 1024 ** 2,
+                                  rpc_pickle_name: str = "/api/rpc_pickle",
+                                  client_max_size: int = 4 * 1024**2,
                                   standalone: bool = True,
-                                    ssl_key_path: str = "",
-                                    ssl_crt_path: str = ""
-                                  ):
+                                  ssl_key_path: str = "",
+                                  ssl_crt_path: str = ""):
     # client_max_size 4MB is enough for most image upload.
     http_service = HttpService(server_core)
     ctx = contextlib.nullcontext()
@@ -586,25 +598,32 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
         # TODO should we create a global client session for all http call in server?
         loop_task = asyncio.create_task(ws_service.event_provide_executor())
         app.router.add_post(rpc_name, http_service.remote_json_call_http)
-        app.router.add_post(rpc_pickle_name, http_service.remote_pickle_call_http)
+        app.router.add_post(rpc_pickle_name,
+                            http_service.remote_pickle_call_http)
         app.router.add_get(ws_name, ws_service.handle_new_connection)
-        ssl_context = None 
-        if Path(ssl_key_path).exists() and Path(ssl_crt_path).exists():
+        ssl_context = None
+        if ssl_key_path != "" and ssl_key_path != "":
             ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
             ssl_context.load_cert_chain(ssl_crt_path, ssl_key_path)
         return await asyncio.gather(
-            serve_app(app, port, server_core.shutdown_event,
-                    server_core.async_shutdown_event, is_sync, ssl_context=ssl_context), loop_task)
+            serve_app(app,
+                      port,
+                      server_core.shutdown_event,
+                      server_core.async_shutdown_event,
+                      is_sync,
+                      ssl_context=ssl_context), loop_task)
 
 
 def serve_service_core(server_core: ProtobufServiceCore,
                        port=50052,
-                       credentials=None,
                        rpc_name="/api/rpc",
                        ws_name="/api/ws"):
-    http_task = serve_service_core_task(server_core, port, None, is_sync=True, standalone=True)
+    http_task = serve_service_core_task(server_core,
+                                        port,
+                                        is_sync=True,
+                                        standalone=True)
     try:
         asyncio.run(http_task)
     except KeyboardInterrupt:
-        
+
         print("shutdown by keyboard interrupt")

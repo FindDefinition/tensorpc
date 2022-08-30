@@ -146,10 +146,10 @@ async def serve_service(service: AsyncRemoteObjectService,
     remote_object_pb2_grpc.add_RemoteObjectServicer_to_server(service, server)
     url = '[::]:{}'.format(port)
     credentials = None
-    if Path(ssl_key_path).exists() and Path(ssl_crt_path).exists():
-        with open(ssl_key_path, "r") as f:
+    if ssl_key_path != "" and ssl_key_path != "":
+        with open(ssl_key_path, "rb") as f:
             private_key = f.read()
-        with open(ssl_crt_path, "r") as f:
+        with open(ssl_crt_path, "rb") as f:
             certificate_chain = f.read()
         credentials = grpc.ssl_server_credentials([(private_key,
                                                     certificate_chain)])
@@ -240,7 +240,6 @@ async def serve_with_http_async(server_core: ProtobufServiceCore,
             http_task = httpserver.serve_service_core_task(
                 server_core,
                 http_port,
-                None,
                 is_sync=False,
                 standalone=False,
                 ssl_key_path=ssl_key_path,
