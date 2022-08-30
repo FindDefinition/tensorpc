@@ -16,9 +16,9 @@ from tensorpc.core import core_io
 from tensorpc.core import serviceunit
 from tensorpc.core.client import RemoteException, format_stdout
 from tensorpc.core.serviceunit import ServiceType
-
+import ssl
 from tensorpc.core.server_core import ProtobufServiceCore, ServiceCore, ServerMeta
-
+from pathlib import Path 
 from tensorpc.protos import remote_object_pb2
 from tensorpc.protos import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos import rpc_message_pb2
@@ -546,11 +546,12 @@ async def serve_app(app,
                     shutdown_ev: threading.Event,
                     async_shutdown_ev: asyncio.Event,
                     is_sync: bool = False,
-                    url=None):
+                    url=None,
+                    ssl_context=None):
     loop = asyncio.get_running_loop()
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, host=url, port=port)
+    site = web.TCPSite(runner, host=url, port=port, ssl_context=ssl_context)
     await site.start()
     if not is_sync:
         await async_shutdown_ev.wait()
@@ -568,7 +569,10 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
                                   is_sync: bool = False,
                                   rpc_pickle_name: str="/api/rpc_pickle",
                                   client_max_size: int = 4 * 1024 ** 2,
-                                  standalone: bool = True):
+                                  standalone: bool = True,
+                                    ssl_key_path: str = "",
+                                    ssl_crt_path: str = ""
+                                  ):
     # client_max_size 4MB is enough for most image upload.
     http_service = HttpService(server_core)
     ctx = contextlib.nullcontext()
@@ -584,9 +588,13 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
         app.router.add_post(rpc_name, http_service.remote_json_call_http)
         app.router.add_post(rpc_pickle_name, http_service.remote_pickle_call_http)
         app.router.add_get(ws_name, ws_service.handle_new_connection)
+        ssl_context = None 
+        if Path(ssl_key_path).exists() and Path(ssl_crt_path).exists():
+            ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            ssl_context.load_cert_chain(ssl_crt_path, ssl_key_path)
         return await asyncio.gather(
             serve_app(app, port, server_core.shutdown_event,
-                    server_core.async_shutdown_event, is_sync), loop_task)
+                    server_core.async_shutdown_event, is_sync, ssl_context=ssl_context), loop_task)
 
 
 def serve_service_core(server_core: ProtobufServiceCore,

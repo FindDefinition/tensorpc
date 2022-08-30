@@ -443,10 +443,10 @@ class SampleThreeApp(EditableApp):
         # cam = three.OrthographicCamera(True, position=[0, 0, 10], up=[0, 0, 1], near=0.1, far=1000,
         #                               zoom=8.0)
         self.img = three.Image()
-        ctrl = three.MapControl(True, 0.25, 1, 100)
+        ctrl = three.MapControl()
         # ctrl = three.FirstPersonControl()
 
-        # ctrl = three.OrbitControl(True, 0.25, 1, 100)
+        # ctrl = three.OrbitControl()
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.b2d = three.Boxes2D(1000)
         mesh = three.Mesh(three.BoxGeometry(), three.MeshBasicMaterial())
@@ -586,11 +586,11 @@ class SampleThreeHudApp(EditableApp):
         # cam = three.OrthographicCamera(True, near=0.1, far=1000,
         #                               zoom=8.0)
         # cam.prop(position=[0, 0, 10], up=[0, 0, 1])
-        ctrl = three.MapControl(True, 0.25, 1, 100)
+        ctrl = three.MapControl()
         # ctrl = three.FirstPersonControl()
 
 
-        # ctrl = three.OrbitControl(True, 0.25, 1, 100)
+        # ctrl = three.OrbitControl()
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.b2d = three.Boxes2D(1000)
         mesh = three.Mesh(three.RoundedRectGeometry(2, 1.5, 0.5), three.MeshBasicMaterial().prop(color="#393939"))
@@ -706,7 +706,8 @@ class SampleThree2DApp(EditableApp):
         cam = three.OrthographicCamera(True, near=0.1, far=1000,
                                       zoom=50.0)
         cam.prop(position=[0, 0, 10], up=[0, 0, 1])
-        ctrl = three.MapControl(True, 0.25, 1, 100)
+        ctrl = three.MapControl()
+        ctrl.props.enable_rotate = False
         # ctrl = three.FirstPersonControl()
 
         self.canvas = three.ThreeCanvas({

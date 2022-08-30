@@ -1028,110 +1028,44 @@ class OrthographicCamera(Object3dBase[Object3dBaseProps]):
         })
         return state
 
+@dataclasses.dataclass
+class OrbitControlProps(ThreeBasicProps):
+    enable_damping: Union[bool, Undefined] = undefined
+    damping_factor: Union[NumberType, Undefined] = undefined
+    min_distance: Union[NumberType, Undefined] = undefined
+    max_distance: Union[NumberType, Undefined] = undefined
+    min_polar_angle: Union[NumberType, Undefined] = undefined
+    max_polar_angle: Union[NumberType, Undefined] = undefined
+    min_zoom: Union[NumberType, Undefined] = undefined
+    max_zoom: Union[NumberType, Undefined] = undefined
+    enable_zoom: Union[bool, Undefined] = undefined
+    zoom_speed: Union[NumberType, Undefined] = undefined
+    enable_rotate: Union[bool, Undefined] = undefined
+    rotate_speed: Union[NumberType, Undefined] = undefined
+    enable_pan: Union[bool, Undefined] = undefined
+    pan_speed: Union[NumberType, Undefined] = undefined
+    key_pan_speed: Union[NumberType, Undefined] = undefined
 
-class MapControl(ThreeComponentBase[ThreeBasicProps]):
+class MapControl(ThreeComponentBase[OrbitControlProps]):
     def __init__(self,
-                 enableDamping: bool,
-                 dampingFactor: float,
-                 minDistance: float,
-                 maxDistance: float,
-                 maxPolarAngle: float = np.pi,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.ThreeMapControl, ThreeBasicProps, queue)
-        self.enableDamping = enableDamping
-        self.dampingFactor = dampingFactor
-        self.minDistance = minDistance
-        self.maxDistance = maxDistance
-        self.maxPolarAngle = maxPolarAngle
-
-    # TODO from camera matrix and intrinsics
-
-    async def update_parameters(self,
-                                enableDamping: bool,
-                                dampingFactor: float,
-                                minDistance: float,
-                                maxDistance: float,
-                                maxPolarAngle: float = np.pi):
-        upd: Dict[str, Any] = {
-            "enableDamping": enableDamping,
-            "dampingFactor": dampingFactor,
-            "minDistance": minDistance,
-            "maxDistance": maxDistance,
-            "maxPolarAngle": maxPolarAngle,
-        }
-        self.enableDamping = enableDamping
-        self.dampingFactor = dampingFactor
-        self.minDistance = minDistance
-        self.maxDistance = maxDistance
-        self.maxPolarAngle = maxPolarAngle
-        await self.send_app_event_and_wait(self.create_update_event(upd))
-
-    def get_state(self):
-        state = super().get_state()
-        state.update({
-            "enableDamping": self.enableDamping,
-            "dampingFactor": self.dampingFactor,
-            "minDistance": self.minDistance,
-            "maxDistance": self.maxDistance,
-            "maxPolarAngle": self.maxPolarAngle,
-        })
-        return state
+        super().__init__(uid, UIType.ThreeMapControl, OrbitControlProps, queue)
+        self.props.enable_damping = True 
+        self.props.damping_factor = 0.25
+        self.props.min_distance = 1
+        self.props.max_distance = 100
 
 
-class OrbitControl(ThreeComponentBase[ThreeBasicProps]):
+class OrbitControl(ThreeComponentBase[OrbitControlProps]):
     def __init__(self,
-                 enableDamping: bool,
-                 dampingFactor: float,
-                 minDistance: float,
-                 maxDistance: float,
-                 maxPolarAngle: float = np.pi,
-                 screenSpacePanning: bool = False,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.ThreeOrbitControl, ThreeBasicProps, queue)
-        self.enableDamping = enableDamping
-        self.dampingFactor = dampingFactor
-        self.minDistance = minDistance
-        self.maxDistance = maxDistance
-        self.maxPolarAngle = maxPolarAngle
-        self.screenSpacePanning = screenSpacePanning
-
-    # TODO from camera matrix and intrinsics
-
-    async def update_parameters(self,
-                                enableDamping: bool,
-                                dampingFactor: float,
-                                minDistance: float,
-                                maxDistance: float,
-                                maxPolarAngle: float = np.pi,
-                                screenSpacePanning: bool = False):
-        upd: Dict[str, Any] = {
-            "enableDamping": enableDamping,
-            "dampingFactor": dampingFactor,
-            "minDistance": minDistance,
-            "maxDistance": maxDistance,
-            "maxPolarAngle": maxPolarAngle,
-            "screenSpacePanning": screenSpacePanning,
-        }
-        self.enableDamping = enableDamping
-        self.dampingFactor = dampingFactor
-        self.minDistance = minDistance
-        self.maxDistance = maxDistance
-        self.maxPolarAngle = maxPolarAngle
-        await self.send_app_event_and_wait(self.create_update_event(upd))
-
-    def get_state(self):
-        state = super().get_state()
-        state.update({
-            "enableDamping": self.enableDamping,
-            "dampingFactor": self.dampingFactor,
-            "minDistance": self.minDistance,
-            "maxDistance": self.maxDistance,
-            "maxPolarAngle": self.maxPolarAngle,
-            "screenSpacePanning": self.screenSpacePanning,
-        })
-        return state
+        super().__init__(uid, UIType.ThreeOrbitControl, OrbitControlProps, queue)
+        self.props.enable_damping = True 
+        self.props.damping_factor = 0.25
+        self.props.min_distance = 1
+        self.props.max_distance = 100
 
 
 class PointerLockControl(ThreeComponentBase[ThreeBasicProps]):

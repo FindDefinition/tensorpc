@@ -28,7 +28,7 @@ from tensorpc.core.defs import ServiceDef
 from tensorpc.core.server_core import ProtobufServiceCore, ServerMeta
 from tensorpc.protos import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos import rpc_message_pb2
-
+from pathlib import Path
 from tensorpc.protos import \
     remote_object_pb2_grpc as remote_object_pb2_grpc
 from tensorpc.utils.df_logging import get_logger
@@ -102,7 +102,8 @@ class AsyncRemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
     def ServerShutdown(self, request, context):
         print("Shutdown message received")
         self.server_core._reset_timeout()
-        context.add_callback(lambda: self.server_core.async_shutdown_event.set())
+        context.add_callback(
+            lambda: self.server_core.async_shutdown_event.set())
         return rpc_message_pb2.SimpleReply()
 
     async def HealthCheck(self, request, context):
@@ -125,7 +126,8 @@ async def serve_service(service: AsyncRemoteObjectService,
                         is_local=False,
                         max_threads=10,
                         process_id=-1,
-                        credentials=None):
+                        ssl_key_path: str = "",
+                        ssl_crt_path: str = ""):
     assert isinstance(service, AsyncRemoteObjectService)
     if is_local and process_id >= 0:
         if hasattr(os, "sched_setaffinity"):
@@ -143,7 +145,14 @@ async def serve_service(service: AsyncRemoteObjectService,
     server = grpc.aio.server(options=options)
     remote_object_pb2_grpc.add_RemoteObjectServicer_to_server(service, server)
     url = '[::]:{}'.format(port)
-
+    credentials = None
+    if Path(ssl_key_path).exists() and Path(ssl_crt_path).exists():
+        with open(ssl_key_path, "r") as f:
+            private_key = f.read()
+        with open(ssl_crt_path, "r") as f:
+            certificate_chain = f.read()
+        credentials = grpc.ssl_server_credentials([(private_key,
+                                                    certificate_chain)])
     if credentials is not None:
         server.add_secure_port(url, credentials)
     else:
@@ -166,7 +175,6 @@ async def serve_service(service: AsyncRemoteObjectService,
     await server.stop(0)
     # exec cleanup functions
     await server_core.exec_exit_funcs()
-
 
 
 # def serve_with_http(service_def: ServiceDef,
@@ -201,22 +209,23 @@ async def serve_service(service: AsyncRemoteObjectService,
 #         # loop.run_until_complete(coro)
 #         print("shutdown by keyboard interrupt")
 
+
 async def serve_with_http_async(server_core: ProtobufServiceCore,
-                    url: str,
-                    wait_time=-1,
-                    port=50051,
-                    http_port=50052,
-                    length=-1,
-                    is_local=False,
-                    max_threads=10,
-                    process_id=-1,
-                    credentials=None):
+                                url: str,
+                                wait_time=-1,
+                                port=50051,
+                                http_port=50052,
+                                length=-1,
+                                is_local=False,
+                                max_threads=10,
+                                process_id=-1,
+                                ssl_key_path: str = "",
+                                ssl_crt_path: str = ""):
     if not compat.Python3_7AndLater:
         raise NotImplementedError
     smeta = ServerMeta(port=port, http_port=http_port)
 
     # server_core = ProtobufServiceCore(url, service_def, False, smeta)
-
     async with aiohttp.ClientSession() as sess:
         server_core.init_http_client_session(sess)
 
@@ -225,11 +234,19 @@ async def serve_with_http_async(server_core: ProtobufServiceCore,
             await server_core._init_async_members()
 
             service = AsyncRemoteObjectService(server_core, is_local, length)
-            grpc_task = serve_service(service, wait_time, port, length, is_local,
-                                    max_threads, process_id, credentials)
-            http_task = httpserver.serve_service_core_task(server_core, http_port,
-                                                        None, is_sync=False, standalone=False)
+            grpc_task = serve_service(service, wait_time, port, length,
+                                      is_local, max_threads, process_id,
+                                      ssl_key_path, ssl_crt_path)
+            http_task = httpserver.serve_service_core_task(
+                server_core,
+                http_port,
+                None,
+                is_sync=False,
+                standalone=False,
+                ssl_key_path=ssl_key_path,
+                ssl_crt_path=ssl_crt_path)
             return await asyncio.gather(grpc_task, http_task)
+
 
 async def run_exit_async(server_core: ProtobufServiceCore):
     async with aiohttp.ClientSession() as sess:
@@ -239,13 +256,14 @@ async def run_exit_async(server_core: ProtobufServiceCore):
 
 
 async def serve_async(sc: ProtobufServiceCore,
-        wait_time=-1,
-        port=50051,
-        length=-1,
-        is_local=False,
-        max_threads=10,
-        process_id=-1,
-        credentials=None):
+                      wait_time=-1,
+                      port=50051,
+                      length=-1,
+                      is_local=False,
+                      max_threads=10,
+                      process_id=-1,
+                      ssl_key_path: str = "",
+                      ssl_crt_path: str = ""):
     if not compat.Python3_7AndLater:
         raise NotImplementedError
 
@@ -254,8 +272,10 @@ async def serve_async(sc: ProtobufServiceCore,
         await server_core._init_async_members()
         service = AsyncRemoteObjectService(server_core, is_local, length)
         grpc_task = serve_service(service, wait_time, port, length, is_local,
-                                max_threads, process_id, credentials)
+                                  max_threads, process_id, ssl_key_path,
+                                  ssl_crt_path)
         return await grpc_task
+
 
 def serve(service_def: ServiceDef,
           wait_time=-1,
@@ -264,20 +284,28 @@ def serve(service_def: ServiceDef,
           is_local=False,
           max_threads=10,
           process_id=-1,
-          credentials=None):
+          ssl_key_path: str = "",
+          ssl_crt_path: str = ""):
     if not compat.Python3_7AndLater:
         raise NotImplementedError
     url = '[::]:{}'.format(port)
     smeta = ServerMeta(port=port, http_port=-1)
     server_core = ProtobufServiceCore(url, service_def, False, smeta)
     try:
-        asyncio.run(serve_async(server_core, 
-            port=port, length=length, is_local=is_local,
-            max_threads=max_threads, process_id=process_id, credentials=credentials))
+        asyncio.run(
+            serve_async(server_core,
+                        port=port,
+                        length=length,
+                        is_local=is_local,
+                        max_threads=max_threads,
+                        process_id=process_id,
+                        ssl_key_path=ssl_key_path,
+                        ssl_crt_path=ssl_crt_path))
     except KeyboardInterrupt:
         asyncio.run(run_exit_async(server_core))
         print("shutdown by keyboard interrupt")
-    
+
+
 # import uvloop
 def serve_with_http(service_def: ServiceDef,
                     wait_time=-1,
@@ -287,7 +315,8 @@ def serve_with_http(service_def: ServiceDef,
                     is_local=False,
                     max_threads=10,
                     process_id=-1,
-                    credentials=None):
+                    ssl_key_path: str = "",
+                    ssl_crt_path: str = ""):
     if not compat.Python3_7AndLater:
         raise NotImplementedError
     url = '[::]:{}'.format(port)
@@ -296,9 +325,18 @@ def serve_with_http(service_def: ServiceDef,
     try:
         # uvloop.install()
         # print("UVLOOP")
-        asyncio.run(serve_with_http_async(server_core, url, wait_time=wait_time, 
-            port=port, http_port=http_port, length=length, is_local=is_local,
-            max_threads=max_threads, process_id=process_id, credentials=credentials))
+        asyncio.run(
+            serve_with_http_async(server_core,
+                                  url,
+                                  wait_time=wait_time,
+                                  port=port,
+                                  http_port=http_port,
+                                  length=length,
+                                  is_local=is_local,
+                                  max_threads=max_threads,
+                                  process_id=process_id,
+                                  ssl_key_path=ssl_key_path,
+                                  ssl_crt_path=ssl_crt_path))
     except KeyboardInterrupt:
         asyncio.run(run_exit_async(server_core))
         print("shutdown by keyboard interrupt")
