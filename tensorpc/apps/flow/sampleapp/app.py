@@ -614,10 +614,12 @@ class SampleThreeHudApp(EditableApp):
         self.html = three.Html({
             "btn": mui.Button("RTX", lambda: print("RTX1"))
         })
-        self.html.prop(transform=True, center=False, enable_reflow=True)
+        self.html.prop(transform=True, center=False, inside_flex=True)
         self.html2 = three.Html({
+            "btn2": mui.Button("RTX2", lambda: print("RTX2"))
+
         })
-        self.html2.prop(transform=True, center=False, enable_reflow=True, pointer_events="none")
+        self.html2.prop(transform=True, center=False, inside_flex=True)
 
         self.canvas = three.ThreeCanvas({
             "cam": cam,
@@ -656,12 +658,11 @@ class SampleThreeHudApp(EditableApp):
                 "mesh1": three.ItemBox({
                     "mesh0": three.ToggleButton("RTX2", 2, 1, lambda x: print("HELLO2", x)),
                 }).prop(center_anchor=True),
-
                 "text": three.ItemBox({
-                    "text0": self.text2,
+                    "text0": self.html,
                 }).prop(center_anchor=True),
                 "text4": three.ItemBox({
-                    "text0": self.img,
+                    "text0": self.html2,
                 }).prop(center_anchor=True),
                 "text3": three.ItemBox({
                     "text0": three.BoundingBox([2, 5, 2]),
@@ -715,7 +716,10 @@ class SampleThree2DApp(EditableApp):
             "ctrl": ctrl,
             "b2d": self.box2d,
             # "axes": three.AxesHelper(10),
-            "btn0": three.Button("RTX", 2, 1, self.on_box2d_update)
+            "btn0": three.Button("RTX", 2, 1, self.on_box2d_update),
+            "html0": three.Html({
+                "btn0": mui.Button("RTX", lambda: print("RTX")),
+            }).prop(position=(-5, 0, 0), transform=True)
         })
         return {
             "d3v":

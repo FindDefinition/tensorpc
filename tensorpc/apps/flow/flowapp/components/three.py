@@ -1208,7 +1208,7 @@ class HtmlProps(Object3dBaseProps):
     wrapper_class: Union[str, Undefined] = undefined
     pointer_events: Union[PointerEventsProperties, Undefined] = undefined
     occlude: Union[bool, Undefined] = undefined
-    enable_reflow: Union[bool, Undefined] = undefined
+    inside_flex: Union[bool, Undefined] = undefined
 
 
 class Html(Object3dContainerBase[HtmlProps, MUIComponentType]):
