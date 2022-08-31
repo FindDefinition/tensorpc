@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List, Optional, Tuple
+from typing import Any, AsyncGenerator, List, Optional, Tuple
 
 from tensorpc.protos import rpc_message_pb2
 
@@ -200,8 +200,11 @@ class AppClient(tensorpc.RemoteManager):
         self.is_remote = is_remote
         self.module_key = module_key
         self.remote_key = "tensorpc.apps.flow.serv.flowapp::FlowApp.run_app_service"
+        self.async_gen_key = "tensorpc.apps.flow.serv.flowapp::FlowApp.run_app_async_gen_service"
         if is_remote:
             self.remote_key = "tensorpc.apps.flow.serv.worker::FlowWorker.run_app_service"
+            # TODO
+            self.async_gen_key = "tensorpc.apps.flow.serv.worker::FlowWorker.run_app_async_gen_service"
         self.graph_args = []
         if self.is_remote:
             self.graph_args = [self.graph_id, self.node_id]
@@ -234,6 +237,21 @@ class AppClient(tensorpc.RemoteManager):
                                         rpc_flags=rpc_flags,
                                         **kwargs)
 
+    def app_remote_generator(
+            self,
+            key: str,
+            *args,
+            timeout: Optional[int] = None,
+            rpc_callback="",
+            rpc_flags: int = rpc_message_pb2.PickleArray,
+            **kwargs) -> AsyncGenerator[Any, None]:
+        for data in self.remote_generator(self.async_gen_key,
+                                self.module_key + "." + key, *self.graph_args, *args,
+                                        rpc_flags=rpc_flags,
+                                        rpc_callback=rpc_callback,
+                                        **kwargs):
+            yield data
+
 class AsyncAppClient(tensorpc.AsyncRemoteManager):
 
     def __init__(self,
@@ -251,8 +269,12 @@ class AsyncAppClient(tensorpc.AsyncRemoteManager):
         self.node_id = node_id
         self.is_remote = is_remote
         self.remote_key = "tensorpc.apps.flow.serv.flowapp::FlowApp.run_app_service"
+        self.async_gen_key = "tensorpc.apps.flow.serv.flowapp::FlowApp.run_app_async_gen_service"
         if is_remote:
             self.remote_key = "tensorpc.apps.flow.serv.worker::FlowWorker.run_app_service"
+            # TODO
+            self.async_gen_key = "tensorpc.apps.flow.serv.worker::FlowWorker.run_app_async_gen_service"
+
         self.graph_args = []
         if self.is_remote:
             self.graph_args = [self.graph_id, self.node_id]
@@ -286,3 +308,18 @@ class AsyncAppClient(tensorpc.AsyncRemoteManager):
                                         *self.graph_args, *args,
                                         rpc_flags=rpc_flags,
                                         **kwargs)
+
+    async def app_remote_generator(
+            self,
+            key: str,
+            *args,
+            timeout: Optional[int] = None,
+            rpc_callback="",
+            rpc_flags: int = rpc_message_pb2.PickleArray,
+            **kwargs) -> AsyncGenerator[Any, None]:
+        async for data in self.remote_generator(self.async_gen_key,
+                                self.module_key + "." + key, *self.graph_args, *args,
+                                        rpc_flags=rpc_flags,
+                                        rpc_callback=rpc_callback,
+                                        **kwargs):
+            yield data

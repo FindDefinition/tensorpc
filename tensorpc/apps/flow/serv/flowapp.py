@@ -95,6 +95,12 @@ class FlowApp:
         else:
             return res_or_coro
 
+    async def run_app_async_gen_service(self, key: str, *args, **kwargs):
+        serv, meta = self.app_su.get_service_and_meta(key)
+        assert meta.is_async and meta.is_gen
+        async for x in serv(*args, **kwargs):
+            yield x
+
     async def _run_schedule_event_task(self, data):
         ev = ScheduleEvent.from_dict(data)
         res = await self.app.flow_run(ev)

@@ -299,7 +299,7 @@ class ServiceCore(object):
                 # all services are lazy-loaded,
                 # so we need to put get_service in try block
                 func, meta = self.service_units.get_service_and_meta(service_key)
-                assert meta.is_async and meta.is_gen
+                assert meta.is_async and meta.is_gen, service_key
                 assert meta.type == service_type
                 # client code can call primitives to get server contents.
                 async for res in func(*args, **kwargs):

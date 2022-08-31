@@ -17,14 +17,14 @@ import base64
 import dataclasses
 import io
 import time
-from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
+from typing import (Any, AsyncGenerator, AsyncIterable, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Tuple, Type, TypeVar, Union,
                     TYPE_CHECKING)
 from typing_extensions import Literal, TypeAlias
 import numpy as np
 from PIL import Image as PILImage
 import json
-
+import inspect
 from tensorpc.core.asynctools import cancel_task
 from ..core import (AppEvent, BasicProps, Component, ComponentBaseProps,
                     ContainerBase, NumberType, T_child, TaskLoopEvent, UIEvent,
@@ -863,7 +863,7 @@ class TaskLoop(MUIComponentBase[MUIComponentBaseProps]):
         return self.loop_callbcak
 
     async def task_loop(self,
-                        it: Iterable[_T],
+                        it: Union[Iterable[_T], AsyncIterable[_T]],
                         total: int = -1) -> AsyncGenerator[_T, None]:
         if isinstance(it, list):
             total = len(it)
@@ -875,18 +875,32 @@ class TaskLoop(MUIComponentBase[MUIComponentBaseProps]):
                 # keep root progress
                 self.progresses.append(0.0)
             self.stack_count += 1
-            for item in it:
-                yield item
-                # await asyncio.sleep(0)
-                await self.pause_event.wait()
-                cnt += 1
-                dura += time.time() - t
+            if inspect.isasyncgen(it):
+                async for item in it:
+                    yield item
+                    # await asyncio.sleep(0)
+                    await self.pause_event.wait()
+                    cnt += 1
+                    dura += time.time() - t
 
-                if total > 0 and dura > self.update_period:
-                    dura = 0
-                    prog = cnt / total
-                    await self.update_progress(prog, self.stack_count - 1)
-                t = time.time()
+                    if total > 0 and dura > self.update_period:
+                        dura = 0
+                        prog = cnt / total
+                        await self.update_progress(prog, self.stack_count - 1)
+                    t = time.time()
+            else:
+                for item in it:
+                    yield item
+                    # await asyncio.sleep(0)
+                    await self.pause_event.wait()
+                    cnt += 1
+                    dura += time.time() - t
+
+                    if total > 0 and dura > self.update_period:
+                        dura = 0
+                        prog = cnt / total
+                        await self.update_progress(prog, self.stack_count - 1)
+                    t = time.time()
             await self.update_progress(1.0, self.stack_count - 1)
         finally:
             self.stack_count -= 1
