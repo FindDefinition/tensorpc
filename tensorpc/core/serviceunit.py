@@ -6,11 +6,13 @@ import types
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple
+import uuid
 
 from tensorpc.constants import TENSORPC_FUNC_META_KEY, TENSORPC_SPLIT
 from tensorpc.core import inspecttools
 from tensorpc.core.defs import DynamicEvent
-
+import importlib.util
+import sys
 
 class ParamType(Enum):
     PosOnly = "PosOnly"
@@ -113,12 +115,24 @@ class DynamicClass:
             self.cls_name = module_cls[-1]
         try:
             if self.module_path.startswith("!"):
-                # treat module_path as a file path
                 self.module_path = self.module_path[1:]
                 self.file_path = self.module_path
                 assert Path(self.module_path).exists(), f"your {self.module_path} not exists"
-                self.module_dict = runpy.run_path(self.module_path)
+
+                # treat module_path as a file path
+                # import sys
+                mod_name = Path(self.module_path).stem + "_" + uuid.uuid4().hex
+                spec = importlib.util.spec_from_file_location(mod_name, self.module_path)
+                assert spec is not None, f"your {self.module_path} not exists"
+                self.standard_module = importlib.util.module_from_spec(spec)
+                assert spec.loader is not None, "shouldn't happen"
+                spec.loader.exec_module(self.standard_module)
+                sys.modules[mod_name] = self.standard_module
+                self.module_dict = self.standard_module.__dict__
                 self.is_standard_module = False
+                # self.module_dict = runpy.run_path(self.module_path)
+
+
             else:
                 self.standard_module = importlib.import_module(self.module_path)
                 file_path = inspect.getfile(self.standard_module)
@@ -524,9 +538,16 @@ if __name__ == "__main__":
     su = ServiceUnit("tensorpc.services.for_test::Service1::Test", {})
     print(su.run_service("Test.add", 1, 2))
 
-    cl = ReloadableDynamicClass("tensorpc.services.for_test::Service1::Test")
-    obj = cl.obj_type()
+    # cl = ReloadableDynamicClass("tensorpc.services.for_test::Service1::Test")
+    # obj = cl.obj_type()
+    # print(obj.add(1, 2))
+    # print(input("hold"))
+    # cl.reload_obj_methods(obj)
+    # print(obj.add(1, 2))
+
+    cl2 = ReloadableDynamicClass("!/home/yy/Projects/distflow/tensorpc/services/for_test.py::Service1::Test")
+    obj = cl2.obj_type()
     print(obj.add(1, 2))
     print(input("hold"))
-    cl.reload_obj_methods(obj)
+    cl2.reload_obj_methods(obj)
     print(obj.add(1, 2))
