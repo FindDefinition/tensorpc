@@ -619,8 +619,8 @@ class SampleThreeHudApp(EditableApp):
             "btn2": mui.Button("RTX2", lambda: print("RTX2"))
 
         })
-        self.html2.prop(transform=True, center=False, inside_flex=True)
-
+        res = self.html2.prop(transform=True, center=False, inside_flex=True)
+        
         self.canvas = three.ThreeCanvas({
             "cam": cam,
             "points": self.points,
@@ -700,7 +700,6 @@ class SampleThree2DApp(EditableApp):
         self.root.props.min_height = 0
         # store components here if you want to keep
         # data after reload layout.
-        self.box2d = three.Boxes2D(20000)
 
 
     def app_create_layout(self) -> Dict[str, MUIComponentType]:
@@ -710,6 +709,14 @@ class SampleThree2DApp(EditableApp):
         ctrl = three.MapControl()
         ctrl.props.enable_rotate = False
         # ctrl = three.FirstPersonControl()
+        self.box2d = three.Boxes2D(20000)
+
+        self.box2d.prop(color="aqua", 
+            line_color="red", 
+            alpha=0.1, 
+            line_width=1,
+            hover_line_color="blue",
+            hover_line_width=2)
 
         self.canvas = three.ThreeCanvas({
             "cam": cam,
@@ -742,6 +749,4 @@ class SampleThree2DApp(EditableApp):
         attrs = [str(i) for i in range(centers.shape[0])]
         await self.box2d.update_boxes(centers,
                                     dimensions,
-                                    color="red",
-                                    alpha=0.0,
                                     attrs=attrs)

@@ -29,7 +29,10 @@ from tensorpc.core.asynctools import cancel_task
 from ..core import (AppEvent, BasicProps, Component, ComponentBaseProps,
                     ContainerBase, NumberType, T_child, TaskLoopEvent, UIEvent,
                     UIRunStatus, UIType, Undefined, undefined, T_base_props,
+                    T_container_props, ContainerBaseProps,
                     ValueType)
+
+from .. import colors
 
 if TYPE_CHECKING:
     from .three import ThreeCanvas
@@ -48,10 +51,49 @@ def _encode_image_bytes(img: np.ndarray):
 @dataclasses.dataclass
 class MUIBasicProps(BasicProps):
     pass
-
+_OverflowType = Union[Literal["visible"], Literal["hidden"], Literal["scroll"], Literal["auto"]]
 
 @dataclasses.dataclass
-class MUIComponentBaseProps(ComponentBaseProps):
+class FlexComponentBaseProps(BasicProps):
+    """all props must have a default value, 
+    manage state by your self.
+    """
+    position: Union[Literal["absolute", "relative"], Undefined] = undefined
+    top: Union[ValueType, Undefined] = undefined
+    bottom: Union[ValueType, Undefined] = undefined
+    left: Union[ValueType, Undefined] = undefined
+    right: Union[ValueType, Undefined] = undefined
+    z_index: Union[ValueType, Undefined] = undefined
+
+    flex: Union[ValueType, Undefined] = undefined
+    align_self: Union[str, Undefined] = undefined
+    flex_grow: Union[str, Undefined] = undefined
+    flex_shrink: Union[str, Undefined] = undefined
+    flex_basis: Union[str, Undefined] = undefined
+
+    height: Union[ValueType, Undefined] = undefined
+    width: Union[ValueType, Undefined] = undefined
+    max_height: Union[ValueType, Undefined] = undefined
+    max_width: Union[ValueType, Undefined] = undefined
+    min_height: Union[ValueType, Undefined] = undefined
+    min_width: Union[ValueType, Undefined] = undefined
+    padding: Union[ValueType, Undefined] = undefined
+    padding_top: Union[ValueType, Undefined] = undefined
+    padding_bottom: Union[ValueType, Undefined] = undefined
+    padding_left: Union[ValueType, Undefined] = undefined
+    padding_right: Union[ValueType, Undefined] = undefined
+    margin: Union[ValueType, Undefined] = undefined
+    margin_top: Union[ValueType, Undefined] = undefined
+    margin_left: Union[ValueType, Undefined] = undefined
+    margin_right: Union[ValueType, Undefined] = undefined
+    margin_bottom: Union[ValueType, Undefined] = undefined
+
+    overflow: Union[_OverflowType, Undefined] = undefined
+    overflow_y: Union[_OverflowType, Undefined] = undefined
+    overflow_x: Union[_OverflowType, Undefined] = undefined
+
+@dataclasses.dataclass
+class MUIComponentBaseProps(FlexComponentBaseProps):
     pass
 
 
@@ -59,12 +101,12 @@ class MUIComponentBase(Component[T_base_props, "MUIComponentType"]):
     pass
 
 
-class MUIContainerBase(ContainerBase[T_base_props, T_child]):
+class MUIContainerBase(ContainerBase[T_container_props, T_child]):
     pass
 
 
 @dataclasses.dataclass
-class FlexBoxProps(ComponentBaseProps):
+class FlexBoxProps(FlexComponentBaseProps):
     # TODO add literal here.
     align_content: Union[str, Undefined] = undefined
     align_items: Union[str, Undefined] = undefined
@@ -73,19 +115,18 @@ class FlexBoxProps(ComponentBaseProps):
     flex_wrap: Union[str, Undefined] = undefined
     flex_flow: Union[str, Undefined] = undefined
 
-
 # we can't let mui use three component.
 @dataclasses.dataclass
-class MUIFlexBoxProps(FlexBoxProps):
+class MUIFlexBoxProps(FlexBoxProps, ContainerBaseProps):
     pass
 
 
 async def _handle_standard_event(comp: Component, data: Any):
-    if comp._status == UIRunStatus.Running:
+    if comp.props.status == UIRunStatus.Running.value:
         # TODO send exception if ignored click
-        print("IGNORE EVENT", comp._status)
+        print("IGNORE EVENT", comp.props.status)
         return
-    elif comp._status == UIRunStatus.Stop:
+    elif comp.props.status == UIRunStatus.Stop.value:
         cb1 = comp.get_callback()
         comp.state_change_callback(data)
         if cb1 is not None:
@@ -100,34 +141,39 @@ async def _handle_standard_event(comp: Component, data: Any):
 
 async def _handle_button_event(comp: Union["Button", "ListItemButton"],
                                data: Any):
-    if comp._status == UIRunStatus.Running:
+    if comp.props.status == UIRunStatus.Running.value:
         # TODO send exception if ignored click
-        print("IGNORE EVENT", comp._status)
+        print("IGNORE EVENT", comp.props.status)
         return
-    elif comp._status == UIRunStatus.Stop:
+    elif comp.props.status == UIRunStatus.Stop.value:
         cb2 = comp.callback
         comp._task = asyncio.create_task(comp.run_callback(lambda: cb2()))
 
 
-MUIComponentType: TypeAlias = Union[MUIBasicProps, MUIComponentBase,
-                                    MUIContainerBase, MUIFlexBoxProps,
-                                    MUIComponentBaseProps]
+MUIComponentType: TypeAlias = Union[MUIComponentBase, MUIContainerBase]
 
+@dataclasses.dataclass
+class ImageProps(MUIComponentBaseProps):
+    image: bytes = dataclasses.field(default_factory=bytes)
 
-class Images(MUIComponentBase[MUIComponentBaseProps]):
+class Images(MUIComponentBase[ImageProps]):
 
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Image, MUIComponentBaseProps, queue)
-        self.image_str: bytes = b""
+        super().__init__(uid, UIType.Image, ImageProps, queue)
+        # self.image_str: bytes = b""
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["image"] = self.props.image
+        return res
 
     async def show(self, image: np.ndarray):
         encoded = _encode_image_bytes(image)
-        self.image_str = encoded
-        await self.queue.put(self.create_update_event({
-            "image": encoded,
-        }))
+        self.props.image = encoded
+        # self.image_str = encoded
+        await self.queue.put(self.update_event(image=encoded))
 
     async def show_raw(self, image_bytes: bytes, suffix: str):
         await self.queue.put(self.show_raw_event(image_bytes, suffix))
@@ -135,178 +181,193 @@ class Images(MUIComponentBase[MUIComponentBaseProps]):
     def show_raw_event(self, image_bytes: bytes, suffix: str):
         raw = b'data:image/' + suffix.encode(
             "utf-8") + b';base64,' + base64.b64encode(image_bytes)
-        self.image_str = raw
-        return self.create_update_event({
-            "image": raw,
-        })
+        # self.image_str = raw
+        self.props.image = raw
+        return self.update_event(image=raw)
 
-    def get_state(self):
-        state = super().get_state()
-        state["image"] = self.image_str
-        return state
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
 
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        if "image" in state:
-            self.image_str = state["image"]
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class PlotlyProps(BasicProps):
+    data: Union[list, Undefined] = undefined 
+    layout: Union[dict, Undefined] = undefined 
 
 
-class Plotly(MUIComponentBase[MUIComponentBaseProps]):
+class Plotly(MUIComponentBase[PlotlyProps]):
 
     def __init__(self,
-                 data: Optional[list] = None,
-                 layout: Optional[dict] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Plotly, MUIComponentBaseProps, queue)
-        if data is None:
-            data = []
-        if layout is None:
-            layout = {}
-        self.data = data
-        self.layout = layout
+        super().__init__(uid, UIType.Plotly, PlotlyProps, queue)
 
     async def show_raw(self, data: list, layout: Any):
-        await self.queue.put(
-            self.create_update_event({
-                "data": data,
-                "layout": layout,
-            }))
+        self.props.data = data
+        self.props.layout = layout
+        await self.queue.put(self.update_event(data=data, layout=layout))
 
-    def get_state(self):
-        state = super().get_state()
-        state["data"] = self.data
-        state["layout"] = self.layout
-        return state
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["data"] = self.props.data
+        res["layout"] = self.props.layout
+        return res
 
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        if "data" in state:
-            self.data = state["data"]
-        if "layout" in state:
-            self.layout = state["layout"]
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class ChartJSLineProps(BasicProps):
+    data: Union[Any, Undefined] = undefined 
+    options: Union[Any, Undefined] = undefined 
 
 
-class ChartJSLine(MUIComponentBase[MUIComponentBaseProps]):
+class ChartJSLine(MUIComponentBase[ChartJSLineProps]):
 
     def __init__(self,
-                 data: Optional[Any] = None,
-                 options: Optional[Any] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.ChartJSLine, MUIComponentBaseProps, queue)
-        if data is None:
-            data = {}
-        if options is None:
-            options = {}
-        self.data = data
-        self.options = options
+        super().__init__(uid, UIType.ChartJSLine, ChartJSLineProps, queue)
 
     async def show_raw(self, data: list, options: Any):
-        await self.queue.put(
-            self.create_update_event({
-                "data": data,
-                "options": options,
-            }))
+        self.props.data = data
+        self.props.options = options
+        await self.queue.put(self.update_event(data=data, options=options))
 
-    def get_state(self):
-        state = super().get_state()
-        state["data"] = self.data
-        state["options"] = self.options
-        return state
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["data"] = self.props.data
+        res["options"] = self.props.options
+        return res
 
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        if "data" in state:
-            self.data = state["data"]
-        if "options" in state:
-            self.options = state["options"]
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class TextProps(MUIComponentBaseProps):
+    value: str = "" 
 
 
-class Text(MUIComponentBase[MUIComponentBaseProps]):
+class Text(MUIComponentBase[TextProps]):
 
     def __init__(self,
                  init: str,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Text, MUIComponentBaseProps, queue)
-        self.value = init
+        super().__init__(uid, UIType.Text, TextProps, queue)
+        self.props.value = init
 
     async def write(self, content: str):
-        self.value = content
-        await self.queue.put(self.create_update_event({"value": self.value}))
+        self.props.value = content
+        await self.queue.put(self.update_event(value=content))
 
-    def get_state(self):
-        state = super().get_state()
-        state["value"] = self.value
-        return state
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
+        return res
 
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        if "value" in state:
-            self.value = state["value"]
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
 
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
-class ListItemText(MUIComponentBase[MUIComponentBaseProps]):
+class ListItemText(MUIComponentBase[TextProps]):
 
     def __init__(self,
                  init: str,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.ListItemText, MUIComponentBaseProps,
+        super().__init__(uid, UIType.ListItemText, TextProps,
                          queue)
-        self.value = init
+        self.props.value = init
 
     async def write(self, content: str):
-        self.value = content
-        await self.queue.put(self.create_update_event({"value": self.value}))
+        self.props.value = content
+        await self.queue.put(self.update_event(value=content))
 
-    def get_state(self):
-        state = super().get_state()
-        state["value"] = self.value
-        return state
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
+        return res
 
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        if "value" in state:
-            self.value = state["value"]
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
 
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
-class Divider(MUIComponentBase[MUIComponentBaseProps]):
+@dataclasses.dataclass
+class DividerProps(MUIComponentBaseProps):
+    orientation: Union[Literal["horizontal", "vertical"], Undefined] = undefined
+
+class Divider(MUIComponentBase[DividerProps]):
 
     def __init__(self,
                  orientation: Union[Literal["horizontal"],
                                     Literal["vertical"]] = "horizontal",
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Divider, MUIComponentBaseProps, queue)
-        self.orientation = orientation
+        super().__init__(uid, UIType.Divider, DividerProps, queue)
+        self.props.orientation = orientation
         assert orientation == "horizontal" or orientation == "vertical"
 
-    def to_dict(self):
-        res = super().to_dict()
-        res["orientation"] = self.orientation
-        return res
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class ButtonProps(MUIComponentBaseProps):
+    name: str = ""
 
 
-class Button(MUIComponentBase[MUIComponentBaseProps]):
+class Button(MUIComponentBase[ButtonProps]):
 
     def __init__(self,
                  name: str,
                  callback: Callable[[], _CORO_NONE],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Button, MUIComponentBaseProps, queue)
-        self.name = name
+        super().__init__(uid, UIType.Button, ButtonProps, queue)
+        self.props.name = name
         self.callback = callback
 
-    def to_dict(self):
-        res = super().to_dict()
-        res["name"] = self.name
-        return res
-
     async def headless_click(self):
-        return await self.queue.put(UIEvent({self.uid: self.name}))
+        return await self.queue.put(UIEvent({self.uid: self.props.name}))
 
     def get_callback(self):
         return self.callback
@@ -317,26 +378,30 @@ class Button(MUIComponentBase[MUIComponentBaseProps]):
     async def handle_event(self, ev: Any):
         await _handle_button_event(self, ev)
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
 
-class ListItemButton(MUIComponentBase[MUIComponentBaseProps]):
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+class ListItemButton(MUIComponentBase[ButtonProps]):
 
     def __init__(self,
                  name: str,
                  callback: Callable[[], _CORO_NONE],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.ListItemButton, MUIComponentBaseProps,
+        super().__init__(uid, UIType.ListItemButton, ButtonProps,
                          queue)
-        self.name = name
+        self.props.name = name
         self.callback = callback
 
-    def to_dict(self):
-        res = super().to_dict()
-        res["name"] = self.name
-        return res
-
     async def headless_click(self):
-        return await self.queue.put(UIEvent({self.uid: self.name}))
+        return await self.queue.put(UIEvent({self.uid: self.props.name}))
 
     def get_callback(self):
         return self.callback
@@ -347,6 +412,15 @@ class ListItemButton(MUIComponentBase[MUIComponentBaseProps]):
     async def handle_event(self, ev: Any):
         await _handle_button_event(self, ev)
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
 
@@ -360,8 +434,26 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
         super().__init__(base_type, MUIFlexBoxProps, uid, queue, uid_to_comp,
                          _init_dict, inited)
 
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["childs"] = self.props.childs
+        return res
 
-class MUIList(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class MUIListProps(MUIFlexBoxProps):
+    subheader: str = ""
+
+class MUIList(MUIContainerBase[MUIListProps, MUIComponentType]):
 
     def __init__(self,
                  uid: str,
@@ -371,24 +463,23 @@ class MUIList(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
                  subheader: str = "",
                  inited: bool = False) -> None:
         super().__init__(UIType.MUIList,
-                         MUIFlexBoxProps,
+                         MUIListProps,
                          uid,
                          queue=queue,
                          uid_to_comp=uid_to_comp,
                          _init_dict=_init_dict,
                          inited=inited)
-        self.subheader = subheader
+        self.props.subheader = subheader
 
-    def get_state(self):
-        state = super().get_state()
-        state["subheader"] = self.subheader
-        return state
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
 
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        if "subheader" in state:
-            self.subheader = state["subheader"]
-
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 def VBox(layout: Dict[str, MUIComponentType]):
     res = FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
@@ -412,8 +503,13 @@ def VList(layout: Dict[str, MUIComponentType], subheader: str = ""):
                    subheader=subheader,
                    _init_dict=layout)
 
+@dataclasses.dataclass
+class RadioGroupProps(MUIComponentBaseProps):
+    names: List[str] = dataclasses.field(default_factory=list)
+    row: Union[Undefined, bool] = undefined
+    value: str = ""
 
-class RadioGroup(MUIComponentBase[MUIComponentBaseProps]):
+class RadioGroup(MUIComponentBase[RadioGroupProps]):
 
     def __init__(self,
                  names: List[str],
@@ -422,39 +518,32 @@ class RadioGroup(MUIComponentBase[MUIComponentBaseProps]):
                                                               None]]] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.RadioGroup, MUIComponentBaseProps, queue)
-        self.names = names
+        super().__init__(uid, UIType.RadioGroup, RadioGroupProps, queue)
+        self.props.names = names
         self.callback = callback
-        self.row = row
-        self.value = names[0]
-
-    def to_dict(self):
-        res = super().to_dict()
-        res["names"] = self.names
-        res["row"] = self.row
-        return res
-
-    def get_state(self):
-        state = super().get_state()
-        state["value"] = self.value
-        return state
-
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        # noexcept here.
-        if state["value"] in self.names:
-            self.value = state["value"]
+        self.props.row = row
+        self.props.value = names[0]
 
     def state_change_callback(self, data: str):
-        self.value = data
+        self.props.value = data
+
+    def validate_props(self, props: Dict[str, Any]):
+        if "names" in props:
+            return props["names"] == self.props.names
+        return False
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
+        return res
 
     async def update_value(self, value: Any):
-        assert value in self.names
+        assert value in self.props.names
         await self.queue.put(self.create_update_event({"value": value}))
-        self.value = value
+        self.props.value = value
 
     async def headless_click(self, index: int):
-        return await self.queue.put(UIEvent({self.uid: self.names[index]}))
+        return await self.queue.put(UIEvent({self.uid: self.props.names[index]}))
 
     def get_callback(self):
         return self.callback
@@ -465,8 +554,24 @@ class RadioGroup(MUIComponentBase[MUIComponentBaseProps]):
     async def handle_event(self, ev: Any):
         await _handle_standard_event(self, ev)
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
 
-class Input(MUIComponentBase[MUIComponentBaseProps]):
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class InputProps(MUIComponentBaseProps):
+    label: str = ""
+    multiline: bool = False 
+    password: bool = False
+    value: str = ""
+
+class Input(MUIComponentBase[InputProps]):
 
     def __init__(self,
                  label: str,
@@ -477,31 +582,20 @@ class Input(MUIComponentBase[MUIComponentBaseProps]):
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  init: str = "") -> None:
-        super().__init__(uid, UIType.Input, MUIComponentBaseProps, queue)
-        self.label = label
+        super().__init__(uid, UIType.Input, InputProps, queue)
+        self.props.label = label
         self.callback = callback
-        self.value: str = init
-        self.multiline = multiline
-        self.password = password
+        self.props.value = init
+        self.props.multiline = multiline
+        self.props.password = password
 
-    def to_dict(self):
-        res = super().to_dict()
-        res["label"] = self.label
-        res["multiline"] = self.multiline
-        res["password"] = self.password
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
         return res
 
-    def get_state(self):
-        state = super().get_state()
-        state["value"] = self.value
-        return state
-
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        self.value = state["value"]
-
     def state_change_callback(self, data: str):
-        self.value = data
+        self.props.value = data
 
     async def headless_write(self, content: str):
         return await self.queue.put(UIEvent({self.uid: content}))
@@ -513,33 +607,40 @@ class Input(MUIComponentBase[MUIComponentBaseProps]):
         self.callback = val
 
     def json(self):
-        return json.loads(self.value)
+        return json.loads(self.props.value)
 
     def float(self):
-        return float(self.value)
+        return float(self.props.value)
 
     def int(self):
-        return int(self.value)
+        return int(self.props.value)
 
     async def handle_event(self, ev: Any):
 
-        if self._status == UIRunStatus.Running:
+        if self.props.status == UIRunStatus.Running.value:
             # TODO send exception if ignored click
-            print("IGNORE EVENT", self._status)
+            print("IGNORE EVENT", self.props.status)
             return
-        elif self._status == UIRunStatus.Stop:
+        elif self.props.status == UIRunStatus.Stop.value:
             cb = self.callback
             self.state_change_callback(ev)
             # we can't update input state
             # because input is an uncontrolled
             # component.
             if cb is not None:
-
                 def ccb(cb):
                     return lambda: cb(ev)
-
                 self._task = asyncio.create_task(self.run_callback(ccb(cb)))
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 # class CodeEditor(MUIComponentBase[MUIComponentBaseProps]):
 
@@ -565,8 +666,12 @@ class Input(MUIComponentBase[MUIComponentBaseProps]):
 #     def state_change_callback(self, data: str):
 #         self.value = data
 
+@dataclasses.dataclass
+class SwitchProps(MUIComponentBaseProps):
+    label: str = ""
+    checked: bool = False 
 
-class Switch(MUIComponentBase[MUIComponentBaseProps]):
+class Switch(MUIComponentBase[SwitchProps]):
 
     def __init__(self,
                  label: str,
@@ -574,28 +679,18 @@ class Switch(MUIComponentBase[MUIComponentBaseProps]):
                                                                None]]] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Switch, MUIComponentBaseProps, queue)
-        self.label = label
+        super().__init__(uid, UIType.Switch, SwitchProps, queue)
+        self.props.label = label
         self.callback = callback
-        self.checked = False
+        self.props.checked = False
 
-    def to_dict(self):
-        res = super().to_dict()
-        res["label"] = self.label
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["checked"] = self.props.checked
         return res
 
-    def get_state(self):
-        state = super().get_state()
-        state["checked"] = self.checked
-        return state
-
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        if "checked" in state:
-            self.checked = state["checked"]
-
     def state_change_callback(self, data: bool):
-        self.checked = data
+        self.props.checked = data
 
     async def headless_write(self, checked: bool):
         return await self.queue.put(UIEvent({self.uid: checked}))
@@ -607,13 +702,28 @@ class Switch(MUIComponentBase[MUIComponentBaseProps]):
         self.callback = val
 
     def __bool__(self):
-        return self.checked
+        return self.props.checked
 
     async def handle_event(self, ev: Any):
         await _handle_standard_event(self, ev)
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
 
-class Select(MUIComponentBase[MUIComponentBaseProps]):
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class SelectProps(MUIComponentBaseProps):
+    label: str = ""
+    items: List[Tuple[str, ValueType]] = dataclasses.field(default_factory=list) 
+    value: ValueType = ""
+
+class Select(MUIComponentBase[SelectProps]):
 
     def __init__(self,
                  label: str,
@@ -623,33 +733,24 @@ class Select(MUIComponentBase[MUIComponentBaseProps]):
                                                        None]]] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Select, MUIComponentBaseProps, queue)
-        self.label = label
+        super().__init__(uid, UIType.Select, SelectProps, queue)
+        self.props.label = label
         self.callback = callback
         assert len(items) > 0
-        self.items = items
+        self.props.items = items
         # item value must implement eq/ne
-        self.value = ""
+        self.props.value = ""
 
-    def to_dict(self):
-        res = super().to_dict()
-        res["label"] = self.label
+    def validate_props(self, props: Dict[str, Any]):
+        if "items" in props:
+            items = props["items"]
+            return items == self.props.items
+        return False
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
         return res
-
-    def get_state(self):
-        state = super().get_state()
-        state["items"] = self.items
-        state["value"] = self.value
-        return state
-
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        if "value" in state and "items" in state:
-            value = state["value"]
-            items = state["items"]
-            if items == self.items:
-                self.value = value
-                self.items = items
 
     async def update_items(self, items: List[Tuple[str, ValueType]],
                            selected: int):
@@ -658,20 +759,20 @@ class Select(MUIComponentBase[MUIComponentBaseProps]):
                 "items": items,
                 "value": items[selected][1]
             }))
-        self.items = items
-        self.value = items[selected][1]
+        self.props.items = items
+        self.props.value = items[selected][1]
 
     async def update_value(self, value: ValueType):
-        assert value in [x[1] for x in self.items]
+        assert value in [x[1] for x in self.props.items]
         await self.queue.put(self.create_update_event({"value": value}))
-        self.value = value
+        self.props.value = value
 
     def update_value_no_sync(self, value: ValueType):
-        assert value in [x[1] for x in self.items]
-        self.value = value
+        assert value in [x[1] for x in self.props.items]
+        self.props.value = value
 
     def state_change_callback(self, value: ValueType):
-        self.value = value
+        self.props.value = value
 
     async def headless_select(self, value: ValueType):
         return await self.queue.put(UIEvent({self.uid: value}))
@@ -685,8 +786,23 @@ class Select(MUIComponentBase[MUIComponentBaseProps]):
     async def handle_event(self, ev: Any):
         await _handle_standard_event(self, ev)
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
 
-class MultipleSelect(MUIComponentBase[MUIComponentBaseProps]):
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class MultipleSelectProps(MUIComponentBaseProps):
+    label: str = ""
+    items: List[Tuple[str, ValueType]] = dataclasses.field(default_factory=list) 
+    values: List[ValueType] = dataclasses.field(default_factory=list) 
+
+class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
 
     def __init__(self,
                  label: str,
@@ -696,34 +812,25 @@ class MultipleSelect(MUIComponentBase[MUIComponentBaseProps]):
                                                        None]]] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.MultipleSelect, MUIComponentBaseProps,
+        super().__init__(uid, UIType.MultipleSelect, MultipleSelectProps,
                          queue)
-        self.label = label
+        self.props.label = label
         self.callback = callback
         assert len(items) > 0
-        self.items = items
+        self.props.items = items
         # item value must implement eq/ne
-        self.values: List[ValueType] = []
+        self.props.values = []
 
-    def to_dict(self):
-        res = super().to_dict()
-        res["label"] = self.label
+    def validate_props(self, props: Dict[str, Any]):
+        if "items" in props:
+            items = props["items"]
+            return items == self.props.items
+        return False
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["values"] = self.props.values
         return res
-
-    def get_state(self):
-        state = super().get_state()
-        state["items"] = self.items
-        state["values"] = self.values
-        return state
-
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        if "values" in state and "items" in state:
-            values = state["values"]
-            items = state["items"]
-            if [list(x) for x in items] == [list(x) for x in self.items]:
-                self.values = values
-                self.items = items
 
     async def update_items(self,
                            items: List[Tuple[str, Any]],
@@ -735,22 +842,22 @@ class MultipleSelect(MUIComponentBase[MUIComponentBaseProps]):
                 "items": items,
                 "values": [items[s][1] for s in selected]
             }))
-        self.items = items
-        self.values = [items[s][1] for s in selected]
+        self.props.items = items
+        self.props.values = [items[s][1] for s in selected]
 
     async def update_value(self, values: List[ValueType]):
         for v in values:
-            assert v in [x[1] for x in self.items]
+            assert v in [x[1] for x in self.props.items]
         await self.queue.put(self.create_update_event({"values": values}))
-        self.values = values
+        self.props.values = values
 
     def update_value_no_sync(self, values: List[ValueType]):
         for v in values:
-            assert v in [x[1] for x in self.items]
-        self.values = values
+            assert v in [x[1] for x in self.props.items]
+        self.props.values = values
 
     def state_change_callback(self, values: List[ValueType]):
-        self.values = values
+        self.props.values = values
 
     async def headless_select(self, values: List[ValueType]):
         return await self.queue.put(UIEvent({self.uid: values}))
@@ -764,62 +871,72 @@ class MultipleSelect(MUIComponentBase[MUIComponentBaseProps]):
     async def handle_event(self, ev: Any):
         await _handle_standard_event(self, ev)
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
 
-class Slider(MUIComponentBase[MUIComponentBaseProps]):
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class SliderProps(MUIComponentBaseProps):
+    label: str = ""
+    ranges: Tuple[NumberType, NumberType, NumberType] = (0, 1, 0) 
+    value: NumberType = 0
+
+
+class Slider(MUIComponentBase[SliderProps]):
 
     def __init__(self,
                  label: str,
-                 begin: Union[int, float],
-                 end: Union[int, float],
-                 step: Union[int, float],
-                 callback: Optional[Callable[[Union[int, float]],
+                 begin: NumberType,
+                 end: NumberType,
+                 step: NumberType,
+                 callback: Optional[Callable[[NumberType],
                                              _CORO_NONE]] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Slider, MUIComponentBaseProps, queue)
-        self.label = label
+        super().__init__(uid, UIType.Slider, SliderProps, queue)
+        self.props.label = label
         self.callback = callback
         assert end > begin and step <= end - begin
-        self.ranges = (begin, end, step)
-        self.value = begin
+        self.props.ranges = (begin, end, step)
+        self.props.value = begin
 
-    def to_dict(self):
-        res = super().to_dict()
-        res["label"] = self.label
+    def validate_props(self, props: Dict[str, Any]):
+        if "value" in props:
+            value = props["value"]
+            return (value >= self.props.ranges[0] and value < self.props.ranges[1])
+        return False
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
         return res
 
-    def get_state(self):
-        state = super().get_state()
-        state["ranges"] = self.ranges
-        state["value"] = self.value
-        return state
-
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        if "value" in state and "ranges" in state:
-            self.value = state["value"]
-            self.ranges = state["ranges"]
-
-    async def update_ranges(self, begin: Union[int, float],
-                            end: Union[int, float], step: Union[int, float]):
-        self.ranges = (begin, end, step)
+    async def update_ranges(self, begin: NumberType,
+                            end: NumberType, step: NumberType):
+        self.props.ranges = (begin, end, step)
         assert end > begin and step < end - begin
-        self.value = begin
+        self.props.value = begin
         await self.queue.put(
             self.create_update_event({
                 "ranges": (begin, end, step),
-                "value": self.value
+                "value": self.props.value
             }))
 
-    async def update_value(self, value: Union[int, float]):
-        assert value >= self.ranges[0] and value <= self.ranges[1]
+    async def update_value(self, value: NumberType):
+        assert value >= self.props.ranges[0] and value <= self.props.ranges[1]
         await self.queue.put(self.create_update_event({"value": value}))
-        self.value = value
+        self.props.value = value
 
-    def state_change_callback(self, value: Union[int, float]):
-        self.value = value
+    def state_change_callback(self, value: NumberType):
+        self.props.value = value
 
-    async def headless_change(self, value: Union[int, float]):
+    async def headless_change(self, value: NumberType):
         return await self.queue.put(UIEvent({self.uid: value}))
 
     def get_callback(self):
@@ -831,11 +948,25 @@ class Slider(MUIComponentBase[MUIComponentBaseProps]):
     async def handle_event(self, ev: Any):
         await _handle_standard_event(self, ev)
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 _T = TypeVar("_T")
 
+@dataclasses.dataclass
+class TaskLoopProps(MUIComponentBaseProps):
+    label: str = ""
+    progresses: List[float] = dataclasses.field(default_factory=list)
 
-class TaskLoop(MUIComponentBase[MUIComponentBaseProps]):
+
+class TaskLoop(MUIComponentBase[TaskLoopProps]):
 
     def __init__(self,
                  label: str,
@@ -843,21 +974,16 @@ class TaskLoop(MUIComponentBase[MUIComponentBaseProps]):
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  update_period: float = 0.2) -> None:
-        super().__init__(uid, UIType.TaskLoop, MUIComponentBaseProps, queue)
-        self.label = label
+        super().__init__(uid, UIType.TaskLoop, TaskLoopProps, queue)
+        self.props.label = label
         self.loop_callbcak = loop_callbcak
 
-        self.progresses: List[float] = [0.0]
+        self.props.progresses = [0.0]
         self.stack_count = 0
         self.pause_event = asyncio.Event()
         self.pause_event.set()
         self.update_period = update_period
 
-    def get_state(self):
-        state = super().get_state()
-        state["label"] = self.label
-        state["progresses"] = self.progresses
-        return state
 
     def get_callback(self):
         return self.loop_callbcak
@@ -873,7 +999,7 @@ class TaskLoop(MUIComponentBase[MUIComponentBaseProps]):
             dura = 0.0
             if self.stack_count > 0:
                 # keep root progress
-                self.progresses.append(0.0)
+                self.props.progresses.append(0.0)
             self.stack_count += 1
             if inspect.isasyncgen(it):
                 async for item in it:
@@ -905,18 +1031,18 @@ class TaskLoop(MUIComponentBase[MUIComponentBaseProps]):
         finally:
             self.stack_count -= 1
             self.pause_event.set()
-            if len(self.progresses) > 1:
-                self.progresses.pop()
+            if len(self.props.progresses) > 1:
+                self.props.progresses.pop()
 
     async def update_progress(self, progress: float, index: int):
         progress = max(0, min(progress, 1))
-        self.progresses[index] = progress
+        self.props.progresses[index] = progress
         await self.queue.put(
-            self.create_update_event({"progresses": self.progresses}))
+            self.create_update_event({"progresses": self.props.progresses}))
 
     async def update_label(self, label: str):
         await self.queue.put(self.create_update_event({"label": label}))
-        self.label = label
+        self.props.label = label
 
     async def headless_run(self):
         return await self.queue.put(
@@ -927,29 +1053,38 @@ class TaskLoop(MUIComponentBase[MUIComponentBaseProps]):
 
     async def handle_event(self, data: Any):
         if data == TaskLoopEvent.Start.value:
-            if self._status == UIRunStatus.Stop:
+            if self.props.status == UIRunStatus.Stop.value:
                 self._task = asyncio.create_task(
                     self.run_callback(self.loop_callbcak))
             else:
-                print("IGNORE TaskLoop EVENT", self._status)
+                print("IGNORE TaskLoop EVENT", self.props.status)
         elif data == TaskLoopEvent.Pause.value:
-            if self._status == UIRunStatus.Running:
+            if self.props.status == UIRunStatus.Running.value:
                 # pause
                 self.pause_event.clear()
-                self._status = UIRunStatus.Pause
-            elif self._status == UIRunStatus.Pause:
+                self.props.status = UIRunStatus.Pause.value
+            elif self.props.status == UIRunStatus.Pause.value:
                 self.pause_event.set()
-                self._status = UIRunStatus.Running
+                self.props.status = UIRunStatus.Running.value
             else:
-                print("IGNORE TaskLoop EVENT", self._status)
+                print("IGNORE TaskLoop EVENT", self.props.status)
         elif data == TaskLoopEvent.Stop.value:
-            if self._status == UIRunStatus.Running:
+            if self.props.status == UIRunStatus.Running.value:
                 await cancel_task(self._task)
             else:
-                print("IGNORE TaskLoop EVENT", self._status)
+                print("IGNORE TaskLoop EVENT", self.props.status)
         else:
             raise NotImplementedError
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 _TypographyVarient: TypeAlias = Literal['body1', 'body2', 'button', 'caption',
                                         'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -968,34 +1103,34 @@ class TypographyProps(ComponentBaseProps):
     no_wrap: Union[bool, Undefined] = undefined
     variant: Union[_TypographyVarient, Undefined] = undefined
     paragraph: Union[bool, Undefined] = undefined
+    value: str = ""
 
 
-class Typography(MUIComponentBase[ComponentBaseProps]):
+class Typography(MUIComponentBase[TypographyProps]):
 
     def __init__(self,
                  init: str,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Typography, ComponentBaseProps, queue)
-        self.value = init
+        super().__init__(uid, UIType.Typography, TypographyProps, queue)
+        self.props.value = init
 
     async def write(self, content: str):
-        self.value = content
-        await self.queue.put(self.create_update_event({"value": self.value}))
+        self.props.value = content
+        await self.queue.put(self.create_update_event({"value": self.props.value}))
 
-    def get_state(self):
-        state = super().get_state()
-        state["value"] = self.value
-        return state
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
+        return res
 
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        if "value" in state:
-            self.value = state["value"]
-
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
 
 @dataclasses.dataclass
-class PaperProps(FlexBoxProps):
+class PaperProps(MUIFlexBoxProps):
     elevation: Union[int, Undefined] = undefined
     square: Union[bool, Undefined] = undefined
     variant: Union[Literal["elevation", "outlined"], Undefined] = undefined
@@ -1012,13 +1147,17 @@ class Paper(MUIContainerBase[PaperProps, MUIComponentType]):
         super().__init__(UIType.Paper, PaperProps, uid, queue, uid_to_comp,
                          init_dict, inited)
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
 
 _BtnGroupColor: TypeAlias = Literal['inherit', 'primary', 'secondary', 'error',
                                     'info', 'success', 'warning']
 
 
 @dataclasses.dataclass
-class ButtonGroupProps(FlexBoxProps):
+class ButtonGroupProps(MUIFlexBoxProps):
     color: Union[_BtnGroupColor, str, Undefined] = undefined
     disabled: Union[bool, Undefined] = undefined
     full_width: Union[bool, Undefined] = undefined
@@ -1042,9 +1181,13 @@ class ButtonGroup(MUIContainerBase[ButtonGroupProps, Button]):
         for v in init_dict.values():
             assert isinstance(v, Button), "all childs must be button"
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
 
 @dataclasses.dataclass
-class CollapseProps(FlexBoxProps):
+class CollapseProps(MUIFlexBoxProps):
     orientation: Union[Literal["horizontal", "vertical"],
                        Undefined] = undefined
     timeout: Union[NumberType, Undefined] = undefined
@@ -1061,6 +1204,10 @@ class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
         super().__init__(UIType.Collapse, CollapseProps, uid, queue,
                          uid_to_comp, init_dict, inited)
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
 
 @dataclasses.dataclass
 class ChipProps(ComponentBaseProps):
@@ -1068,7 +1215,7 @@ class ChipProps(ComponentBaseProps):
     clickable: Union[bool, Undefined] = undefined
     size: Union[Literal["small", "medium"], Undefined] = undefined
     variant: Union[Literal["filled", "outlined"], Undefined] = undefined
-
+    label: str = ""
 
 class Chip(MUIComponentBase[ChipProps]):
 
@@ -1079,17 +1226,17 @@ class Chip(MUIComponentBase[ChipProps]):
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
         super().__init__(uid, UIType.Chip, ChipProps, queue)
-        self.label = label
+        self.props.label = label
         self.callback = callback
         self.delete_callback = delete_callback
 
     def to_dict(self):
         res = super().to_dict()
-        res["label"] = self.label
+        res["label"] = self.props.label
         return res
 
     async def headless_click(self):
-        return await self.queue.put(UIEvent({self.uid: self.label}))
+        return await self.queue.put(UIEvent({self.uid: self.props.label}))
 
     def get_callback(self):
         return self.callback
@@ -1099,12 +1246,17 @@ class Chip(MUIComponentBase[ChipProps]):
 
     async def handle_event(self, ev: Any):
         # TODO add delete support
-        if self._status == UIRunStatus.Running:
+        if self.props.status == UIRunStatus.Running.value:
             # TODO send exception if ignored click
-            print("IGNORE EVENT", self._status)
+            print("IGNORE EVENT", self.props.status)
             return
-        elif self._status == UIRunStatus.Stop:
+        elif self.props.status == UIRunStatus.Stop.value:
             cb2 = self.get_callback()
             if cb2 is not None:
                 self._task = asyncio.create_task(
                     self.run_callback(lambda: cb2()))
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)

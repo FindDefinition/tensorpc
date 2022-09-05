@@ -554,6 +554,7 @@ class SSHClient:
                                     username=self.username,
                                     password=self.password,
                                     keepalive_interval=15,
+                                    login_timeout=10,
                                     known_hosts=None) as conn:
             if not self.bash_file_inited:
                 p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
@@ -593,6 +594,7 @@ class SSHClient:
                                         username=self.username,
                                         password=self.password,
                                         keepalive_interval=10,
+                                        login_timeout=10,
                                         known_hosts=None) as conn:
                 if not self.bash_file_inited:
                     p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"

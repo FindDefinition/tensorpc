@@ -70,8 +70,11 @@ class AppContext:
 APP_CONTEXT_VAR: contextvars.ContextVar[
     Optional[AppContext]] = contextvars.ContextVar("flowapp_context",
                                                    default=None)
+
+
 def get_app_context() -> Optional[AppContext]:
     return APP_CONTEXT_VAR.get()
+
 
 @contextlib.contextmanager
 def _enter_app_conetxt(app: "App"):
@@ -81,6 +84,7 @@ def _enter_app_conetxt(app: "App"):
         yield ctx
     finally:
         APP_CONTEXT_VAR.reset(token)
+
 
 _ROOT = "root"
 
@@ -169,10 +173,10 @@ class App:
         state: Dict[str, Any] = {}
         for comp in self.root._get_all_nested_childs():
             if isinstance(comp, (mui.Input, mui.Switch, mui.RadioGroup,
-                                 mui.Slider, mui.Select, mui.MultipleSelect)):
+                                 mui.Slider, mui.Select, mui.MultipleSelect,)):
                 state[comp.uid] = {
                     "type": comp.type.value,
-                    "state": comp.get_state(),
+                    "props": comp.get_sync_props(),
                 }
         return state
 
@@ -185,8 +189,9 @@ class App:
             if k in self.root._uid_to_comp:
                 comp_to_restore = self.root._uid_to_comp[k]
                 if comp_to_restore.type.value == s["type"]:
-                    comp_to_restore.set_state(s["state"])
-                    ev = ev.merge_new(comp_to_restore.get_sync_event(True))
+                    comp_to_restore.set_props(s["props"])
+                    pylance_wtf = ev.merge_new(comp_to_restore.get_sync_event(True))
+                    ev = pylance_wtf
         await self._queue.put(ev)
 
     def _app_force_use_layout_function(self):
@@ -205,7 +210,7 @@ class App:
         self._uid_to_comp.clear()
         self.root.uid = _ROOT
         res = self.app_create_layout()
-        res_anno: Dict[str, Union[Component, BasicProps]] = {**res}
+        res_anno: Dict[str, Component] = {**res}
         self.root.add_layout(res_anno)
         self._uid_to_comp[_ROOT] = self.root
         self.root._prevent_add_layout = True
@@ -214,7 +219,7 @@ class App:
             for comp in self._uid_to_comp.values():
                 if comp.uid in prev_comps:
                     if comp.type.value == prev_comps[comp.uid]["type"]:
-                        comp.set_state(prev_comps[comp.uid]["state"])
+                        comp.set_props(prev_comps[comp.uid]["state"])
             del prev_comps
         if send_layout_ev:
             ev = AppEvent(
@@ -346,16 +351,19 @@ class EditableApp(App):
 
     def __init__(self,
                  reloadable_layout: bool = False,
+                 use_app_editor: bool = True,
                  flex_flow: Union[str, Undefined] = "column nowrap",
                  justify_content: Union[str, Undefined] = undefined,
                  align_items: Union[str, Undefined] = undefined,
                  maxqsize: int = 10) -> None:
         super().__init__(flex_flow, justify_content, align_items, maxqsize)
-        lines, lineno = inspect.findsource(type(self))
-        self.code_editor.value = "".join(lines)
-        self.code_editor.language = "python"
-        self.code_editor.set_init_line_number(lineno)
-        self.code_editor.freeze()
+        self._use_app_editor = use_app_editor
+        if use_app_editor:
+            lines, lineno = inspect.findsource(type(self))
+            self.code_editor.value = "".join(lines)
+            self.code_editor.language = "python"
+            self.code_editor.set_init_line_number(lineno)
+            self.code_editor.freeze()
         self._watchdog_prev_content = ""
         if reloadable_layout:
             self._app_force_use_layout_function()
@@ -414,27 +422,28 @@ class EditableApp(App):
     async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
         """override this method to support vscode editor.
         """
-        if event.type == AppEditorFrontendEventType.Save:
-            with self._watch_lock:
-                self._watchdog_ignore_next = True
-                with open(inspect.getfile(type(self)), "w") as f:
-                    f.write(event.data)
-                self.code_editor.value = event.data
-                self._watchdog_prev_content = event.data
-                layout_func_changed = self._reload_app_file()
-                if layout_func_changed:
-                    await self._app_run_layout_function(True,
-                                                        with_code_editor=False,
-                                                        reload=True)
+        if self._use_app_editor:
+            if event.type == AppEditorFrontendEventType.Save:
+                with self._watch_lock:
+                    self._watchdog_ignore_next = True
+                    with open(inspect.getfile(type(self)), "w") as f:
+                        f.write(event.data)
+                    self.code_editor.value = event.data
+                    self._watchdog_prev_content = event.data
+                    layout_func_changed = self._reload_app_file()
+                    if layout_func_changed:
+                        await self._app_run_layout_function(
+                            True, with_code_editor=False, reload=True)
         return
 
 
 class EditableLayoutApp(EditableApp):
 
     def __init__(self,
+                 use_app_editor: bool = True,
                  flex_flow: Union[str, Undefined] = "column nowrap",
                  justify_content: Union[str, Undefined] = undefined,
                  align_items: Union[str, Undefined] = undefined,
                  maxqsize: int = 10) -> None:
-        super().__init__(True, flex_flow, justify_content, align_items,
-                         maxqsize)
+        super().__init__(True, use_app_editor, flex_flow, justify_content,
+                         align_items, maxqsize)

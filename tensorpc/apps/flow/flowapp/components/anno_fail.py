@@ -93,6 +93,16 @@ class Component(Generic[T]):
             return self.__props
         return wrapper 
 
+    def runX(self, prop: Callable[P, Any]):
+        def wrapper(*args: P.args, **kwargs: P.kwargs):
+            for k, v in kwargs.items():
+                setattr(self.__props, k, v)
+            return self.__props
+        return wrapper 
+
+    def runX2(self):
+        return self.runX(self.prop_cls2)
+
 
 
 a = Component(Props, Props)
@@ -101,4 +111,5 @@ a.prop_pylance_works
 a.prop_pylance_dont_work
 a.prop_pylance_dont_work_too
 a.prop_pylance_works_too_but_trivial
-
+a.runX(Props)()
+a.runX2()

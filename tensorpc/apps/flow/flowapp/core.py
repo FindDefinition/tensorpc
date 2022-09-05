@@ -27,13 +27,12 @@ import dataclasses
 import re
 from tensorpc.compat import Python3_10AndLater
 import sys
-from typing_extensions import Literal, ParamSpec, Concatenate, TypeAlias, Protocol
+from typing_extensions import Literal, ParamSpec, Concatenate, Self, TypeAlias, Protocol
 
 ALL_APP_EVENTS = HashableRegistry()
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
 
-__COMPONENT_SPECIAL_KEY = "_tensorpc_component_special_key"
 ValueType: TypeAlias = Union[int, float, str]
 
 NumberType: TypeAlias = Union[int, float]
@@ -129,6 +128,7 @@ class AppEventType(enum.Enum):
     UIUpdateEvent = 11
     UISaveStateEvent = 12
     Notify = 13
+    UIUpdatePropsEvent = 14
     # clipboard
     CopyToClipboard = 20
     # schedule event, won't be sent to frontend.
@@ -423,16 +423,29 @@ class AppEvent:
         t2e.sort(key=lambda x: x[0])
         return {"uid": self.uid, "typeToEvents": t2e}
 
-    def merge_new(self, new: "AppEvent"):
+    def merge_new(self, new: "AppEvent") -> "AppEvent":
         new_type_to_event: Dict[AppEventType,
                                 APP_EVENT_TYPES] = new.type_to_event.copy()
+        if self.sent_event is not None:
+            assert new.sent_event is None, "sent event of new must be None"
+            sent_event = self.sent_event
+        else:
+            sent_event = new.sent_event
         for k, v in self.type_to_event.items():
             if k in new.type_to_event:
                 new_type_to_event[k] = v.merge_new(new.type_to_event[k])
             else:
                 new_type_to_event[k] = v
-        return AppEvent(self.uid, new_type_to_event)
+        return AppEvent(self.uid, new_type_to_event, sent_event)
 
+    def __add__(self, other: "AppEvent"):
+        return self.merge_new(other)
+
+    def __iadd__(self, other: "AppEvent"):
+        ret = self.merge_new(other)
+        self.type_to_event = ret.type_to_event
+        self.sent_event = ret.sent_event
+        return
 
 def camel_to_snake(name: str):
     name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
@@ -448,22 +461,27 @@ def snake_to_camel(name: str):
 
 
 
+def _split_props_to_undefined(props: Dict[str, Any]):
+        res = {}
+        res_und = []
+        for res_camel, val in props.items():
+            if isinstance(val, Undefined):
+                res_und.append(res_camel)
+            else:
+                res[res_camel] = val
+        return res, res_und
+
 
 @dataclasses.dataclass
 class BasicProps:
-    _tensorpc_component_special_key: Optional[Any] = None
-
+    status: int = UIRunStatus.Stop.value
     def get_dict_and_undefined(self, state: Dict[str, Any]):
         this_type = type(self)
         res = {}
-        self._tensorpc_component_special_key = None
         ref_dict = dataclasses.asdict(self)
-        ref_dict.pop("_tensorpc_component_special_key")
         res_und = []
         for field in dataclasses.fields(this_type):
             if field.name in state:
-                continue
-            if field.name == "_tensorpc_component_special_key":
                 continue
             res_camel = snake_to_camel(field.name)
             val = ref_dict[field.name]
@@ -483,7 +501,12 @@ class BasicProps:
             res[res_camel] = val
         return res
 
+@dataclasses.dataclass
+class ContainerBaseProps(BasicProps):
+    childs: List[str] = dataclasses.field(default_factory=list)
+
 T_base_props = TypeVar("T_base_props", bound=BasicProps)
+T_container_props = TypeVar("T_container_props", bound=ContainerBaseProps)
 
 _OverflowType = Union[Literal["visible"], Literal["hidden"], Literal["scroll"], Literal["auto"]]
 
@@ -593,7 +616,7 @@ class Component(Generic[T_base_props, T_child]):
         self._queue = queue
         self.uid = uid
         self.type = type
-        self._status = UIRunStatus.Stop
+        # self._status = UIRunStatus.Stop
         # task for callback of controls
         # if previous control callback hasn't finished yet,
         # the new control event will be IGNORED
@@ -606,21 +629,38 @@ class Component(Generic[T_base_props, T_child]):
     def props(self) -> T_base_props:
         return self.__props
 
-    # @property
-    # def propcls(self) -> Type[T]:
-    #     return self.__prop_cls
-
     @property
-    def prop(self) -> Type[T_base_props]:
-        """set some prop of this component"""
-        @init_anno_fwd(self.__prop_cls)
-        def wrapper(**kwargs):
-            self.__props._tensorpc_component_special_key = self  # type: ignore
+    def propcls(self) -> Type[T_base_props]:
+        return self.__prop_cls
+
+    # @property
+    # def prop(self) -> Type[T_base_props]:
+    #     """set some prop of this component"""
+    #     @init_anno_fwd(self.__prop_cls)
+    #     def wrapper(**kwargs):
+    #         self.__props._tensorpc_component_special_key = self  # type: ignore
+    #         for k, v in kwargs.items():
+    #             setattr(self.__props, k, v)
+    #         return self.__props
+
+    #     return wrapper  # type: ignore
+
+    def _prop_base(self, prop: Callable[P, Any], this: T3) -> Callable[P, T3]:
+        def wrapper(*args: P.args, **kwargs: P.kwargs):
             for k, v in kwargs.items():
                 setattr(self.__props, k, v)
-            return self.__props
+            return this
+        return wrapper 
 
-        return wrapper  # type: ignore
+    def _update_props_base(self, prop: Callable[P, Any]):
+        def wrapper(*args: P.args, **kwargs: P.kwargs):
+            return self.create_update_event(kwargs)
+        return wrapper 
+
+
+    # def prop3(self):
+    #     propcls: Type[T_base_props] = self.propcls
+    #     return self.prop2(propcls)
 
     # @property
     # def prop2(self):
@@ -661,24 +701,55 @@ class Component(Generic[T_base_props, T_child]):
         if you reimplement to_dict, you need to use 
         camel name, no conversion provided.
         """
-        state = self.get_state()
-        newstate = {}
-        for k, v in state.items():
-            if not isinstance(v, Undefined):
-                newstate[snake_to_camel(k)] = v
-        # TODO better way to resolve type anno problem
-        static, _ = self.__props.get_dict_and_undefined(state)  # type: ignore
-        static["state"] = newstate
-        static["uid"] = self.uid
-        static["type"] = self.type.value
-        return static
+        props = self.get_props()
+        props, und = _split_props_to_undefined(props)
+        # state = self.get_state()
+        # newstate = {}
+        # for k, v in state.items():
+        #     if not isinstance(v, Undefined):
+        #         newstate[snake_to_camel(k)] = v
+        # # TODO better way to resolve type anno problem
+        # static, _ = self.__props.get_dict_and_undefined(state)  # type: ignore
+        res = {
+            "uid": self.uid,
+            "type": self.type.value,
+            "props": props,
+            # "status": self._status.value,
+        }
+        # static["state"] = newstate
+        # static["uid"] = self.uid
+        # static["type"] = self.type.value
+        return res
 
-    def get_state(self) -> Dict[str, Any]:
-        return {"status": self._status.value}  # type: ignore
+    def get_sync_props(self) -> Dict[str, Any]:
+        """this function is used for props you want to kept when app
+        shutdown or layout updated.
+        1. app shutdown: only limited component support props recover.
+        2. update layout: all component will override props
+        by previous sync props
+        """
+        return {"status": self.props.status}
 
-    def set_state(self, state: Dict[str, Any]):
-        if "status" in state:
-            self._status = UIRunStatus(state["status"])
+    # def set_sync_state(self, state: Dict[str, Any]):
+    #     if "status" in state:
+    #         self.props.status = state["status"]
+
+    def get_props(self) -> Dict[str, Any]:
+        return self.__props.get_dict()  # type: ignore
+
+    def validate_props(self, props: Dict[str, Any]):
+        """use this function to validate props before call
+        set props.
+        """
+        return True
+
+    def set_props(self, props: Dict[str, Any]):
+        if self.validate_props(props):
+            fields = dataclasses.fields(self.__props)
+            name_to_fields = {f.name: f for f in fields}
+            for name, value in props.items():
+                if name in name_to_fields:
+                    setattr(self.__props, name, value)
 
     @property
     def queue(self):
@@ -701,6 +772,19 @@ class Component(Generic[T_base_props, T_child]):
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UIUpdateEvent: ev})
 
+    def create_update_prop_event(self, data: Dict[str, Union[Any, Undefined]]):
+        data_no_und = {}
+        data_unds = []
+        for k, v in data.items():
+            k = snake_to_camel(k)
+            if isinstance(v, Undefined):
+                data_unds.append(k)
+            else:
+                data_no_und[k] = v
+        ev = UIUpdateEvent({self.uid: (data_no_und, data_unds)})
+        # uid is set in flowapp service later.
+        return AppEvent("", {AppEventType.UIUpdatePropsEvent: ev})
+
     async def send_app_event_and_wait(self, ev: AppEvent):
         if ev.sent_event is None:
             ev.sent_event = asyncio.Event()
@@ -720,7 +804,7 @@ class Component(Generic[T_base_props, T_child]):
     async def run_callback(self,
                            cb: Callable[[], _CORO_NONE],
                            sync_state: bool = False):
-        self._status = UIRunStatus.Running  
+        self.props.status = UIRunStatus.Running.value
         ev = asyncio.Event()
         await self.sync_status(sync_state, ev)
         await ev.wait()
@@ -734,18 +818,18 @@ class Component(Generic[T_base_props, T_child]):
             
             raise
         finally:
-            self._status = UIRunStatus.Stop 
+            self.props.status = UIRunStatus.Stop.value 
             await self.sync_status(sync_state)
 
     async def sync_status(self,
                           sync_state: bool = False,
                           sent_event: Optional[asyncio.Event] = None):
         if sync_state:
-            ev = self.create_update_event(self.get_state())
+            ev = self.create_update_event(self.get_sync_props())
             ev.sent_event = sent_event
             await self.queue.put(ev)
         else:
-            ev = self.create_update_event({"status": self._status.value})
+            ev = self.create_update_event({"status": self.props.status})
             ev.sent_event = sent_event
             await self.queue.put(ev)
 
@@ -754,16 +838,15 @@ class Component(Generic[T_base_props, T_child]):
 
     def get_sync_event(self, sync_state: bool = False):
         if sync_state:
-            return self.create_update_event(self.get_state())
+            return self.create_update_event(self.get_sync_props())
         else:
-            return self.create_update_event({"status": self._status.value
-                                             })  # type: ignore
+            return self.create_update_event({"status": self.props.status})
 
 
-class ContainerBase(Component[T_base_props, T_child]):
+class ContainerBase(Component[T_container_props, T_child]):
     def __init__(self,
                  base_type: UIType,
-                 prop_cls: Type[T_base_props],
+                 prop_cls: Type[T_container_props],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
@@ -778,7 +861,7 @@ class ContainerBase(Component[T_base_props, T_child]):
         self._uid_to_comp = uid_to_comp
         self._init_dict = _init_dict
 
-        self._childs: List[str] = []
+        # self.props.childs: List[str] = []
 
         self.inited = inited
         self._prevent_add_layout = False
@@ -787,10 +870,10 @@ class ContainerBase(Component[T_base_props, T_child]):
         return ComponentBaseProps
 
     async def _clear(self):
-        for c in self._childs:
+        for c in self.props.childs:
             cc = self[c]
             await cc._clear()
-        self._childs.clear()
+        self.props.childs.clear()
         await super()._clear()
         self._pool.unique_set.clear()
 
@@ -816,14 +899,14 @@ class ContainerBase(Component[T_base_props, T_child]):
                 v._uid_to_comp = uid_to_comp
 
     def __getitem__(self, key: str):
-        assert key in self._childs, f"{key}, {self._childs}"
+        assert key in self.props.childs, f"{key}, {self.props.childs}"
         return self._uid_to_comp[self._get_uid_with_ns(key)]
 
     def _get_all_nested_child_recursive(self, name: str, res: List[Component]):
         comp = self[name]
         res.append(comp)
         if isinstance(comp, ContainerBase):
-            for child in comp._childs:
+            for child in comp.props.childs:
                 comp._get_all_nested_child_recursive(child, res)
 
     def _get_all_nested_child(self, name: str):
@@ -833,12 +916,12 @@ class ContainerBase(Component[T_base_props, T_child]):
 
     def _get_all_nested_childs(self):
         comps: List[Component] = []
-        for c in self._childs:
+        for c in self.props.childs:
             comps.extend(self._get_all_nested_child(c))
         return comps
 
     def _get_all_child_comp_uids(self):
-        return [self[n].uid for n in self._childs]
+        return [self[n].uid for n in self.props.childs]
 
     def _get_uid_with_ns(self, name: str):
         if not self.inited:
@@ -868,21 +951,16 @@ class ContainerBase(Component[T_base_props, T_child]):
         self._add_prop_to_ui(comp)
         if add_to_state:
             self._uid_to_comp[comp.uid] = comp
-            self._childs.append(name)
+            self.props.childs.append(name)
         return comp
 
-    def _extract_layout(self, layout: Dict[str, Union[Component, BasicProps]]):
+    def _extract_layout(self, layout: Dict[str, Component]):
         """ get all components without add to app state.
         """
         # we assume layout is a ordered dict (python >= 3.7)
         comps: List[Component] = []
         for k, v1 in layout.items():
-            if isinstance(v1, BasicProps):
-                assert v1._tensorpc_component_special_key is not None
-                v: Component = v1._tensorpc_component_special_key  # type: ignore
-                v1._tensorpc_component_special_key = None
-            else:
-                v = v1
+            v = v1
             comps.append(self.add_component(k, v, False, anonymous=False))
             if isinstance(v, ContainerBase):
                 msg = "you must use VBox/HBox/Box instead in dict layout"
@@ -890,7 +968,7 @@ class ContainerBase(Component[T_base_props, T_child]):
                 comps.extend(v._extract_layout(v._init_dict))
         return comps
 
-    def add_layout(self, layout: Dict[str, Union[Component, BasicProps]]):
+    def add_layout(self, layout: Dict[str, Component]):
         """ {
             btn0: Button(...),
             box0: VBox({
@@ -903,13 +981,7 @@ class ContainerBase(Component[T_base_props, T_child]):
             raise ValueError("you must init layout in app_create_layout")
         # we assume layout is a ordered dict (python >= 3.7)
         for k, v1 in layout.items():
-            if isinstance(v1, BasicProps):
-                assert v1._tensorpc_component_special_key is not None
-                v: Component[
-                    T] = v1._tensorpc_component_special_key  # type: ignore
-                v1._tensorpc_component_special_key = None
-            else:
-                v = v1
+            v = v1
             if not isinstance(v, ContainerBase):
                 self.add_component(k, v, anonymous=False)
             else:
@@ -926,22 +998,21 @@ class ContainerBase(Component[T_base_props, T_child]):
                     v._attach_to_app(self._queue)
                 self.add_component(k, v, anonymous=False)
 
-    def get_state(self):
-        state = super().get_state()
+    def get_props(self):
+        state = super().get_props()
         state["childs"] = self._get_all_child_comp_uids()
         return state
 
-    async def set_new_layout(self, layout: Dict[str, Union[Component,
-                                                           BasicProps]]):
+    async def set_new_layout(self, layout: Dict[str, Component]):
         # remove all first
         # TODO we may need to stop task of a comp
         comps_to_remove: List[Component] = []
-        for c in self._childs:
+        for c in self.props.childs:
             comps_to_remove.extend(self._get_all_nested_child(c))
         for c in comps_to_remove:
             await c._clear()
             self._uid_to_comp.pop(c.uid)
-        self._childs.clear()
+        self.props.childs.clear()
         # TODO should we merge two events to one?
         await self.queue.put(
             self.create_delete_comp_event([c.uid for c in comps_to_remove]))
@@ -951,8 +1022,10 @@ class ContainerBase(Component[T_base_props, T_child]):
             for c in self._get_all_nested_childs()
         }
         # make sure all child of this box is rerendered.
+        # TODO merge events
         comps_frontend[self.uid] = self.to_dict()
         await self.queue.put(self.create_update_comp_event(comps_frontend))
+        await self.queue.put(self.create_update_event({"childs": self.props.childs}))
 
     async def remove_childs_by_keys(self, keys: List[str]):
         comps_to_remove: List[Component] = []
@@ -962,16 +1035,16 @@ class ContainerBase(Component[T_base_props, T_child]):
             await c._clear()
             self._uid_to_comp.pop(c.uid)
         for k in keys:
-            self._childs.remove(k)
+            self.props.childs.remove(k)
         # make sure all child of this box is rerendered.
         await self.queue.put(
             self.create_delete_comp_event([c.uid for c in comps_to_remove]))
         # TODO combine two event to one
         await self.queue.put(
             self.create_update_comp_event({self.uid: self.to_dict()}))
+        await self.queue.put(self.create_update_event({"childs": self.props.childs}))
 
-    async def update_childs(self, layout: Dict[str, Union[Component,
-                                                          BasicProps]]):
+    async def update_childs(self, layout: Dict[str, Component]):
         new_comps = self._extract_layout(layout)
         update_comps_frontend = {c.uid: c.to_dict() for c in new_comps}
         for c in new_comps:
@@ -980,9 +1053,10 @@ class ContainerBase(Component[T_base_props, T_child]):
                 item.parent = ""  # mark invalid
             self._uid_to_comp[c.uid] = c
         for n in layout.keys():
-            if n not in self._childs:
-                self._childs.append(n)
+            if n not in self.props.childs:
+                self.props.childs.append(n)
         # make sure all child of this box is rerendered.
         update_comps_frontend[self.uid] = self.to_dict()
         await self.queue.put(
             self.create_update_comp_event(update_comps_frontend))
+        await self.queue.put(self.create_update_event({"childs": self.props.childs}))

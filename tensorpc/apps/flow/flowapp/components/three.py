@@ -17,25 +17,34 @@ import base64
 import enum
 import io
 import time
-from tensorpc import compat
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Tuple, Type, TypeVar, Union)
+
+from tensorpc import compat
 
 if compat.Python3_8AndLater:
     from typing import Literal
 else:
     from typing_extensions import Literal
-from typing_extensions import TypeAlias
+
+import dataclasses
 
 import numpy as np
 from tensorpc.utils.uniquename import UniqueNamePool
-import dataclasses
-from ..core import AppEvent, BasicProps, Component, NumberType, T_child, TaskLoopEvent, UIEvent, UIRunStatus, UIType, ContainerBase, Undefined, ValueType, undefined, ComponentBaseProps, T_base_props
-from .mui import FlexBoxProps, MUIContainerBase, _encode_image_bytes, MUIComponentType, _handle_button_event
+from typing_extensions import ParamSpec, TypeAlias
+
+from ..core import (AppEvent, BasicProps, Component, ComponentBaseProps,
+                    ContainerBase, NumberType, T_base_props, T_child,
+                    TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
+                    ValueType, undefined, ContainerBaseProps, T_container_props)
+from .mui import (FlexBoxProps, MUIComponentType, MUIContainerBase,
+                  _encode_image_bytes, _handle_button_event)
 
 Vector3Type: TypeAlias = Tuple[float, float, float]
 
 _CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
+CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
+P = ParamSpec('P')
 
 
 @dataclasses.dataclass
@@ -90,7 +99,7 @@ class ThreeComponentBase(Component[T_base_props, "ThreeComponentType"]):
     pass
 
 
-class ThreeContainerBase(ContainerBase[T_base_props, T_child]):
+class ThreeContainerBase(ContainerBase[T_container_props, T_child]):
     pass
 
 
@@ -110,13 +119,7 @@ class ThreeGeometryPropsBase(ThreeBasicProps):
 T_material_prop = TypeVar("T_material_prop", bound=ThreeMaterialPropsBase)
 T_geometry_prop = TypeVar("T_geometry_prop", bound=ThreeGeometryPropsBase)
 
-ThreeComponentType = Union[ThreeComponentBase, ThreeContainerBase,
-                           ThreeBasicProps, ThreeFlexPropsBase,
-                           ThreeFlexItemPropsBase]
-
-ThreeMaterialType = Union[ThreeMaterialBase[T_base_props],
-                          ThreeMaterialPropsBase]
-
+ThreeComponentType = Union[ThreeComponentBase, ThreeContainerBase]
 
 class PointerEventType(enum.Enum):
     # we don't support hover/move/missed
@@ -137,6 +140,7 @@ class PointerEventType(enum.Enum):
 
 @dataclasses.dataclass
 class Object3dBaseProps(ThreeBasicProps):
+    # position already exists in base flex props, so we use another name
     position: Union[Vector3Type, Undefined] = undefined
     rotation: Union[Vector3Type, Undefined] = undefined
     up: Union[Vector3Type, Undefined] = undefined
@@ -149,9 +153,13 @@ class Object3dBaseProps(ThreeBasicProps):
     #   stopPropagation
     # }
 
+@dataclasses.dataclass
+class Object3dContainerBaseProps(Object3dBaseProps, ContainerBaseProps):
+    pass
 
 
 T_o3d_prop = TypeVar("T_o3d_prop", bound=Object3dBaseProps)
+T_o3d_container_prop = TypeVar("T_o3d_container_prop", bound=Object3dContainerBaseProps)
 
 
 class Object3dBase(ThreeComponentBase[T_o3d_prop]):
@@ -161,43 +169,6 @@ class Object3dBase(ThreeComponentBase[T_o3d_prop]):
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
         super().__init__(uid, base_type, prop_cls, queue)
-
-    def get_state(self):
-        state = super().get_state()
-        if not isinstance(self.props.position, Undefined):
-            state["position"] = self.props.position
-        if not isinstance(self.props.rotation, Undefined):
-            state["rotation"] = self.props.rotation
-        if not isinstance(self.props.scale, Undefined):
-            state["scale"] = self.props.scale
-        if not isinstance(self.props.up, Undefined):
-            state["up"] = self.props.up
-        if not isinstance(self.props.visible, Undefined):
-            state["visible"] = self.props.visible
-        if not isinstance(self.props.receive_shadow, Undefined):
-            state["receive_shadow"] = self.props.receive_shadow
-        if not isinstance(self.props.cast_shadow, Undefined):
-            state["cast_shadow"] = self.props.cast_shadow
-        return state
-
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        if "position" in state:
-            self.props.position = state["position"]
-        if "rotation" in state:
-            self.props.rotation = state["rotation"]
-        if "scale" in state:
-            self.props.scale = state["scale"]
-        if "up" in state:
-            self.props.up = state["up"]
-        if "visible" in state:
-            self.props.visible = state["visible"]
-        if "visible" in state:
-            self.props.visible = state["visible"]
-        if "receive_shadow" in state:
-            self.props.receive_shadow = state["receive_shadow"]
-        if "cast_shadow" in state:
-            self.props.cast_shadow = state["cast_shadow"]
 
     def update_object3d_event(self,
                               position: Optional[Union[Vector3Type,
@@ -293,7 +264,7 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
                     "type": k.value,
                     "stopPropagation": v.stop_propagation
                 })
-        res["usedEvents"] = evs
+        res["props"]["usedEvents"] = evs
         return res
 
     def set_pointer_callback(self,
@@ -340,11 +311,11 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
         handler = self._pointer_event_map[ev_type]
         if isinstance(handler, Undefined):
             return
-        if self._status == UIRunStatus.Running:
+        if self.props.status == UIRunStatus.Running.value:
             # TODO send exception if ignored click
-            print("IGNORE EVENT", self._status)
+            print("IGNORE EVENT", self.props.status)
             return
-        elif self._status == UIRunStatus.Stop:
+        elif self.props.status == UIRunStatus.Stop.value:
             self.state_change_callback(data)
 
             def ccb(cb):
@@ -354,10 +325,10 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
                 self.run_callback(ccb(handler.cb), True))
 
 
-class Object3dContainerBase(ThreeContainerBase[T_o3d_prop, T_child]):
+class Object3dContainerBase(ThreeContainerBase[T_o3d_container_prop, T_child]):
     def __init__(self,
                  base_type: UIType,
-                 prop_cls: Type[T_o3d_prop],
+                 prop_cls: Type[T_o3d_container_prop],
                  init_dict: Dict[str, T_child],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
@@ -365,43 +336,6 @@ class Object3dContainerBase(ThreeContainerBase[T_o3d_prop, T_child]):
                  inited: bool = False) -> None:
         super().__init__(base_type, prop_cls, uid, queue, uid_to_comp,
                          init_dict, inited)
-
-    def get_state(self):
-        state = super().get_state()
-        if not isinstance(self.props.position, Undefined):
-            state["position"] = self.props.position
-        if not isinstance(self.props.rotation, Undefined):
-            state["rotation"] = self.props.rotation
-        if not isinstance(self.props.scale, Undefined):
-            state["scale"] = self.props.scale
-        if not isinstance(self.props.up, Undefined):
-            state["up"] = self.props.up
-        if not isinstance(self.props.visible, Undefined):
-            state["visible"] = self.props.visible
-        if not isinstance(self.props.receive_shadow, Undefined):
-            state["receive_shadow"] = self.props.receive_shadow
-        if not isinstance(self.props.cast_shadow, Undefined):
-            state["cast_shadow"] = self.props.cast_shadow
-        return state
-
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        if "position" in state:
-            self.props.position = state["position"]
-        if "rotation" in state:
-            self.props.rotation = state["rotation"]
-        if "scale" in state:
-            self.props.scale = state["scale"]
-        if "up" in state:
-            self.props.up = state["up"]
-        if "visible" in state:
-            self.props.visible = state["visible"]
-        if "visible" in state:
-            self.props.visible = state["visible"]
-        if "receive_shadow" in state:
-            self.props.receive_shadow = state["receive_shadow"]
-        if "cast_shadow" in state:
-            self.props.cast_shadow = state["cast_shadow"]
 
     def update_object3d_event(self,
                               position: Optional[Union[Vector3Type,
@@ -451,10 +385,10 @@ class Object3dContainerBase(ThreeContainerBase[T_o3d_prop, T_child]):
             self.update_object3d_event(position, rotation, up, scale, visible))
 
 
-class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_prop, T_child]):
+class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop, T_child]):
     def __init__(self,
                  base_type: UIType,
-                 prop_cls: Type[T_o3d_prop],
+                 prop_cls: Type[T_o3d_container_prop],
                  init_dict: Dict[str, T_child],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
@@ -490,7 +424,7 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_prop, T_child]):
                     "type": k.value,
                     "stopPropagation": v.stop_propagation
                 })
-        res["usedEvents"] = evs
+        res["props"]["usedEvents"] = evs
         return res
 
     def set_pointer_callback(self,
@@ -537,36 +471,50 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_prop, T_child]):
         handler = self._pointer_event_map[ev_type]
         if isinstance(handler, Undefined):
             return
-        if self._status == UIRunStatus.Running:
+        if self.props.status == UIRunStatus.Running.value:
             # TODO send exception if ignored click
-            print("IGNORE EVENT", self._status)
+            print("IGNORE EVENT", self.props.status)
             return
-        elif self._status == UIRunStatus.Stop:
+        elif self.props.status == UIRunStatus.Stop.value:
             self.state_change_callback(data)
-
             def ccb(cb):
                 return lambda: cb(data)
 
             self._task = asyncio.create_task(
                 self.run_callback(ccb(handler.cb), True))
 
+@dataclasses.dataclass
+class PointProps(ThreeBasicProps):
+    points: Union[np.ndarray, Undefined] = undefined
+    intensity: Union[np.ndarray, Undefined] = undefined
+    colors: Union[np.ndarray, Undefined] = undefined
+    attrs: Union[np.ndarray, Undefined] = undefined
+    attr_fields: Union[List[str], Undefined] = undefined
+    size_attenuation: bool = False 
+    size: float = 3.0
 
-class Points(ThreeComponentBase[ThreeBasicProps]):
+class Points(ThreeComponentBase[PointProps]):
     def __init__(self,
                  limit: int,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.ThreePoints, ThreeBasicProps, queue)
-        self.points = np.zeros((0, 3), np.float32)
-
-        self.size = 3.0
+        super().__init__(uid, UIType.ThreePoints, PointProps, queue)
+        self.props.points = np.zeros((0, 3), np.float32)
         self.limit = limit
-        self.intensity: Optional[np.ndarray] = None
-        self.colors: Optional[np.ndarray] = None
-        self.attrs: Optional[np.ndarray] = None
-        self.sizeAttenuation = False
-        self.attrs: Optional[np.ndarray] = None
-        self.attr_fields: Optional[List[str]] = None
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["points"] = self.props.points
+        res["intensity"] = self.props.intensity
+        res["colors"] = self.props.colors
+        res["attrs"] = self.props.attrs
+        res["attr_fields"] = self.props.attr_fields
+        return res
+
+    def validate_props(self, props: Dict[str, Any]):
+        if "points" in props:
+            return props["points"].shape[0] <= self.limit
+        return False
 
     def to_dict(self):
         res = super().to_dict()
@@ -575,10 +523,12 @@ class Points(ThreeComponentBase[ThreeBasicProps]):
 
     async def update_points(self,
                             points: np.ndarray,
-                            intensity: Optional[np.ndarray] = None,
-                            colors: Optional[np.ndarray] = None,
-                            attrs: Optional[np.ndarray] = None,
+                            intensity: Optional[Union[np.ndarray, Undefined]] = None,
+                            colors: Optional[Union[np.ndarray, Undefined]] = None,
+                            attrs: Optional[Union[np.ndarray, Undefined]] = None,
                             attr_fields: Optional[List[str]] = None):
+        # TODO better check, we must handle all errors before sent to frontend.
+        assert points.ndim == 2 and points.shape[1] in [3, 4], "only support 3 or 4 features for points"
         assert points.shape[
             0] <= self.limit, f"your points size must smaller than limit {self.limit}"
         if points.shape[1] == 4 and intensity is None:
@@ -590,164 +540,154 @@ class Points(ThreeComponentBase[ThreeBasicProps]):
         }
         if intensity is not None:
             upd["intensity"] = intensity
+            self.props.intensity = intensity
         if colors is not None:
             upd["colors"] = colors
+            self.props.colors = colors
         if attrs is not None:
-            if attrs.ndim == 1:
-                attrs = attrs.reshape(-1, 1)
-            if attr_fields is None:
-                attr_fields = [f"{i}" for i in range(attrs.shape[1])]
+            self.props.attrs = attrs
+
+            if not isinstance(attrs, Undefined):
+                if attrs.ndim == 1:
+                    attrs = attrs.reshape(-1, 1)
+                if attr_fields is None:
+                    attr_fields = [f"{i}" for i in range(attrs.shape[1])]
             upd["attrs"] = attrs
             upd["attrFields"] = attr_fields
-
-        self.points = points
-        self.intensity = intensity
-        self.colors = colors
-        self.attrs = attrs
-        self.attr_fields = attr_fields
+            if attr_fields is not None:
+                self.props.attr_fields = attr_fields
+        self.props.points = points
         await self.send_app_event_and_wait(self.create_update_event(upd))
 
-    def get_state(self):
-        state = super().get_state()
-        state["points"] = self.points
-        state["size"] = self.size
-        state["sizeAttenuation"] = self.sizeAttenuation
-        if self.intensity is not None:
-            state["intensity"] = self.intensity
-        if self.colors is not None:
-            state["color"] = self.colors
-        if self.attrs is not None:
-            assert self.attr_fields is not None, "you must provide attr fields"
-            state["attrs"] = self.attrs
-            state["attrFields"] = self.attr_fields
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
-        return state
+@dataclasses.dataclass
+class SegmentsProps(ThreeBasicProps):
+    lines: Union[np.ndarray, Undefined] = undefined
+    colors: Union[np.ndarray, Undefined] = undefined
+    line_width: float = 1.0
+    color: Union[str, Undefined] = undefined
+    transparent: Union[bool, Undefined] = undefined
+    opacity: Union[float, Undefined] = undefined
 
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        if "points" in state:
-            if state["points"].shape[0] <= self.limit:
-                self.points = state["points"]
-                if "intensity" in state:
-                    self.intensity = state["intensity"]
-                if "colors" in state:
-                    self.colors = state["colors"]
-                if "attrs" in state:
-                    self.attrs = state["attrs"]
-                if "attrFields" in state:
-                    self.attr_fields = state["attrFields"]
-                if "size" in state:
-                    self.size = state["size"]
-                if "sizeAttenuation" in state:
-                    self.sizeAttenuation = state["sizeAttenuation"]
-
-
-class Segments(ThreeComponentBase[ThreeBasicProps]):
+class Segments(ThreeComponentBase[SegmentsProps]):
     def __init__(self,
                  limit: int,
                  line_width: float = 1.0,
-                 color: Optional[str] = "black",
-                 transparent: bool = True,
-                 opacity: float = 0.5,
+                 color: Union[str, Undefined] = undefined,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.ThreeSegments, ThreeBasicProps, queue)
-        self.lines = np.zeros((0, 2, 3), np.float32)
-        self.line_width = line_width
+        super().__init__(uid, UIType.ThreeSegments, SegmentsProps, queue)
+        self.props.lines = np.zeros((0, 2, 3), np.float32)
+        self.props.line_width = line_width
         self.limit = limit
-        self.colors: Optional[np.ndarray] = None
-        self.color = color
-        self.transparent = transparent
-        self.opacity = opacity
+        self.props.colors = undefined
+        self.props.color = color
 
     def to_dict(self):
         res = super().to_dict()
         res["limit"] = self.limit
         return res
 
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["lines"] = self.props.lines
+        res["colors"] = self.props.colors
+        return res
+
+    def validate_props(self, props: Dict[str, Any]):
+        if "lines" in props:
+            return props["lines"].shape[0] <= self.limit
+        return False
+
     async def update_lines(self,
                            lines: np.ndarray,
-                           colors: Optional[np.ndarray] = None,
-                           line_width: Optional[float] = None,
-                           color: Optional[str] = None):
+                           colors: Optional[Union[np.ndarray, Undefined]] = None):
         assert lines.ndim == 3 and lines.shape[1] == 2 and lines.shape[
-            2] == 3, f"{lines.shape}"
+            2] == 3, f"{lines.shape} lines must be [N, 2, 3]"
         assert lines.shape[
-            0] <= self.limit, f"your points size must smaller than limit {self.limit}"
+            0] <= self.limit, f"your line size must smaller than limit {self.limit}"
         upd: Dict[str, Any] = {
             "lines": lines,
         }
         if colors is not None:
+            if not isinstance(colors, Undefined):
+                assert colors.shape[0] == lines.shape[0], "color shape not valid"
             upd["colors"] = colors
-        if color is not None:
-            upd["color"] = color
-            self.color = color
-        if line_width is not None:
-            upd["lineWidth"] = line_width
-            self.line_width = line_width
-
-        self.lines = lines.astype(np.float32)
-        self.colors = colors
+            self.props.colors = colors
+        self.props.lines = lines.astype(np.float32)
         await self.send_app_event_and_wait(self.create_update_event(upd))
 
-    def get_state(self):
-        state = super().get_state()
-        state["lines"] = self.lines
-        state["lineWidth"] = self.line_width
-        if self.colors is not None:
-            state["colors"] = self.colors
-        state["opacity"] = self.opacity
-        state["transparent"] = self.transparent
-        state["color"] = self.color
-        return state
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        if "lines" in state:
-            if state["lines"].shape[0] <= self.limit:
-                self.lines = state["lines"]
-                self.lineWidth = state["lineWidth"]
-                self.opacity = state["opacity"]
-                self.transparent = state["transparent"]
-                self.color = state["color"]
-                if "colors" in state:
-                    self.colors = state["colors"]
+@dataclasses.dataclass
+class Boxes2DProps(Object3dBaseProps):
+    centers: Union[np.ndarray, Undefined] = undefined
+    dimensions: Union[np.ndarray, Undefined] = undefined
+    colors: Union[np.ndarray, Undefined] = undefined
+    attrs: Union[List[str], Undefined] = undefined
+    color: Union[str, Undefined] = undefined
+    alpha: Union[NumberType, Undefined] = undefined
+    line_color: Union[str, Undefined] = undefined
+    line_width: Union[NumberType, Undefined] = undefined
+    hover_line_color: Union[str, Undefined] = undefined
+    hover_line_width: Union[NumberType, Undefined] = undefined
 
-
-class Boxes2D(Object3dWithEventBase[Object3dBaseProps]):
+class Boxes2D(Object3dWithEventBase[Boxes2DProps]):
     def __init__(self,
                  limit: int,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(UIType.ThreeBoxes2D, Object3dBaseProps, uid, queue)
-        self.centers = np.zeros((0, 2), np.float32)
-        self.dimensions = np.zeros((0, 2), np.float32)
-        self.colors: Union[np.ndarray, Undefined] = undefined
+        super().__init__(UIType.ThreeBoxes2D, Boxes2DProps, uid, queue)
+        self.props.centers = np.zeros((0, 2), np.float32)
+        self.props.dimensions = np.zeros((0, 2), np.float32)
         self.limit = limit
-        self.color: Union[str, Undefined] = undefined
-        self.attrs: Union[List[str], Undefined] = undefined
-        self.alpha: Union[float, Undefined] = undefined
 
     def to_dict(self):
         res = super().to_dict()
         res["limit"] = self.limit
         return res
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["centers"] = self.props.centers
+        res["dimensions"] = self.props.dimensions
+        res["colors"] = self.props.colors
+        return res
+
+    def validate_props(self, props: Dict[str, Any]):
+        if "centers" in props:
+            return props["centers"].shape[0] <= self.limit
+        return False
 
     async def update_boxes(self,
                            centers: Optional[np.ndarray] = None,
                            dimensions: Optional[np.ndarray] = None,
                            colors: Optional[Union[np.ndarray,
                                                   Undefined]] = None,
-                           color: Optional[Union[str, Undefined]] = None,
-                           attrs: Optional[Union[List[str], Undefined]] = None,
-                           alpha: Optional[Union[float, Undefined]] = None):
+                           attrs: Optional[Union[List[str], Undefined]] = None):
         upd: Dict[str, Any] = {}
         if centers is not None:
             assert centers.shape[
                 0] <= self.limit, f"your centers size must smaller than limit {self.limit}"
             self.centers = centers
             upd["centers"] = centers
-
         if dimensions is not None:
             assert dimensions.shape[
                 0] <= self.limit, f"your dimensions size must smaller than limit {self.limit}"
@@ -755,106 +695,118 @@ class Boxes2D(Object3dWithEventBase[Object3dBaseProps]):
             if dimensions.shape != self.centers.shape:
                 dimensions = np.broadcast_to(dimensions, self.centers.shape)
             upd["dimensions"] = dimensions
-
-
         if colors is not None:
             if not isinstance(colors, Undefined):
                 assert colors.shape[
                     0] <= self.limit, f"your colors size must smaller than limit {self.limit}"
             self.colors = colors
             upd["colors"] = colors
-        if color is not None:
-            self.color = color
-            upd["color"] = color
         if attrs is not None:
             self.attrs = attrs
             upd["attrs"] = attrs
-        if alpha is not None:
-            self.alpha = alpha
-            upd["alpha"] = alpha
-
         await self.send_app_event_and_wait(self.create_update_event(upd))
 
-    def get_state(self):
-        state = super().get_state()
-        dims = self.dimensions
-        if self.dimensions.shape != self.centers.shape:
-            dims = np.broadcast_to(dims, self.centers.shape)
+    def get_props(self):
+        state = super().get_props()
+        dims = self.props.dimensions
+        centers = self.props.centers
+        if not isinstance(dims, Undefined) and not isinstance(centers, Undefined):
+            if dims.shape != centers.shape:
+                dims = np.broadcast_to(dims, centers.shape)
         state.update({
-            "colors": self.colors,
-            "color": self.color,
-            "centers": self.centers,
+            "colors": self.props.colors,
+            "centers": self.props.centers,
             "dimensions": dims,
-            "attrs": self.attrs,
-            "alpha": self.alpha,
+            "attrs": self.props.attrs,
         })
         return state
 
-    def set_state(self, state: Dict[str, Any]):
-        super().set_state(state)
-        if "centers" in state:
-            if state["centers"].shape[0] <= self.limit:
-                self.centers = state["centers"]
-                self.dimensions = state["dimensions"]
-                self.alpha = state["alpha"] if "alpha" in state else undefined
-                self.opacity = state[
-                    "opacity"] if "opacity" in state else undefined
-                self.color = state["color"] if "color" in state else undefined
-                self.colors = state[
-                    "colors"] if "colors" in state else undefined
-                self.attrs = state["attrs"] if "attrs" in state else undefined
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
+@dataclasses.dataclass
+class BoundingBoxProps(Object3dBaseProps):
+    dimension: Union[Vector3Type, Undefined] = undefined 
+    edge_width: Union[float, Undefined] = undefined 
+    edge_color: Union[str, Undefined] = undefined 
+    emissive: Union[str, Undefined] = undefined 
+    color: Union[str, Undefined] = undefined 
+    opacity: Union[float, Undefined] = undefined 
+    edge_opacity: Union[float, Undefined] = undefined 
 
-class BoundingBox(Object3dWithEventBase[Object3dBaseProps]):
+class BoundingBox(Object3dWithEventBase[BoundingBoxProps]):
     def __init__(self,
                  dimension: Vector3Type,
-                 edgeWidth: float = 4,
-                 edgeColor: str = "green",
+                 edge_width: float = 4,
+                 edge_color: str = "green",
                  emissive: str = "red",
                  color: str = "red",
                  opacity: float = 0.5,
-                 edgeOpacity: float = 0.5,
+                 edge_opacity: float = 0.5,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(UIType.ThreeBoundingBox, Object3dBaseProps, uid,
+        super().__init__(UIType.ThreeBoundingBox, BoundingBoxProps, uid,
                          queue)
-        self.dimension = dimension
-        self.edgeWidth = edgeWidth
-        self.edgeColor = edgeColor
-        self.emissive = emissive
-        self.color = color
-        self.opacity = opacity
-        self.edgeOpacity = edgeOpacity
+        self.props.dimension = dimension
+        self.props.edge_width = edge_width
+        self.props.edge_color = edge_color
+        self.props.emissive = emissive
+        self.props.color = color
+        self.props.opacity = opacity
+        self.props.edge_opacity = edge_opacity
 
-    def get_state(self):
-        state = super().get_state()
-        state.update({
-            "dimension": self.dimension,
-            "edgeWidth": self.edgeWidth,
-            "edgeColor": self.edgeColor,
-            "emissive": self.emissive,
-            "color": self.color,
-            "opacity": self.opacity,
-            "edgeOpacity": self.edgeOpacity,
-        })
-        return state
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["dimension"] = self.props.dimension
+        return res
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
-class AxesHelper(ThreeComponentBase[ThreeBasicProps]):
+@dataclasses.dataclass
+class AxesHelperProps(Object3dBaseProps):
+    length: NumberType = 10 
+
+class AxesHelper(ThreeComponentBase[AxesHelperProps]):
     def __init__(self,
                  length: float,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.ThreeAxesHelper, ThreeBasicProps, queue)
-        self.length = length
+        super().__init__(uid, UIType.ThreeAxesHelper, AxesHelperProps, queue)
+        self.props.length = length
 
-    def to_dict(self):
-        res = super().to_dict()
-        res["length"] = self.length
-        return res
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
+@dataclasses.dataclass
+class InfiniteGridHelperProps(Object3dBaseProps):
+    size1: Union[NumberType, Undefined] = undefined
+    size2: Union[NumberType, Undefined] = undefined
+    color: Union[str, Undefined] = undefined
+    distance: Union[NumberType, Undefined] = undefined
 
-class InfiniteGridHelper(ThreeComponentBase[ThreeBasicProps]):
+class InfiniteGridHelper(ThreeComponentBase[InfiniteGridHelperProps]):
     def __init__(self,
                  size1: float,
                  size2: float,
@@ -862,23 +814,24 @@ class InfiniteGridHelper(ThreeComponentBase[ThreeBasicProps]):
                  distance: float = 8000,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.ThreeInfiniteGridHelper, ThreeBasicProps,
+        super().__init__(uid, UIType.ThreeInfiniteGridHelper, InfiniteGridHelperProps,
                          queue)
-        self.size1 = size1
-        self.size2 = size2
-        self.color = color
-        self.distance = distance
+        self.props.size1 = size1
+        self.props.size2 = size2
+        self.props.color = color
+        self.props.distance = distance
 
-    def to_dict(self):
-        res = super().to_dict()
-        res["size1"] = self.size1
-        res["size2"] = self.size2
-        res["color"] = self.color
-        res["distance"] = self.distance
-        return res
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
-
-class Group(Object3dContainerBase[Object3dBaseProps, ThreeComponentType]):
+class Group(Object3dContainerBase[Object3dContainerBaseProps, ThreeComponentType]):
     # TODO can/should group accept event?
     def __init__(self,
                  init_dict: Dict[str, ThreeComponentType],
@@ -886,20 +839,32 @@ class Group(Object3dContainerBase[Object3dBaseProps, ThreeComponentType]):
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(UIType.ThreeGroup, Object3dBaseProps, init_dict, uid,
+        super().__init__(UIType.ThreeGroup, Object3dContainerBaseProps, init_dict, uid,
                          queue, uid_to_comp, inited)
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
-class Image(Object3dWithEventBase[Object3dBaseProps]):
+@dataclasses.dataclass
+class ImageProps(Object3dBaseProps):
+    image: bytes = dataclasses.field(default_factory=bytes)
+
+class Image(Object3dWithEventBase[ImageProps]):
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(UIType.ThreeImage, Object3dBaseProps, uid, queue)
-        self.image_str: bytes = b""
+        super().__init__(UIType.ThreeImage, ImageProps, uid, queue)
 
     async def show(self, image: np.ndarray):
         encoded = _encode_image_bytes(image)
-        self.image_str = encoded
+        self.props.image = encoded
         await self.send_app_event_and_wait(
             self.create_update_event({
                 "image": encoded,
@@ -916,18 +881,36 @@ class Image(Object3dWithEventBase[Object3dBaseProps]):
     def show_raw_event(self, image_bytes: bytes, suffix: str):
         raw = b'data:image/' + suffix.encode(
             "utf-8") + b';base64,' + base64.b64encode(image_bytes)
-        self.image_str = raw
+        self.props.image = raw
         return self.create_update_event({
             "image": raw,
         })
 
-    def get_state(self):
-        state = super().get_state()
-        state["image"] = self.image_str
-        return state
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["image"] = self.props.image
+        return res
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class PerspectiveCameraProps(Object3dBaseProps):
+    fov: Union[float, Undefined] = undefined
+    aspect: Union[float, Undefined] = undefined
+    near: Union[float, Undefined] = undefined
+    far: Union[float, Undefined] = undefined
 
 
-class PerspectiveCamera(Object3dBase[Object3dBaseProps]):
+
+class PerspectiveCamera(Object3dBase[PerspectiveCameraProps]):
     def __init__(self,
                  makeDefault: bool,
                  fov: Union[float, Undefined] = undefined,
@@ -936,12 +919,12 @@ class PerspectiveCamera(Object3dBase[Object3dBaseProps]):
                  far: Union[float, Undefined] = undefined,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(UIType.ThreePerspectiveCamera, Object3dBaseProps, uid,
+        super().__init__(UIType.ThreePerspectiveCamera, PerspectiveCameraProps, uid,
                          queue)
-        self.fov = fov
-        self.aspect = aspect
-        self.near = near
-        self.far = far
+        self.props.fov = fov
+        self.props.aspect = aspect
+        self.props.near = near
+        self.props.far = far
         self.makeDefault = makeDefault
 
     # TODO from camera matrix and intrinsics
@@ -950,51 +933,35 @@ class PerspectiveCamera(Object3dBase[Object3dBaseProps]):
         res["makeDefault"] = self.makeDefault
         return res
 
-    async def update_parameters(self,
-                                fov: Optional[Union[float, Undefined]] = None,
-                                aspect: Optional[Union[float,
-                                                       Undefined]] = None,
-                                near: Optional[Union[float, Undefined]] = None,
-                                far: Optional[Union[float, Undefined]] = None):
-        upd: Dict[str, Any] = {}
-        if fov is not None:
-            self.fov = fov
-            upd["fov"] = fov
-        if aspect is not None:
-            self.aspect = aspect
-            upd["aspect"] = aspect
-        if near is not None:
-            self.near = near
-            upd["near"] = near
-        if far is not None:
-            self.far = far
-            upd["far"] = far
-        await self.send_app_event_and_wait(self.create_update_event(upd))
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
-    def get_state(self):
-        state = super().get_state()
-        state.update({
-            "fov": self.fov,
-            "aspect": self.aspect,
-            "near": self.near,
-            "far": self.far,
-        })
-        return state
+@dataclasses.dataclass
+class OrthographicCameraProps(Object3dBaseProps):
+    zoom: Union[float, Undefined] = undefined
+    near: Union[float, Undefined] = undefined
+    far: Union[float, Undefined] = undefined
 
-
-class OrthographicCamera(Object3dBase[Object3dBaseProps]):
+class OrthographicCamera(Object3dBase[OrthographicCameraProps]):
     def __init__(self,
                  makeDefault: bool,
-                 near: Optional[float] = None,
-                 far: Optional[float] = None,
-                 zoom: Optional[float] = None,
+                 near: Union[float, Undefined] = undefined,
+                 far: Union[float, Undefined] = undefined,
+                 zoom: Union[float, Undefined] = undefined,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(UIType.ThreeOrthographicCamera, Object3dBaseProps,
+        super().__init__(UIType.ThreeOrthographicCamera, OrthographicCameraProps,
                          uid, queue)
-        self.zoom = zoom
-        self.near = near
-        self.far = far
+        self.props.zoom = zoom
+        self.props.near = near
+        self.props.far = far
         self.makeDefault = makeDefault
 
     # TODO from camera matrix and intrinsics
@@ -1003,30 +970,15 @@ class OrthographicCamera(Object3dBase[Object3dBaseProps]):
         res["makeDefault"] = self.makeDefault
         return res
 
-    async def update_parameters(self,
-                                zoom: Optional[Union[float, Undefined]] = None,
-                                near: Optional[Union[float, Undefined]] = None,
-                                far: Optional[Union[float, Undefined]] = None):
-        upd: Dict[str, Any] = {}
-        if zoom is not None:
-            self.zoom = zoom
-            upd["zoom"] = zoom
-        if near is not None:
-            self.near = near
-            upd["near"] = near
-        if far is not None:
-            self.far = far
-            upd["far"] = far
-        await self.send_app_event_and_wait(self.create_update_event(upd))
-
-    def get_state(self):
-        state = super().get_state()
-        state.update({
-            "zoom": self.zoom,
-            "near": self.near,
-            "far": self.far,
-        })
-        return state
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 @dataclasses.dataclass
 class OrbitControlProps(ThreeBasicProps):
@@ -1056,6 +1008,15 @@ class MapControl(ThreeComponentBase[OrbitControlProps]):
         self.props.min_distance = 1
         self.props.max_distance = 100
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 class OrbitControl(ThreeComponentBase[OrbitControlProps]):
     def __init__(self,
@@ -1067,30 +1028,44 @@ class OrbitControl(ThreeComponentBase[OrbitControlProps]):
         self.props.min_distance = 1
         self.props.max_distance = 100
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
-class PointerLockControl(ThreeComponentBase[ThreeBasicProps]):
+@dataclasses.dataclass
+class PointerLockControlProps(Object3dBaseProps):
+    enabled: Union[bool, Undefined] = undefined
+    min_polar_angle: Union[float, Undefined] = undefined
+    max_polar_angle: Union[float, Undefined] = undefined
+
+class PointerLockControl(ThreeComponentBase[PointerLockControlProps]):
     def __init__(self,
                  enabled: Union[bool, Undefined] = undefined,
-                 minPolarAngle: Union[float, Undefined] = undefined,
-                 maxPolarAngle: Union[float, Undefined] = undefined,
+                 min_polar_angle: Union[float, Undefined] = undefined,
+                 max_polar_angle: Union[float, Undefined] = undefined,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.ThreePointerLockControl, ThreeBasicProps,
+        super().__init__(uid, UIType.ThreePointerLockControl, PointerLockControlProps,
                          queue)
-        self.enabled = enabled
-        self.minPolarAngle = minPolarAngle
-        self.maxPolarAngle = maxPolarAngle
+        self.props.enabled = enabled
+        self.props.min_polar_angle = min_polar_angle
+        self.props.max_polar_angle = max_polar_angle
 
-    def to_dict(self):
-        res = super().to_dict()
-        if not isinstance(self.enabled, Undefined):
-            res["enabled"] = self.enabled
-        if not isinstance(self.minPolarAngle, Undefined):
-            res["minPolarAngle"] = self.minPolarAngle
-        if not isinstance(self.maxPolarAngle, Undefined):
-            res["maxPolarAngle"] = self.maxPolarAngle
-        return res
-
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 @dataclasses.dataclass
 class FirstPersonControlProps(ThreeBasicProps):
@@ -1117,6 +1092,15 @@ class FirstPersonControl(ThreeComponentBase[FirstPersonControlProps]):
         super().__init__(uid, UIType.ThreeFirstPersonControl,
                          FirstPersonControlProps, queue)
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 class FlexAutoReflow(ThreeComponentBase[ThreeBasicProps]):
     def __init__(self,
@@ -1125,8 +1109,17 @@ class FlexAutoReflow(ThreeComponentBase[ThreeBasicProps]):
         super().__init__(uid, UIType.ThreeFlexAutoReflow, ThreeBasicProps,
                          queue)
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
-class ThreeCanvas(MUIContainerBase[BasicProps, ThreeComponentType]):
+class ThreeCanvas(MUIContainerBase[ContainerBaseProps, ThreeComponentType]):
     def __init__(self,
                  init_dict: Dict[str, ThreeComponentType],
                  background: Union[str, Undefined] = undefined,
@@ -1134,7 +1127,7 @@ class ThreeCanvas(MUIContainerBase[BasicProps, ThreeComponentType]):
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(UIType.ThreeCanvas, ThreeBasicProps, uid, queue,
+        super().__init__(UIType.ThreeCanvas, ContainerBaseProps, uid, queue,
                          uid_to_comp, init_dict, inited)
         self.background = background
 
@@ -1144,9 +1137,18 @@ class ThreeCanvas(MUIContainerBase[BasicProps, ThreeComponentType]):
             res["backgroundColor"] = self.background
         return res
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 @dataclasses.dataclass
-class ThreeFlexProps(ThreeFlexPropsBase):
+class ThreeFlexProps(ThreeFlexPropsBase, ContainerBaseProps):
     size: Union[Vector3Type, Undefined] = undefined
     position: Union[Vector3Type, Undefined] = undefined
     direction: Union[str, Undefined] = undefined
@@ -1164,9 +1166,18 @@ class Flex(ThreeContainerBase[ThreeFlexProps, ThreeComponentType]):
         super().__init__(UIType.ThreeFlex, ThreeFlexProps, uid, queue,
                          uid_to_comp, init_dict, inited)
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 @dataclasses.dataclass
-class ThreeFlexItemBoxProps(ThreeFlexItemPropsBase):
+class ThreeFlexItemBoxProps(ThreeFlexPropsBase, ContainerBaseProps):
     center_anchor: Union[bool, Undefined] = undefined  # false
 
 
@@ -1180,10 +1191,31 @@ class ItemBox(ThreeContainerBase[ThreeFlexItemBoxProps, ThreeComponentType]):
         super().__init__(UIType.ThreeFlexItemBox, ThreeFlexItemBoxProps, uid,
                          queue, uid_to_comp, init_dict, inited)
 
-    def get_state(self):
-        state = super().get_state()
-        print(state)
-        return state
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+def VBox(init_dict: Dict[str, ThreeComponentType]):
+    box = ItemBox(init_dict)
+    box.props.flex_direction = "column"
+    return box
+
+def HBox(init_dict: Dict[str, ThreeComponentType]):
+    box = ItemBox(init_dict)
+    box.props.flex_direction = "row"
+    return box
+
+def FlexItem(comp: ThreeComponentType):
+    box = ItemBox({
+        "c": comp,
+    })
+    return box
 
 
 PointerEventsProperties = Union[Literal["auto"], Literal["none"],
@@ -1196,7 +1228,7 @@ PointerEventsProperties = Union[Literal["auto"], Literal["none"],
 
 
 @dataclasses.dataclass
-class HtmlProps(Object3dBaseProps):
+class HtmlProps(Object3dContainerBaseProps):
     prepend: Union[bool, Undefined] = undefined
     center: Union[bool, Undefined] = undefined
     fullscreen: Union[bool, Undefined] = undefined
@@ -1223,9 +1255,20 @@ class Html(Object3dContainerBase[HtmlProps, MUIComponentType]):
         super().__init__(UIType.ThreeHtml, HtmlProps, init_dict, uid, queue,
                          uid_to_comp, inited)
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
 
 @dataclasses.dataclass
 class TextProps(Object3dBaseProps):
+    value: str = ""
     characters: Union[str, Undefined] = undefined
     color: Union[str, Undefined] = undefined
     font_size: Union[NumberType, Undefined] = undefined
@@ -1268,20 +1311,27 @@ class Text(Object3dWithEventBase[TextProps]):
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
         super().__init__(UIType.ThreeText, TextProps, uid, queue)
-        self.value = init
+        self.props.value = init
 
-    def get_state(self):
-        state = super().get_state()
-        state.update({
-            "value": self.value,
-        })
-        return state
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
+        return res
 
     async def update_value(self, value: str):
-        self.value = value
+        self.props.value = value
         upd: Dict[str, Any] = {"value": value}
         await self.send_app_event_and_wait(self.create_update_event(upd))
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 class GeometryType(enum.Enum):
     Box = 0
@@ -1371,6 +1421,15 @@ class ShapeGeometry(ThreeGeometryBase[PathShapeProps]):
         super().__init__(uid, UIType.ThreeShape, PathShapeProps, queue)
         self.props.path_ops = shape.ops
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 def _rounded_shape(x: float, y: float, w: float, h: float, r: float):
     ctx = Shape()
@@ -1407,6 +1466,15 @@ class RoundedRectGeometry(ShapeGeometry):
         shape = _rounded_shape(-width / 2, -height / 2, width, height, radius)
         super().__init__(shape, uid, queue)
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 class SimpleGeometry(ThreeGeometryBase[SimpleGeometryProps]):
     def __init__(self,
@@ -1419,6 +1487,15 @@ class SimpleGeometry(ThreeGeometryBase[SimpleGeometryProps]):
         self.props.shape_type = type.value
         self.props.shape_args = args
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 class BoxGeometry(SimpleGeometry):
     def __init__(self,
@@ -1545,6 +1622,15 @@ class MeshBasicMaterial(ThreeMaterialBase[MeshBasicMaterialProps]):
                          queue)
         self.props.material_type = MeshMaterialType.Basic.value
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 class MeshStandardMaterial(ThreeMaterialBase[MeshStandardMaterialProps]):
     def __init__(self,
@@ -1554,6 +1640,15 @@ class MeshStandardMaterial(ThreeMaterialBase[MeshStandardMaterialProps]):
                          MeshStandardMaterialProps, queue)
         self.props.material_type = MeshMaterialType.Standard.value
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 class MeshLambertMaterial(ThreeMaterialBase[MeshLambertMaterialProps]):
     def __init__(self,
@@ -1563,6 +1658,15 @@ class MeshLambertMaterial(ThreeMaterialBase[MeshLambertMaterialProps]):
                          MeshLambertMaterialProps, queue)
         self.props.material_type = MeshMaterialType.Lambert.value
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 class MeshMatcapMaterial(ThreeMaterialBase[MeshMatcapMaterialProps]):
     def __init__(self,
@@ -1572,6 +1676,15 @@ class MeshMatcapMaterial(ThreeMaterialBase[MeshMatcapMaterialProps]):
                          MeshMatcapMaterialProps, queue)
         self.props.material_type = MeshMaterialType.Matcap.value
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 class MeshNormalMaterial(ThreeMaterialBase[MeshNormalMaterialProps]):
     def __init__(self,
@@ -1581,6 +1694,15 @@ class MeshNormalMaterial(ThreeMaterialBase[MeshNormalMaterialProps]):
                          MeshNormalMaterialProps, queue)
         self.props.material_type = MeshMaterialType.Normal.value
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 class MeshPhongMaterial(ThreeMaterialBase[MeshPhongMaterialProps]):
     def __init__(self,
@@ -1590,6 +1712,15 @@ class MeshPhongMaterial(ThreeMaterialBase[MeshPhongMaterialProps]):
                          queue)
         self.props.material_type = MeshMaterialType.Phong.value
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 class MeshPhysicalMaterial(ThreeMaterialBase[MeshPhysicalMaterialProps]):
     def __init__(self,
@@ -1599,6 +1730,15 @@ class MeshPhysicalMaterial(ThreeMaterialBase[MeshPhysicalMaterialProps]):
                          MeshPhysicalMaterialProps, queue)
         self.props.material_type = MeshMaterialType.Physical.value
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 class MeshToonMaterial(ThreeMaterialBase[MeshToonMaterialProps]):
     def __init__(self,
@@ -1608,15 +1748,25 @@ class MeshToonMaterial(ThreeMaterialBase[MeshToonMaterialProps]):
                          queue)
         self.props.material_type = MeshMaterialType.Toon.value
 
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 MeshChildType: TypeAlias = Union[ThreeMaterialBase, ThreeMaterialPropsBase,
                                  ThreeGeometryPropsBase, ThreeGeometryBase]
 
 @dataclasses.dataclass
-class MeshProps(Object3dBaseProps):
+class MeshProps(Object3dContainerBaseProps):
     hover_color: Union[str, Undefined] = undefined 
     click_color: Union[str, Undefined] = undefined
     toggle_mode: Union[bool, Undefined] = undefined
+    toggled: Union[bool, Undefined] = undefined
 
 class Mesh(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
     def __init__(self,
@@ -1634,7 +1784,31 @@ class Mesh(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
         }
         super().__init__(UIType.ThreeMesh, MeshProps, init_dict, uid,
                          queue, uid_to_comp, inited)
+        self.props.toggled = False
 
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["toggled"] = self.props.toggled
+        return res
+
+    def state_change_callback(self, data: bool):
+        self.props.toggled = data
+
+    async def set_checked(self, checked: bool):
+        ev = self.create_update_event({
+            "toggled": checked,
+        })
+        await self.send_app_event_and_wait(ev)
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 @dataclasses.dataclass
 class HudProps(ThreeFlexProps):
@@ -1651,6 +1825,77 @@ class Hud(ThreeContainerBase[HudProps, ThreeComponentType]):
                  inited: bool = False) -> None:
         super().__init__(UIType.ThreeHud, HudProps, uid, queue, uid_to_comp,
                          init_dict, inited)
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+class ShapeButton(Group):
+    def __init__(self,
+                 name: str,
+                 shape: Shape, 
+                 font_size: NumberType,
+                 text_max_width: NumberType,
+                 callback: Callable[[Any], _CORO_NONE],
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        material = MeshBasicMaterial()
+        material.prop(color="#393939")
+        mesh = Mesh(ShapeGeometry(shape), material)
+        mesh.set_pointer_callback(on_click=EventCallback(callback, True))
+        mesh.prop(hover_color="#222222", click_color="#009A63")
+        self.mesh = mesh
+        text = Text(name)
+        text.prop(font_size=font_size, color="white", position=(0, 0, 0), max_width=text_max_width)
+        init_dict = {
+            "mesh": mesh,
+            "text": text,
+        }
+        super().__init__(init_dict, uid, queue)
+        self.name = name
+        # self.callback = callback
+
+    def to_dict(self):
+        res = super().to_dict()
+        res["name"] = self.name
+        return res
+
+    async def headless_click(self):
+        return await self.queue.put(UIEvent({self.uid: [PointerEventType.Click, self.name]}))
+
+    def get_callback(self):
+        res = self.mesh._pointer_event_map[PointerEventType.Click]
+        assert not isinstance(res, Undefined)
+        return res.cb
+
+    def set_callback(self, val: Any):
+        self.mesh.set_pointer_callback(on_click=EventCallback(val, True))
+        # self.callback = val
+
+    async def handle_event(self, ev: Any):
+        if self.props.status == UIRunStatus.Running.value:
+            # TODO send exception if ignored click
+            print("IGNORE EVENT", self.props.status)
+            return
+        elif self.props.status == UIRunStatus.Stop.value:
+            cb2 = self.get_callback()
+            self._task = asyncio.create_task(self.run_callback(lambda: cb2(ev)))
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 class Button(Group):
 
@@ -1700,14 +1945,23 @@ class Button(Group):
         self.mesh.set_pointer_callback(on_click=EventCallback(val, True))
         # self.callback = val
 
-    async def handle_event(self, ev: Any):
-        if self._status == UIRunStatus.Running:
-            # TODO send exception if ignored click
-            print("IGNORE EVENT", self._status)
-            return
-        elif self._status == UIRunStatus.Stop:
-            cb2 = self.get_callback()
-            self._task = asyncio.create_task(self.run_callback(lambda: cb2(ev)))
+    # async def handle_event(self, ev: Any):
+    #     if self.props.status == UIRunStatus.Running.value:
+    #         # TODO send exception if ignored click
+    #         print("IGNORE EVENT", self.props.status)
+    #         return
+    #     elif self.props.status == UIRunStatus.Stop.value:
+    #         cb2 = self.get_callback()
+    #         self._task = asyncio.create_task(self.run_callback(lambda: cb2(ev)))
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 class ToggleButton(Group):
 
@@ -1756,3 +2010,13 @@ class ToggleButton(Group):
 
     def set_callback(self, val: Any):
         self.mesh.set_pointer_callback(on_click=EventCallback(val, True))
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
