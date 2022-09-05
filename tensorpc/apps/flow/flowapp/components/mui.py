@@ -26,7 +26,7 @@ from PIL import Image as PILImage
 import json
 import inspect
 from tensorpc.core.asynctools import cancel_task
-from ..core import (AppEvent, BasicProps, Component, ComponentBaseProps,
+from ..core import (AppEvent, BasicProps, Component,
                     ContainerBase, NumberType, T_child, TaskLoopEvent, UIEvent,
                     UIRunStatus, UIType, Undefined, undefined, T_base_props,
                     T_container_props, ContainerBaseProps,
@@ -1096,7 +1096,7 @@ _StdColor: TypeAlias = Literal['default', 'primary', 'secondary', 'error',
 
 
 @dataclasses.dataclass
-class TypographyProps(ComponentBaseProps):
+class TypographyProps(MUIComponentBaseProps):
     align: Union[Literal["center", "inherit", "justify", "left", "right"],
                  Undefined] = undefined
     gutter_bottom: Union[bool, Undefined] = undefined
@@ -1210,7 +1210,7 @@ class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
         return self._prop_base(propcls, self)
 
 @dataclasses.dataclass
-class ChipProps(ComponentBaseProps):
+class ChipProps(MUIComponentBaseProps):
     color: Union[_StdColor, str, Undefined] = undefined
     clickable: Union[bool, Undefined] = undefined
     size: Union[Literal["small", "medium"], Undefined] = undefined

@@ -508,46 +508,6 @@ class ContainerBaseProps(BasicProps):
 T_base_props = TypeVar("T_base_props", bound=BasicProps)
 T_container_props = TypeVar("T_container_props", bound=ContainerBaseProps)
 
-_OverflowType = Union[Literal["visible"], Literal["hidden"], Literal["scroll"], Literal["auto"]]
-
-@dataclasses.dataclass
-class ComponentBaseProps(BasicProps):
-    """all props must have a default value, 
-    manage state by your self.
-    """
-    position: Union[Literal["absolute", "relative"], Undefined] = undefined
-    top: Union[ValueType, Undefined] = undefined
-    bottom: Union[ValueType, Undefined] = undefined
-    left: Union[ValueType, Undefined] = undefined
-    right: Union[ValueType, Undefined] = undefined
-    z_index: Union[ValueType, Undefined] = undefined
-
-    flex: Union[ValueType, Undefined] = undefined
-    align_self: Union[str, Undefined] = undefined
-    flex_grow: Union[str, Undefined] = undefined
-    flex_shrink: Union[str, Undefined] = undefined
-    flex_basis: Union[str, Undefined] = undefined
-
-    height: Union[ValueType, Undefined] = undefined
-    width: Union[ValueType, Undefined] = undefined
-    max_height: Union[ValueType, Undefined] = undefined
-    max_width: Union[ValueType, Undefined] = undefined
-    min_height: Union[ValueType, Undefined] = undefined
-    min_width: Union[ValueType, Undefined] = undefined
-    padding: Union[ValueType, Undefined] = undefined
-    padding_top: Union[ValueType, Undefined] = undefined
-    padding_bottom: Union[ValueType, Undefined] = undefined
-    padding_left: Union[ValueType, Undefined] = undefined
-    padding_right: Union[ValueType, Undefined] = undefined
-    margin: Union[ValueType, Undefined] = undefined
-    margin_top: Union[ValueType, Undefined] = undefined
-    margin_left: Union[ValueType, Undefined] = undefined
-    margin_right: Union[ValueType, Undefined] = undefined
-    margin_bottom: Union[ValueType, Undefined] = undefined
-
-    overflow: Union[_OverflowType, Undefined] = undefined
-    overflow_y: Union[_OverflowType, Undefined] = undefined
-    overflow_x: Union[_OverflowType, Undefined] = undefined
 
 P = ParamSpec('P')
 T3 = TypeVar('T3')
@@ -865,9 +825,6 @@ class ContainerBase(Component[T_container_props, T_child]):
 
         self.inited = inited
         self._prevent_add_layout = False
-
-    def get_prop_cls(self):
-        return ComponentBaseProps
 
     async def _clear(self):
         for c in self.props.childs:

@@ -33,7 +33,7 @@ import numpy as np
 from tensorpc.utils.uniquename import UniqueNamePool
 from typing_extensions import ParamSpec, TypeAlias
 
-from ..core import (AppEvent, BasicProps, Component, ComponentBaseProps,
+from ..core import (AppEvent, BasicProps, Component,
                     ContainerBase, NumberType, T_base_props, T_child,
                     TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
                     ValueType, undefined, ContainerBaseProps, T_container_props)
@@ -53,13 +53,35 @@ class ThreeBasicProps(BasicProps):
 
 
 @dataclasses.dataclass
-class ThreeFlexPropsBase(FlexBoxProps):
-    pass
+class R3FlexPropsBase(BasicProps):
+    align_content: Union[str, Undefined] = undefined
+    align_items: Union[str, Undefined] = undefined
+    justify_content: Union[str, Undefined] = undefined
+    flex_direction: Union[str, Undefined] = undefined
+    flex_wrap: Union[str, Undefined] = undefined
 
+    align_self: Union[str, Undefined] = undefined
+    flex_grow: Union[str, Undefined] = undefined
+    flex_shrink: Union[str, Undefined] = undefined
+    flex_basis: Union[str, Undefined] = undefined
 
-@dataclasses.dataclass
-class ThreeFlexItemPropsBase(ComponentBaseProps):
-    pass
+    height: Union[ValueType, Undefined] = undefined
+    width: Union[ValueType, Undefined] = undefined
+    max_height: Union[ValueType, Undefined] = undefined
+    max_width: Union[ValueType, Undefined] = undefined
+    min_height: Union[ValueType, Undefined] = undefined
+    min_width: Union[ValueType, Undefined] = undefined
+    padding: Union[ValueType, Undefined] = undefined
+    padding_top: Union[ValueType, Undefined] = undefined
+    padding_bottom: Union[ValueType, Undefined] = undefined
+    padding_left: Union[ValueType, Undefined] = undefined
+    padding_right: Union[ValueType, Undefined] = undefined
+    margin: Union[ValueType, Undefined] = undefined
+    margin_top: Union[ValueType, Undefined] = undefined
+    margin_left: Union[ValueType, Undefined] = undefined
+    margin_right: Union[ValueType, Undefined] = undefined
+    margin_bottom: Union[ValueType, Undefined] = undefined
+
 
 
 class Side(enum.Enum):
@@ -1148,7 +1170,7 @@ class ThreeCanvas(MUIContainerBase[ContainerBaseProps, ThreeComponentType]):
         return self._update_props_base(propcls)
 
 @dataclasses.dataclass
-class ThreeFlexProps(ThreeFlexPropsBase, ContainerBaseProps):
+class ThreeFlexProps(R3FlexPropsBase, ContainerBaseProps):
     size: Union[Vector3Type, Undefined] = undefined
     position: Union[Vector3Type, Undefined] = undefined
     direction: Union[str, Undefined] = undefined
@@ -1177,7 +1199,7 @@ class Flex(ThreeContainerBase[ThreeFlexProps, ThreeComponentType]):
         return self._update_props_base(propcls)
 
 @dataclasses.dataclass
-class ThreeFlexItemBoxProps(ThreeFlexPropsBase, ContainerBaseProps):
+class ThreeFlexItemBoxProps(R3FlexPropsBase, ContainerBaseProps):
     center_anchor: Union[bool, Undefined] = undefined  # false
 
 
