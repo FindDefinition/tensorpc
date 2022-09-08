@@ -590,10 +590,7 @@ class Component(Generic[T_base_props, T_child]):
         return self.__prop_cls
 
     def is_mounted(self):
-        if self._parent != "":
-            return True 
-        else:
-            return self._mounted_override
+        return self._queue is not None
 
     def _prop_base(self, prop: Callable[P, Any], this: T3) -> Callable[P, T3]:
         def wrapper(*args: P.args, **kwargs: P.kwargs):
@@ -744,7 +741,8 @@ class Component(Generic[T_base_props, T_child]):
         if ev.sent_event is None:
             ev.sent_event = asyncio.Event()
         await self.put_app_event(ev)
-        await ev.sent_event.wait()
+        if self.is_mounted():
+            await ev.sent_event.wait()
 
     def create_update_comp_event(self, updates: Dict[str, Any]):
         ev = UpdateComponentsEvent(updates)
@@ -776,7 +774,7 @@ class Component(Generic[T_base_props, T_child]):
             traceback.print_exc()
             ss = io.StringIO()
             traceback.print_exc(file=ss)
-            user_exc = UserException(self.uid, str(e), ss.getvalue())
+            user_exc = UserException(self.uid, repr(e), ss.getvalue())
             await self.put_app_event(self.create_exception_event(user_exc))
         finally:
             self.props.status = UIRunStatus.Stop.value 
@@ -859,6 +857,7 @@ class ContainerBase(Component[T_container_props, T_child]):
 
     def __getitem__(self, key: str):
         assert key in self.props.childs, f"{key}, {self.props.childs}"
+        # print(key, self, self.uid, self._get_uid_with_ns(key), len(self._uid_to_comp))
         return self._uid_to_comp[self._get_uid_with_ns(key)]
 
     def _get_all_nested_child_recursive(self, name: str, res: List[Component]):
@@ -880,7 +879,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         return comps
 
     def _get_uid_with_ns(self, name: str):
-        if not self.inited:
+        if self.uid == "":
             return (f"{name}")
         return (f"{self.uid}.{name}")
 
@@ -924,45 +923,42 @@ class ContainerBase(Component[T_container_props, T_child]):
             3. if has init dict, consume it
             4. change uid/parent of all nested childs with new namespace
         """
-        namespace = self.uid
-        if namespace == "":
-            comp.uid = name
-        else:
-            comp.uid = namespace + "." + name
-        comp._queue = self.queue
+        # consume init_dict  before assign uid to 
+        # ensure comp is a child-inited standclone component.
         if isinstance(comp, ContainerBase):
             if comp._init_dict is not None:
                 # consume this _init_dict
                 comp.add_layout(comp._init_dict)
                 comp._init_dict = None
+
+        namespace = self.uid
+        if namespace == "":
+            comp.uid = name
+        else:
+            comp.uid = namespace + "." + name
+        comp_child_ns = comp.uid
+        # print("WTF", comp_child_ns, comp.uid)
+        comp._queue = self._queue
+        self._uid_to_comp[comp.uid] = comp
+        comps_added: List[Component] = [comp]
+        if isinstance(comp, ContainerBase):
             comp_uid_to_comp = comp._uid_to_comp
             # set all uid/parent of child with new uid
             for k, v in comp_uid_to_comp.items():
-                new_name = f"{namespace}.{k}"
-                new_parent = f"{namespace}.{v._parent}"
+                new_name = f"{comp_child_ns}.{k}"
+                new_parent = f"{comp_child_ns}.{v._parent}"
                 v.uid = new_name
                 v._parent = new_parent
+                v._queue = self._queue
                 # add standclone comp map to main map
                 self._uid_to_comp[v.uid] = v
-                # if isinstance(v, ContainerBase):
-                #     v._uid_to_comp = self._uid_to_comp
+                # print("WTF2", comp_child_ns, k)
+                comps_added.append(v)
+                if isinstance(v, ContainerBase):
+                    v._uid_to_comp = self._uid_to_comp
             comp._uid_to_comp = self._uid_to_comp
         self.props.childs.append(name)
-        return comp
-
-    def _extract_layout(self, layout: Dict[str, Component]):
-        """ get all components without add to app state.
-        """
-        # we assume layout is a ordered dict (python >= 3.7)
-        comps: List[Component] = []
-        for k, v1 in layout.items():
-            v = v1
-            comps.append(self.add_component(k, v, False, anonymous=False))
-            if isinstance(v, ContainerBase):
-                msg = "you must use VBox/HBox/Box instead in dict layout"
-                assert v._init_dict is not None, msg
-                comps.extend(v._extract_layout(v._init_dict))
-        return comps
+        return comp, comps_added
 
     def add_layout(self, layout: Dict[str, Component]):
         """ {
@@ -975,48 +971,18 @@ class ContainerBase(Component[T_container_props, T_child]):
         """
         if self._prevent_add_layout:
             raise ValueError("you must init layout in app_create_layout")
-        # we assume layout is a ordered dict (python >= 3.7)
-        for k, v1 in layout.items():
-            v = v1
-            if not isinstance(v, ContainerBase):
-                self.add_component(k, v, anonymous=False)
-            else:
-                if v._init_dict is not None:
-                    # consume this _init_dict
-                    v.add_layout(v._init_dict)
-                    v._init_dict = None
-                # update uids of childs of v,
-                ns = f"{k}"
-                if self.uid != "":
-                    ns = f"{self.uid}.{k}"
-                # set namespace of all child 
-                # the namespace is actually parent uid.
-                v._update_child_ns_and_comp_dict(ns, self._uid_to_comp)
-                if not v.inited and self.inited:
-                    v._attach_to_app(self._queue)
-                self.add_component(k, v, anonymous=False)
-
-    def add_layout_v2(self, layout: Dict[str, Component]):
-        """ {
-            btn0: Button(...),
-            box0: VBox({
-                btn1: Button(...),
-                ...
-            }, flex...),
-        }
-        """
-        if self._prevent_add_layout:
-            raise ValueError("you must init layout in app_create_layout")
+        comps_added: List[Component] = []
         # we assume layout is a ordered dict (python >= 3.7)
         for k, v in layout.items():
-            self.add_component_v2(k, v)
+            comps_added.extend(self.add_component_v2(k, v)[1])
+        return comps_added
 
     def get_props(self):
         state = super().get_props()
         state["childs"] = [self[n].uid for n in self.props.childs]
         return state
 
-    async def remove_child(self, name: str):
+    def remove_child(self, name: str):
         """if child isn't a container, just stop callback task, reset uid/_parent and remove from 
         self child.
         if child is a container, we need to reset namespace/parent to 
@@ -1025,40 +991,24 @@ class ContainerBase(Component[T_container_props, T_child]):
         # TODO we may need a global aio lock here.
         comp = self[name]
         self.props.childs.remove(name)
-        comp.uid = ""
-        comp._parent = ""
-        await comp._cancel_task()
-        comp._queue = None
-        all_removed = [comp]
-        if isinstance(comp, ContainerBase):
-            standalone_map: Dict[str, Component] = {}
-            all_child = comp._get_all_nested_childs()
-            for c in all_child:
-                await c._cancel_task()
-                c._parent = c._parent[len(self.uid):]
-                c._queue = None
-                c.uid = c.uid[len(self.uid):]
-                if isinstance(c, ContainerBase):
-                    c._uid_to_comp = standalone_map
-                standalone_map[c.uid] = c
-            all_removed.extend(all_removed)
-        return comp, all_removed
+        return _detach_component(comp)
 
     async def set_new_layout(self, layout: Dict[str, Component]):
+        for k, v in layout.items():
+            _detach_component(v)
         # remove all first
         # TODO we may need to stop task of a comp
         comps_to_remove: List[Component] = []
-        for c in self.props.childs:
-            comps_to_remove.extend(self._get_all_nested_child(c))
-        for c in comps_to_remove:
-            await c._clear()
-        for c in comps_to_remove:
-            self._uid_to_comp.pop(c.uid)
-
-        self.props.childs.clear()
+        comp_uids_to_remove: List[str] = []
+        for c in self.props.childs.copy():
+            comp, comp_to_remove_this, comp_to_remove_uids = self.remove_child(c)
+            comps_to_remove.extend(comp_to_remove_this)
+            comp_uids_to_remove.extend(comp_to_remove_uids)
+        for comp in comps_to_remove:
+            await comp._cancel_task()
         # TODO should we merge two events to one?
         await self.put_app_event(
-            self.create_delete_comp_event([c.uid for c in comps_to_remove]))
+            self.create_delete_comp_event(comp_uids_to_remove))
         self.add_layout(layout)
         comps_frontend = {
             c.uid: c.to_dict()
@@ -1073,36 +1023,70 @@ class ContainerBase(Component[T_container_props, T_child]):
 
     async def remove_childs_by_keys(self, keys: List[str]):
         comps_to_remove: List[Component] = []
+        comp_uids_to_remove: List[str] = []
         for c in keys:
-            comps_to_remove.extend(self._get_all_nested_child(c))
-        for c in comps_to_remove:
-            await c._clear()
-            self._uid_to_comp.pop(c.uid)
-        for k in keys:
-            self.props.childs.remove(k)
-        # make sure all child of this box is rerendered.
+            comp, comp_to_remove_this, comp_to_remove_uids = self.remove_child(c)
+            comps_to_remove.extend(comp_to_remove_this)
+            comp_uids_to_remove.extend(comp_to_remove_uids)
+        for comp in comps_to_remove:
+            await comp._cancel_task()
         await self.put_app_event(
-            self.create_delete_comp_event([c.uid for c in comps_to_remove]))
-        # TODO combine two event to one
-        await self.put_app_event(
-            self.create_update_comp_event({self.uid: self.to_dict()}))
+            self.create_delete_comp_event(comp_uids_to_remove))
         child_uids = [self[c].uid for c in self.props.childs]
         await self.put_app_event(self.create_update_event({"childs": child_uids}))
 
     async def update_childs(self, layout: Dict[str, Component]):
-        new_comps = self._extract_layout(layout)
-        update_comps_frontend = {c.uid: c.to_dict() for c in new_comps}
-        for c in new_comps:
-            if c.uid in self._uid_to_comp:
-                item = self._uid_to_comp.pop(c.uid)
-                item._parent = ""  # mark invalid
-            self._uid_to_comp[c.uid] = c
-        for n in layout.keys():
-            if n not in self.props.childs:
-                self.props.childs.append(n)
+        for k, v in layout.items():
+            if k not in self.props.childs:
+                _detach_component(v)
+        # remove replaced components first.
+        comps_to_remove: List[Component] = []
+        comp_uids_to_remove: List[str] = []
+        for c in self.props.childs:
+            comp = self[c]
+            if c in layout:
+                comp_detached, comp_to_remove_this, comp_to_remove_uids = self.remove_child(c)
+                comps_to_remove.extend(comp_to_remove_this)
+                comp_uids_to_remove.extend(comp_to_remove_uids)
+        for comp in comps_to_remove:
+            await comp._cancel_task()
+
+        comp_added = self.add_layout(layout)
+        update_comps_frontend = {c.uid: c.to_dict() for c in comp_added}
         # make sure all child of this box is rerendered.
         update_comps_frontend[self.uid] = self.to_dict()
         await self.put_app_event(
             self.create_update_comp_event(update_comps_frontend))
-        child_uids = [self[c].uid for c in self.props.childs]
-        await self.put_app_event(self.create_update_event({"childs": child_uids}))
+
+    async def replace_childs(self, layout: Dict[str, Component]):
+        for k in layout.keys():
+            assert k in self.props.childs
+        return await self.update_childs(layout)
+
+
+def _detach_component(comp: Component):
+    """detach a component from app.
+    """
+    # print("-----DETACH------", comp.uid, comp)
+    standalone_map: Dict[str, Component] = {}
+    all_removed_prev_uids = [comp.uid]
+    all_removed = [comp]
+
+    if isinstance(comp, ContainerBase):
+        all_child = comp._get_all_nested_childs()
+        for c in all_child:
+            all_removed_prev_uids.append(c.uid)
+            c._queue = None
+            if comp.uid:
+                c._parent = c._parent[len(comp.uid) + 1:]
+                c.uid = c.uid[len(comp.uid) + 1:]
+            if isinstance(c, ContainerBase):
+                c._uid_to_comp = standalone_map
+            standalone_map[c.uid] = c
+        all_removed.extend(all_removed)
+        comp._uid_to_comp = standalone_map
+
+    comp.uid = ""
+    comp._parent = ""
+    comp._queue = None
+    return comp, all_removed, all_removed_prev_uids
