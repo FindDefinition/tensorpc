@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .app import App, EditableApp, EditableLayoutApp
+from .app import (App, AppEditorFrontendEvent, AppEditorFrontendEventType,
+                  EditableApp, EditableLayoutApp, AppEvent)
 from .components import mui, three
 from .core import Undefined, undefined

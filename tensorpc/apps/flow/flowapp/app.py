@@ -54,9 +54,10 @@ import contextvars
 from .components import mui, three
 from .core import (AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
                    AppEditorFrontendEventType, AppEvent, AppEventType,
-                   BasicProps, Component, CopyToClipboardEvent, LayoutEvent,
-                   TaskLoopEvent, UIEvent, UIRunStatus, UIType, UIUpdateEvent,
-                   Undefined, undefined)
+                   BasicProps, Component, ContainerBase, CopyToClipboardEvent,
+                   LayoutEvent, TaskLoopEvent, UIEvent, UIExceptionEvent,
+                   UIRunStatus, UIType, UIUpdateEvent, Undefined,
+                   UserException, undefined)
 
 ALL_APP_EVENTS = HashableRegistry()
 
@@ -144,7 +145,8 @@ class App:
                  align_items: Union[str, Undefined] = undefined,
                  maxqsize: int = 10) -> None:
         self._uid_to_comp: Dict[str, Component] = {}
-        self._queue = asyncio.Queue(maxsize=maxqsize)
+        self._queue: "asyncio.Queue[AppEvent]" = asyncio.Queue(
+            maxsize=maxqsize)
 
         self._send_callback: Optional[Callable[[AppEvent],
                                                Coroutine[None, None,
@@ -172,8 +174,14 @@ class App:
         """
         state: Dict[str, Any] = {}
         for comp in self.root._get_all_nested_childs():
-            if isinstance(comp, (mui.Input, mui.Switch, mui.RadioGroup,
-                                 mui.Slider, mui.Select, mui.MultipleSelect,)):
+            if isinstance(comp, (
+                    mui.Input,
+                    mui.Switch,
+                    mui.RadioGroup,
+                    mui.Slider,
+                    mui.Select,
+                    mui.MultipleSelect,
+            )):
                 state[comp.uid] = {
                     "type": comp.type.value,
                     "props": comp.get_sync_props(),
@@ -190,7 +198,8 @@ class App:
                 comp_to_restore = self.root._uid_to_comp[k]
                 if comp_to_restore.type.value == s["type"]:
                     comp_to_restore.set_props(s["props"])
-                    pylance_wtf = ev.merge_new(comp_to_restore.get_sync_event(True))
+                    pylance_wtf = ev.merge_new(
+                        comp_to_restore.get_sync_event(True))
                     ev = pylance_wtf
         await self._queue.put(ev)
 
@@ -205,11 +214,35 @@ class App:
         self.root._prevent_add_layout = False
         prev_comps = {}
         if reload:
-            prev_comps = {u: c.to_dict() for u, c in self._uid_to_comp.items()}
+            prev_comps = {
+                u: c._to_dict_with_sync_props()
+                for u, c in self._uid_to_comp.items()
+            }
         await self.root._clear()
         self._uid_to_comp.clear()
         self.root.uid = _ROOT
-        res = self.app_create_layout()
+        try:
+            res = self.app_create_layout()
+        except Exception as e:
+            traceback.print_exc()
+            ss = io.StringIO()
+            traceback.print_exc(file=ss)
+            user_exc = UserException("", str(e), ss.getvalue())
+            ev = UIExceptionEvent([user_exc])
+            fbm = (
+                "app_create_layout failed!!! check your app_create_layout. if "
+                "you are using reloadable app, just check and save your app code!"
+            )
+            await self._queue.put(
+                AppEvent(
+                    "", {
+                        AppEventType.UIException:
+                        ev,
+                        AppEventType.UpdateLayout:
+                        LayoutEvent(
+                            self._get_fallback_layout(fbm, with_code_editor))
+                    }))
+            return
         res_anno: Dict[str, Component] = {**res}
         self.root.add_layout(res_anno)
         self._uid_to_comp[_ROOT] = self.root
@@ -219,7 +252,7 @@ class App:
             for comp in self._uid_to_comp.values():
                 if comp.uid in prev_comps:
                     if comp.type.value == prev_comps[comp.uid]["type"]:
-                        comp.set_props(prev_comps[comp.uid]["state"])
+                        comp.set_props(prev_comps[comp.uid]["props"])
             del prev_comps
         if send_layout_ev:
             ev = AppEvent(
@@ -252,6 +285,21 @@ class App:
             "layout": {u: c.to_dict()
                        for u, c in self._uid_to_comp.items()},
             "enableEditor": self._enable_editor,
+            "fallback": "",
+        }
+        if with_code_editor:
+            res.update({
+                "codeEditor": self.code_editor.get_state(),
+            })
+        return res
+
+    def _get_fallback_layout(self,
+                             fallback_msg: str,
+                             with_code_editor: bool = True):
+        res = {
+            "layout": {},
+            "enableEditor": self._enable_editor,
+            "fallback": fallback_msg,
         }
         if with_code_editor:
             res.update({
@@ -392,9 +440,10 @@ class EditableApp(App):
                 # we have no way to distringuish save event and external save.
                 # so we compare data with previous saved result.
                 if new_data != self._watchdog_prev_content:
-                    fut = asyncio.run_coroutine_threadsafe(
-                        self.set_editor_value(new_data), self._loop)
-                    fut.result()
+                    if self._use_app_editor:
+                        fut = asyncio.run_coroutine_threadsafe(
+                            self.set_editor_value(new_data), self._loop)
+                        fut.result()
                     layout_func_changed = self._reload_app_file()
                     if layout_func_changed:
                         fut = asyncio.run_coroutine_threadsafe(

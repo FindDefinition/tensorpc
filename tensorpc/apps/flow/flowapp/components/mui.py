@@ -26,7 +26,7 @@ from PIL import Image as PILImage
 import json
 import inspect
 from tensorpc.core.asynctools import cancel_task
-from ..core import (AppEvent, BasicProps, Component,
+from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, NumberType, T_child, TaskLoopEvent, UIEvent,
                     UIRunStatus, UIType, Undefined, undefined, T_base_props,
                     T_container_props, ContainerBaseProps,
@@ -90,7 +90,14 @@ class FlexComponentBaseProps(BasicProps):
 
     overflow: Union[_OverflowType, Undefined] = undefined
     overflow_y: Union[_OverflowType, Undefined] = undefined
-    overflow_x: Union[_OverflowType, Undefined] = undefined
+    overflow_x: Union[_OverflowType, Undefined] = undefined 
+
+    color: Union[ValueType, Undefined] = undefined
+    background_color: Union[ValueType, Undefined] = undefined
+    font_size: Union[ValueType, Undefined] = undefined
+
+    border: Union[str, Undefined] = undefined
+
 
 @dataclasses.dataclass
 class MUIComponentBaseProps(FlexComponentBaseProps):
@@ -173,10 +180,10 @@ class Images(MUIComponentBase[ImageProps]):
         encoded = _encode_image_bytes(image)
         self.props.image = encoded
         # self.image_str = encoded
-        await self.queue.put(self.update_event(image=encoded))
+        await self.put_app_event(self.update_event(image=encoded))
 
     async def show_raw(self, image_bytes: bytes, suffix: str):
-        await self.queue.put(self.show_raw_event(image_bytes, suffix))
+        await self.put_app_event(self.show_raw_event(image_bytes, suffix))
 
     def show_raw_event(self, image_bytes: bytes, suffix: str):
         raw = b'data:image/' + suffix.encode(
@@ -211,7 +218,7 @@ class Plotly(MUIComponentBase[PlotlyProps]):
     async def show_raw(self, data: list, layout: Any):
         self.props.data = data
         self.props.layout = layout
-        await self.queue.put(self.update_event(data=data, layout=layout))
+        await self.put_app_event(self.update_event(data=data, layout=layout))
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -245,7 +252,7 @@ class ChartJSLine(MUIComponentBase[ChartJSLineProps]):
     async def show_raw(self, data: list, options: Any):
         self.props.data = data
         self.props.options = options
-        await self.queue.put(self.update_event(data=data, options=options))
+        await self.put_app_event(self.update_event(data=data, options=options))
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -279,7 +286,7 @@ class Text(MUIComponentBase[TextProps]):
 
     async def write(self, content: str):
         self.props.value = content
-        await self.queue.put(self.update_event(value=content))
+        await self.put_app_event(self.update_event(value=content))
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -295,6 +302,10 @@ class Text(MUIComponentBase[TextProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+    @property 
+    def value(self):
+        return self.props.value
 
 class ListItemText(MUIComponentBase[TextProps]):
 
@@ -308,7 +319,7 @@ class ListItemText(MUIComponentBase[TextProps]):
 
     async def write(self, content: str):
         self.props.value = content
-        await self.queue.put(self.update_event(value=content))
+        await self.put_app_event(self.update_event(value=content))
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -324,6 +335,10 @@ class ListItemText(MUIComponentBase[TextProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+    @property 
+    def value(self):
+        return self.props.value
 
 @dataclasses.dataclass
 class DividerProps(MUIComponentBaseProps):
@@ -350,9 +365,31 @@ class Divider(MUIComponentBase[DividerProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+class HDivider(Divider):
+    def __init__(self,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__("horizontal", uid, queue)
+
+class VDivider(Divider):
+    def __init__(self,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__("vertical", uid, queue)
+
+_BtnGroupColor: TypeAlias = Literal['inherit', 'primary', 'secondary', 'error',
+                                    'info', 'success', 'warning']
+
 @dataclasses.dataclass
 class ButtonProps(MUIComponentBaseProps):
     name: str = ""
+    elem_color: Union[_BtnGroupColor, Undefined] = undefined
+    disabled: Union[bool, Undefined] = undefined
+    full_width: Union[bool, Undefined] = undefined
+    size: Union[Literal["small", "medium", "large"], Undefined] = undefined
+    variant: Union[Literal["contained", "outlined", "text"],
+                   Undefined] = undefined
+
 
 
 class Button(MUIComponentBase[ButtonProps]):
@@ -367,7 +404,7 @@ class Button(MUIComponentBase[ButtonProps]):
         self.callback = callback
 
     async def headless_click(self):
-        return await self.queue.put(UIEvent({self.uid: self.props.name}))
+        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: UIEvent({self.uid: self.props.name})}))
 
     def get_callback(self):
         return self.callback
@@ -388,6 +425,36 @@ class Button(MUIComponentBase[ButtonProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
+@dataclasses.dataclass
+class ButtonGroupProps(MUIFlexBoxProps):
+    orientation: Union[Literal["horizontal", "vertical"],
+                       Undefined] = undefined
+    elem_color: Union[_BtnGroupColor, Undefined] = undefined
+    disabled: Union[bool, Undefined] = undefined
+    full_width: Union[bool, Undefined] = undefined
+    size: Union[Literal["small", "medium", "large"], Undefined] = undefined
+    variant: Union[Literal["contained", "outlined", "text"],
+                   Undefined] = undefined
+
+class ButtonGroup(MUIContainerBase[ButtonGroupProps, Button]):
+
+    def __init__(self,
+                 init_dict: Dict[str, Button],
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 uid_to_comp: Optional[Dict[str, Component]] = None,
+                 inited: bool = False) -> None:
+        super().__init__(UIType.ButtonGroup, ButtonGroupProps, uid, queue,
+                         uid_to_comp, init_dict, inited)
+        for v in init_dict.values():
+            assert isinstance(v, Button), "all childs must be button"
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
 class ListItemButton(MUIComponentBase[ButtonProps]):
 
     def __init__(self,
@@ -401,7 +468,8 @@ class ListItemButton(MUIComponentBase[ButtonProps]):
         self.callback = callback
 
     async def headless_click(self):
-        return await self.queue.put(UIEvent({self.uid: self.props.name}))
+        uiev = UIEvent({self.uid: self.props.name})
+        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: uiev}))
 
     def get_callback(self):
         return self.callback
@@ -433,11 +501,6 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
                  inited: bool = False) -> None:
         super().__init__(base_type, MUIFlexBoxProps, uid, queue, uid_to_comp,
                          _init_dict, inited)
-
-    def get_sync_props(self) -> Dict[str, Any]:
-        res = super().get_sync_props()
-        res["childs"] = self.props.childs
-        return res
 
     @property 
     def prop(self):
@@ -539,11 +602,12 @@ class RadioGroup(MUIComponentBase[RadioGroupProps]):
 
     async def update_value(self, value: Any):
         assert value in self.props.names
-        await self.queue.put(self.create_update_event({"value": value}))
+        await self.put_app_event(self.create_update_event({"value": value}))
         self.props.value = value
 
     async def headless_click(self, index: int):
-        return await self.queue.put(UIEvent({self.uid: self.props.names[index]}))
+        uiev = UIEvent({self.uid: self.props.names[index]})
+        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: uiev}))
 
     def get_callback(self):
         return self.callback
@@ -563,6 +627,10 @@ class RadioGroup(MUIComponentBase[RadioGroupProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+    @property 
+    def value(self):
+        return self.props.value
 
 @dataclasses.dataclass
 class InputProps(MUIComponentBaseProps):
@@ -594,11 +662,16 @@ class Input(MUIComponentBase[InputProps]):
         res["value"] = self.props.value
         return res
 
+    @property 
+    def value(self):
+        return self.props.value
+
     def state_change_callback(self, data: str):
         self.props.value = data
 
     async def headless_write(self, content: str):
-        return await self.queue.put(UIEvent({self.uid: content}))
+        uiev = UIEvent({self.uid: content})
+        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: uiev}))
 
     def get_callback(self):
         return self.callback
@@ -689,11 +762,16 @@ class Switch(MUIComponentBase[SwitchProps]):
         res["checked"] = self.props.checked
         return res
 
+    @property 
+    def checked(self):
+        return self.props.checked
+
     def state_change_callback(self, data: bool):
         self.props.checked = data
 
     async def headless_write(self, checked: bool):
-        return await self.queue.put(UIEvent({self.uid: checked}))
+        uiev = UIEvent({self.uid: checked})
+        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: uiev}))
 
     def get_callback(self):
         return self.callback
@@ -741,10 +819,14 @@ class Select(MUIComponentBase[SelectProps]):
         # item value must implement eq/ne
         self.props.value = ""
 
+    @property 
+    def value(self):
+        return self.props.value
+
     def validate_props(self, props: Dict[str, Any]):
-        if "items" in props:
-            items = props["items"]
-            return items == self.props.items
+        if "value" in props:
+            value = props["value"]
+            return value in [x[1] for x in self.props.items]
         return False
 
     def get_sync_props(self) -> Dict[str, Any]:
@@ -754,7 +836,7 @@ class Select(MUIComponentBase[SelectProps]):
 
     async def update_items(self, items: List[Tuple[str, ValueType]],
                            selected: int):
-        await self.queue.put(
+        await self.put_app_event(
             self.create_update_event({
                 "items": items,
                 "value": items[selected][1]
@@ -764,7 +846,7 @@ class Select(MUIComponentBase[SelectProps]):
 
     async def update_value(self, value: ValueType):
         assert value in [x[1] for x in self.props.items]
-        await self.queue.put(self.create_update_event({"value": value}))
+        await self.put_app_event(self.create_update_event({"value": value}))
         self.props.value = value
 
     def update_value_no_sync(self, value: ValueType):
@@ -775,7 +857,8 @@ class Select(MUIComponentBase[SelectProps]):
         self.props.value = value
 
     async def headless_select(self, value: ValueType):
-        return await self.queue.put(UIEvent({self.uid: value}))
+        uiev = UIEvent({self.uid: value})
+        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: uiev}))
 
     def get_callback(self):
         return self.callback
@@ -821,10 +904,14 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
         # item value must implement eq/ne
         self.props.values = []
 
+    @property 
+    def values(self):
+        return self.props.values
+
     def validate_props(self, props: Dict[str, Any]):
-        if "items" in props:
-            items = props["items"]
-            return items == self.props.items
+        if "value" in props:
+            value = props["value"]
+            return value in [x[1] for x in self.props.items]
         return False
 
     def get_sync_props(self) -> Dict[str, Any]:
@@ -837,7 +924,7 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
                            selected: Optional[List[int]] = None):
         if selected is None:
             selected = []
-        await self.queue.put(
+        await self.put_app_event(
             self.create_update_event({
                 "items": items,
                 "values": [items[s][1] for s in selected]
@@ -848,7 +935,7 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
     async def update_value(self, values: List[ValueType]):
         for v in values:
             assert v in [x[1] for x in self.props.items]
-        await self.queue.put(self.create_update_event({"values": values}))
+        await self.put_app_event(self.create_update_event({"values": values}))
         self.props.values = values
 
     def update_value_no_sync(self, values: List[ValueType]):
@@ -860,7 +947,8 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
         self.props.values = values
 
     async def headless_select(self, values: List[ValueType]):
-        return await self.queue.put(UIEvent({self.uid: values}))
+        uiev = UIEvent({self.uid: values})
+        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: uiev}))
 
     def get_callback(self):
         return self.callback
@@ -906,6 +994,10 @@ class Slider(MUIComponentBase[SliderProps]):
         self.props.ranges = (begin, end, step)
         self.props.value = begin
 
+    @property 
+    def value(self):
+        return self.props.value
+
     def validate_props(self, props: Dict[str, Any]):
         if "value" in props:
             value = props["value"]
@@ -922,7 +1014,7 @@ class Slider(MUIComponentBase[SliderProps]):
         self.props.ranges = (begin, end, step)
         assert end > begin and step < end - begin
         self.props.value = begin
-        await self.queue.put(
+        await self.put_app_event(
             self.create_update_event({
                 "ranges": (begin, end, step),
                 "value": self.props.value
@@ -930,14 +1022,15 @@ class Slider(MUIComponentBase[SliderProps]):
 
     async def update_value(self, value: NumberType):
         assert value >= self.props.ranges[0] and value <= self.props.ranges[1]
-        await self.queue.put(self.create_update_event({"value": value}))
+        await self.put_app_event(self.create_update_event({"value": value}))
         self.props.value = value
 
     def state_change_callback(self, value: NumberType):
         self.props.value = value
 
     async def headless_change(self, value: NumberType):
-        return await self.queue.put(UIEvent({self.uid: value}))
+        uiev = UIEvent({self.uid: value})
+        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: uiev}))
 
     def get_callback(self):
         return self.callback
@@ -1015,7 +1108,7 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
                         await self.update_progress(prog, self.stack_count - 1)
                     t = time.time()
             else:
-                for item in it:
+                for item in it: # type: ignore
                     yield item
                     # await asyncio.sleep(0)
                     await self.pause_event.wait()
@@ -1037,16 +1130,16 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
     async def update_progress(self, progress: float, index: int):
         progress = max(0, min(progress, 1))
         self.props.progresses[index] = progress
-        await self.queue.put(
+        await self.put_app_event(
             self.create_update_event({"progresses": self.props.progresses}))
 
     async def update_label(self, label: str):
-        await self.queue.put(self.create_update_event({"label": label}))
+        await self.put_app_event(self.create_update_event({"label": label}))
         self.props.label = label
 
     async def headless_run(self):
-        return await self.queue.put(
-            UIEvent({self.uid: TaskLoopEvent.Start.value}))
+        uiev = UIEvent({self.uid: TaskLoopEvent.Start.value})
+        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: uiev}))
 
     def set_callback(self, val: Any):
         self.loop_callbcak = val
@@ -1117,7 +1210,7 @@ class Typography(MUIComponentBase[TypographyProps]):
 
     async def write(self, content: str):
         self.props.value = content
-        await self.queue.put(self.create_update_event({"value": self.props.value}))
+        await self.put_app_event(self.create_update_event({"value": self.props.value}))
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -1152,39 +1245,8 @@ class Paper(MUIContainerBase[PaperProps, MUIComponentType]):
         propcls = self.propcls
         return self._prop_base(propcls, self)
 
-_BtnGroupColor: TypeAlias = Literal['inherit', 'primary', 'secondary', 'error',
-                                    'info', 'success', 'warning']
 
 
-@dataclasses.dataclass
-class ButtonGroupProps(MUIFlexBoxProps):
-    color: Union[_BtnGroupColor, str, Undefined] = undefined
-    disabled: Union[bool, Undefined] = undefined
-    full_width: Union[bool, Undefined] = undefined
-    orientation: Union[Literal["horizontal", "vertical"],
-                       Undefined] = undefined
-    size: Union[Literal["small", "medium", "large"], Undefined] = undefined
-    variant: Union[Literal["contained", "outlined", "text"],
-                   Undefined] = undefined
-
-
-class ButtonGroup(MUIContainerBase[ButtonGroupProps, Button]):
-
-    def __init__(self,
-                 init_dict: Dict[str, Button],
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
-                 inited: bool = False) -> None:
-        super().__init__(UIType.ButtonGroup, ButtonGroupProps, uid, queue,
-                         uid_to_comp, init_dict, inited)
-        for v in init_dict.values():
-            assert isinstance(v, Button), "all childs must be button"
-
-    @property 
-    def prop(self):
-        propcls = self.propcls
-        return self._prop_base(propcls, self)
 
 @dataclasses.dataclass
 class CollapseProps(MUIFlexBoxProps):
@@ -1208,6 +1270,30 @@ class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
     def prop(self):
         propcls = self.propcls
         return self._prop_base(propcls, self)
+
+# @dataclasses.dataclass
+# class AccordionProps(MUIFlexBoxProps):
+#     orientation: Union[Literal["horizontal", "vertical"],
+#                        Undefined] = undefined
+#     timeout: Union[NumberType, Undefined] = undefined
+
+
+# class Accordion(MUIContainerBase[AccordionProps, MUIComponentType]):
+
+#     def __init__(self,
+#                  init_dict: Dict[str, MUIComponentType],
+#                  uid: str = "",
+#                  queue: Optional[asyncio.Queue] = None,
+#                  uid_to_comp: Optional[Dict[str, Component]] = None,
+#                  inited: bool = False) -> None:
+#         super().__init__(UIType.Accordion, AccordionProps, uid, queue,
+#                          uid_to_comp, init_dict, inited)
+
+#     @property 
+#     def prop(self):
+#         propcls = self.propcls
+#         return self._prop_base(propcls, self)
+
 
 @dataclasses.dataclass
 class ChipProps(MUIComponentBaseProps):
@@ -1236,7 +1322,9 @@ class Chip(MUIComponentBase[ChipProps]):
         return res
 
     async def headless_click(self):
-        return await self.queue.put(UIEvent({self.uid: self.props.label}))
+        uiev = UIEvent({self.uid: self.props.label})
+        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: uiev}))
+
 
     def get_callback(self):
         return self.callback

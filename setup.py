@@ -42,6 +42,7 @@ REQUIRED = [
     "async-timeout",
     "watchdog",
     "typing_extensions>=4.3.0",
+    "pyee",
 ]
 
 # What packages are optional?

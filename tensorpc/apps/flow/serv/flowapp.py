@@ -170,6 +170,10 @@ class FlowApp:
                     break
                 ev: AppEvent = send_task.result()
                 if self.headless:
+                    for k, v in ev.type_to_event.items():
+                        if k == AppEventType.UIEvent:
+                            assert isinstance(v, UIEvent)
+                            await self.app._handle_event_with_ctx(v)
                     continue 
                 ts = time.time()
                 # assign uid here.

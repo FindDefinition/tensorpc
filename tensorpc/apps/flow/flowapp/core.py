@@ -14,6 +14,7 @@
 
 import abc
 import enum
+import io
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Generic, Iterable, List, Optional, Tuple, Type, TypeVar,
                     Union)
@@ -72,6 +73,7 @@ class UIType(enum.Enum):
     Collapse = 0x11
     Card = 0x12
     Chip = 0x13
+    Accordion = 0x14
 
 
     # special
@@ -100,6 +102,7 @@ class UIType(enum.Enum):
     ThreeOrbitControl = 0x1011
     ThreePointerLockControl = 0x1012
     ThreeFirstPersonControl = 0x1013
+    ThreeTransformControl = 0x1014
 
     ThreeBoundingBox = 0x1020
     ThreeAxesHelper = 0x1021
@@ -129,6 +132,7 @@ class AppEventType(enum.Enum):
     UISaveStateEvent = 12
     Notify = 13
     UIUpdatePropsEvent = 14
+    UIException = 15
     # clipboard
     CopyToClipboard = 20
     # schedule event, won't be sent to frontend.
@@ -158,6 +162,17 @@ class AppEditorFrontendEventType(enum.Enum):
     Save = 0
     Change = 1
     SaveEditorState = 2
+
+@dataclasses.dataclass
+class UserException:
+    uid: str
+    error: str 
+    detail: str
+
+    @classmethod
+    def from_dict(cls, dc: Dict[str, str]):
+        return cls(uid=dc["uid"], error=dc["error"], 
+                detail=dc["detail"])
 
 
 class AppEditorFrontendEvent:
@@ -261,6 +276,24 @@ class UIUpdateEvent:
             else:
                 res_uid_to_data[k] = v
         return UIUpdateEvent(res_uid_to_data)
+
+@ALL_APP_EVENTS.register(key=AppEventType.UIException.value)
+class UIExceptionEvent:
+    def __init__(
+        self, user_excs: List[UserException]) -> None:
+        self.user_excs = user_excs
+
+    def to_dict(self):
+        return [dataclasses.asdict(v) for v in self.user_excs]
+
+    @classmethod
+    def from_dict(cls, data: List[Any]):
+
+        return cls([UserException.from_dict(v) for v in data])
+
+    def merge_new(self, new):
+        assert isinstance(new, UIExceptionEvent)
+        return UIExceptionEvent(self.user_excs + new.user_excs)
 
 
 @ALL_APP_EVENTS.register(key=AppEventType.AppEditor.value)
@@ -378,7 +411,7 @@ class ScheduleNextForApp:
 APP_EVENT_TYPES = Union[UIEvent, LayoutEvent, CopyToClipboardEvent,
                         UpdateComponentsEvent, DeleteComponentsEvent,
                         ScheduleNextForApp, AppEditorEvent, UIUpdateEvent,
-                        UISaveStateEvent, NotifyEvent]
+                        UISaveStateEvent, NotifyEvent, UIExceptionEvent]
 
 
 def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":
@@ -445,7 +478,7 @@ class AppEvent:
         ret = self.merge_new(other)
         self.type_to_event = ret.type_to_event
         self.sent_event = ret.sent_event
-        return
+        return self
 
 def camel_to_snake(name: str):
     name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
@@ -524,45 +557,7 @@ def init_anno_fwd(
 
     return decorator
 
-
-# @init_anno_fwd(ComponentBaseProps)
-# def open_for_writing(*args, **kwargs):
-#     kwargs['mode'] = 'w'
-#     return open(*args, **kwargs)
-
-# open_for_writing()
-# open_for_writing(file='')
-
-P2 = ParamSpec('P2')
 # TProp = TypeVar('TProp', covariant=True)
-
-# class IComponent(Protocol[TProp]):
-#     @property
-#     def props(self) -> TProp: ...
-#     # @property
-#     # def prop(self) -> Type[TProp]: ...
-#     def get_callback(self) -> Optional[Callable]: ...
-#     def set_callback(self, val: Any): ...
-#     async def _clear(self): ...
-#     def to_dict(self) -> Dict[str, Any]: ...
-#     def get_state(self) -> Dict[str, Any]: ...
-#     def set_state(self, state: Dict[str, Any]): ...
-#     @property
-#     def queue(self) -> asyncio.Queue[AppEvent]: ...
-#     def state_change_callback(self, data: Any): ...
-#     def create_update_event(self, data: Dict[str, Union[Any, Undefined]]): ...
-#     async def send_app_event_and_wait(self, ev: AppEvent): ...
-#     def create_update_comp_event(self, updates: Dict[str, Any]): ...
-#     def create_delete_comp_event(self, deletes: List[str]): ...
-#     async def run_callback(self,
-#                            cb: Callable[[], _CORO_NONE],
-#                            sync_state: bool = False): ...
-#     async def sync_status(self,
-#                           sync_state: bool = False,
-#                           sent_event: Optional[asyncio.Event] = None): ...
-#     async def sync_state(self, sent_event: Optional[asyncio.Event] = None): ...
-#     def get_sync_event(self, sync_state: bool = False): ...
-
 
 T_child = TypeVar("T_child")
 
@@ -581,9 +576,10 @@ class Component(Generic[T_base_props, T_child]):
         # if previous control callback hasn't finished yet,
         # the new control event will be IGNORED
         self._task: Optional[asyncio.Task] = None
-        self.parent = ""
+        self._parent = ""
         self.__props = prop_cls()
         self.__prop_cls = prop_cls
+        self._mounted_override = False
 
     @property
     def props(self) -> T_base_props:
@@ -593,17 +589,11 @@ class Component(Generic[T_base_props, T_child]):
     def propcls(self) -> Type[T_base_props]:
         return self.__prop_cls
 
-    # @property
-    # def prop(self) -> Type[T_base_props]:
-    #     """set some prop of this component"""
-    #     @init_anno_fwd(self.__prop_cls)
-    #     def wrapper(**kwargs):
-    #         self.__props._tensorpc_component_special_key = self  # type: ignore
-    #         for k, v in kwargs.items():
-    #             setattr(self.__props, k, v)
-    #         return self.__props
-
-    #     return wrapper  # type: ignore
+    def is_mounted(self):
+        if self._parent != "":
+            return True 
+        else:
+            return self._mounted_override
 
     def _prop_base(self, prop: Callable[P, Any], this: T3) -> Callable[P, T3]:
         def wrapper(*args: P.args, **kwargs: P.kwargs):
@@ -617,21 +607,6 @@ class Component(Generic[T_base_props, T_child]):
             return self.create_update_event(kwargs)
         return wrapper 
 
-
-    # def prop3(self):
-    #     propcls: Type[T_base_props] = self.propcls
-    #     return self.prop2(propcls)
-
-    # @property
-    # def prop2(self):
-    #     """set some prop of this component"""
-    #     @init_anno_fwd(self.__prop_cls, self)
-    #     def wrapper(*args, **kwargs):
-    #         for k, v in kwargs.items():
-    #             setattr(self.__props, k, v)
-    #         return self
-    #     return wrapper
-
     def get_callback(self) -> Optional[Callable]:
         return None
 
@@ -642,7 +617,7 @@ class Component(Generic[T_base_props, T_child]):
         pass
 
     async def _clear(self):
-        self.uid = ""
+        # self.uid = ""
         # self._queue = None
         # ignore all task error here.
         if self._task is not None:
@@ -654,7 +629,17 @@ class Component(Generic[T_base_props, T_child]):
 
             # await _cancel(self._task)
             self._task = None
-        self.parent = ""
+        self._parent = ""
+
+    async def _cancel_task(self):
+        # ignore all task error here.
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except:
+                traceback.print_exc()
+            self._task = None
 
     def to_dict(self):
         """undefined will be removed here.
@@ -668,7 +653,6 @@ class Component(Generic[T_base_props, T_child]):
         # for k, v in state.items():
         #     if not isinstance(v, Undefined):
         #         newstate[snake_to_camel(k)] = v
-        # # TODO better way to resolve type anno problem
         # static, _ = self.__props.get_dict_and_undefined(state)  # type: ignore
         res = {
             "uid": self.uid,
@@ -681,6 +665,17 @@ class Component(Generic[T_base_props, T_child]):
         # static["type"] = self.type.value
         return res
 
+    def _to_dict_with_sync_props(self):
+        props = self.get_sync_props()
+        props, und = _split_props_to_undefined(props)
+        res = {
+            "uid": self.uid,
+            "type": self.type.value,
+            "props": props,
+            # "status": self._status.value,
+        }
+        return res
+
     def get_sync_props(self) -> Dict[str, Any]:
         """this function is used for props you want to kept when app
         shutdown or layout updated.
@@ -689,10 +684,6 @@ class Component(Generic[T_base_props, T_child]):
         by previous sync props
         """
         return {"status": self.props.status}
-
-    # def set_sync_state(self, state: Dict[str, Any]):
-    #     if "status" in state:
-    #         self.props.status = state["status"]
 
     def get_props(self) -> Dict[str, Any]:
         return self.__props.get_dict()  # type: ignore
@@ -711,9 +702,13 @@ class Component(Generic[T_base_props, T_child]):
                 if name in name_to_fields:
                     setattr(self.__props, name, value)
 
+    async def put_app_event(self, ev: AppEvent):
+        if self.is_mounted():
+            return await self.queue.put(ev)
+
     @property
     def queue(self):
-        assert self._queue is not None, "you must add ui by flexbox.add_xxx"
+        assert self._queue is not None, f"you must add ui by flexbox.add_xxx"
         return self._queue
 
     def state_change_callback(self, data: Any):
@@ -748,7 +743,7 @@ class Component(Generic[T_base_props, T_child]):
     async def send_app_event_and_wait(self, ev: AppEvent):
         if ev.sent_event is None:
             ev.sent_event = asyncio.Event()
-        await self.queue.put(ev)
+        await self.put_app_event(ev)
         await ev.sent_event.wait()
 
     def create_update_comp_event(self, updates: Dict[str, Any]):
@@ -761,6 +756,11 @@ class Component(Generic[T_base_props, T_child]):
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.DeleteComponents: ev})
 
+    def create_exception_event(self, exc: UserException):
+        ev = UIExceptionEvent([exc])
+        # uid is set in flowapp service later.
+        return AppEvent("", {AppEventType.UIException: ev})
+
     async def run_callback(self,
                            cb: Callable[[], _CORO_NONE],
                            sync_state: bool = False):
@@ -772,11 +772,12 @@ class Component(Generic[T_base_props, T_child]):
             coro = cb()
             if inspect.iscoroutine(coro):
                 await coro
-        except:
+        except Exception as e:
             traceback.print_exc()
-            # TODO send exception to frontend
-            
-            raise
+            ss = io.StringIO()
+            traceback.print_exc(file=ss)
+            user_exc = UserException(self.uid, str(e), ss.getvalue())
+            await self.put_app_event(self.create_exception_event(user_exc))
         finally:
             self.props.status = UIRunStatus.Stop.value 
             await self.sync_status(sync_state)
@@ -787,11 +788,11 @@ class Component(Generic[T_base_props, T_child]):
         if sync_state:
             ev = self.create_update_event(self.get_sync_props())
             ev.sent_event = sent_event
-            await self.queue.put(ev)
+            await self.put_app_event(ev)
         else:
             ev = self.create_update_event({"status": self.props.status})
             ev.sent_event = sent_event
-            await self.queue.put(ev)
+            await self.put_app_event(ev)
 
     async def sync_state(self, sent_event: Optional[asyncio.Event] = None):
         return await self.sync_status(True, sent_event)
@@ -851,6 +852,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         for k, v in prev_uid_to_comp.items():
             new_name = f"{ns}.{k}"
             v.uid = new_name
+            v._parent = ns
             uid_to_comp[v.uid] = v
             if isinstance(v, ContainerBase):
                 v._uid_to_comp = uid_to_comp
@@ -877,9 +879,6 @@ class ContainerBase(Component[T_container_props, T_child]):
             comps.extend(self._get_all_nested_child(c))
         return comps
 
-    def _get_all_child_comp_uids(self):
-        return [self[n].uid for n in self.props.childs]
-
     def _get_uid_with_ns(self, name: str):
         if not self.inited:
             return (f"{name}")
@@ -888,7 +887,7 @@ class ContainerBase(Component[T_container_props, T_child]):
     def _add_prop_to_ui(self, ui: Component):
         if self.inited:
             ui._queue = self.queue
-        ui.parent = self.uid
+        ui._parent = self.uid
         if isinstance(ui, ContainerBase):
             ui._pool = self._pool
             ui._uid_to_comp = self._uid_to_comp
@@ -904,11 +903,51 @@ class ContainerBase(Component[T_container_props, T_child]):
         comp.uid = uid
         if add_to_state:
             assert uid not in self._uid_to_comp
-        assert comp.parent == "", "this component must not be added before."
+        assert comp._parent == "", "this component must not be added before."
         self._add_prop_to_ui(comp)
         if add_to_state:
             self._uid_to_comp[comp.uid] = comp
             self.props.childs.append(name)
+        return comp
+
+    def add_component_v2(self,
+                      name: str,
+                      comp: Component):
+        """ 
+        we assume self uid is ready.
+        if non-container
+            1. set uid to ns + component name
+            2. set queue, 
+            done
+        if container
+            2.1 set uid_to_comp
+            3. if has init dict, consume it
+            4. change uid/parent of all nested childs with new namespace
+        """
+        namespace = self.uid
+        if namespace == "":
+            comp.uid = name
+        else:
+            comp.uid = namespace + "." + name
+        comp._queue = self.queue
+        if isinstance(comp, ContainerBase):
+            if comp._init_dict is not None:
+                # consume this _init_dict
+                comp.add_layout(comp._init_dict)
+                comp._init_dict = None
+            comp_uid_to_comp = comp._uid_to_comp
+            # set all uid/parent of child with new uid
+            for k, v in comp_uid_to_comp.items():
+                new_name = f"{namespace}.{k}"
+                new_parent = f"{namespace}.{v._parent}"
+                v.uid = new_name
+                v._parent = new_parent
+                # add standclone comp map to main map
+                self._uid_to_comp[v.uid] = v
+                # if isinstance(v, ContainerBase):
+                #     v._uid_to_comp = self._uid_to_comp
+            comp._uid_to_comp = self._uid_to_comp
+        self.props.childs.append(name)
         return comp
 
     def _extract_layout(self, layout: Dict[str, Component]):
@@ -950,15 +989,60 @@ class ContainerBase(Component[T_container_props, T_child]):
                 ns = f"{k}"
                 if self.uid != "":
                     ns = f"{self.uid}.{k}"
+                # set namespace of all child 
+                # the namespace is actually parent uid.
                 v._update_child_ns_and_comp_dict(ns, self._uid_to_comp)
                 if not v.inited and self.inited:
                     v._attach_to_app(self._queue)
                 self.add_component(k, v, anonymous=False)
 
+    def add_layout_v2(self, layout: Dict[str, Component]):
+        """ {
+            btn0: Button(...),
+            box0: VBox({
+                btn1: Button(...),
+                ...
+            }, flex...),
+        }
+        """
+        if self._prevent_add_layout:
+            raise ValueError("you must init layout in app_create_layout")
+        # we assume layout is a ordered dict (python >= 3.7)
+        for k, v in layout.items():
+            self.add_component_v2(k, v)
+
     def get_props(self):
         state = super().get_props()
-        state["childs"] = self._get_all_child_comp_uids()
+        state["childs"] = [self[n].uid for n in self.props.childs]
         return state
+
+    async def remove_child(self, name: str):
+        """if child isn't a container, just stop callback task, reset uid/_parent and remove from 
+        self child.
+        if child is a container, we need to reset namespace/parent to 
+        standalone component.
+        """
+        # TODO we may need a global aio lock here.
+        comp = self[name]
+        self.props.childs.remove(name)
+        comp.uid = ""
+        comp._parent = ""
+        await comp._cancel_task()
+        comp._queue = None
+        all_removed = [comp]
+        if isinstance(comp, ContainerBase):
+            standalone_map: Dict[str, Component] = {}
+            all_child = comp._get_all_nested_childs()
+            for c in all_child:
+                await c._cancel_task()
+                c._parent = c._parent[len(self.uid):]
+                c._queue = None
+                c.uid = c.uid[len(self.uid):]
+                if isinstance(c, ContainerBase):
+                    c._uid_to_comp = standalone_map
+                standalone_map[c.uid] = c
+            all_removed.extend(all_removed)
+        return comp, all_removed
 
     async def set_new_layout(self, layout: Dict[str, Component]):
         # remove all first
@@ -968,10 +1052,12 @@ class ContainerBase(Component[T_container_props, T_child]):
             comps_to_remove.extend(self._get_all_nested_child(c))
         for c in comps_to_remove:
             await c._clear()
+        for c in comps_to_remove:
             self._uid_to_comp.pop(c.uid)
+
         self.props.childs.clear()
         # TODO should we merge two events to one?
-        await self.queue.put(
+        await self.put_app_event(
             self.create_delete_comp_event([c.uid for c in comps_to_remove]))
         self.add_layout(layout)
         comps_frontend = {
@@ -981,8 +1067,9 @@ class ContainerBase(Component[T_container_props, T_child]):
         # make sure all child of this box is rerendered.
         # TODO merge events
         comps_frontend[self.uid] = self.to_dict()
-        await self.queue.put(self.create_update_comp_event(comps_frontend))
-        await self.queue.put(self.create_update_event({"childs": self.props.childs}))
+        await self.put_app_event(self.create_update_comp_event(comps_frontend))
+        child_uids = [self[c].uid for c in self.props.childs]
+        await self.put_app_event(self.create_update_event({"childs": child_uids}))
 
     async def remove_childs_by_keys(self, keys: List[str]):
         comps_to_remove: List[Component] = []
@@ -994,12 +1081,13 @@ class ContainerBase(Component[T_container_props, T_child]):
         for k in keys:
             self.props.childs.remove(k)
         # make sure all child of this box is rerendered.
-        await self.queue.put(
+        await self.put_app_event(
             self.create_delete_comp_event([c.uid for c in comps_to_remove]))
         # TODO combine two event to one
-        await self.queue.put(
+        await self.put_app_event(
             self.create_update_comp_event({self.uid: self.to_dict()}))
-        await self.queue.put(self.create_update_event({"childs": self.props.childs}))
+        child_uids = [self[c].uid for c in self.props.childs]
+        await self.put_app_event(self.create_update_event({"childs": child_uids}))
 
     async def update_childs(self, layout: Dict[str, Component]):
         new_comps = self._extract_layout(layout)
@@ -1007,13 +1095,14 @@ class ContainerBase(Component[T_container_props, T_child]):
         for c in new_comps:
             if c.uid in self._uid_to_comp:
                 item = self._uid_to_comp.pop(c.uid)
-                item.parent = ""  # mark invalid
+                item._parent = ""  # mark invalid
             self._uid_to_comp[c.uid] = c
         for n in layout.keys():
             if n not in self.props.childs:
                 self.props.childs.append(n)
         # make sure all child of this box is rerendered.
         update_comps_frontend[self.uid] = self.to_dict()
-        await self.queue.put(
+        await self.put_app_event(
             self.create_update_comp_event(update_comps_frontend))
-        await self.queue.put(self.create_update_event({"childs": self.props.childs}))
+        child_uids = [self[c].uid for c in self.props.childs]
+        await self.put_app_event(self.create_update_event({"childs": child_uids}))

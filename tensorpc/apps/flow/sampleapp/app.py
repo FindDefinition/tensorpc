@@ -448,13 +448,15 @@ class SampleThreeApp(EditableApp):
 
         # ctrl = three.OrbitControl()
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
-        self.b2d = three.Boxes2D(1000)
+        self.lines.prop(line_width=1, color="green")
+        self.b2d = three.Boxes2D(1000).prop(color="red",
+                                    alpha=0.5)
         mesh = three.Mesh(three.BoxGeometry(), three.MeshBasicMaterial())
         mesh.set_pointer_callback(on_click=three.EventCallback(lambda x: print(x)))
         self.canvas = three.ThreeCanvas({
             "cam": cam,
             "points": self.points,
-            # "lines": self.lines,
+            "lines": self.lines,
             "ctrl": ctrl,
             "axes": three.AxesHelper(10),
             "infgrid": infgrid,
@@ -502,9 +504,7 @@ class SampleThreeApp(EditableApp):
 
         random_lines = np.random.uniform(-5, 5, size=[5, 2,
                                                       3]).astype(np.float32)
-        await self.lines.update_lines(random_lines,
-                                      line_width=1,
-                                      color="green")
+        await self.lines.update_lines(random_lines)
         # print("???????", random_lines)
         # with open("/home/yy/Pictures/Screenshot from 2022-02-11 15-10-06.png", "rb") as f:
         #     await self.img.show_raw(f.read(), "png")
@@ -512,9 +512,8 @@ class SampleThreeApp(EditableApp):
         dimensions = np.array([[1, 1], [1, 1], [1, 1]], np.float32)
         attrs = [str(i) for i in range(centers.shape[0])]
         await self.b2d.update_boxes(centers,
-                                    dimensions,
-                                    color="red",
-                                    alpha=0.5)
+                                    dimensions)
+        print("???")
         await self.b2d.update_object3d(position=(0, 0, 1))
 
     async def show_pc(self, pc):

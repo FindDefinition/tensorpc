@@ -33,7 +33,7 @@ import numpy as np
 from tensorpc.utils.uniquename import UniqueNamePool
 from typing_extensions import ParamSpec, TypeAlias
 
-from ..core import (AppEvent, BasicProps, Component,
+from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, NumberType, T_base_props, T_child,
                     TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
                     ValueType, undefined, ContainerBaseProps, T_container_props)
@@ -575,7 +575,7 @@ class Points(ThreeComponentBase[PointProps]):
                 if attr_fields is None:
                     attr_fields = [f"{i}" for i in range(attrs.shape[1])]
             upd["attrs"] = attrs
-            upd["attrFields"] = attr_fields
+            upd["attr_fields"] = attr_fields
             if attr_fields is not None:
                 self.props.attr_fields = attr_fields
         self.props.points = points
@@ -695,8 +695,10 @@ class Boxes2D(Object3dWithEventBase[Boxes2DProps]):
 
     def validate_props(self, props: Dict[str, Any]):
         if "centers" in props:
-            return props["centers"].shape[0] <= self.limit
-        return False
+            res = props["centers"].shape[0] <= self.limit
+        else:
+            res = False
+        return res
 
     async def update_boxes(self,
                            centers: Optional[np.ndarray] = None,
@@ -704,27 +706,32 @@ class Boxes2D(Object3dWithEventBase[Boxes2DProps]):
                            colors: Optional[Union[np.ndarray,
                                                   Undefined]] = None,
                            attrs: Optional[Union[List[str], Undefined]] = None):
+        # TODO check props in 
         upd: Dict[str, Any] = {}
         if centers is not None:
             assert centers.shape[
                 0] <= self.limit, f"your centers size must smaller than limit {self.limit}"
-            self.centers = centers
+            self.props.centers = centers
             upd["centers"] = centers
         if dimensions is not None:
-            assert dimensions.shape[
-                0] <= self.limit, f"your dimensions size must smaller than limit {self.limit}"
-            self.dimensions = dimensions
-            if dimensions.shape != self.centers.shape:
-                dimensions = np.broadcast_to(dimensions, self.centers.shape)
+            if dimensions.ndim == 1:
+                assert dimensions.shape[0] in [1, 2], "dimersion must be [1] or [2]"
+            else:
+                assert dimensions.shape[
+                    0] <= self.limit, f"your dimensions size must smaller than limit {self.limit}"
+            self.props.dimensions = dimensions
+            if dimensions.shape != self.props.centers.shape:
+                # check broadcastable
+                np.broadcast_shapes(self.props.centers.shape, dimensions.shape)
             upd["dimensions"] = dimensions
         if colors is not None:
             if not isinstance(colors, Undefined):
                 assert colors.shape[
                     0] <= self.limit, f"your colors size must smaller than limit {self.limit}"
-            self.colors = colors
+            self.props.colors = colors
             upd["colors"] = colors
         if attrs is not None:
-            self.attrs = attrs
+            self.props.attrs = attrs
             upd["attrs"] = attrs
         await self.send_app_event_and_wait(self.create_update_event(upd))
 
@@ -1170,6 +1177,38 @@ class ThreeCanvas(MUIContainerBase[ContainerBaseProps, ThreeComponentType]):
         return self._update_props_base(propcls)
 
 @dataclasses.dataclass
+class TransformControlsProps(ContainerBaseProps):
+    enabled: Union[bool, Undefined] = undefined
+    axis: Union[str, Undefined] = undefined
+    mode: Union[str, Undefined] = undefined
+    translation_snap: Union[NumberType, Undefined] = undefined
+    rotation_snap: Union[NumberType, Undefined] = undefined
+    scale_snap: Union[NumberType, Undefined] = undefined
+    space: Union[str, Undefined] = undefined
+    size: Union[NumberType, Undefined] = undefined
+    show_x: Union[bool, Undefined] = undefined
+    show_y: Union[bool, Undefined] = undefined
+    show_z: Union[bool, Undefined] = undefined
+    object3d_uid: Union[str, Undefined] = undefined
+
+class TransformControls(ThreeComponentBase[TransformControlsProps]):
+    def __init__(self,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.ThreeTransformControl, TransformControlsProps, queue)
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+        
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+
+@dataclasses.dataclass
 class ThreeFlexProps(R3FlexPropsBase, ContainerBaseProps):
     size: Union[Vector3Type, Undefined] = undefined
     position: Union[Vector3Type, Undefined] = undefined
@@ -1238,7 +1277,6 @@ def FlexItem(comp: ThreeComponentType):
         "c": comp,
     })
     return box
-
 
 PointerEventsProperties = Union[Literal["auto"], Literal["none"],
                                 Literal["visiblePainted"],
@@ -1889,7 +1927,8 @@ class ShapeButton(Group):
         return res
 
     async def headless_click(self):
-        return await self.queue.put(UIEvent({self.uid: [PointerEventType.Click, self.name]}))
+        uiev = UIEvent({self.uid: [PointerEventType.Click, self.name]})
+        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: uiev}))
 
     def get_callback(self):
         res = self.mesh._pointer_event_map[PointerEventType.Click]
@@ -1956,7 +1995,8 @@ class Button(Group):
         return res
 
     async def headless_click(self):
-        return await self.queue.put(UIEvent({self.uid: [PointerEventType.Click, self.name]}))
+        uiev = UIEvent({self.uid: [PointerEventType.Click, self.name]})
+        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: uiev}))
 
     def get_callback(self):
         res = self.mesh._pointer_event_map[PointerEventType.Click]
@@ -2023,7 +2063,8 @@ class ToggleButton(Group):
         return res
 
     async def headless_toggle(self):
-        return await self.queue.put(UIEvent({self.uid: [PointerEventType.Change, self.name]}))
+        uiev = UIEvent({self.uid: [PointerEventType.Change, self.name]})
+        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: uiev}))
 
     def get_callback(self):
         res = self.mesh._pointer_event_map[PointerEventType.Change]
