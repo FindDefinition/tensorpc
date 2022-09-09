@@ -498,7 +498,8 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop, T_ch
             print("IGNORE EVENT", self.props.status)
             return
         elif self.props.status == UIRunStatus.Stop.value:
-            self.state_change_callback(data)
+            if ev_type == PointerEventType.Change:
+                self.state_change_callback(data)
             def ccb(cb):
                 return lambda: cb(data)
 

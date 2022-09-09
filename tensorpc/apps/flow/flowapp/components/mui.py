@@ -95,7 +95,7 @@ class FlexComponentBaseProps(BasicProps):
     color: Union[ValueType, Undefined] = undefined
     background_color: Union[ValueType, Undefined] = undefined
     font_size: Union[ValueType, Undefined] = undefined
-
+    font_family: Union[str, Undefined] = undefined
     border: Union[str, Undefined] = undefined
 
 
@@ -800,6 +800,9 @@ class SelectProps(MUIComponentBaseProps):
     label: str = ""
     items: List[Tuple[str, ValueType]] = dataclasses.field(default_factory=list) 
     value: ValueType = ""
+    size: Union[Undefined, Literal["small", "medium"]] = undefined
+    form_margin: Union[Undefined, Literal["dense", "none", "normal"]] = undefined
+    variant: Union[Undefined, Literal["filled", "outlined", "standard"]] = undefined
 
 class Select(MUIComponentBase[SelectProps]):
 
@@ -1245,7 +1248,26 @@ class Paper(MUIContainerBase[PaperProps, MUIComponentType]):
         propcls = self.propcls
         return self._prop_base(propcls, self)
 
+@dataclasses.dataclass
+class FormControlProps(MUIFlexBoxProps):
+    size: Union[Undefined, Literal["small", "medium"]] = undefined
+    form_margin: Union[Undefined, Literal["dense", "none", "normal"]] = undefined
 
+class FormControl(MUIContainerBase[FormControlProps, MUIComponentType]):
+
+    def __init__(self,
+                 init_dict: Dict[str, MUIComponentType],
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 uid_to_comp: Optional[Dict[str, Component]] = None,
+                 inited: bool = False) -> None:
+        super().__init__(UIType.Paper, FormControlProps, uid, queue, uid_to_comp,
+                         init_dict, inited)
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
 
 
 @dataclasses.dataclass
@@ -1348,3 +1370,20 @@ class Chip(MUIComponentBase[ChipProps]):
     def prop(self):
         propcls = self.propcls
         return self._prop_base(propcls, self)
+
+
+def get_control_value(comp: Union[Input, Switch, RadioGroup, Select, MultipleSelect, Slider]):
+    if isinstance(comp, Input):
+        return comp.value 
+    elif isinstance(comp, Switch):
+        return comp.checked 
+    elif isinstance(comp, RadioGroup):
+        return comp.value 
+    elif isinstance(comp, Select):
+        return comp.value 
+    elif isinstance(comp, MultipleSelect):
+        return comp.values
+    elif isinstance(comp, Slider):
+        return comp.value 
+    else:
+        raise NotImplementedError("not a control ui")

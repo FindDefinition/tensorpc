@@ -39,7 +39,8 @@ ValueType: TypeAlias = Union[int, float, str]
 NumberType: TypeAlias = Union[int, float]
 
 class Undefined:
-    pass
+    def __repr__(self) -> str:
+        return "undefined"
 
 
 class NoDefault:
@@ -74,7 +75,9 @@ class UIType(enum.Enum):
     Card = 0x12
     Chip = 0x13
     Accordion = 0x14
-
+    FormControl = 0x15
+    FormControlLabel = 0x16
+    InputLabel = 0x17
 
     # special
     TaskLoop = 0x100
@@ -601,6 +604,8 @@ class Component(Generic[T_base_props, T_child]):
 
     def _update_props_base(self, prop: Callable[P, Any]):
         def wrapper(*args: P.args, **kwargs: P.kwargs):
+            for k, v in kwargs.items():
+                setattr(self.__props, k, v)
             return self.create_update_event(kwargs)
         return wrapper 
 
