@@ -13,6 +13,8 @@
 # limitations under the License.
 
 from .app import (App, AppEditorFrontendEvent, AppEditorFrontendEventType,
-                  EditableApp, EditableLayoutApp, AppEvent)
+                  EditableApp, EditableLayoutApp, AppEvent,
+                  AppEditorEventType, AppEditor, get_app_context,
+                  get_app_storage)
 from .components import mui, three
 from .core import Undefined, undefined

@@ -63,6 +63,10 @@ APP_CONTEXT_VAR: contextvars.ContextVar[
 def get_app_context() -> Optional[AppContext]:
     return APP_CONTEXT_VAR.get()
 
+def get_app_storage() :
+    ctx = get_app_context()
+    assert ctx is not None 
+    return ctx.app.get_persist_storage()
 
 @contextlib.contextmanager
 def _enter_app_conetxt(app: "App"):
@@ -79,16 +83,13 @@ _ROOT = "root"
 
 class AppEditor:
 
-    def __init__(
-        self,
-        init_value: str,
-        language: str,
-    ) -> None:
+    def __init__(self, init_value: str, language: str, queue: "asyncio.Queue[AppEvent]") -> None:
         self._language = language
         self._value: str = init_value
         self.__freeze_language = False
         self._init_line_number = 1
         self._monaco_state: Optional[Any] = None
+        self._queue = queue
 
     def set_init_line_number(self, val: int):
         self._init_line_number = val
@@ -123,9 +124,28 @@ class AppEditor:
         state["initLineNumber"] = self._init_line_number
         return state
 
+    async def _send_editor_event(self, event: AppEditorEvent):
+        await self._queue.put(AppEvent("", {AppEventType.AppEditor: event}))
+
+    async def set_editor_value(self, value: str, language: str = ""):
+        """use this method to set editor value and language.
+        """
+        self.value = value
+        if language:
+            self.language = language
+        app_ev = AppEditorEvent(
+            AppEditorEventType.SetValue, {
+                "value": self.value,
+                "language": self.language,
+            })
+        await self._send_editor_event(app_ev)
 
 class App:
-    # TODO find a way to sync state to frontend uncontrolled elements.
+    """
+    App Init Callbacks:
+    1. app init/app init async
+    2. set_persist_props_async for all comps
+    """
     def __init__(self,
                  flex_flow: Union[str, Undefined] = "column nowrap",
                  justify_content: Union[str, Undefined] = undefined,
@@ -146,7 +166,7 @@ class App:
         self.root = root
         self._enable_editor = False
 
-        self.code_editor = AppEditor("", "python")
+        self.code_editor = AppEditor("", "python", self._queue)
         self._app_dynamic_cls: Optional[ReloadableDynamicClass] = None
         # other app can call app methods via service_unit
         self._app_service_unit: Optional[ServiceUnit] = None
@@ -156,11 +176,23 @@ class App:
 
         self._force_special_layout_method = False
 
+        self.__persist_storage: Dict[str, Any] = {}
+
+        self.__previous_error_sync_props = {}
+        self.__previous_error_persist_state = {}
+
+
+    def get_persist_storage(self):
+        return self.__persist_storage
+
     def _get_simple_app_state(self):
         """get state of Input/Switch/Radio/Slider/Select
         """
         state: Dict[str, Any] = {}
+        user_state: Dict[str, Any] = {}
+
         for comp in self.root._get_all_nested_childs():
+            # automatic simple state store
             if isinstance(comp, (
                     mui.Input,
                     mui.Switch,
@@ -169,25 +201,50 @@ class App:
                     mui.Select,
                     mui.MultipleSelect,
             )):
-                state[comp.uid] = {
-                    "type": comp.type.value,
+                state[comp._flow_uid] = {
+                    "type": comp._flow_comp_type.value,
                     "props": comp.get_sync_props(),
                 }
-        return state
+            # user state 
+            st = comp.get_persist_props()
+            if st is not None:
+                user_state[comp._flow_uid] = {
+                    "type": comp._flow_comp_type.value,
+                    "state": st,
+                }
+        # print("persist_storage_SAVE", self.__persist_storage, id(self.__persist_storage))
+        return {
+            "persist_storage": self.__persist_storage,
+            "uistate": state,
+            "userstate": user_state,
+        }
 
     async def _restore_simple_app_state(self, state: Dict[str, Any]):
         """try to restore state of Input/Switch/Radio/Slider/Select
         no exception if fail.
         """
+        uistate = state["uistate"]
+        userstate = state["userstate"]
+        # print("persist_storage", state["persist_storage"])
+        if state["persist_storage"]:
+            self.__persist_storage.update(state["persist_storage"])
         ev = AppEvent("", {})
-        for k, s in state.items():
+        for k, s in uistate.items():
             if k in self.root._uid_to_comp:
                 comp_to_restore = self.root._uid_to_comp[k]
-                if comp_to_restore.type.value == s["type"]:
+                if comp_to_restore._flow_comp_type.value == s["type"]:
                     comp_to_restore.set_props(s["props"])
-                    pylance_wtf = ev.merge_new(
-                        comp_to_restore.get_sync_event(True))
-                    ev = pylance_wtf
+                    ev += comp_to_restore.get_sync_event(True)
+        with _enter_app_conetxt(self):
+            for k, s in userstate.items():
+                if k in self.root._uid_to_comp:
+                    comp_to_restore = self.root._uid_to_comp[k]
+                    if comp_to_restore._flow_comp_type.value == s["type"]:
+                        try:
+                            await comp_to_restore.set_persist_props_async(s["state"])
+                        except:
+                            traceback.print_exc()
+                            continue
         await self._queue.put(ev)
 
     def _app_force_use_layout_function(self):
@@ -199,18 +256,26 @@ class App:
                                        with_code_editor: bool = True,
                                        reload: bool = False):
         self.root._prevent_add_layout = False
-        prev_comps = {}
+        prev_comps = self.__previous_error_sync_props.copy()
+        prev_user_states = self.__previous_error_persist_state.copy()
         if reload:
-            prev_comps = {
-                u: c._to_dict_with_sync_props()
-                for u, c in self._uid_to_comp.items()
-            }
+            for u, c in self._uid_to_comp.items():
+                prev_comps[u] = c._to_dict_with_sync_props()
+                user_state = c.get_persist_props()
+                if user_state is not None:
+                    prev_user_states[u] = {
+                        "type": c._flow_comp_type.value,
+                        "state": user_state,
+                    }
         await self.root._clear()
         self._uid_to_comp.clear()
-        self.root.uid = _ROOT
+        self.root._flow_uid = _ROOT
         try:
             res = self.app_create_layout()
+            self.__previous_error_sync_props.clear()
+            self.__previous_error_persist_state.clear()
         except Exception as e:
+            # TODO store
             traceback.print_exc()
             ss = io.StringIO()
             traceback.print_exc(file=ss)
@@ -236,11 +301,18 @@ class App:
         self.root._prevent_add_layout = True
         if reload:
             # comps = self.root._get_all_nested_childs()
-            for comp in self._uid_to_comp.values():
-                if comp.uid in prev_comps:
-                    if comp.type.value == prev_comps[comp.uid]["type"]:
-                        comp.set_props(prev_comps[comp.uid]["props"])
+            with _enter_app_conetxt(self):
+
+                for comp in self._uid_to_comp.values():
+                    if comp._flow_uid in prev_comps:
+                        if comp._flow_comp_type.value == prev_comps[comp._flow_uid]["type"]:
+                            comp.set_props(prev_comps[comp._flow_uid]["props"])
+                    if comp._flow_uid in prev_user_states:
+                        if comp._flow_comp_type.value == prev_user_states[comp._flow_uid]["type"]:
+                            await comp.set_persist_props_async(prev_user_states[comp._flow_uid]["state"])
             del prev_comps
+            del prev_user_states
+
         if send_layout_ev:
             ev = AppEvent(
                 "", {
@@ -250,6 +322,11 @@ class App:
             await self._queue.put(ev)
 
     def app_initialize(self):
+        """override this to init app before server start
+        """
+        pass
+
+    async def app_initialize_async(self):
         """override this to init app before server start
         """
         pass
@@ -322,8 +399,10 @@ class App:
         if event.type == AppEditorFrontendEventType.SaveEditorState:
             self.code_editor._monaco_state = event.data
             return
-        # with _enter_app_conetxt(self):
-        return await self.handle_code_editor_event(event)
+        elif event.type == AppEditorFrontendEventType.Save:
+            self.code_editor.value = event.data
+        with _enter_app_conetxt(self):
+            return await self.handle_code_editor_event(event)
 
     async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
         """override this method to support vscode editor.
@@ -431,6 +510,7 @@ class EditableApp(App):
                         fut = asyncio.run_coroutine_threadsafe(
                             self.set_editor_value(new_data), self._loop)
                         fut.result()
+
                     layout_func_changed = self._reload_app_file()
                     if layout_func_changed:
                         fut = asyncio.run_coroutine_threadsafe(
@@ -449,7 +529,6 @@ class EditableApp(App):
         new_cb, code_changed = self._get_app_dynamic_cls().reload_obj_methods(
             self, callback_dict)
         self._get_app_service_unit().reload_metas()
-
         for k, v in comps.items():
             if k in new_cb:
                 v.set_callback(new_cb[k])
@@ -464,9 +543,9 @@ class EditableApp(App):
                     self._watchdog_ignore_next = True
                     with open(inspect.getfile(type(self)), "w") as f:
                         f.write(event.data)
-                    self.code_editor.value = event.data
                     self._watchdog_prev_content = event.data
                     layout_func_changed = self._reload_app_file()
+
                     if layout_func_changed:
                         await self._app_run_layout_function(
                             True, with_code_editor=False, reload=True)

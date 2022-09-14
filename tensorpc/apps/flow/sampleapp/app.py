@@ -425,6 +425,8 @@ class SampleEditorAppV2(EditableApp):
     def new_method(self):
         print("new method")
 
+
+
 class SampleThreeApp(EditableApp):
 
     def __init__(self) -> None:

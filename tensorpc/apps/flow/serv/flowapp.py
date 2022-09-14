@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pickle
 from typing import Any, Dict, List, Optional
 from tensorpc.apps.flow.coretypes import ScheduleEvent, get_uid
 from tensorpc.apps.flow.flowapp.core import AppEditorFrontendEvent, AppEvent, AppEventType, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UISaveStateEvent
@@ -63,11 +64,13 @@ class FlowApp:
     @marker.mark_async_init
     async def init(self):
         self.app.app_initialize()
+        await self.app.app_initialize_async()
         if self.app._force_special_layout_method:
             await self.app._app_run_layout_function()
         lay = self.app._get_app_layout()
         await self._send_loop_queue.put(
             AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)}))
+        # TODO should we just use grpc client to query init state here?
         await self._send_loop_queue.put(
             AppEvent("", {AppEventType.Notify: NotifyEvent(NotifyType.AppStart)}))
 
@@ -149,6 +152,17 @@ class FlowApp:
             return await robj.chunked_remote_call(
                 serv_names.FLOW_PUT_APP_EVENT, ev.to_dict())
 
+    def _send_grpc_event_large_sync(self, ev: AppEvent,
+                                     robj: tensorpc.RemoteManager):
+        if self.master_meta.is_worker:
+            return robj.chunked_remote_call(
+                serv_names.FLOWWORKER_PUT_APP_EVENT, self.master_meta.graph_id,
+                ev.to_dict())
+        else:
+            return robj.chunked_remote_call(
+                serv_names.FLOW_PUT_APP_EVENT, ev.to_dict())
+
+
     async def _send_loop(self):
         # TODO unlike flowworker, the app shouldn't disconnect to master/flowworker.
         # so we should just use retry here.
@@ -212,11 +226,16 @@ class FlowApp:
     @marker.mark_exit
     async def on_exit(self):
         # save simple state to master
-        print("????????????????")
         try:
+            grpc_url = self.master_meta.grpc_url
             uiev = UISaveStateEvent(self.app._get_simple_app_state())
             ev = AppEvent(self._uid, {AppEventType.UISaveStateEvent: uiev})
-            print(ev)
-            await self._send_http_event(ev)
+            # TODO remove this dump
+            # check user error, user can't store invalid
+            # object that exists after reload module.
+            pickle.dumps(ev)
+            async with tensorpc.AsyncRemoteManager(grpc_url) as robj:
+                await self._send_grpc_event_large(ev, robj)
+
         except:
             traceback.print_exc()

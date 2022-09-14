@@ -173,6 +173,7 @@ async def serve_service(service: AsyncRemoteObjectService,
     #         if wait_time > 0 and interval > wait_time:
     #             break
     await server.stop(0)
+    await server.wait_for_termination()
     # exec cleanup functions
     await server_core.exec_exit_funcs()
 
