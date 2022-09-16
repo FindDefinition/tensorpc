@@ -37,7 +37,7 @@ from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, NumberType, T_base_props, T_child,
                     TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
                     ValueType, undefined, ContainerBaseProps,
-                    T_container_props)
+                    T_container_props, Fragment)
 from .mui import (FlexBoxProps, MUIComponentType, MUIContainerBase,
                   _encode_image_bytes, _handle_button_event, PointerEventsProperties)
 
@@ -143,7 +143,7 @@ class ThreeGeometryPropsBase(ThreeBasicProps):
 T_material_prop = TypeVar("T_material_prop", bound=ThreeMaterialPropsBase)
 T_geometry_prop = TypeVar("T_geometry_prop", bound=ThreeGeometryPropsBase)
 
-ThreeComponentType = Union[ThreeComponentBase, ThreeContainerBase]
+ThreeComponentType = Union[ThreeComponentBase, ThreeContainerBase, Fragment]
 
 
 class PointerEventType(enum.Enum):

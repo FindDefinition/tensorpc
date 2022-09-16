@@ -30,7 +30,7 @@ from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, NumberType, T_child, TaskLoopEvent, UIEvent,
                     UIRunStatus, UIType, Undefined, undefined, T_base_props,
                     T_container_props, ContainerBaseProps,
-                    ValueType)
+                    ValueType, Fragment)
 
 from .. import colors
 
@@ -175,7 +175,7 @@ async def _handle_button_event(comp: Union["Button", "ListItemButton"],
         comp._task = asyncio.create_task(comp.run_callback(lambda: cb2()))
 
 
-MUIComponentType: TypeAlias = Union[MUIComponentBase, MUIContainerBase]
+MUIComponentType: TypeAlias = Union[MUIComponentBase, MUIContainerBase, Fragment]
 
 @dataclasses.dataclass
 class ImageProps(MUIComponentBaseProps):
@@ -519,6 +519,7 @@ class ButtonGroup(MUIContainerBase[ButtonGroupProps, Button]):
     def prop(self):
         propcls = self.propcls
         return self._prop_base(propcls, self)
+
 
 @dataclasses.dataclass
 class AccordionDetailsProps(MUIFlexBoxProps):

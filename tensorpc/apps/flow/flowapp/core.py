@@ -78,12 +78,14 @@ class UIType(enum.Enum):
     AccordionSummary = 0x16
     AccordionDetail = 0x17
 
-
     # special
     TaskLoop = 0x100
     FlexBox = 0x101
     MUIList = 0x102
     Divider = 0x103
+
+    # react fragment
+    Fragment = 0x200
 
     MASK_THREE = 0x1000
     MASK_THREE_GEOMETRY = 0x0100
@@ -125,16 +127,22 @@ class UIType(enum.Enum):
     ThreeSimpleGeometry = 0x1101
     ThreeShape = 0x1102
 
-    MASK_LEAFLET = 0x3000
-    LeafletMapContainer = 0x3000
-    LeafletTileLayer = 0x3001
-    LeafletMarker = 0x3002
-    LeafletPopup = 0x3003
-    LeafletPolyline = 0x3004
-    LeafletPolygon = 0x3005
-    LeafletCircle = 0x3006
-    LeafletRectangle = 0x3007
-    LeafletTooltip = 0x3008
+    MASK_LEAFLET = 0x2000
+    LeafletMapContainer = 0x2000
+    LeafletTileLayer = 0x2001
+    LeafletMarker = 0x2002
+    LeafletPopup = 0x2003
+    LeafletPolyline = 0x2004
+    LeafletPolygon = 0x2005
+    LeafletCircle = 0x2006
+    LeafletRectangle = 0x2007
+    LeafletTooltip = 0x2008
+    LeafletCircleMarker = 0x2009
+
+    # composite elements
+    # a poly line and lots of circle markers/tooltips (typo) in single flowapp element.
+    LeafletTracklet = 0x2100 
+
 
 
 class AppEventType(enum.Enum):
@@ -1170,3 +1178,17 @@ def _detach_component(comp: Component):
     comp._parent = ""
     comp._queue = None
     return comp, all_removed, all_removed_prev_uids
+
+
+
+class Fragment(ContainerBase[ContainerBaseProps, Component]):
+    def __init__(self,
+                 init_dict: Dict[str, Component],
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 uid_to_comp: Optional[Dict[str, Component]] = None,
+                 inited: bool = False) -> None:
+        super().__init__(UIType.Fragment, ContainerBaseProps, uid, queue,
+                         uid_to_comp, init_dict, inited)
+
+
