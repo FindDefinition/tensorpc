@@ -51,7 +51,15 @@ def _encode_image_bytes(img: np.ndarray):
 @dataclasses.dataclass
 class MUIBasicProps(BasicProps):
     pass
+
 _OverflowType = Union[Literal["visible"], Literal["hidden"], Literal["scroll"], Literal["auto"]]
+PointerEventsProperties: TypeAlias = Union[Literal["auto"], Literal["none"],
+                                Literal["visiblePainted"],
+                                Literal["visibleFill"],
+                                Literal["visibleStroke"], Literal["visible"],
+                                Literal["painted"], Literal["fill"],
+                                Literal["stroke"], Literal["all"],
+                                Literal["inherit"]]
 
 @dataclasses.dataclass
 class FlexComponentBaseProps(BasicProps):
@@ -98,7 +106,7 @@ class FlexComponentBaseProps(BasicProps):
     font_family: Union[str, Undefined] = undefined
     border: Union[str, Undefined] = undefined
     white_space: Union[Literal["normal", "pre", "nowrap", "pre-wrap", "pre-line", "break-spaces"], Undefined] = undefined
-
+    pointer_events: Union[PointerEventsProperties, Undefined] = undefined
 
 @dataclasses.dataclass
 class MUIComponentBaseProps(FlexComponentBaseProps):

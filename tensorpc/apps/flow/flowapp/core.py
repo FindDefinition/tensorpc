@@ -125,6 +125,18 @@ class UIType(enum.Enum):
     ThreeSimpleGeometry = 0x1101
     ThreeShape = 0x1102
 
+    MASK_LEAFLET = 0x3000
+    LeafletMapContainer = 0x3000
+    LeafletTileLayer = 0x3001
+    LeafletMarker = 0x3002
+    LeafletPopup = 0x3003
+    LeafletPolyline = 0x3004
+    LeafletPolygon = 0x3005
+    LeafletCircle = 0x3006
+    LeafletRectangle = 0x3007
+    LeafletTooltip = 0x3008
+
+
 class AppEventType(enum.Enum):
     # layout events
     UpdateLayout = 0
@@ -144,6 +156,9 @@ class AppEventType(enum.Enum):
     ScheduleNext = 100
     # special UI event
     AppEditor = 200
+    # for components that don't support contolled mode.
+    # for example, editor and leaflet map
+    UnControlledEvent = 300
 
 
 class UIRunStatus(enum.Enum):
@@ -234,6 +249,24 @@ class NotifyEvent:
         assert isinstance(new, NotifyEvent)
         return new
 
+@ALL_APP_EVENTS.register(key=AppEventType.UnControlledEvent.value)
+class UncontrolledEvent:
+    def __init__(self, uid_to_data: Dict[str, Any]) -> None:
+        self.uid_to_data = uid_to_data
+
+    def to_dict(self):
+        return self.uid_to_data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        return cls(data)
+
+    def merge_new(self, new):
+        assert isinstance(new, UncontrolledEvent)
+        return UncontrolledEvent({
+            **new.uid_to_data,
+            **self.uid_to_data,
+        })
 
 @ALL_APP_EVENTS.register(key=AppEventType.UISaveStateEvent.value)
 class UISaveStateEvent:
@@ -417,7 +450,8 @@ class ScheduleNextForApp:
 APP_EVENT_TYPES = Union[UIEvent, LayoutEvent, CopyToClipboardEvent,
                         UpdateComponentsEvent, DeleteComponentsEvent,
                         ScheduleNextForApp, AppEditorEvent, UIUpdateEvent,
-                        UISaveStateEvent, NotifyEvent, UIExceptionEvent]
+                        UISaveStateEvent, NotifyEvent, UIExceptionEvent,
+                        UncontrolledEvent]
 
 
 def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":
@@ -456,7 +490,7 @@ class AppEvent:
         self.sent_event = sent_event
 
     def to_dict(self):
-        # here we don't use dict for typeToEvents due to frontend key type limit.
+        # here we don't use dict for typeToEvents because key in js must be string.
         t2e = [(k.value, v.to_dict()) for k, v in self.type_to_event.items()]
         # make sure layout is proceed firstly.
         t2e.sort(key=lambda x: x[0])
@@ -750,6 +784,11 @@ class Component(Generic[T_base_props, T_child]):
         ev = UIUpdateEvent({self._flow_uid: (data_no_und, data_unds)})
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UIUpdatePropsEvent: ev})
+
+    def create_uncontrolled_comp_event(self, data: Dict[str, Any]):
+        ev = UncontrolledEvent({self._flow_uid: data})
+        # uid is set in flowapp service later.
+        return AppEvent("", {AppEventType.UnControlledEvent: ev})
 
     async def send_app_event_and_wait(self, ev: AppEvent):
         if ev.sent_event is None:

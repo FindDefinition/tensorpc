@@ -36,7 +36,7 @@ from tensorpc.apps.flow.flowapp.components.mui import (
 from ..flowapp.core import Component
 from tensorpc.core import prim
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.apps.flow.flowapp.components import three, mui
+from tensorpc.apps.flow.flowapp.components import three, mui, leaflet
 import numpy as np
 
 class SampleApp(App):
@@ -751,3 +751,26 @@ class SampleThree2DApp(EditableApp):
         await self.box2d.update_boxes(centers,
                                     dimensions,
                                     attrs=attrs)
+
+class SampleMapApp(EditableApp):
+    def __init__(self) -> None:
+        super().__init__(reloadable_layout=True)
+        self.set_init_window_size([800, 600])
+        # makesure three canvas size fit parent.
+        # self.root.props.min_height = 0
+        # store components here if you want to keep
+        # data after reload layout.
+        self.root.props.flex_flow = "row nowrap"
+
+    def app_create_layout(self) -> Dict[str, MUIComponentType]:
+        self.leaflet = leaflet.MapContainer((30, 100), 13, {
+                "tile": leaflet.TileLayer(),
+            }).prop(height="100%", flex=3)
+        return {
+            "control": mui.VBox({
+                "btn": mui.Button("FlyTo", lambda: self.leaflet.fly_to((40, 100), zoom=10)),
+            }).prop(min_height=0, flex=1),
+            "mmap": self.leaflet,
+        }
+
+    

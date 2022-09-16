@@ -549,13 +549,15 @@ class SSHClient:
 
     @contextlib.asynccontextmanager
     async def simple_connect(self):
-        async with asyncssh.connection.connect(self.url_no_port,
+        conn_task = asyncssh.connection.connect(self.url_no_port,
                                     self.port,
                                     username=self.username,
                                     password=self.password,
                                     keepalive_interval=15,
                                     login_timeout=10,
-                                    known_hosts=None) as conn:
+                                    known_hosts=None)
+        conn_ctx = await asyncio.wait_for(conn_task, timeout=10)
+        async with conn_ctx as conn:
             if not self.bash_file_inited:
                 p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
                 await asyncsshscp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
@@ -589,13 +591,17 @@ class SSHClient:
             env = {}
         # TODO better keepalive
         try:
-            async with asyncssh.connection.connect(self.url_no_port,
+            conn_task = asyncssh.connection.connect(self.url_no_port,
                                         self.port,
                                         username=self.username,
                                         password=self.password,
                                         keepalive_interval=10,
                                         login_timeout=10,
-                                        known_hosts=None) as conn:
+                                        known_hosts=None)
+            print("START WAIT2")
+            conn_ctx = await asyncio.wait_for(conn_task, timeout=10)
+            print("END WAIT")
+            async with conn_ctx as conn:
                 if not self.bash_file_inited:
                     p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
                     await asyncsshscp(str(p),
@@ -711,6 +717,7 @@ class SSHClient:
                     ]
                 await loop_task
         except Exception as exc:
+            print("FUCKJ")
             await callback(_warp_exception_to_event(exc, self.uid))
         finally:
             if init_event:

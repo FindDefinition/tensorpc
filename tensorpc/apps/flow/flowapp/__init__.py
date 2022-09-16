@@ -16,5 +16,5 @@ from .app import (App, AppEditorFrontendEvent, AppEditorFrontendEventType,
                   EditableApp, EditableLayoutApp, AppEvent,
                   AppEditorEventType, AppEditor, get_app_context,
                   get_app_storage)
-from .components import mui, three
+from .components import mui, three, leaflet
 from .core import Undefined, undefined

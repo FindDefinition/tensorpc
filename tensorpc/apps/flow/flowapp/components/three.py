@@ -39,11 +39,11 @@ from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     ValueType, undefined, ContainerBaseProps,
                     T_container_props)
 from .mui import (FlexBoxProps, MUIComponentType, MUIContainerBase,
-                  _encode_image_bytes, _handle_button_event)
+                  _encode_image_bytes, _handle_button_event, PointerEventsProperties)
 
 Vector3Type: TypeAlias = Tuple[float, float, float]
 
-_CORO_ANY: TypeAlias = Union[Coroutine[None, None, None], None]
+_CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
 _CORO_ANY: TypeAlias = Union[Coroutine[Any, None, None], Any]
 
 CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
@@ -1361,14 +1361,6 @@ def FlexItem(comp: ThreeComponentType):
     })
     return box
 
-
-PointerEventsProperties = Union[Literal["auto"], Literal["none"],
-                                Literal["visiblePainted"],
-                                Literal["visibleFill"],
-                                Literal["visibleStroke"], Literal["visible"],
-                                Literal["painted"], Literal["fill"],
-                                Literal["stroke"], Literal["all"],
-                                Literal["inherit"]]
 
 
 @dataclasses.dataclass
