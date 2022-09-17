@@ -25,6 +25,7 @@ import numpy as np
 from PIL import Image as PILImage
 import json
 import inspect
+from tensorpc.apps.flow.flowapp.components.common import handle_standard_event, handle_standard_event_no_arg
 from tensorpc.core.asynctools import cancel_task
 from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, NumberType, T_child, TaskLoopEvent, UIEvent,
@@ -478,7 +479,7 @@ class Button(MUIComponentBase[ButtonProps]):
         self.callback = val
 
     async def handle_event(self, ev: Any):
-        await _handle_button_event(self, ev)
+        await handle_standard_event_no_arg(self, sync_first=True)
 
     @property 
     def prop(self):
@@ -505,14 +506,14 @@ class ButtonGroupProps(MUIFlexBoxProps):
 class ButtonGroup(MUIContainerBase[ButtonGroupProps, Button]):
 
     def __init__(self,
-                 init_dict: Dict[str, Button],
+                 children: Dict[str, Button],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(UIType.ButtonGroup, ButtonGroupProps, uid, queue,
-                         uid_to_comp, init_dict, inited)
-        for v in init_dict.values():
+                         uid_to_comp, children, inited)
+        for v in children.values():
             assert isinstance(v, Button), "all childs must be button"
 
     @property 
@@ -532,13 +533,13 @@ class AccordionSummaryProps(MUIFlexBoxProps):
 class AccordionDetails(MUIContainerBase[AccordionDetailsProps, MUIComponentType]):
 
     def __init__(self,
-                 init_dict: Dict[str, MUIComponentType],
+                 children: Dict[str, MUIComponentType],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(UIType.AccordionDetail, AccordionDetailsProps, uid, queue,
-                         uid_to_comp, init_dict, inited)
+                         uid_to_comp, children, inited)
 
     @property 
     def prop(self):
@@ -548,13 +549,13 @@ class AccordionDetails(MUIContainerBase[AccordionDetailsProps, MUIComponentType]
 class AccordionSummary(MUIContainerBase[AccordionSummaryProps, MUIComponentType]):
 
     def __init__(self,
-                 init_dict: Dict[str, MUIComponentType],
+                 children: Dict[str, MUIComponentType],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(UIType.AccordionSummary, AccordionSummaryProps, uid, queue,
-                         uid_to_comp, init_dict, inited)
+                         uid_to_comp, children, inited)
 
     @property 
     def prop(self):
@@ -576,15 +577,15 @@ class Accordion(MUIContainerBase[AccordionProps, Union[AccordionDetails, Accordi
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        init_dict: Dict[str, Union[AccordionDetails, AccordionSummary]] = {
+        children: Dict[str, Union[AccordionDetails, AccordionSummary]] = {
             "summary": summary
         }
         if details is not None:
-            init_dict["details"] = details
-        for v in init_dict.values():
+            children["details"] = details
+        for v in children.values():
             assert isinstance(v, (AccordionSummary, AccordionDetails)), "all childs must be summary or defail"
         super().__init__(UIType.Accordion, AccordionProps, uid, queue,
-                         uid_to_comp, init_dict, inited)
+                         uid_to_comp, children, inited)
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -600,7 +601,7 @@ class Accordion(MUIContainerBase[AccordionProps, Union[AccordionDetails, Accordi
         self.props.expanded = data
         
     async def handle_event(self, ev: Any):
-        await _handle_standard_event(self, ev)
+        await handle_standard_event(self, ev)
 
     @property 
     def update_event(self):
@@ -630,7 +631,7 @@ class ListItemButton(MUIComponentBase[ButtonProps]):
         self.callback = val
 
     async def handle_event(self, ev: Any):
-        await _handle_button_event(self, ev)
+        await handle_standard_event_no_arg(self, sync_first=False)
 
     @property 
     def prop(self):
@@ -648,11 +649,11 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
-                 _init_dict: Optional[Dict[str, MUIComponentType]] = None,
+                 _children: Optional[Dict[str, MUIComponentType]] = None,
                  base_type: UIType = UIType.FlexBox,
                  inited: bool = False) -> None:
         super().__init__(base_type, MUIFlexBoxProps, uid, queue, uid_to_comp,
-                         _init_dict, inited)
+                         _children, inited)
 
     @property 
     def prop(self):
@@ -674,7 +675,7 @@ class MUIList(MUIContainerBase[MUIListProps, MUIComponentType]):
                  uid: str,
                  queue: asyncio.Queue,
                  uid_to_comp: Dict[str, Component],
-                 _init_dict: Optional[Dict[str, MUIComponentType]] = None,
+                 _children: Optional[Dict[str, MUIComponentType]] = None,
                  subheader: str = "",
                  inited: bool = False) -> None:
         super().__init__(UIType.MUIList,
@@ -682,7 +683,7 @@ class MUIList(MUIContainerBase[MUIListProps, MUIComponentType]):
                          uid,
                          queue=queue,
                          uid_to_comp=uid_to_comp,
-                         _init_dict=_init_dict,
+                         _children=_children,
                          inited=inited)
         self.props.subheader = subheader
 
@@ -697,26 +698,26 @@ class MUIList(MUIContainerBase[MUIListProps, MUIComponentType]):
         return self._update_props_base(propcls)
 
 def VBox(layout: Dict[str, MUIComponentType]):
-    res = FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
+    res = FlexBox("", asyncio.Queue(), {}, _children=layout)
     res.prop(flex_flow="column nowrap")
     return res
 
 
 def HBox(layout: Dict[str, MUIComponentType], ):
-    res = FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
+    res = FlexBox("", asyncio.Queue(), {}, _children=layout)
     res.prop(flex_flow="row nowrap")
     return res
 
 
 def Box(layout: Dict[str, MUIComponentType]):
-    return FlexBox("", asyncio.Queue(), {}, _init_dict=layout)
+    return FlexBox("", asyncio.Queue(), {}, _children=layout)
 
 
 def VList(layout: Dict[str, MUIComponentType], subheader: str = ""):
     return MUIList("",
                    asyncio.Queue(), {},
                    subheader=subheader,
-                   _init_dict=layout)
+                   _children=layout)
 
 @dataclasses.dataclass
 class RadioGroupProps(MUIComponentBaseProps):
@@ -768,7 +769,7 @@ class RadioGroup(MUIComponentBase[RadioGroupProps]):
         self.callback = val
 
     async def handle_event(self, ev: Any):
-        await _handle_standard_event(self, ev)
+        await handle_standard_event(self, ev)
 
     @property 
     def prop(self):
@@ -945,7 +946,7 @@ class Switch(MUIComponentBase[SwitchProps]):
         return self.props.checked
 
     async def handle_event(self, ev: Any):
-        await _handle_standard_event(self, ev)
+        await handle_standard_event(self, ev)
 
     @property 
     def prop(self):
@@ -1038,7 +1039,7 @@ class Select(MUIComponentBase[SelectProps]):
         self.callback = val
 
     async def handle_event(self, ev: Any):
-        await _handle_standard_event(self, ev)
+        await handle_standard_event(self, ev)
 
     @property 
     def prop(self):
@@ -1128,7 +1129,7 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
         self.callback = val
 
     async def handle_event(self, ev: Any):
-        await _handle_standard_event(self, ev)
+        await handle_standard_event(self, ev)
 
     @property 
     def prop(self):
@@ -1210,7 +1211,7 @@ class Slider(MUIComponentBase[SliderProps]):
         self.callback = val
 
     async def handle_event(self, ev: Any):
-        await _handle_standard_event(self, ev)
+        await handle_standard_event(self, ev)
 
     @property 
     def prop(self):
@@ -1395,13 +1396,13 @@ class PaperProps(MUIFlexBoxProps):
 class Paper(MUIContainerBase[PaperProps, MUIComponentType]):
 
     def __init__(self,
-                 init_dict: Dict[str, MUIComponentType],
+                 children: Dict[str, MUIComponentType],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(UIType.Paper, PaperProps, uid, queue, uid_to_comp,
-                         init_dict, inited)
+                         children, inited)
 
     @property 
     def prop(self):
@@ -1416,13 +1417,13 @@ class FormControlProps(MUIFlexBoxProps):
 class FormControl(MUIContainerBase[FormControlProps, MUIComponentType]):
 
     def __init__(self,
-                 init_dict: Dict[str, MUIComponentType],
+                 children: Dict[str, MUIComponentType],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(UIType.Paper, FormControlProps, uid, queue, uid_to_comp,
-                         init_dict, inited)
+                         children, inited)
 
     @property 
     def prop(self):
@@ -1440,13 +1441,13 @@ class CollapseProps(MUIFlexBoxProps):
 class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
 
     def __init__(self,
-                 init_dict: Dict[str, MUIComponentType],
+                 children: Dict[str, MUIComponentType],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(UIType.Collapse, CollapseProps, uid, queue,
-                         uid_to_comp, init_dict, inited)
+                         uid_to_comp, children, inited)
 
     @property 
     def prop(self):
@@ -1463,13 +1464,13 @@ class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
 # class Accordion(MUIContainerBase[AccordionProps, MUIComponentType]):
 
 #     def __init__(self,
-#                  init_dict: Dict[str, MUIComponentType],
+#                  children: Dict[str, MUIComponentType],
 #                  uid: str = "",
 #                  queue: Optional[asyncio.Queue] = None,
 #                  uid_to_comp: Optional[Dict[str, Component]] = None,
 #                  inited: bool = False) -> None:
 #         super().__init__(UIType.Accordion, AccordionProps, uid, queue,
-#                          uid_to_comp, init_dict, inited)
+#                          uid_to_comp, children, inited)
 
 #     @property 
 #     def prop(self):

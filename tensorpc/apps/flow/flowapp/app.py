@@ -44,7 +44,7 @@ from .core import (AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
                    BasicProps, Component, ContainerBase, CopyToClipboardEvent,
                    LayoutEvent, TaskLoopEvent, UIEvent, UIExceptionEvent,
                    UIRunStatus, UIType, UIUpdateEvent, Undefined,
-                   UserException, undefined)
+                   UserMessage, undefined)
 
 ALL_APP_EVENTS = HashableRegistry()
 
@@ -279,7 +279,7 @@ class App:
             traceback.print_exc()
             ss = io.StringIO()
             traceback.print_exc(file=ss)
-            user_exc = UserException("", str(e), ss.getvalue())
+            user_exc = UserMessage.create_error("", str(e), ss.getvalue())
             ev = UIExceptionEvent([user_exc])
             fbm = (
                 "app_create_layout failed!!! check your app_create_layout. if "

@@ -33,14 +33,13 @@ import numpy as np
 from tensorpc.utils.uniquename import UniqueNamePool
 from typing_extensions import ParamSpec, TypeAlias
 
-from ..core import (AppEvent, AppEventType, BasicProps, Component,
+from ..core import (BasicProps, Component,
                     ContainerBase, NumberType, T_base_props, T_child,
-                    TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
-                    ValueType, undefined, ContainerBaseProps,
-                    T_container_props, Fragment)
-from .mui import (FlexBoxProps, MUIComponentType, MUIContainerBase,
-                  _encode_image_bytes, _handle_button_event, PointerEventsProperties)
-
+                    UIRunStatus, UIType, Undefined,
+                    undefined, ContainerBaseProps,
+                    T_container_props, Fragment, EventHandler, _create_ignore_usr_msg)
+from .mui import (FlexBoxProps, MUIComponentType, MUIContainerBase)
+from .common import handle_raw_event, handle_standard_event
 
 class MapComponentBase(Component[T_base_props, "MapComponentType"]):
     pass
@@ -93,18 +92,22 @@ class MapEventSetZoom(MapEventBase):
 class MapContainerProps(ContainerBaseProps, FlexBoxProps):
     pass
 
+class MapFrontendEventType(enum.Enum):
+    Zoom = "zoom"
+    Move = "move"
+
 class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
     def __init__(self,
                 center: Tuple[NumberType, NumberType],
                 zoom: NumberType,
-                 init_dict: Dict[str, MapComponentType],
+                 children: Dict[str, MapComponentType],
 
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(UIType.LeafletMapContainer, MapContainerProps, uid, queue,
-                         uid_to_comp, init_dict, inited)
+                         uid_to_comp, children, inited)
         self.center = center
         self.zoom = zoom 
 
@@ -113,6 +116,22 @@ class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
         res["center"] = self.center
         res["zoom"] = self.zoom
         return res
+
+    def set_pointer_callback(
+            self,
+            on_move: Optional[Union[EventHandler, Undefined]] = None,
+            on_zoom: Optional[Union[EventHandler,
+                                            Undefined]] = None):
+        pointer_event_map = {
+            MapFrontendEventType.Move: on_move,
+            MapFrontendEventType.Zoom: on_zoom,
+        }
+        for k, v in pointer_event_map.items():
+            if v is not None:
+                self._flow_event_handlers[k.value] = v
+
+    async def handle_event(self, ev: Any):
+        await handle_raw_event(ev, self)
 
     async def fly_to(self, center: Tuple[NumberType, NumberType], zoom: Optional[NumberType] = None):
         ev = MapEventFlyTo(center, zoom)
@@ -142,8 +161,8 @@ class TileLayer(MapComponentBase[TileLayerProps]):
     def __init__(self,
                 url: str = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
                 attribution: str = r"&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
+                uid: str = "",
+                queue: Optional[asyncio.Queue] = None) -> None:
         super().__init__(uid, UIType.LeafletTileLayer,
                          TileLayerProps, queue)
         self.props.url = url 
@@ -174,30 +193,20 @@ class PathOptions:
     fill_opacity: Union[Undefined, NumberType] = undefined 
     fill_rule: Union[Undefined, Literal['nonzero', 'evenodd', 'inherit']] = undefined 
 
-@dataclasses.dataclass
-class MarkerProps(ContainerBaseProps):
-    position: Union[Tuple[NumberType, NumberType], Undefined] = undefined
-    opacity: Union[NumberType, Undefined] = undefined
-    title: Union[str, Undefined] = undefined
 
-class Marker(ContainerBase[MarkerProps, MUIComponentType]):
+@dataclasses.dataclass
+class TooltipProps(ContainerBaseProps):
+    opacity: Union[NumberType, Undefined] = undefined
+    direction: Union[Literal['right', 'left', 'top', 'bottom', 'center', 'auto'], Undefined] = undefined
+
+class Tooltip(ContainerBase[TooltipProps, MUIComponentType]):
     def __init__(self,
-                 position: Tuple[NumberType, NumberType],
-                 init_dict: Dict[str, MUIComponentType],
-                 callback: Optional[Callable[[], _CORO_NONE]] = None,
+                 children: Dict[str, MUIComponentType],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(UIType.LeafletMarker,
-                         MarkerProps, uid, queue,
-                         _init_dict=init_dict)
-        self.props.position = position
-        self.callback = callback
-    
-    def get_callback(self):
-        return self.callback
-
-    def set_callback(self, val: Any):
-        self.callback = val
+        super().__init__(UIType.LeafletTooltip,
+                         TooltipProps, uid, queue,
+                         _children=children)
 
     @property
     def prop(self):
@@ -209,32 +218,51 @@ class Marker(ContainerBase[MarkerProps, MUIComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def handle_event(self, ev: Any):
-        if self.props.status == UIRunStatus.Running.value:
-            # TODO send exception if ignored click
-            print("IGNORE EVENT", self.props.status)
-            return
-        elif self.props.status == UIRunStatus.Stop.value:
-            cb1 = self.get_callback()
-            if cb1 is not None:
-                self._task = asyncio.create_task(self.run_callback(cb1, True, sync_first=False))
-            else:
-                await self.sync_status(True)
+@dataclasses.dataclass
+class PopupProps(ContainerBaseProps):
+    pass
+
+class Popup(ContainerBase[PopupProps, MUIComponentType]):
+    def __init__(self,
+                 children: Dict[str, MUIComponentType],
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(UIType.LeafletPopup,
+                         PopupProps, uid, queue,
+                         _children=children)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+MapElementChildType: TypeAlias = Union[Tooltip, Popup]
 
 @dataclasses.dataclass
-class PolylineProps(BasicProps, PathOptions):
+class PolylineProps(ContainerBaseProps, PathOptions):
     positions: Union[List[Tuple[NumberType, NumberType]], Undefined] = undefined
 
-class Polyline(MapComponentBase[PolylineProps]):
+class Polyline(ContainerBase[PolylineProps, MapElementChildType]):
     def __init__(self,
                 color: str = "black",
                 positions: Union[List[Tuple[NumberType, NumberType]], Undefined] = undefined,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.LeafletPolyline,
-                         PolylineProps, queue)
+                children: Optional[Dict[str, MapElementChildType]] = None,
+                on_click: Optional[Callable[[Tuple[NumberType, NumberType, NumberType]], _CORO_NONE]] = None,
+                uid: str = "",
+                queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(UIType.LeafletPolyline,
+                         PolylineProps, uid, queue, _children=children)
         self.props.color = color 
         self.props.positions = positions
+        self.on_click = on_click
+
+    async def handle_event(self, ev: Any):
+        await handle_standard_event(self, ev)
 
     @property
     def prop(self):
@@ -249,21 +277,53 @@ class Polyline(MapComponentBase[PolylineProps]):
     async def update_positions(self, positions: List[Tuple[NumberType, NumberType]]):
         await self.send_app_event_and_wait(self.update_event(positions=positions))
 
+    def get_callback(self) -> Optional[Callable]:
+        return self.on_click
+
+    def set_callback(self, cb: Callable):
+        self.on_click = cb
+
+@dataclasses.dataclass
+class CircleProps(ContainerBaseProps, PathOptions):
+    center: Union[Tuple[NumberType, NumberType], Undefined] = undefined
+    radius: Union[Undefined, NumberType] = undefined
+
+class Circle(ContainerBase[CircleProps, MapElementChildType]):
+    def __init__(self,
+                 center: Tuple[NumberType, NumberType],
+                children: Optional[Dict[str, MapElementChildType]] = None,
+                uid: str = "",
+                queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(UIType.LeafletCircle,
+                         CircleProps, uid, queue, _children=children)
+        self.props.center = center 
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+
 @dataclasses.dataclass
 class CircleMarkerProps(ContainerBaseProps, PathOptions):
     center: Union[Tuple[NumberType, NumberType], Undefined] = undefined
     radius: Union[Undefined, NumberType] = undefined
 
-class CircleMarker(ContainerBase[CircleMarkerProps, MUIComponentType]):
+class CircleMarker(ContainerBase[CircleMarkerProps, MapElementChildType]):
     def __init__(self,
                  center: Tuple[NumberType, NumberType],
-                 init_dict: Dict[str, MUIComponentType],
+                 children: Dict[str, MapElementChildType],
                  callback: Optional[Callable[[], _CORO_NONE]] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
         super().__init__(UIType.LeafletCircleMarker,
                          CircleMarkerProps, uid, queue,
-                         _init_dict=init_dict)
+                         _children=children)
         self.props.center = center
         self.callback = callback
     
@@ -284,13 +344,42 @@ class CircleMarker(ContainerBase[CircleMarkerProps, MUIComponentType]):
         return self._update_props_base(propcls)
 
     async def handle_event(self, ev: Any):
-        if self.props.status == UIRunStatus.Running.value:
-            # TODO send exception if ignored click
-            print("IGNORE EVENT", self.props.status)
-            return
-        elif self.props.status == UIRunStatus.Stop.value:
-            cb1 = self.get_callback()
-            if cb1 is not None:
-                self._task = asyncio.create_task(self.run_callback(cb1, True, sync_first=False))
-            else:
-                await self.sync_status(True)
+        await handle_standard_event(self, ev)
+
+@dataclasses.dataclass
+class MarkerProps(ContainerBaseProps):
+    position: Union[Tuple[NumberType, NumberType], Undefined] = undefined
+    opacity: Union[NumberType, Undefined] = undefined
+    title: Union[str, Undefined] = undefined
+
+class Marker(ContainerBase[MarkerProps, MapElementChildType]):
+    def __init__(self,
+                 position: Tuple[NumberType, NumberType],
+                 children: Dict[str, MapElementChildType],
+                 callback: Optional[Callable[[], _CORO_NONE]] = None,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(UIType.LeafletMarker,
+                         MarkerProps, uid, queue,
+                         _children=children)
+        self.props.position = position
+        self.callback = callback
+    
+    def get_callback(self):
+        return self.callback
+
+    def set_callback(self, val: Any):
+        self.callback = val
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def handle_event(self, ev: Any):
+        await handle_standard_event(self, ev)

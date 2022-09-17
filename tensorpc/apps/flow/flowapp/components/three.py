@@ -37,9 +37,10 @@ from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, NumberType, T_base_props, T_child,
                     TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
                     ValueType, undefined, ContainerBaseProps,
-                    T_container_props, Fragment)
+                    T_container_props, Fragment, EventHandler)
 from .mui import (FlexBoxProps, MUIComponentType, MUIContainerBase,
-                  _encode_image_bytes, _handle_button_event, PointerEventsProperties)
+                  _encode_image_bytes, PointerEventsProperties)
+
 
 Vector3Type: TypeAlias = Tuple[float, float, float]
 
@@ -246,18 +247,6 @@ class Object3dBase(ThreeComponentBase[T_o3d_prop]):
             self.update_object3d_event(position, rotation, up, scale, visible))
 
 
-class EventCallback:
-
-    def __init__(self,
-                 cb: Callable[[Any], _CORO_ANY],
-                 stop_propagation: bool = False) -> None:
-        self.cb = cb
-        self.stop_propagation = stop_propagation
-
-
-PointerEventCBType: TypeAlias = EventCallback
-
-
 class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
 
     def __init__(self,
@@ -267,7 +256,7 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
                  queue: Optional[asyncio.Queue] = None) -> None:
         super().__init__(base_type, prop_cls, uid, queue)
         self._pointer_event_map: Dict[PointerEventType,
-                                      Union[PointerEventCBType, Undefined]] = {
+                                      Union[EventHandler, Undefined]] = {
                                           PointerEventType.Click: undefined,
                                           PointerEventType.DoubleClick:
                                           undefined,
@@ -289,27 +278,26 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
             if k == PointerEventType.Change:
                 continue
             if not isinstance(v, Undefined):
-                evs.append({
-                    "type": k.value,
-                    "stopPropagation": v.stop_propagation
-                })
+                d = v.to_dict()
+                d["type"] = k.value
+                evs.append(d)
         res["props"]["usedEvents"] = evs
         return res
 
     def set_pointer_callback(
             self,
-            on_click: Optional[Union[PointerEventCBType, Undefined]] = None,
-            on_double_click: Optional[Union[PointerEventCBType,
+            on_click: Optional[Union[EventHandler, Undefined]] = None,
+            on_double_click: Optional[Union[EventHandler,
                                             Undefined]] = None,
-            on_enter: Optional[Union[PointerEventCBType, Undefined]] = None,
-            on_leave: Optional[Union[PointerEventCBType, Undefined]] = None,
-            on_over: Optional[Union[PointerEventCBType, Undefined]] = None,
-            on_out: Optional[Union[PointerEventCBType, Undefined]] = None,
-            on_up: Optional[Union[PointerEventCBType, Undefined]] = None,
-            on_down: Optional[Union[PointerEventCBType, Undefined]] = None,
-            on_context_menu: Optional[Union[PointerEventCBType,
+            on_enter: Optional[Union[EventHandler, Undefined]] = None,
+            on_leave: Optional[Union[EventHandler, Undefined]] = None,
+            on_over: Optional[Union[EventHandler, Undefined]] = None,
+            on_out: Optional[Union[EventHandler, Undefined]] = None,
+            on_up: Optional[Union[EventHandler, Undefined]] = None,
+            on_down: Optional[Union[EventHandler, Undefined]] = None,
+            on_context_menu: Optional[Union[EventHandler,
                                             Undefined]] = None,
-            on_change: Optional[Union[PointerEventCBType, Undefined]] = None):
+            on_change: Optional[Union[EventHandler, Undefined]] = None):
         pointer_event_map = {
             PointerEventType.Click: on_click,
             PointerEventType.DoubleClick: on_double_click,
@@ -352,13 +340,13 @@ class Object3dContainerBase(ThreeContainerBase[T_o3d_container_prop, T_child]):
     def __init__(self,
                  base_type: UIType,
                  prop_cls: Type[T_o3d_container_prop],
-                 init_dict: Dict[str, T_child],
+                 children: Dict[str, T_child],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(base_type, prop_cls, uid, queue, uid_to_comp,
-                         init_dict, inited)
+                         children, inited)
 
     def update_object3d_event(self,
                               position: Optional[Union[Vector3Type,
@@ -414,15 +402,15 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
     def __init__(self,
                  base_type: UIType,
                  prop_cls: Type[T_o3d_container_prop],
-                 init_dict: Dict[str, T_child],
+                 children: Dict[str, T_child],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(base_type, prop_cls, init_dict, uid, queue,
+        super().__init__(base_type, prop_cls, children, uid, queue,
                          uid_to_comp, inited)
         self._pointer_event_map: Dict[PointerEventType,
-                                      Union[PointerEventCBType, Undefined]] = {
+                                      Union[EventHandler, Undefined]] = {
                                           PointerEventType.Click: undefined,
                                           PointerEventType.DoubleClick:
                                           undefined,
@@ -453,18 +441,18 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
 
     def set_pointer_callback(
             self,
-            on_click: Optional[Union[PointerEventCBType, Undefined]] = None,
-            on_double_click: Optional[Union[PointerEventCBType,
+            on_click: Optional[Union[EventHandler, Undefined]] = None,
+            on_double_click: Optional[Union[EventHandler,
                                             Undefined]] = None,
-            on_enter: Optional[Union[PointerEventCBType, Undefined]] = None,
-            on_leave: Optional[Union[PointerEventCBType, Undefined]] = None,
-            on_over: Optional[Union[PointerEventCBType, Undefined]] = None,
-            on_out: Optional[Union[PointerEventCBType, Undefined]] = None,
-            on_up: Optional[Union[PointerEventCBType, Undefined]] = None,
-            on_down: Optional[Union[PointerEventCBType, Undefined]] = None,
-            on_context_menu: Optional[Union[PointerEventCBType,
+            on_enter: Optional[Union[EventHandler, Undefined]] = None,
+            on_leave: Optional[Union[EventHandler, Undefined]] = None,
+            on_over: Optional[Union[EventHandler, Undefined]] = None,
+            on_out: Optional[Union[EventHandler, Undefined]] = None,
+            on_up: Optional[Union[EventHandler, Undefined]] = None,
+            on_down: Optional[Union[EventHandler, Undefined]] = None,
+            on_context_menu: Optional[Union[EventHandler,
                                             Undefined]] = None,
-            on_change: Optional[Union[PointerEventCBType, Undefined]] = None):
+            on_change: Optional[Union[EventHandler, Undefined]] = None):
         pointer_event_map = {
             PointerEventType.Click: on_click,
             PointerEventType.DoubleClick: on_double_click,
@@ -890,13 +878,13 @@ class Group(Object3dContainerBase[Object3dContainerBaseProps,
                                   ThreeComponentType]):
     # TODO can/should group accept event?
     def __init__(self,
-                 init_dict: Dict[str, ThreeComponentType],
+                 children: Dict[str, ThreeComponentType],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(UIType.ThreeGroup, Object3dContainerBaseProps,
-                         init_dict, uid, queue, uid_to_comp, inited)
+                         children, uid, queue, uid_to_comp, inited)
 
     @property
     def prop(self):
@@ -1223,14 +1211,14 @@ class FlexManualReflow(ThreeComponentBase[FlexManualReflowProps]):
 class ThreeCanvas(MUIContainerBase[ContainerBaseProps, ThreeComponentType]):
 
     def __init__(self,
-                 init_dict: Dict[str, ThreeComponentType],
+                 children: Dict[str, ThreeComponentType],
                  background: Union[str, Undefined] = undefined,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(UIType.ThreeCanvas, ContainerBaseProps, uid, queue,
-                         uid_to_comp, init_dict, inited)
+                         uid_to_comp, children, inited)
         self.background = background
 
     def to_dict(self):
@@ -1297,13 +1285,13 @@ class ThreeFlexProps(R3FlexPropsBase, ContainerBaseProps):
 class Flex(ThreeContainerBase[ThreeFlexProps, ThreeComponentType]):
 
     def __init__(self,
-                 init_dict: Dict[str, ThreeComponentType],
+                 children: Dict[str, ThreeComponentType],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(UIType.ThreeFlex, ThreeFlexProps, uid, queue,
-                         uid_to_comp, init_dict, inited)
+                         uid_to_comp, children, inited)
 
     @property
     def prop(self):
@@ -1324,13 +1312,13 @@ class ThreeFlexItemBoxProps(R3FlexPropsBase, ContainerBaseProps):
 class ItemBox(ThreeContainerBase[ThreeFlexItemBoxProps, ThreeComponentType]):
 
     def __init__(self,
-                 init_dict: Dict[str, ThreeComponentType],
+                 children: Dict[str, ThreeComponentType],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(UIType.ThreeFlexItemBox, ThreeFlexItemBoxProps, uid,
-                         queue, uid_to_comp, init_dict, inited)
+                         queue, uid_to_comp, children, inited)
 
     @property
     def prop(self):
@@ -1343,14 +1331,14 @@ class ItemBox(ThreeContainerBase[ThreeFlexItemBoxProps, ThreeComponentType]):
         return self._update_props_base(propcls)
 
 
-def VBox(init_dict: Dict[str, ThreeComponentType]):
-    box = ItemBox(init_dict)
+def VBox(children: Dict[str, ThreeComponentType]):
+    box = ItemBox(children)
     box.props.flex_direction = "column"
     return box
 
 
-def HBox(init_dict: Dict[str, ThreeComponentType]):
-    box = ItemBox(init_dict)
+def HBox(children: Dict[str, ThreeComponentType]):
+    box = ItemBox(children)
     box.props.flex_direction = "row"
     return box
 
@@ -1384,12 +1372,12 @@ class Html(Object3dContainerBase[HtmlProps, MUIComponentType]):
     """
 
     def __init__(self,
-                 init_dict: Dict[str, MUIComponentType],
+                 children: Dict[str, MUIComponentType],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(UIType.ThreeHtml, HtmlProps, init_dict, uid, queue,
+        super().__init__(UIType.ThreeHtml, HtmlProps, children, uid, queue,
                          uid_to_comp, inited)
 
     @property
@@ -2050,11 +2038,11 @@ class Mesh(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
                  inited: bool = False) -> None:
         self.geometry = geometry
         self.material = material
-        init_dict: Dict[str, ThreeComponentType] = {
+        children: Dict[str, ThreeComponentType] = {
             "geometry": geometry,
             "material": material,
         }
-        super().__init__(UIType.ThreeMesh, MeshProps, init_dict, uid, queue,
+        super().__init__(UIType.ThreeMesh, MeshProps, children, uid, queue,
                          uid_to_comp, inited)
         self.props.toggled = False
 
@@ -2091,13 +2079,13 @@ class HudProps(ThreeFlexProps):
 class Hud(ThreeContainerBase[HudProps, ThreeComponentType]):
     # TODO can/should group accept event?
     def __init__(self,
-                 init_dict: Dict[str, ThreeComponentType],
+                 children: Dict[str, ThreeComponentType],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(UIType.ThreeHud, HudProps, uid, queue, uid_to_comp,
-                         init_dict, inited)
+                         children, inited)
 
     @property
     def prop(self):
@@ -2131,11 +2119,11 @@ class ShapeButton(Group):
                   color="white",
                   position=(0, 0, 0),
                   max_width=text_max_width)
-        init_dict = {
+        children = {
             "mesh": mesh,
             "text": text,
         }
-        super().__init__(init_dict, uid, queue)
+        super().__init__(children, uid, queue)
         self.name = name
         # self.callback = callback
 
@@ -2205,11 +2193,11 @@ class Button(Group):
                   color="white",
                   position=(0, 0, 0),
                   max_width=width)
-        init_dict = {
+        children = {
             "mesh": mesh,
             "text": text,
         }
-        super().__init__(init_dict, uid, queue)
+        super().__init__(children, uid, queue)
         self.name = name
         # self.callback = callback
 
@@ -2281,11 +2269,11 @@ class ToggleButton(Group):
                   color="white",
                   position=(0, 0, 0),
                   max_width=width)
-        init_dict = {
+        children = {
             "mesh": mesh,
             "text": text,
         }
-        super().__init__(init_dict, uid, queue)
+        super().__init__(children, uid, queue)
         self.name = name
 
     @property 

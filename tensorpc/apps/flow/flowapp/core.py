@@ -21,17 +21,17 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
 import asyncio
 import traceback
 import inspect
-from ....autossh.core import _cancel
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.uniquename import UniqueNamePool
 import dataclasses
 import re
 import sys
 from typing_extensions import Literal, ParamSpec, Concatenate, Self, TypeAlias, Protocol
-
+from tensorpc.apps.flow.coretypes import MessageLevel
 ALL_APP_EVENTS = HashableRegistry()
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
+_CORO_ANY: TypeAlias = Union[Coroutine[Any, None, None], Any]
 
 ValueType: TypeAlias = Union[int, float, str]
 
@@ -192,16 +192,36 @@ class AppEditorFrontendEventType(enum.Enum):
     SaveEditorState = 2
 
 @dataclasses.dataclass
-class UserException:
+class UserMessage:
     uid: str
     error: str 
+    level: MessageLevel
     detail: str
+
+    def to_dict(self):
+        return {
+            "uid": self.uid,
+            "error": self.error,
+            "level": self.level.value,
+            "detail": self.detail,
+        }
 
     @classmethod
     def from_dict(cls, dc: Dict[str, str]):
         return cls(uid=dc["uid"], error=dc["error"], 
-                detail=dc["detail"])
+                detail=dc["detail"], level=MessageLevel(dc["level"]))
 
+    @classmethod
+    def create_error(cls, uid: str, error: str, detail: str):
+        return cls(uid, error, MessageLevel.Error, detail)
+
+    @classmethod
+    def create_warning(cls, uid: str, error: str, detail: str):
+        return cls(uid, error, MessageLevel.Warning, detail)
+
+    @classmethod
+    def createinfo(cls, uid: str, error: str, detail: str):
+        return cls(uid, error, MessageLevel.Info, detail)
 
 class AppEditorFrontendEvent:
     def __init__(self, type: AppEditorFrontendEventType, data: Any) -> None:
@@ -327,7 +347,7 @@ class UIUpdateEvent:
 @ALL_APP_EVENTS.register(key=AppEventType.UIException.value)
 class UIExceptionEvent:
     def __init__(
-        self, user_excs: List[UserException]) -> None:
+        self, user_excs: List[UserMessage]) -> None:
         self.user_excs = user_excs
 
     def to_dict(self):
@@ -336,7 +356,7 @@ class UIExceptionEvent:
     @classmethod
     def from_dict(cls, data: List[Any]):
 
-        return cls([UserException.from_dict(v) for v in data])
+        return cls([UserMessage.from_dict(v) for v in data])
 
     def merge_new(self, new):
         assert isinstance(new, UIExceptionEvent)
@@ -628,6 +648,7 @@ class Component(Generic[T_base_props, T_child]):
         self.__props = prop_cls()
         self.__prop_cls = prop_cls
         self._mounted_override = False
+        self._flow_event_handlers: Dict[str, Union[EventHandler, Undefined]] = {}
 
     @property
     def props(self) -> T_base_props:
@@ -707,9 +728,14 @@ class Component(Generic[T_base_props, T_child]):
             "props": props,
             # "status": self._status.value,
         }
-        # static["state"] = newstate
-        # static["uid"] = self.uid
-        # static["type"] = self.type.value
+        evs = []
+        for k, v in self._flow_event_handlers.items():
+            if not isinstance(v, Undefined):
+                d = v.to_dict()
+                d["type"] = k
+                evs.append(d)
+        if evs:
+            res["usedEvents"] = evs
         return res
 
     def _to_dict_with_sync_props(self):
@@ -815,7 +841,7 @@ class Component(Generic[T_base_props, T_child]):
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.DeleteComponents: ev})
 
-    def create_exception_event(self, exc: UserException):
+    def create_user_msg_event(self, exc: UserMessage):
         ev = UIExceptionEvent([exc])
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UIException: ev})
@@ -844,8 +870,8 @@ class Component(Generic[T_base_props, T_child]):
             traceback.print_exc()
             ss = io.StringIO()
             traceback.print_exc(file=ss)
-            user_exc = UserException(self._flow_uid, repr(e), ss.getvalue())
-            await self.put_app_event(self.create_exception_event(user_exc))
+            user_exc = UserMessage.create_error(self._flow_uid, repr(e), ss.getvalue())
+            await self.put_app_event(self.create_user_msg_event(user_exc))
         finally:
             self.props.status = UIRunStatus.Stop.value 
             await self.sync_status(sync_state)
@@ -880,7 +906,7 @@ class ContainerBase(Component[T_container_props, T_child]):
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
-                 _init_dict: Optional[Dict[str, T_child]] = None,
+                 _children: Optional[Dict[str, T_child]] = None,
                  inited: bool = False) -> None:
         super().__init__(uid, base_type, prop_cls, queue)
         if inited:
@@ -889,12 +915,13 @@ class ContainerBase(Component[T_container_props, T_child]):
             uid_to_comp = {}
         self._pool = UniqueNamePool()
         self._uid_to_comp = uid_to_comp
-        self._init_dict = _init_dict
+        self._children = _children
 
         # self.props.childs: List[str] = []
 
         self.inited = inited
         self._prevent_add_layout = False
+
 
     async def _clear(self):
         for c in self.props.childs:
@@ -994,13 +1021,13 @@ class ContainerBase(Component[T_container_props, T_child]):
             3. if has init dict, consume it
             4. change uid/parent of all nested childs with new namespace
         """
-        # consume init_dict  before assign uid to 
+        # consume children  before assign uid to 
         # ensure comp is a child-inited standclone component.
         if isinstance(comp, ContainerBase):
-            if comp._init_dict is not None:
-                # consume this _init_dict
-                comp.add_layout(comp._init_dict)
-                comp._init_dict = None
+            if comp._children is not None:
+                # consume this _children
+                comp.add_layout(comp._children)
+                comp._children = None
 
         namespace = self._flow_uid
         if namespace == "":
@@ -1183,12 +1210,36 @@ def _detach_component(comp: Component):
 
 class Fragment(ContainerBase[ContainerBaseProps, Component]):
     def __init__(self,
-                 init_dict: Dict[str, Component],
+                 children: Dict[str, Component],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(UIType.Fragment, ContainerBaseProps, uid, queue,
-                         uid_to_comp, init_dict, inited)
+                         uid_to_comp, children, inited)
 
+
+class EventHandler:
+
+    def __init__(self,
+                 cb: Callable[[Any], _CORO_ANY],
+                 stop_propagation: bool = False,
+                 debounce: Optional[NumberType] = None) -> None:
+        self.cb = cb
+        self.stop_propagation = stop_propagation
+        self.debounce = debounce
+
+    def to_dict(self):
+        res: Dict[str, Any] = {
+            "stopPropagation": self.stop_propagation,
+        }
+        if self.debounce is not None:
+            res["debounce"] = self.debounce
+        return res 
+
+
+def _create_ignore_usr_msg(comp: Component):
+    msg = comp.create_user_msg_event((UserMessage.create_warning(comp._flow_uid, "UI Running", 
+        f"UI {comp._flow_uid}@{str(type(comp).__name__)} is still running, so ignore your control")))
+    return msg
 
