@@ -1,7 +1,7 @@
 import re
 import subprocess
 from pathlib import Path
-from tensorpc.constants import PACKAGE_ROOT
+# from tensorpc.constants import PACKAGE_ROOT
 # import codeai
 
 
@@ -22,7 +22,9 @@ def compile_proto(cwd, proto_dir, js_out=True, cpp_out=False, grpc_web: bool = F
         *[str(p) for p in grpc_paths],  # windows have problem with wildcard
     ]
     no_grpc_proto_cmds = [
-        "protoc",
+        "python",
+        "-m",
+        "grpc_tools.protoc",
         "-I{}".format(proto_dir),
         "--python_out={}".format(proto_dir),
         "--pyi_out={}".format(proto_dir),
@@ -90,5 +92,5 @@ def compile_proto(cwd, proto_dir, js_out=True, cpp_out=False, grpc_web: bool = F
 
 if __name__ == "__main__":
     compile_proto(
-        PACKAGE_ROOT,
+        Path(__file__).parent / "protos",
         Path(__file__).parent.resolve() / "protos")

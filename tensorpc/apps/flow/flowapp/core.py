@@ -1206,28 +1206,43 @@ def _detach_component(comp: Component):
     comp._queue = None
     return comp, all_removed, all_removed_prev_uids
 
+@dataclasses.dataclass
+class FragmentProps(ContainerBaseProps):
+    disabled: Union[Undefined, bool] = undefined
 
-
-class Fragment(ContainerBase[ContainerBaseProps, Component]):
+class Fragment(ContainerBase[FragmentProps, Component]):
     def __init__(self,
                  children: Dict[str, Component],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(UIType.Fragment, ContainerBaseProps, uid, queue,
+        super().__init__(UIType.Fragment, FragmentProps, uid, queue,
                          uid_to_comp, children, inited)
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
 
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def set_disabled(self, disabled: bool):
+        await self.send_app_event_and_wait(self.update_event(disabled=disabled))
 
 class EventHandler:
 
     def __init__(self,
                  cb: Callable[[Any], _CORO_ANY],
                  stop_propagation: bool = False,
+                 throttle: Optional[NumberType] = None,
                  debounce: Optional[NumberType] = None) -> None:
         self.cb = cb
         self.stop_propagation = stop_propagation
         self.debounce = debounce
+        self.throttle = throttle
 
     def to_dict(self):
         res: Dict[str, Any] = {
@@ -1235,10 +1250,12 @@ class EventHandler:
         }
         if self.debounce is not None:
             res["debounce"] = self.debounce
+        if self.throttle is not None:
+            res["throttle"] = self.throttle
         return res 
 
 
-def _create_ignore_usr_msg(comp: Component):
+def create_ignore_usr_msg(comp: Component):
     msg = comp.create_user_msg_event((UserMessage.create_warning(comp._flow_uid, "UI Running", 
         f"UI {comp._flow_uid}@{str(type(comp).__name__)} is still running, so ignore your control")))
     return msg

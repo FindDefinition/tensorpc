@@ -2,17 +2,17 @@ from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
-from typing import ClassVar, Iterable, Mapping, Optional, Union
+from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Mapping, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class arrayjson(_message.Message):
     __slots__ = ["arrays", "data"]
-    ARRAYS_FIELD_NUMBER: ClassVar[int]
-    DATA_FIELD_NUMBER: ClassVar[int]
+    ARRAYS_FIELD_NUMBER: _ClassVar[int]
+    DATA_FIELD_NUMBER: _ClassVar[int]
     arrays: _containers.RepeatedCompositeFieldContainer[ndarray]
     data: str
-    def __init__(self, arrays: Optional[Iterable[Union[ndarray, Mapping]]] = ..., data: Optional[str] = ...) -> None: ...
+    def __init__(self, arrays: _Optional[_Iterable[_Union[ndarray, _Mapping]]] = ..., data: _Optional[str] = ...) -> None: ...
 
 class dtype(_message.Message):
     __slots__ = ["byte_order", "type"]
@@ -20,10 +20,10 @@ class dtype(_message.Message):
         __slots__ = []
     class DataType(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
         __slots__ = []
-    BYTE_ORDER_FIELD_NUMBER: ClassVar[int]
+    BYTE_ORDER_FIELD_NUMBER: _ClassVar[int]
     Base64: dtype.DataType
     CustomBytes: dtype.DataType
-    TYPE_FIELD_NUMBER: ClassVar[int]
+    TYPE_FIELD_NUMBER: _ClassVar[int]
     bigEndian: dtype.ByteOrder
     bool_: dtype.DataType
     byte_order: dtype.ByteOrder
@@ -42,14 +42,14 @@ class dtype(_message.Message):
     uint32: dtype.DataType
     uint64: dtype.DataType
     uint8: dtype.DataType
-    def __init__(self, type: Optional[Union[dtype.DataType, str]] = ..., byte_order: Optional[Union[dtype.ByteOrder, str]] = ...) -> None: ...
+    def __init__(self, type: _Optional[_Union[dtype.DataType, str]] = ..., byte_order: _Optional[_Union[dtype.ByteOrder, str]] = ...) -> None: ...
 
 class ndarray(_message.Message):
     __slots__ = ["data", "dtype", "shape"]
-    DATA_FIELD_NUMBER: ClassVar[int]
-    DTYPE_FIELD_NUMBER: ClassVar[int]
-    SHAPE_FIELD_NUMBER: ClassVar[int]
+    DATA_FIELD_NUMBER: _ClassVar[int]
+    DTYPE_FIELD_NUMBER: _ClassVar[int]
+    SHAPE_FIELD_NUMBER: _ClassVar[int]
     data: bytes
     dtype: dtype
     shape: _containers.RepeatedScalarFieldContainer[int]
-    def __init__(self, shape: Optional[Iterable[int]] = ..., dtype: Optional[Union[dtype, Mapping]] = ..., data: Optional[bytes] = ...) -> None: ...
+    def __init__(self, shape: _Optional[_Iterable[int]] = ..., dtype: _Optional[_Union[dtype, _Mapping]] = ..., data: _Optional[bytes] = ...) -> None: ...

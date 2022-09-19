@@ -37,7 +37,7 @@ from ..core import (BasicProps, Component,
                     ContainerBase, NumberType, T_base_props, T_child,
                     UIRunStatus, UIType, Undefined,
                     undefined, ContainerBaseProps,
-                    T_container_props, Fragment, EventHandler, _create_ignore_usr_msg)
+                    T_container_props, Fragment, EventHandler, create_ignore_usr_msg)
 from .mui import (FlexBoxProps, MUIComponentType, MUIContainerBase)
 from .common import handle_raw_event, handle_standard_event
 
@@ -117,7 +117,7 @@ class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
         res["zoom"] = self.zoom
         return res
 
-    def set_pointer_callback(
+    def set_map_callback(
             self,
             on_move: Optional[Union[EventHandler, Undefined]] = None,
             on_zoom: Optional[Union[EventHandler,
@@ -196,10 +196,11 @@ class PathOptions:
 
 @dataclasses.dataclass
 class TooltipProps(ContainerBaseProps):
+    sticky: Union[bool, Undefined] = undefined
     opacity: Union[NumberType, Undefined] = undefined
     direction: Union[Literal['right', 'left', 'top', 'bottom', 'center', 'auto'], Undefined] = undefined
 
-class Tooltip(ContainerBase[TooltipProps, MUIComponentType]):
+class Tooltip(MapContainerBase[TooltipProps, MUIComponentType]):
     def __init__(self,
                  children: Dict[str, MUIComponentType],
                  uid: str = "",
@@ -222,7 +223,7 @@ class Tooltip(ContainerBase[TooltipProps, MUIComponentType]):
 class PopupProps(ContainerBaseProps):
     pass
 
-class Popup(ContainerBase[PopupProps, MUIComponentType]):
+class Popup(MapContainerBase[PopupProps, MUIComponentType]):
     def __init__(self,
                  children: Dict[str, MUIComponentType],
                  uid: str = "",
@@ -247,7 +248,7 @@ MapElementChildType: TypeAlias = Union[Tooltip, Popup]
 class PolylineProps(ContainerBaseProps, PathOptions):
     positions: Union[List[Tuple[NumberType, NumberType]], Undefined] = undefined
 
-class Polyline(ContainerBase[PolylineProps, MapElementChildType]):
+class Polyline(MapContainerBase[PolylineProps, MapElementChildType]):
     def __init__(self,
                 color: str = "black",
                 positions: Union[List[Tuple[NumberType, NumberType]], Undefined] = undefined,
@@ -288,7 +289,7 @@ class CircleProps(ContainerBaseProps, PathOptions):
     center: Union[Tuple[NumberType, NumberType], Undefined] = undefined
     radius: Union[Undefined, NumberType] = undefined
 
-class Circle(ContainerBase[CircleProps, MapElementChildType]):
+class Circle(MapContainerBase[CircleProps, MapElementChildType]):
     def __init__(self,
                  center: Tuple[NumberType, NumberType],
                 children: Optional[Dict[str, MapElementChildType]] = None,
@@ -314,7 +315,7 @@ class CircleMarkerProps(ContainerBaseProps, PathOptions):
     center: Union[Tuple[NumberType, NumberType], Undefined] = undefined
     radius: Union[Undefined, NumberType] = undefined
 
-class CircleMarker(ContainerBase[CircleMarkerProps, MapElementChildType]):
+class CircleMarker(MapContainerBase[CircleMarkerProps, MapElementChildType]):
     def __init__(self,
                  center: Tuple[NumberType, NumberType],
                  children: Dict[str, MapElementChildType],
@@ -352,7 +353,7 @@ class MarkerProps(ContainerBaseProps):
     opacity: Union[NumberType, Undefined] = undefined
     title: Union[str, Undefined] = undefined
 
-class Marker(ContainerBase[MarkerProps, MapElementChildType]):
+class Marker(MapContainerBase[MarkerProps, MapElementChildType]):
     def __init__(self,
                  position: Tuple[NumberType, NumberType],
                  children: Dict[str, MapElementChildType],

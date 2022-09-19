@@ -31,7 +31,7 @@ from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, NumberType, T_child, TaskLoopEvent, UIEvent,
                     UIRunStatus, UIType, Undefined, undefined, T_base_props,
                     T_container_props, ContainerBaseProps,
-                    ValueType, Fragment)
+                    ValueType, Fragment, EventHandler)
 
 from .. import colors
 

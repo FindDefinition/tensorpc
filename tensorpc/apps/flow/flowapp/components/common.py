@@ -14,7 +14,7 @@
 
 from typing import Any
 import asyncio
-from tensorpc.apps.flow.flowapp.core import Component, _create_ignore_usr_msg, Undefined, UIRunStatus
+from tensorpc.apps.flow.flowapp.core import Component, create_ignore_usr_msg, Undefined, UIRunStatus
 
 
 async def handle_raw_event(ev: Any, comp: Component):
@@ -27,7 +27,7 @@ async def handle_raw_event(ev: Any, comp: Component):
     else:
         return
     if comp.props.status == UIRunStatus.Running.value:
-        msg = _create_ignore_usr_msg(comp)
+        msg = create_ignore_usr_msg(comp)
         await comp.send_app_event_and_wait(msg)
         return
     elif comp.props.status == UIRunStatus.Stop.value:
@@ -41,7 +41,7 @@ async def handle_raw_event(ev: Any, comp: Component):
 
 async def handle_standard_event(comp: Component, data: Any, sync_first: bool = False):
     if comp.props.status == UIRunStatus.Running.value:
-        msg = _create_ignore_usr_msg(comp)
+        msg = create_ignore_usr_msg(comp)
         await comp.send_app_event_and_wait(msg)
         return
     elif comp.props.status == UIRunStatus.Stop.value:
@@ -56,7 +56,7 @@ async def handle_standard_event(comp: Component, data: Any, sync_first: bool = F
 
 async def handle_standard_event_no_arg(comp: Component, sync_first: bool = False):
     if comp.props.status == UIRunStatus.Running.value:
-        msg = _create_ignore_usr_msg(comp)
+        msg = create_ignore_usr_msg(comp)
         await comp.send_app_event_and_wait(msg)
         return
     elif comp.props.status == UIRunStatus.Stop.value:
