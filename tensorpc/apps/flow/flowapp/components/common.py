@@ -17,7 +17,7 @@ import asyncio
 from tensorpc.apps.flow.flowapp.core import Component, create_ignore_usr_msg, Undefined, UIRunStatus
 
 
-async def handle_raw_event(ev: Any, comp: Component):
+async def handle_raw_event(ev: Any, comp: Component, just_run: bool = False):
     # ev: [type, data]
     type, data = ev
     if type in comp._flow_event_handlers:
@@ -32,13 +32,14 @@ async def handle_raw_event(ev: Any, comp: Component):
         return
     elif comp.props.status == UIRunStatus.Stop.value:
         comp.state_change_callback(data)
-
         def ccb(cb):
             return lambda: cb(data)
-
-        comp._task = asyncio.create_task(
-            comp.run_callback(ccb(handler.cb), True))
-
+        if not just_run:
+            comp._task = asyncio.create_task(
+                comp.run_callback(ccb(handler.cb), True))
+        else:
+            await comp.run_callback(ccb(handler.cb), True)
+            
 async def handle_standard_event(comp: Component, data: Any, sync_first: bool = False):
     if comp.props.status == UIRunStatus.Running.value:
         msg = create_ignore_usr_msg(comp)

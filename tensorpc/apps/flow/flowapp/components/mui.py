@@ -1548,3 +1548,23 @@ def get_control_value(comp: Union[Input, Switch, RadioGroup, Select, MultipleSel
         return comp.value 
     else:
         raise NotImplementedError("not a control ui")
+
+
+
+@dataclasses.dataclass
+class AppTerminalProps(BasicProps):
+    flex: Union[ValueType, Undefined] = undefined
+
+
+class AppTerminal(MUIComponentBase[AppTerminalProps]):
+
+    def __init__(self,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.AppTerminal, AppTerminalProps, queue)
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+

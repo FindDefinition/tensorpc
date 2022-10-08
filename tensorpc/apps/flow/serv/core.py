@@ -952,7 +952,6 @@ class FlowGraph:
         self._update_connection(edges)
 
         self.graph_id = graph_id
-        self.ssh_data = flow_data["ssh"]
 
         self.messages: Dict[str, Message] = {}
 
@@ -1041,7 +1040,6 @@ class FlowGraph:
             "viewport": self.viewport,
             "nodes": [n.raw_data for n in self.nodes],
             "edges": [n.raw_data for n in self.edges],
-            "ssh": self.ssh_data,
             "id": self.graph_id,
         }
 
@@ -1050,7 +1048,6 @@ class FlowGraph:
         """
         # we may need to shutdown node, so use async function
         new_graph_data = new_flow_data
-        self.ssh_data = new_flow_data["ssh"]
         self.viewport = new_graph_data["viewport"]
         self.graph_id = graph_id
         nodes = [
@@ -1110,11 +1107,6 @@ def _empty_flow_graph(graph_id: str = ""):
             "x": 0,
             "y": 0,
             "zoom": 1,
-        },
-        "ssh": {
-            "url": "",
-            "username": "",
-            "password": "",
         },
         "id": graph_id,
     }
@@ -1626,11 +1618,9 @@ class Flow:
 
 
     async def save_graph(self, graph_id: str, flow_data):
-        # TODO do we need a async lock here?
-
-        ssh_data = flow_data["ssh"]
+        # TODO do we need a async lock here?    
+        # print(json.dumps(flow_data, indent=2 ))
         flow_data = flow_data["graph"]
-        flow_data["ssh"] = ssh_data
         flow_data["id"] = graph_id
         if graph_id in self.flow_dict:
             await self.flow_dict[graph_id].update_graph(graph_id, flow_data)
@@ -1642,6 +1632,7 @@ class Flow:
             n["selected"] = False
         flow_path = self.root / f"{graph_id}.json"
         with flow_path.open("w") as f:
+            print(flow_path, flow_path)
             json.dump(flow_data, f)
         for node in graph.nodes:
             if isinstance(node, RemoteSSHNode):
@@ -1793,10 +1784,12 @@ class Flow:
         if isinstance(node, CommandNode):
             if node_desp.driver is None:
                 raise ValueError("you need to assign a driver to node first", node.readable_id)
-            print("START", graph_id, node_id, node.is_session_started(),
-                  type(node))
             driver = node_desp.driver
+            print("START", graph_id, node_id, node.is_session_started(),
+                  type(node), driver, node.driver_id)
+
             if isinstance(driver, DirectSSHNode):
+                print("DRIVER", driver.url)
                 if not node.is_session_started():
                     await self._start_session_direct(graph_id, node, driver)
                 await node.run_command(cmd_renderer=graph.render_command)

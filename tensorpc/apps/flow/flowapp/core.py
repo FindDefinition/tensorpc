@@ -83,6 +83,7 @@ class UIType(enum.Enum):
     FlexBox = 0x101
     MUIList = 0x102
     Divider = 0x103
+    AppTerminal = 0x104
 
     # react fragment
     Fragment = 0x200
@@ -351,7 +352,7 @@ class UIExceptionEvent:
         self.user_excs = user_excs
 
     def to_dict(self):
-        return [dataclasses.asdict(v) for v in self.user_excs]
+        return [v.to_dict() for v in self.user_excs]
 
     @classmethod
     def from_dict(cls, data: List[Any]):

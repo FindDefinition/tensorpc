@@ -131,7 +131,7 @@ class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
                 self._flow_event_handlers[k.value] = v
 
     async def handle_event(self, ev: Any):
-        await handle_raw_event(ev, self)
+        await handle_raw_event(ev, self, just_run=True)
 
     async def fly_to(self, center: Tuple[NumberType, NumberType], zoom: Optional[NumberType] = None):
         ev = MapEventFlyTo(center, zoom)
