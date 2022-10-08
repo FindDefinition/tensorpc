@@ -799,6 +799,7 @@ class InputProps(MUIComponentBaseProps):
     disabled: Union[bool, Undefined] = undefined 
     error: Union[bool, Undefined] = undefined 
     full_width: Union[bool, Undefined] = undefined 
+    rows: Union[NumberType, str, Undefined] = undefined 
     size: Union[Undefined, Literal["small", "medium"]] = undefined
     mui_margin: Union[Undefined, Literal["dense", "none", "normal"]] = undefined
     variant: Union[Undefined, Literal["filled", "outlined", "standard"]] = undefined
