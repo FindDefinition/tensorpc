@@ -14,9 +14,51 @@
 
 import tensorpc 
 import time 
-from tensorpc.apps.flow.serv_names import serv_names
-def update_status():
-    tensorpc.simple_remote_call("localhost:51051", serv_names.FLOW_SSH_INPUT, "default_flow", f"Node_0", "\x1b[16;1R")
+from typing import Any, Tuple, Union, List, Dict, get_origin, Generic
+import dataclasses
+import mashumaro
+
+def get_args(t: Any) -> Tuple[Any, ...]:
+    return getattr(t, "__args__", None) or ()
+
+def get_origin(tp):
+    if tp is Generic:
+        return Generic
+    return getattr(tp, "__origin__", None)
+
+_BASE_TYPES = (int, float, bool, str, )
+
+def _check_is_basic_type(tp):
+    origin = get_origin(tp)
+    if origin is not None:
+        if origin in (list, tuple, dict):
+            args = get_args(tp)
+            return all(_check_is_basic_type(a) for a in args)
+        else:
+            return tp in _BASE_TYPES
+    else:
+        return tp in _BASE_TYPES
+
+
+@dataclasses.dataclass
+class WTF1:
+    d: int 
+    e: List[Tuple[int, Dict[str, int]]]
+
+@dataclasses.dataclass
+class WTF:
+    a: int 
+    b: Union[int, float]
+    x: WTF1
+    f: List[Tuple[int, Dict[str, int]]]
+    c: bool = False 
+    e: str = "RTX"
 
 if __name__ == "__main__":
-    update_status()
+    # X = List[Tuple[int, Dict[str, int]]]
+    # print(X, type(X))
+    # breakpoint()
+    for f in dataclasses.fields(WTF):
+        # if f.name == "b":
+        print(f.type, _check_is_basic_type(f.type))
+        # breakpoint()

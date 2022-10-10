@@ -15,13 +15,36 @@
 import dataclasses
 from functools import partial
 import json
-from typing import Any, Dict, Optional, Type, TypeVar, Union
+from typing import Any, Dict, List, Optional, Tuple, Type, TypeVar, Union, Generic
 import operator
 from .. import mui
 
 T = TypeVar("T")
 
 _CONFIG_META_KEY = "_tensorpc_config_panel_meta"
+
+_BASE_TYPES = (int, float, bool, str, )
+
+def get_args(t: Any) -> Tuple[Any, ...]:
+    return getattr(t, "__args__", None) or ()
+
+def get_origin(tp):
+    if tp is Generic:
+        return Generic
+    return getattr(tp, "__origin__", None)
+
+_BASE_TYPES = (int, float, bool, str, )
+
+def _check_is_basic_type(tp):
+    origin = get_origin(tp)
+    if origin is not None:
+        if origin in (list, tuple, dict):
+            args = get_args(tp)
+            return all(_check_is_basic_type(a) for a in args)
+        else:
+            return tp in _BASE_TYPES
+    else:
+        return tp in _BASE_TYPES
 
 
 @dataclasses.dataclass
@@ -54,16 +77,23 @@ class ConfigPanel(mui.FlexBox):
     supported field: common value type and SINGLE nested dataclass,
     don't support structured nested dataclass member, e.g.
     List[OtherDataClass].
+    don't support optional/union.
     WARNING: config object must be singleton. 
+    TODO add support for optional (add a checkbox/switch)
+    TODO add support for simple structure (List[some_dataclass] or Dict[some_dataclass])
+    TODO add support for select (Literal[some_string])
+
     """
-    def __init__(self, config_obj: Any, max_input_rows: int = 3):
+    def __init__(self, config_obj: Any, max_input_rows: int = 3, append_childs: Optional[Dict[str, mui.Component]] = None):
         assert dataclasses.is_dataclass(config_obj)
         # parse config dataclass.
         self.max_input_rows = max_input_rows
-
-        layout, nfield_to_comp = self._parse_dataclass_and_bind(
+        layout_type, nfield_to_comp = self._parse_dataclass_and_bind(
             config_obj, config_obj, "")
+        layout: Dict[str, mui.Component] = {**layout_type}
         super().__init__()
+        if append_childs is not None:
+            layout.update(append_childs)
         self.add_layout(layout)
         self.props.flex_flow = "column nowrap"
         self.__config_obj = config_obj
@@ -108,6 +138,8 @@ class ConfigPanel(mui.FlexBox):
             if dataclasses.is_dataclass(ty):
                 upd = self._sync_config_event(getattr(current_obj, f.name), next_name)
                 continue
+            if not _check_is_basic_type(ty):
+                continue # TODO add support for simple complex type
             comp = self._nfield_to_comp[next_name]
             if ty is bool:
                 # use switch
@@ -147,6 +179,8 @@ class ConfigPanel(mui.FlexBox):
                 layout[f.name] = mui.Accordion(
                     summary, detail.prop(padding_left=1, padding_right=1))
                 continue
+            if not _check_is_basic_type(ty):
+                continue # TODO add support for simple complex type
             # we support int/float/bool/str
             meta: Optional[ConfigMeta] = None
             if _CONFIG_META_KEY in f.metadata:
