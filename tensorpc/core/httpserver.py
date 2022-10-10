@@ -19,11 +19,11 @@ from tensorpc.core.serviceunit import ServiceType
 import ssl
 from tensorpc.core.server_core import ProtobufServiceCore, ServiceCore, ServerMeta
 from pathlib import Path
-from tensorpc.protos import remote_object_pb2
-from tensorpc.protos import remote_object_pb2 as remote_object_pb2
-from tensorpc.protos import rpc_message_pb2
+from tensorpc.protos_export import remote_object_pb2
+from tensorpc.protos_export import remote_object_pb2 as remote_object_pb2
+from tensorpc.protos_export import rpc_message_pb2
 
-from tensorpc.protos import wsdef_pb2
+from tensorpc.protos_export import wsdef_pb2
 from tensorpc.utils import df_logging
 from tensorpc.constants import TENSORPC_WEBSOCKET_MSG_SIZE
 from contextlib import suppress

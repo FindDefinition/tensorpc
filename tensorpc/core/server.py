@@ -29,10 +29,10 @@ from tensorpc.core.defs import ServiceDef
 
 from tensorpc.core.server_core import ProtobufServiceCore, ServerMeta
 
-from tensorpc.protos import remote_object_pb2 as remote_object_pb2
-from tensorpc.protos import rpc_message_pb2
+from tensorpc.protos_export import remote_object_pb2 as remote_object_pb2
+from tensorpc.protos_export import rpc_message_pb2
 
-from tensorpc.protos import \
+from tensorpc.protos_export import \
     remote_object_pb2_grpc as remote_object_pb2_grpc
 from tensorpc.utils.df_logging import get_logger
 

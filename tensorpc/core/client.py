@@ -8,10 +8,10 @@ from typing import Any, Dict, Generator, Iterator, List, Optional, Tuple, Union
 import grpc
 
 from tensorpc.core import core_io as core_io
-from tensorpc.protos import remote_object_pb2 as rpc_pb2
-from tensorpc.protos import rpc_message_pb2 as rpc_msg_pb2
+from tensorpc.protos_export import remote_object_pb2 as rpc_pb2
+from tensorpc.protos_export import rpc_message_pb2 as rpc_msg_pb2
 
-from tensorpc.protos import \
+from tensorpc.protos_export import \
     remote_object_pb2_grpc as remote_object_pb2_grpc
 from tensorpc.utils.wait_tools import wait_until
 from tensorpc.utils.df_logging import get_logger

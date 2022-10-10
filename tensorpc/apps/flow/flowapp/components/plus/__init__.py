@@ -12,9 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .app import (App, AppEditorFrontendEvent, AppEditorFrontendEventType,
-                  EditableApp, EditableLayoutApp, AppEvent,
-                  AppEditorEventType, AppEditor, get_app_context,
-                  get_app_storage)
-from .components import mui, three, leaflet, plus
-from .core import Undefined, undefined
+from .config import ConfigPanel

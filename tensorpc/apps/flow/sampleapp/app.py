@@ -21,7 +21,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Union
-
+import dataclasses
 import cv2
 import imageio
 from faker import Faker
@@ -36,7 +36,7 @@ from tensorpc.apps.flow.flowapp.components.mui import (
 from ..flowapp.core import Component
 from tensorpc.core import prim
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.apps.flow.flowapp.components import three, mui, leaflet
+from tensorpc.apps.flow.flowapp.components import three, mui, leaflet, plus
 import numpy as np
 
 class SampleApp(App):
@@ -454,7 +454,7 @@ class SampleThreeApp(EditableApp):
         self.b2d = three.Boxes2D(1000).prop(color="red",
                                     alpha=0.5)
         mesh = three.Mesh(three.BoxGeometry(), three.MeshBasicMaterial())
-        mesh.set_pointer_callback(on_click=three.EventCallback(lambda x: print(x)))
+        mesh.set_pointer_callback(on_click=three.EventHandler(lambda x: print(x)))
         self.canvas = three.ThreeCanvas({
             "cam": cam,
             "points": self.points,
@@ -595,22 +595,22 @@ class SampleThreeHudApp(EditableApp):
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.b2d = three.Boxes2D(1000)
         mesh = three.Mesh(three.RoundedRectGeometry(2, 1.5, 0.5), three.MeshBasicMaterial().prop(color="#393939"))
-        mesh.set_pointer_callback(on_click=three.EventCallback(lambda x: print(1), True))
+        mesh.set_pointer_callback(on_click=three.EventHandler(lambda x: print(1), True))
         mesh.prop(hover_color="#222222", click_color="#009A63")
         text = three.Text("WTF")
         text.prop(color="red", font_size=2)
-        text.set_pointer_callback(on_click=three.EventCallback(lambda x: print(2)))
+        text.set_pointer_callback(on_click=three.EventHandler(lambda x: print(2)))
 
         self.text2 = three.Text("T")
         self.text2.prop(color="red", font_size=0.5)
-        self.text2.set_pointer_callback(on_click=three.EventCallback(lambda x: print(3)))
+        self.text2.set_pointer_callback(on_click=three.EventHandler(lambda x: print(3)))
         material = three.MeshBasicMaterial()
         material.prop(wireframe=True, color="hotpink")
         mesh2 = three.Mesh(three.BoxGeometry(), material)
-        mesh2.set_pointer_callback(on_click=three.EventCallback(lambda x: print(4)))
+        mesh2.set_pointer_callback(on_click=three.EventHandler(lambda x: print(4)))
         self.img_path = mui.Input("Image Path")
         self.img = three.Image()
-        self.img.set_pointer_callback(on_click=three.EventCallback(lambda x: print("IMAGE!!!", self.img_path.value)))
+        self.img.set_pointer_callback(on_click=three.EventHandler(lambda x: print("IMAGE!!!", self.img_path.value)))
         self.img.prop(scale=(4, 4, 1))
         self.html = three.Html({
             "btn": mui.Button("RTX", lambda: print("RTX1"))
@@ -771,6 +771,35 @@ class SampleMapApp(EditableApp):
                 "btn": mui.Button("FlyTo", lambda: self.leaflet.fly_to((40, 100), zoom=10)),
             }).prop(min_height=0, flex=1),
             "mmap": self.leaflet,
+        }
+
+@dataclasses.dataclass
+class WTF1:
+    d: int 
+@dataclasses.dataclass
+class WTF:
+    a: int 
+    b: Union[int, float]
+    x: WTF1
+    c: bool = False 
+    e: str = "RTX"
+
+
+class SampleConfigApp(EditableApp):
+    def __init__(self) -> None:
+        super().__init__(reloadable_layout=True)
+        self.set_init_window_size([800, 600])
+        # makesure three canvas size fit parent.
+        # self.root.props.min_height = 0
+        # store components here if you want to keep
+        # data after reload layout.
+        self.root.props.flex_flow = "row nowrap"
+        self.cfg = WTF(1, 0.5, WTF1(2), False)
+
+    def app_create_layout(self) -> Dict[str, MUIComponentType]:
+        return {
+            "control": plus.ConfigPanel(self.cfg),
+            "check": mui.Button("Check Config", lambda: print(self.cfg))
         }
 
     

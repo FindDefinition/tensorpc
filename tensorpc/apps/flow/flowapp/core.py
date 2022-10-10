@@ -77,6 +77,11 @@ class UIType(enum.Enum):
     Alert = 0x15
     AccordionSummary = 0x16
     AccordionDetail = 0x17
+    TabContext = 0x18
+    Tab = 0x19
+    TabPanel = 0x1a
+    TabList = 0x1b
+    Checkbox = 0x1c
 
     # special
     TaskLoop = 0x100

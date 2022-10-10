@@ -150,7 +150,6 @@ ThreeComponentType = Union[ThreeComponentBase, ThreeContainerBase, Fragment]
 class PointerEventType(enum.Enum):
     # we don't support hover/move/missed
     # here because it make too much events.
-    # TODO maybe we can use debounced event for hover?
     Click = 0
     DoubleClick = 1
     Enter = 2
@@ -160,8 +159,9 @@ class PointerEventType(enum.Enum):
     Up = 6
     Down = 7
     ContextMenu = 8
+    Move = 9
     # special method for three 2d UI.
-    Change = 9
+    Change = 20
 
 
 @dataclasses.dataclass
@@ -174,10 +174,6 @@ class Object3dBaseProps(ThreeBasicProps):
     visible: Union[bool, Undefined] = undefined
     receive_shadow: Union[bool, Undefined] = undefined
     cast_shadow: Union[bool, Undefined] = undefined
-    # event: {
-    #   type
-    #   stopPropagation
-    # }
 
 
 @dataclasses.dataclass
@@ -2111,7 +2107,7 @@ class ShapeButton(Group):
         material = MeshBasicMaterial()
         material.prop(color="#393939")
         mesh = Mesh(ShapeGeometry(shape), material)
-        mesh.set_pointer_callback(on_click=EventCallback(callback, True))
+        mesh.set_pointer_callback(on_click=EventHandler(callback, True))
         mesh.prop(hover_color="#222222", click_color="#009A63")
         self.mesh = mesh
         text = Text(name)
@@ -2143,7 +2139,7 @@ class ShapeButton(Group):
         return res.cb
 
     def set_callback(self, val: Any):
-        self.mesh.set_pointer_callback(on_click=EventCallback(val, True))
+        self.mesh.set_pointer_callback(on_click=EventHandler(val, True))
         # self.callback = val
 
     async def handle_event(self, ev: Any):
@@ -2185,7 +2181,7 @@ class Button(Group):
         material = MeshBasicMaterial()
         material.prop(color="#393939")
         mesh = Mesh(RoundedRectGeometry(width, height, radius), material)
-        mesh.set_pointer_callback(on_click=EventCallback(callback, True))
+        mesh.set_pointer_callback(on_click=EventHandler(callback, True))
         mesh.prop(hover_color="#222222", click_color="#009A63")
         self.mesh = mesh
         text = Text(name)
@@ -2217,7 +2213,7 @@ class Button(Group):
         return res.cb
 
     def set_callback(self, val: Any):
-        self.mesh.set_pointer_callback(on_click=EventCallback(val, True))
+        self.mesh.set_pointer_callback(on_click=EventHandler(val, True))
         # self.callback = val
 
     # async def handle_event(self, ev: Any):
@@ -2257,7 +2253,7 @@ class ToggleButton(Group):
         material = MeshBasicMaterial()
         material.prop(color="#393939")
         mesh = Mesh(RoundedRectGeometry(width, height, radius), material)
-        mesh.set_pointer_callback(on_change=EventCallback(callback, True))
+        mesh.set_pointer_callback(on_change=EventHandler(callback, True))
 
         mesh.prop(hover_color="#222222",
                   click_color="#009A63",
@@ -2296,7 +2292,7 @@ class ToggleButton(Group):
         return res.cb
 
     def set_callback(self, val: Any):
-        self.mesh.set_pointer_callback(on_change=EventCallback(val, True))
+        self.mesh.set_pointer_callback(on_change=EventHandler(val, True))
 
     @property
     def prop(self):

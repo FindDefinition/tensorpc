@@ -19,8 +19,8 @@ import aiohttp
 from tensorpc.core.defs import Service, ServiceDef
 from tensorpc import compat
 from tensorpc.core import core_io, serviceunit
-from tensorpc.protos import remote_object_pb2 as remote_object_pb2
-from tensorpc.protos import rpc_message_pb2 as rpc_msg_pb2
+from tensorpc.protos_export import remote_object_pb2 as remote_object_pb2
+from tensorpc.protos_export import rpc_message_pb2 as rpc_msg_pb2
 
 from tensorpc.utils import df_logging
 import contextvars

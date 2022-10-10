@@ -29,10 +29,10 @@ import numpy as np
 
 from tensorpc.core import core_io as core_io
 from tensorpc.core.client import RemoteException, format_stdout
-from tensorpc.protos import remote_object_pb2 as rpc_pb2
-from tensorpc.protos import rpc_message_pb2
+from tensorpc.protos_export import remote_object_pb2 as rpc_pb2
+from tensorpc.protos_export import rpc_message_pb2
 
-from tensorpc.protos import \
+from tensorpc.protos_export import \
     remote_object_pb2_grpc as remote_object_pb2_grpc
 from tensorpc.utils.wait_tools import wait_blocking_async, wait_until, wait_until_async
 from tensorpc.utils.df_logging import get_logger

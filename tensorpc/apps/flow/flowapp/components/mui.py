@@ -17,6 +17,7 @@ import base64
 import dataclasses
 import io
 import time
+import enum
 from typing import (Any, AsyncGenerator, AsyncIterable, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Tuple, Type, TypeVar, Union,
                     TYPE_CHECKING)
@@ -108,6 +109,20 @@ class FlexComponentBaseProps(BasicProps):
     border: Union[str, Undefined] = undefined
     white_space: Union[Literal["normal", "pre", "nowrap", "pre-wrap", "pre-line", "break-spaces"], Undefined] = undefined
     pointer_events: Union[PointerEventsProperties, Undefined] = undefined
+
+class IconType(enum.Enum):
+    """all icons used in devflow.
+    """
+    Start = 0
+    Stop = 1
+    Pause = 2 
+    Close = 3 
+    Code = 4
+    FullScreen = 5
+    Trash = 6 
+    More = 7 
+    Setting = 8
+
 
 @dataclasses.dataclass
 class MUIComponentBaseProps(FlexComponentBaseProps):
@@ -583,7 +598,7 @@ class Accordion(MUIContainerBase[AccordionProps, Union[AccordionDetails, Accordi
         if details is not None:
             children["details"] = details
         for v in children.values():
-            assert isinstance(v, (AccordionSummary, AccordionDetails)), "all childs must be summary or defail"
+            assert isinstance(v, (AccordionSummary, AccordionDetails)), "all childs must be summary or detail"
         super().__init__(UIType.Accordion, AccordionProps, uid, queue,
                          uid_to_comp, children, inited)
 
@@ -810,8 +825,7 @@ class Input(MUIComponentBase[InputProps]):
     def __init__(self,
                  label: str,
                  multiline: bool = False,
-                 callback: Optional[Callable[[str], Coroutine[None, None,
-                                                              None]]] = None,
+                 callback: Optional[Callable[[str], _CORO_NONE]] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  init: str = "") -> None:
@@ -907,16 +921,19 @@ class Input(MUIComponentBase[InputProps]):
 class SwitchProps(MUIComponentBaseProps):
     label: str = ""
     checked: bool = False 
+    size: Union[Literal["small", "medium"], Undefined] = undefined
+    mui_color: Union[_BtnGroupColor, Undefined] = undefined
+    label_placement: Union[Literal["top", "start", "bottom", "end"], Undefined] = undefined
 
-class Switch(MUIComponentBase[SwitchProps]):
+class SwitchBase(MUIComponentBase[SwitchProps]):
 
     def __init__(self,
                  label: str,
-                 callback: Optional[Callable[[bool], Coroutine[None, None,
-                                                               None]]] = None,
+                 base_type: UIType,
+                 callback: Optional[Callable[[bool], _CORO_NONE]] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Switch, SwitchProps, queue)
+        super().__init__(uid, base_type, SwitchProps, queue)
         self.props.label = label
         self.callback = callback
         self.props.checked = False
@@ -958,6 +975,24 @@ class Switch(MUIComponentBase[SwitchProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+class Switch(SwitchBase):
+
+    def __init__(self,
+                 label: str,
+                 callback: Optional[Callable[[bool], _CORO_NONE]] = None,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(label, UIType.Switch, callback, uid, queue)
+
+class Checkbox(SwitchBase):
+
+    def __init__(self,
+                 label: str,
+                 callback: Optional[Callable[[bool], _CORO_NONE]] = None,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(label, UIType.Checkbox, callback, uid, queue)
 
 @dataclasses.dataclass
 class SelectProps(MUIComponentBaseProps):
@@ -1266,6 +1301,9 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
             if self.stack_count > 0:
                 # keep root progress
                 self.props.progresses.append(0.0)
+            else:
+                # reset states
+                await self.update_progress(0.0, 0)
             self.stack_count += 1
             if inspect.isasyncgen(it):
                 async for item in it:
@@ -1387,6 +1425,11 @@ class Typography(MUIComponentBase[TypographyProps]):
         propcls = self.propcls
         return self._prop_base(propcls, self)
 
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
 @dataclasses.dataclass
 class PaperProps(MUIFlexBoxProps):
     elevation: Union[int, Undefined] = undefined
@@ -1410,6 +1453,11 @@ class Paper(MUIContainerBase[PaperProps, MUIComponentType]):
         propcls = self.propcls
         return self._prop_base(propcls, self)
 
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
 @dataclasses.dataclass
 class FormControlProps(MUIFlexBoxProps):
     size: Union[Undefined, Literal["small", "medium"]] = undefined
@@ -1431,6 +1479,10 @@ class FormControl(MUIContainerBase[FormControlProps, MUIComponentType]):
         propcls = self.propcls
         return self._prop_base(propcls, self)
 
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 @dataclasses.dataclass
 class CollapseProps(MUIFlexBoxProps):
@@ -1454,6 +1506,11 @@ class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
     def prop(self):
         propcls = self.propcls
         return self._prop_base(propcls, self)
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 # @dataclasses.dataclass
 # class AccordionProps(MUIFlexBoxProps):
@@ -1533,6 +1590,10 @@ class Chip(MUIComponentBase[ChipProps]):
         propcls = self.propcls
         return self._prop_base(propcls, self)
 
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 def get_control_value(comp: Union[Input, Switch, RadioGroup, Select, MultipleSelect, Slider]):
     if isinstance(comp, Input):
@@ -1569,3 +1630,144 @@ class AppTerminal(MUIComponentBase[AppTerminalProps]):
         propcls = self.propcls
         return self._prop_base(propcls, self)
 
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class TabProps(MUIBasicProps):
+    label: str = "" 
+    value: str = ""
+    wrapped: Union[Undefined, bool] = undefined
+    disabled: Union[Undefined, bool] = undefined
+    icon: Union[Undefined, str] = undefined
+    icon_position: Union[Literal["start", "end", "bottom", "top"],
+                       Undefined] = undefined
+
+class Tab(MUIComponentBase[TabProps]):
+
+    def __init__(self,
+                 label: str,
+                 value: str,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.Tab, TabProps, queue)
+        self.props.label = label
+        self.props.value = value
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class TabListProps(MUIFlexBoxProps):
+    orientation: Union[Literal["horizontal", "vertical"],
+                       Undefined] = undefined
+    variant: Union[Literal["scrollable", "vertical", "fullWidth"],
+                       Undefined] = undefined
+    text_color: Union[Literal["inherit", "primary", "secondary"],
+                       Undefined] = undefined
+    centered: Union[Undefined, bool] = undefined 
+    indicator_color: Union[Literal["primary", "secondary"],
+                       Undefined] = undefined
+    visible_scrollbar: Union[Undefined, bool] = undefined 
+
+
+class TabList(MUIContainerBase[TabListProps, Tab]):
+
+    def __init__(self,
+                 children: Dict[str, Tab],
+                 callback: Callable[[], _CORO_NONE],
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 uid_to_comp: Optional[Dict[str, Component]] = None,
+                 inited: bool = False) -> None:
+        super().__init__(UIType.TabList, TabListProps, uid, queue,
+                         uid_to_comp, children, inited)
+        self.callback = callback
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    async def headless_change_tab(self, value: str):
+        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: UIEvent({self._flow_uid: value})}))
+
+    def get_callback(self):
+        return self.callback
+
+    def set_callback(self, val: Any):
+        self.callback = val
+
+    async def handle_event(self, ev: Any):
+        await handle_standard_event_no_arg(self, sync_first=True)
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+
+@dataclasses.dataclass
+class TabContextProps(ContainerBaseProps):
+    value: str = ""
+
+class TabContext(MUIContainerBase[TabContextProps, MUIComponentType]):
+
+    def __init__(self,
+                 children: Dict[str, MUIComponentType],
+                 value: str,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 uid_to_comp: Optional[Dict[str, Component]] = None,
+                 inited: bool = False) -> None:
+        super().__init__(UIType.TabContext, TabContextProps, uid, queue,
+                         uid_to_comp, children, inited)
+        self.props.value = value
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class TabPanelProps(MUIFlexBoxProps):
+    value: str = ""
+
+class TabPanel(MUIContainerBase[TabPanelProps, MUIComponentType]):
+
+    def __init__(self,
+                 children: Dict[str, MUIComponentType],
+                 value: str,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 uid_to_comp: Optional[Dict[str, Component]] = None,
+                 inited: bool = False) -> None:
+        super().__init__(UIType.TabPanel, TabPanelProps, uid, queue,
+                         uid_to_comp, children, inited)
+        self.props.value = value
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)

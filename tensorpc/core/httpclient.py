@@ -7,7 +7,7 @@ import aiohttp
 import requests
 from tensorpc.core import core_io as core_io
 from tensorpc.core.client import RemoteManager
-from tensorpc.protos import rpc_message_pb2, wsdef_pb2
+from tensorpc.protos_export import rpc_message_pb2, wsdef_pb2
 from tensorpc.core.client import RemoteException
 import time
 
