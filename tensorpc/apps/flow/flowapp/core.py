@@ -655,6 +655,7 @@ class Component(Generic[T_base_props, T_child]):
         self.__prop_cls = prop_cls
         self._mounted_override = False
         self._flow_event_handlers: Dict[str, Union[EventHandler, Undefined]] = {}
+        self.__sx_props: Dict[str, Any] = {}
 
     @property
     def props(self) -> T_base_props:
@@ -715,6 +716,9 @@ class Component(Generic[T_base_props, T_child]):
                 traceback.print_exc()
             self._task = None
 
+    def set_sx_props(self, sx_props: Dict[str, Any]):
+        self.__sx_props = sx_props
+
     def to_dict(self):
         """undefined will be removed here.
         if you reimplement to_dict, you need to use 
@@ -722,6 +726,7 @@ class Component(Generic[T_base_props, T_child]):
         """
         props = self.get_props()
         props, und = _split_props_to_undefined(props)
+        props.update(self.__sx_props)
         # state = self.get_state()
         # newstate = {}
         # for k, v in state.items():

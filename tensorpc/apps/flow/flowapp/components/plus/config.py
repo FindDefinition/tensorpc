@@ -13,27 +13,38 @@
 # limitations under the License.
 
 import dataclasses
+import enum
 from functools import partial
 import json
 from typing import Any, Dict, List, Optional, Tuple, Type, TypeVar, Union, Generic
 import operator
+from typing_extensions import Literal
 from .. import mui
 
 T = TypeVar("T")
 
 _CONFIG_META_KEY = "_tensorpc_config_panel_meta"
 
-_BASE_TYPES = (int, float, bool, str, )
+_BASE_TYPES = (
+    int,
+    float,
+    bool,
+    str,
+)
+
 
 def get_args(t: Any) -> Tuple[Any, ...]:
     return getattr(t, "__args__", None) or ()
+
 
 def get_origin(tp):
     if tp is Generic:
         return Generic
     return getattr(tp, "__origin__", None)
 
-_BASE_TYPES = (int, float, bool, str, )
+
+_BASE_TYPES = (int, float, bool, str)
+
 
 def _check_is_basic_type(tp):
     origin = get_origin(tp)
@@ -42,9 +53,9 @@ def _check_is_basic_type(tp):
             args = get_args(tp)
             return all(_check_is_basic_type(a) for a in args)
         else:
-            return tp in _BASE_TYPES
+            return origin in _BASE_TYPES or origin is Literal
     else:
-        return tp in _BASE_TYPES
+        return tp in _BASE_TYPES or issubclass(tp, (enum.Enum, enum.IntEnum))
 
 
 @dataclasses.dataclass
@@ -81,10 +92,13 @@ class ConfigPanel(mui.FlexBox):
     WARNING: config object must be singleton. 
     TODO add support for optional (add a checkbox/switch)
     TODO add support for simple structure (List[some_dataclass] or Dict[some_dataclass])
-    TODO add support for select (Literal[some_string])
 
     """
-    def __init__(self, config_obj: Any, max_input_rows: int = 3, append_childs: Optional[Dict[str, mui.Component]] = None):
+
+    def __init__(self,
+                 config_obj: Any,
+                 max_input_rows: int = 3,
+                 append_childs: Optional[Dict[str, mui.Component]] = None):
         assert dataclasses.is_dataclass(config_obj)
         # parse config dataclass.
         self.max_input_rows = max_input_rows
@@ -101,32 +115,29 @@ class ConfigPanel(mui.FlexBox):
         self.props.min_height = 0
         self._nfield_to_comp = nfield_to_comp
 
-    @property 
+    @property
     def config(self):
         return self.__config_obj
 
     @staticmethod
     def switch_meta():
-        return {
-            _CONFIG_META_KEY: SwitchMeta()
-        }
+        return {_CONFIG_META_KEY: SwitchMeta()}
 
     @staticmethod
     def input_meta(multiline: bool, rows: int, font_size: mui.ValueType,
                    font_family: str):
         return {
-            _CONFIG_META_KEY: InputMeta(multiline=multiline,
-                         rows=rows,
-                         font_size=font_size,
-                         font_family=font_family)
+            _CONFIG_META_KEY:
+            InputMeta(multiline=multiline,
+                      rows=rows,
+                      font_size=font_size,
+                      font_family=font_family)
         }
 
     @staticmethod
     def slider_meta(begin: mui.NumberType, end: mui.NumberType,
                     step: mui.NumberType):
-        return {
-            _CONFIG_META_KEY: SliderMeta(begin=begin, end=end, step=step)
-        }
+        return {_CONFIG_META_KEY: SliderMeta(begin=begin, end=end, step=step)}
 
     def _sync_config_event(self, current_obj: Any, current_name: str):
         uievent = mui.AppEvent("", {})
@@ -136,10 +147,11 @@ class ConfigPanel(mui.FlexBox):
                 next_name = current_name + "." + f.name
             ty = f.type
             if dataclasses.is_dataclass(ty):
-                upd = self._sync_config_event(getattr(current_obj, f.name), next_name)
+                upd = self._sync_config_event(getattr(current_obj, f.name),
+                                              next_name)
                 continue
             if not _check_is_basic_type(ty):
-                continue # TODO add support for simple complex type
+                continue  # TODO add support for simple complex type
             comp = self._nfield_to_comp[next_name]
             if ty is bool:
                 # use switch
@@ -147,18 +159,33 @@ class ConfigPanel(mui.FlexBox):
                 upd = comp.update_event(checked=getattr(current_obj, f.name))
             elif ty is int or ty is float or ty is str:
                 # use textfield with number type
-                assert isinstance(comp, mui.Input)
-                upd = comp.update_event(value=getattr(current_obj, f.name))
+                if isinstance(comp, (mui.Input, mui.Slider)):
+                    upd = comp.update_event(value=getattr(current_obj, f.name))
+                elif isinstance(comp, mui.Slider):
+                    upd = comp.update_event(value=getattr(current_obj, f.name))
+                else:
+                    raise NotImplementedError
             else:
+                ty_origin = get_origin(ty)
                 # use textfield with json
-                assert isinstance(comp, mui.Input)
-                upd = comp.update_event(
-                    value=json.dumps(getattr(current_obj, f.name)))
+                if ty_origin is Literal:
+                    assert isinstance(comp, mui.Select)
+                    upd = comp.update_event(value=getattr(current_obj, f.name))
+                elif ty_origin is None and issubclass(
+                        ty, (enum.Enum, enum.IntEnum)):
+                    assert isinstance(comp, mui.Select)
+                    upd = comp.update_event(
+                        value=getattr(current_obj, f.name).value)
+                else:
+                    assert isinstance(comp, mui.Input)
+                    upd = comp.update_event(
+                        value=json.dumps(getattr(current_obj, f.name)))
             uievent += upd
         return uievent
 
     async def sync_config(self):
-        return await self.send_app_event_and_wait(self._sync_config_event(self.__config_obj, ""))
+        return await self.send_app_event_and_wait(
+            self._sync_config_event(self.__config_obj, ""))
 
     def _parse_dataclass_and_bind(self, origin_obj, current_obj,
                                   current_name: str):
@@ -176,11 +203,13 @@ class ConfigPanel(mui.FlexBox):
                 res = self._parse_dataclass_and_bind(origin_obj, ty, next_name)
                 detail = mui.AccordionDetails(res[0])
                 nfield_to_comp.update(res[1])
-                layout[f.name] = mui.Accordion(
+                acc = mui.Accordion(
                     summary, detail.prop(padding_left=1, padding_right=1))
+                acc.prop(disable_gutters=True)
+                layout[f.name] = acc
                 continue
             if not _check_is_basic_type(ty):
-                continue # TODO add support for simple complex type
+                continue  # TODO add support for simple complex type
             # we support int/float/bool/str
             meta: Optional[ConfigMeta] = None
             if _CONFIG_META_KEY in f.metadata:
@@ -191,6 +220,7 @@ class ConfigPanel(mui.FlexBox):
                          field_name=f.name,
                          origin_obj=origin_obj,
                          type=ty)
+
             if ty is bool:
                 # use switch
                 if meta is not None:
@@ -204,9 +234,10 @@ class ConfigPanel(mui.FlexBox):
                     assert isinstance(meta, (InputMeta, SliderMeta))
                 if meta is None or isinstance(meta, InputMeta):
                     if meta is None:
-                        comp = mui.Input(f.name, multiline=False,
-                                         callback=cb).prop(mui_margin="dense",
-                                                           type="number")
+                        comp = mui.Input(f.name, multiline=False, callback=cb)
+                        comp.prop(mui_margin="dense",
+                                  type="number",
+                                  size="small")
                     else:
                         comp = mui.Input(f.name,
                                          multiline=meta.multiline,
@@ -215,7 +246,8 @@ class ConfigPanel(mui.FlexBox):
                                   type="number",
                                   rows=meta.rows,
                                   font_family=meta.font_family,
-                                  font_size=meta.font_size)
+                                  font_size=meta.font_size,
+                                  size="small")
                     if f.default != dataclasses.MISSING:
                         comp.props.value = str(f.default)
 
@@ -235,40 +267,59 @@ class ConfigPanel(mui.FlexBox):
                     assert isinstance(meta, InputMeta)
 
                 if meta is None:
-                    comp = mui.Input(f.name, multiline=False,
-                                     callback=cb).prop(mui_margin="dense",
-                                                       type="number")
+                    comp = mui.Input(f.name, multiline=False, callback=cb)
+                    comp.prop(mui_margin="dense", size="small")
                 else:
                     comp = mui.Input(f.name,
                                      multiline=meta.multiline,
                                      callback=cb)
                     comp.prop(mui_margin="dense",
-                              type="number",
                               rows=meta.rows,
                               font_family=meta.font_family,
-                              font_size=meta.font_size)
+                              font_size=meta.font_size,
+                              size="small")
 
                 if f.default != dataclasses.MISSING:
                     comp.props.value = f.default
+
             else:
-                # use textfield with json
-                if meta is not None:
-                    assert isinstance(meta, InputMeta)
-                if meta is None:
-                    comp = mui.Input(f.name, multiline=False,
-                                     callback=cb).prop(mui_margin="dense",
-                                                       type="number")
+                ty_origin = get_origin(ty)
+                # print(ty, ty_origin, type(ty), type(ty_origin))
+                if ty_origin is Literal:
+                    values = get_args(ty)
+                    names = list(map(str, values))
+                    comp = mui.Select(f.name,
+                                      list(zip(names, values)),
+                                      callback=cb).prop(mui_margin="dense",
+                                                        size="small")
+                    if f.default != dataclasses.MISSING:
+                        comp.props.value = f.default
+                elif ty_origin is None and issubclass(
+                        ty, (enum.Enum, enum.IntEnum)):
+                    comp = mui.Select(f.name,
+                                      list((x.name, x.value) for x in ty),
+                                      callback=cb).prop(mui_margin="dense",
+                                                        size="small")
+                    if f.default != dataclasses.MISSING:
+                        comp.props.value = f.default.value
                 else:
-                    comp = mui.Input(f.name,
-                                     multiline=meta.multiline,
-                                     callback=cb)
-                    comp.prop(mui_margin="dense",
-                              type="number",
-                              rows=meta.rows,
-                              font_family=meta.font_family,
-                              font_size=meta.font_size)
-                if f.default != dataclasses.MISSING:
-                    comp.props.value = json.dumps(f.default)
+                    # use textfield with json
+                    if meta is not None:
+                        assert isinstance(meta, InputMeta)
+                    if meta is None:
+                        comp = mui.Input(f.name, multiline=False, callback=cb)
+                        comp.prop(mui_margin="dense", size="small")
+                    else:
+                        comp = mui.Input(f.name,
+                                         multiline=meta.multiline,
+                                         callback=cb)
+                        comp.prop(mui_margin="dense",
+                                  rows=meta.rows,
+                                  font_family=meta.font_family,
+                                  font_size=meta.font_size,
+                                  size="small")
+                    if f.default != dataclasses.MISSING:
+                        comp.props.value = json.dumps(f.default)
 
             layout[f.name] = comp
             nfield_to_comp[next_name] = comp
@@ -276,6 +327,7 @@ class ConfigPanel(mui.FlexBox):
 
     @staticmethod
     def _callback(value, origin_obj, cur_name, field_name, type):
+        # print(type, value)
         if type is bool:
             value = value
         elif type is int:
@@ -285,7 +337,14 @@ class ConfigPanel(mui.FlexBox):
         elif type is str:
             value = value
         else:
-            value = json.loads(value)
+            ty_origin = get_origin(type)
+            if ty_origin is Literal:
+                value = value
+            elif ty_origin is None and issubclass(type,
+                                                  (enum.Enum, enum.IntEnum)):
+                value = type(value)
+            else:
+                value = json.loads(value)
         if cur_name:
             getter = operator.attrgetter(cur_name)
             setattr(getter(origin_obj), field_name, value)

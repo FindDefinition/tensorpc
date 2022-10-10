@@ -20,9 +20,11 @@ import time
 import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Union
+from typing import Any, Dict, List, Tuple, Union
 import dataclasses
+from typing_extensions import Literal
 import cv2
+import enum 
 import imageio
 from faker import Faker
 import tensorpc
@@ -33,6 +35,7 @@ from tensorpc.apps.flow.flowapp.app import EditableLayoutApp
 from tensorpc.apps.flow.flowapp.components.mui import (
     Button, ChartJSLine, HBox, ListItemButton, ListItemText, MUIComponentType,
     Plotly, Text, VBox, VList)
+from tensorpc.apps.flow.flowapp.components.plus.config import ConfigPanel
 from ..flowapp.core import Component
 from tensorpc.core import prim
 from tensorpc.core.asynctools import cancel_task
@@ -773,17 +776,31 @@ class SampleMapApp(EditableApp):
             "mmap": self.leaflet,
         }
 
+class TestEnum(enum.Enum):
+    A = "1"
+    B = "2"
+    C = "3"
+
+class TestEnumInt(enum.IntEnum):
+    A = 1
+    B = 2
+    C = 3
+
 @dataclasses.dataclass
 class WTF1:
     d: int 
+
 @dataclasses.dataclass
 class WTF:
     a: int 
     b: Union[int, float]
-    x: WTF1
+    g: WTF1
+    x: Literal["WTF", "WTF1"]
+    f: List[Tuple[int, Dict[str, int]]]
     c: bool = False 
     e: str = "RTX"
-
+    h: TestEnum = TestEnum.C
+    i: int = dataclasses.field(default=1, metadata=ConfigPanel.slider_meta(0, 10, 1))
 
 class SampleConfigApp(EditableApp):
     def __init__(self) -> None:
@@ -794,7 +811,7 @@ class SampleConfigApp(EditableApp):
         # store components here if you want to keep
         # data after reload layout.
         self.root.props.flex_flow = "row nowrap"
-        self.cfg = WTF(1, 0.5, WTF1(2), False)
+        self.cfg = WTF(1, 0.5, WTF1(2), "WTF", [])
 
     def app_create_layout(self) -> Dict[str, MUIComponentType]:
         return {
@@ -802,4 +819,3 @@ class SampleConfigApp(EditableApp):
             "check": mui.Button("Check Config", lambda: print(self.cfg))
         }
 
-    

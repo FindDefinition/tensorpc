@@ -582,6 +582,7 @@ class AccordionProps(MUIFlexBoxProps):
     disabled: Union[Undefined, bool] = undefined
     expanded: bool = False 
     square: Union[Undefined, bool] = undefined
+    disable_gutters: Union[Undefined, bool] = undefined
 
 class Accordion(MUIContainerBase[AccordionProps, Union[AccordionDetails, AccordionSummary]]):
 
@@ -1009,8 +1010,7 @@ class Select(MUIComponentBase[SelectProps]):
                  label: str,
                  items: List[Tuple[str, ValueType]],
                  callback: Optional[Callable[[ValueType],
-                                             Coroutine[None, None,
-                                                       None]]] = None,
+                                             _CORO_NONE]] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
         super().__init__(uid, UIType.Select, SelectProps, queue)
@@ -1098,9 +1098,7 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
     def __init__(self,
                  label: str,
                  items: List[Tuple[str, ValueType]],
-                 callback: Optional[Callable[[List[ValueType]],
-                                             Coroutine[None, None,
-                                                       None]]] = None,
+                 callback: Optional[Callable[[List[ValueType]], _CORO_NONE]] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
         super().__init__(uid, UIType.MultipleSelect, MultipleSelectProps,

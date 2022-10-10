@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing_extensions import Literal
 import tensorpc 
 import time 
 from typing import Any, Tuple, Union, List, Dict, get_origin, Generic
 import dataclasses
 import mashumaro
+import enum 
+
 
 def get_args(t: Any) -> Tuple[Any, ...]:
     return getattr(t, "__args__", None) or ()
@@ -35,10 +38,14 @@ def _check_is_basic_type(tp):
             args = get_args(tp)
             return all(_check_is_basic_type(a) for a in args)
         else:
-            return tp in _BASE_TYPES
+            return origin in _BASE_TYPES or origin is Literal
     else:
-        return tp in _BASE_TYPES
+        return tp in _BASE_TYPES or issubclass(tp, enum.Enum)
 
+class TestEnum(enum.Enum):
+    A = "1"
+    B = "2"
+    C = "3"
 
 @dataclasses.dataclass
 class WTF1:
@@ -49,10 +56,11 @@ class WTF1:
 class WTF:
     a: int 
     b: Union[int, float]
-    x: WTF1
+    x: Literal["WTF", "WTF1"]
     f: List[Tuple[int, Dict[str, int]]]
     c: bool = False 
     e: str = "RTX"
+    f: TestEnum = TestEnum.C
 
 if __name__ == "__main__":
     # X = List[Tuple[int, Dict[str, int]]]
@@ -60,5 +68,5 @@ if __name__ == "__main__":
     # breakpoint()
     for f in dataclasses.fields(WTF):
         # if f.name == "b":
-        print(f.type, _check_is_basic_type(f.type))
+        print(f.type, get_origin(f.type), get_origin(f.type) is Union, get_origin(f.type) is Literal, type(get_origin(f.type)), _check_is_basic_type(f.type))
         # breakpoint()
