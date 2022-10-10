@@ -97,11 +97,9 @@ class ConfigPanel(mui.FlexBox):
 
     def __init__(self,
                  config_obj: Any,
-                 max_input_rows: int = 3,
                  append_childs: Optional[Dict[str, mui.Component]] = None):
         assert dataclasses.is_dataclass(config_obj)
         # parse config dataclass.
-        self.max_input_rows = max_input_rows
         layout_type, nfield_to_comp = self._parse_dataclass_and_bind(
             config_obj, config_obj, "")
         layout: Dict[str, mui.Component] = {**layout_type}
