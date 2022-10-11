@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type, TypeVar, Union, Gener
 import operator
 from typing_extensions import Literal
 from .. import mui
-
+import inspect
 T = TypeVar("T")
 
 _CONFIG_META_KEY = "_tensorpc_config_panel_meta"
@@ -55,8 +55,10 @@ def _check_is_basic_type(tp):
         else:
             return origin in _BASE_TYPES or origin is Literal
     else:
-        return tp in _BASE_TYPES or issubclass(tp, (enum.Enum, enum.IntEnum))
-
+        if inspect.isclass(tp):
+            return tp in _BASE_TYPES or issubclass(tp, (enum.Enum, enum.IntEnum))
+        else:
+            return False 
 
 @dataclasses.dataclass
 class ConfigMeta:
@@ -198,11 +200,11 @@ class ConfigPanel(mui.FlexBox):
                 # nested parse
                 summary = mui.AccordionSummary(
                     {"t": mui.Typography(f"{f.name}")})
-                res = self._parse_dataclass_and_bind(origin_obj, ty, next_name)
+                res = self._parse_dataclass_and_bind(origin_obj, getattr(current_obj, f.name), next_name)
                 detail = mui.AccordionDetails(res[0])
                 nfield_to_comp.update(res[1])
                 acc = mui.Accordion(
-                    summary, detail.prop(padding_left=1, padding_right=1))
+                    summary, detail.prop(padding_left=1, padding_right=1, flex_flow="column nowrap"))
                 acc.prop(disable_gutters=True)
                 layout[f.name] = acc
                 continue
@@ -224,8 +226,7 @@ class ConfigPanel(mui.FlexBox):
                 if meta is not None:
                     assert isinstance(meta, SwitchMeta)
                 comp = mui.Switch(f.name, cb)
-                if f.default != dataclasses.MISSING:
-                    comp.props.checked = f.default
+                comp.props.checked = getattr(current_obj, f.name)
             elif ty is int or ty is float:
                 # use textfield with number type
                 if meta is not None:
@@ -246,8 +247,7 @@ class ConfigPanel(mui.FlexBox):
                                   font_family=meta.font_family,
                                   font_size=meta.font_size,
                                   size="small")
-                    if f.default != dataclasses.MISSING:
-                        comp.props.value = str(f.default)
+                    comp.props.value = str(getattr(current_obj, f.name))
 
                 elif isinstance(meta, SliderMeta):
                     comp = mui.Slider(f.name,
@@ -255,8 +255,7 @@ class ConfigPanel(mui.FlexBox):
                                       meta.end,
                                       meta.step,
                                       callback=cb)
-                    if f.default != dataclasses.MISSING:
-                        comp.props.value = f.default
+                    comp.props.value = getattr(current_obj, f.name)
                 else:
                     raise NotImplementedError
             elif ty is str:
@@ -277,8 +276,7 @@ class ConfigPanel(mui.FlexBox):
                               font_size=meta.font_size,
                               size="small")
 
-                if f.default != dataclasses.MISSING:
-                    comp.props.value = f.default
+                comp.props.value = str(getattr(current_obj, f.name))
 
             else:
                 ty_origin = get_origin(ty)
@@ -290,16 +288,14 @@ class ConfigPanel(mui.FlexBox):
                                       list(zip(names, values)),
                                       callback=cb).prop(mui_margin="dense",
                                                         size="small")
-                    if f.default != dataclasses.MISSING:
-                        comp.props.value = f.default
+                    comp.props.value = getattr(current_obj, f.name)
                 elif ty_origin is None and issubclass(
                         ty, (enum.Enum, enum.IntEnum)):
                     comp = mui.Select(f.name,
                                       list((x.name, x.value) for x in ty),
                                       callback=cb).prop(mui_margin="dense",
                                                         size="small")
-                    if f.default != dataclasses.MISSING:
-                        comp.props.value = f.default.value
+                    comp.props.value = getattr(current_obj, f.name).value
                 else:
                     # use textfield with json
                     if meta is not None:
@@ -316,8 +312,7 @@ class ConfigPanel(mui.FlexBox):
                                   font_family=meta.font_family,
                                   font_size=meta.font_size,
                                   size="small")
-                    if f.default != dataclasses.MISSING:
-                        comp.props.value = json.dumps(f.default)
+                    comp.props.value = json.dumps(getattr(current_obj, f.name))
 
             layout[f.name] = comp
             nfield_to_comp[next_name] = comp

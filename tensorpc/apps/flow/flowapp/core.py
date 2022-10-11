@@ -82,6 +82,9 @@ class UIType(enum.Enum):
     TabPanel = 0x1a
     TabList = 0x1b
     Checkbox = 0x1c
+    AppBar = 0x1d
+    Toolbar = 0x1e
+    Drawer = 0x1f
 
     # special
     TaskLoop = 0x100
