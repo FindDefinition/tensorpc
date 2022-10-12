@@ -471,7 +471,8 @@ class ButtonProps(MUIComponentBaseProps):
     size: Union[Literal["small", "medium", "large"], Undefined] = undefined
     variant: Union[Literal["contained", "outlined", "text"],
                    Undefined] = undefined
-
+    loading: Union[Undefined, bool] = undefined 
+    loading_indicator: Union[Undefined, str] = undefined
 
 class Button(MUIComponentBase[ButtonProps]):
 
@@ -1400,6 +1401,7 @@ class TypographyProps(MUIComponentBaseProps):
     value: str = ""
 
 
+
 class Typography(MUIComponentBase[TypographyProps]):
 
     def __init__(self,
@@ -1769,3 +1771,70 @@ class TabPanel(MUIContainerBase[TabPanelProps, MUIComponentType]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+
+@dataclasses.dataclass
+class CircularProgressProps(MUIFlexBoxProps):
+    value: NumberType = 0
+    label_color: Union[Undefined, str] = undefined 
+    mui_color: Union[_BtnGroupColor, Undefined] = undefined 
+    label_variant: Union[_TypographyVarient, Undefined] = undefined
+    size: Union[Undefined, str, NumberType] = undefined 
+    variant: Union[Undefined, Literal["determinate", "indeterminate"]] = undefined
+    thickness: Union[Undefined, NumberType] = undefined
+
+class CircularProgress(MUIComponentBase[CircularProgressProps]):
+
+    def __init__(self,
+                 init_value: NumberType = 0,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.CircularProgress, CircularProgressProps, queue)
+        self.props.value = init_value
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def update_value(self, value: NumberType):
+        value = min(max(value, 0), 100)
+        await self.send_app_event_and_wait(self.update_event(value=value))
+
+
+@dataclasses.dataclass
+class LinearProgressProps(MUIFlexBoxProps):
+    value: NumberType = 0
+    label_color: Union[Undefined, str] = undefined 
+    mui_color: Union[_BtnGroupColor, Undefined] = undefined 
+    label_variant: Union[_TypographyVarient, Undefined] = undefined
+    variant: Union[Undefined, Literal["determinate", "indeterminate", "buffer", "query"]] = undefined
+
+
+class LinearProgress(MUIComponentBase[LinearProgressProps]):
+
+    def __init__(self,
+                 init_value: NumberType = 0,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.LinearProgress, LinearProgressProps, queue)
+        self.props.value = init_value
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def update_value(self, value: NumberType):
+        value = min(max(value, 0), 100)
+        await self.send_app_event_and_wait(self.update_event(value=value))

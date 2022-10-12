@@ -85,6 +85,8 @@ class UIType(enum.Enum):
     AppBar = 0x1d
     Toolbar = 0x1e
     Drawer = 0x1f
+    CircularProgress = 0x20
+    LinearProgress = 0x21
 
     # special
     TaskLoop = 0x100
@@ -92,6 +94,7 @@ class UIType(enum.Enum):
     MUIList = 0x102
     Divider = 0x103
     AppTerminal = 0x104
+    ThemeProvider = 0x105
 
     # react fragment
     Fragment = 0x200
