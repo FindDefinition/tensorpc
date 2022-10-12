@@ -150,7 +150,8 @@ class App:
                  flex_flow: Union[str, Undefined] = "column nowrap",
                  justify_content: Union[str, Undefined] = undefined,
                  align_items: Union[str, Undefined] = undefined,
-                 maxqsize: int = 10) -> None:
+                 maxqsize: int = 10,
+                 enable_value_cache: bool = False) -> None:
         self._uid_to_comp: Dict[str, Component] = {}
         self._queue: "asyncio.Queue[AppEvent]" = asyncio.Queue(
             maxsize=maxqsize)
@@ -180,6 +181,7 @@ class App:
 
         self.__previous_error_sync_props = {}
         self.__previous_error_persist_state = {}
+        self._enable_value_cache = enable_value_cache
 
 
     def get_persist_storage(self):
@@ -228,24 +230,25 @@ class App:
         # print("persist_storage", state["persist_storage"])
         if state["persist_storage"]:
             self.__persist_storage.update(state["persist_storage"])
-        ev = AppEvent("", {})
-        for k, s in uistate.items():
-            if k in self.root._uid_to_comp:
-                comp_to_restore = self.root._uid_to_comp[k]
-                if comp_to_restore._flow_comp_type.value == s["type"]:
-                    comp_to_restore.set_props(s["props"])
-                    ev += comp_to_restore.get_sync_event(True)
-        with _enter_app_conetxt(self):
-            for k, s in userstate.items():
+        if self._enable_value_cache:
+            ev = AppEvent("", {})
+            for k, s in uistate.items():
                 if k in self.root._uid_to_comp:
                     comp_to_restore = self.root._uid_to_comp[k]
                     if comp_to_restore._flow_comp_type.value == s["type"]:
-                        try:
-                            await comp_to_restore.set_persist_props_async(s["state"])
-                        except:
-                            traceback.print_exc()
-                            continue
-        await self._queue.put(ev)
+                        comp_to_restore.set_props(s["props"])
+                        ev += comp_to_restore.get_sync_event(True)
+            with _enter_app_conetxt(self):
+                for k, s in userstate.items():
+                    if k in self.root._uid_to_comp:
+                        comp_to_restore = self.root._uid_to_comp[k]
+                        if comp_to_restore._flow_comp_type.value == s["type"]:
+                            try:
+                                await comp_to_restore.set_persist_props_async(s["state"])
+                            except:
+                                traceback.print_exc()
+                                continue
+            await self._queue.put(ev)
 
     def _app_force_use_layout_function(self):
         self._force_special_layout_method = True

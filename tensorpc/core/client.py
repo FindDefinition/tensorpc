@@ -3,6 +3,7 @@ import contextlib
 import json
 import time
 from functools import wraps
+import traceback
 from typing import Any, Dict, Generator, Iterator, List, Optional, Tuple, Union
 
 import grpc
@@ -46,15 +47,31 @@ class RemoteObject(object):
     num_blocks: int
     """
     def __init__(self,
-                 channel: grpc.Channel,
+                 channel: Optional[grpc.Channel],
                  name="",
                  print_stdout=True):
 
-        self.channel = channel
-        self.stub = remote_object_pb2_grpc.RemoteObjectStub(channel)
+        self._channel = channel
+        if channel is not None:
+            self._stub = remote_object_pb2_grpc.RemoteObjectStub(channel)
+        else:
+            self._stub = None 
         self.func_dict = {}
         self.name = name
         self.print_stdout = print_stdout
+
+    def enabled(self):
+        return self._channel is not None
+
+    @property 
+    def channel(self):
+        assert self._channel is not None, "you need to provide a channel to enable rpc feature."
+        return self._channel
+
+    @property 
+    def stub(self):
+        assert self._stub is not None, "you need to provide a channel to enable rpc feature."
+        return self._stub
 
     def query_server_meta(self):
         response = self.stub.QueryServerMeta(rpc_msg_pb2.RemoteCallRequest())
@@ -347,29 +364,38 @@ class RemoteManager(RemoteObject):
                  name="",
                  channel_options=None,
                  credentials=None,
-                 print_stdout=True):
-        if credentials is not None:
-            self.channel = grpc.secure_channel(url,
-                                               credentials,
-                                               options=channel_options)
+                 print_stdout=True,
+                 enabled=True):
+        if enabled:
+            if credentials is not None:
+                channel = grpc.secure_channel(url,
+                                                credentials,
+                                                options=channel_options)
+            else:
+                channel = grpc.insecure_channel(url, options=channel_options)
         else:
-            self.channel = grpc.insecure_channel(url, options=channel_options)
+            channel = None
         self.credentials = credentials
         self._channel_options = channel_options
         self.url = url
+        if enabled:
+            self._channel = channel
+        super().__init__(channel, name, print_stdout)
+        if enabled:
+            self.wait_for_channel_ready()
         atexit.register(self.close)
-        self.wait_for_channel_ready()
-        super().__init__(self.channel, name, print_stdout)
+
 
     def reconnect(self, timeout=10, max_retries=20):
         self.close()
         if self.credentials is not None:
-            self.channel = grpc.secure_channel(self.url,
+            self._channel = grpc.secure_channel(self.url,
                                                self.credentials,
                                                options=self._channel_options)
         else:
-            self.channel = grpc.insecure_channel(self.url,
+            self._channel = grpc.insecure_channel(self.url,
                                                  options=self._channel_options)
+        self._stub = remote_object_pb2_grpc.RemoteObjectStub(self.channel)
         self.wait_for_remote_ready(timeout, max_retries)
 
     def wait_for_channel_ready(self, timeout: float=10):
@@ -391,12 +417,12 @@ class RemoteManager(RemoteObject):
             return False
 
     def close(self):
-        if self.channel is not None:
+        if self._channel is not None:
             # if we shutdown remote and close channel,
             # will raise strange error.
             # self.channel.close()
-            del self.channel
-            self.channel = None
+            del self._channel
+            self._channel = None
 
     def shutdown(self):
         super().shutdown()

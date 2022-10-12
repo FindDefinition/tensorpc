@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, AsyncGenerator, List, Optional, Tuple
+from typing import Any, AsyncGenerator, List, Optional, Tuple, Generator
 
 from tensorpc.protos import rpc_message_pb2
 
@@ -85,6 +85,30 @@ class MasterMeta:
         assert self._node_id is not None
         return self._node_id
 
+class AppLocalMeta:
+    def __init__(self) -> None:
+        gport = os.getenv(constants.TENSORPC_FLOW_APP_GRPC_PORT)
+        port = os.getenv(constants.TENSORPC_FLOW_APP_HTTP_PORT)
+        self.module_name = os.getenv(constants.TENSORPC_FLOW_APP_MODULE_NAME, "")
+        url = ""
+        grpc_url = ""
+        if port is not None:
+            url = f"http://localhost:{port}/api/rpc"
+        if gport is not None:
+            grpc_url = f"localhost:{gport}"
+        self.grpc_port = gport
+        self.http_port = port
+        self.grpc_url = grpc_url
+        self.http_url = url
+        self.is_inside_devflow = gport is not None and port is not None and self.module_name != ""
+
+def is_inside_devflow():
+    meta = MasterMeta()
+    return meta.is_inside_devflow
+
+def is_inside_app():
+    meta = AppLocalMeta()
+    return meta.is_inside_devflow
 
 def _get_ids_and_url():
     gid = os.getenv(constants.TENSORPC_FLOW_GRAPH_ID)
@@ -182,7 +206,7 @@ def query_app_urls(master_url: str, graph_id: str,
     return tuple(res_urls), is_remote, module_name
 
 
-class AppClient(tensorpc.RemoteManager):
+class AppClientBase(tensorpc.RemoteManager):
 
     def __init__(self,
                  master_url: str,
@@ -191,10 +215,23 @@ class AppClient(tensorpc.RemoteManager):
                  name="",
                  channel_options=None,
                  credentials=None,
-                 print_stdout=True):
-        app_urls, is_remote, module_key = query_app_urls(master_url, graph_id, node_id)
+                 print_stdout=True,
+                 enabled: bool = True):
+        if enabled:
+            if master_url == "":
+                is_remote = False 
+                local_meta = AppLocalMeta()
+                module_key = local_meta.module_name
+                assert local_meta.is_inside_devflow, "you can only use this in devflow."
+                app_urls = (local_meta.grpc_url, local_meta.http_url)
+            else:
+                app_urls, is_remote, module_key = query_app_urls(master_url, graph_id, node_id)
+        else:
+            app_urls = ("", "")
+            is_remote = False 
+            module_key = ""
         super().__init__(app_urls[0], name, channel_options, credentials,
-                         print_stdout)
+                         print_stdout, enabled=enabled)
         self.graph_id = graph_id
         self.node_id = node_id
         self.is_remote = is_remote
@@ -244,7 +281,7 @@ class AppClient(tensorpc.RemoteManager):
             timeout: Optional[int] = None,
             rpc_callback="",
             rpc_flags: int = rpc_message_pb2.PickleArray,
-            **kwargs) -> AsyncGenerator[Any, None]:
+            **kwargs) -> Generator[Any, None, None]:
         for data in self.remote_generator(self.async_gen_key,
                                 self.module_key + "." + key, *self.graph_args, *args,
                                         rpc_flags=rpc_flags,
@@ -252,7 +289,7 @@ class AppClient(tensorpc.RemoteManager):
                                         **kwargs):
             yield data
 
-class AsyncAppClient(tensorpc.AsyncRemoteManager):
+class AppClient(AppClientBase):
 
     def __init__(self,
                  master_url: str,
@@ -261,10 +298,49 @@ class AsyncAppClient(tensorpc.AsyncRemoteManager):
                  name="",
                  channel_options=None,
                  credentials=None,
-                 print_stdout=True):
-        app_urls, is_remote, module_key = query_app_urls(master_url, graph_id, node_id)
+                 print_stdout=True,
+                 enabled: bool = True):
+        assert master_url != "" and graph_id != "" and node_id != ""
+        super().__init__(master_url, graph_id, node_id,name, channel_options, credentials, print_stdout, enabled)
+
+class AppLocalClient(AppClientBase):
+
+    def __init__(self,
+                 name="",
+                 channel_options=None,
+                 credentials=None,
+                 print_stdout=True,
+                 enabled: bool = True):
+        super().__init__("", "", "" ,name, channel_options, credentials, print_stdout, enabled)
+
+
+class AsyncAppClientBase(tensorpc.AsyncRemoteManager):
+
+    def __init__(self,
+                 master_url: str,
+                 graph_id: str,
+                 node_id: str,
+                 name="",
+                 channel_options=None,
+                 credentials=None,
+                 print_stdout=True,
+                 enabled: bool = True):
+        if enabled:
+            if master_url == "":
+                is_remote = False 
+                local_meta = AppLocalMeta()
+                module_key = local_meta.module_name
+                assert local_meta.is_inside_devflow, "you can only use this in devflow."
+                app_urls = (local_meta.grpc_url, local_meta.http_url)
+            else:
+                app_urls, is_remote, module_key = query_app_urls(master_url, graph_id, node_id)
+        else:
+            app_urls = ("", "")
+            is_remote = False 
+            module_key = ""
+            
         super().__init__(app_urls[0], name, channel_options, credentials,
-                         print_stdout)
+                         print_stdout, enabled=enabled)
         self.graph_id = graph_id
         self.node_id = node_id
         self.is_remote = is_remote
@@ -323,3 +399,27 @@ class AsyncAppClient(tensorpc.AsyncRemoteManager):
                                         rpc_callback=rpc_callback,
                                         **kwargs):
             yield data
+
+class AsyncAppClient(AsyncAppClientBase):
+
+    def __init__(self,
+                 master_url: str,
+                 graph_id: str,
+                 node_id: str,
+                 name="",
+                 channel_options=None,
+                 credentials=None,
+                 print_stdout=True,
+                 enabled: bool = True):
+        assert master_url != "" and graph_id != "" and node_id != ""
+        super().__init__(master_url, graph_id, node_id,name, channel_options, credentials, print_stdout, enabled)
+
+class AsyncAppLocalClient(AsyncAppClientBase):
+
+    def __init__(self,
+                 name="",
+                 channel_options=None,
+                 credentials=None,
+                 print_stdout=True,
+                 enabled: bool = True):
+        super().__init__("", "", "" ,name, channel_options, credentials, print_stdout, enabled)

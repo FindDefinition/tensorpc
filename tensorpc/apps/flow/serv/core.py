@@ -39,6 +39,7 @@ from tensorpc.apps.flow.constants import (
     TENSORPC_FLOW_MASTER_HTTP_PORT, TENSORPC_FLOW_NODE_ID,
     TENSORPC_FLOW_NODE_READABLE_ID, TENSORPC_FLOW_NODE_UID,
     TENSORPC_FLOW_USE_REMOTE_FWD)
+from tensorpc.apps.flow import constants as flowconstants
 from tensorpc.apps.flow.coretypes import (Message, MessageEvent,
                                           MessageEventType, MessageLevel,
                                           ScheduleEvent, SessionStatus,
@@ -57,7 +58,7 @@ from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.wait_tools import get_free_ports
 from jinja2 import BaseLoader, Environment, Template
 
-JINJA2_VARIABLE_ENV = Environment(loader=BaseLoader,
+JINJA2_VARIABLE_ENV = Environment(loader=BaseLoader(),
                                   variable_start_string="{{",
                                   variable_end_string="}}")
 
@@ -850,7 +851,11 @@ class AppNode(CommandNode):
             self.last_event = CommandEventType.PROMPT_END
             self.set_stop_status()
             self.running_driver_id = ""
-
+        envs.update({
+            flowconstants.TENSORPC_FLOW_APP_GRPC_PORT: str(self.grpc_port),
+            flowconstants.TENSORPC_FLOW_APP_HTTP_PORT: str(self.http_port),
+            flowconstants.TENSORPC_FLOW_APP_MODULE_NAME: self.module_name,
+        })
         sd_task = asyncio.create_task(self.shutdown_ev.wait())
         self.task = asyncio.create_task(
             client.connect_queue(self.input_queue,

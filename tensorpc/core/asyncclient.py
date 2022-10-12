@@ -53,15 +53,32 @@ class AsyncRemoteObject(object):
     num_blocks: int
     """
     def __init__(self,
-                 channel: grpc.aio.Channel,
+                 channel: Optional[grpc.aio.Channel],
                  name="",
                  print_stdout=True):
 
-        self.channel = channel
-        self.stub = remote_object_pb2_grpc.RemoteObjectStub(channel)
+        self._channel = channel
+        if channel is not None:
+            self._stub = remote_object_pb2_grpc.RemoteObjectStub(channel)
+        else:
+            self._stub = None 
+
         self.func_dict = {}
         self.name = name
         self.print_stdout = print_stdout
+
+    def enabled(self):
+        return self._channel is not None
+
+    @property 
+    def channel(self):
+        assert self._channel is not None, "you need to provide a channel to enable rpc feature."
+        return self._channel
+
+    @property 
+    def stub(self):
+        assert self._stub is not None, "you need to provide a channel to enable rpc feature."
+        return self._stub
 
     async def query_server_meta(self):
         response = await self.stub.QueryServerMeta(rpc_message_pb2.RemoteCallRequest())
@@ -325,34 +342,41 @@ class AsyncRemoteManager(AsyncRemoteObject):
                  name="",
                  channel_options=None,
                  credentials=None,
-                 print_stdout=True):
-        if credentials is not None:
-            self.channel = grpc.aio.secure_channel(url,
-                                                   credentials,
-                                                   options=channel_options)
+                 print_stdout=True,
+                 enabled=True):
+        if enabled:
+            if credentials is not None:
+                channel = grpc.aio.secure_channel(url,
+                                                    credentials,
+                                                    options=channel_options)
+            else:
+                channel = grpc.aio.insecure_channel(url,
+                                                        options=channel_options)
         else:
-            self.channel = grpc.aio.insecure_channel(url,
-                                                     options=channel_options)
+            channel = None
         self.credentials = credentials
         self._channel_options = channel_options
         self.url = url
+        if enabled:
+            self._channel = channel
         atexit.register(self.close)
-        super().__init__(self.channel, name, print_stdout)
+        super().__init__(channel, name, print_stdout)
 
     async def reconnect(self, timeout=10, max_retries=20):
         self.close()
         if self.credentials is not None:
-            self.channel = grpc.aio.secure_channel(
+            self._channel = grpc.aio.secure_channel(
                 self.url, self.credentials, options=self._channel_options)
         else:
-            self.channel = grpc.aio.insecure_channel(
+            self._channel = grpc.aio.insecure_channel(
                 self.url, options=self._channel_options)
+        self._stub = remote_object_pb2_grpc.RemoteObjectStub(self.channel)
         await self.wait_for_remote_ready(timeout, max_retries)
 
     async def wait_for_channel_ready(self, timeout: float=10, max_retries=20):
-        assert self.channel is not None 
+        assert self._channel is not None 
         try:
-            await wait_blocking_async(self.channel.channel_ready, max_retries,
+            await wait_blocking_async(self._channel.channel_ready, max_retries,
                                    timeout / max_retries)
         except TimeoutError as e:
 
@@ -372,12 +396,12 @@ class AsyncRemoteManager(AsyncRemoteObject):
             return False
 
     def close(self):
-        if self.channel is not None:
+        if self._channel is not None:
             # if we shutdown remote and close channel,
             # will raise strange error.
             # self.channel.close()
-            del self.channel
-            self.channel = None
+            del self._channel
+            self._channel = None
 
     async def shutdown(self):
         await super().shutdown()

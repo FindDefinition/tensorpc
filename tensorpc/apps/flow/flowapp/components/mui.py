@@ -107,6 +107,11 @@ class FlexComponentBaseProps(BasicProps):
     font_size: Union[ValueType, Undefined] = undefined
     font_family: Union[str, Undefined] = undefined
     border: Union[str, Undefined] = undefined
+    border_top: Union[ValueType, Undefined] = undefined
+    border_left: Union[ValueType, Undefined] = undefined
+    border_right: Union[ValueType, Undefined] = undefined
+    border_bottom: Union[ValueType, Undefined] = undefined
+    border_color: Union[str, Undefined] = undefined
     white_space: Union[Literal["normal", "pre", "nowrap", "pre-wrap", "pre-line", "break-spaces"], Undefined] = undefined
     pointer_events: Union[PointerEventsProperties, Undefined] = undefined
 
@@ -1264,9 +1269,11 @@ _T = TypeVar("_T")
 class TaskLoopProps(MUIComponentBaseProps):
     label: str = ""
     progresses: List[float] = dataclasses.field(default_factory=list)
-
+    linear: Union[Undefined, bool] = undefined
 
 class TaskLoop(MUIComponentBase[TaskLoopProps]):
+    """task loop that user use task_loop to start task.
+    """
 
     def __init__(self,
                  label: str,
@@ -1340,11 +1347,11 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
     async def update_progress(self, progress: float, index: int):
         progress = max(0, min(progress, 1))
         self.props.progresses[index] = progress
-        await self.put_app_event(
-            self.create_update_event({"progresses": self.props.progresses}))
+        await self.send_app_event_and_wait(
+            self.update_event(progresses=self.props.progresses))
 
     async def update_label(self, label: str):
-        await self.put_app_event(self.create_update_event({"label": label}))
+        await self.send_app_event_and_wait(self.update_event(label=label))
         self.props.label = label
 
     async def headless_run(self):
@@ -1389,6 +1396,57 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+class RawTaskLoop(MUIComponentBase[TaskLoopProps]):
+    """task loop that user control all events.
+    """
+    def __init__(self,
+                 label: str,
+                 callbcak: Callable[[int], _CORO_NONE],
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None,
+                 update_period: float = 0.2) -> None:
+        super().__init__(uid, UIType.TaskLoop, TaskLoopProps, queue)
+        self.props.label = label
+        self.callbcak = callbcak
+
+        self.props.progresses = [0.0]
+        self.stack_count = 0
+        self.pause_event = asyncio.Event()
+        self.pause_event.set()
+        self.update_period = update_period
+
+    def get_callback(self):
+        return self.callbcak
+
+    async def update_progress(self, progress: float, index: int):
+        progress = max(0, min(progress, 1))
+        self.props.progresses[index] = progress
+        await self.send_app_event_and_wait(
+            self.update_event(progresses=self.props.progresses))
+
+    async def update_label(self, label: str):
+        await self.send_app_event_and_wait(self.update_event(label=label))
+        self.props.label = label
+
+    async def headless_event(self, ev: TaskLoopEvent):
+        uiev = UIEvent({self._flow_uid: ev.value})
+        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: uiev}))
+
+    def set_callback(self, val: Any):
+        self.callbcak = val
+
+    async def handle_event(self, data: Any):
+        await handle_standard_event(self, data)
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 @dataclasses.dataclass
 class TypographyProps(MUIComponentBaseProps):
@@ -1635,39 +1693,40 @@ class AppTerminal(MUIComponentBase[AppTerminalProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-@dataclasses.dataclass
-class TabProps(MUIBasicProps):
-    label: str = "" 
-    value: str = ""
-    wrapped: Union[Undefined, bool] = undefined
-    disabled: Union[Undefined, bool] = undefined
-    icon: Union[Undefined, str] = undefined
-    icon_position: Union[Literal["start", "end", "bottom", "top"],
-                       Undefined] = undefined
+# @dataclasses.dataclass
+# class TabProps(MUIBasicProps):
+#     label: str = "" 
+#     value: str = ""
+#     wrapped: Union[Undefined, bool] = undefined
+#     disabled: Union[Undefined, bool] = undefined
+#     icon: Union[Undefined, str] = undefined
+#     icon_position: Union[Literal["start", "end", "bottom", "top"],
+#                        Undefined] = undefined
 
-class Tab(MUIComponentBase[TabProps]):
+# class Tab(MUIComponentBase[TabProps]):
 
-    def __init__(self,
-                 label: str,
-                 value: str,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Tab, TabProps, queue)
-        self.props.label = label
-        self.props.value = value
+#     def __init__(self,
+#                  label: str,
+#                  value: str,
+#                  uid: str = "",
+#                  queue: Optional[asyncio.Queue] = None) -> None:
+#         super().__init__(uid, UIType.Tab, TabProps, queue)
+#         self.props.label = label
+#         self.props.value = value
 
-    @property 
-    def prop(self):
-        propcls = self.propcls
-        return self._prop_base(propcls, self)
+#     @property 
+#     def prop(self):
+#         propcls = self.propcls
+#         return self._prop_base(propcls, self)
 
-    @property 
-    def update_event(self):
-        propcls = self.propcls
-        return self._update_props_base(propcls)
+#     @property 
+#     def update_event(self):
+#         propcls = self.propcls
+#         return self._update_props_base(propcls)
 
 @dataclasses.dataclass
 class TabListProps(MUIFlexBoxProps):
+    tabs: List[Tuple[str, str]] = dataclasses.field(default_factory=list)
     orientation: Union[Literal["horizontal", "vertical"],
                        Undefined] = undefined
     variant: Union[Literal["scrollable", "vertical", "fullWidth"],
@@ -1680,26 +1739,21 @@ class TabListProps(MUIFlexBoxProps):
     visible_scrollbar: Union[Undefined, bool] = undefined 
 
 
-class TabList(MUIContainerBase[TabListProps, Tab]):
+class TabList(MUIComponentBase[TabListProps]):
 
     def __init__(self,
-                 children: Dict[str, Tab],
-                 callback: Callable[[], _CORO_NONE],
+                tabs: List[Tuple[str, str]],
+                 callback: Callable[[str], _CORO_NONE],
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
-                 inited: bool = False) -> None:
-        super().__init__(UIType.TabList, TabListProps, uid, queue,
-                         uid_to_comp, children, inited)
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(uid, UIType.TabList, TabListProps, queue)
         self.callback = callback
+        self.props.tabs = tabs
 
     @property 
     def prop(self):
         propcls = self.propcls
         return self._prop_base(propcls, self)
-
-    async def headless_change_tab(self, value: str):
-        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: UIEvent({self._flow_uid: value})}))
 
     def get_callback(self):
         return self.callback
@@ -1708,7 +1762,7 @@ class TabList(MUIContainerBase[TabListProps, Tab]):
         self.callback = val
 
     async def handle_event(self, ev: Any):
-        await handle_standard_event_no_arg(self, sync_first=True)
+        await handle_standard_event(self, ev, sync_first=True)
 
     @property 
     def update_event(self):
@@ -1743,6 +1797,13 @@ class TabContext(MUIContainerBase[TabContextProps, MUIComponentType]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+    async def change_tab(self, value: str):
+        return await self.send_app_event_and_wait(self.update_event(value=value))
+    
+    async def headless_change_tab(self, value: str):
+        return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: UIEvent({self._flow_uid: value})}))
+
 
 @dataclasses.dataclass
 class TabPanelProps(MUIFlexBoxProps):
