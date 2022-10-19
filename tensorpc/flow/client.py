@@ -16,7 +16,7 @@ from typing import Any, AsyncGenerator, List, Optional, Tuple, Generator
 
 from tensorpc.protos import rpc_message_pb2
 
-from ...utils.address import get_url_port
+from ..utils.address import get_url_port
 from . import constants
 from .serv_names import serv_names
 from tensorpc.core.httpclient import http_remote_call_request
