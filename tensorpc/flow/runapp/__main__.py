@@ -20,7 +20,7 @@ from tensorpc.flow.serv.flowapp import FlowApp
 
 
 async def main_async(module_name: str, **config):
-    app_serv = FlowApp(module_name, **config)
+    app_serv = FlowApp(module_name, config, True)
     await app_serv.init()
     await app_serv.app.headless_main()
     app_serv.shutdown_ev.set()

@@ -39,14 +39,18 @@ class FlowApp:
         self.config = config
         self.shutdown_ev = asyncio.Event()
         self.master_meta = MasterMeta()
-        assert self.master_meta.is_inside_devflow, "this service must run inside devflow"
-        assert self.master_meta.is_http_valid
+        if not headless:
+            assert self.master_meta.is_inside_devflow, "this service must run inside devflow"
+            assert self.master_meta.is_http_valid
         self._send_loop_task: Optional[asyncio.Task] = None
         self._need_to_send_env: Optional[AppEvent] = None
         self.shutdown_ev.clear()
+        if not headless:
 
-        self._uid = get_uid(self.master_meta.graph_id,
-                            self.master_meta.node_id)
+            self._uid = get_uid(self.master_meta.graph_id,
+                                self.master_meta.node_id)
+        else:
+            self._uid = ""
         self.headless = headless
         self.dynamic_app_cls = ReloadableDynamicClass(module_name)
         self.app: App = self.dynamic_app_cls.obj_type(**self.config)
