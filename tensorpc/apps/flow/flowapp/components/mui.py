@@ -243,12 +243,16 @@ class Images(MUIComponentBase[ImageProps]):
 
 @dataclasses.dataclass
 class PlotlyProps(BasicProps):
-    data: Union[list, Undefined] = undefined 
-    layout: Union[dict, Undefined] = undefined 
+    data: list = dataclasses.field(default_factory=list) 
+    layout: dict = dataclasses.field(default_factory=dict) 
+
+# @dataclasses.dataclass
+# class PlotlyLayoutTitle:
+
 
 
 class Plotly(MUIComponentBase[PlotlyProps]):
-
+    """see https://plotly.com/javascript/ for documentation"""
     def __init__(self,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
@@ -275,39 +279,27 @@ class Plotly(MUIComponentBase[PlotlyProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-@dataclasses.dataclass
-class ChartJSLineProps(BasicProps):
-    data: Union[Any, Undefined] = undefined 
-    options: Union[Any, Undefined] = undefined 
+    @staticmethod
+    def layout_no_margin():
+        return {
+            # "height": 240,
+            "autosize": 'true',
+            "margin": {
+                "l": 0,
+                "r": 0,
+                "b": 0,
+                "t": 0,
+                #   "pad": 0
+            },
+            "yaxis": {
+                "automargin": True,
+            },
+            "xaxis": {
+                "automargin": True,
+            },
+        }
 
 
-class ChartJSLine(MUIComponentBase[ChartJSLineProps]):
-
-    def __init__(self,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.ChartJSLine, ChartJSLineProps, queue)
-
-    async def show_raw(self, data: list, options: Any):
-        self.props.data = data
-        self.props.options = options
-        await self.put_app_event(self.update_event(data=data, options=options))
-
-    def get_sync_props(self) -> Dict[str, Any]:
-        res = super().get_sync_props()
-        res["data"] = self.props.data
-        res["options"] = self.props.options
-        return res
-
-    @property 
-    def prop(self):
-        propcls = self.propcls
-        return self._prop_base(propcls, self)
-
-    @property 
-    def update_event(self):
-        propcls = self.propcls
-        return self._update_props_base(propcls)
 
 @dataclasses.dataclass
 class TextProps(MUIComponentBaseProps):
@@ -527,11 +519,13 @@ class ButtonGroupProps(MUIFlexBoxProps):
 class ButtonGroup(MUIContainerBase[ButtonGroupProps, Button]):
 
     def __init__(self,
-                 children: Dict[str, Button],
+                 children: Union[List[Button], Dict[str, Button]],
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ButtonGroup, ButtonGroupProps, uid, queue,
                          uid_to_comp, children, inited)
         for v in children.values():
@@ -671,9 +665,11 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
-                 _children: Optional[Dict[str, MUIComponentType]] = None,
+                 _children: Optional[Union[List[MUIComponentType], Dict[str, MUIComponentType]]] = None,
                  base_type: UIType = UIType.FlexBox,
                  inited: bool = False) -> None:
+        if _children is not None and isinstance(_children, list):
+            _children = {str(i): v for i, v in enumerate(_children)}
         super().__init__(base_type, MUIFlexBoxProps, uid, queue, uid_to_comp,
                          _children, inited)
 
@@ -719,19 +715,19 @@ class MUIList(MUIContainerBase[MUIListProps, MUIComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-def VBox(layout: Dict[str, MUIComponentType]):
+def VBox(layout: Union[List[MUIComponentType], Dict[str, MUIComponentType]]):
     res = FlexBox("", asyncio.Queue(), {}, _children=layout)
-    res.prop(flex_flow="column nowrap")
+    res.prop(flex_flow="column")
     return res
 
 
-def HBox(layout: Dict[str, MUIComponentType], ):
+def HBox(layout: Union[List[MUIComponentType], Dict[str, MUIComponentType]]):
     res = FlexBox("", asyncio.Queue(), {}, _children=layout)
-    res.prop(flex_flow="row nowrap")
+    res.prop(flex_flow="row")
     return res
 
 
-def Box(layout: Dict[str, MUIComponentType]):
+def Box(layout: Union[List[MUIComponentType], Dict[str, MUIComponentType]]):
     return FlexBox("", asyncio.Queue(), {}, _children=layout)
 
 
@@ -1270,6 +1266,7 @@ class TaskLoopProps(MUIComponentBaseProps):
     label: str = ""
     progresses: List[float] = dataclasses.field(default_factory=list)
     linear: Union[Undefined, bool] = undefined
+    task_status: Union[Undefined, int] = undefined
 
 class TaskLoop(MUIComponentBase[TaskLoopProps]):
     """task loop that user use task_loop to start task.
@@ -1777,12 +1774,14 @@ class TabContextProps(ContainerBaseProps):
 class TabContext(MUIContainerBase[TabContextProps, MUIComponentType]):
 
     def __init__(self,
-                 children: Dict[str, MUIComponentType],
+                 children: Union[List[MUIComponentType], Dict[str, MUIComponentType]],
                  value: str,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.TabContext, TabContextProps, uid, queue,
                          uid_to_comp, children, inited)
         self.props.value = value
@@ -1812,12 +1811,14 @@ class TabPanelProps(MUIFlexBoxProps):
 class TabPanel(MUIContainerBase[TabPanelProps, MUIComponentType]):
 
     def __init__(self,
-                 children: Dict[str, MUIComponentType],
+                 children: Union[List[MUIComponentType], Dict[str, MUIComponentType]],
                  value: str,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.TabPanel, TabPanelProps, uid, queue,
                          uid_to_comp, children, inited)
         self.props.value = value

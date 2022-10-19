@@ -854,8 +854,10 @@ class AppNode(CommandNode):
         envs.update({
             flowconstants.TENSORPC_FLOW_APP_GRPC_PORT: str(self.grpc_port),
             flowconstants.TENSORPC_FLOW_APP_HTTP_PORT: str(self.http_port),
-            flowconstants.TENSORPC_FLOW_APP_MODULE_NAME: self.module_name,
+            flowconstants.TENSORPC_FLOW_APP_MODULE_NAME: f"\"{self.module_name}\"",
         })
+        if self.module_name.startswith("!"):
+            envs[flowconstants.TENSORPC_FLOW_APP_MODULE_NAME] = ""
         sd_task = asyncio.create_task(self.shutdown_ev.wait())
         self.task = asyncio.create_task(
             client.connect_queue(self.input_queue,

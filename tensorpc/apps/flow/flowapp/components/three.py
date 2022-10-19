@@ -1207,12 +1207,14 @@ class FlexManualReflow(ThreeComponentBase[FlexManualReflowProps]):
 class ThreeCanvas(MUIContainerBase[ContainerBaseProps, ThreeComponentType]):
 
     def __init__(self,
-                 children: Dict[str, ThreeComponentType],
+                 children: Union[List[ThreeComponentType], Dict[str, ThreeComponentType]],
                  background: Union[str, Undefined] = undefined,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ThreeCanvas, ContainerBaseProps, uid, queue,
                          uid_to_comp, children, inited)
         self.background = background

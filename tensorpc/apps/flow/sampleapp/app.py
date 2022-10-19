@@ -33,7 +33,7 @@ from tensorpc.apps.flow.coretypes import MessageLevel, ScheduleEvent
 from tensorpc.apps.flow.flowapp import App, EditableApp
 from tensorpc.apps.flow.flowapp.app import EditableLayoutApp
 from tensorpc.apps.flow.flowapp.components.mui import (
-    Button, ChartJSLine, HBox, ListItemButton, ListItemText, MUIComponentType,
+    Button, HBox, ListItemButton, ListItemText, MUIComponentType,
     Plotly, Text, VBox, VList)
 from tensorpc.apps.flow.flowapp.components.plus.config import ConfigPanel
 from ..flowapp.core import Component
@@ -226,13 +226,6 @@ class SamplePlotApp(App):
                 "t": 0,
                 #   "pad": 0
             },
-            #  "margin": {
-            # #   "l": 0,
-            # #   "r": 0,
-            # #   "b": 0,
-            #   "t": 20,
-            # #   "pad": 0
-            # },
             "yaxis": {
                 "automargin": True,
             },
@@ -240,8 +233,7 @@ class SamplePlotApp(App):
                 "automargin": True,
             },
         }
-
-        self.plot = Plotly(data=data, layout=layout)
+        self.plot = Plotly().prop(data=data, layout=layout)
         self.root.add_layout({
             "plot0": self.plot,
             "btn": Button("Show", self._show_plot)
@@ -271,88 +263,6 @@ class SamplePlotApp(App):
             }
         }
         await self.plot.show_raw(data, layout)
-
-
-class SampleChartJSApp(App):
-
-    def __init__(self) -> None:
-        super().__init__()
-        options = {
-            "responsive": True,
-            "devicePixelRatio": 1.5,
-            "plugins": {
-                "legend": {
-                    "position": 'top',
-                },
-                "title": {
-                    "display": True,
-                    "text": 'Chart.js Line Chart',
-                },
-            },
-        }
-        labels = [
-            'January', 'February', 'March', 'April', 'May', 'June', 'July'
-        ]
-        data = {
-            "labels":
-            labels,
-            "datasets": [
-                {
-                    "label": 'Dataset 1',
-                    "data": list(range(len(labels))),
-                    "borderColor": 'rgb(255, 99, 132)',
-                    "backgroundColor": 'rgba(255, 99, 132, 0.5)',
-                },
-                {
-                    "label": 'Dataset 2',
-                    "data": list(range(len(labels))),
-                    "borderColor": 'rgb(53, 162, 235)',
-                    "backgroundColor": 'rgba(53, 162, 235, 0.5)',
-                },
-            ],
-        }
-        self.plot = ChartJSLine(data=data, options=options)
-        self.root.add_layout({
-            "plot0": VBox({
-                "asd": self.plot,
-            }, flex=1),
-            "btn": Button("Show", self._show_plot)
-        })
-        self.set_init_window_size([480, 320])
-
-    async def _show_plot(self):
-        options = {
-            "responsive": True,
-            "plugins": {
-                "legend": {
-                    "position": 'top',
-                },
-                "title": {
-                    "display": True,
-                    "text": 'Chart.js Line Chart',
-                },
-            },
-        }
-        labels = ['0', '1', '2', '3', '4', '5', '6']
-        data = {
-            "labels":
-            labels,
-            "datasets": [
-                {
-                    "label": 'Dataset 1',
-                    "data": list(range(len(labels))),
-                    "borderColor": 'rgb(255, 99, 132)',
-                    "backgroundColor": 'rgba(255, 99, 132, 0.5)',
-                },
-                {
-                    "label": 'Dataset 2',
-                    "data": list(range(len(labels))),
-                    "borderColor": 'rgb(53, 162, 235)',
-                    "backgroundColor": 'rgba(53, 162, 235, 0.5)',
-                },
-            ],
-        }
-        await self.plot.show_raw(data, options)
 
 
 class SampleFlowApp(App):
