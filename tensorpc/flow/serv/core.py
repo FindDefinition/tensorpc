@@ -878,7 +878,7 @@ class AppNode(CommandNode):
     async def run_command(self,
                           newenvs: Optional[Dict[str, Any]] = None,
                           cmd_renderer: Optional[Callable[[str], str]] = None):
-        serv_name = f"tensorpc.apps.flow.serv.flowapp{TENSORPC_SPLIT}FlowApp"
+        serv_name = f"tensorpc.flow.serv.flowapp{TENSORPC_SPLIT}FlowApp"
         cfg = {
             serv_name: {
                 "module_name": self.module_name,

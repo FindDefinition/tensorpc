@@ -236,12 +236,12 @@ class AppClientBase(tensorpc.RemoteManager):
         self.node_id = node_id
         self.is_remote = is_remote
         self.module_key = module_key
-        self.remote_key = "tensorpc.apps.flow.serv.flowapp::FlowApp.run_app_service"
-        self.async_gen_key = "tensorpc.apps.flow.serv.flowapp::FlowApp.run_app_async_gen_service"
+        self.remote_key = "tensorpc.flow.serv.flowapp::FlowApp.run_app_service"
+        self.async_gen_key = "tensorpc.flow.serv.flowapp::FlowApp.run_app_async_gen_service"
         if is_remote:
-            self.remote_key = "tensorpc.apps.flow.serv.worker::FlowWorker.run_app_service"
+            self.remote_key = "tensorpc.flow.serv.worker::FlowWorker.run_app_service"
             # TODO
-            self.async_gen_key = "tensorpc.apps.flow.serv.worker::FlowWorker.run_app_async_gen_service"
+            self.async_gen_key = "tensorpc.flow.serv.worker::FlowWorker.run_app_async_gen_service"
         self.graph_args = []
         if self.is_remote:
             self.graph_args = [self.graph_id, self.node_id]
@@ -344,12 +344,12 @@ class AsyncAppClientBase(tensorpc.AsyncRemoteManager):
         self.graph_id = graph_id
         self.node_id = node_id
         self.is_remote = is_remote
-        self.remote_key = "tensorpc.apps.flow.serv.flowapp::FlowApp.run_app_service"
-        self.async_gen_key = "tensorpc.apps.flow.serv.flowapp::FlowApp.run_app_async_gen_service"
+        self.remote_key = "tensorpc.flow.serv.flowapp::FlowApp.run_app_service"
+        self.async_gen_key = "tensorpc.flow.serv.flowapp::FlowApp.run_app_async_gen_service"
         if is_remote:
-            self.remote_key = "tensorpc.apps.flow.serv.worker::FlowWorker.run_app_service"
+            self.remote_key = "tensorpc.flow.serv.worker::FlowWorker.run_app_service"
             # TODO
-            self.async_gen_key = "tensorpc.apps.flow.serv.worker::FlowWorker.run_app_async_gen_service"
+            self.async_gen_key = "tensorpc.flow.serv.worker::FlowWorker.run_app_async_gen_service"
 
         self.graph_args = []
         if self.is_remote:
