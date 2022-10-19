@@ -14,9 +14,9 @@
 
 import pickle
 from typing import Any, Dict, List, Optional
-from tensorpc.apps.flow.coretypes import ScheduleEvent, get_uid
-from tensorpc.apps.flow.flowapp.core import AppEditorFrontendEvent, AppEvent, AppEventType, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UISaveStateEvent
-from tensorpc.apps.flow.flowapp.app import App
+from tensorpc.flow.coretypes import ScheduleEvent, get_uid
+from tensorpc.flow.flowapp.core import AppEditorFrontendEvent, AppEvent, AppEventType, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UISaveStateEvent
+from tensorpc.flow.flowapp.app import App
 import asyncio
 from tensorpc.core import marker
 from tensorpc.core.httpclient import http_remote_call
@@ -24,7 +24,7 @@ from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceUnit
 import tensorpc
 from ..client import MasterMeta
 from tensorpc import prim
-from tensorpc.apps.flow.serv_names import serv_names
+from tensorpc.flow.serv_names import serv_names
 import traceback
 import time 
 

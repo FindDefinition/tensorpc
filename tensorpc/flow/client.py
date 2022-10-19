@@ -24,7 +24,7 @@ import tensorpc
 
 import os
 import time
-from tensorpc.apps.flow.coretypes import Message, MessageItem, MessageLevel, RelayUpdateNodeEvent
+from tensorpc.flow.coretypes import Message, MessageItem, MessageLevel, RelayUpdateNodeEvent
 import uuid
 
 

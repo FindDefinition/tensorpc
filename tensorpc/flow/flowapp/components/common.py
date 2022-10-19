@@ -14,7 +14,7 @@
 
 from typing import Any
 import asyncio
-from tensorpc.apps.flow.flowapp.core import Component, create_ignore_usr_msg, Undefined, UIRunStatus
+from tensorpc.flow.flowapp.core import Component, create_ignore_usr_msg, Undefined, UIRunStatus
 
 
 async def handle_raw_event(ev: Any, comp: Component, just_run: bool = False):

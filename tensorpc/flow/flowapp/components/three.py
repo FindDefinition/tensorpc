@@ -705,6 +705,7 @@ class Boxes2D(Object3dWithEventBase[Boxes2DProps]):
                            attrs: Optional[Union[List[str],
                                                  Undefined]] = None):
         # TODO check props in
+        assert not isinstance(self.props.centers, Undefined)
         upd: Dict[str, Any] = {}
         if centers is not None:
             assert centers.shape[

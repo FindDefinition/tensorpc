@@ -13,8 +13,8 @@
 # limitations under the License.
 
 from typing import Dict
-from tensorpc.apps.flow.flowapp import App, EditableApp, EditableLayoutApp, mui
-from tensorpc.apps.flow.flowapp.core import Component
+from tensorpc.flow.flowapp import App, EditableApp, EditableLayoutApp, mui
+from tensorpc.flow.flowapp.core import Component
 
 from tensorpc.autossh import SSHClient
 import asyncssh 

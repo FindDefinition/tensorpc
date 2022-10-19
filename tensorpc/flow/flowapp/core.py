@@ -27,7 +27,7 @@ import dataclasses
 import re
 import sys
 from typing_extensions import Literal, ParamSpec, Concatenate, Self, TypeAlias, Protocol
-from tensorpc.apps.flow.coretypes import MessageLevel
+from tensorpc.flow.coretypes import MessageLevel
 ALL_APP_EVENTS = HashableRegistry()
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]

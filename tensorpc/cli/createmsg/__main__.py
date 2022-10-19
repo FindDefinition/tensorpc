@@ -14,8 +14,8 @@
 
 from pathlib import Path
 import fire 
-from tensorpc.apps.flow.client import add_message
-from tensorpc.apps.flow.coretypes import MessageItemType, MessageLevel, MessageItem
+from tensorpc.flow.client import add_message
+from tensorpc.flow.coretypes import MessageItemType, MessageLevel, MessageItem
 import faker
 import base64
 

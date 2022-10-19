@@ -18,7 +18,7 @@ from typing import Any, AnyStr, Awaitable, Callable, Deque, Dict, List, Optional
 from contextlib import suppress
 import asyncssh
 import tensorpc
-from tensorpc.apps.flow.constants import TENSORPC_READUNTIL
+from tensorpc.flow.constants import TENSORPC_READUNTIL
 from tensorpc.constants import PACKAGE_ROOT
 import getpass
 from asyncssh.scp import scp as asyncsshscp

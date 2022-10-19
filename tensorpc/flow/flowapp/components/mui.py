@@ -26,7 +26,7 @@ import numpy as np
 from PIL import Image as PILImage
 import json
 import inspect
-from tensorpc.apps.flow.flowapp.components.common import handle_standard_event, handle_standard_event_no_arg
+from tensorpc.flow.flowapp.components.common import handle_standard_event, handle_standard_event_no_arg
 from tensorpc.core.asynctools import cancel_task
 from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, NumberType, T_child, TaskLoopEvent, UIEvent,

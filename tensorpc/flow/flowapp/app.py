@@ -30,7 +30,7 @@ import numpy as np
 import watchdog
 import watchdog.events
 from PIL import Image
-from tensorpc.apps.flow.coretypes import ScheduleEvent
+from tensorpc.flow.coretypes import ScheduleEvent
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceUnit
 from tensorpc.utils.registry import HashableRegistry

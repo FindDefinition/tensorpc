@@ -23,19 +23,19 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import grpc
 import tensorpc
 from tensorpc import prim
-from tensorpc.apps.flow import constants as flowconstants
-from tensorpc.apps.flow.coretypes import (Message, MessageEvent,
+from tensorpc.flow import constants as flowconstants
+from tensorpc.flow.coretypes import (Message, MessageEvent,
                                           MessageEventType, RelayEvent,
                                           RelayEventType, RelaySSHEvent,
                                           RelayUpdateNodeEvent, ScheduleEvent,
                                           relay_event_from_dict)
-from tensorpc.apps.flow.flowapp.core import AppEvent, AppEventType, ScheduleNextForApp, app_event_from_data
-from tensorpc.apps.flow.serv_names import serv_names
+from tensorpc.flow.flowapp.core import AppEvent, AppEventType, ScheduleNextForApp, app_event_from_data
+from tensorpc.flow.serv_names import serv_names
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, RawEvent,
                                    SSHClient, SSHRequest, SSHRequestType)
 from tensorpc.core import get_grpc_url, get_http_url
-from ....core.client import simple_chunk_call
+from ...core.client import simple_chunk_call
 from tensorpc.core.httpclient import http_remote_call
 from tensorpc.utils.address import convert_url_to_local, get_url_port
 from tensorpc.utils.wait_tools import get_free_ports

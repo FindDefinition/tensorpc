@@ -28,18 +28,18 @@ import enum
 import imageio
 from faker import Faker
 import tensorpc
-from tensorpc.apps.flow.client import AsyncAppClient, add_message, AppClient
-from tensorpc.apps.flow.coretypes import MessageLevel, ScheduleEvent
-from tensorpc.apps.flow.flowapp import App, EditableApp
-from tensorpc.apps.flow.flowapp.app import EditableLayoutApp
-from tensorpc.apps.flow.flowapp.components.mui import (
+from tensorpc.flow.client import AsyncAppClient, add_message, AppClient
+from tensorpc.flow.coretypes import MessageLevel, ScheduleEvent
+from tensorpc.flow.flowapp import App, EditableApp
+from tensorpc.flow.flowapp.app import EditableLayoutApp
+from tensorpc.flow.flowapp.components.mui import (
     Button, HBox, ListItemButton, ListItemText, MUIComponentType,
     Plotly, Text, VBox, VList)
-from tensorpc.apps.flow.flowapp.components.plus.config import ConfigPanel
+from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from ..flowapp.core import Component
 from tensorpc.core import prim
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.apps.flow.flowapp.components import three, mui, leaflet, plus
+from tensorpc.flow.flowapp.components import three, mui, leaflet, plus
 import numpy as np
 
 class SampleApp(App):
@@ -378,7 +378,7 @@ class SampleThreeApp(EditableApp):
             "img": self.img,
             "b2d": self.b2d,
             "mesh": mesh,
-            # "box": three.BoundingBox([2, 5, 2], [0, 10, 0], [0, 0, 0.5])
+            # "box": three.BoundingBox((2, 5, 2), [0, 10, 0], [0, 0, 0.5])
         })
         btn_random_pc = Button("showRandomRPC", self.show_Random_pc)
         return {
@@ -562,7 +562,7 @@ class SampleThreeHudApp(EditableApp):
             "mesh": mesh2,
             # "img": self.img,
             "text": three.Text("WTF").prop(color="red", font_size=2),
-            "box": three.BoundingBox([2, 5, 2]).prop(position=(5, 0, 0)),
+            "box": three.BoundingBox((2, 5, 2)).prop(position=(5, 0, 0)),
             # 
             # "text0": self.html,
             "hud": three.Hud({
@@ -579,7 +579,7 @@ class SampleThreeHudApp(EditableApp):
                     "text0": self.html2,
                 }).prop(center_anchor=True),
                 "text3": three.ItemBox({
-                    "text0": three.BoundingBox([2, 5, 2]),
+                    "text0": three.BoundingBox((2, 5, 2)),
                 }).prop(center_anchor=True),
                 "autoreflow": three.FlexAutoReflow(),
             }).prop(render_priority=1, flex_direction="row", justify_content="flex-start")
@@ -619,7 +619,7 @@ class SampleThree2DApp(EditableApp):
     def app_create_layout(self) -> Dict[str, MUIComponentType]:
         cam = three.OrthographicCamera(True, near=0.1, far=1000,
                                       zoom=50.0)
-        cam.prop(position=[0, 0, 10], up=[0, 0, 1])
+        cam.prop(position=(0, 0, 10), up=(0, 0, 1))
         ctrl = three.MapControl()
         ctrl.props.enable_rotate = False
         # ctrl = three.FirstPersonControl()

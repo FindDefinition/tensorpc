@@ -14,7 +14,7 @@
 
 from dataclasses import dataclass
 from typing import List
-from tensorpc.apps.flow.client import update_node_status
+from tensorpc.flow.client import update_node_status
 
 import csv 
 import subprocess

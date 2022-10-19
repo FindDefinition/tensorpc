@@ -33,20 +33,20 @@ import bcrypt
 import tensorpc
 from tensorpc.constants import TENSORPC_SPLIT
 from tensorpc import get_http_url, http_remote_call, marker, prim
-from tensorpc.apps.flow.constants import (
+from tensorpc.flow.constants import (
     FLOW_DEFAULT_GRAPH_ID, FLOW_FOLDER_PATH, TENSORPC_FLOW_DEFAULT_TMUX_NAME,
     TENSORPC_FLOW_GRAPH_ID, TENSORPC_FLOW_MASTER_GRPC_PORT,
     TENSORPC_FLOW_MASTER_HTTP_PORT, TENSORPC_FLOW_NODE_ID,
     TENSORPC_FLOW_NODE_READABLE_ID, TENSORPC_FLOW_NODE_UID,
     TENSORPC_FLOW_USE_REMOTE_FWD)
-from tensorpc.apps.flow import constants as flowconstants
-from tensorpc.apps.flow.coretypes import (Message, MessageEvent,
+from tensorpc.flow import constants as flowconstants
+from tensorpc.flow.coretypes import (Message, MessageEvent,
                                           MessageEventType, MessageLevel,
                                           ScheduleEvent, SessionStatus,
                                           UserContentEvent, UserEvent,
                                           UserStatusEvent, get_uid)
-from tensorpc.apps.flow.flowapp.core import AppEvent, AppEventType, NotifyEvent, NotifyType, ScheduleNextForApp, UISaveStateEvent, app_event_from_data
-from tensorpc.apps.flow.serv_names import serv_names
+from tensorpc.flow.flowapp.core import AppEvent, AppEventType, NotifyEvent, NotifyType, ScheduleNextForApp, UISaveStateEvent, app_event_from_data
+from tensorpc.flow.serv_names import serv_names
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, RawEvent,
                                    SSHClient, SSHRequest, SSHRequestType,
@@ -857,7 +857,7 @@ class AppNode(CommandNode):
             flowconstants.TENSORPC_FLOW_APP_MODULE_NAME: f"\"{self.module_name}\"",
         })
         if self.module_name.startswith("!"):
-            envs[flowconstants.TENSORPC_FLOW_APP_MODULE_NAME] = ""
+            envs[flowconstants.TENSORPC_FLOW_APP_MODULE_NAME] = f"\"\\{self.module_name}\""
         sd_task = asyncio.create_task(self.shutdown_ev.wait())
         self.task = asyncio.create_task(
             client.connect_queue(self.input_queue,

@@ -15,8 +15,8 @@
 import fire
 import asyncio
 
-from tensorpc.apps.flow.flowapp import App
-from tensorpc.apps.flow.serv.flowapp import FlowApp
+from tensorpc.flow.flowapp import App
+from tensorpc.flow.serv.flowapp import FlowApp
 
 
 async def main_async(module_name: str, **config):
