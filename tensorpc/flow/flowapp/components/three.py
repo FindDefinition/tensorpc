@@ -37,7 +37,7 @@ from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, NumberType, T_base_props, T_child,
                     TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
                     ValueType, undefined, ContainerBaseProps,
-                    T_container_props, Fragment, EventHandler)
+                    T_container_props, Fragment, EventHandler, EventType)
 from .mui import (FlexBoxProps, MUIComponentType, MUIContainerBase,
                   _encode_image_bytes, PointerEventsProperties)
 
@@ -310,7 +310,7 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
             if v is not None:
                 self._pointer_event_map[k] = v
 
-    async def handle_event(self, ev: Any):
+    async def handle_event(self, ev: EventType):
         # ev: [type, data]
         type, data = ev
         ev_type = PointerEventType(type)
@@ -465,7 +465,7 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
             if v is not None:
                 self._pointer_event_map[k] = v
 
-    async def handle_event(self, ev: Any):
+    async def handle_event(self, ev: EventType):
         # ev: [type, data]
         type, data = ev
         ev_type = PointerEventType(type)
@@ -2145,7 +2145,8 @@ class ShapeButton(Group):
         self.mesh.set_pointer_callback(on_click=EventHandler(val, True))
         # self.callback = val
 
-    async def handle_event(self, ev: Any):
+    async def handle_event(self, ev: EventType):
+        data = ev[1]
         if self.props.status == UIRunStatus.Running.value:
             # TODO send exception if ignored click
             print("IGNORE EVENT", self.props.status)
@@ -2153,7 +2154,7 @@ class ShapeButton(Group):
         elif self.props.status == UIRunStatus.Stop.value:
             cb2 = self.get_callback()
             self._task = asyncio.create_task(
-                self.run_callback(lambda: cb2(ev)))
+                self.run_callback(lambda: cb2(data)))
 
     @property
     def prop(self):
@@ -2219,7 +2220,7 @@ class Button(Group):
         self.mesh.set_pointer_callback(on_click=EventHandler(val, True))
         # self.callback = val
 
-    # async def handle_event(self, ev: Any):
+    # async def handle_event(self, ev: EventType):
     #     if self.props.status == UIRunStatus.Running.value:
     #         # TODO send exception if ignored click
     #         print("IGNORE EVENT", self.props.status)

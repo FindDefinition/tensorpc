@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any
+from typing import Any, Tuple, Union
 import asyncio
-from tensorpc.flow.flowapp.core import Component, create_ignore_usr_msg, Undefined, UIRunStatus
+from tensorpc.flow.flowapp.core import Component, NumberType, create_ignore_usr_msg, Undefined, UIRunStatus
 
 
 async def handle_raw_event(ev: Any, comp: Component, just_run: bool = False):
@@ -40,22 +40,22 @@ async def handle_raw_event(ev: Any, comp: Component, just_run: bool = False):
         else:
             await comp.run_callback(ccb(handler.cb), True)
             
-async def handle_standard_event(comp: Component, data: Any, sync_first: bool = False):
+async def handle_change_event(comp: Component, data: Tuple[Union[NumberType, str], Any], sync_first: bool = False):
     if comp.props.status == UIRunStatus.Running.value:
         msg = create_ignore_usr_msg(comp)
         await comp.send_app_event_and_wait(msg)
         return
     elif comp.props.status == UIRunStatus.Stop.value:
         cb1 = comp.get_callback()
-        comp.state_change_callback(data)
+        comp.state_change_callback(data[1])
         if cb1 is not None:
             def ccb(cb):
-                return lambda: cb(data)
+                return lambda: cb(data[1])
             comp._task = asyncio.create_task(comp.run_callback(ccb(cb1), True, sync_first=sync_first))
         else:
             await comp.sync_status(True)
 
-async def handle_standard_event_no_arg(comp: Component, sync_first: bool = False):
+async def handle_change_event_no_arg(comp: Component, sync_first: bool = False):
     if comp.props.status == UIRunStatus.Running.value:
         msg = create_ignore_usr_msg(comp)
         await comp.send_app_event_and_wait(msg)

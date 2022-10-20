@@ -33,13 +33,13 @@ import numpy as np
 from tensorpc.utils.uniquename import UniqueNamePool
 from typing_extensions import ParamSpec, TypeAlias
 
-from ..core import (BasicProps, Component,
+from ..core import (BasicProps, Component, EventType,
                     ContainerBase, NumberType, T_base_props, T_child,
                     UIRunStatus, UIType, Undefined,
                     undefined, ContainerBaseProps,
                     T_container_props, Fragment, EventHandler, create_ignore_usr_msg)
 from .mui import (FlexBoxProps, MUIComponentType, MUIContainerBase)
-from .common import handle_raw_event, handle_standard_event
+from .common import handle_raw_event, handle_change_event
 
 class MapComponentBase(Component[T_base_props, "MapComponentType"]):
     pass
@@ -130,7 +130,7 @@ class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
             if v is not None:
                 self._flow_event_handlers[k.value] = v
 
-    async def handle_event(self, ev: Any):
+    async def handle_event(self, ev: EventType):
         await handle_raw_event(ev, self, just_run=True)
 
     async def fly_to(self, center: Tuple[NumberType, NumberType], zoom: Optional[NumberType] = None):
@@ -262,8 +262,8 @@ class Polyline(MapContainerBase[PolylineProps, MapElementChildType]):
         self.props.positions = positions
         self.on_click = on_click
 
-    async def handle_event(self, ev: Any):
-        await handle_standard_event(self, ev)
+    async def handle_event(self, ev: EventType):
+        await handle_change_event(self, ev)
 
     @property
     def prop(self):
@@ -344,8 +344,8 @@ class CircleMarker(MapContainerBase[CircleMarkerProps, MapElementChildType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def handle_event(self, ev: Any):
-        await handle_standard_event(self, ev)
+    async def handle_event(self, ev: EventType):
+        await handle_change_event(self, ev)
 
 @dataclasses.dataclass
 class MarkerProps(ContainerBaseProps):
@@ -382,5 +382,5 @@ class Marker(MapContainerBase[MarkerProps, MapElementChildType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def handle_event(self, ev: Any):
-        await handle_standard_event(self, ev)
+    async def handle_event(self, ev: EventType):
+        await handle_change_event(self, ev)

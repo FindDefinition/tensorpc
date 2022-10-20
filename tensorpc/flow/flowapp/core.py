@@ -37,6 +37,8 @@ ValueType: TypeAlias = Union[int, float, str]
 
 NumberType: TypeAlias = Union[int, float]
 
+EventType: TypeAlias = Tuple[Union[NumberType, str], Any]
+
 class Undefined:
     def __repr__(self) -> str:
         return "undefined"
@@ -170,6 +172,7 @@ class AppEventType(enum.Enum):
     Notify = 13
     UIUpdatePropsEvent = 14
     UIException = 15
+    FrontendUIEvent = 16
     # clipboard
     CopyToClipboard = 20
     # schedule event, won't be sent to frontend.
@@ -266,6 +269,20 @@ class UIEvent:
     def merge_new(self, new):
         return new
 
+@ALL_APP_EVENTS.register(key=AppEventType.FrontendUIEvent.value)
+class FrontendUIEvent:
+    def __init__(self, uid_to_data: Dict[str, Tuple[Union[NumberType, str], Any]]) -> None:
+        self.uid_to_data = uid_to_data
+
+    def to_dict(self):
+        return self.uid_to_data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Tuple[Union[NumberType, str], Any]]):
+        return cls(data)
+
+    def merge_new(self, new):
+        return new
 
 class NotifyType(enum.Enum):
     AppStart = 0
@@ -491,7 +508,7 @@ APP_EVENT_TYPES = Union[UIEvent, LayoutEvent, CopyToClipboardEvent,
                         UpdateComponentsEvent, DeleteComponentsEvent,
                         ScheduleNextForApp, AppEditorEvent, UIUpdateEvent,
                         UISaveStateEvent, NotifyEvent, UIExceptionEvent,
-                        UncontrolledEvent]
+                        UncontrolledEvent, FrontendUIEvent]
 
 
 def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":
@@ -694,7 +711,7 @@ class Component(Generic[T_base_props, T_child]):
     def set_callback(self, val: Any):
         return
 
-    async def handle_event(self, ev: Any):
+    async def handle_event(self, ev: EventType):
         pass
 
     async def _clear(self):
