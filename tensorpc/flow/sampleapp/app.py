@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Tuple, Union
 import dataclasses
 from typing_extensions import Literal
 import cv2
-import enum 
+import enum
 import imageio
 from faker import Faker
 import tensorpc
@@ -32,15 +32,17 @@ from tensorpc.flow.client import AsyncAppClient, add_message, AppClient
 from tensorpc.flow.coretypes import MessageLevel, ScheduleEvent
 from tensorpc.flow.flowapp import App, EditableApp
 from tensorpc.flow.flowapp.app import EditableLayoutApp
-from tensorpc.flow.flowapp.components.mui import (
-    Button, HBox, ListItemButton, ListItemText, MUIComponentType,
-    Plotly, Text, VBox, VList)
+from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
+                                                  ListItemText,
+                                                  MUIComponentType, Text, VBox,
+                                                  VList)
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from ..flowapp.core import Component
 from tensorpc.core import prim
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.flow.flowapp.components import three, mui, leaflet, plus
+from tensorpc.flow.flowapp.components import three, mui, leaflet, plus, plotly
 import numpy as np
+
 
 class SampleApp(App):
 
@@ -49,22 +51,38 @@ class SampleApp(App):
         self.img_ui = mui.Images()
         self.task_loop = mui.TaskLoop("Test", self.on_task_loop)
         self.root.add_layout({
-            "btn": mui.ButtonGroup({
-                "btn0": mui.Button("LoadImage", partial(self.on_button_click, name="LoadImage")),
-                "btn1": mui.Button("SendMessage", partial(self.on_button_click, name="SendMessage")),
-                "btn2": mui.Button("OpenCam", partial(self.on_button_click, name="OpenCam")),
-                "btn3": mui.Button("Sleep", partial(self.on_button_click, name="Sleep")),
+            "btn":
+            mui.ButtonGroup({
+                "btn0":
+                mui.Button("LoadImage",
+                           partial(self.on_button_click, name="LoadImage")),
+                "btn1":
+                mui.Button("SendMessage",
+                           partial(self.on_button_click, name="SendMessage")),
+                "btn2":
+                mui.Button("OpenCam",
+                           partial(self.on_button_click, name="OpenCam")),
+                "btn3":
+                mui.Button("Sleep", partial(self.on_button_click,
+                                            name="Sleep")),
             }),
-            "btn2": mui.Button("Sleep", self.on_one_button_click),
-
-            "swi": mui.Switch("Switch", self.on_switch),
-            "inp": mui.Input("Image Path", callback=self.on_input_change),
-            "img_ui": self.img_ui,
-            "taskloop": self.task_loop,
-            "slider": mui.Slider("Slider", 0, 100, 1, self.on_slider_change),
-            "select": mui.Select("Select", [("One", 0), ("Two", 1)],
-                             self.on_select_change),
-            "rg": mui.RadioGroup(["Option1", "Option2"], True, self.on_radio),
+            "btn2":
+            mui.Button("Sleep", self.on_one_button_click),
+            "swi":
+            mui.Switch("Switch", self.on_switch),
+            "inp":
+            mui.Input("Image Path", callback=self.on_input_change),
+            "img_ui":
+            self.img_ui,
+            "taskloop":
+            self.task_loop,
+            "slider":
+            mui.Slider("Slider", 0, 100, 1, self.on_slider_change),
+            "select":
+            mui.Select("Select", [("One", 0), ("Two", 1)],
+                       self.on_select_change),
+            "rg":
+            mui.RadioGroup(["Option1", "Option2"], True, self.on_radio),
         })
         self.img_path = ""
         self.set_init_window_size([480, 640])
@@ -73,6 +91,7 @@ class SampleApp(App):
 
     async def on_radio(self, name: str):
         print(name)
+
     # on_one_button_click
     async def on_one_button_click(self):
         await asyncio.sleep(3)
@@ -182,8 +201,7 @@ class SampleDictApp(App):
             "layout0":
             HBox({
                 "btn0":
-                Button("CLICK ME1",
-                       lambda: print("HELLO BTN1")).prop(flex=1),
+                Button("CLICK ME1", lambda: print("HELLO BTN1")).prop(flex=1),
                 "btn1":
                 Button("Add", self._ppend_list).prop(flex=1),
             }),
@@ -205,35 +223,20 @@ class SamplePlotApp(App):
 
     def __init__(self) -> None:
         super().__init__()
-        data = [
-            {
-                "x": [1, 2, 3],
-                "y": [2, 6, 3],
-                "type": 'scatter',
-                "mode": 'lines+markers',
-                "marker": {
-                    "color": 'red'
-                },
-            },
-        ]
-        layout = {
-            "height": 240,
-            "autosize": 'true',
-            "margin": {
-                "l": 0,
-                "r": 0,
-                "b": 0,
-                "t": 0,
-                #   "pad": 0
-            },
-            "yaxis": {
-                "automargin": True,
-            },
-            "xaxis": {
-                "automargin": True,
-            },
-        }
-        self.plot = Plotly().prop(data=data, layout=layout)
+        self.plot = plotly.Plotly().prop(
+            data=[
+                plotly.Trace(x=[1, 2, 3],
+                             y=[2, 6, 3],
+                             type="scatter",
+                             mode="lines")
+            ],
+            layout=plotly.Layout(
+                height=240,
+                autosize=True,
+                margin=plotly.Margin(l=0, r=0, b=0, t=0),
+                xaxis=plotly.Axis(automargin=True),
+                yaxis=plotly.Axis(automargin=True),
+            ))
         self.root.add_layout({
             "plot0": self.plot,
             "btn": Button("Show", self._show_plot)
@@ -242,26 +245,19 @@ class SamplePlotApp(App):
 
     async def _show_plot(self):
         data = [
-            {
-                "x": [1, 2, 3],
-                "y": [3, 2, 1],
-                "type": 'scatter',
-                "mode": 'lines+markers',
-                "marker": {
-                    "color": 'red'
-                },
-            },
+            plotly.Trace(x=[1, 2, 3],
+                         y=[2, 6, 3],
+                         type="scatter",
+                         mode="lines",
+                         marker=plotly.Marker(color="red"))
         ]
-        layout = {
-            "width": 320,
-            "height": 240,
-            "yaxis": {
-                "automargin": True,
-            },
-            "xaxis": {
-                "automargin": True,
-            }
-        }
+        layout = plotly.Layout(
+            height=240,
+            autosize=True,
+            margin=plotly.Margin(l=0, r=0, b=0, t=0),
+            xaxis=plotly.Axis(automargin=True),
+            yaxis=plotly.Axis(automargin=True),
+        )
         await self.plot.show_raw(data, layout)
 
 
@@ -305,6 +301,7 @@ class SampleEditorApp(EditableApp):
     def new_method(self):
         print("new method")
 
+
 class SampleEditorAppV2(EditableApp):
 
     def __init__(self) -> None:
@@ -325,7 +322,6 @@ class SampleEditorAppV2(EditableApp):
             "btn": Button("runCB", self.example_cb),
             "btn2": Button("ShowTS", self.show_ts),
         }
-        
 
     def example_cb(self):
         print("dynamic loadable APP!!!")
@@ -337,7 +333,6 @@ class SampleEditorAppV2(EditableApp):
 
     def new_method(self):
         print("new method")
-
 
 
 class SampleThreeApp(EditableApp):
@@ -364,10 +359,10 @@ class SampleThreeApp(EditableApp):
         # ctrl = three.OrbitControl()
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.lines.prop(line_width=1, color="green")
-        self.b2d = three.Boxes2D(1000).prop(color="red",
-                                    alpha=0.5)
+        self.b2d = three.Boxes2D(1000).prop(color="red", alpha=0.5)
         mesh = three.Mesh(three.BoxGeometry(), three.MeshBasicMaterial())
-        mesh.set_pointer_callback(on_click=three.EventHandler(lambda x: print(x)))
+        mesh.set_pointer_callback(
+            on_click=three.EventHandler(lambda x: print(x)))
         self.canvas = three.ThreeCanvas({
             "cam": cam,
             "points": self.points,
@@ -388,12 +383,12 @@ class SampleThreeApp(EditableApp):
                 VBox({
                     "d32": self.canvas,
                 }).prop(flex=1, min_height=0, min_width=0),
-                "btn": btn_random_pc,
+                "btn":
+                btn_random_pc,
                 "btn2":
                 Button("rpcTest", self.rpc_test),
             }).prop(flex=1, min_height=0),
         }
-        
 
     async def show_Random_pc(self):
         # data = np.load(
@@ -426,8 +421,7 @@ class SampleThreeApp(EditableApp):
         centers = np.array([[0, 0], [2, 2], [3, 3]], np.float32)
         dimensions = np.array([[1, 1], [1, 1], [1, 1]], np.float32)
         attrs = [str(i) for i in range(centers.shape[0])]
-        await self.b2d.update_boxes(centers,
-                                    dimensions)
+        await self.b2d.update_boxes(centers, dimensions)
         print("???")
         await self.b2d.update_object3d(position=(0, 0, 1))
 
@@ -475,12 +469,15 @@ class SampleTestApp(App):
     def __init__(self) -> None:
         super().__init__()
         self.root.add_layout({
-            "plot0": VBox({
+            "plot0":
+            VBox({
                 "asd": Text("Hello"),
             }).prop(flex=1),
-            "btn": Button("Show", lambda: print("?"))
+            "btn":
+            Button("Show", lambda: print("?"))
         })
         self.set_init_window_size([480, 320])
+
 
 class SampleThreeHudApp(EditableApp):
 
@@ -503,41 +500,45 @@ class SampleThreeHudApp(EditableApp):
         ctrl = three.MapControl()
         # ctrl = three.FirstPersonControl()
 
-
         # ctrl = three.OrbitControl()
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.b2d = three.Boxes2D(1000)
-        mesh = three.Mesh(three.RoundedRectGeometry(2, 1.5, 0.5), three.MeshBasicMaterial().prop(color="#393939"))
-        mesh.set_pointer_callback(on_click=three.EventHandler(lambda x: print(1), True))
+        mesh = three.Mesh(three.RoundedRectGeometry(2, 1.5, 0.5),
+                          three.MeshBasicMaterial().prop(color="#393939"))
+        mesh.set_pointer_callback(
+            on_click=three.EventHandler(lambda x: print(1), True))
         mesh.prop(hover_color="#222222", click_color="#009A63")
         text = three.Text("WTF")
         text.prop(color="red", font_size=2)
-        text.set_pointer_callback(on_click=three.EventHandler(lambda x: print(2)))
+        text.set_pointer_callback(
+            on_click=three.EventHandler(lambda x: print(2)))
 
         self.text2 = three.Text("T")
         self.text2.prop(color="red", font_size=0.5)
-        self.text2.set_pointer_callback(on_click=three.EventHandler(lambda x: print(3)))
+        self.text2.set_pointer_callback(
+            on_click=three.EventHandler(lambda x: print(3)))
         material = three.MeshBasicMaterial()
         material.prop(wireframe=True, color="hotpink")
         mesh2 = three.Mesh(three.BoxGeometry(), material)
-        mesh2.set_pointer_callback(on_click=three.EventHandler(lambda x: print(4)))
+        mesh2.set_pointer_callback(
+            on_click=three.EventHandler(lambda x: print(4)))
         self.img_path = mui.Input("Image Path")
         self.img = three.Image()
-        self.img.set_pointer_callback(on_click=three.EventHandler(lambda x: print("IMAGE!!!", self.img_path.value)))
+        self.img.set_pointer_callback(on_click=three.EventHandler(
+            lambda x: print("IMAGE!!!", self.img_path.value)))
         self.img.prop(scale=(4, 4, 1))
-        self.html = three.Html({
-            "btn": mui.Button("RTX", lambda: print("RTX1"))
-        })
+        self.html = three.Html(
+            {"btn": mui.Button("RTX", lambda: print("RTX1"))})
         self.html.prop(transform=True, center=False, inside_flex=True)
-        self.html2 = three.Html({
-            "btn2": mui.Button("RTX2", lambda: print("RTX2"))
-
-        })
+        self.html2 = three.Html(
+            {"btn2": mui.Button("RTX2", lambda: print("RTX2"))})
         res = self.html2.prop(transform=True, center=False, inside_flex=True)
-        
+
         self.canvas = three.ThreeCanvas({
-            "cam": cam,
-            "points": self.points,
+            "cam":
+            cam,
+            "points":
+            self.points,
             # "lines": self.lines,
             # "flexdev": three.Flex({
             #     "box1": three.ItemBox({
@@ -554,56 +555,79 @@ class SampleThreeHudApp(EditableApp):
             #     }).prop(center_anchor=True),
 
             # }).prop(flex_direction="row", size=(20, 20, 0), position=(-20, -20, 0), flex_wrap="wrap"),
-
-            "ctrl": ctrl,
-            "axes": three.AxesHelper(10),
-            "infgrid": infgrid,
-            "b2d": self.b2d,
-            "mesh": mesh2,
+            "ctrl":
+            ctrl,
+            "axes":
+            three.AxesHelper(10),
+            "infgrid":
+            infgrid,
+            "b2d":
+            self.b2d,
+            "mesh":
+            mesh2,
             # "img": self.img,
-            "text": three.Text("WTF").prop(color="red", font_size=2),
-            "box": three.BoundingBox((2, 5, 2)).prop(position=(5, 0, 0)),
-            # 
+            "text":
+            three.Text("WTF").prop(color="red", font_size=2),
+            "box":
+            three.BoundingBox((2, 5, 2)).prop(position=(5, 0, 0)),
+            #
             # "text0": self.html,
-            "hud": three.Hud({
-                "mesh": three.ItemBox({
-                    "mesh0": three.Button("RTX", 2, 1, lambda x: print("HELLO")),
+            "hud":
+            three.Hud({
+                "mesh":
+                three.ItemBox({
+                    "mesh0":
+                    three.Button("RTX", 2, 1, lambda x: print("HELLO")),
                 }).prop(center_anchor=True),
-                "mesh1": three.ItemBox({
-                    "mesh0": three.ToggleButton("RTX2", 2, 1, lambda x: print("HELLO2", x)),
+                "mesh1":
+                three.ItemBox({
+                    "mesh0":
+                    three.ToggleButton("RTX2", 2, 1,
+                                       lambda x: print("HELLO2", x)),
                 }).prop(center_anchor=True),
-                "text": three.ItemBox({
+                "text":
+                three.ItemBox({
                     "text0": self.html,
                 }).prop(center_anchor=True),
-                "text4": three.ItemBox({
+                "text4":
+                three.ItemBox({
                     "text0": self.html2,
                 }).prop(center_anchor=True),
-                "text3": three.ItemBox({
+                "text3":
+                three.ItemBox({
                     "text0": three.BoundingBox((2, 5, 2)),
                 }).prop(center_anchor=True),
-                "autoreflow": three.FlexAutoReflow(),
-            }).prop(render_priority=1, flex_direction="row", justify_content="flex-start")
+                "autoreflow":
+                three.FlexAutoReflow(),
+            }).prop(render_priority=1,
+                    flex_direction="row",
+                    justify_content="flex-start")
         })
         return {
             "d3v":
             VBox({
-                "d3": self.canvas,
-                "hud": mui.VBox({
+                "d3":
+                self.canvas,
+                "hud":
+                mui.VBox({
                     "inp": self.img_path,
                     "btn1": mui.Button("Read Image", self.on_read_img),
                     "btn3": mui.Text("Inp", )
-
-
-                }).prop(position="absolute", top=0, right=0, z_index=5, justify_content="flex-end")
+                }).prop(position="absolute",
+                        top=0,
+                        right=0,
+                        z_index=5,
+                        justify_content="flex-end")
             }).prop(position="relative", flex=1, min_height=0),
         }
-        
+
     async def on_read_img(self):
         path = self.img_path.value
         with open(path, "rb") as f:
             img_str = f.read()
         await self.img.show_raw(img_str, "jpg")
         await self.text2.update_value("WTF1")
+
 
 class SampleThree2DApp(EditableApp):
 
@@ -615,57 +639,68 @@ class SampleThree2DApp(EditableApp):
         # store components here if you want to keep
         # data after reload layout.
 
-
     def app_create_layout(self) -> Dict[str, MUIComponentType]:
-        cam = three.OrthographicCamera(True, near=0.1, far=1000,
-                                      zoom=50.0)
+        cam = three.OrthographicCamera(True, near=0.1, far=1000, zoom=50.0)
         cam.prop(position=(0, 0, 10), up=(0, 0, 1))
         ctrl = three.MapControl()
         ctrl.props.enable_rotate = False
         # ctrl = three.FirstPersonControl()
         self.box2d = three.Boxes2D(20000)
 
-        self.box2d.prop(color="aqua", 
-            line_color="red", 
-            alpha=0.1, 
-            line_width=1,
-            hover_line_color="blue",
-            hover_line_width=2)
+        self.box2d.prop(color="aqua",
+                        line_color="red",
+                        alpha=0.1,
+                        line_width=1,
+                        hover_line_color="blue",
+                        hover_line_width=2)
 
         self.canvas = three.ThreeCanvas({
-            "cam": cam,
-            "ctrl": ctrl,
-            "b2d": self.box2d,
+            "cam":
+            cam,
+            "ctrl":
+            ctrl,
+            "b2d":
+            self.box2d,
             # "axes": three.AxesHelper(10),
-            "btn0": three.Button("RTX", 2, 1, self.on_box2d_update),
-            "html0": three.Html({
+            "btn0":
+            three.Button("RTX", 2, 1, self.on_box2d_update),
+            "html0":
+            three.Html({
                 "btn0": mui.Button("RTX", lambda: print("RTX")),
             }).prop(position=(-5, 0, 0), transform=True)
         })
         return {
             "d3v":
             VBox({
-                "d3": self.canvas,
-                "hud": mui.VBox({
+                "d3":
+                self.canvas,
+                "hud":
+                mui.VBox({
                     # "update": mui.Button("Box2d", self.on_box2d_update),
                     "btn3": mui.Text("Inp", )
-                }).prop(position="absolute", top=0, right=0, z_index=5, justify_content="flex-end")
+                }).prop(position="absolute",
+                        top=0,
+                        right=0,
+                        z_index=5,
+                        justify_content="flex-end")
             }).prop(position="relative", flex=1, min_height=0),
         }
-        
-    async def on_box2d_update(self, ev = None):
-        centers = np.random.randint(1, 10, size=[128 * 32, 2]).astype(np.float32)
+
+    async def on_box2d_update(self, ev=None):
+        centers = np.random.randint(1, 10, size=[128 * 32,
+                                                 2]).astype(np.float32)
         centers = np.arange(0, 128 * 32).astype(np.int32)
-        centers = np.stack([centers // 32, centers % 32], axis=1).astype(np.float32)
+        centers = np.stack([centers // 32, centers % 32],
+                           axis=1).astype(np.float32)
         centers += [3, 0]
         # centers = np.array([[0, 0], [2, 2], [3, 3]], np.float32)
-        dimensions = np.ones((1,), np.float32) #  - 0.1
+        dimensions = np.ones((1, ), np.float32)  #  - 0.1
         attrs = [str(i) for i in range(centers.shape[0])]
-        await self.box2d.update_boxes(centers,
-                                    dimensions,
-                                    attrs=attrs)
+        await self.box2d.update_boxes(centers, dimensions, attrs=attrs)
+
 
 class SampleMapApp(EditableApp):
+
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
@@ -677,42 +712,53 @@ class SampleMapApp(EditableApp):
 
     def app_create_layout(self) -> Dict[str, MUIComponentType]:
         self.leaflet = leaflet.MapContainer((30, 100), 13, {
-                "tile": leaflet.TileLayer(),
-            }).prop(height="100%", flex=3)
+            "tile": leaflet.TileLayer(),
+        }).prop(height="100%", flex=3)
         return {
-            "control": mui.VBox({
-                "btn": mui.Button("FlyTo", lambda: self.leaflet.fly_to((40, 100), zoom=10)),
+            "control":
+            mui.VBox({
+                "btn":
+                mui.Button("FlyTo", lambda: self.leaflet.fly_to(
+                    (40, 100), zoom=10)),
             }).prop(min_height=0, flex=1),
-            "mmap": self.leaflet,
+            "mmap":
+            self.leaflet,
         }
+
 
 class TestEnum(enum.Enum):
     A = "1"
     B = "2"
     C = "3"
 
+
 class TestEnumInt(enum.IntEnum):
     A = 1
     B = 2
     C = 3
 
+
 @dataclasses.dataclass
 class WTF1:
-    d: int 
+    d: int
+
 
 @dataclasses.dataclass
 class WTF:
-    a: int 
+    a: int
     b: Union[int, float]
     g: WTF1
     x: Literal["WTF", "WTF1"]
     f: List[Tuple[int, Dict[str, int]]]
-    c: bool = False 
+    c: bool = False
     e: str = "RTX"
     h: TestEnum = TestEnum.C
-    i: int = dataclasses.field(default=1, metadata=ConfigPanel.slider_meta(0, 10, 1))
+    i: int = dataclasses.field(default=1,
+                               metadata=ConfigPanel.slider_meta(0, 10, 1))
+
 
 class SampleConfigApp(EditableApp):
+
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
@@ -728,4 +774,3 @@ class SampleConfigApp(EditableApp):
             "control": plus.ConfigPanel(self.cfg),
             "check": mui.Button("Check Config", lambda: print(self.cfg))
         }
-

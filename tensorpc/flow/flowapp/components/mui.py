@@ -204,10 +204,8 @@ class ImageProps(MUIComponentBaseProps):
 
 class Images(MUIComponentBase[ImageProps]):
 
-    def __init__(self,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Image, ImageProps, queue)
+    def __init__(self) -> None:
+        super().__init__(UIType.Image, ImageProps)
         # self.image_str: bytes = b""
 
     def get_sync_props(self) -> Dict[str, Any]:
@@ -241,65 +239,6 @@ class Images(MUIComponentBase[ImageProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-@dataclasses.dataclass
-class PlotlyProps(BasicProps):
-    data: list = dataclasses.field(default_factory=list) 
-    layout: dict = dataclasses.field(default_factory=dict) 
-
-# @dataclasses.dataclass
-# class PlotlyLayoutTitle:
-
-
-
-class Plotly(MUIComponentBase[PlotlyProps]):
-    """see https://plotly.com/javascript/ for documentation"""
-    def __init__(self,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Plotly, PlotlyProps, queue)
-
-    async def show_raw(self, data: list, layout: Any):
-        self.props.data = data
-        self.props.layout = layout
-        await self.put_app_event(self.update_event(data=data, layout=layout))
-
-    def get_sync_props(self) -> Dict[str, Any]:
-        res = super().get_sync_props()
-        res["data"] = self.props.data
-        res["layout"] = self.props.layout
-        return res
-
-    @property 
-    def prop(self):
-        propcls = self.propcls
-        return self._prop_base(propcls, self)
-
-    @property 
-    def update_event(self):
-        propcls = self.propcls
-        return self._update_props_base(propcls)
-
-    @staticmethod
-    def layout_no_margin():
-        return {
-            # "height": 240,
-            "autosize": 'true',
-            "margin": {
-                "l": 0,
-                "r": 0,
-                "b": 0,
-                "t": 0,
-                #   "pad": 0
-            },
-            "yaxis": {
-                "automargin": True,
-            },
-            "xaxis": {
-                "automargin": True,
-            },
-        }
-
-
 
 @dataclasses.dataclass
 class TextProps(MUIComponentBaseProps):
@@ -309,10 +248,8 @@ class TextProps(MUIComponentBaseProps):
 class Text(MUIComponentBase[TextProps]):
 
     def __init__(self,
-                 init: str,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Text, TextProps, queue)
+                 init: str) -> None:
+        super().__init__(UIType.Text, TextProps)
         self.props.value = init
 
     async def write(self, content: str):
@@ -342,11 +279,8 @@ class Text(MUIComponentBase[TextProps]):
 class ListItemText(MUIComponentBase[TextProps]):
 
     def __init__(self,
-                 init: str,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.ListItemText, TextProps,
-                         queue)
+                 init: str) -> None:
+        super().__init__(UIType.ListItemText, TextProps)
         self.props.value = init
 
     async def write(self, content: str):
@@ -387,10 +321,8 @@ class Alert(MUIComponentBase[AlertProps]):
     def __init__(self,
                  value: str,
                  severity: _SEVERITY_TYPES, 
-                 title: str = "",
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Alert, AlertProps, queue)
+                 title: str = "") -> None:
+        super().__init__(UIType.Alert, AlertProps)
         self.props.value = value
         self.props.severity = severity
         self.props.title = title
@@ -427,10 +359,8 @@ class Divider(MUIComponentBase[DividerProps]):
 
     def __init__(self,
                  orientation: Union[Literal["horizontal"],
-                                    Literal["vertical"]] = "horizontal",
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Divider, DividerProps, queue)
+                                    Literal["vertical"]] = "horizontal") -> None:
+        super().__init__(UIType.Divider, DividerProps)
         self.props.orientation = orientation
         assert orientation == "horizontal" or orientation == "vertical"
 
@@ -445,16 +375,12 @@ class Divider(MUIComponentBase[DividerProps]):
         return self._update_props_base(propcls)
 
 class HDivider(Divider):
-    def __init__(self,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__("horizontal", uid, queue)
+    def __init__(self) -> None:
+        super().__init__("horizontal")
 
 class VDivider(Divider):
-    def __init__(self,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__("vertical", uid, queue)
+    def __init__(self) -> None:
+        super().__init__("vertical")
 
 _BtnGroupColor: TypeAlias = Literal['inherit', 'primary', 'secondary', 'error',
                                     'info', 'success', 'warning']
@@ -475,10 +401,8 @@ class Button(MUIComponentBase[ButtonProps]):
 
     def __init__(self,
                  name: str,
-                 callback: Callable[[], _CORO_NONE],
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Button, ButtonProps, queue)
+                 callback: Callable[[], _CORO_NONE]) -> None:
+        super().__init__(UIType.Button, ButtonProps)
         self.props.name = name
         self.callback = callback
 
@@ -520,13 +444,11 @@ class ButtonGroup(MUIContainerBase[ButtonGroupProps, Button]):
 
     def __init__(self,
                  children: Union[List[Button], Dict[str, Button]],
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ButtonGroup, ButtonGroupProps, uid, queue,
+        super().__init__(UIType.ButtonGroup, ButtonGroupProps,
                          uid_to_comp, children, inited)
         for v in children.values():
             assert isinstance(v, Button), "all childs must be button"
@@ -549,11 +471,9 @@ class AccordionDetails(MUIContainerBase[AccordionDetailsProps, MUIComponentType]
 
     def __init__(self,
                  children: Dict[str, MUIComponentType],
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(UIType.AccordionDetail, AccordionDetailsProps, uid, queue,
+        super().__init__(UIType.AccordionDetail, AccordionDetailsProps,
                          uid_to_comp, children, inited)
 
     @property 
@@ -565,11 +485,9 @@ class AccordionSummary(MUIContainerBase[AccordionSummaryProps, MUIComponentType]
 
     def __init__(self,
                  children: Dict[str, MUIComponentType],
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(UIType.AccordionSummary, AccordionSummaryProps, uid, queue,
+        super().__init__(UIType.AccordionSummary, AccordionSummaryProps,
                          uid_to_comp, children, inited)
 
     @property 
@@ -589,8 +507,6 @@ class Accordion(MUIContainerBase[AccordionProps, Union[AccordionDetails, Accordi
     def __init__(self,
                  summary: AccordionSummary,
                  details: Optional[AccordionDetails] = None,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         children: Dict[str, Union[AccordionDetails, AccordionSummary]] = {
@@ -600,7 +516,7 @@ class Accordion(MUIContainerBase[AccordionProps, Union[AccordionDetails, Accordi
             children["details"] = details
         for v in children.values():
             assert isinstance(v, (AccordionSummary, AccordionDetails)), "all childs must be summary or detail"
-        super().__init__(UIType.Accordion, AccordionProps, uid, queue,
+        super().__init__(UIType.Accordion, AccordionProps,
                          uid_to_comp, children, inited)
 
     def get_sync_props(self) -> Dict[str, Any]:
@@ -628,11 +544,8 @@ class ListItemButton(MUIComponentBase[ButtonProps]):
 
     def __init__(self,
                  name: str,
-                 callback: Callable[[], _CORO_NONE],
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.ListItemButton, ButtonProps,
-                         queue)
+                 callback: Callable[[], _CORO_NONE]) -> None:
+        super().__init__(UIType.ListItemButton, ButtonProps)
         self.props.name = name
         self.callback = callback
 
@@ -662,16 +575,16 @@ class ListItemButton(MUIComponentBase[ButtonProps]):
 class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
 
     def __init__(self,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  _children: Optional[Union[List[MUIComponentType], Dict[str, MUIComponentType]]] = None,
                  base_type: UIType = UIType.FlexBox,
-                 inited: bool = False) -> None:
+                 inited: bool = False,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
         if _children is not None and isinstance(_children, list):
             _children = {str(i): v for i, v in enumerate(_children)}
-        super().__init__(base_type, MUIFlexBoxProps, uid, queue, uid_to_comp,
-                         _children, inited)
+        super().__init__(base_type, MUIFlexBoxProps, uid_to_comp,
+                         _children, inited, uid=uid, queue=queue)
 
     @property 
     def prop(self):
@@ -690,16 +603,12 @@ class MUIListProps(MUIFlexBoxProps):
 class MUIList(MUIContainerBase[MUIListProps, MUIComponentType]):
 
     def __init__(self,
-                 uid: str,
-                 queue: asyncio.Queue,
                  uid_to_comp: Dict[str, Component],
                  _children: Optional[Dict[str, MUIComponentType]] = None,
                  subheader: str = "",
                  inited: bool = False) -> None:
         super().__init__(UIType.MUIList,
                          MUIListProps,
-                         uid,
-                         queue=queue,
                          uid_to_comp=uid_to_comp,
                          _children=_children,
                          inited=inited)
@@ -716,24 +625,23 @@ class MUIList(MUIContainerBase[MUIListProps, MUIComponentType]):
         return self._update_props_base(propcls)
 
 def VBox(layout: Union[List[MUIComponentType], Dict[str, MUIComponentType]]):
-    res = FlexBox("", asyncio.Queue(), {}, _children=layout)
+    res = FlexBox({}, _children=layout)
     res.prop(flex_flow="column")
     return res
 
 
 def HBox(layout: Union[List[MUIComponentType], Dict[str, MUIComponentType]]):
-    res = FlexBox("", asyncio.Queue(), {}, _children=layout)
+    res = FlexBox({}, _children=layout)
     res.prop(flex_flow="row")
     return res
 
 
 def Box(layout: Union[List[MUIComponentType], Dict[str, MUIComponentType]]):
-    return FlexBox("", asyncio.Queue(), {}, _children=layout)
+    return FlexBox({}, _children=layout)
 
 
 def VList(layout: Dict[str, MUIComponentType], subheader: str = ""):
-    return MUIList("",
-                   asyncio.Queue(), {},
+    return MUIList({},
                    subheader=subheader,
                    _children=layout)
 
@@ -749,10 +657,8 @@ class RadioGroup(MUIComponentBase[RadioGroupProps]):
                  names: List[str],
                  row: bool,
                  callback: Optional[Callable[[str], Coroutine[None, None,
-                                                              None]]] = None,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.RadioGroup, RadioGroupProps, queue)
+                                                              None]]] = None) -> None:
+        super().__init__(UIType.RadioGroup, RadioGroupProps)
         self.props.names = names
         self.callback = callback
         self.props.row = row
@@ -829,10 +735,8 @@ class Input(MUIComponentBase[InputProps]):
                  label: str,
                  multiline: bool = False,
                  callback: Optional[Callable[[str], _CORO_NONE]] = None,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
                  init: str = "") -> None:
-        super().__init__(uid, UIType.Input, InputProps, queue)
+        super().__init__(UIType.Input, InputProps)
         self.props.label = label
         self.callback = callback
         self.props.value = init
@@ -933,10 +837,8 @@ class SwitchBase(MUIComponentBase[SwitchProps]):
     def __init__(self,
                  label: str,
                  base_type: UIType,
-                 callback: Optional[Callable[[bool], _CORO_NONE]] = None,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, base_type, SwitchProps, queue)
+                 callback: Optional[Callable[[bool], _CORO_NONE]] = None) -> None:
+        super().__init__(base_type, SwitchProps)
         self.props.label = label
         self.callback = callback
         self.props.checked = False
@@ -983,19 +885,15 @@ class Switch(SwitchBase):
 
     def __init__(self,
                  label: str,
-                 callback: Optional[Callable[[bool], _CORO_NONE]] = None,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(label, UIType.Switch, callback, uid, queue)
+                 callback: Optional[Callable[[bool], _CORO_NONE]] = None) -> None:
+        super().__init__(label, UIType.Switch, callback)
 
 class Checkbox(SwitchBase):
 
     def __init__(self,
                  label: str,
-                 callback: Optional[Callable[[bool], _CORO_NONE]] = None,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(label, UIType.Checkbox, callback, uid, queue)
+                 callback: Optional[Callable[[bool], _CORO_NONE]] = None) -> None:
+        super().__init__(label, UIType.Checkbox, callback)
 
 @dataclasses.dataclass
 class SelectProps(MUIComponentBaseProps):
@@ -1012,10 +910,9 @@ class Select(MUIComponentBase[SelectProps]):
                  label: str,
                  items: List[Tuple[str, ValueType]],
                  callback: Optional[Callable[[ValueType],
-                                             _CORO_NONE]] = None,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Select, SelectProps, queue)
+                                             _CORO_NONE]] = None
+                 ) -> None:
+        super().__init__(UIType.Select, SelectProps)
         self.props.label = label
         self.callback = callback
         # assert len(items) > 0
@@ -1100,11 +997,9 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
     def __init__(self,
                  label: str,
                  items: List[Tuple[str, ValueType]],
-                 callback: Optional[Callable[[List[ValueType]], _CORO_NONE]] = None,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.MultipleSelect, MultipleSelectProps,
-                         queue)
+                 callback: Optional[Callable[[List[ValueType]], _CORO_NONE]] = None
+                 ) -> None:
+        super().__init__( UIType.MultipleSelect, MultipleSelectProps)
         self.props.label = label
         self.callback = callback
         assert len(items) > 0
@@ -1192,10 +1087,9 @@ class Slider(MUIComponentBase[SliderProps]):
                  end: NumberType,
                  step: NumberType,
                  callback: Optional[Callable[[NumberType],
-                                             _CORO_NONE]] = None,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Slider, SliderProps, queue)
+                                             _CORO_NONE]] = None
+                 ) -> None:
+        super().__init__(UIType.Slider, SliderProps)
         self.props.label = label
         self.callback = callback
         assert end > begin and step <= end - begin
@@ -1275,10 +1169,8 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
     def __init__(self,
                  label: str,
                  loop_callbcak: Callable[[], _CORO_NONE],
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
                  update_period: float = 0.2) -> None:
-        super().__init__(uid, UIType.TaskLoop, TaskLoopProps, queue)
+        super().__init__(UIType.TaskLoop, TaskLoopProps)
         self.props.label = label
         self.loop_callbcak = loop_callbcak
 
@@ -1400,10 +1292,8 @@ class RawTaskLoop(MUIComponentBase[TaskLoopProps]):
     def __init__(self,
                  label: str,
                  callbcak: Callable[[int], _CORO_NONE],
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
                  update_period: float = 0.2) -> None:
-        super().__init__(uid, UIType.TaskLoop, TaskLoopProps, queue)
+        super().__init__(UIType.TaskLoop, TaskLoopProps)
         self.props.label = label
         self.callbcak = callbcak
 
@@ -1461,10 +1351,8 @@ class TypographyProps(MUIComponentBaseProps):
 class Typography(MUIComponentBase[TypographyProps]):
 
     def __init__(self,
-                 init: str,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Typography, TypographyProps, queue)
+                 init: str) -> None:
+        super().__init__(UIType.Typography, TypographyProps)
         self.props.value = init
 
     async def write(self, content: str):
@@ -1497,11 +1385,9 @@ class Paper(MUIContainerBase[PaperProps, MUIComponentType]):
 
     def __init__(self,
                  children: Dict[str, MUIComponentType],
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(UIType.Paper, PaperProps, uid, queue, uid_to_comp,
+        super().__init__(UIType.Paper, PaperProps, uid_to_comp,
                          children, inited)
 
     @property 
@@ -1523,11 +1409,9 @@ class FormControl(MUIContainerBase[FormControlProps, MUIComponentType]):
 
     def __init__(self,
                  children: Dict[str, MUIComponentType],
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(UIType.Paper, FormControlProps, uid, queue, uid_to_comp,
+        super().__init__(UIType.Paper, FormControlProps, uid_to_comp,
                          children, inited)
 
     @property 
@@ -1551,11 +1435,9 @@ class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
 
     def __init__(self,
                  children: Dict[str, MUIComponentType],
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(UIType.Collapse, CollapseProps, uid, queue,
+        super().__init__(UIType.Collapse, CollapseProps,
                          uid_to_comp, children, inited)
 
     @property 
@@ -1583,7 +1465,7 @@ class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
 #                  queue: Optional[asyncio.Queue] = None,
 #                  uid_to_comp: Optional[Dict[str, Component]] = None,
 #                  inited: bool = False) -> None:
-#         super().__init__(UIType.Accordion, AccordionProps, uid, queue,
+#         super().__init__(UIType.Accordion, AccordionProps,
 #                          uid_to_comp, children, inited)
 
 #     @property 
@@ -1606,9 +1488,8 @@ class Chip(MUIComponentBase[ChipProps]):
                  label: str,
                  callback: Optional[Callable[[], _CORO_NONE]] = None,
                  delete_callback: Optional[Callable[[], _CORO_NONE]] = None,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.Chip, ChipProps, queue)
+                 ) -> None:
+        super().__init__(UIType.Chip, ChipProps)
         self.props.label = label
         self.callback = callback
         self.delete_callback = delete_callback
@@ -1676,10 +1557,8 @@ class AppTerminalProps(BasicProps):
 
 class AppTerminal(MUIComponentBase[AppTerminalProps]):
 
-    def __init__(self,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.AppTerminal, AppTerminalProps, queue)
+    def __init__(self) -> None:
+        super().__init__(UIType.AppTerminal, AppTerminalProps)
 
     @property 
     def prop(self):
@@ -1742,9 +1621,8 @@ class TabList(MUIComponentBase[TabListProps]):
     def __init__(self,
                 tabs: List[Tuple[str, str]],
                  callback: Callable[[str], _CORO_NONE],
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.TabList, TabListProps, queue)
+                 ) -> None:
+        super().__init__(UIType.TabList, TabListProps)
         self.callback = callback
         self.props.tabs = tabs
 
@@ -1777,13 +1655,11 @@ class TabContext(MUIContainerBase[TabContextProps, MUIComponentType]):
     def __init__(self,
                  children: Union[List[MUIComponentType], Dict[str, MUIComponentType]],
                  value: str,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.TabContext, TabContextProps, uid, queue,
+        super().__init__(UIType.TabContext, TabContextProps,
                          uid_to_comp, children, inited)
         self.props.value = value
 
@@ -1814,13 +1690,11 @@ class TabPanel(MUIContainerBase[TabPanelProps, MUIComponentType]):
     def __init__(self,
                  children: Union[List[MUIComponentType], Dict[str, MUIComponentType]],
                  value: str,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.TabPanel, TabPanelProps, uid, queue,
+        super().__init__(UIType.TabPanel, TabPanelProps,
                          uid_to_comp, children, inited)
         self.props.value = value
 
@@ -1849,10 +1723,8 @@ class CircularProgressProps(MUIFlexBoxProps):
 class CircularProgress(MUIComponentBase[CircularProgressProps]):
 
     def __init__(self,
-                 init_value: NumberType = 0,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.CircularProgress, CircularProgressProps, queue)
+                 init_value: NumberType = 0) -> None:
+        super().__init__(UIType.CircularProgress, CircularProgressProps)
         self.props.value = init_value
 
     @property 
@@ -1883,9 +1755,8 @@ class LinearProgress(MUIComponentBase[LinearProgressProps]):
 
     def __init__(self,
                  init_value: NumberType = 0,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(uid, UIType.LinearProgress, LinearProgressProps, queue)
+                 ) -> None:
+        super().__init__(UIType.LinearProgress, LinearProgressProps)
         self.props.value = init_value
 
     @property 

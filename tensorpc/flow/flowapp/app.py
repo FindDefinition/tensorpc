@@ -159,7 +159,7 @@ class App:
         self._send_callback: Optional[Callable[[AppEvent],
                                                Coroutine[None, None,
                                                          None]]] = None
-        root = mui.FlexBox(_ROOT, self._queue, self._uid_to_comp, inited=True)
+        root = mui.FlexBox(self._uid_to_comp, inited=True, uid=_ROOT, queue=self._queue)
         root.prop(flex_flow=flex_flow,
                   justify_content=justify_content,
                   align_items=align_items)

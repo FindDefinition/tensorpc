@@ -589,8 +589,6 @@ def snake_to_camel(name: str):
     res = res[0].lower() + res[1:]
     return res
 
-
-
 def _split_props_to_undefined(props: Dict[str, Any]):
         res = {}
         res_und = []
@@ -601,14 +599,33 @@ def _split_props_to_undefined(props: Dict[str, Any]):
                 res[res_camel] = val
         return res, res_und
 
+def _undefined_dict_factory(x: List[Tuple[str, Any]]):
+    res: Dict[str, Any] = {}
+    for k, v in x:
+        if not isinstance(v, Undefined):
+            res[k] = v
+    return res
+
+
+def as_dict_no_undefined(obj: Any):
+    return dataclasses.asdict(obj, dict_factory=_undefined_dict_factory)
 
 @dataclasses.dataclass
-class BasicProps:
-    status: int = UIRunStatus.Stop.value
+class _DataclassSer:
+    obj: Any
+
+def as_dict_no_undefined_v2(obj: Any):
+    return dataclasses.asdict(_DataclassSer(obj), dict_factory=_undefined_dict_factory)["obj"]
+
+
+@dataclasses.dataclass
+class DataClassWithUndefined:
     def get_dict_and_undefined(self, state: Dict[str, Any]):
         this_type = type(self)
         res = {}
-        ref_dict = dataclasses.asdict(self)
+        # we only support update in first-level dict,
+        # so we ignore all undefined in childs.
+        ref_dict = dataclasses.asdict(self, dict_factory=_undefined_dict_factory)
         res_und = []
         for field in dataclasses.fields(this_type):
             if field.name in state:
@@ -624,12 +641,19 @@ class BasicProps:
     def get_dict(self):
         this_type = type(self)
         res = {}
-        ref_dict = dataclasses.asdict(self)
+        ref_dict = dataclasses.asdict(self, dict_factory=_undefined_dict_factory)
         for field in dataclasses.fields(this_type):
             res_camel = snake_to_camel(field.name)
-            val = ref_dict[field.name]
+            if field.name not in ref_dict:
+                val = undefined 
+            else:
+                val = ref_dict[field.name]
             res[res_camel] = val
         return res
+
+@dataclasses.dataclass
+class BasicProps(DataClassWithUndefined):
+    status: int = UIRunStatus.Stop.value
 
 @dataclasses.dataclass
 class ContainerBaseProps(BasicProps):
@@ -661,9 +685,9 @@ T_child = TypeVar("T_child")
 
 class Component(Generic[T_base_props, T_child]):
     def __init__(self,
-                 uid: str,
                  type: UIType,
                  prop_cls: Type[T_base_props],
+                 uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
         self._queue: Optional[asyncio.Queue] = queue
         self._flow_uid = uid
@@ -835,7 +859,7 @@ class Component(Generic[T_base_props, T_child]):
             if isinstance(v, Undefined):
                 data_unds.append(k)
             else:
-                data_no_und[k] = v
+                data_no_und[k] = as_dict_no_undefined_v2(v)
         ev = UIUpdateEvent({self._flow_uid: (data_no_und, data_unds)})
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UIUpdateEvent: ev})
@@ -937,12 +961,12 @@ class ContainerBase(Component[T_container_props, T_child]):
     def __init__(self,
                  base_type: UIType,
                  prop_cls: Type[T_container_props],
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  _children: Optional[Dict[str, T_child]] = None,
-                 inited: bool = False) -> None:
-        super().__init__(uid, base_type, prop_cls, queue)
+                 inited: bool = False,
+                 uid: str = "",
+                 queue: Optional[asyncio.Queue] = None) -> None:
+        super().__init__(base_type, prop_cls, uid, queue)
         if inited:
             assert queue is not None and uid_to_comp is not None
         if uid_to_comp is None:
@@ -1247,11 +1271,9 @@ class FragmentProps(ContainerBaseProps):
 class Fragment(ContainerBase[FragmentProps, Component]):
     def __init__(self,
                  children: Dict[str, Component],
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(UIType.Fragment, FragmentProps, uid, queue,
+        super().__init__(UIType.Fragment, FragmentProps,
                          uid_to_comp, children, inited)
     @property 
     def prop(self):
