@@ -261,6 +261,42 @@ class SamplePlotApp(App):
         await self.plot.show_raw(data, layout)
 
 
+class SamplePlotMetricApp(App):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.plots = plus.HomogeneousMetricFigure(300, 300)
+
+        self.root.add_layout({
+            "plot0": self.plots,
+            "btn": mui.Button("Increment", self._increment),
+            "btn2": mui.Button("MaskFirstTrace", self._mask_first_trace)
+
+        })
+        self.set_init_window_size([640, 480])
+        self.cnt = 0
+        self.visible_test = True
+
+    async def _increment(self):
+        await self.plots.update_metric(self.cnt, "x", "green", {
+            "sinx": float(np.sin(self.cnt / 10)),
+            "cosx": float(np.cos(self.cnt / 10)),
+        })
+        await self.plots.update_metric(self.cnt, "y", "red", {
+            "sinx": float(np.sin((self.cnt + 5) / 10)),
+            "cosx": float(np.cos((self.cnt + 5) / 10)),
+        })
+        await self.plots.update_metric(self.cnt, "z", "blue", {
+            "sinx": float(np.sin((self.cnt + 8) / 10)),
+            "cosx": float(np.cos((self.cnt + 8) / 10)),
+        })
+
+        self.cnt += 1
+
+    async def _mask_first_trace(self):
+        await self.plots.set_trace_visible("x", not self.visible_test)
+        self.visible_test = not self.visible_test
+
 class SampleFlowApp(App):
 
     def __init__(self) -> None:

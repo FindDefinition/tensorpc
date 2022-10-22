@@ -606,17 +606,12 @@ def _undefined_dict_factory(x: List[Tuple[str, Any]]):
             res[k] = v
     return res
 
-
-def as_dict_no_undefined(obj: Any):
-    return dataclasses.asdict(obj, dict_factory=_undefined_dict_factory)
-
 @dataclasses.dataclass
 class _DataclassSer:
     obj: Any
 
-def as_dict_no_undefined_v2(obj: Any):
+def as_dict_no_undefined(obj: Any):
     return dataclasses.asdict(_DataclassSer(obj), dict_factory=_undefined_dict_factory)["obj"]
-
 
 @dataclasses.dataclass
 class DataClassWithUndefined:
@@ -859,7 +854,7 @@ class Component(Generic[T_base_props, T_child]):
             if isinstance(v, Undefined):
                 data_unds.append(k)
             else:
-                data_no_und[k] = as_dict_no_undefined_v2(v)
+                data_no_und[k] = as_dict_no_undefined(v)
         ev = UIUpdateEvent({self._flow_uid: (data_no_und, data_unds)})
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UIUpdateEvent: ev})

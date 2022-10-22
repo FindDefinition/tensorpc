@@ -26,7 +26,7 @@ from typing_extensions import Literal, TypeAlias
 
 from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, NumberType, T_child, TaskLoopEvent, UIEvent,
-                    UIRunStatus, UIType, Undefined, undefined, as_dict_no_undefined_v2)
+                    UIRunStatus, UIType, Undefined, undefined, as_dict_no_undefined)
 from .mui import MUIComponentBase
 
 

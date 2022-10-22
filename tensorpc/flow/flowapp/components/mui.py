@@ -470,9 +470,11 @@ class AccordionSummaryProps(MUIFlexBoxProps):
 class AccordionDetails(MUIContainerBase[AccordionDetailsProps, MUIComponentType]):
 
     def __init__(self,
-                 children: Dict[str, MUIComponentType],
+                 children: Union[List[MUIComponentType], Dict[str, MUIComponentType]],
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.AccordionDetail, AccordionDetailsProps,
                          uid_to_comp, children, inited)
 
@@ -484,9 +486,11 @@ class AccordionDetails(MUIContainerBase[AccordionDetailsProps, MUIComponentType]
 class AccordionSummary(MUIContainerBase[AccordionSummaryProps, MUIComponentType]):
 
     def __init__(self,
-                 children: Dict[str, MUIComponentType],
+                 children: Union[List[MUIComponentType], Dict[str, MUIComponentType]],
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.AccordionSummary, AccordionSummaryProps,
                          uid_to_comp, children, inited)
 
@@ -604,9 +608,11 @@ class MUIList(MUIContainerBase[MUIListProps, MUIComponentType]):
 
     def __init__(self,
                  uid_to_comp: Dict[str, Component],
-                 _children: Optional[Dict[str, MUIComponentType]] = None,
+                 _children: Optional[Union[List[MUIComponentType], Dict[str, MUIComponentType]]] = None,
                  subheader: str = "",
                  inited: bool = False) -> None:
+        if _children is not None and isinstance(_children, list):
+            _children = {str(i): v for i, v in enumerate(_children)}
         super().__init__(UIType.MUIList,
                          MUIListProps,
                          uid_to_comp=uid_to_comp,
@@ -640,7 +646,7 @@ def Box(layout: Union[List[MUIComponentType], Dict[str, MUIComponentType]]):
     return FlexBox({}, _children=layout)
 
 
-def VList(layout: Dict[str, MUIComponentType], subheader: str = ""):
+def VList(layout: Union[List[MUIComponentType], Dict[str, MUIComponentType]], subheader: str = ""):
     return MUIList({},
                    subheader=subheader,
                    _children=layout)

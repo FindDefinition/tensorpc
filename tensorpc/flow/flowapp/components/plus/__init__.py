@@ -13,3 +13,4 @@
 # limitations under the License.
 
 from .config import ConfigPanel
+from .figure import HomogeneousMetricFigure
