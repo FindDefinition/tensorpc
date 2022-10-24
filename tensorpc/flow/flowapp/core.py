@@ -179,9 +179,9 @@ class AppEventType(enum.Enum):
     ScheduleNext = 100
     # special UI event
     AppEditor = 200
-    # for components that don't support contolled mode.
-    # for example, editor and leaflet map
-    UnControlledEvent = 300
+    # send event to component, for append update 
+    # and uncontrolled component.
+    ComponentEvent = 300
 
 
 class UIRunStatus(enum.Enum):
@@ -306,8 +306,8 @@ class NotifyEvent:
         assert isinstance(new, NotifyEvent)
         return new
 
-@ALL_APP_EVENTS.register(key=AppEventType.UnControlledEvent.value)
-class UncontrolledEvent:
+@ALL_APP_EVENTS.register(key=AppEventType.ComponentEvent.value)
+class ComponentEvent:
     def __init__(self, uid_to_data: Dict[str, Any]) -> None:
         self.uid_to_data = uid_to_data
 
@@ -319,8 +319,8 @@ class UncontrolledEvent:
         return cls(data)
 
     def merge_new(self, new):
-        assert isinstance(new, UncontrolledEvent)
-        return UncontrolledEvent({
+        assert isinstance(new, ComponentEvent)
+        return ComponentEvent({
             **new.uid_to_data,
             **self.uid_to_data,
         })
@@ -508,7 +508,7 @@ APP_EVENT_TYPES = Union[UIEvent, LayoutEvent, CopyToClipboardEvent,
                         UpdateComponentsEvent, DeleteComponentsEvent,
                         ScheduleNextForApp, AppEditorEvent, UIUpdateEvent,
                         UISaveStateEvent, NotifyEvent, UIExceptionEvent,
-                        UncontrolledEvent, FrontendUIEvent]
+                        ComponentEvent, FrontendUIEvent]
 
 
 def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":
@@ -881,12 +881,12 @@ class Component(Generic[T_base_props, T_child]):
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UIUpdatePropsEvent: ev})
 
-    def create_uncontrolled_comp_event(self, data: Dict[str, Any]):
-        ev = UncontrolledEvent({self._flow_uid: data})
+    def create_comp_event(self, data: Dict[str, Any]):
+        ev = ComponentEvent({self._flow_uid: data})
         # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.UnControlledEvent: ev})
+        return AppEvent("", {AppEventType.ComponentEvent: ev})
 
-    async def send_app_event_and_wait(self, ev: AppEvent):
+    async def send_and_wait(self, ev: AppEvent):
         if ev.sent_event is None:
             ev.sent_event = asyncio.Event()
         await self.put_app_event(ev)
@@ -1292,7 +1292,7 @@ class Fragment(ContainerBase[FragmentProps, Component]):
         return self._update_props_base(propcls)
 
     async def set_disabled(self, disabled: bool):
-        await self.send_app_event_and_wait(self.update_event(disabled=disabled))
+        await self.send_and_wait(self.update_event(disabled=disabled))
 
 class EventHandler:
 

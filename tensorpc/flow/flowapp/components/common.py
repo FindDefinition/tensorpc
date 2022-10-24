@@ -28,7 +28,7 @@ async def handle_raw_event(ev: Any, comp: Component, just_run: bool = False):
         return
     if comp.props.status == UIRunStatus.Running.value:
         msg = create_ignore_usr_msg(comp)
-        await comp.send_app_event_and_wait(msg)
+        await comp.send_and_wait(msg)
         return
     elif comp.props.status == UIRunStatus.Stop.value:
         comp.state_change_callback(data)
@@ -43,7 +43,7 @@ async def handle_raw_event(ev: Any, comp: Component, just_run: bool = False):
 async def handle_change_event(comp: Component, data: Tuple[Union[NumberType, str], Any], sync_first: bool = False):
     if comp.props.status == UIRunStatus.Running.value:
         msg = create_ignore_usr_msg(comp)
-        await comp.send_app_event_and_wait(msg)
+        await comp.send_and_wait(msg)
         return
     elif comp.props.status == UIRunStatus.Stop.value:
         cb1 = comp.get_callback()
@@ -58,7 +58,7 @@ async def handle_change_event(comp: Component, data: Tuple[Union[NumberType, str
 async def handle_change_event_no_arg(comp: Component, sync_first: bool = False):
     if comp.props.status == UIRunStatus.Running.value:
         msg = create_ignore_usr_msg(comp)
-        await comp.send_app_event_and_wait(msg)
+        await comp.send_and_wait(msg)
         return
     elif comp.props.status == UIRunStatus.Stop.value:
         cb2 = comp.get_callback()

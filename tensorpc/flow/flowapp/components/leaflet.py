@@ -149,13 +149,13 @@ class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
                      center: Tuple[NumberType, NumberType],
                      zoom: Optional[NumberType] = None):
         ev = MapEventFlyTo(center, zoom)
-        return await self.send_app_event_and_wait(
-            self.create_uncontrolled_comp_event(ev.to_dict()))
+        return await self.send_and_wait(
+            self.create_comp_event(ev.to_dict()))
 
     async def set_zoom(self, zoom: NumberType):
         ev = MapEventSetZoom(zoom)
-        return await self.send_app_event_and_wait(
-            self.create_uncontrolled_comp_event(ev.to_dict()))
+        return await self.send_and_wait(
+            self.create_comp_event(ev.to_dict()))
 
     @property
     def prop(self):
@@ -311,7 +311,7 @@ class Polyline(MapContainerBase[PolylineProps, MapElementChildType]):
 
     async def update_positions(self, positions: List[Tuple[NumberType,
                                                            NumberType]]):
-        await self.send_app_event_and_wait(
+        await self.send_and_wait(
             self.update_event(positions=positions))
 
     def get_callback(self) -> Optional[Callable]:

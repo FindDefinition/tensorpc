@@ -1242,11 +1242,11 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
     async def update_progress(self, progress: float, index: int):
         progress = max(0, min(progress, 1))
         self.props.progresses[index] = progress
-        await self.send_app_event_and_wait(
+        await self.send_and_wait(
             self.update_event(progresses=self.props.progresses))
 
     async def update_label(self, label: str):
-        await self.send_app_event_and_wait(self.update_event(label=label))
+        await self.send_and_wait(self.update_event(label=label))
         self.props.label = label
 
     async def headless_run(self):
@@ -1315,11 +1315,11 @@ class RawTaskLoop(MUIComponentBase[TaskLoopProps]):
     async def update_progress(self, progress: float, index: int):
         progress = max(0, min(progress, 1))
         self.props.progresses[index] = progress
-        await self.send_app_event_and_wait(
+        await self.send_and_wait(
             self.update_event(progresses=self.props.progresses))
 
     async def update_label(self, label: str):
-        await self.send_app_event_and_wait(self.update_event(label=label))
+        await self.send_and_wait(self.update_event(label=label))
         self.props.label = label
 
     async def headless_event(self, ev: TaskLoopEvent):
@@ -1681,7 +1681,7 @@ class TabContext(MUIContainerBase[TabContextProps, MUIComponentType]):
         return self._update_props_base(propcls)
 
     async def change_tab(self, value: str):
-        return await self.send_app_event_and_wait(self.update_event(value=value))
+        return await self.send_and_wait(self.update_event(value=value))
     
     async def headless_change_tab(self, value: str):
         return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: UIEvent({self._flow_uid: value})}))
@@ -1745,7 +1745,7 @@ class CircularProgress(MUIComponentBase[CircularProgressProps]):
 
     async def update_value(self, value: NumberType):
         value = min(max(value, 0), 100)
-        await self.send_app_event_and_wait(self.update_event(value=value))
+        await self.send_and_wait(self.update_event(value=value))
 
 
 @dataclasses.dataclass
@@ -1777,4 +1777,4 @@ class LinearProgress(MUIComponentBase[LinearProgressProps]):
 
     async def update_value(self, value: NumberType):
         value = min(max(value, 0), 100)
-        await self.send_app_event_and_wait(self.update_event(value=value))
+        await self.send_and_wait(self.update_event(value=value))

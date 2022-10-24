@@ -184,7 +184,7 @@ class ConfigPanel(mui.FlexBox):
         return uievent
 
     async def sync_config(self):
-        return await self.send_app_event_and_wait(
+        return await self.send_and_wait(
             self._sync_config_event(self.__config_obj, ""))
 
     def _parse_dataclass_and_bind(self, origin_obj, current_obj,

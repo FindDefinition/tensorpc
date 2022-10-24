@@ -234,7 +234,7 @@ class Object3dBase(ThreeComponentBase[T_o3d_prop]):
                                                       bool]] = None):
         """if not none, updated
         """
-        await self.send_app_event_and_wait(
+        await self.send_and_wait(
             self.update_object3d_event(position, rotation, up, scale, visible))
 
 
@@ -374,7 +374,7 @@ class Object3dContainerBase(ThreeContainerBase[T_o3d_container_prop, T_child]):
                                                       bool]] = None):
         """if not none, updated
         """
-        await self.send_app_event_and_wait(
+        await self.send_and_wait(
             self.update_object3d_event(position, rotation, up, scale, visible))
 
 
@@ -546,7 +546,7 @@ class Points(ThreeComponentBase[PointProps]):
             if attr_fields is not None:
                 self.props.attr_fields = attr_fields
         self.props.points = points
-        await self.send_app_event_and_wait(self.create_update_event(upd))
+        await self.send_and_wait(self.create_update_event(upd))
 
     @property
     def prop(self):
@@ -616,7 +616,7 @@ class Segments(ThreeComponentBase[SegmentsProps]):
             upd["colors"] = colors
             self.props.colors = colors
         self.props.lines = lines.astype(np.float32)
-        await self.send_app_event_and_wait(self.create_update_event(upd))
+        await self.send_and_wait(self.create_update_event(upd))
 
     @property
     def prop(self):
@@ -707,7 +707,7 @@ class Boxes2D(Object3dWithEventBase[Boxes2DProps]):
         if attrs is not None:
             self.props.attrs = attrs
             upd["attrs"] = attrs
-        await self.send_app_event_and_wait(self.create_update_event(upd))
+        await self.send_and_wait(self.create_update_event(upd))
 
     def get_props(self):
         state = super().get_props()
@@ -871,13 +871,13 @@ class Image(Object3dWithEventBase[ImageProps]):
     async def show(self, image: np.ndarray):
         encoded = _encode_image_bytes(image)
         self.props.image = encoded
-        await self.send_app_event_and_wait(
+        await self.send_and_wait(
             self.create_update_event({
                 "image": encoded,
             }))
 
     async def show_raw(self, image_bytes: bytes, suffix: str):
-        await self.send_app_event_and_wait(
+        await self.send_and_wait(
             self.show_raw_event(image_bytes, suffix))
 
     def encode_raw_to_web(self, raw: bytes, suffix: str):
@@ -1147,7 +1147,7 @@ class FlexManualReflow(ThreeComponentBase[FlexManualReflowProps]):
         return self._update_props_base(propcls)
 
     async def reflow(self):
-        await self.send_app_event_and_wait(
+        await self.send_and_wait(
             self.update_event(timestamp=str(time.time())))
 
 
@@ -1377,7 +1377,7 @@ class Text(Object3dWithEventBase[TextProps]):
     async def update_value(self, value: str):
         self.props.value = value
         upd: Dict[str, Any] = {"value": value}
-        await self.send_app_event_and_wait(self.create_update_event(upd))
+        await self.send_and_wait(self.create_update_event(upd))
 
     @property
     def prop(self):
@@ -1941,7 +1941,7 @@ class Mesh(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
         ev = self.create_update_event({
             "toggled": checked,
         })
-        await self.send_app_event_and_wait(ev)
+        await self.send_and_wait(ev)
 
     @property
     def prop(self):

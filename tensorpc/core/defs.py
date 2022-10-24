@@ -25,6 +25,11 @@ class DynamicEvent:
         self.name = name
         self.data = data
 
+class DynamicEvents:
+    def __init__(self, name_and_datas: List[Tuple[str, Any]]) -> None:
+        self.name_and_datas = name_and_datas
+
+
 def from_yaml_path(path: Union[Path, str]) -> ServiceDef:
     """read yaml config with strong-type check
     """

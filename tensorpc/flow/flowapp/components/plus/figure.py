@@ -61,7 +61,7 @@ class HomogeneousMetricFigure(FlexBox):
                 plot = self[k]
                 assert isinstance(plot, plotly.Plotly)
                 ev += plot.update_event(data=plot.props.data)
-        return await self.send_app_event_and_wait(ev)
+        return await self.send_and_wait(ev)
 
     async def set_trace_visible(self, trace_id: str, visible: bool):
         return await self.set_traces_visible([trace_id], visible)
@@ -90,7 +90,7 @@ class HomogeneousMetricFigure(FlexBox):
             trace.x.extend(x)
             trace.y.extend(v)
             ev += plot.update_event(data=plot.props.data)
-        return await self.send_app_event_and_wait(ev)
+        return await self.send_and_wait(ev)
 
     async def update_plotly_layout(self, layout: plotly.Layout):
         """merge new key to existed base_layout, only support depth-1 merge"""
@@ -103,5 +103,5 @@ class HomogeneousMetricFigure(FlexBox):
             new_layout = dataclasses.replace(plot.props.layout, **layout_dict)
             plot.props.layout = new_layout
             ev += plot.update_event(layout=new_layout)
-        return await self.send_app_event_and_wait(ev)
+        return await self.send_and_wait(ev)
 

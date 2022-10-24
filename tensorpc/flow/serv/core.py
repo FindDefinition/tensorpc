@@ -45,7 +45,7 @@ from tensorpc.flow.coretypes import (Message, MessageEvent,
                                           ScheduleEvent, SessionStatus,
                                           UserContentEvent, UserEvent,
                                           UserStatusEvent, get_uid)
-from tensorpc.flow.flowapp.core import AppEvent, AppEventType, NotifyEvent, NotifyType, ScheduleNextForApp, UISaveStateEvent, app_event_from_data
+from tensorpc.flow.flowapp.core import AppEvent, AppEventType, ComponentEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UISaveStateEvent, app_event_from_data
 from tensorpc.flow.serv_names import serv_names
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, RawEvent,
@@ -1250,6 +1250,17 @@ class Flow:
     async def app_event(self):
         # ws client wait for this event to get new app event
         appev = await self._app_q.get()
+        if AppEventType.ComponentEvent in appev.type_to_event:
+            ev = appev.type_to_event[AppEventType.ComponentEvent]
+            assert isinstance(ev, ComponentEvent)
+            name_to_data: List[Tuple[str, Any]] = []
+            for k, v in ev.uid_to_data.items():
+                new_k = f"{appev.uid}-{AppEventType.ComponentEvent.value}-{k}"
+                name_to_data.append((new_k, v))
+            appev.type_to_event.pop(AppEventType.ComponentEvent)
+            if appev.type_to_event:
+                name_to_data.append((appev.get_event_uid(), appev.to_dict()))
+            return prim.DynamicEvents(name_to_data)
         return prim.DynamicEvent(appev.get_event_uid(), appev.to_dict())
 
     @marker.mark_websocket_event
@@ -1392,7 +1403,6 @@ class Flow:
 
     async def query_app_state(self, graph_id: str, node_id: str):
         node, driver = self._get_app_node_and_driver(graph_id, node_id)
-        print(node.last_event)
         if not node.is_session_started():
             return None
         if node.last_event != CommandEventType.CURRENT_COMMAND:

@@ -12,7 +12,7 @@ import aiohttp
 from aiohttp import web
 
 from tensorpc import compat
-from tensorpc.core import core_io
+from tensorpc.core import core_io, defs
 from tensorpc.core import serviceunit
 from tensorpc.core.client import RemoteException, format_stdout
 from tensorpc.core.serviceunit import ServiceType
@@ -468,29 +468,46 @@ class AllWebsocketHandler:
                     else:
                         msg_type = core_io.SocketMsgType.Event
                         res = task.result()
-                    if isinstance(res, serviceunit.DynamicEvent):
-                        data = res.data
-                        dynamic_key = res.name
+                    if isinstance(res, defs.DynamicEvents):
+                        # exc is None
+                        for dykey, data in res.name_and_datas:
+                            data_to_send = [data]
+                            ev_clients = self.event_to_clients[ev_str]
+                            # we need to generate a rpc id for event
+                            for client in ev_clients:
+                                rpc_id = client.get_event_id()
+                                sending_tasks.append(
+                                    client.send(data_to_send,
+                                                service_key=ev_str,
+                                                msg_type=msg_type,
+                                                request_id=rpc_id,
+                                                is_json=exc is not None,
+                                                dynamic_key=dykey))
                     else:
-                        data = res
-                        dynamic_key = ""
-                    # this event may be deleted before.
-                    if exc is None:
-                        data_to_send = [data]
-                    else:
-                        data_to_send = data
 
-                    ev_clients = self.event_to_clients[ev_str]
-                    # we need to generate a rpc id for event
-                    for client in ev_clients:
-                        rpc_id = client.get_event_id()
-                        sending_tasks.append(
-                            client.send(data_to_send,
-                                        service_key=ev_str,
-                                        msg_type=msg_type,
-                                        request_id=rpc_id,
-                                        is_json=exc is not None,
-                                        dynamic_key=dynamic_key))
+                        if isinstance(res, defs.DynamicEvent):
+                            data = res.data
+                            dynamic_key = res.name
+                        else:
+                            data = res
+                            dynamic_key = ""
+                        # this event may be deleted before.
+                        if exc is None:
+                            data_to_send = [data]
+                        else:
+                            data_to_send = data
+
+                        ev_clients = self.event_to_clients[ev_str]
+                        # we need to generate a rpc id for event
+                        for client in ev_clients:
+                            rpc_id = client.get_event_id()
+                            sending_tasks.append(
+                                client.send(data_to_send,
+                                            service_key=ev_str,
+                                            msg_type=msg_type,
+                                            request_id=rpc_id,
+                                            is_json=exc is not None,
+                                            dynamic_key=dynamic_key))
             # we must cancel task AFTER clear _delete_events
             for task in task_to_be_canceled:
                 # TODO better cancel, don't await here.
