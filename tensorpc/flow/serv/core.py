@@ -139,8 +139,8 @@ class Node:
                  graph_id: str = "",
                  schedulable: bool = False) -> None:
         self._flow_data = flow_data
+        flow_data["data"]["graphId"] = graph_id
         self.id: str = flow_data["id"]
-        self.graph_id: str = graph_id
         self.inputs: Dict[str, List[Handle]] = {}
         self.outputs: Dict[str, List[Handle]] = {}
         # self.remote_driver_id: str = ""
@@ -224,6 +224,10 @@ class Node:
         return self._flow_data["type"]
 
     @property
+    def graph_id(self) -> str:
+        return self._flow_data["data"]["graphId"]
+
+    @property
     def node_data(self) -> Dict[str, Any]:
         return self._flow_data["data"]
 
@@ -238,7 +242,6 @@ class Node:
     def update_data(self, graph_id: str, flow_data: Dict[str, Any]):
         self._flow_data = flow_data
         # graph id may change due to rename
-        self.graph_id = graph_id
         self.inputs: Dict[str, List[Handle]] = {}
         self.outputs: Dict[str, List[Handle]] = {}
         if "tensorpc_flow" in flow_data:
@@ -1534,7 +1537,7 @@ class Flow:
                             res = node.get_previous_cmd_result()
                             if event.arg is not None:
                                 res.return_code = int(event.arg)
-                            print(res.cmd, res.return_code)
+                            # print(res.cmd, res.return_code)
                             sch_ev = ScheduleEvent(time.time_ns(), res.to_dict(), {})
                             node.clear_previous_cmd()
                             await self.schedule_next(graph_id, node_id, sch_ev.to_dict())
@@ -1654,7 +1657,6 @@ class Flow:
     async def save_graph(self, graph_id: str, flow_data):
         # TODO do we need a async lock here?    
         # print(json.dumps(flow_data, indent=2 ))
-        flow_data = flow_data["graph"]
         flow_data["id"] = graph_id
         if graph_id in self.flow_dict:
             await self.flow_dict[graph_id].update_graph(graph_id, flow_data)
@@ -1663,6 +1665,7 @@ class Flow:
         # print ("SAVE GRAPH", [n.id for n in self.flow_dict[graph_id].nodes])
         graph = self.flow_dict[graph_id]
         for n in flow_data["nodes"]:
+            n["data"]["graphId"] = graph_id
             n["selected"] = False
         flow_path = self.root / f"{graph_id}.json"
         with flow_path.open("w") as f:
@@ -1679,7 +1682,37 @@ class Flow:
                         [n.to_dict() for n in driv_nodes], graph.variable_dict)
 
     async def load_default_graph(self):
-        return await self.load_graph(FLOW_DEFAULT_GRAPH_ID, force_reload=False)
+        final_res = [await self.load_graph(FLOW_DEFAULT_GRAPH_ID, force_reload=False)]
+        for k, v in self.flow_dict.items(): 
+            if k != FLOW_DEFAULT_GRAPH_ID:
+                res = await self.load_graph(k, force_reload=False)
+                final_res.append(res)
+        return final_res 
+
+    async def delete_graph(self, graph_id: str):
+        flow = self.flow_dict[graph_id]
+        for node in flow.nodes:
+            await node.shutdown()
+        self.flow_dict.pop(graph_id)
+        flow_path = self.root / f"{graph_id}.json"
+        if flow_path.exists():
+            flow_path.unlink()
+
+    async def configure_graph(self, graph_id: str, settings: Dict[str, Any]):
+        flow = self.flow_dict[graph_id]
+        if "name" in settings and settings["name"] != "":
+            # rename 
+            new_name = settings["name"]
+            flow = self.flow_dict.pop(graph_id)
+            self.flow_dict[new_name] = flow 
+            flow.graph_id = new_name
+            flow_path = self.root / f"{graph_id}.json"
+            if flow_path.exists():
+                flow_path.unlink()
+            new_flow_path = self.root / f"{new_name}.json"
+            with new_flow_path.open("w") as f:
+                json.dump(flow.to_dict(), f)
+
 
     async def load_graph(self, graph_id: str, force_reload: bool = False):
         flow_path = self.root / f"{graph_id}.json"
