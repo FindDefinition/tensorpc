@@ -539,12 +539,14 @@ class AppEvent:
     def __init__(self,
                  uid: str,
                  type_to_event: Dict[AppEventType, APP_EVENT_TYPES],
-                 sent_event: Optional[asyncio.Event] = None) -> None:
+                 sent_event: Optional[asyncio.Event] = None,
+                 event_id: str = "") -> None:
         self.uid = uid
         self.type_to_event = type_to_event
         # event that indicate this app event is sent
         # used for callback
         self.sent_event = sent_event
+        self.event_id = event_id
 
     def to_dict(self):
         # here we don't use dict for typeToEvents because key in js must be string.
@@ -567,6 +569,11 @@ class AppEvent:
             else:
                 new_type_to_event[k] = v
         return AppEvent(self.uid, new_type_to_event, sent_event)
+
+    def get_event_uid(self):
+        if self.event_id:
+            return self.uid + "-" + self.event_id
+        return self.uid 
 
     def __add__(self, other: "AppEvent"):
         return self.merge_new(other)
@@ -698,6 +705,8 @@ class Component(Generic[T_base_props, T_child]):
         self._mounted_override = False
         self._flow_event_handlers: Dict[str, Union[EventHandler, Undefined]] = {}
         self.__sx_props: Dict[str, Any] = {}
+
+        self._flow_user_data: Any = None
 
     @property
     def props(self) -> T_base_props:
@@ -1265,9 +1274,11 @@ class FragmentProps(ContainerBaseProps):
 
 class Fragment(ContainerBase[FragmentProps, Component]):
     def __init__(self,
-                 children: Dict[str, Component],
+                 children: Union[List[Component], Dict[str, Component]],
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.Fragment, FragmentProps,
                          uid_to_comp, children, inited)
     @property 

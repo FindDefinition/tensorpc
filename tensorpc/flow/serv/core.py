@@ -270,6 +270,10 @@ class Node:
     @property 
     def driver_id(self) -> str:
         return self._flow_data["data"].get("driver", "")
+    
+    @property 
+    def group_id(self) -> str:
+        return self._flow_data["data"].get("group", "")
 
 class RunnableNodeBase(Node):
     pass
@@ -306,6 +310,20 @@ class DirectSSHNode(Node):
         cmds = self.node_data["initCommands"].strip()
         return cmds
 
+@ALL_NODES.register
+class GroupNode(Node):
+
+    @property
+    def name(self) -> str:
+        return self.node_data["name"]
+
+    @property
+    def roles(self) -> List[str]:
+        return self.node_data["roles"]
+
+    @property
+    def color(self) -> str:
+        return self.node_data["color"]
 
 class NodeWithSSHBase(RunnableNodeBase):
 
@@ -902,6 +920,7 @@ _TYPE_TO_NODE_CLS: Dict[str, Type[Node]] = {
     "remotessh": RemoteSSHNode,
     "app": AppNode,
     "datastorage": DataStorageNode,
+    "group": GroupNode,
 }
 
 
@@ -950,8 +969,14 @@ class FlowGraph:
             for d in graph_data["nodes"]
         ]
         edges = [Edge(d, graph_id) for d in graph_data["edges"]]
-        self.viewport = graph_data["viewport"]
-
+        if "viewport" in graph_data:
+            self.viewport = graph_data["viewport"]
+        else:
+            self.viewport = {
+                "x": 0,
+                "y": 0,
+                "zoom": 1.0,
+            }
         self._node_id_to_node = {n.id: n for n in nodes}
         self._node_rid_to_node = {n.readable_id: n for n in nodes}
 
@@ -1055,7 +1080,9 @@ class FlowGraph:
         """
         # we may need to shutdown node, so use async function
         new_graph_data = new_flow_data
-        self.viewport = new_graph_data["viewport"]
+        if "viewport" in new_graph_data:
+            self.viewport = new_graph_data["viewport"]
+        
         self.graph_id = graph_id
         nodes = [
             _TYPE_TO_NODE_CLS[d["type"]](d, graph_id)
@@ -1220,7 +1247,7 @@ class Flow:
     async def app_event(self):
         # ws client wait for this event to get new app event
         appev = await self._app_q.get()
-        return prim.DynamicEvent(appev.uid, appev.to_dict())
+        return prim.DynamicEvent(appev.get_event_uid(), appev.to_dict())
 
     @marker.mark_websocket_event
     async def message_event(self):
