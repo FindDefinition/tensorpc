@@ -89,6 +89,9 @@ class UIType(enum.Enum):
     Drawer = 0x1f
     CircularProgress = 0x20
     LinearProgress = 0x21
+    ToggleButton = 0x22
+    ToggleButtonGroup = 0x23
+
 
     # special
     TaskLoop = 0x100

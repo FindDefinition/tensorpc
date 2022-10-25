@@ -46,7 +46,6 @@ class FlowApp:
         self._need_to_send_env: Optional[AppEvent] = None
         self.shutdown_ev.clear()
         if not headless:
-
             self._uid = get_uid(self.master_meta.graph_id,
                                 self.master_meta.node_id)
         else:
@@ -58,7 +57,7 @@ class FlowApp:
         self.app_su.init_service(self.app)
         self.app._app_dynamic_cls = self.dynamic_app_cls
         self.app._app_service_unit = self.app_su
-
+        self.app._flow_app_is_headless = headless
         self._send_loop_queue: "asyncio.Queue[AppEvent]" = self.app._queue
         self.app._send_callback = self._send_http_event
         self._send_loop_task = asyncio.create_task(self._send_loop())

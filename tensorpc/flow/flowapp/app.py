@@ -182,6 +182,7 @@ class App:
         self.__previous_error_sync_props = {}
         self.__previous_error_persist_state = {}
         self._enable_value_cache = enable_value_cache
+        self._flow_app_is_headless = False
 
 
     def get_persist_storage(self):
@@ -488,11 +489,15 @@ class EditableApp(App):
     def app_initialize(self):
         dcls = self._get_app_dynamic_cls()
         path = dcls.file_path
-        observer = Observer()
-        self._watch = _WatchDogForAppFile(self._watchdog_on_modified)
-        observer.schedule(self._watch, path, recursive=False)
-        observer.start()
-        self.observer = observer
+        self._watchdog_watcher = None 
+        self._watchdog_observer = None
+        if not self._flow_app_is_headless:
+            observer = Observer()
+            self._watchdog_watcher = _WatchDogForAppFile(self._watchdog_on_modified)
+            print(path)
+            observer.schedule(self._watchdog_watcher, path, recursive=False)
+            observer.start()
+            self._watchdog_observer = observer
         self._watchdog_ignore_next = False
         self._loop = asyncio.get_running_loop()
         self._watch_lock = threading.Lock()

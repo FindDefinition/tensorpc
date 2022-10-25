@@ -458,6 +458,97 @@ class ButtonGroup(MUIContainerBase[ButtonGroupProps, Button]):
         propcls = self.propcls
         return self._prop_base(propcls, self)
 
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class ToggleButtonProps(MUIComponentBaseProps):
+    value: ValueType = ""
+    name: str = ""
+    mui_color: Union[_BtnGroupColor, Undefined] = undefined
+    disabled: Union[bool, Undefined] = undefined
+    full_width: Union[bool, Undefined] = undefined
+    size: Union[Literal["small", "medium", "large"], Undefined] = undefined
+
+
+class ToggleButton(MUIComponentBase[ToggleButtonProps]):
+
+    def __init__(self,
+                 name: str, value: ValueType) -> None:
+        super().__init__(UIType.ToggleButton, ToggleButtonProps)
+        self.props.name = name
+        self.props.value = value
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+
+@dataclasses.dataclass
+class ToggleButtonGroupProps(MUIFlexBoxProps):
+    value: Union[ValueType, List[ValueType]] = ""
+    orientation: Union[Literal["horizontal", "vertical"],
+                       Undefined] = undefined
+    mui_color: Union[_BtnGroupColor, Undefined] = undefined
+    disabled: Union[bool, Undefined] = undefined
+    full_width: Union[bool, Undefined] = undefined
+    exclusive: Union[bool, Undefined] = undefined
+    size: Union[Literal["small", "medium", "large"], Undefined] = undefined
+
+
+class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps, ToggleButton]):
+    def __init__(self,
+                 children: Union[List[ToggleButton], Dict[str, ToggleButton]],
+                 value: Union[ValueType, List[ValueType]],
+                 exclusive: bool,
+                 callback: Optional[Callable[[Union[ValueType, List[ValueType]]], _CORO_NONE]] = None,
+                 uid_to_comp: Optional[Dict[str, Component]] = None,
+                 inited: bool = False) -> None:
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+        super().__init__(UIType.ToggleButtonGroup, ToggleButtonGroupProps,
+                         uid_to_comp, children, inited)
+        for v in children.values():
+            assert isinstance(v, ToggleButton), "all childs must be button"
+        self.props.value = value
+        self.props.exclusive = exclusive
+        self.callback = callback
+        if not exclusive:
+            assert isinstance(value, list), "if not exclusive, value must be a list"
+        else:
+            assert not isinstance(value, list), "if exclusive, value must not be a list"
+
+    @property 
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property 
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    def state_change_callback(self, value: Union[ValueType, List[ValueType]]):
+        self.props.value = value
+
+
+    def get_callback(self):
+        return self.callback
+
+    def set_callback(self, val: Any):
+        self.callback = val
+
+    async def handle_event(self, ev: EventType):
+        await handle_change_event(self, ev)
+
 
 @dataclasses.dataclass
 class AccordionDetailsProps(MUIFlexBoxProps):
