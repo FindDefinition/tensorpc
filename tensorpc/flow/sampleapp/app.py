@@ -399,6 +399,7 @@ class SampleThreeApp(EditableApp):
         mesh = three.Mesh(three.BoxGeometry(), three.MeshBasicMaterial())
         mesh.set_pointer_callback(
             on_click=three.EventHandler(lambda x: print(x)))
+        self.scene_ctrl = three.SceneControl()
         self.canvas = three.ThreeCanvas({
             "cam": cam,
             "points": self.points,
@@ -409,6 +410,7 @@ class SampleThreeApp(EditableApp):
             "img": self.img,
             "b2d": self.b2d,
             "mesh": mesh,
+            "tc": self.scene_ctrl,
             # "box": three.BoundingBox((2, 5, 2), [0, 10, 0], [0, 0, 0.5])
         })
         btn_random_pc = Button("showRandomRPC", self.show_Random_pc)
@@ -423,6 +425,9 @@ class SampleThreeApp(EditableApp):
                 btn_random_pc,
                 "btn2":
                 Button("rpcTest", self.rpc_test),
+                "btn3":
+                Button("Reset Camera", self.reset_camera),
+
             }).prop(flex=1, min_height=0),
         }
 
@@ -460,6 +465,14 @@ class SampleThreeApp(EditableApp):
         await self.b2d.update_boxes(centers, dimensions)
         print("???")
         await self.b2d.update_object3d(position=(0, 0, 1))
+
+    async def reset_camera(self):
+        mat = np.eye(4)
+        mat[0, 3] = 6
+        mat[1, 3] = 6
+        mat[2, 3] = 0
+        
+        await self.scene_ctrl.set_cam2world(mat)
 
     async def show_pc(self, pc):
         intensity = None

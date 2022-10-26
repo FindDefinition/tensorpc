@@ -1125,6 +1125,26 @@ class FlexAutoReflow(ThreeComponentBase[ThreeBasicProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+class SceneControlType(enum.Enum):
+    SetCamPose = 0
+
+
+class SceneControl(ThreeComponentBase[ThreeBasicProps]):
+
+    def __init__(self) -> None:
+        super().__init__(UIType.ThreeSceneControl, ThreeBasicProps)
+
+    async def set_cam2world(self, cam2world: Union[List[float], np.ndarray]):
+        cam2world = np.array(cam2world, np.float32).reshape(4, 4)
+        cam2world = cam2world.T # R|T to R/T
+        return await self.send_and_wait(
+            self.create_comp_event({
+                "type": SceneControlType.SetCamPose.value,
+                "pose": list(map(float, cam2world.reshape(-1).tolist())),
+            }))
+
+
+
 
 @dataclasses.dataclass
 class FlexManualReflowProps(ThreeBasicProps):
