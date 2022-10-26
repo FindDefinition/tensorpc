@@ -1024,6 +1024,14 @@ class MapControl(ThreeComponentBase[OrbitControlProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+    async def set_cam2world(self, cam2world: Union[List[float], np.ndarray]):
+        cam2world = np.array(cam2world, np.float32).reshape(4, 4)
+        cam2world = cam2world.T # R|T to R/T
+        return await self.send_and_wait(
+            self.create_comp_event({
+                "type": SceneControlType.SetCamPose.value,
+                "pose": list(map(float, cam2world.reshape(-1).tolist())),
+            }))
 
 class OrbitControl(ThreeComponentBase[OrbitControlProps]):
 
@@ -1050,7 +1058,7 @@ class PointerLockControlProps(Object3dBaseProps):
     enabled: Union[bool, Undefined] = undefined
     min_polar_angle: Union[float, Undefined] = undefined
     max_polar_angle: Union[float, Undefined] = undefined
-
+    
 
 class PointerLockControl(ThreeComponentBase[PointerLockControlProps]):
 

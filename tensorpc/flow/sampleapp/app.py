@@ -389,8 +389,8 @@ class SampleThreeApp(EditableApp):
         # cam = three.OrthographicCamera(True, position=[0, 0, 10], up=[0, 0, 1], near=0.1, far=1000,
         #                               zoom=8.0)
         self.img = three.Image()
-        ctrl = three.MapControl()
-        # ctrl = three.FirstPersonControl()
+        # self.ctrl = three.MapControl()
+        self.ctrl = three.FirstPersonControl().prop(auto_forward=True, enabled=True)
 
         # ctrl = three.OrbitControl()
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
@@ -404,13 +404,13 @@ class SampleThreeApp(EditableApp):
             "cam": cam,
             "points": self.points,
             "lines": self.lines,
-            "ctrl": ctrl,
+            "ctrl": self.ctrl,
             "axes": three.AxesHelper(10),
             "infgrid": infgrid,
             "img": self.img,
             "b2d": self.b2d,
             "mesh": mesh,
-            "tc": self.scene_ctrl,
+            # "tc": self.scene_ctrl,
             # "box": three.BoundingBox((2, 5, 2), [0, 10, 0], [0, 0, 0.5])
         })
         btn_random_pc = Button("showRandomRPC", self.show_Random_pc)
@@ -468,11 +468,11 @@ class SampleThreeApp(EditableApp):
 
     async def reset_camera(self):
         mat = np.eye(4)
-        mat[0, 3] = 6
-        mat[1, 3] = 6
+        mat[0, 3] = 5
+        mat[1, 3] = 5
         mat[2, 3] = 0
         
-        await self.scene_ctrl.set_cam2world(mat)
+        await self.ctrl.set_cam2world(mat)
 
     async def show_pc(self, pc):
         intensity = None
