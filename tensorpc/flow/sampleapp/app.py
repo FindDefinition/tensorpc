@@ -390,7 +390,7 @@ class SampleThreeApp(EditableApp):
         #                               zoom=8.0)
         self.img = three.Image()
         # self.ctrl = three.PointerLockControl().prop(enabled=True)
-        self.ctrl = three.CameraControl()
+        self.ctrl = three.CameraControl().prop(damping_factor=1.0)
 
         # ctrl = three.OrbitControl()
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
@@ -399,7 +399,6 @@ class SampleThreeApp(EditableApp):
         mesh = three.Mesh(three.BoxGeometry(), three.MeshBasicMaterial())
         mesh.set_pointer_callback(
             on_click=three.EventHandler(lambda x: print(x)))
-        self.scene_ctrl = three.SceneControl()
         self.canvas = three.ThreeCanvas({
             "cam": cam,
             "points": self.points,
@@ -468,11 +467,11 @@ class SampleThreeApp(EditableApp):
 
     async def reset_camera(self):
         mat = np.eye(4)
-        mat[0, 3] = 5
-        mat[1, 3] = 5
-        mat[2, 3] = 0
+        mat[0, 3] = 1
+        mat[1, 3] = 1
+        mat[2, 3] = 1
         
-        await self.ctrl.set_cam2world(mat)
+        await self.ctrl.set_cam2world(mat, 50)
 
     async def show_pc(self, pc):
         intensity = None

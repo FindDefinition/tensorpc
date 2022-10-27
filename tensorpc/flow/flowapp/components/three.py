@@ -1037,14 +1037,11 @@ class MapControl(ThreeComponentBase[OrbitControlProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def set_cam2world(self, cam2world: Union[List[float], np.ndarray]):
-        cam2world = np.array(cam2world, np.float32).reshape(4, 4)
-        cam2world = cam2world.T # R|T to R/T
-        return await self.send_and_wait(
-            self.create_comp_event({
-                "type": SceneControlType.SetCamPose.value,
-                "pose": list(map(float, cam2world.reshape(-1).tolist())),
-            }))
+class CameraUserControlType(enum.Enum):
+    SetCamPose = 0
+    SetLookAt = 1
+    Reset = 2
+
 
 class CameraControl(ThreeComponentBase[CameraControlProps]):
 
@@ -1065,13 +1062,37 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def set_cam2world(self, cam2world: Union[List[float], np.ndarray]):
+    async def set_cam2world(self, cam2world: Union[List[float], np.ndarray], distance: float):
+        """
+        Args: 
+            cam2world: camera to world matrix, 4x4 ndaray or 16 list
+            distance: camera orbit target distance.
+        """
         cam2world = np.array(cam2world, np.float32).reshape(4, 4)
         cam2world = cam2world.T # R|T to R/T
         return await self.send_and_wait(
             self.create_comp_event({
-                "type": SceneControlType.SetCamPose.value,
+                "type": CameraUserControlType.SetCamPose.value,
                 "pose": list(map(float, cam2world.reshape(-1).tolist())),
+                "targetDistance": distance,
+            }))
+
+    async def set_lookat(self, origin: List[float], target: List[float]):
+        """
+        Args: 
+            origin: camera position
+            target: lookat target
+        """
+        return await self.send_and_wait(
+            self.create_comp_event({
+                "type": CameraUserControlType.SetLookAt.value,
+                "lookat": origin + target,
+            }))
+
+    async def reset_camera(self):
+        return await self.send_and_wait(
+            self.create_comp_event({
+                "type": CameraUserControlType.Reset.value,
             }))
 
 class OrbitControl(ThreeComponentBase[OrbitControlProps]):
@@ -1173,25 +1194,6 @@ class FlexAutoReflow(ThreeComponentBase[ThreeBasicProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
-
-class SceneControlType(enum.Enum):
-    SetCamPose = 0
-
-
-class SceneControl(ThreeComponentBase[ThreeBasicProps]):
-
-    def __init__(self) -> None:
-        super().__init__(UIType.ThreeSceneControl, ThreeBasicProps)
-
-    async def set_cam2world(self, cam2world: Union[List[float], np.ndarray]):
-        cam2world = np.array(cam2world, np.float32).reshape(4, 4)
-        cam2world = cam2world.T # R|T to R/T
-        return await self.send_and_wait(
-            self.create_comp_event({
-                "type": SceneControlType.SetCamPose.value,
-                "pose": list(map(float, cam2world.reshape(-1).tolist())),
-            }))
-
 
 
 
