@@ -389,8 +389,8 @@ class SampleThreeApp(EditableApp):
         # cam = three.OrthographicCamera(True, position=[0, 0, 10], up=[0, 0, 1], near=0.1, far=1000,
         #                               zoom=8.0)
         self.img = three.Image()
-        # self.ctrl = three.MapControl()
-        self.ctrl = three.FirstPersonControl().prop(auto_forward=True, enabled=True)
+        # self.ctrl = three.PointerLockControl().prop(enabled=True)
+        self.ctrl = three.CameraControl()
 
         # ctrl = three.OrbitControl()
         infgrid = three.InfiniteGridHelper(5, 50, "gray")

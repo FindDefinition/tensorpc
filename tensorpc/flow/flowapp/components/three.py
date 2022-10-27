@@ -1004,6 +1004,19 @@ class OrbitControlProps(ThreeBasicProps):
     pan_speed: Union[NumberType, Undefined] = undefined
     key_pan_speed: Union[NumberType, Undefined] = undefined
 
+@dataclasses.dataclass
+class CameraControlProps(ThreeBasicProps):
+    damping_factor: Union[NumberType, Undefined] = undefined
+    min_distance: Union[NumberType, Undefined] = undefined
+    max_distance: Union[NumberType, Undefined] = undefined
+    min_polar_angle: Union[NumberType, Undefined] = undefined
+    max_polar_angle: Union[NumberType, Undefined] = undefined
+    min_zoom: Union[NumberType, Undefined] = undefined
+    max_zoom: Union[NumberType, Undefined] = undefined
+    polar_rotate_speed: Union[NumberType, Undefined] = undefined
+    azimuth_rotate_speed: Union[NumberType, Undefined] = undefined
+    truck_speed: Union[NumberType, Undefined] = undefined
+    dolly_speed: Union[NumberType, Undefined] = undefined
 
 class MapControl(ThreeComponentBase[OrbitControlProps]):
 
@@ -1013,6 +1026,34 @@ class MapControl(ThreeComponentBase[OrbitControlProps]):
         self.props.damping_factor = 0.25
         self.props.min_distance = 1
         self.props.max_distance = 100
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def set_cam2world(self, cam2world: Union[List[float], np.ndarray]):
+        cam2world = np.array(cam2world, np.float32).reshape(4, 4)
+        cam2world = cam2world.T # R|T to R/T
+        return await self.send_and_wait(
+            self.create_comp_event({
+                "type": SceneControlType.SetCamPose.value,
+                "pose": list(map(float, cam2world.reshape(-1).tolist())),
+            }))
+
+class CameraControl(ThreeComponentBase[CameraControlProps]):
+
+    def __init__(self) -> None:
+        super().__init__(UIType.ThreeCameraControl, CameraControlProps)
+        # self.props.enable_damping = True
+        # self.props.damping_factor = 0.25
+        # self.props.min_distance = 1
+        # self.props.max_distance = 100
 
     @property
     def prop(self):

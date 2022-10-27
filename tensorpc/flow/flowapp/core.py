@@ -125,6 +125,7 @@ class UIType(enum.Enum):
     ThreePointerLockControl = 0x1012
     ThreeFirstPersonControl = 0x1013
     ThreeTransformControl = 0x1014
+    ThreeCameraControl = 0x1015
 
     ThreeBoundingBox = 0x1020
     ThreeAxesHelper = 0x1021
