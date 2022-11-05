@@ -618,6 +618,11 @@ class Segments(ThreeComponentBase[SegmentsProps]):
         self.props.lines = lines.astype(np.float32)
         await self.send_and_wait(self.create_update_event(upd))
 
+    async def update_mesh_lines(self, mesh: np.ndarray):
+        mesh = mesh.reshape(-1, 3, 3)
+        lines = np.stack([mesh[:, [0, 1]], mesh[:, [1, 2]], mesh[:, [2, 0]]], axis=1).reshape(-1, 2, 3)
+        await self.update_lines(lines)
+
     @property
     def prop(self):
         propcls = self.propcls

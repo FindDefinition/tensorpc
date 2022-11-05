@@ -13,6 +13,7 @@
 # limitations under the License.
 """Flow APP: simple GUI application in devflow"""
 
+import ast
 import asyncio
 import base64
 import contextlib
@@ -511,6 +512,11 @@ class EditableApp(App):
                     return
                 with open(ev.src_path, "r") as f:
                     new_data = f.read()
+                try:
+                    ast.parse(new_data, filename=ev.src_path)
+                except:
+                    traceback.print_exc()
+                    return
                 # we have no way to distringuish save event and external save.
                 # so we compare data with previous saved result.
                 if new_data != self._watchdog_prev_content:

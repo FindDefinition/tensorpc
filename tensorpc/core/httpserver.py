@@ -186,6 +186,7 @@ class AllWebsocketHandler:
 
         self._new_events: Set[str] = set()
         self._delete_events: Set[str] = set()
+        
 
     async def _handle_rpc(self, client: WebsocketClient, service_key: str,
                           data, req_id: int, is_notification: bool):
@@ -220,8 +221,12 @@ class AllWebsocketHandler:
         await client.send([res], msg_type=msg_type, request_id=req_id)
 
     async def handle_new_connection(self, request):
+        print("NEW CONN", request)
         service_core = self.service_core
         ws = web.WebSocketResponse()
+        conn_st_ev = asyncio.Event()
+        # wait at most 100 rpcs
+        conn_rpc_queue: "asyncio.Queue[asyncio.Task]" = asyncio.Queue(1000)
         await ws.prepare(request)
         client = WebsocketClient(
             ws, service_core.service_units.get_service_id_to_name())
@@ -231,6 +236,7 @@ class AllWebsocketHandler:
             except Exception as e:
                 await client.send_user_error(e, 0)
         # assert not self.event_to_clients and not self.client_to_events
+        wait_task = asyncio.create_task(self.rpc_awaiter(conn_rpc_queue, conn_st_ev))
         try:
             # send serv ids first
             await client.send(self._name_to_serv_id,
@@ -329,12 +335,14 @@ class AllWebsocketHandler:
 
                     elif msg_type == core_io.SocketMsgType.RPC:
                         arg_data = core_io.parse_message_chunks(header, [data])
-                        await self._handle_rpc(client, serv_key, arg_data,
-                                               req.rpc_id, False)
+                        # TODO if full for some time, drop rpc (raise busy error)
+                        await conn_rpc_queue.put(asyncio.create_task(self._handle_rpc(client, serv_key, arg_data,
+                                               req.rpc_id, False)))
                     elif msg_type == core_io.SocketMsgType.Notification:
                         arg_data = core_io.parse_message_chunks(header, [data])
-                        await self._handle_rpc(client, serv_key, arg_data,
-                                               req.rpc_id, True)
+                        # TODO if full for some time, drop rpc (raise busy error)
+                        await conn_rpc_queue.put(asyncio.create_task(self._handle_rpc(client, serv_key, arg_data,
+                                               req.rpc_id, True)))
                     elif msg_type == core_io.SocketMsgType.QueryServiceIds:
                         await client.send(self._name_to_serv_id,
                                           msg_type,
@@ -365,6 +373,38 @@ class AllWebsocketHandler:
                 service_core.service_units.websocket_ondisconnect(client)
             except:
                 traceback.print_exc()
+            conn_st_ev.set()
+            await wait_task
+            # cancel all rpc
+            while True:
+                try:
+                    task = conn_rpc_queue.get_nowait()
+                    await _cancel(task)
+                except:
+                    break
+        print("CONN", request, "disconnected.")
+    
+    async def rpc_awaiter(self, rpc_queue: "asyncio.Queue[asyncio.Task]", shutdown_ev: asyncio.Event):
+        _shutdown_task = asyncio.create_task(shutdown_ev.wait())
+        rpc_q_task = asyncio.create_task(rpc_queue.get())
+        wait_tasks: List[asyncio.Task] = [
+            rpc_q_task,
+            _shutdown_task,
+        ]
+        while True:
+            (_,
+             pending) = await asyncio.wait(wait_tasks,
+                                           return_when=asyncio.FIRST_COMPLETED)
+            if shutdown_ev.is_set():
+                for task in pending:
+                    await _cancel(task)
+                break
+            await rpc_q_task.result()
+            rpc_q_task = asyncio.create_task(rpc_queue.get())
+            wait_tasks = [
+                rpc_q_task,
+                _shutdown_task,
+            ]
 
     async def event_provide_executor(self):
         subed_evs = [(k, self.all_ev_providers[k])
