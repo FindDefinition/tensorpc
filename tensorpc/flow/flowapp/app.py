@@ -17,10 +17,12 @@ import ast
 import asyncio
 import base64
 import contextlib
+import contextvars
 import enum
 import inspect
 import io
 import json
+import pickle
 import threading
 import time
 import traceback
@@ -31,27 +33,27 @@ import numpy as np
 import watchdog
 import watchdog.events
 from PIL import Image
-from tensorpc.flow.coretypes import ScheduleEvent
+from watchdog.observers import Observer
+from tensorpc import simple_chunk_call_async
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceUnit
+from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem
+from tensorpc.flow.serv_names import serv_names
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.uniquename import UniqueNamePool
-from watchdog.observers import Observer
-import contextvars
-
+from tensorpc.flow.client import MasterMeta
 from .components import mui, three
 from .core import (AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
                    AppEditorFrontendEventType, AppEvent, AppEventType,
                    BasicProps, Component, ContainerBase, CopyToClipboardEvent,
                    LayoutEvent, TaskLoopEvent, UIEvent, UIExceptionEvent,
-                   UIRunStatus, UIType, UIUpdateEvent, Undefined,
-                   UserMessage, undefined)
+                   UIRunStatus, UIType, UIUpdateEvent, Undefined, UserMessage,
+                   undefined)
 
 ALL_APP_EVENTS = HashableRegistry()
 
 
 class AppContext:
-
     def __init__(self, app: "App") -> None:
         self.app = app
 
@@ -64,10 +66,12 @@ APP_CONTEXT_VAR: contextvars.ContextVar[
 def get_app_context() -> Optional[AppContext]:
     return APP_CONTEXT_VAR.get()
 
-def get_app_storage() :
+
+def get_app_storage():
     ctx = get_app_context()
-    assert ctx is not None 
+    assert ctx is not None
     return ctx.app.get_persist_storage()
+
 
 @contextlib.contextmanager
 def _enter_app_conetxt(app: "App"):
@@ -83,8 +87,8 @@ _ROOT = "root"
 
 
 class AppEditor:
-
-    def __init__(self, init_value: str, language: str, queue: "asyncio.Queue[AppEvent]") -> None:
+    def __init__(self, init_value: str, language: str,
+                 queue: "asyncio.Queue[AppEvent]") -> None:
         self._language = language
         self._value: str = init_value
         self.__freeze_language = False
@@ -134,12 +138,12 @@ class AppEditor:
         self.value = value
         if language:
             self.language = language
-        app_ev = AppEditorEvent(
-            AppEditorEventType.SetValue, {
-                "value": self.value,
-                "language": self.language,
-            })
+        app_ev = AppEditorEvent(AppEditorEventType.SetValue, {
+            "value": self.value,
+            "language": self.language,
+        })
         await self._send_editor_event(app_ev)
+
 
 class App:
     """
@@ -160,7 +164,10 @@ class App:
         self._send_callback: Optional[Callable[[AppEvent],
                                                Coroutine[None, None,
                                                          None]]] = None
-        root = mui.FlexBox(self._uid_to_comp, inited=True, uid=_ROOT, queue=self._queue)
+        root = mui.FlexBox(self._uid_to_comp,
+                           inited=True,
+                           uid=_ROOT,
+                           queue=self._queue)
         root.prop(flex_flow=flex_flow,
                   justify_content=justify_content,
                   align_items=align_items)
@@ -185,6 +192,53 @@ class App:
         self._enable_value_cache = enable_value_cache
         self._flow_app_is_headless = False
 
+        self.__flowapp_master_meta = MasterMeta()
+        self.__flowapp_storage_cache: Dict[str, StorageDataItem] = {}
+
+    async def save_data_storage(self,
+                                key: str,
+                                data: Any,
+                                in_memory_limit: int = 100):
+        data_enc = pickle.dumps(data)
+        in_memory_limit_bytes = in_memory_limit * 1024 * 1024
+        item = StorageDataItem(data, time.time_ns())
+        if len(data_enc) <= in_memory_limit_bytes:
+            self.__flowapp_storage_cache[key] = item
+        parts = key.split(".")
+        assert len(parts) in [
+            2, 3
+        ], "must be graph_id.node_id.key or node_id.key (for current node)"
+        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
+        if len(parts) == 2:
+            parts.insert(0, self.__flowapp_master_meta.graph_id)
+        await simple_chunk_call_async(self.__flowapp_master_meta.grpc_url,
+                                      serv_names.FLOW_DATA_SAVE, parts[0],
+                                      parts[1], parts[2], data_enc,
+                                      item.timestamp)
+
+    async def read_data_storage(self, key: str):
+        meta = self.__flowapp_master_meta
+        parts = key.split(".")
+        assert len(parts) in [
+            2, 3
+        ], "must be graph_id.node_id.key or node_id.key (for current node)"
+        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
+        if len(parts) == 2:
+            parts.insert(0, self.__flowapp_master_meta.graph_id)
+        if key in self.__flowapp_storage_cache:
+            item_may_invalid = self.__flowapp_storage_cache[key]
+            res = await simple_chunk_call_async(meta.grpc_url,
+                                                serv_names.FLOW_DATA_READ,
+                                                parts[0], parts[1], parts[2],
+                                                item_may_invalid.timestamp)
+            if res is None:
+                return pickle.loads(item_may_invalid.data)
+            else:
+                return pickle.loads(res.data)
+        else:
+            return simple_chunk_call_async(meta.grpc_url,
+                                           serv_names.FLOW_DATA_READ, parts[0],
+                                           parts[1], parts[2])
 
     def get_persist_storage(self):
         return self.__persist_storage
@@ -209,7 +263,7 @@ class App:
                     "type": comp._flow_comp_type.value,
                     "props": comp.get_sync_props(),
                 }
-            # user state 
+            # user state
             st = comp.get_persist_props()
             if st is not None:
                 user_state[comp._flow_uid] = {
@@ -246,7 +300,8 @@ class App:
                         comp_to_restore = self.root._uid_to_comp[k]
                         if comp_to_restore._flow_comp_type.value == s["type"]:
                             try:
-                                await comp_to_restore.set_persist_props_async(s["state"])
+                                await comp_to_restore.set_persist_props_async(
+                                    s["state"])
                             except:
                                 traceback.print_exc()
                                 continue
@@ -310,11 +365,14 @@ class App:
 
                 for comp in self._uid_to_comp.values():
                     if comp._flow_uid in prev_comps:
-                        if comp._flow_comp_type.value == prev_comps[comp._flow_uid]["type"]:
+                        if comp._flow_comp_type.value == prev_comps[
+                                comp._flow_uid]["type"]:
                             comp.set_props(prev_comps[comp._flow_uid]["props"])
                     if comp._flow_uid in prev_user_states:
-                        if comp._flow_comp_type.value == prev_user_states[comp._flow_uid]["type"]:
-                            await comp.set_persist_props_async(prev_user_states[comp._flow_uid]["state"])
+                        if comp._flow_comp_type.value == prev_user_states[
+                                comp._flow_uid]["type"]:
+                            await comp.set_persist_props_async(
+                                prev_user_states[comp._flow_uid]["state"])
             del prev_comps
             del prev_user_states
 
@@ -455,7 +513,6 @@ _WATCHDOG_MODIFY_EVENT_TYPES = Union[watchdog.events.DirModifiedEvent,
 
 
 class _WatchDogForAppFile(watchdog.events.FileSystemEventHandler):
-
     def __init__(
             self, on_modified: Callable[[_WATCHDOG_MODIFY_EVENT_TYPES],
                                         None]) -> None:
@@ -467,7 +524,6 @@ class _WatchDogForAppFile(watchdog.events.FileSystemEventHandler):
 
 
 class EditableApp(App):
-
     def __init__(self,
                  reloadable_layout: bool = False,
                  use_app_editor: bool = True,
@@ -490,11 +546,12 @@ class EditableApp(App):
     def app_initialize(self):
         dcls = self._get_app_dynamic_cls()
         path = dcls.file_path
-        self._watchdog_watcher = None 
+        self._watchdog_watcher = None
         self._watchdog_observer = None
         if not self._flow_app_is_headless:
             observer = Observer()
-            self._watchdog_watcher = _WatchDogForAppFile(self._watchdog_on_modified)
+            self._watchdog_watcher = _WatchDogForAppFile(
+                self._watchdog_on_modified)
             print(path)
             observer.schedule(self._watchdog_watcher, path, recursive=False)
             observer.start()
@@ -567,7 +624,6 @@ class EditableApp(App):
 
 
 class EditableLayoutApp(EditableApp):
-
     def __init__(self,
                  use_app_editor: bool = True,
                  flex_flow: Union[str, Undefined] = "column nowrap",

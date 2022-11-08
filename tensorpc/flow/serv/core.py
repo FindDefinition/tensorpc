@@ -18,6 +18,9 @@ import bisect
 import enum
 import itertools
 import json
+import os
+import pickle
+import shutil
 import time
 import traceback
 import uuid
@@ -30,33 +33,44 @@ from typing import (Any, Awaitable, Callable, Coroutine, Dict, Iterable, List,
 import aiohttp
 import asyncssh
 import bcrypt
+import numpy as np
+from jinja2 import BaseLoader, Environment, Template
+
 import tensorpc
-from tensorpc.constants import TENSORPC_SPLIT
 from tensorpc import get_http_url, http_remote_call, marker, prim
-from tensorpc.flow.constants import (
-    FLOW_DEFAULT_GRAPH_ID, FLOW_FOLDER_PATH, TENSORPC_FLOW_DEFAULT_TMUX_NAME,
-    TENSORPC_FLOW_GRAPH_ID, TENSORPC_FLOW_MASTER_GRPC_PORT,
-    TENSORPC_FLOW_MASTER_HTTP_PORT, TENSORPC_FLOW_NODE_ID,
-    TENSORPC_FLOW_NODE_READABLE_ID, TENSORPC_FLOW_NODE_UID,
-    TENSORPC_FLOW_USE_REMOTE_FWD)
-from tensorpc.flow import constants as flowconstants
-from tensorpc.flow.coretypes import (Message, MessageEvent,
-                                          MessageEventType, MessageLevel,
-                                          ScheduleEvent, SessionStatus,
-                                          UserContentEvent, UserEvent,
-                                          UserStatusEvent, get_uid)
-from tensorpc.flow.flowapp.core import AppEvent, AppEventType, ComponentEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UISaveStateEvent, app_event_from_data
-from tensorpc.flow.serv_names import serv_names
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, RawEvent,
                                    SSHClient, SSHRequest, SSHRequestType,
                                    remove_ansi_seq)
+from tensorpc.constants import TENSORPC_SPLIT
 from tensorpc.core import get_grpc_url
 from tensorpc.core.asynctools import cancel_task
+from tensorpc.flow import constants as flowconstants
+from tensorpc.flow.constants import (FLOW_DEFAULT_GRAPH_ID, FLOW_FOLDER_PATH,
+                                     TENSORPC_FLOW_DEFAULT_TMUX_NAME,
+                                     TENSORPC_FLOW_GRAPH_ID,
+                                     TENSORPC_FLOW_MASTER_GRPC_PORT,
+                                     TENSORPC_FLOW_MASTER_HTTP_PORT,
+                                     TENSORPC_FLOW_NODE_ID,
+                                     TENSORPC_FLOW_NODE_READABLE_ID,
+                                     TENSORPC_FLOW_NODE_UID,
+                                     TENSORPC_FLOW_USE_REMOTE_FWD)
+from tensorpc.flow.coretypes import (DataStorageItemType, Message,
+                                     MessageEvent, MessageEventType,
+                                     MessageLevel, ScheduleEvent,
+                                     SessionStatus, StorageDataItem,
+                                     UserContentEvent, UserDataUpdateEvent,
+                                     UserEvent, UserStatusEvent, get_uid)
+from tensorpc.flow.flowapp.core import (AppEvent, AppEventType, ComponentEvent,
+                                        NotifyEvent, NotifyType,
+                                        ScheduleNextForApp, UISaveStateEvent,
+                                        app_event_from_data)
+from tensorpc.flow.serv_names import serv_names
 from tensorpc.utils.address import get_url_port
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.wait_tools import get_free_ports
-from jinja2 import BaseLoader, Environment, Template
+
+FLOW_FOLDER_DATA_PATH = FLOW_FOLDER_PATH / "data_nodes"
 
 JINJA2_VARIABLE_ENV = Environment(loader=BaseLoader(),
                                   variable_start_string="{{",
@@ -277,6 +291,11 @@ class Node:
     @property 
     def group_id(self) -> str:
         return self._flow_data["data"].get("group", "")
+
+    def on_delete(self):
+        """ will be called when this node is deleted
+        """
+        pass
 
 class RunnableNodeBase(Node):
     pass
@@ -666,24 +685,118 @@ class EnvNode(Node):
     def value(self):
         return self.node_data["value"]
 
+def get_qualname_of_type(klass: Type) -> str:
+    module = klass.__module__
+    if module == 'builtins':
+        return klass.__qualname__  # avoid outputs like 'builtins.str'
+    return module + '.' + klass.__qualname__
+
+
 @ALL_NODES.register
 class DataStorageNode(Node):
-    def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
+    """storage: 
+    """
+    def __init__(self, flow_data: Dict[str, bytes], graph_id: str = "") -> None:
         super().__init__(flow_data, graph_id, True)
+        self.stored_data: Dict[str, StorageDataItem] = {}
 
-        self.stored_data: Optional[Any] = None 
+    @property 
+    def in_memory_limit_bytes(self):
+        return self.node_data["inMemoryLimit"] * 1024 * 1024
 
-    @property
-    def full(self):
-        return self.stored_data is not None
+    def get_data_attrs(self):
+        items = self.get_items()
+        res = []
+        for item in items:
+            data = self.read_data(item)
+            try:
+                data_decoded = pickle.loads(data.data)
+                type_str = get_qualname_of_type(type(data_decoded))
+                meta_str = type_str
+                item_type = DataStorageItemType.Other
+                if isinstance(data_decoded, np.ndarray):
+                    shape = list(map(int, data_decoded.shape))
+                    meta_str = f"{shape}"
+                    item_type = DataStorageItemType.NdArray
+                elif isinstance(data_decoded, dict):
+                    meta_str = f"dict"
+                    item_type = DataStorageItemType.Dict
+                elif isinstance(data_decoded, list):
+                    meta_str = f"list"
+                    item_type = DataStorageItemType.List
+            except:
+                meta_str = ""
+                item_type = DataStorageItemType.Other
+            res.append({
+                "name": item,
+                "type": item_type.value,
+                "meta": meta_str
+            })
+        return res  
 
+    @property 
+    def count(self):
+        return sum(map(len, self.stored_data.values()), start=0)
+
+    def get_items(self):
+        res: List[str] = []
+        if not (FLOW_FOLDER_DATA_PATH / self.id).exists():
+            return res 
+        for p in (FLOW_FOLDER_DATA_PATH / self.id).glob("*.pkl"):
+            res.append(p.stem)
+        return res 
+
+    def get_save_path(self, key: str):
+        root = FLOW_FOLDER_DATA_PATH / self.id 
+        if not root.exists():
+            root.mkdir(mode=0o755, parents=True)
+        return FLOW_FOLDER_DATA_PATH / self.id / f"{key}.pkl"
+
+    def save_data(self, key: str, data: bytes, timestamp: int):
+        item = StorageDataItem(data, timestamp)
+        with self.get_save_path(key).open("wb") as f:
+            pickle.dump(item, f)
+        if len(data) <= self.in_memory_limit_bytes:
+            self.stored_data[key] = item 
+        else:
+            self.stored_data[key] = StorageDataItem(bytes(), timestamp)
+
+    def read_data(self, key: str) -> StorageDataItem:
+        if key in self.stored_data:
+            data = self.stored_data[key]
+            if len(data) > 0:
+                return data 
+        path = self.get_save_path(key)
+        if path.exists():
+            with path.open("rb") as f:
+                data: StorageDataItem = pickle.load(f)
+                if len(data) <= self.in_memory_limit_bytes:
+                    self.stored_data[key] = data 
+                else:
+                    self.stored_data[key] = StorageDataItem(bytes(), data.timestamp)
+                return data 
+        raise FileNotFoundError(f"{path} not exists")
+
+    def need_update(self, key: str, timestamp: int):
+        return self.stored_data[key].timestamp != timestamp
+
+    def read_data_if_need_update(self, key: str, timestamp: int):
+        if self.need_update(key, timestamp):
+            return self.read_data(key)
+        return None 
+
+    def on_delete(self):
+        if (FLOW_FOLDER_DATA_PATH / self.id).exists():
+            try:
+                shutil.rmtree(FLOW_FOLDER_DATA_PATH / self.id)
+            except:
+                traceback.print_exc() 
 
 class CommandResult:
     def __init__(self, cmd: str, stdouts: List[bytes], return_code: int) -> None:
         self.cmd = cmd 
         self.stdouts = stdouts
         self.return_code = return_code
-
 
     def to_dict(self):
         return {
@@ -1124,7 +1237,7 @@ class FlowGraph:
                             driver = self.get_node_by_id(node.driver_id)
                             if isinstance(driver, DirectSSHNode):
                                 await node.shutdown()
-
+                node.on_delete()
 
         self.update_nodes(new_node_id_to_node.values())
         # we assume edges don't contain any state, so just update them.
@@ -1686,7 +1799,6 @@ class Flow:
                 # sync graph node to remote
                 if node.is_session_started():
                     driv_nodes = graph.get_driver_nodes(node)
-
                     await node.http_remote_call(
                         serv_names.FLOWWORKER_SYNC_GRAPH, graph_id, node.to_dict(),
                         [n.to_dict() for n in driv_nodes], graph.variable_dict)
@@ -1960,6 +2072,35 @@ class Flow:
                 await node.soft_shutdown()
         else:
             raise NotImplementedError
+
+    async def query_data_items(self, graph_id: str, node_id: str):
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node
+        assert isinstance(node, DataStorageNode)
+        return node.get_items()
+
+    async def save_data_to_storage(self, graph_id: str, node_id: str, key: str, data: bytes, timestamp: int):
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node
+        assert isinstance(node, DataStorageNode)
+        res = node.save_data(key, data, timestamp)
+        await self._user_ev_q.put((node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
+        return res 
+
+    async def read_data_from_storage(self, graph_id: str, node_id: str, key: str, timestamp: Optional[int] = None):
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node
+        assert isinstance(node, DataStorageNode)
+        if timestamp is not None:
+            return node.read_data_if_need_update(key, timestamp)
+        else:
+            return node.read_data(key)
+
+    async def query_data_attrs(self, graph_id: str, node_id: str):
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node
+        assert isinstance(node, DataStorageNode)
+        return node.get_data_attrs()
 
     @marker.mark_exit
     async def _on_exit(self):

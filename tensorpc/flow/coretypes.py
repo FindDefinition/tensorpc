@@ -1,11 +1,34 @@
 import enum
 
 from typing import Any, Dict, List
-
+import dataclasses
 from tensorpc.autossh.core import Event, event_from_dict
 
 def get_uid(graph_id: str, node_id: str):
     return f"{graph_id}@{node_id}"
+
+class StorageDataItem:
+    def __init__(self, data: bytes, timestamp: int) -> None:
+        self.data = data
+        self.timestamp = timestamp
+
+    def empty(self):
+        return len(self.data) > 0
+
+    def __len__(self):
+        return len(self.data)
+
+class DataStorageItemType(enum.Enum):
+    Dict = 0
+    List = 1
+    Other = 2
+    NdArray = 3
+
+@dataclasses.dataclass
+class DataItemMeta:
+    name: str 
+    type: int 
+    meta: str 
 
 class MessageItemType(enum.Enum):
     Text = 0
@@ -165,6 +188,7 @@ class UserEventType(enum.Enum):
     Status = 0
     Content = 1
     Message = 2
+    DataUpdate = 3
 
 
 class UserEvent:
@@ -207,6 +231,16 @@ class UserContentEvent(UserEvent):
     def to_dict(self):
         res = super().to_dict()
         res["content"] = self.content
+        return res
+
+class UserDataUpdateEvent(UserEvent):
+    def __init__(self, content: Any):
+        super().__init__(UserEventType.DataUpdate)
+        self.content = content
+
+    def to_dict(self):
+        res = super().to_dict()
+        res["update"] = self.content
         return res
 
 

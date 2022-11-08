@@ -822,3 +822,22 @@ class SampleConfigApp(EditableApp):
             "control": plus.ConfigPanel(self.cfg),
             "check": mui.Button("Check Config", lambda: print(self.cfg))
         }
+
+
+class SampleDataControlApp(EditableApp):
+
+    def __init__(self) -> None:
+        super().__init__(reloadable_layout=True)
+        # makesure three canvas size fit parent.
+        # self.root.props.min_height = 0
+        # store components here if you want to keep
+        # data after reload layout.
+        self.root.props.flex_flow = "row nowrap"
+
+    def app_create_layout(self) -> Dict[str, MUIComponentType]:
+        return {
+            "btn1": mui.Button("Add Data To Storage", self.add_data),
+        }
+
+    async def add_data(self):
+        await self.save_data_storage("default_flow.Data.arr0", np.zeros((500, 3)))

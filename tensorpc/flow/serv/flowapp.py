@@ -61,8 +61,6 @@ class FlowApp:
         self._send_loop_queue: "asyncio.Queue[AppEvent]" = self.app._queue
         self.app._send_callback = self._send_http_event
         self._send_loop_task = asyncio.create_task(self._send_loop())
-        # print(lay)
-        print(self.master_meta.http_url)
 
     @marker.mark_async_init
     async def init(self):
