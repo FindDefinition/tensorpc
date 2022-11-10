@@ -29,7 +29,7 @@ from functools import partial
 from pathlib import Path
 from typing import (Any, Awaitable, Callable, Coroutine, Dict, Iterable, List,
                     Optional, Set, Tuple, Type, Union)
-
+from tensorpc.utils.moduleid import get_qualname_of_type
 import aiohttp
 import asyncssh
 import bcrypt
@@ -40,8 +40,7 @@ import tensorpc
 from tensorpc import get_http_url, http_remote_call, marker, prim
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, RawEvent,
-                                   SSHClient, SSHRequest, SSHRequestType,
-                                   remove_ansi_seq)
+                                   SSHClient, SSHRequest, SSHRequestType)
 from tensorpc.constants import TENSORPC_SPLIT
 from tensorpc.core import get_grpc_url
 from tensorpc.core.asynctools import cancel_task
@@ -60,7 +59,8 @@ from tensorpc.flow.coretypes import (DataStorageItemType, Message,
                                      MessageLevel, ScheduleEvent,
                                      SessionStatus, StorageDataItem,
                                      UserContentEvent, UserDataUpdateEvent,
-                                     UserEvent, UserStatusEvent, get_uid)
+                                     UserEvent, UserStatusEvent, get_uid,
+                                     DataItemMeta)
 from tensorpc.flow.flowapp.core import (AppEvent, AppEventType, ComponentEvent,
                                         NotifyEvent, NotifyType,
                                         ScheduleNextForApp, UISaveStateEvent,
@@ -685,13 +685,6 @@ class EnvNode(Node):
     def value(self):
         return self.node_data["value"]
 
-def get_qualname_of_type(klass: Type) -> str:
-    module = klass.__module__
-    if module == 'builtins':
-        return klass.__qualname__  # avoid outputs like 'builtins.str'
-    return module + '.' + klass.__qualname__
-
-
 @ALL_NODES.register
 class DataStorageNode(Node):
     """storage: 
@@ -705,33 +698,11 @@ class DataStorageNode(Node):
         return self.node_data["inMemoryLimit"] * 1024 * 1024
 
     def get_data_attrs(self):
-        items = self.get_items()
+        items = self.get_item_metas()
         res = []
         for item in items:
-            data = self.read_data(item)
-            try:
-                data_decoded = pickle.loads(data.data)
-                type_str = get_qualname_of_type(type(data_decoded))
-                meta_str = type_str
-                item_type = DataStorageItemType.Other
-                if isinstance(data_decoded, np.ndarray):
-                    shape = list(map(int, data_decoded.shape))
-                    meta_str = f"{shape}"
-                    item_type = DataStorageItemType.NdArray
-                elif isinstance(data_decoded, dict):
-                    meta_str = f"dict"
-                    item_type = DataStorageItemType.Dict
-                elif isinstance(data_decoded, list):
-                    meta_str = f"list"
-                    item_type = DataStorageItemType.List
-            except:
-                meta_str = ""
-                item_type = DataStorageItemType.Other
-            res.append({
-                "name": item,
-                "type": item_type.value,
-                "meta": meta_str
-            })
+            data = self.read_meta_dict(item)
+            res.append(data)
         return res  
 
     @property 
@@ -743,7 +714,17 @@ class DataStorageNode(Node):
         if not (FLOW_FOLDER_DATA_PATH / self.id).exists():
             return res 
         for p in (FLOW_FOLDER_DATA_PATH / self.id).glob("*.pkl"):
-            res.append(p.stem)
+            if (p.parent / f"{p.stem}.json").exists():
+                res.append(p.stem)
+        return res 
+
+    def get_item_metas(self):
+        res: List[str] = []
+        if not (FLOW_FOLDER_DATA_PATH / self.id).exists():
+            return res 
+        for p in (FLOW_FOLDER_DATA_PATH / self.id).glob("*.json"):
+            if (p.parent / f"{p.stem}.pkl").exists():
+                res.append(p.stem)
         return res 
 
     def get_save_path(self, key: str):
@@ -752,14 +733,35 @@ class DataStorageNode(Node):
             root.mkdir(mode=0o755, parents=True)
         return FLOW_FOLDER_DATA_PATH / self.id / f"{key}.pkl"
 
-    def save_data(self, key: str, data: bytes, timestamp: int):
-        item = StorageDataItem(data, timestamp)
+    def get_meta_path(self, key: str):
+        root = FLOW_FOLDER_DATA_PATH / self.id 
+        if not root.exists():
+            root.mkdir(mode=0o755, parents=True)
+        return FLOW_FOLDER_DATA_PATH / self.id / f"{key}.json"
+
+    def save_data(self, key: str, data: bytes, meta: DataItemMeta, timestamp: int):
+        item = StorageDataItem(data, timestamp, meta)
         with self.get_save_path(key).open("wb") as f:
             pickle.dump(item, f)
+        with self.get_meta_path(key).open("w") as f:
+            json.dump(item.get_meta_dict(), f)
         if len(data) <= self.in_memory_limit_bytes:
             self.stored_data[key] = item 
         else:
-            self.stored_data[key] = StorageDataItem(bytes(), timestamp)
+            self.stored_data[key] = StorageDataItem(bytes(), timestamp, meta)
+    
+    def read_meta_dict(self, key: str) -> dict:
+        if key in self.stored_data:
+            data = self.stored_data[key]
+            return data.get_meta_dict()
+        meta_path = self.get_meta_path(key)
+        if meta_path.exists():
+            with meta_path.open("r") as f:
+                meta_dict = json.load(f)
+            meta = DataItemMeta(meta_dict["name"], DataStorageItemType(meta_dict["type"]), meta_dict["meta"])
+            return meta_dict 
+        raise FileNotFoundError(f"{meta_path} not exists")
+
 
     def read_data(self, key: str) -> StorageDataItem:
         if key in self.stored_data:
@@ -767,13 +769,18 @@ class DataStorageNode(Node):
             if len(data) > 0:
                 return data 
         path = self.get_save_path(key)
-        if path.exists():
+        meta_path = self.get_meta_path(key)
+
+        if path.exists() and meta_path.exists():
+            with meta_path.open("r") as f:
+                meta_dict = json.load(f)
+            meta = DataItemMeta(meta_dict["name"], DataStorageItemType(meta_dict["type"]), meta_dict["meta"])
             with path.open("rb") as f:
                 data: StorageDataItem = pickle.load(f)
                 if len(data) <= self.in_memory_limit_bytes:
                     self.stored_data[key] = data 
                 else:
-                    self.stored_data[key] = StorageDataItem(bytes(), data.timestamp)
+                    self.stored_data[key] = StorageDataItem(bytes(), data.timestamp, meta)
                 return data 
         raise FileNotFoundError(f"{path} not exists")
 
@@ -2079,11 +2086,11 @@ class Flow:
         assert isinstance(node, DataStorageNode)
         return node.get_items()
 
-    async def save_data_to_storage(self, graph_id: str, node_id: str, key: str, data: bytes, timestamp: int):
+    async def save_data_to_storage(self, graph_id: str, node_id: str, key: str, data: bytes, meta: DataItemMeta, timestamp: int):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
         assert isinstance(node, DataStorageNode)
-        res = node.save_data(key, data, timestamp)
+        res = node.save_data(key, data, meta, timestamp)
         await self._user_ev_q.put((node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
         return res 
 

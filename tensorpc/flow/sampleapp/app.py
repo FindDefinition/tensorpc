@@ -837,7 +837,12 @@ class SampleDataControlApp(EditableApp):
     def app_create_layout(self) -> Dict[str, MUIComponentType]:
         return {
             "btn1": mui.Button("Add Data To Storage", self.add_data),
+            "btn2": mui.Button("Read Data From Storage", self.read_data),
         }
 
     async def add_data(self):
         await self.save_data_storage("default_flow.Data.arr0", np.zeros((500, 3)))
+
+    async def read_data(self):
+        print(await self.read_data_storage("Data.arr0"))
+

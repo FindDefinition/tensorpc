@@ -30,16 +30,17 @@ else:
 import dataclasses
 
 import numpy as np
-from tensorpc.utils.uniquename import UniqueNamePool
 from typing_extensions import ParamSpec, TypeAlias
 
+from tensorpc.utils.uniquename import UniqueNamePool
+
 from ..core import (AppEvent, AppEventType, BasicProps, Component,
-                    ContainerBase, NumberType, T_base_props, T_child,
-                    TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
-                    ValueType, undefined, ContainerBaseProps,
-                    T_container_props, Fragment, EventHandler, EventType)
+                    ContainerBase, ContainerBaseProps, EventHandler, EventType,
+                    Fragment, FrontendEventType, NumberType, T_base_props,
+                    T_child, T_container_props, TaskLoopEvent, UIEvent,
+                    UIRunStatus, UIType, Undefined, ValueType, undefined)
 from .mui import (FlexBoxProps, MUIComponentType, MUIContainerBase,
-                  _encode_image_bytes, PointerEventsProperties)
+                  PointerEventsProperties, _encode_image_bytes)
 
 Vector3Type: TypeAlias = Tuple[float, float, float]
 
@@ -146,22 +147,6 @@ T_geometry_prop = TypeVar("T_geometry_prop", bound=ThreeGeometryPropsBase)
 ThreeComponentType = Union[ThreeComponentBase, ThreeContainerBase, Fragment]
 
 
-class PointerEventType(enum.Enum):
-    # we don't support hover/move/missed
-    # here because it make too much events.
-    Click = 0
-    DoubleClick = 1
-    Enter = 2
-    Leave = 3
-    Over = 4
-    Out = 5
-    Up = 6
-    Down = 7
-    ContextMenu = 8
-    Move = 9
-    # special method for three 2d UI.
-    Change = 20
-
 
 @dataclasses.dataclass
 class Object3dBaseProps(ThreeBasicProps):
@@ -242,27 +227,27 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
 
     def __init__(self, base_type: UIType, prop_cls: Type[T_o3d_prop]) -> None:
         super().__init__(base_type, prop_cls)
-        self._pointer_event_map: Dict[PointerEventType,
+        self._pointer_event_map: Dict[FrontendEventType,
                                       Union[EventHandler, Undefined]] = {
-                                          PointerEventType.Click: undefined,
-                                          PointerEventType.DoubleClick:
+                                          FrontendEventType.Click: undefined,
+                                          FrontendEventType.DoubleClick:
                                           undefined,
-                                          PointerEventType.Enter: undefined,
-                                          PointerEventType.Leave: undefined,
-                                          PointerEventType.Over: undefined,
-                                          PointerEventType.Out: undefined,
-                                          PointerEventType.Up: undefined,
-                                          PointerEventType.Down: undefined,
-                                          PointerEventType.ContextMenu:
+                                          FrontendEventType.Enter: undefined,
+                                          FrontendEventType.Leave: undefined,
+                                          FrontendEventType.Over: undefined,
+                                          FrontendEventType.Out: undefined,
+                                          FrontendEventType.Up: undefined,
+                                          FrontendEventType.Down: undefined,
+                                          FrontendEventType.ContextMenu:
                                           undefined,
-                                          PointerEventType.Change: undefined,
+                                          FrontendEventType.Change: undefined,
                                       }
 
     def to_dict(self):
         res = super().to_dict()
         evs = []
         for k, v in self._pointer_event_map.items():
-            if k == PointerEventType.Change:
+            if k == FrontendEventType.Change:
                 continue
             if not isinstance(v, Undefined):
                 d = v.to_dict()
@@ -284,16 +269,16 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
             on_context_menu: Optional[Union[EventHandler, Undefined]] = None,
             on_change: Optional[Union[EventHandler, Undefined]] = None):
         pointer_event_map = {
-            PointerEventType.Click: on_click,
-            PointerEventType.DoubleClick: on_double_click,
-            PointerEventType.Enter: on_enter,
-            PointerEventType.Leave: on_leave,
-            PointerEventType.Over: on_over,
-            PointerEventType.Out: on_out,
-            PointerEventType.Up: on_up,
-            PointerEventType.Down: on_down,
-            PointerEventType.ContextMenu: on_context_menu,
-            PointerEventType.Change: on_change,
+            FrontendEventType.Click: on_click,
+            FrontendEventType.DoubleClick: on_double_click,
+            FrontendEventType.Enter: on_enter,
+            FrontendEventType.Leave: on_leave,
+            FrontendEventType.Over: on_over,
+            FrontendEventType.Out: on_out,
+            FrontendEventType.Up: on_up,
+            FrontendEventType.Down: on_down,
+            FrontendEventType.ContextMenu: on_context_menu,
+            FrontendEventType.Change: on_change,
         }
         for k, v in pointer_event_map.items():
             if v is not None:
@@ -302,7 +287,7 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
     async def handle_event(self, ev: EventType):
         # ev: [type, data]
         type, data = ev
-        ev_type = PointerEventType(type)
+        ev_type = FrontendEventType(type)
         handler = self._pointer_event_map[ev_type]
         if isinstance(handler, Undefined):
             return
@@ -388,27 +373,27 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(base_type, prop_cls, children, uid_to_comp, inited)
-        self._pointer_event_map: Dict[PointerEventType,
+        self._pointer_event_map: Dict[FrontendEventType,
                                       Union[EventHandler, Undefined]] = {
-                                          PointerEventType.Click: undefined,
-                                          PointerEventType.DoubleClick:
+                                          FrontendEventType.Click: undefined,
+                                          FrontendEventType.DoubleClick:
                                           undefined,
-                                          PointerEventType.Enter: undefined,
-                                          PointerEventType.Leave: undefined,
-                                          PointerEventType.Over: undefined,
-                                          PointerEventType.Out: undefined,
-                                          PointerEventType.Up: undefined,
-                                          PointerEventType.Down: undefined,
-                                          PointerEventType.ContextMenu:
+                                          FrontendEventType.Enter: undefined,
+                                          FrontendEventType.Leave: undefined,
+                                          FrontendEventType.Over: undefined,
+                                          FrontendEventType.Out: undefined,
+                                          FrontendEventType.Up: undefined,
+                                          FrontendEventType.Down: undefined,
+                                          FrontendEventType.ContextMenu:
                                           undefined,
-                                          PointerEventType.Change: undefined,
+                                          FrontendEventType.Change: undefined,
                                       }
 
     def to_dict(self):
         res = super().to_dict()
         evs = []
         for k, v in self._pointer_event_map.items():
-            if k == PointerEventType.Change:
+            if k == FrontendEventType.Change:
                 continue
             if not isinstance(v, Undefined):
                 evs.append({
@@ -431,16 +416,16 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
             on_context_menu: Optional[Union[EventHandler, Undefined]] = None,
             on_change: Optional[Union[EventHandler, Undefined]] = None):
         pointer_event_map = {
-            PointerEventType.Click: on_click,
-            PointerEventType.DoubleClick: on_double_click,
-            PointerEventType.Enter: on_enter,
-            PointerEventType.Leave: on_leave,
-            PointerEventType.Over: on_over,
-            PointerEventType.Out: on_out,
-            PointerEventType.Up: on_up,
-            PointerEventType.Down: on_down,
-            PointerEventType.ContextMenu: on_context_menu,
-            PointerEventType.Change: on_change,
+            FrontendEventType.Click: on_click,
+            FrontendEventType.DoubleClick: on_double_click,
+            FrontendEventType.Enter: on_enter,
+            FrontendEventType.Leave: on_leave,
+            FrontendEventType.Over: on_over,
+            FrontendEventType.Out: on_out,
+            FrontendEventType.Up: on_up,
+            FrontendEventType.Down: on_down,
+            FrontendEventType.ContextMenu: on_context_menu,
+            FrontendEventType.Change: on_change,
         }
         for k, v in pointer_event_map.items():
             if v is not None:
@@ -449,7 +434,7 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
     async def handle_event(self, ev: EventType):
         # ev: [type, data]
         type, data = ev
-        ev_type = PointerEventType(type)
+        ev_type = FrontendEventType(type)
         handler = self._pointer_event_map[ev_type]
         if isinstance(handler, Undefined):
             return
@@ -458,7 +443,7 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
             print("IGNORE EVENT", self.props.status)
             return
         elif self.props.status == UIRunStatus.Stop.value:
-            if ev_type == PointerEventType.Change:
+            if ev_type == FrontendEventType.Change:
                 self.state_change_callback(data)
 
             def ccb(cb):
@@ -2085,12 +2070,12 @@ class ShapeButton(Group):
         return res
 
     async def headless_click(self):
-        uiev = UIEvent({self._flow_uid: [PointerEventType.Click, self.name]})
+        uiev = UIEvent({self._flow_uid: [FrontendEventType.Click, self.name]})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
     def get_callback(self):
-        res = self.mesh._pointer_event_map[PointerEventType.Click]
+        res = self.mesh._pointer_event_map[FrontendEventType.Click]
         assert not isinstance(res, Undefined)
         return res.cb
 
@@ -2158,12 +2143,12 @@ class Button(Group):
         return res
 
     async def headless_click(self):
-        uiev = UIEvent({self._flow_uid: [PointerEventType.Click, self.name]})
+        uiev = UIEvent({self._flow_uid: [FrontendEventType.Click, self.name]})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
     def get_callback(self):
-        res = self.mesh._pointer_event_map[PointerEventType.Click]
+        res = self.mesh._pointer_event_map[FrontendEventType.Click]
         assert not isinstance(res, Undefined)
         return res.cb
 
@@ -2235,12 +2220,12 @@ class ToggleButton(Group):
         return res
 
     async def headless_toggle(self):
-        uiev = UIEvent({self._flow_uid: [PointerEventType.Change, self.name]})
+        uiev = UIEvent({self._flow_uid: [FrontendEventType.Change, self.name]})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
     def get_callback(self):
-        res = self.mesh._pointer_event_map[PointerEventType.Change]
+        res = self.mesh._pointer_event_map[FrontendEventType.Change]
         assert not isinstance(res, Undefined)
         return res.cb
 

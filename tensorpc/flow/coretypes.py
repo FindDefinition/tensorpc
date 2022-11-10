@@ -3,20 +3,11 @@ import enum
 from typing import Any, Dict, List
 import dataclasses
 from tensorpc.autossh.core import Event, event_from_dict
+from tensorpc.utils.moduleid import get_qualname_of_type
+import numpy as np 
 
 def get_uid(graph_id: str, node_id: str):
     return f"{graph_id}@{node_id}"
-
-class StorageDataItem:
-    def __init__(self, data: bytes, timestamp: int) -> None:
-        self.data = data
-        self.timestamp = timestamp
-
-    def empty(self):
-        return len(self.data) > 0
-
-    def __len__(self):
-        return len(self.data)
 
 class DataStorageItemType(enum.Enum):
     Dict = 0
@@ -26,9 +17,28 @@ class DataStorageItemType(enum.Enum):
 
 @dataclasses.dataclass
 class DataItemMeta:
-    name: str 
-    type: int 
-    meta: str 
+    name: str
+    type: DataStorageItemType
+    meta_str: str
+
+class StorageDataItem:
+    def __init__(self, data: bytes, timestamp: int, meta: DataItemMeta) -> None:
+        self.data = data
+        self.timestamp = timestamp
+        self.meta = meta
+
+    def empty(self):
+        return len(self.data) > 0
+
+    def __len__(self):
+        return len(self.data)
+
+    def get_meta_dict(self):
+        return {
+            "name": self.meta.name,
+            "type": self.meta.type.value,
+            "meta": self.meta.meta_str
+        }
 
 class MessageItemType(enum.Enum):
     Text = 0
@@ -260,3 +270,24 @@ class ScheduleEvent:
     @classmethod
     def from_dict(cls, data):
         return cls(data["ts"], data["data"], data["envs"])
+
+
+def get_object_type_meta(obj, name: str):
+    type_str = get_qualname_of_type(type(obj))
+    meta_str = type_str
+    item_type = DataStorageItemType.Other
+    if isinstance(obj, np.ndarray):
+        shape = list(map(int, obj.shape))
+        meta_str = f"{shape}|{obj.dtype}"
+        item_type = DataStorageItemType.NdArray
+    elif isinstance(obj, dict):
+        meta_str = f"dict"
+        item_type = DataStorageItemType.Dict
+    elif isinstance(obj, list):
+        meta_str = f"list"
+        item_type = DataStorageItemType.List
+    elif get_qualname_of_type(type(obj)) == "torch.Tensor":
+        shape = list(map(int, obj.shape))
+        meta_str = f"{shape}|{obj.dtype}"
+        item_type = DataStorageItemType.NdArray
+    return DataItemMeta(name, item_type, meta_str)

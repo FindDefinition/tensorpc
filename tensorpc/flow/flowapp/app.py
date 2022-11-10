@@ -37,7 +37,7 @@ from watchdog.observers import Observer
 from tensorpc import simple_chunk_call_async
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceUnit
-from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem
+from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem, get_object_type_meta
 from tensorpc.flow.serv_names import serv_names
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.uniquename import UniqueNamePool
@@ -49,6 +49,7 @@ from .core import (AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
                    LayoutEvent, TaskLoopEvent, UIEvent, UIExceptionEvent,
                    UIRunStatus, UIType, UIUpdateEvent, Undefined, UserMessage,
                    undefined)
+from tensorpc.utils.moduleid import get_qualname_of_type
 
 ALL_APP_EVENTS = HashableRegistry()
 
@@ -144,7 +145,6 @@ class AppEditor:
         })
         await self._send_editor_event(app_ev)
 
-
 class App:
     """
     App Init Callbacks:
@@ -200,10 +200,6 @@ class App:
                                 data: Any,
                                 in_memory_limit: int = 100):
         data_enc = pickle.dumps(data)
-        in_memory_limit_bytes = in_memory_limit * 1024 * 1024
-        item = StorageDataItem(data, time.time_ns())
-        if len(data_enc) <= in_memory_limit_bytes:
-            self.__flowapp_storage_cache[key] = item
         parts = key.split(".")
         assert len(parts) in [
             2, 3
@@ -211,12 +207,17 @@ class App:
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if len(parts) == 2:
             parts.insert(0, self.__flowapp_master_meta.graph_id)
+        meta = get_object_type_meta(data, parts[-1])
+        in_memory_limit_bytes = in_memory_limit * 1024 * 1024
+        item = StorageDataItem(data, time.time_ns(), meta)
+        if len(data_enc) <= in_memory_limit_bytes:
+            self.__flowapp_storage_cache[key] = item
         await simple_chunk_call_async(self.__flowapp_master_meta.grpc_url,
                                       serv_names.FLOW_DATA_SAVE, parts[0],
-                                      parts[1], parts[2], data_enc,
+                                      parts[1], parts[2], data_enc, meta,
                                       item.timestamp)
 
-    async def read_data_storage(self, key: str):
+    async def read_data_storage(self, key: str, in_memory_limit: int = 100):
         meta = self.__flowapp_master_meta
         parts = key.split(".")
         assert len(parts) in [
@@ -236,9 +237,15 @@ class App:
             else:
                 return pickle.loads(res.data)
         else:
-            return simple_chunk_call_async(meta.grpc_url,
+            res: StorageDataItem = await simple_chunk_call_async(meta.grpc_url,
                                            serv_names.FLOW_DATA_READ, parts[0],
                                            parts[1], parts[2])
+            in_memory_limit_bytes = in_memory_limit * 1024 * 1024
+            data = pickle.loads(res.data)
+            if len(res.data) <= in_memory_limit_bytes:
+                self.__flowapp_storage_cache[key] = res
+            return data
+
 
     def get_persist_storage(self):
         return self.__persist_storage
@@ -552,7 +559,6 @@ class EditableApp(App):
             observer = Observer()
             self._watchdog_watcher = _WatchDogForAppFile(
                 self._watchdog_on_modified)
-            print(path)
             observer.schedule(self._watchdog_watcher, path, recursive=False)
             observer.start()
             self._watchdog_observer = observer
@@ -581,7 +587,6 @@ class EditableApp(App):
                         fut = asyncio.run_coroutine_threadsafe(
                             self.set_editor_value(new_data), self._loop)
                         fut.result()
-
                     layout_func_changed = self._reload_app_file()
                     if layout_func_changed:
                         fut = asyncio.run_coroutine_threadsafe(

@@ -15,6 +15,8 @@
 import abc
 import enum
 import io
+import builtins
+from pathlib import Path 
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Generic, Iterable, List, Optional, Tuple, Type, TypeVar,
                     Union)
@@ -186,6 +188,20 @@ class AppEventType(enum.Enum):
     # send event to component, for append update 
     # and uncontrolled component.
     ComponentEvent = 300
+
+class FrontendEventType(enum.Enum):
+    Click = 0
+    DoubleClick = 1
+    Enter = 2
+    Leave = 3
+    Over = 4
+    Out = 5
+    Up = 6
+    Down = 7
+    ContextMenu = 8
+    Move = 9
+    # special method for three 2d UI.
+    Change = 20
 
 
 class UIRunStatus(enum.Enum):
@@ -707,11 +723,19 @@ class Component(Generic[T_base_props, T_child]):
         self.__props = prop_cls()
         self.__prop_cls = prop_cls
         self._mounted_override = False
-        self._flow_event_handlers: Dict[str, Union[EventHandler, Undefined]] = {}
+        self._flow_event_handlers: Dict[ValueType, Union[EventHandler, Undefined]] = {}
         self.__sx_props: Dict[str, Any] = {}
 
         self._flow_user_data: Any = None
-
+        try:
+            self._flow_comp_def_path = inspect.getfile(builtins.type(self))
+        except:
+            traceback.print_exc()
+            self._flow_comp_def_path = ""
+        path = Path(self._flow_comp_def_path)
+        if not path.exists() or path.suffix != ".py":
+            self._flow_comp_def_path = ""
+        
     @property
     def props(self) -> T_base_props:
         return self.__props
@@ -855,6 +879,14 @@ class Component(Generic[T_base_props, T_child]):
     def queue(self):
         assert self._queue is not None, f"you must add ui by flexbox.add_xxx"
         return self._queue
+
+    def register_event_handler(self, type: ValueType, cb: Callable,
+                    stop_propagation: bool = False,
+                    throttle: Optional[NumberType] = None,
+                    debounce: Optional[NumberType] = None):
+        evh = EventHandler(cb, stop_propagation, throttle, debounce)
+        self._flow_event_handlers[type] = evh
+        return evh
 
     def state_change_callback(self, data: Any):
         pass
@@ -1231,7 +1263,6 @@ class ContainerBase(Component[T_container_props, T_child]):
                 comp_uids_to_remove.extend(comp_to_remove_uids)
         for comp in comps_to_remove:
             await comp._cancel_task()
-
         comp_added = self.add_layout(layout)
         update_comps_frontend = {c._flow_uid: c.to_dict() for c in comp_added}
         # make sure all child of this box is rerendered.
@@ -1301,7 +1332,7 @@ class Fragment(ContainerBase[FragmentProps, Component]):
 class EventHandler:
 
     def __init__(self,
-                 cb: Callable[[Any], _CORO_ANY],
+                 cb: Callable,
                  stop_propagation: bool = False,
                  throttle: Optional[NumberType] = None,
                  debounce: Optional[NumberType] = None) -> None:

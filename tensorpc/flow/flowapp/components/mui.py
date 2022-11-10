@@ -15,26 +15,29 @@
 import asyncio
 import base64
 import dataclasses
-import io
-import time
 import enum
-from typing import (Any, AsyncGenerator, AsyncIterable, Awaitable, Callable, Coroutine, Dict,
-                    Iterable, List, Optional, Tuple, Type, TypeVar, Union,
-                    TYPE_CHECKING)
-from typing_extensions import Literal, TypeAlias
+import inspect
+import io
+import json
+import time
+from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterable,
+                    Awaitable, Callable, Coroutine, Dict, Iterable, List,
+                    Optional, Tuple, Type, TypeVar, Union)
+
 import numpy as np
 from PIL import Image as PILImage
-import json
-import inspect
-from tensorpc.flow.flowapp.components.common import handle_change_event, handle_change_event_no_arg
+from typing_extensions import Literal, TypeAlias
+
 from tensorpc.core.asynctools import cancel_task
-from ..core import (AppEvent, AppEventType, BasicProps, Component,
-                    ContainerBase, NumberType, T_child, TaskLoopEvent, UIEvent,
-                    UIRunStatus, UIType, Undefined, undefined, T_base_props,
-                    T_container_props, ContainerBaseProps,
-                    ValueType, Fragment, EventHandler, EventType)
+from tensorpc.flow.flowapp.components.common import (
+    handle_change_event, handle_change_event_no_arg)
 
 from .. import colors
+from ..core import (AppEvent, AppEventType, BasicProps, Component,
+                    ContainerBase, ContainerBaseProps, EventHandler, EventType,
+                    Fragment, FrontendEventType, NumberType, T_base_props,
+                    T_child, T_container_props, TaskLoopEvent, UIEvent,
+                    UIRunStatus, UIType, Undefined, ValueType, undefined)
 
 if TYPE_CHECKING:
     from .three import ThreeCanvas
@@ -405,6 +408,7 @@ class Button(MUIComponentBase[ButtonProps]):
         super().__init__(UIType.Button, ButtonProps)
         self.props.name = name
         self.callback = callback
+        self.register_event_handler(FrontendEventType.Click.value, callback)
 
     async def headless_click(self):
         return await self.put_app_event(AppEvent("", {AppEventType.UIEvent: UIEvent({self._flow_uid: self.props.name})}))
@@ -525,6 +529,8 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps, ToggleButton]):
             assert isinstance(value, list), "if not exclusive, value must be a list"
         else:
             assert not isinstance(value, list), "if exclusive, value must not be a list"
+
+        self._flow_event_handlers
 
     @property 
     def prop(self):
