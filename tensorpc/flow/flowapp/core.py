@@ -19,7 +19,7 @@ import builtins
 from pathlib import Path 
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Generic, Iterable, List, Optional, Tuple, Type, TypeVar,
-                    Union)
+                    Union, Set)
 import asyncio
 import traceback
 import inspect
@@ -39,7 +39,7 @@ ValueType: TypeAlias = Union[int, float, str]
 
 NumberType: TypeAlias = Union[int, float]
 
-EventType: TypeAlias = Tuple[Union[NumberType, str], Any]
+EventType: TypeAlias = Tuple[ValueType, Any]
 
 class Undefined:
     def __repr__(self) -> str:
@@ -202,7 +202,8 @@ class FrontendEventType(enum.Enum):
     Move = 9
     # special method for three 2d UI.
     Change = 20
-
+    # custom events in devflow
+    Delete = 40
 
 class UIRunStatus(enum.Enum):
     Stop = 0
@@ -709,6 +710,7 @@ class Component(Generic[T_base_props, T_child]):
     def __init__(self,
                  type: UIType,
                  prop_cls: Type[T_base_props],
+                 allowed_events: Optional[Iterable[ValueType]] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
         self._queue: Optional[asyncio.Queue] = queue
@@ -725,7 +727,9 @@ class Component(Generic[T_base_props, T_child]):
         self._mounted_override = False
         self._flow_event_handlers: Dict[ValueType, Union[EventHandler, Undefined]] = {}
         self.__sx_props: Dict[str, Any] = {}
-
+        self._flow_allowed_events: Set[ValueType] = set()
+        if allowed_events is not None:
+            self._flow_allowed_events = set(allowed_events)
         self._flow_user_data: Any = None
         try:
             self._flow_comp_def_path = inspect.getfile(builtins.type(self))
@@ -884,9 +888,17 @@ class Component(Generic[T_base_props, T_child]):
                     stop_propagation: bool = False,
                     throttle: Optional[NumberType] = None,
                     debounce: Optional[NumberType] = None):
+        if self._flow_allowed_events:
+            assert type in self._flow_allowed_events, f"only support events: {self._flow_allowed_events}"
         evh = EventHandler(cb, stop_propagation, throttle, debounce)
         self._flow_event_handlers[type] = evh
         return evh
+
+    def get_event_handler(self, type: ValueType):
+        res = self._flow_event_handlers.get(type)
+        if isinstance(res, Undefined):
+            res = None 
+        return res 
 
     def state_change_callback(self, data: Any):
         pass
@@ -1004,9 +1016,10 @@ class ContainerBase(Component[T_container_props, T_child]):
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  _children: Optional[Dict[str, T_child]] = None,
                  inited: bool = False,
+                 allowed_events: Optional[Iterable[ValueType]] = None,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(base_type, prop_cls, uid, queue)
+        super().__init__(base_type, prop_cls, allowed_events, uid, queue)
         if inited:
             assert queue is not None and uid_to_comp is not None
         if uid_to_comp is None:

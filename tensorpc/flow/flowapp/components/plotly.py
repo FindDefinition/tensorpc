@@ -19,8 +19,7 @@ from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Dict, Iterable,
                     List, Optional, Tuple, Type, TypeVar, Union)
 
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.flow.flowapp.components.common import (handle_change_event,
-                                                     handle_change_event_no_arg
+from tensorpc.flow.flowapp.components.common import (handle_standard_event
                                                      )
 from typing_extensions import Literal, TypeAlias
 

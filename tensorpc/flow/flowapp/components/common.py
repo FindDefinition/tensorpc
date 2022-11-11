@@ -14,7 +14,7 @@
 
 from typing import Any, Tuple, Union
 import asyncio
-from tensorpc.flow.flowapp.core import Component, NumberType, create_ignore_usr_msg, Undefined, UIRunStatus
+from tensorpc.flow.flowapp.core import Component, EventType, create_ignore_usr_msg, Undefined, UIRunStatus, FrontendEventType
 
 
 async def handle_raw_event(ev: Any, comp: Component, just_run: bool = False):
@@ -40,27 +40,34 @@ async def handle_raw_event(ev: Any, comp: Component, just_run: bool = False):
         else:
             await comp.run_callback(ccb(handler.cb), True)
             
-async def handle_change_event(comp: Component, data: Tuple[Union[NumberType, str], Any], sync_first: bool = False):
+async def handle_standard_event(comp: Component, data: EventType, sync_first: bool = False):
     if comp.props.status == UIRunStatus.Running.value:
         msg = create_ignore_usr_msg(comp)
         await comp.send_and_wait(msg)
         return
     elif comp.props.status == UIRunStatus.Stop.value:
-        cb1 = comp.get_callback()
-        comp.state_change_callback(data[1])
-        if cb1 is not None:
-            def ccb(cb):
-                return lambda: cb(data[1])
-            comp._task = asyncio.create_task(comp.run_callback(ccb(cb1), True, sync_first=sync_first))
+        if data[0] == FrontendEventType.Change.value:
+            handler = comp.get_event_handler(FrontendEventType.Change.value)
+            comp.state_change_callback(data[1])
+            if handler is not None:
+                def ccb(cb):
+                    return lambda: cb(data[1])
+                comp._task = asyncio.create_task(comp.run_callback(ccb(handler.cb), True, sync_first=sync_first))
+            else:
+                await comp.sync_status(True)
+        elif data[0] == FrontendEventType.Click.value:
+            handler = comp.get_event_handler(FrontendEventType.Click.value)
+            if handler is not None:
+                comp._task = asyncio.create_task(comp.run_callback(handler.cb, sync_first=sync_first))
         else:
-            await comp.sync_status(True)
+            raise NotImplementedError
 
-async def handle_change_event_no_arg(comp: Component, sync_first: bool = False):
-    if comp.props.status == UIRunStatus.Running.value:
-        msg = create_ignore_usr_msg(comp)
-        await comp.send_and_wait(msg)
-        return
-    elif comp.props.status == UIRunStatus.Stop.value:
-        cb2 = comp.get_callback()
-        if cb2 is not None:
-            comp._task = asyncio.create_task(comp.run_callback(cb2, sync_first=sync_first))
+# async def handle_change_event_no_arg(comp: Component, sync_first: bool = False):
+#     if comp.props.status == UIRunStatus.Running.value:
+#         msg = create_ignore_usr_msg(comp)
+#         await comp.send_and_wait(msg)
+#         return
+#     elif comp.props.status == UIRunStatus.Stop.value:
+#         cb2 = comp.get_callback()
+#         if cb2 is not None:
+#             comp._task = asyncio.create_task(comp.run_callback(cb2, sync_first=sync_first))

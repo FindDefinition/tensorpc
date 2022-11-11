@@ -64,11 +64,11 @@ class FlowApp:
 
     @marker.mark_async_init
     async def init(self):
-        self.app.app_initialize()
-        await self.app.app_initialize_async()
         if self.app._force_special_layout_method:
             await self.app._app_run_layout_function()
         lay = self.app._get_app_layout()
+        self.app.app_initialize()
+        await self.app.app_initialize_async()
         await self._send_loop_queue.put(
             AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)}))
         # TODO should we just use grpc client to query init state here?

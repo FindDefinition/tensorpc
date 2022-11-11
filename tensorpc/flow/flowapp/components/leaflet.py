@@ -39,7 +39,7 @@ from ..core import (BasicProps, Component, EventType, ContainerBase,
                     T_container_props, Fragment, EventHandler,
                     create_ignore_usr_msg)
 from .mui import (FlexBoxProps, MUIComponentType, MUIContainerBase)
-from .common import handle_raw_event, handle_change_event
+from .common import handle_raw_event, handle_standard_event
 
 
 class MapComponentBase(Component[T_base_props, "MapComponentType"]):
@@ -297,7 +297,7 @@ class Polyline(MapContainerBase[PolylineProps, MapElementChildType]):
         self.on_click = on_click
 
     async def handle_event(self, ev: EventType):
-        await handle_change_event(self, ev)
+        await handle_standard_event(self, ev)
 
     @property
     def prop(self):
@@ -382,7 +382,7 @@ class CircleMarker(MapContainerBase[CircleMarkerProps, MapElementChildType]):
         return self._update_props_base(propcls)
 
     async def handle_event(self, ev: EventType):
-        await handle_change_event(self, ev)
+        await handle_standard_event(self, ev)
 
 
 @dataclasses.dataclass
@@ -419,4 +419,4 @@ class Marker(MapContainerBase[MarkerProps, MapElementChildType]):
         return self._update_props_base(propcls)
 
     async def handle_event(self, ev: EventType):
-        await handle_change_event(self, ev)
+        await handle_standard_event(self, ev)

@@ -48,9 +48,9 @@ from .core import (AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
                    BasicProps, Component, ContainerBase, CopyToClipboardEvent,
                    LayoutEvent, TaskLoopEvent, UIEvent, UIExceptionEvent,
                    UIRunStatus, UIType, UIUpdateEvent, Undefined, UserMessage,
-                   undefined)
+                   undefined, EventHandler)
 from tensorpc.utils.moduleid import get_qualname_of_type
-
+from tensorpc.utils.moduleid import is_lambda, get_function_qualname
 ALL_APP_EVENTS = HashableRegistry()
 
 
@@ -560,6 +560,19 @@ class EditableApp(App):
             self._watchdog_watcher = _WatchDogForAppFile(
                 self._watchdog_on_modified)
             observer.schedule(self._watchdog_watcher, path, recursive=False)
+            # add observe path for all callbacks
+            for comp in self._uid_to_comp.values():
+                for key, handler in comp._flow_event_handlers.items():
+                    if isinstance(handler, EventHandler):
+                        cb = handler.cb
+                        if is_lambda(cb):
+                            continue
+                        try:
+                            cb_path = inspect.getabsfile(cb)
+                            # observer.schedule(self._watchdog_watcher, cb_path, recursive=False)
+                        except:
+                            pass
+
             observer.start()
             self._watchdog_observer = observer
         self._watchdog_ignore_next = False
@@ -568,6 +581,9 @@ class EditableApp(App):
 
     def _watchdog_on_modified(self, ev: _WATCHDOG_MODIFY_EVENT_TYPES):
         if isinstance(ev, watchdog.events.FileModifiedEvent):
+            dcls = self._get_app_dynamic_cls()
+            app_path = dcls.file_path
+            
             print("WATCHDOG", ev)
             with self._watch_lock:
                 if self._watchdog_ignore_next:
