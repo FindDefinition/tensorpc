@@ -57,7 +57,6 @@ def _encode_image_bytes(img: np.ndarray):
 class MUIBasicProps(BasicProps):
     pass
 
-
 _OverflowType = Union[Literal["visible"], Literal["hidden"], Literal["scroll"],
                       Literal["auto"]]
 PointerEventsProperties: TypeAlias = Union[Literal["auto"], Literal["none"],
@@ -184,6 +183,15 @@ _StdColorNoDefault: TypeAlias = Literal['primary', 'secondary', 'error',
 MUIComponentType: TypeAlias = Union[MUIComponentBase, MUIContainerBase,
                                     Fragment]
 
+LayoutType: TypeAlias = Union[List[MUIComponentType],
+                                           Dict[str,
+                                                MUIComponentType]]
+
+
+def layout_unify(layout: LayoutType):
+    if isinstance(layout, list):
+        layout = {str(i): v for i, v in enumerate(layout)}
+    return layout
 
 @dataclasses.dataclass
 class ImageProps(MUIComponentBaseProps):
