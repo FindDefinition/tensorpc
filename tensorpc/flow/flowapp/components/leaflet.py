@@ -33,7 +33,7 @@ import numpy as np
 from tensorpc.utils.uniquename import UniqueNamePool
 from typing_extensions import ParamSpec, TypeAlias
 
-from ..core import (BasicProps, Component, EventType, ContainerBase,
+from ..core import (BasicProps, Component, EventType, ContainerBase, FrontendEventType,
                     NumberType, T_base_props, T_child, UIRunStatus, UIType,
                     Undefined, undefined, ContainerBaseProps,
                     T_container_props, Fragment, EventHandler,
@@ -105,21 +105,18 @@ class MapContainerProps(ContainerBaseProps, FlexBoxProps):
     pass
 
 
-class MapFrontendEventType(enum.Enum):
-    Zoom = "zoom"
-    Move = "move"
-
-
 class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
-
+    EvMove = FrontendEventType.MapMove
+    EvZoom = FrontendEventType.MapZoom
     def __init__(self,
                  center: Tuple[NumberType, NumberType],
                  zoom: NumberType,
                  children: Dict[str, MapComponentType],
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
+        allow_evs = [FrontendEventType.MapZoom.value, FrontendEventType.MapMove.value]
         super().__init__(UIType.LeafletMapContainer, MapContainerProps,
-                         uid_to_comp, children, inited)
+                         uid_to_comp, children, inited, allow_evs)
         self.center = center
         self.zoom = zoom
 
@@ -134,9 +131,10 @@ class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
                                                  Undefined]] = None,
                          on_zoom: Optional[Union[EventHandler,
                                                  Undefined]] = None):
+        
         pointer_event_map = {
-            MapFrontendEventType.Move: on_move,
-            MapFrontendEventType.Zoom: on_zoom,
+            FrontendEventType.MapZoom: on_move,
+            FrontendEventType.MapMove: on_zoom,
         }
         for k, v in pointer_event_map.items():
             if v is not None:
@@ -314,12 +312,6 @@ class Polyline(MapContainerBase[PolylineProps, MapElementChildType]):
         await self.send_and_wait(
             self.update_event(positions=positions))
 
-    def get_callback(self) -> Optional[Callable]:
-        return self.on_click
-
-    def set_callback(self, cb: Callable):
-        self.on_click = cb
-
 
 @dataclasses.dataclass
 class CircleProps(ContainerBaseProps, PathOptions):
@@ -361,15 +353,11 @@ class CircleMarker(MapContainerBase[CircleMarkerProps, MapElementChildType]):
                  callback: Optional[Callable[[], _CORO_NONE]] = None) -> None:
         super().__init__(UIType.LeafletCircleMarker,
                          CircleMarkerProps,
-                         _children=children)
+                         _children=children,
+                         allowed_events=[FrontendEventType.Click.value])
         self.props.center = center
-        self.callback = callback
-
-    def get_callback(self):
-        return self.callback
-
-    def set_callback(self, val: Any):
-        self.callback = val
+        if callback is not None:
+            self.register_event_handler(FrontendEventType.Click.value, callback)
 
     @property
     def prop(self):
@@ -398,15 +386,11 @@ class Marker(MapContainerBase[MarkerProps, MapElementChildType]):
                  position: Tuple[NumberType, NumberType],
                  children: Dict[str, MapElementChildType],
                  callback: Optional[Callable[[], _CORO_NONE]] = None) -> None:
-        super().__init__(UIType.LeafletMarker, MarkerProps, _children=children)
+        super().__init__(UIType.LeafletMarker, MarkerProps, _children=children,
+            allowed_events=[FrontendEventType.Click.value])
         self.props.position = position
-        self.callback = callback
-
-    def get_callback(self):
-        return self.callback
-
-    def set_callback(self, val: Any):
-        self.callback = val
+        if callback is not None:
+            self.register_event_handler(FrontendEventType.Click.value, callback)
 
     @property
     def prop(self):

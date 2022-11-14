@@ -70,11 +70,12 @@ class ServFunctionMeta:
     is_async: bool
     is_static: bool
     is_binded: bool
-    code: str =""
+    code: str = ""
+    qualname: str = ""
 
     def __init__(self, fn: Callable, name: str, type: ServiceType,
                  sig: inspect.Signature, is_gen: bool, is_async: bool,
-                 is_static: bool, is_binded: bool) -> None:
+                 is_static: bool, is_binded: bool, qualname: str = "") -> None:
         self.name = name
         self.type = type
         self.args = [ParamMeta(n, p) for n, p in sig.parameters.items()]
@@ -86,6 +87,7 @@ class ServFunctionMeta:
         self.is_binded = is_binded
         self.fn = fn
         self.code = ""
+        self.qualname = qualname
 
     def to_json(self):
         return {
@@ -118,7 +120,6 @@ class DynamicClass:
                 self.module_path = self.module_path[1:]
                 self.file_path = self.module_path
                 assert Path(self.module_path).exists(), f"your {self.module_path} not exists"
-
                 # treat module_path as a file path
                 # import sys
                 mod_name = Path(self.module_path).stem + "_" + uuid.uuid4().hex
@@ -131,8 +132,6 @@ class DynamicClass:
                 self.module_dict = self.standard_module.__dict__
                 self.is_standard_module = False
                 # self.module_dict = runpy.run_path(self.module_path)
-
-
             else:
                 self.standard_module = importlib.import_module(self.module_path)
                 file_path = inspect.getfile(self.standard_module)
@@ -149,7 +148,7 @@ class DynamicClass:
 
 
 class ReloadableDynamicClass(DynamicClass):
-    def __init__(self, module_name: str, ) -> None:
+    def __init__(self, module_name: str) -> None:
         super().__init__(module_name)
         self.serv_metas = self.get_metas_of_regular_methods(self.obj_type)
 
@@ -172,7 +171,7 @@ class ReloadableDynamicClass(DynamicClass):
                 is_gen = is_async_gen
             v_sig = inspect.signature(v)
             serv_meta = ServFunctionMeta(v, k, ServiceType.Normal, v_sig, is_gen,
-                                         is_async, is_static, False)
+                                         is_async, is_static, False, qualname=v.__qualname__)
             code, _ = inspect.getsourcelines(v)
             serv_meta.code = "".join(code)
             serv_metas.append(serv_meta)
@@ -207,7 +206,7 @@ class ReloadableDynamicClass(DynamicClass):
                 if method in callback_inv_dict:
                     new_cb[callback_inv_dict[method]] = new_method
                 if new_meta.code != meta.code:
-                    code_changed_cb.append(new_meta.name)
+                    code_changed_cb.append(new_meta.qualname)
             else:
                 setattr(obj, new_meta.name, new_method)
         self.serv_metas = new_metas

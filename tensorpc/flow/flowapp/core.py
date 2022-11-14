@@ -200,10 +200,13 @@ class FrontendEventType(enum.Enum):
     Down = 7
     ContextMenu = 8
     Move = 9
-    # special method for three 2d UI.
     Change = 20
-    # custom events in devflow
-    Delete = 40
+    Delete = 21
+    
+    # leaflet events
+    MapZoom = 60 
+    MapMove = 61
+
 
 class UIRunStatus(enum.Enum):
     Stop = 0
@@ -732,7 +735,7 @@ class Component(Generic[T_base_props, T_child]):
             self._flow_allowed_events = set(allowed_events)
         self._flow_user_data: Any = None
         try:
-            self._flow_comp_def_path = inspect.getfile(builtins.type(self))
+            self._flow_comp_def_path = str(Path(inspect.getfile(builtins.type(self))).resolve())
         except:
             traceback.print_exc()
             self._flow_comp_def_path = ""
@@ -764,12 +767,6 @@ class Component(Generic[T_base_props, T_child]):
                 setattr(self.__props, k, v)
             return self.create_update_event(kwargs)
         return wrapper 
-
-    def get_callback(self) -> Optional[Callable]:
-        return None
-
-    def set_callback(self, val: Any):
-        return
 
     async def handle_event(self, ev: EventType):
         pass
@@ -893,6 +890,9 @@ class Component(Generic[T_base_props, T_child]):
         evh = EventHandler(cb, stop_propagation, throttle, debounce)
         self._flow_event_handlers[type] = evh
         return evh
+
+    def clear_event_handlers(self):
+        self._flow_event_handlers.clear()
 
     def get_event_handler(self, type: ValueType):
         res = self._flow_event_handlers.get(type)

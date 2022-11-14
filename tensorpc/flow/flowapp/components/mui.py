@@ -181,35 +181,6 @@ _StdColorNoDefault: TypeAlias = Literal['primary', 'secondary', 'error',
                                         'info', 'success', 'warning']
 
 
-async def _handle_standard_event(comp: Component, data: Any):
-    if comp.props.status == UIRunStatus.Running.value:
-        # TODO send exception if ignored click
-        print("IGNORE EVENT", comp.props.status)
-        return
-    elif comp.props.status == UIRunStatus.Stop.value:
-        cb1 = comp.get_callback()
-        comp.state_change_callback(data)
-        if cb1 is not None:
-
-            def ccb(cb):
-                return lambda: cb(data)
-
-            comp._task = asyncio.create_task(comp.run_callback(ccb(cb1), True))
-        else:
-            await comp.sync_status(True)
-
-
-async def _handle_button_event(comp: Union["Button", "ListItemButton"],
-                               data: Any):
-    if comp.props.status == UIRunStatus.Running.value:
-        # TODO send exception if ignored click
-        print("IGNORE EVENT", comp.props.status)
-        return
-    elif comp.props.status == UIRunStatus.Stop.value:
-        cb2 = comp.callback
-        comp._task = asyncio.create_task(comp.run_callback(lambda: cb2()))
-
-
 MUIComponentType: TypeAlias = Union[MUIComponentBase, MUIContainerBase,
                                     Fragment]
 
@@ -443,11 +414,6 @@ class Button(MUIComponentBase[ButtonProps]):
                 UIEvent({self._flow_uid: self.props.name})
             }))
 
-    def get_callback(self):
-        return self.callback
-
-    def set_callback(self, val: Any):
-        self.callback = val
 
     async def handle_event(self, ev: EventType):
         await handle_standard_event(self, ev, sync_first=True)
@@ -585,11 +551,6 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
     def state_change_callback(self, value: Union[ValueType, List[ValueType]]):
         self.props.value = value
 
-    def get_callback(self):
-        return self.callback
-
-    def set_callback(self, val: Any):
-        self.callback = val
 
     async def handle_event(self, ev: EventType):
         await handle_standard_event(self, ev)
@@ -706,12 +667,6 @@ class ListItemButton(MUIComponentBase[ButtonProps]):
         uiev = UIEvent({self._flow_uid: self.props.name})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
-
-    def get_callback(self):
-        return self.callback
-
-    def set_callback(self, val: Any):
-        self.callback = val
 
     async def handle_event(self, ev: EventType):
         await handle_standard_event(self, ev, sync_first=False)
@@ -862,11 +817,6 @@ class RadioGroup(MUIComponentBase[RadioGroupProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    def get_callback(self):
-        return self.callback
-
-    def set_callback(self, val: Any):
-        self.callback = val
 
     async def handle_event(self, ev: EventType):
         await handle_standard_event(self, ev)
@@ -946,11 +896,6 @@ class Input(MUIComponentBase[InputProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    def get_callback(self):
-        return self.callback
-
-    def set_callback(self, val: Any):
-        self.callback = val
 
     def json(self):
         return json.loads(self.props.value)
@@ -1059,11 +1004,6 @@ class SwitchBase(MUIComponentBase[SwitchProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    def get_callback(self):
-        return self.callback
-
-    def set_callback(self, val: Any):
-        self.callback = val
 
     def __bool__(self):
         return self.props.checked
@@ -1181,11 +1121,6 @@ class Select(MUIComponentBase[SelectProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    def get_callback(self):
-        return self.callback
-
-    def set_callback(self, val: Any):
-        self.callback = val
 
     async def handle_event(self, ev: EventType):
         await handle_standard_event(self, ev)
@@ -1276,12 +1211,6 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    def get_callback(self):
-        return self.callback
-
-    def set_callback(self, val: Any):
-        self.callback = val
-
     async def handle_event(self, ev: EventType):
         await handle_standard_event(self, ev)
 
@@ -1364,11 +1293,6 @@ class Slider(MUIComponentBase[SliderProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    def get_callback(self):
-        return self.callback
-
-    def set_callback(self, val: Any):
-        self.callback = val
 
     async def handle_event(self, ev: EventType):
         await handle_standard_event(self, ev)
@@ -1412,9 +1336,6 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
         self.pause_event = asyncio.Event()
         self.pause_event.set()
         self.update_period = update_period
-
-    def get_callback(self):
-        return self.loop_callbcak
 
     async def task_loop(self,
                         it: Union[Iterable[_T], AsyncIterable[_T]],
@@ -1480,9 +1401,6 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    def set_callback(self, val: Any):
-        self.loop_callbcak = val
-
     async def handle_event(self, ev: EventType):
         data = ev[1]
         if data == TaskLoopEvent.Start.value:
@@ -1540,9 +1458,6 @@ class RawTaskLoop(MUIComponentBase[TaskLoopProps]):
         self.update_period = update_period
         self.register_event_handler(FrontendEventType.Change.value, callback)
 
-    def get_callback(self):
-        return self.callback
-
     async def update_progress(self, progress: float, index: int):
         progress = max(0, min(progress, 1))
         self.props.progresses[index] = progress
@@ -1557,9 +1472,6 @@ class RawTaskLoop(MUIComponentBase[TaskLoopProps]):
         uiev = UIEvent({self._flow_uid: ev.value})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
-
-    def set_callback(self, val: Any):
-        self.callback = val
 
     async def handle_event(self, data: EventType):
         await handle_standard_event(self, data)
@@ -1757,11 +1669,6 @@ class Chip(MUIComponentBase[ChipProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    def get_callback(self):
-        return self.callback
-
-    def set_callback(self, val: Any):
-        self.callback = val
 
     async def handle_event(self, ev: EventType):
         # TODO add delete support
@@ -1770,10 +1677,10 @@ class Chip(MUIComponentBase[ChipProps]):
             print("IGNORE EVENT", self.props.status)
             return
         elif self.props.status == UIRunStatus.Stop.value:
-            cb2 = self.get_callback()
-            if cb2 is not None:
+            handler = self.get_event_handler(ev[0])
+            if handler is not None:
                 self._task = asyncio.create_task(
-                    self.run_callback(lambda: cb2()))
+                    self.run_callback(lambda: handler.cb()))
 
     @property
     def prop(self):
@@ -1891,12 +1798,6 @@ class TabList(MUIComponentBase[TabListProps]):
     def prop(self):
         propcls = self.propcls
         return self._prop_base(propcls, self)
-
-    def get_callback(self):
-        return self.callback
-
-    def set_callback(self, val: Any):
-        self.callback = val
 
     async def handle_event(self, ev: EventType):
         await handle_standard_event(self, ev, sync_first=True)

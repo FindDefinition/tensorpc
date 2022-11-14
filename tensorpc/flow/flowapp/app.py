@@ -18,28 +18,35 @@ import asyncio
 import base64
 import contextlib
 import contextvars
+import dataclasses
 import enum
 import inspect
 import io
 import json
+from pathlib import Path
 import pickle
 import threading
 import time
 import traceback
+from types import ModuleType
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
-                    Iterable, List, Optional, Tuple, TypeVar, Union)
+                    Iterable, List, Optional, Set, Tuple, TypeVar, Union)
 
 import numpy as np
+import importlib.machinery
+import importlib
 import watchdog
 import watchdog.events
 from PIL import Image
 from watchdog.observers import Observer
 from tensorpc import simple_chunk_call_async
+from tensorpc.constants import PACKAGE_ROOT
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceUnit
 from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem, get_object_type_meta
 from tensorpc.flow.serv_names import serv_names
 from tensorpc.utils.registry import HashableRegistry
+from tensorpc.utils.reload import reload_method
 from tensorpc.utils.uniquename import UniqueNamePool
 from tensorpc.flow.client import MasterMeta
 from .components import mui, three
@@ -47,7 +54,7 @@ from .core import (AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
                    AppEditorFrontendEventType, AppEvent, AppEventType,
                    BasicProps, Component, ContainerBase, CopyToClipboardEvent,
                    LayoutEvent, TaskLoopEvent, UIEvent, UIExceptionEvent,
-                   UIRunStatus, UIType, UIUpdateEvent, Undefined, UserMessage,
+                   UIRunStatus, UIType, UIUpdateEvent, Undefined, UserMessage, ValueType,
                    undefined, EventHandler)
 from tensorpc.utils.moduleid import get_qualname_of_type
 from tensorpc.utils.moduleid import is_lambda, get_function_qualname
@@ -529,6 +536,64 @@ class _WatchDogForAppFile(watchdog.events.FileSystemEventHandler):
     def on_modified(self, event: _WATCHDOG_MODIFY_EVENT_TYPES):
         return self._on_modified(event)
 
+@dataclasses.dataclass
+class _CompReloadMeta:
+    uid: str
+    handler: EventHandler 
+
+
+def _create_reload_metas(uid_to_comp: Dict[str, Component], path: str):
+    path_resolve = str(Path(path).resolve())
+    metas: List[_CompReloadMeta] = []
+    for k, v in uid_to_comp.items():
+        # try:
+        #     # if comp is inside tensorpc official, ignore it.
+        #     Path(v_file).relative_to(PACKAGE_ROOT)
+        #     continue 
+        # except:
+        #     pass
+        for handler_type, handler in v._flow_event_handlers.items():
+            if not isinstance(handler, Undefined):
+                cb = handler.cb 
+                if is_lambda(cb):
+                    continue 
+                cb_file = str(Path(inspect.getfile(cb)).resolve())
+                if cb_file != path_resolve:
+                    continue
+                # code, _ = inspect.getsourcelines(cb)
+                metas.append(_CompReloadMeta(k, handler))
+    return metas 
+
+class _SimpleCodeManager:
+    def __init__(self, paths: List[str]) -> None:
+        self.file_to_code: Dict[str, str] = {}
+        for path in paths:
+            resolved_path = str(Path(path).resolve())
+            with open(resolved_path, "r") as f:
+                self.file_to_code[path] = f.read()
+
+    def update_code_from_editor(self, path: str, new_data: str):
+        resolved_path = str(Path(path).resolve())
+        if new_data == self.file_to_code[resolved_path]:
+            return False 
+        self.file_to_code[resolved_path] = new_data
+        return True
+
+    def update_code(self, change_file: str):
+        resolved_path = str(Path(change_file).resolve())
+        if resolved_path not in self.file_to_code:
+            return False 
+        with open(change_file, "r") as f:
+            new_data = f.read()
+        if new_data == self.file_to_code[resolved_path]:
+            return False 
+        self.file_to_code[resolved_path] = new_data
+        return True
+
+    def get_code(self, change_file: str):
+        resolved_path = str(Path(change_file).resolve())
+        return self.file_to_code[resolved_path]
+
 
 class EditableApp(App):
     def __init__(self,
@@ -537,7 +602,8 @@ class EditableApp(App):
                  flex_flow: Union[str, Undefined] = "column nowrap",
                  justify_content: Union[str, Undefined] = undefined,
                  align_items: Union[str, Undefined] = undefined,
-                 maxqsize: int = 10) -> None:
+                 maxqsize: int = 10,
+                 observed_files: Optional[List[str]] = None) -> None:
         super().__init__(flex_flow, justify_content, align_items, maxqsize)
         self._use_app_editor = use_app_editor
         if use_app_editor:
@@ -547,8 +613,10 @@ class EditableApp(App):
             self.code_editor.set_init_line_number(lineno)
             self.code_editor.freeze()
         self._watchdog_prev_content = ""
+        self._flow_reloadable_layout = reloadable_layout
         if reloadable_layout:
             self._app_force_use_layout_function()
+        self._flow_observed_files = observed_files
 
     def app_initialize(self):
         dcls = self._get_app_dynamic_cls()
@@ -559,85 +627,142 @@ class EditableApp(App):
             observer = Observer()
             self._watchdog_watcher = _WatchDogForAppFile(
                 self._watchdog_on_modified)
-            observer.schedule(self._watchdog_watcher, path, recursive=False)
-            # add observe path for all callbacks
-            for comp in self._uid_to_comp.values():
-                for key, handler in comp._flow_event_handlers.items():
-                    if isinstance(handler, EventHandler):
-                        cb = handler.cb
-                        if is_lambda(cb):
-                            continue
-                        try:
-                            cb_path = inspect.getabsfile(cb)
-                            # observer.schedule(self._watchdog_watcher, cb_path, recursive=False)
-                        except:
-                            pass
+            if self._flow_observed_files is not None:
+                for p in self._flow_observed_files:
+                    assert Path(p).exists(), f"{p} must exist"
+                paths = set(self._flow_observed_files)
+                self._flow_comp_mgr = _SimpleCodeManager(self._flow_observed_files)
+            else:
+                self._flow_comp_mgr = _SimpleCodeManager(list(self.__get_default_observe_paths()))
+                paths = set(self._flow_comp_mgr.file_to_code.keys())
 
+            paths.add(str(Path(path).resolve()))
+            # print(paths)
+            for p in paths:
+                observer.schedule(self._watchdog_watcher, p, recursive=False)
             observer.start()
             self._watchdog_observer = observer
+        else:
+            self._flow_comp_mgr = None 
         self._watchdog_ignore_next = False
         self._loop = asyncio.get_running_loop()
         self._watch_lock = threading.Lock()
 
+    def __get_default_observe_paths(self):
+        res: Set[str] = set()
+        for k, v in self._uid_to_comp.items():
+            v_file = v._flow_comp_def_path
+            if not v_file:
+                continue 
+            try:
+                # if comp is inside tensorpc official, ignore it.
+                Path(v_file).relative_to(PACKAGE_ROOT)
+                continue 
+            except:
+                pass
+            res.add(v_file)
+        res.add(self._get_app_dynamic_cls().file_path)
+        return res
+
+    def __reload_callback(self, change_file: str, mod_is_reloaded: bool):
+        # TODO find a way to record history callback code and 
+        # reload only if code change
+        assert self._flow_comp_mgr is not None 
+        resolved_path = str(Path(change_file).resolve())
+        reload_metas = _create_reload_metas(self._uid_to_comp, resolved_path)
+        if reload_metas:
+            module = inspect.getmodule(reload_metas[0].handler.cb)
+            if module is None:
+                return
+            # now module is valid, reload it.
+            if not mod_is_reloaded:
+                try:
+                    importlib.reload(module)
+                except:
+                    traceback.print_exc()
+                    return
+            for meta in reload_metas:
+                handler = meta.handler
+                cb = handler.cb 
+                new_method, new_code = reload_method(cb, module.__dict__)
+                # if new_code:
+                #     meta.code = new_code
+                if new_method is not None:
+                    print(new_method, "new_method")
+                    handler.cb = new_method
+
+
     def _watchdog_on_modified(self, ev: _WATCHDOG_MODIFY_EVENT_TYPES):
         if isinstance(ev, watchdog.events.FileModifiedEvent):
             dcls = self._get_app_dynamic_cls()
-            app_path = dcls.file_path
-            
+            resolved_path = str(Path(ev.src_path).resolve())
+            resolved_app_path = str(Path(dcls.file_path).resolve())
+            is_app_file_changed = resolved_app_path == resolved_path
             print("WATCHDOG", ev)
             with self._watch_lock:
-                if self._watchdog_ignore_next:
-                    self._watchdog_ignore_next = False
+                if self._flow_comp_mgr is None:
                     return
-                with open(ev.src_path, "r") as f:
-                    new_data = f.read()
+                if not self._flow_comp_mgr.update_code(ev.src_path):
+                    return 
+                new_data = self._flow_comp_mgr.get_code(ev.src_path)
                 try:
                     ast.parse(new_data, filename=ev.src_path)
                 except:
                     traceback.print_exc()
                     return
-                # we have no way to distringuish save event and external save.
-                # so we compare data with previous saved result.
-                if new_data != self._watchdog_prev_content:
-                    if self._use_app_editor:
-                        fut = asyncio.run_coroutine_threadsafe(
-                            self.set_editor_value(new_data), self._loop)
-                        fut.result()
-                    layout_func_changed = self._reload_app_file()
-                    if layout_func_changed:
-                        fut = asyncio.run_coroutine_threadsafe(
-                            self._app_run_layout_function(
-                                True, with_code_editor=False, reload=True),
-                            self._loop)
-                        fut.result()
+                try:
+                    # watchdog callback can't fail
+                    code_changed: List[str] = []
+                    if is_app_file_changed:
+                        if self._use_app_editor:
+                            fut = asyncio.run_coroutine_threadsafe(
+                                self.set_editor_value(new_data), self._loop)
+                            fut.result()
+                        code_changed = self._reload_app_file()
+                        layout_func_changed = App.app_create_layout.__qualname__ in code_changed
+                        if layout_func_changed:
+                            fut = asyncio.run_coroutine_threadsafe(
+                                self._app_run_layout_function(
+                                    True, with_code_editor=False, reload=True),
+                                self._loop)
+                            fut.result()
+                    already_reloaded = is_app_file_changed
+                    self.__reload_callback(resolved_path, already_reloaded)
+                except:
+                    traceback.print_exc()
+                    return
+
 
     def _reload_app_file(self):
         comps = self._uid_to_comp
-        callback_dict = {}
-        for k, v in comps.items():
-            cb = v.get_callback()
-            if cb is not None:
-                callback_dict[k] = cb
+        # callback_dict = {}
+        # for k, v in comps.items():
+        #     cb = v.get_callback()
+        #     if cb is not None:
+        #         callback_dict[k] = cb
         new_cb, code_changed = self._get_app_dynamic_cls().reload_obj_methods(
-            self, callback_dict)
+            self, {})
         self._get_app_service_unit().reload_metas()
-        for k, v in comps.items():
-            if k in new_cb:
-                v.set_callback(new_cb[k])
-        return App.app_create_layout.__name__ in code_changed
+        # for k, v in comps.items():
+        #     if k in new_cb:
+        #         v.set_callback(new_cb[k])
+        return code_changed
 
     async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
         """override this method to support vscode editor.
         """
         if self._use_app_editor:
+            app_path = self._get_app_dynamic_cls().file_path
             if event.type == AppEditorFrontendEventType.Save:
                 with self._watch_lock:
-                    self._watchdog_ignore_next = True
-                    with open(inspect.getfile(type(self)), "w") as f:
+                    # self._watchdog_ignore_next = True
+                    with open(app_path, "w") as f:
                         f.write(event.data)
-                    self._watchdog_prev_content = event.data
-                    layout_func_changed = self._reload_app_file()
-
+                    # self._watchdog_prev_content = event.data
+                    if self._flow_comp_mgr is not None:
+                        self._flow_comp_mgr.update_code_from_editor(app_path, event.data)
+                    code_changed = self._reload_app_file()
+                    layout_func_changed = App.app_create_layout.__qualname__ in code_changed
                     if layout_func_changed:
                         await self._app_run_layout_function(
                             True, with_code_editor=False, reload=True)
@@ -650,6 +775,7 @@ class EditableLayoutApp(EditableApp):
                  flex_flow: Union[str, Undefined] = "column nowrap",
                  justify_content: Union[str, Undefined] = undefined,
                  align_items: Union[str, Undefined] = undefined,
-                 maxqsize: int = 10) -> None:
+                 maxqsize: int = 10,
+                 observed_files: Optional[List[str]] = None) -> None:
         super().__init__(True, use_app_editor, flex_flow, justify_content,
-                         align_items, maxqsize)
+                         align_items, maxqsize, observed_files)

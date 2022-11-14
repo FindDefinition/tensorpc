@@ -21,7 +21,7 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Tuple, Type, TypeVar, Union)
 
 from tensorpc import compat
-
+import numpy.typing as npt
 if compat.Python3_8AndLater:
     from typing import Literal
 else:
@@ -227,31 +227,16 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
 
     def __init__(self, base_type: UIType, prop_cls: Type[T_o3d_prop]) -> None:
         super().__init__(base_type, prop_cls)
-        self._pointer_event_map: Dict[FrontendEventType,
-                                      Union[EventHandler, Undefined]] = {
-                                          FrontendEventType.Click: undefined,
-                                          FrontendEventType.DoubleClick:
-                                          undefined,
-                                          FrontendEventType.Enter: undefined,
-                                          FrontendEventType.Leave: undefined,
-                                          FrontendEventType.Over: undefined,
-                                          FrontendEventType.Out: undefined,
-                                          FrontendEventType.Up: undefined,
-                                          FrontendEventType.Down: undefined,
-                                          FrontendEventType.ContextMenu:
-                                          undefined,
-                                          FrontendEventType.Change: undefined,
-                                      }
 
     def to_dict(self):
         res = super().to_dict()
         evs = []
-        for k, v in self._pointer_event_map.items():
-            if k == FrontendEventType.Change:
+        for k, v in self._flow_event_handlers.items():
+            if k == FrontendEventType.Change.value:
                 continue
             if not isinstance(v, Undefined):
                 d = v.to_dict()
-                d["type"] = k.value
+                d["type"] = k
                 evs.append(d)
         res["props"]["usedEvents"] = evs
         return res
@@ -282,13 +267,13 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
         }
         for k, v in pointer_event_map.items():
             if v is not None:
-                self._pointer_event_map[k] = v
+                self._flow_event_handlers[k.value] = v
 
     async def handle_event(self, ev: EventType):
         # ev: [type, data]
         type, data = ev
-        ev_type = FrontendEventType(type)
-        handler = self._pointer_event_map[ev_type]
+        # ev_type = FrontendEventType(type)
+        handler = self._flow_event_handlers[type]
         if isinstance(handler, Undefined):
             return
         if self.props.status == UIRunStatus.Running.value:
@@ -373,31 +358,16 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(base_type, prop_cls, children, uid_to_comp, inited)
-        self._pointer_event_map: Dict[FrontendEventType,
-                                      Union[EventHandler, Undefined]] = {
-                                          FrontendEventType.Click: undefined,
-                                          FrontendEventType.DoubleClick:
-                                          undefined,
-                                          FrontendEventType.Enter: undefined,
-                                          FrontendEventType.Leave: undefined,
-                                          FrontendEventType.Over: undefined,
-                                          FrontendEventType.Out: undefined,
-                                          FrontendEventType.Up: undefined,
-                                          FrontendEventType.Down: undefined,
-                                          FrontendEventType.ContextMenu:
-                                          undefined,
-                                          FrontendEventType.Change: undefined,
-                                      }
 
     def to_dict(self):
         res = super().to_dict()
         evs = []
-        for k, v in self._pointer_event_map.items():
-            if k == FrontendEventType.Change:
+        for k, v in self._flow_event_handlers.items():
+            if k == FrontendEventType.Change.value:
                 continue
             if not isinstance(v, Undefined):
                 evs.append({
-                    "type": k.value,
+                    "type": k,
                     "stopPropagation": v.stop_propagation
                 })
         res["props"]["usedEvents"] = evs
@@ -429,13 +399,13 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
         }
         for k, v in pointer_event_map.items():
             if v is not None:
-                self._pointer_event_map[k] = v
+                self._flow_event_handlers[k.value] = v
 
     async def handle_event(self, ev: EventType):
         # ev: [type, data]
         type, data = ev
         ev_type = FrontendEventType(type)
-        handler = self._pointer_event_map[ev_type]
+        handler = self._flow_event_handlers[type]
         if isinstance(handler, Undefined):
             return
         if self.props.status == UIRunStatus.Running.value:
@@ -603,7 +573,7 @@ class Segments(ThreeComponentBase[SegmentsProps]):
         self.props.lines = lines.astype(np.float32)
         await self.send_and_wait(self.create_update_event(upd))
 
-    async def update_mesh_lines(self, mesh: np.ndarray):
+    async def update_mesh_lines(self, mesh: npt.NDArray[np.float32]):
         mesh = mesh.reshape(-1, 3, 3)
         lines = np.stack([mesh[:, [0, 1]], mesh[:, [1, 2]], mesh[:, [2, 0]]], axis=1).reshape(-1, 2, 3)
         await self.update_lines(lines)
@@ -2074,15 +2044,6 @@ class ShapeButton(Group):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    def get_callback(self):
-        res = self.mesh._pointer_event_map[FrontendEventType.Click]
-        assert not isinstance(res, Undefined)
-        return res.cb
-
-    def set_callback(self, val: Any):
-        self.mesh.set_pointer_callback(on_click=EventHandler(val, True))
-        # self.callback = val
-
     async def handle_event(self, ev: EventType):
         data = ev[1]
         if self.props.status == UIRunStatus.Running.value:
@@ -2090,9 +2051,10 @@ class ShapeButton(Group):
             print("IGNORE EVENT", self.props.status)
             return
         elif self.props.status == UIRunStatus.Stop.value:
-            cb2 = self.get_callback()
-            self._task = asyncio.create_task(
-                self.run_callback(lambda: cb2(data)))
+            handler = self.get_event_handler(ev[0])
+            if handler is not None:
+                self._task = asyncio.create_task(
+                    self.run_callback(lambda: handler.cb(data)))
 
     @property
     def prop(self):
@@ -2147,23 +2109,6 @@ class Button(Group):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    def get_callback(self):
-        res = self.mesh._pointer_event_map[FrontendEventType.Click]
-        assert not isinstance(res, Undefined)
-        return res.cb
-
-    def set_callback(self, val: Any):
-        self.mesh.set_pointer_callback(on_click=EventHandler(val, True))
-        # self.callback = val
-
-    # async def handle_event(self, ev: EventType):
-    #     if self.props.status == UIRunStatus.Running.value:
-    #         # TODO send exception if ignored click
-    #         print("IGNORE EVENT", self.props.status)
-    #         return
-    #     elif self.props.status == UIRunStatus.Stop.value:
-    #         cb2 = self.get_callback()
-    #         self._task = asyncio.create_task(self.run_callback(lambda: cb2(ev)))
     @property
     def prop(self):
         propcls = self.propcls
@@ -2223,14 +2168,6 @@ class ToggleButton(Group):
         uiev = UIEvent({self._flow_uid: [FrontendEventType.Change, self.name]})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
-
-    def get_callback(self):
-        res = self.mesh._pointer_event_map[FrontendEventType.Change]
-        assert not isinstance(res, Undefined)
-        return res.cb
-
-    def set_callback(self, val: Any):
-        self.mesh.set_pointer_callback(on_change=EventHandler(val, True))
 
     @property
     def prop(self):

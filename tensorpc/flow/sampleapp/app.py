@@ -328,7 +328,7 @@ class SampleEditorApp(EditableApp):
 
     def example_cb(self):
         print("dynamic loadable APP!!!")
-        print("example cb 5")
+        print("example cb 4")
         self.new_method()
 
     async def show_ts(self):
