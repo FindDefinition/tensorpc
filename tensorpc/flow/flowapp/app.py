@@ -89,8 +89,7 @@ def _enter_app_conetxt(app: "App"):
         yield ctx
     finally:
         APP_CONTEXT_VAR.reset(token)
-
-
+    
 _ROOT = "root"
 
 
@@ -346,6 +345,8 @@ class App:
         self.root._flow_uid = _ROOT
         try:
             res = self.app_create_layout()
+            if isinstance(res, list):
+                res = {str(i): v for i, v in enumerate(res)}
             self.__previous_error_sync_props.clear()
             self.__previous_error_persist_state.clear()
         except Exception as e:
@@ -408,10 +409,22 @@ class App:
         """
         pass
 
-    def app_create_layout(self) -> Dict[str, mui.MUIComponentType]:
+    def app_create_layout(self) -> mui.LayoutType:
         """override this in EditableApp to support reloadable layout
         """
         return {}
+
+    def app_create_node_layout(self) -> Optional[mui.LayoutType]:
+        """override this in EditableApp to support layout without fullscreen
+        if not provided, will use fullscreen layout
+        """
+        return None
+
+    def app_create_side_layout(self) -> Optional[mui.LayoutType]:
+        """override this in EditableApp to support side layout when selected
+        if not provided, will use fullscreen layout
+        """
+        return None
 
     def _get_app_dynamic_cls(self):
         assert self._app_dynamic_cls is not None
@@ -432,6 +445,12 @@ class App:
             res.update({
                 "codeEditor": self.code_editor.get_state(),
             })
+        # node_layout = self.app_create_node_layout()
+        # if node_layout is not None:
+        #     res["nodeLayout"] = mui.layout_unify(node_layout)
+        # side_layout = self.app_create_side_layout()
+        # if side_layout is not None:
+        #     res["sideLayout"] = mui.layout_unify(side_layout)
         return res
 
     def _get_fallback_layout(self,
@@ -688,7 +707,7 @@ class EditableApp(App):
                 # if new_code:
                 #     meta.code = new_code
                 if new_method is not None:
-                    print(new_method, "new_method")
+                    # print(new_method, "new_method")
                     handler.cb = new_method
 
 
