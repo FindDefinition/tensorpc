@@ -20,6 +20,7 @@ import inspect
 import io
 import json
 import time
+
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterable,
                     Awaitable, Callable, Coroutine, Dict, Iterable, List,
                     Optional, Tuple, Type, TypeVar, Union)
@@ -1237,7 +1238,7 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
 @dataclasses.dataclass
 class AutocompletePropsBase(MUIComponentBaseProps):
     label: str = ""
-    input_value: str = ""
+    # input_value: str = ""
     options: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
     size: Union[Undefined, Literal["small", "medium"]] = undefined
     mui_margin: Union[Undefined, Literal["dense", "none",
@@ -1248,23 +1249,23 @@ class AutocompletePropsBase(MUIComponentBaseProps):
                                       "standard"]] = undefined
 
     disable_clearable: Union[Undefined, bool] = undefined
-    disableCloseOnSelect: Union[Undefined, bool] = undefined
-    clearOnEscape: Union[Undefined, bool] = undefined
-    includeInputInList: Union[Undefined, bool] = undefined
-    disableListWrap: Union[Undefined, bool] = undefined
-    openOnFocus: Union[Undefined, bool] = undefined
-    autoHighlight: Union[Undefined, bool] = undefined
-    autoSelect: Union[Undefined, bool] = undefined
+    disable_close_on_select: Union[Undefined, bool] = undefined
+    clear_on_escape: Union[Undefined, bool] = undefined
+    include_input_in_list: Union[Undefined, bool] = undefined
+    disable_list_wrap: Union[Undefined, bool] = undefined
+    open_on_focus: Union[Undefined, bool] = undefined
+    auto_highlight: Union[Undefined, bool] = undefined
+    auto_select: Union[Undefined, bool] = undefined
     disabled: Union[Undefined, bool] = undefined
-    disablePortal: Union[Undefined, bool] = undefined
-    blurOnSelect: Union[Undefined, bool] = undefined
-    clearOnBlur: Union[Undefined, bool] = undefined
-    selectOnFocus: Union[Undefined, bool] = undefined
-    readOnly: Union[Undefined, bool] = undefined
-    freeSolo: Union[Undefined, bool] = undefined
+    disable_portal: Union[Undefined, bool] = undefined
+    blur_on_select: Union[Undefined, bool] = undefined
+    clear_on_blur: Union[Undefined, bool] = undefined
+    select_on_focus: Union[Undefined, bool] = undefined
+    read_only: Union[Undefined, bool] = undefined
+    free_solo: Union[Undefined, bool] = undefined
 
-    groupByKey: Union[Undefined, str] = undefined
-    limitTags: Union[Undefined, int] = undefined
+    group_by_key: Union[Undefined, str] = undefined
+    limit_tags: Union[Undefined, int] = undefined
 
 @dataclasses.dataclass
 class AutocompleteProps(AutocompletePropsBase):
@@ -1279,7 +1280,7 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
             callback: Optional[Callable[[Dict[str, Any]],
                                         _CORO_NONE]] = None) -> None:
         super().__init__(UIType.AutoComplete, AutocompleteProps,
-                         [FrontendEventType.Change.value, FrontendEventType.InputChange.value])
+                         [FrontendEventType.Change.value])
         self.props.label = label
         self.callback = callback
         # assert len(items) > 0
@@ -1314,20 +1315,22 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
         self.props.options = options
         self.props.value = options[selected]
 
-    async def update_value(self, value: Dict[str, Any]):
+    async def update_value(self, value: Optional[Dict[str, Any]]):
         await self.put_app_event(self.create_update_event({"value": value}))
         self.props.value = value
 
-    def update_value_no_sync(self, value: Dict[str, Any]):
+    def update_value_no_sync(self, value: Optional[Dict[str, Any]]):
         self.props.value = value
 
-    def state_change_callback(self, value: Union[str, Dict[str, Any]], type: ValueType = FrontendEventType.Change.value):
+    def state_change_callback(self, value: Union[str, Optional[Dict[str, Any]]], type: ValueType = FrontendEventType.Change.value):
         if type == FrontendEventType.Change.value:
-            assert isinstance(value, dict)
+            if value is not None:
+                assert isinstance(value, dict)
             self.props.value = value
-        else:
-            assert isinstance(value, str)
-            self.props.input_value = value
+        # else:
+        #     assert isinstance(value, str)
+        #     print("self.props.input_value", value, type)
+        #     self.props.input_value = value
 
     async def headless_select(self, value: ValueType):
         uiev = UIEvent({self._flow_uid: value})
@@ -1361,7 +1364,7 @@ class MultipleAutocomplete(MUIComponentBase[MultipleAutocompleteProps]):
             callback: Optional[Callable[[Dict[str, Any]],
                                         _CORO_NONE]] = None) -> None:
         super().__init__(UIType.MultipleAutoComplete, MultipleAutocompleteProps,
-                         [FrontendEventType.Change.value, FrontendEventType.InputChange.value])
+                         [FrontendEventType.Change.value])
         for op in options:
             assert "label" in op, "must contains label in options"
         self.props.label = label
@@ -1411,9 +1414,9 @@ class MultipleAutocomplete(MUIComponentBase[MultipleAutocompleteProps]):
         if type == FrontendEventType.Change.value:
             assert isinstance(value, list)
             self.props.value = value
-        else:
-            assert isinstance(value, str)
-            self.props.input_value = value
+        # else:
+        #     assert isinstance(value, str)
+        #     self.props.input_value = value
 
     async def headless_select(self, value: ValueType):
         uiev = UIEvent({self._flow_uid: value})
