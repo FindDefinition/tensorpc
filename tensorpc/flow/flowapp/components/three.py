@@ -281,7 +281,7 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
             print("IGNORE EVENT", self.props.status)
             return
         elif self.props.status == UIRunStatus.Stop.value:
-            self.state_change_callback(data)
+            self.state_change_callback(data, type)
 
             def ccb(cb):
                 return lambda: cb(data)
@@ -1965,7 +1965,7 @@ class Mesh(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
         res["toggled"] = self.props.toggled
         return res
 
-    def state_change_callback(self, data: bool):
+    def state_change_callback(self, data: bool, type: ValueType = FrontendEventType.Change.value):
         self.props.toggled = data
 
     async def set_checked(self, checked: bool):

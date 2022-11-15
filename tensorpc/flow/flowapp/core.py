@@ -93,6 +93,8 @@ class UIType(enum.Enum):
     LinearProgress = 0x21
     ToggleButton = 0x22
     ToggleButtonGroup = 0x23
+    AutoComplete = 0x24
+    MultipleAutoComplete = 0x25
 
 
     # special
@@ -202,6 +204,7 @@ class FrontendEventType(enum.Enum):
     Move = 9
     Change = 20
     Delete = 21
+    InputChange = 22
     
     # leaflet events
     MapZoom = 60 
@@ -900,7 +903,7 @@ class Component(Generic[T_base_props, T_child]):
             res = None 
         return res 
 
-    def state_change_callback(self, data: Any):
+    def state_change_callback(self, data: Any, type: ValueType = FrontendEventType.Change.value):
         pass
 
     def create_update_event(self, data: Dict[str, Union[Any, Undefined]]):

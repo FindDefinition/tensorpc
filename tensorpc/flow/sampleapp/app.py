@@ -846,3 +846,26 @@ class SampleDataControlApp(EditableApp):
     async def read_data(self):
         print(await self.read_data_storage("Data.arr0"))
 
+class SampleUIEvalApp(EditableApp):
+
+    def __init__(self) -> None:
+        super().__init__(reloadable_layout=True)
+        # makesure three canvas size fit parent.
+        # self.root.props.min_height = 0
+        # store components here if you want to keep
+        # data after reload layout.
+        self.root.props.flex_flow = "row nowrap"
+        self.set_init_window_size([640, 480])
+
+    def app_create_layout(self) -> mui.LayoutType:
+        return {
+            "btn1": mui.Button("Add Data To Storage", self.add_data),
+            "btn2": mui.Button("Read Data From Storage", self.read_data),
+        }
+
+    async def add_data(self):
+        await self.save_data_storage("default_flow.Data.arr0", np.zeros((500, 3)))
+
+    async def read_data(self):
+        print(await self.read_data_storage("Data.arr0"))
+

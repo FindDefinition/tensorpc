@@ -37,7 +37,8 @@ from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, ContainerBaseProps, EventHandler, EventType,
                     Fragment, FrontendEventType, NumberType, T_base_props,
                     T_child, T_container_props, TaskLoopEvent, UIEvent,
-                    UIRunStatus, UIType, Undefined, ValueType, undefined)
+                    UIRunStatus, UIType, Undefined, ValueType, undefined,
+                    create_ignore_usr_msg)
 
 if TYPE_CHECKING:
     from .three import ThreeCanvas
@@ -548,7 +549,7 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    def state_change_callback(self, value: Union[ValueType, List[ValueType]]):
+    def state_change_callback(self, value: Union[ValueType, List[ValueType]], type: ValueType = FrontendEventType.Change.value):
         self.props.value = value
 
 
@@ -642,7 +643,7 @@ class Accordion(MUIContainerBase[AccordionProps, Union[AccordionDetails,
         propcls = self.propcls
         return self._prop_base(propcls, self)
 
-    def state_change_callback(self, data: bool):
+    def state_change_callback(self, data: bool, type: ValueType = FrontendEventType.Change.value):
         self.props.expanded = data
 
     async def handle_event(self, ev: EventType):
@@ -794,7 +795,7 @@ class RadioGroup(MUIComponentBase[RadioGroupProps]):
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
 
-    def state_change_callback(self, data: str):
+    def state_change_callback(self, data: str, type: ValueType = FrontendEventType.Change.value):
         self.props.value = data
 
     def validate_props(self, props: Dict[str, Any]):
@@ -888,7 +889,7 @@ class Input(MUIComponentBase[InputProps]):
     def value(self):
         return self.props.value
 
-    def state_change_callback(self, data: str):
+    def state_change_callback(self, data: str, type: ValueType = FrontendEventType.Change.value):
         self.props.value = data
 
     async def headless_write(self, content: str):
@@ -996,7 +997,7 @@ class SwitchBase(MUIComponentBase[SwitchProps]):
     def checked(self):
         return self.props.checked
 
-    def state_change_callback(self, data: bool):
+    def state_change_callback(self, data: bool, type: ValueType = FrontendEventType.Change.value):
         self.props.checked = data
 
     async def headless_write(self, checked: bool):
@@ -1113,7 +1114,7 @@ class Select(MUIComponentBase[SelectProps]):
         assert value in [x[1] for x in self.props.items]
         self.props.value = value
 
-    def state_change_callback(self, value: ValueType):
+    def state_change_callback(self, value: ValueType, type: ValueType = FrontendEventType.Change.value):
         self.props.value = value
 
     async def headless_select(self, value: ValueType):
@@ -1203,7 +1204,7 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
             assert v in [x[1] for x in self.props.items]
         self.props.values = values
 
-    def state_change_callback(self, values: List[ValueType]):
+    def state_change_callback(self, values: List[ValueType], type: ValueType = FrontendEventType.Change.value):
         self.props.values = values
 
     async def headless_select(self, values: List[ValueType]):
@@ -1213,6 +1214,207 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
 
     async def handle_event(self, ev: EventType):
         await handle_standard_event(self, ev)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+
+@dataclasses.dataclass
+class AutocompletePropsBase(MUIComponentBaseProps):
+    label: str = ""
+    input_value: str = ""
+    options: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
+    size: Union[Undefined, Literal["small", "medium"]] = undefined
+    mui_margin: Union[Undefined, Literal["dense", "none",
+                                         "normal"]] = undefined
+    input_variant: Union[Undefined, Literal["filled", "outlined",
+                                      "standard"]] = undefined
+    variant: Union[Undefined, Literal["checkbox",
+                                      "standard"]] = undefined
+
+    disable_clearable: Union[Undefined, bool] = undefined
+    disableCloseOnSelect: Union[Undefined, bool] = undefined
+    clearOnEscape: Union[Undefined, bool] = undefined
+    includeInputInList: Union[Undefined, bool] = undefined
+    disableListWrap: Union[Undefined, bool] = undefined
+    openOnFocus: Union[Undefined, bool] = undefined
+    autoHighlight: Union[Undefined, bool] = undefined
+    autoSelect: Union[Undefined, bool] = undefined
+    disabled: Union[Undefined, bool] = undefined
+    disablePortal: Union[Undefined, bool] = undefined
+    blurOnSelect: Union[Undefined, bool] = undefined
+    clearOnBlur: Union[Undefined, bool] = undefined
+    selectOnFocus: Union[Undefined, bool] = undefined
+    readOnly: Union[Undefined, bool] = undefined
+    freeSolo: Union[Undefined, bool] = undefined
+
+    groupByKey: Union[Undefined, str] = undefined
+    limitTags: Union[Undefined, int] = undefined
+
+@dataclasses.dataclass
+class AutocompleteProps(AutocompletePropsBase):
+    value: Optional[Dict[str, Any]] = None
+
+class Autocomplete(MUIComponentBase[AutocompleteProps]):
+
+    def __init__(
+            self,
+            label: str,
+            options: List[Dict[str, Any]],
+            callback: Optional[Callable[[Dict[str, Any]],
+                                        _CORO_NONE]] = None) -> None:
+        super().__init__(UIType.AutoComplete, AutocompleteProps,
+                         [FrontendEventType.Change.value, FrontendEventType.InputChange.value])
+        self.props.label = label
+        self.callback = callback
+        # assert len(items) > 0
+        self.props.options = options
+        # item value must implement eq/ne
+        self.props.value = None
+        self.props.size = "small"
+        if callback is not None:
+            self.register_event_handler(FrontendEventType.Change.value,
+                                        callback)
+
+    @property
+    def value(self):
+        return self.props.value
+
+    def validate_props(self, props: Dict[str, Any]):
+        return False
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
+        res["options"] = self.props.options
+        return res
+
+    async def update_options(self, options: List[Dict[str, Any]],
+                           selected: int):
+        await self.put_app_event(
+            self.create_update_event({
+                "options": options,
+                "value": options[selected]
+            }))
+        self.props.options = options
+        self.props.value = options[selected]
+
+    async def update_value(self, value: Dict[str, Any]):
+        await self.put_app_event(self.create_update_event({"value": value}))
+        self.props.value = value
+
+    def update_value_no_sync(self, value: Dict[str, Any]):
+        self.props.value = value
+
+    def state_change_callback(self, value: Union[str, Dict[str, Any]], type: ValueType = FrontendEventType.Change.value):
+        if type == FrontendEventType.Change.value:
+            assert isinstance(value, dict)
+            self.props.value = value
+        else:
+            assert isinstance(value, str)
+            self.props.input_value = value
+
+    async def headless_select(self, value: ValueType):
+        uiev = UIEvent({self._flow_uid: value})
+        return await self.put_app_event(
+            AppEvent("", {AppEventType.UIEvent: uiev}))
+
+
+    async def handle_event(self, data: EventType):
+        await handle_standard_event(self, data)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class MultipleAutocompleteProps(AutocompletePropsBase):
+    value: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
+
+class MultipleAutocomplete(MUIComponentBase[MultipleAutocompleteProps]):
+
+    def __init__(
+            self,
+            label: str,
+            options: List[Dict[str, Any]],
+            callback: Optional[Callable[[Dict[str, Any]],
+                                        _CORO_NONE]] = None) -> None:
+        super().__init__(UIType.MultipleAutoComplete, MultipleAutocompleteProps,
+                         [FrontendEventType.Change.value, FrontendEventType.InputChange.value])
+        for op in options:
+            assert "label" in op, "must contains label in options"
+        self.props.label = label
+        self.callback = callback
+        # assert len(items) > 0
+        self.props.options = options
+        # item value must implement eq/ne
+        self.props.value = []
+        self.props.size = "small"
+        if callback is not None:
+            self.register_event_handler(FrontendEventType.Change.value,
+                                        callback)
+
+    @property
+    def value(self):
+        return self.props.value
+
+    def validate_props(self, props: Dict[str, Any]):
+        return False
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
+        res["options"] = self.props.options
+        return res
+
+    async def update_options(self, options: List[Dict[str, Any]],
+                           selected: Optional[List[int]] = None):
+        if selected is None:
+            selected = []
+        await self.put_app_event(
+            self.create_update_event({
+                "options": options,
+                "value": [options[s] for s in selected]
+            }))
+        self.props.options = options
+        self.props.value = [options[s] for s in selected]
+
+    async def update_value(self, value: List[Dict[str, Any]]):
+        await self.put_app_event(self.create_update_event({"value": value}))
+        self.props.value = value
+
+    def update_value_no_sync(self, value: List[Dict[str, Any]]):
+        self.props.value = value
+
+    def state_change_callback(self, value: Union[str, List[Dict[str, Any]]], type: ValueType = FrontendEventType.Change.value):
+        if type == FrontendEventType.Change.value:
+            assert isinstance(value, list)
+            self.props.value = value
+        else:
+            assert isinstance(value, str)
+            self.props.input_value = value
+
+    async def headless_select(self, value: ValueType):
+        uiev = UIEvent({self._flow_uid: value})
+        return await self.put_app_event(
+            AppEvent("", {AppEventType.UIEvent: uiev}))
+
+
+    async def handle_event(self, data: EventType):
+        await handle_standard_event(self, data)
 
     @property
     def prop(self):
@@ -1285,7 +1487,7 @@ class Slider(MUIComponentBase[SliderProps]):
         await self.put_app_event(self.create_update_event({"value": value}))
         self.props.value = value
 
-    def state_change_callback(self, value: NumberType):
+    def state_change_callback(self, value: NumberType, type: ValueType = FrontendEventType.Change.value):
         self.props.value = value
 
     async def headless_change(self, value: NumberType):
