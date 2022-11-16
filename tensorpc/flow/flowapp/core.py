@@ -68,7 +68,7 @@ class UIType(enum.Enum):
     ListItemButton = 0x8
     ListItemText = 0x9
     Image = 0xa
-    Text = 0xb
+    Dialog = 0xb
     Plotly = 0xc
     ChartJSLine = 0xd
     MultipleSelect = 0xe
@@ -95,7 +95,7 @@ class UIType(enum.Enum):
     ToggleButtonGroup = 0x23
     AutoComplete = 0x24
     MultipleAutoComplete = 0x25
-
+    IconButton = 0x26
 
     # special
     TaskLoop = 0x100
@@ -205,6 +205,7 @@ class FrontendEventType(enum.Enum):
     Change = 20
     Delete = 21
     InputChange = 22
+    DialogClose = 23
     
     # leaflet events
     MapZoom = 60 
@@ -1172,7 +1173,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         self.props.childs.append(name)
         return comp, comps_added
 
-    def add_layout(self, layout: Dict[str, Component]):
+    def add_layout(self, layout: Union[Dict[str, Component], List[Component]]):
         """ {
             btn0: Button(...),
             box0: VBox({
@@ -1181,6 +1182,8 @@ class ContainerBase(Component[T_container_props, T_child]):
             }, flex...),
         }
         """
+        if isinstance(layout, list):
+            layout = {str(i): v for i, v in enumerate(layout)}
         if self._prevent_add_layout:
             raise ValueError("you must init layout in app_create_layout")
         comps_added: List[Component] = []

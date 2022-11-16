@@ -22,7 +22,12 @@ def get_qualname_of_type(klass: Type) -> str:
     return module + '.' + klass.__qualname__
 
 def is_lambda(obj: Callable):
+    if not inspect.isfunction(obj) and not inspect.ismethod(obj):
+        return False
     return obj.__qualname__ == "<lambda>"
+
+def is_valid_function(obj: Callable):
+    return inspect.isfunction(obj) or inspect.ismethod(obj)
 
 def get_function_qualname(obj: Callable):
     return obj.__qualname__

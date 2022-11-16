@@ -57,7 +57,7 @@ from .core import (AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
                    UIRunStatus, UIType, UIUpdateEvent, Undefined, UserMessage, ValueType,
                    undefined, EventHandler)
 from tensorpc.utils.moduleid import get_qualname_of_type
-from tensorpc.utils.moduleid import is_lambda, get_function_qualname
+from tensorpc.utils.moduleid import is_lambda, is_valid_function
 ALL_APP_EVENTS = HashableRegistry()
 
 
@@ -574,7 +574,7 @@ def _create_reload_metas(uid_to_comp: Dict[str, Component], path: str):
         for handler_type, handler in v._flow_event_handlers.items():
             if not isinstance(handler, Undefined):
                 cb = handler.cb 
-                if is_lambda(cb):
+                if not is_valid_function(cb) or is_lambda(cb):
                     continue 
                 cb_file = str(Path(inspect.getfile(cb)).resolve())
                 if cb_file != path_resolve:

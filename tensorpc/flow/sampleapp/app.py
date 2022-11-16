@@ -34,7 +34,7 @@ from tensorpc.flow.flowapp import App, EditableApp
 from tensorpc.flow.flowapp.app import EditableLayoutApp
 from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
                                                   ListItemText,
-                                                  MUIComponentType, Text, VBox,
+                                                  MUIComponentType, VBox,
                                                   VList)
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from ..flowapp.core import Component
@@ -208,7 +208,7 @@ class SampleDictApp(App):
             "l0":
             HBox({
                 "items": self.vlist,
-                "text": Text("content").prop(flex=3),
+                "text": mui.Typography("content").prop(flex=3),
             }).prop(height="100%"),
         })
         self.set_init_window_size([480, 640])
@@ -301,7 +301,7 @@ class SampleFlowApp(App):
 
     def __init__(self) -> None:
         super().__init__()
-        self.text = Text("")
+        self.text = mui.Typography("")
         self.root.add_layout({
             "text": self.text,
         })
@@ -316,7 +316,7 @@ class SampleEditorApp(EditableApp):
 
     def __init__(self) -> None:
         super().__init__()
-        self.text = Text("WTF")
+        self.text = mui.Typography("WTF")
         self.root.add_layout({
             "text": self.text,
             "btn": Button("runCB", self.example_cb),
@@ -342,7 +342,7 @@ class SampleEditorAppV2(EditableApp):
 
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
-        self.text = Text("WTF")
+        self.text = mui.Typography("WTF")
         # self.root.add_layout({
         #     "text": self.text,
         #     "btn": Button("runCB", self.example_cb),
@@ -519,7 +519,7 @@ class SampleTestApp(App):
         self.root.add_layout({
             "plot0":
             VBox({
-                "asd": Text("Hello"),
+                "asd": mui.Typography("Hello"),
             }).prop(flex=1),
             "btn":
             Button("Show", lambda: print("?"))
@@ -660,7 +660,7 @@ class SampleThreeHudApp(EditableApp):
                 mui.VBox({
                     "inp": self.img_path,
                     "btn1": mui.Button("Read Image", self.on_read_img),
-                    "btn3": mui.Text("Inp", )
+                    "btn3": mui.Typography("Inp", )
                 }).prop(position="absolute",
                         top=0,
                         right=0,
@@ -725,7 +725,7 @@ class SampleThree2DApp(EditableApp):
                 "hud":
                 mui.VBox({
                     # "update": mui.Button("Box2d", self.on_box2d_update),
-                    "btn3": mui.Text("Inp", )
+                    "btn3": mui.Typography("Inp", )
                 }).prop(position="absolute",
                         top=0,
                         right=0,

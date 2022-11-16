@@ -16,6 +16,8 @@ from typing import Any, Tuple, Union
 import asyncio
 from tensorpc.flow.flowapp.core import Component, EventType, create_ignore_usr_msg, Undefined, UIRunStatus, FrontendEventType
 
+_ONEARG_EVENTS = set([FrontendEventType.Change.value, FrontendEventType.InputChange.value,
+    FrontendEventType.DialogClose.value])
 
 async def handle_raw_event(ev: Any, comp: Component, just_run: bool = False):
     # ev: [type, data]
@@ -46,8 +48,8 @@ async def handle_standard_event(comp: Component, data: EventType, sync_first: bo
         await comp.send_and_wait(msg)
         return
     elif comp.props.status == UIRunStatus.Stop.value:
-        if data[0] == FrontendEventType.Change.value:
-            handler = comp.get_event_handler(FrontendEventType.Change.value)
+        if data[0] in _ONEARG_EVENTS:
+            handler = comp.get_event_handler(data[0])
             comp.state_change_callback(data[1], data[0])
             if handler is not None:
                 def ccb(cb):
@@ -55,16 +57,6 @@ async def handle_standard_event(comp: Component, data: EventType, sync_first: bo
                 comp._task = asyncio.create_task(comp.run_callback(ccb(handler.cb), True, sync_first=sync_first))
             else:
                 await comp.sync_status(True)
-        elif data[0] == FrontendEventType.InputChange.value:
-            handler = comp.get_event_handler(FrontendEventType.InputChange.value)
-            comp.state_change_callback(data[1], data[0])
-            if handler is not None:
-                def ccb(cb):
-                    return lambda: cb(data[1])
-                comp._task = asyncio.create_task(comp.run_callback(ccb(handler.cb), True, sync_first=sync_first))
-            else:
-                await comp.sync_status(True)
-
         elif data[0] == FrontendEventType.Click.value:
             handler = comp.get_event_handler(FrontendEventType.Click.value)
             if handler is not None:
