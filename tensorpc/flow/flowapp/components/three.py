@@ -39,7 +39,7 @@ from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     Fragment, FrontendEventType, NumberType, T_base_props,
                     T_child, T_container_props, TaskLoopEvent, UIEvent,
                     UIRunStatus, UIType, Undefined, ValueType, undefined)
-from .mui import (FlexBoxProps, MUIComponentType, MUIContainerBase,
+from .mui import (FlexBoxProps, MUIFlexBoxProps, MUIComponentType, MUIContainerBase,
                   PointerEventsProperties, _encode_image_bytes)
 
 Vector3Type: TypeAlias = Tuple[float, float, float]
@@ -1181,8 +1181,10 @@ class FlexManualReflow(ThreeComponentBase[FlexManualReflowProps]):
         await self.send_and_wait(
             self.update_event(timestamp=str(time.time())))
 
+class ThreeCanvasProps(MUIFlexBoxProps):
+    three_background_color: Union[str, Undefined] = undefined 
 
-class ThreeCanvas(MUIContainerBase[ContainerBaseProps, ThreeComponentType]):
+class ThreeCanvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
 
     def __init__(self,
                  children: Union[List[ThreeComponentType],
@@ -1192,15 +1194,9 @@ class ThreeCanvas(MUIContainerBase[ContainerBaseProps, ThreeComponentType]):
                  inited: bool = False) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ThreeCanvas, ContainerBaseProps, uid_to_comp,
+        super().__init__(UIType.ThreeCanvas, ThreeCanvasProps, uid_to_comp,
                          children, inited)
-        self.background = background
-
-    def to_dict(self):
-        res = super().to_dict()
-        if not isinstance(self.background, Undefined):
-            res["backgroundColor"] = self.background
-        return res
+        self.props.three_background_color = background
 
     @property
     def prop(self):

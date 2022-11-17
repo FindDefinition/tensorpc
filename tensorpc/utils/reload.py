@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from functools import partial
 import importlib
 import traceback
 from typing import Callable
@@ -20,10 +21,14 @@ import inspect
 import importlib.machinery
 
 def reload_method(method: Callable, module_dict: dict, prev_code: str = ""):
+    if isinstance(method, partial):
+        method_wrapped = method.func
+    else:
+        method_wrapped = method
     if not inspect.ismethod(method):
         return None, ""
-    bound = method.__self__
-    method_qualname = method.__qualname__
+    bound = method_wrapped.__self__
+    method_qualname = method_wrapped.__qualname__
     qual_parts = method_qualname.split(".")
     # module = inspect.getmodule(method)
     # if module is None:
@@ -48,5 +53,7 @@ def reload_method(method: Callable, module_dict: dict, prev_code: str = ""):
             return None, new_method_code
     # now new_method_unbound should be a unbound method
     new_method = types.MethodType(new_method_unbound, bound)
-    setattr(bound, method.__name__, new_method)
+    setattr(bound, method_wrapped.__name__, new_method)
+    if isinstance(method, partial):
+        new_method = partial(new_method, *method.args, **method.keywords)
     return new_method, new_method_code

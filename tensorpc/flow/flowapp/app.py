@@ -20,6 +20,7 @@ import contextlib
 import contextvars
 import dataclasses
 import enum
+from functools import partial
 import inspect
 import io
 import json
@@ -574,12 +575,17 @@ def _create_reload_metas(uid_to_comp: Dict[str, Component], path: str):
         for handler_type, handler in v._flow_event_handlers.items():
             if not isinstance(handler, Undefined):
                 cb = handler.cb 
-                if not is_valid_function(cb) or is_lambda(cb):
+                is_valid_func = is_valid_function(cb)
+                cb_real = cb 
+                if isinstance(cb, partial):
+                    is_valid_func = is_valid_function(cb.func)
+                    cb_real = cb.func
+                if not is_valid_func or is_lambda(cb):
                     continue 
-                cb_file = str(Path(inspect.getfile(cb)).resolve())
+                cb_file = str(Path(inspect.getfile(cb_real)).resolve())
                 if cb_file != path_resolve:
                     continue
-                # code, _ = inspect.getsourcelines(cb)
+                # code, _ = inspect.getsourcelines(cb_real)
                 metas.append(_CompReloadMeta(k, handler))
     return metas 
 
@@ -738,7 +744,7 @@ class EditableApp(App):
                                 self.set_editor_value(new_data), self._loop)
                             fut.result()
                         code_changed = self._reload_app_file()
-                        layout_func_changed = App.app_create_layout.__qualname__ in code_changed
+                        layout_func_changed = type(self).app_create_layout.__qualname__ in code_changed
                         if layout_func_changed:
                             fut = asyncio.run_coroutine_threadsafe(
                                 self._app_run_layout_function(
@@ -781,7 +787,7 @@ class EditableApp(App):
                     if self._flow_comp_mgr is not None:
                         self._flow_comp_mgr.update_code_from_editor(app_path, event.data)
                     code_changed = self._reload_app_file()
-                    layout_func_changed = App.app_create_layout.__qualname__ in code_changed
+                    layout_func_changed = type(self).app_create_layout.__qualname__ in code_changed
                     if layout_func_changed:
                         await self._app_run_layout_function(
                             True, with_code_editor=False, reload=True)

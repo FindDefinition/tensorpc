@@ -425,7 +425,7 @@ class IconButtonProps(MUIComponentBaseProps):
     disabled: Union[bool, Undefined] = undefined
     size: Union[Literal["small", "medium", "large"], Undefined] = undefined
     icon: int = 0
-    icon_size: Union[Literal["small", "medium", "large"],
+    icon_size: Union[Literal["small", "medium", "large", "inherit"],
                      Undefined] = undefined
     icon_font_size: Union[NumberType, Undefined] = undefined
 
@@ -491,7 +491,13 @@ class Dialog(MUIContainerBase[DialogProps, MUIComponentType]):
         await self.send_and_wait(self.update_event(open=open))
 
     async def handle_event(self, ev: EventType):
+        print(ev)
         await handle_standard_event(self, ev, sync_first=True)
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["open"] = self.props.open
+        return res
 
     @property
     def prop(self):
@@ -510,6 +516,7 @@ class Dialog(MUIContainerBase[DialogProps, MUIComponentType]):
         # this only triggered when dialog closed, so we always set
         # open to false.
         self.props.open = False 
+        print("????")
 
 @dataclasses.dataclass
 class ButtonGroupProps(MUIFlexBoxProps):
@@ -587,7 +594,7 @@ class ToggleButton(MUIComponentBase[ToggleButtonProps]):
 
 @dataclasses.dataclass
 class ToggleButtonGroupProps(MUIFlexBoxProps):
-    value: Union[ValueType, List[ValueType]] = ""
+    value: Optional[Union[ValueType, List[ValueType]]] = None
     orientation: Union[Literal["horizontal", "vertical"],
                        Undefined] = undefined
     mui_color: Union[_BtnGroupColor, Undefined] = undefined
@@ -595,16 +602,22 @@ class ToggleButtonGroupProps(MUIFlexBoxProps):
     full_width: Union[bool, Undefined] = undefined
     exclusive: Union[bool, Undefined] = undefined
     size: Union[Literal["small", "medium", "large"], Undefined] = undefined
+    name_or_icons: List[ValueType] = dataclasses.field(default_factory=list)
+    values: List[ValueType] = dataclasses.field(default_factory=list)
+    icon_size: Union[Literal["small", "medium", "large"],
+                     Undefined] = undefined
+    icon_font_size: Union[NumberType, Undefined] = undefined
 
 
 class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
                                          ToggleButton]):
     def __init__(self,
                  children: Union[List[ToggleButton], Dict[str, ToggleButton]],
-                 value: Union[ValueType, List[ValueType]],
+                 
                  exclusive: bool,
                  callback: Optional[Callable[
-                     [Union[ValueType, List[ValueType]]], _CORO_NONE]] = None,
+                     [Optional[Union[ValueType, List[ValueType]]]], _CORO_NONE]] = None,
+                 value: Optional[Union[ValueType, List[ValueType]]] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         if isinstance(children, list):
@@ -614,6 +627,11 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
                          [FrontendEventType.Change.value])
         for v in children.values():
             assert isinstance(v, ToggleButton), "all childs must be button"
+            if not isinstance(v.props.icon, Undefined):
+                self.props.name_or_icons.append(v.props.icon)
+            else:
+                self.props.name_or_icons.append(v.props.name)
+            self.props.values.append(v.props.value)
         self.props.value = value
         self.props.exclusive = exclusive
         self.callback = callback
@@ -624,7 +642,6 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
             assert not isinstance(
                 value, list), "if exclusive, value must not be a list"
 
-        self._flow_event_handlers
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
@@ -638,6 +655,14 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
+        return res
+
+    async def set_value(self, value: Optional[Union[ValueType, List[ValueType]]]):
+        await self.send_and_wait(self.update_event(value=value))
 
     def state_change_callback(
             self,
@@ -1634,7 +1659,8 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
     def __init__(self,
                  label: str,
                  loop_callbcak: Callable[[], _CORO_NONE],
-                 update_period: float = 0.2) -> None:
+                 update_period: float = 0.2,
+                 raw_update: bool = False) -> None:
         super().__init__(UIType.TaskLoop, TaskLoopProps)
         self.props.label = label
         self.loop_callbcak = loop_callbcak
@@ -1644,10 +1670,13 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
         self.pause_event = asyncio.Event()
         self.pause_event.set()
         self.update_period = update_period
+        self._raw_update = raw_update
 
     async def task_loop(self,
                         it: Union[Iterable[_T], AsyncIterable[_T]],
                         total: int = -1) -> AsyncGenerator[_T, None]:
+        if self._raw_update:
+            raise ValueError("when raw update enabled, you can't use this function")
         if isinstance(it, list):
             total = len(it)
         try:
@@ -1713,6 +1742,8 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
     async def handle_event(self, ev: EventType):
+        if self._raw_update:
+            return await handle_standard_event(self, ev)
         data = ev[1]
         if data == TaskLoopEvent.Start.value:
             if self.props.status == UIRunStatus.Stop.value:
