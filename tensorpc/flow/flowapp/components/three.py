@@ -41,13 +41,17 @@ from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     UIRunStatus, UIType, Undefined, ValueType, undefined)
 from .mui import (FlexBoxProps, MUIFlexBoxProps, MUIComponentType, MUIContainerBase,
                   PointerEventsProperties, _encode_image_bytes)
-
+from .common import handle_standard_event
 Vector3Type: TypeAlias = Tuple[float, float, float]
 
 _CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
 _CORO_ANY: TypeAlias = Union[Coroutine[Any, None, None], Any]
 
 CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
+
+ThreeLayoutType: TypeAlias = Union[List["ThreeComponentType"],
+                                 Dict[str, "ThreeComponentType"]]
+
 P = ParamSpec('P')
 
 
@@ -425,26 +429,27 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
 
 @dataclasses.dataclass
 class PointProps(ThreeBasicProps):
+    limit: int = 0
     points: Union[np.ndarray, Undefined] = undefined
-    intensity: Union[np.ndarray, Undefined] = undefined
-    colors: Union[np.ndarray, Undefined] = undefined
+    colors: Union[np.ndarray, str, Undefined] = undefined
     attrs: Union[np.ndarray, Undefined] = undefined
     attr_fields: Union[List[str], Undefined] = undefined
     size_attenuation: bool = False
     size: float = 3.0
 
+class PointsControlType(enum.Enum):
+    SetColors = 0
 
 class Points(ThreeComponentBase[PointProps]):
 
     def __init__(self, limit: int) -> None:
         super().__init__(UIType.ThreePoints, PointProps)
         self.props.points = np.zeros((0, 3), np.float32)
-        self.limit = limit
+        self.props.limit = limit
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
         res["points"] = self.props.points
-        res["intensity"] = self.props.intensity
         res["colors"] = self.props.colors
         res["attrs"] = self.props.attrs
         res["attr_fields"] = self.props.attr_fields
@@ -452,19 +457,47 @@ class Points(ThreeComponentBase[PointProps]):
 
     def validate_props(self, props: Dict[str, Any]):
         if "points" in props:
-            return props["points"].shape[0] <= self.limit
+            return props["points"].shape[0] <= self.props.limit
         return False
 
-    def to_dict(self):
-        res = super().to_dict()
-        res["limit"] = self.limit
-        return res
+    def _check_colors(self, colors, points: Optional[np.ndarray] = None):
+        if isinstance(colors, np.ndarray):
+            if colors.ndim == 1:
+                assert colors.dtype == np.uint8, "when gray, must be int8"
+            else:
+                assert colors.ndim == 2 and colors.shape[1] == 3
+            if points is not None:
+                assert points.shape[0] == colors.shape[0]
+
+    async def set_colors_in_range(self, colors: Union[str, np.ndarray], begin: int, end: int):
+        """
+        Args: 
+            cam2world: camera to world matrix, 4x4 ndaray or 16 list
+            distance: camera orbit target distance.
+        """
+        assert begin >= 0 and end >= begin and end <= self.props.limit
+        self._check_colors(colors)
+        if isinstance(colors, np.ndarray):
+            assert colors.shape[0] == end - begin
+        return await self.send_and_wait(
+            self.create_comp_event({
+                "type": PointsControlType.SetColors.value,
+                "offset": [begin, end],
+                "colors": colors,
+            }))
+
+    async def clear(self):
+        self.props.points = np.zeros((0, 3), np.float32)
+        self.props.colors = undefined
+        self.props.attrs = undefined
+        self.props.attr_fields = undefined
+
+        return self.send_and_wait(self.update_event(points=undefined, 
+            colors=undefined, attrs=undefined, attr_fields=undefined))
 
     async def update_points(self,
                             points: np.ndarray,
-                            intensity: Optional[Union[np.ndarray,
-                                                      Undefined]] = None,
-                            colors: Optional[Union[np.ndarray,
+                            colors: Optional[Union[np.ndarray, str,
                                                    Undefined]] = None,
                             attrs: Optional[Union[np.ndarray,
                                                   Undefined]] = None,
@@ -474,23 +507,20 @@ class Points(ThreeComponentBase[PointProps]):
             3, 4
         ], "only support 3 or 4 features for points"
         assert points.shape[
-            0] <= self.limit, f"your points size must smaller than limit {self.limit}"
-        if points.shape[1] == 4 and intensity is None:
-            intensity = points[:, 3]
+            0] <= self.props.limit, f"your points size must smaller than limit {self.props.limit}"
+        if points.shape[1] == 4 and colors is None:
+            colors = points[:, 3].astype(np.uint8)
             points = points[:, :3]
+        self._check_colors(colors, points)
 
         upd: Dict[str, Any] = {
             "points": points,
         }
-        if intensity is not None:
-            upd["intensity"] = intensity
-            self.props.intensity = intensity
         if colors is not None:
             upd["colors"] = colors
             self.props.colors = colors
         if attrs is not None:
             self.props.attrs = attrs
-
             if not isinstance(attrs, Undefined):
                 if attrs.ndim == 1:
                     attrs = attrs.reshape(-1, 1)
@@ -516,6 +546,7 @@ class Points(ThreeComponentBase[PointProps]):
 
 @dataclasses.dataclass
 class SegmentsProps(ThreeBasicProps):
+    limit: int = 0
     lines: Union[np.ndarray, Undefined] = undefined
     colors: Union[np.ndarray, Undefined] = undefined
     line_width: float = 1.0
@@ -533,14 +564,9 @@ class Segments(ThreeComponentBase[SegmentsProps]):
         super().__init__(UIType.ThreeSegments, SegmentsProps)
         self.props.lines = np.zeros((0, 2, 3), np.float32)
         self.props.line_width = line_width
-        self.limit = limit
+        self.props.limit = limit
         self.props.colors = undefined
         self.props.color = color
-
-    def to_dict(self):
-        res = super().to_dict()
-        res["limit"] = self.limit
-        return res
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -550,8 +576,13 @@ class Segments(ThreeComponentBase[SegmentsProps]):
 
     def validate_props(self, props: Dict[str, Any]):
         if "lines" in props:
-            return props["lines"].shape[0] <= self.limit
+            return props["lines"].shape[0] <= self.props.limit
         return False
+
+    async def clear(self):
+        self.props.lines = np.zeros((0, 2, 3), np.float32)
+        self.props.colors = undefined
+        return self.send_and_wait(self.update_event(lines=undefined, colors=undefined))
 
     async def update_lines(self,
                            lines: np.ndarray,
@@ -560,7 +591,7 @@ class Segments(ThreeComponentBase[SegmentsProps]):
         assert lines.ndim == 3 and lines.shape[1] == 2 and lines.shape[
             2] == 3, f"{lines.shape} lines must be [N, 2, 3]"
         assert lines.shape[
-            0] <= self.limit, f"your line size must smaller than limit {self.limit}"
+            0] <= self.props.limit, f"your line size must smaller than limit {self.props.limit}"
         upd: Dict[str, Any] = {
             "lines": lines,
         }
@@ -575,7 +606,8 @@ class Segments(ThreeComponentBase[SegmentsProps]):
 
     async def update_mesh_lines(self, mesh: npt.NDArray[np.float32]):
         mesh = mesh.reshape(-1, 3, 3)
-        lines = np.stack([mesh[:, [0, 1]], mesh[:, [1, 2]], mesh[:, [2, 0]]], axis=1).reshape(-1, 2, 3)
+        indexes = [0, 1, 1, 2, 2, 0]
+        lines = np.stack([mesh[:, i] for i in indexes], axis=1).reshape(-1, 2, 3)
         await self.update_lines(lines)
 
     @property
@@ -836,6 +868,12 @@ class Image(Object3dWithEventBase[ImageProps]):
                 "image": encoded,
             }))
 
+    async def clear(self):
+        self.props.image = b''
+        await self.send_and_wait(
+            self.update_event(image=b''))
+    
+
     async def show_raw(self, image_bytes: bytes, suffix: str):
         await self.send_and_wait(
             self.show_raw_event(image_bytes, suffix))
@@ -866,7 +904,6 @@ class Image(Object3dWithEventBase[ImageProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
-
 
 @dataclasses.dataclass
 class PerspectiveCameraProps(Object3dBaseProps):
@@ -977,6 +1014,7 @@ class CameraControlProps(ThreeBasicProps):
     azimuth_rotate_speed: Union[NumberType, Undefined] = undefined
     truck_speed: Union[NumberType, Undefined] = undefined
     dolly_speed: Union[NumberType, Undefined] = undefined
+    vertical_drag_to_forward: Union[bool, Undefined] = undefined
 
 class MapControl(ThreeComponentBase[OrbitControlProps]):
 
@@ -1004,13 +1042,17 @@ class CameraUserControlType(enum.Enum):
 
 
 class CameraControl(ThreeComponentBase[CameraControlProps]):
-
+    EvChange = FrontendEventType.Change.value
     def __init__(self) -> None:
         super().__init__(UIType.ThreeCameraControl, CameraControlProps)
+
         # self.props.enable_damping = True
-        # self.props.damping_factor = 0.25
+        self.props.damping_factor = 1
         # self.props.min_distance = 1
         # self.props.max_distance = 100
+
+    async def handle_event(self, ev: EventType):
+        await handle_standard_event(self, ev)
 
     @property
     def prop(self):
@@ -1022,7 +1064,7 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def set_cam2world(self, cam2world: Union[List[float], np.ndarray], distance: float):
+    async def set_cam2world(self, cam2world: Union[List[float], np.ndarray], distance: float, fov_angle: float = -1):
         """
         Args: 
             cam2world: camera to world matrix, 4x4 ndaray or 16 list
@@ -1035,6 +1077,7 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
                 "type": CameraUserControlType.SetCamPose.value,
                 "pose": list(map(float, cam2world.reshape(-1).tolist())),
                 "targetDistance": distance,
+                "fov": fov_angle,
             }))
 
     async def set_lookat(self, origin: List[float], target: List[float]):
@@ -1054,6 +1097,29 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
             self.create_comp_event({
                 "type": CameraUserControlType.Reset.value,
             }))
+
+    @staticmethod
+    def fov_size_to_intrinsic(fov_angle: float, width: NumberType, height: NumberType):
+        size_wh = [int(width), int(height)]
+        fov = (np.pi / 180) * fov_angle
+        tanHalfFov = np.tan((fov / 2))
+        f = size_wh[1] / 2 / tanHalfFov
+        intrinsic = np.zeros((3, 3), np.float32)
+        intrinsic[0, 0] = f 
+        intrinsic[1, 1] = f 
+        intrinsic[0, 2] = size_wh[0] / 2
+        intrinsic[1, 2] = size_wh[1] / 2
+        intrinsic[2, 2] = 1
+        return intrinsic
+
+    @staticmethod
+    def intrinsic_size_to_fov(intrinsic: np.ndarray, width: NumberType, height: NumberType):
+        f = intrinsic[0][0]
+        size_wh = [int(width), int(height)]
+        tanHalfFov = size_wh[1] / 2 / f
+        fov = np.arctan(tanHalfFov) * 2
+        fov_angle = fov / (np.pi / 180)
+        return fov_angle
 
 class OrbitControl(ThreeComponentBase[OrbitControlProps]):
 

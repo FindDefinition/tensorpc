@@ -44,8 +44,8 @@ async def handle_raw_event(ev: Any, comp: Component, just_run: bool = False):
             
 async def handle_standard_event(comp: Component, data: EventType, sync_first: bool = False):
     if comp.props.status == UIRunStatus.Running.value:
-        msg = create_ignore_usr_msg(comp)
-        await comp.send_and_wait(msg)
+        # msg = create_ignore_usr_msg(comp)
+        # await comp.send_and_wait(msg)
         return
     elif comp.props.status == UIRunStatus.Stop.value:
         if data[0] in _ONEARG_EVENTS:

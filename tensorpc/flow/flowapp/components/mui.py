@@ -46,12 +46,18 @@ if TYPE_CHECKING:
 _CORO_NONE = Union[Coroutine[None, None, None], None]
 
 
-def _encode_image_bytes(img: np.ndarray):
+_PIL_FORMAT_TO_SUFFIX = {
+    "JPEG": "jpg",
+    "PNG": "png"
+}
+
+def _encode_image_bytes(img: np.ndarray, format: str = "JPEG"):
     pil_img = PILImage.fromarray(img)
     buffered = io.BytesIO()
-    pil_img.save(buffered, format="PNG")
+    pil_img.save(buffered, format=format)
     b64_bytes = base64.b64encode(buffered.getvalue())
-    return b"data:image/png;base64," + b64_bytes
+    suffix = _PIL_FORMAT_TO_SUFFIX[format]
+    return b"data:image/" + suffix.encode("utf-8") + b";base64," + b64_bytes
 
 
 @dataclasses.dataclass
@@ -195,8 +201,8 @@ class Images(MUIComponentBase[ImageProps]):
         res["image"] = self.props.image
         return res
 
-    async def show(self, image: np.ndarray):
-        encoded = _encode_image_bytes(image)
+    async def show(self, image: np.ndarray, format: str = "JPEG"):
+        encoded = _encode_image_bytes(image, format)
         self.props.image = encoded
         # self.image_str = encoded
         await self.put_app_event(self.update_event(image=encoded))
@@ -417,6 +423,8 @@ class IconType(enum.IntEnum):
     Dataset = 24
     DataObject = 25
     DataArray = 26
+    Cached = 27
+    SwapVert = 28
 
 
 @dataclasses.dataclass
@@ -491,7 +499,6 @@ class Dialog(MUIContainerBase[DialogProps, MUIComponentType]):
         await self.send_and_wait(self.update_event(open=open))
 
     async def handle_event(self, ev: EventType):
-        print(ev)
         await handle_standard_event(self, ev, sync_first=True)
 
     def get_sync_props(self) -> Dict[str, Any]:
@@ -516,7 +523,6 @@ class Dialog(MUIContainerBase[DialogProps, MUIComponentType]):
         # this only triggered when dialog closed, so we always set
         # open to false.
         self.props.open = False 
-        print("????")
 
 @dataclasses.dataclass
 class ButtonGroupProps(MUIFlexBoxProps):
@@ -557,6 +563,7 @@ class ButtonGroup(MUIContainerBase[ButtonGroupProps, Button]):
 class ToggleButtonProps(MUIComponentBaseProps):
     value: ValueType = ""
     name: str = ""
+    selected: Union[Undefined, bool] = undefined
     tooltip: Union[str, Undefined] = undefined
     mui_color: Union[_BtnGroupColor, Undefined] = undefined
     disabled: Union[bool, Undefined] = undefined
@@ -572,7 +579,8 @@ class ToggleButton(MUIComponentBase[ToggleButtonProps]):
     def __init__(self,
                  value: ValueType,
                  icon: Union[IconType, Undefined] = undefined,
-                 name: str = "") -> None:
+                 name: str = "",
+                 callback: Optional[Callable[[bool], _CORO_NONE]] = None) -> None:
         super().__init__(UIType.ToggleButton, ToggleButtonProps)
         if isinstance(icon, Undefined):
             assert name != "", "if icon not provided, you must provide a valid name"
@@ -580,6 +588,27 @@ class ToggleButton(MUIComponentBase[ToggleButtonProps]):
             self.props.icon = icon.value
         self.props.name = name
         self.props.value = value
+        if callback is not None:
+            self.register_event_handler(FrontendEventType.Change.value,
+                                        callback)
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["selected"] = self.props.selected
+        return res
+
+    def state_change_callback(
+            self,
+            data: bool,
+            type: ValueType = FrontendEventType.Change.value):
+        self.props.selected = data
+
+    async def handle_event(self, ev: EventType):
+        await handle_standard_event(self, ev)
+
+    @property
+    def checked(self):
+        return self.props.selected
 
     @property
     def prop(self):
@@ -800,18 +829,18 @@ class ListItemButton(MUIComponentBase[ButtonProps]):
 
 class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
     def __init__(self,
+                 children: Optional[LayoutType] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
-                 _children: Optional[LayoutType] = None,
                  base_type: UIType = UIType.FlexBox,
                  inited: bool = False,
                  uid: str = "",
                  queue: Optional[asyncio.Queue] = None) -> None:
-        if _children is not None and isinstance(_children, list):
-            _children = {str(i): v for i, v in enumerate(_children)}
+        if children is not None and isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
         super().__init__(base_type,
                          MUIFlexBoxProps,
                          uid_to_comp,
-                         _children,
+                         children,
                          inited,
                          uid=uid,
                          queue=queue)
@@ -834,16 +863,16 @@ class MUIListProps(MUIFlexBoxProps):
 
 class MUIList(MUIContainerBase[MUIListProps, MUIComponentType]):
     def __init__(self,
-                 uid_to_comp: Dict[str, Component],
-                 _children: Optional[LayoutType] = None,
+                 children: Optional[LayoutType] = None,
+                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  subheader: str = "",
                  inited: bool = False) -> None:
-        if _children is not None and isinstance(_children, list):
-            _children = {str(i): v for i, v in enumerate(_children)}
+        if children is not None and isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.MUIList,
                          MUIListProps,
                          uid_to_comp=uid_to_comp,
-                         _children=_children,
+                         _children=children,
                          inited=inited)
         self.props.subheader = subheader
 
@@ -859,23 +888,23 @@ class MUIList(MUIContainerBase[MUIListProps, MUIComponentType]):
 
 
 def VBox(layout: LayoutType):
-    res = FlexBox({}, _children=layout)
+    res = FlexBox(children=layout)
     res.prop(flex_flow="column")
     return res
 
 
 def HBox(layout: LayoutType):
-    res = FlexBox({}, _children=layout)
+    res = FlexBox(children=layout)
     res.prop(flex_flow="row")
     return res
 
 
 def Box(layout: LayoutType):
-    return FlexBox({}, _children=layout)
+    return FlexBox(children=layout)
 
 
 def VList(layout: LayoutType, subheader: str = ""):
-    return MUIList({}, subheader=subheader, _children=layout)
+    return MUIList(subheader=subheader, children=layout)
 
 
 @dataclasses.dataclass
@@ -1095,7 +1124,6 @@ class SwitchBase(MUIComponentBase[SwitchProps]):
         super().__init__(base_type, SwitchProps,
                          [FrontendEventType.Change.value])
         self.props.label = label
-        self.callback = callback
         self.props.checked = False
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
@@ -1658,7 +1686,7 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
     """
     def __init__(self,
                  label: str,
-                 loop_callbcak: Callable[[], _CORO_NONE],
+                 loop_callbcak: Optional[Callable[[], _CORO_NONE]] = None,
                  update_period: float = 0.2,
                  raw_update: bool = False) -> None:
         super().__init__(UIType.TaskLoop, TaskLoopProps)
@@ -1732,6 +1760,19 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
     async def update_label(self, label: str):
         await self.send_and_wait(self.update_event(label=label))
         self.props.label = label
+    
+    async def set_raw_update(self, enable: bool):
+        if self.props.status != UIRunStatus.Stop.value:
+            raise ValueError("you must set raw_update in stop status")
+        if enable != self._raw_update:
+            await self.clear()
+        self._raw_update = enable
+
+    async def clear(self):
+        await cancel_task(self._task)
+        await self.send_and_wait(
+            self.update_event(
+                task_status=UIRunStatus.Stop.value, progresses=[0]))
 
     async def headless_run(self):
         uiev = UIEvent({
@@ -1747,8 +1788,9 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
         data = ev[1]
         if data == TaskLoopEvent.Start.value:
             if self.props.status == UIRunStatus.Stop.value:
-                self._task = asyncio.create_task(
-                    self.run_callback(self.loop_callbcak))
+                if self.loop_callbcak is not None:
+                    self._task = asyncio.create_task(
+                        self.run_callback(self.loop_callbcak))
             else:
                 print("IGNORE TaskLoop EVENT", self.props.status)
         elif data == TaskLoopEvent.Pause.value:
@@ -1804,6 +1846,7 @@ class RawTaskLoop(MUIComponentBase[TaskLoopProps]):
         self.props.progresses[index] = progress
         await self.send_and_wait(
             self.update_event(progresses=self.props.progresses))
+
 
     async def update_label(self, label: str):
         await self.send_and_wait(self.update_event(label=label))

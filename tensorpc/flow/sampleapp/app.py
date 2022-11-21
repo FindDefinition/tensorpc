@@ -512,6 +512,66 @@ class SampleThreeApp(EditableApp):
             await client.app_remote_call("show_pc", pc)
 
 
+class SampleThreePointsApp(EditableApp):
+
+    def __init__(self) -> None:
+        super().__init__(reloadable_layout=True)
+        self.set_init_window_size([800, 600])
+        # makesure three canvas size fit parent.
+        self.root.props.min_height = 0
+        # store components here if you want to keep
+        # data after reload layout.
+        self.points = three.Points(5000000)
+
+    def app_create_layout(self) -> Dict[str, MUIComponentType]:
+        cam = three.PerspectiveCamera(True, fov=75, near=0.1, far=1000)
+        cam.prop(position=(0, 0, 20), up=(0, 0, 1))
+        # cam = three.OrthographicCamera(True, position=[0, 0, 10], up=[0, 0, 1], near=0.1, far=1000,
+        #                               zoom=8.0)
+        self.img = three.Image()
+        # self.ctrl = three.PointerLockControl().prop(enabled=True)
+        self.ctrl = three.CameraControl().prop(damping_factor=1.0)
+
+        # ctrl = three.OrbitControl()
+        infgrid = three.InfiniteGridHelper(5, 50, "gray")
+        self.canvas = three.ThreeCanvas({
+            "cam": cam,
+            "points": self.points,
+            "ctrl": self.ctrl,
+            "axes": three.AxesHelper(10),
+            "infgrid": infgrid,
+            "img": self.img,
+            # "tc": self.scene_ctrl,
+            # "box": three.BoundingBox((2, 5, 2), [0, 10, 0], [0, 0, 0.5])
+        })
+        self.show_pcs = [np.random.uniform(-100, 100, size=[100000, 3]) for _ in range(10)]
+        self.offsets = []
+        start = 0
+        for p in self.show_pcs:
+            self.offsets.append((start, start + p.shape[0]))
+            start += p.shape[0]
+        slider = mui.Slider("Frames", 0, len(self.show_pcs) - 1, 1, self._on_frame_select)
+        self.points.prop(points=np.concatenate(self.show_pcs))
+        self.prev_range = None
+        return {
+            "d3v":
+            VBox({
+                "d3":
+                VBox({
+                    "d32": self.canvas,
+                }).prop(flex=1, min_height=0, min_width=0),
+                "btn": slider,
+
+            }).prop(flex=1, min_height=0),
+        }
+
+    async def _on_frame_select(self, index):
+        if self.prev_range is not None:
+            await self.points.set_colors_in_range("#9099ba", *self.prev_range)
+        self.prev_range = self.offsets[index]
+        await self.points.set_colors_in_range("red", *self.prev_range)
+
+
 class SampleTestApp(App):
 
     def __init__(self) -> None:
