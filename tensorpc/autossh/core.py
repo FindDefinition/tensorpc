@@ -14,7 +14,8 @@ from asyncio.tasks import FIRST_COMPLETED
 from collections import deque
 from dataclasses import dataclass
 import traceback
-from typing import Any, AnyStr, Awaitable, Callable, Deque, Dict, List, Optional, Set, Tuple, Type, Union
+from asyncssh import stream as asyncsshss
+from typing import Any, AnyStr, Awaitable, Callable, Deque, Dict, List, Optional, Set, Tuple, Type, Union, Iterable
 from contextlib import suppress
 import asyncssh
 import tensorpc
@@ -351,10 +352,10 @@ class PeerSSHClient:
         # create read tasks. they should exists during peer open.
         if encoding is None:
             self.separators = separators
-            self._vsc_re = re.compile(rb"\033\]784;([ABPCEFGD])(?:;(.*))?\007")
+            self._vsc_re = re.compile(rb"\033\]784;([ABPCEFGD])(?:;(.*?))?\007")
         else:
             self.separators = separators.decode("utf-8")
-            self._vsc_re = re.compile(r"\033\]784;([ABPCEFGD])(?:;(.*))?\007")
+            self._vsc_re = re.compile(r"\033\]784;([ABPCEFGD])(?:;(.*?))?\007")
 
         self.uid = uid
 
@@ -369,7 +370,7 @@ class PeerSSHClient:
     async def _readuntil(self, reader: asyncssh.stream.SSHReader):
         try:
             # print(separators)
-            res = await reader.readuntil(self.separators)
+            res = await reader.readuntil(self._vsc_re)
             is_eof = reader.at_eof()
             return ReadResult(res, is_eof, False)
         except asyncio.IncompleteReadError as exc:
@@ -497,7 +498,6 @@ class SSHRequest:
         self.type = type
         self.data = data
 
-
 class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
 
     def __init__(self) -> None:
@@ -516,12 +516,88 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
                     res_str = data.decode(self._tensorpc_encoding)
                 else:
                     res_str = data
-            # print(len(res_str), res_str)
             loop = asyncio.get_running_loop()
             asyncio.run_coroutine_threadsafe(
                 self.callback(RawEvent(ts, res_str, False, self.uid)), loop)
         return res
 
+    async def readuntil(self, separator: object, datatype: asyncssh.DataType) -> AnyStr:
+        """Read data from the channel until a separator is seen"""
+
+        if not separator:
+            raise ValueError('Separator cannot be empty')
+
+        buf = asyncsshss.cast(AnyStr, '' if self._encoding else b'')
+        recv_buf = self._recv_buf[datatype]
+        is_re = False
+        if isinstance(separator, re.Pattern):
+            seplen = len(separator.pattern)
+            is_re = True
+            pat = separator
+        else:
+            if separator is asyncsshss._NEWLINE:
+                seplen = 1
+                separators = asyncsshss.cast(AnyStr, '\n' if self._encoding else b'\n')
+            elif isinstance(separator, (bytes, str)):
+                seplen = len(separator)
+                separators = re.escape(asyncsshss.cast(AnyStr, separator))
+            else:
+                bar = asyncsshss.cast(AnyStr, '|' if self._encoding else b'|')
+                seplist = list(asyncsshss.cast(Iterable[AnyStr], separator))
+                seplen = max(len(sep) for sep in seplist)
+                separators = bar.join(re.escape(sep) for sep in seplist)
+
+            pat = re.compile(separators)
+        curbuf = 0
+        buflen = 0
+
+        async with self._read_locks[datatype]:
+            while True:
+                while curbuf < len(recv_buf):
+                    if isinstance(recv_buf[curbuf], Exception):
+                        if buf:
+                            recv_buf[:curbuf] = []
+                            self._recv_buf_len -= buflen
+                            raise asyncio.IncompleteReadError(
+                                asyncsshss.cast(bytes, buf), None)
+                        else:
+                            exc = recv_buf.pop(0)
+
+                            if isinstance(exc, asyncsshss.SoftEOFReceived):
+                                return buf
+                            else:
+                                raise asyncsshss.cast(Exception, exc)
+
+                    newbuf = asyncsshss.cast(AnyStr, recv_buf[curbuf])
+                    buf += newbuf
+                    if is_re:
+                        start = 0 
+                    else:
+                        start = max(buflen + 1 - seplen, 0)
+                    match = pat.search(buf, start)
+                    if match:
+                        idx = match.end()
+                        recv_buf[:curbuf] = []
+                        recv_buf[0] = buf[idx:]
+                        buf = buf[:idx]
+                        self._recv_buf_len -= idx
+
+                        if not recv_buf[0]:
+                            recv_buf.pop(0)
+
+                        self._maybe_resume_reading()
+                        return buf
+
+                    buflen += len(newbuf)
+                    curbuf += 1
+
+                if self._read_paused or self._eof_received:
+                    recv_buf[:curbuf] = []
+                    self._recv_buf_len -= buflen
+                    self._maybe_resume_reading()
+                    raise asyncio.IncompleteReadError(asyncsshss.cast(bytes, buf), None)
+
+                await self._block_read(datatype)
 
 class SSHClient:
 
