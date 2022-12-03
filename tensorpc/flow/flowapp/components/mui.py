@@ -38,7 +38,7 @@ from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     Fragment, FrontendEventType, NumberType, T_base_props,
                     T_child, T_container_props, TaskLoopEvent, UIEvent,
                     UIRunStatus, UIType, Undefined, ValueType, undefined,
-                    create_ignore_usr_msg)
+                    create_ignore_usr_msg, ALL_POINTER_EVENTS)
 
 if TYPE_CHECKING:
     from .three import ThreeCanvas
@@ -188,12 +188,12 @@ def layout_unify(layout: LayoutType):
 
 @dataclasses.dataclass
 class ImageProps(MUIComponentBaseProps):
-    image: bytes = dataclasses.field(default_factory=bytes)
+    image: Union[Undefined, bytes] = undefined
 
 
-class Images(MUIComponentBase[ImageProps]):
+class Image(MUIComponentBase[ImageProps]):
     def __init__(self) -> None:
-        super().__init__(UIType.Image, ImageProps)
+        super().__init__(UIType.Image, ImageProps, allowed_events=ALL_POINTER_EVENTS)
         # self.image_str: bytes = b""
 
     def get_sync_props(self) -> Dict[str, Any]:
@@ -201,11 +201,15 @@ class Images(MUIComponentBase[ImageProps]):
         res["image"] = self.props.image
         return res
 
-    async def show(self, image: np.ndarray, format: str = "JPEG"):
+    async def show(self, image: np.ndarray, format: str = "JPEG", set_size: bool = False):
         encoded = _encode_image_bytes(image, format)
         self.props.image = encoded
         # self.image_str = encoded
-        await self.put_app_event(self.update_event(image=encoded))
+        if set_size:
+            ev = self.update_event(image=encoded, width=image.shape[1], height=image.shape[0])
+        else:
+            ev = self.update_event(image=encoded)
+        await self.put_app_event(ev)
 
     async def show_raw(self, image_bytes: bytes, suffix: str):
         await self.put_app_event(self.show_raw_event(image_bytes, suffix))
@@ -227,6 +231,11 @@ class Images(MUIComponentBase[ImageProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+    async def handle_event(self, ev: EventType):
+        await handle_standard_event(self, ev, sync_first=True)
+
+# TODO remove this
+Images = Image
 
 @dataclasses.dataclass
 class TextProps(MUIComponentBaseProps):
@@ -674,6 +683,23 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
+    
+    async def update_items(self, btns: List[ToggleButton], value: Optional[ValueType] = None):
+        name_or_icons = []
+        values = []
+        for v in btns:
+            assert isinstance(v, ToggleButton), "all childs must be button"
+            if not isinstance(v.props.icon, Undefined):
+                name_or_icons.append(v.props.icon)
+            else:
+                name_or_icons.append(v.props.name)
+            values.append(v.props.value)
+        if value is None:
+            assert self.props.value in values
+            value = self.props.value
+        else:
+            assert value in values 
+        await self.send_and_wait(self.update_event(value=value, name_or_icons=name_or_icons, values=values))
 
     @property
     def prop(self):
@@ -998,7 +1024,7 @@ class InputProps(MUIComponentBaseProps):
     rows: Union[NumberType, str, Undefined] = undefined
     size: Union[Undefined, Literal["small", "medium"]] = undefined
     mui_margin: Union[Undefined, Literal["dense", "none",
-                                         "normal"]] = undefined
+                                         "normal"]] = "dense"
     variant: Union[Undefined, Literal["filled", "outlined",
                                       "standard"]] = undefined
     type: Union[Undefined, _HTMLInputType] = undefined

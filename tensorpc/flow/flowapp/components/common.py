@@ -14,10 +14,17 @@
 
 from typing import Any, Tuple, Union
 import asyncio
-from tensorpc.flow.flowapp.core import Component, EventType, create_ignore_usr_msg, Undefined, UIRunStatus, FrontendEventType
+from tensorpc.flow.flowapp.core import Component, EventType, create_ignore_usr_msg, Undefined, UIRunStatus, FrontendEventType, ALL_POINTER_EVENTS
 
-_ONEARG_EVENTS = set([FrontendEventType.Change.value, FrontendEventType.InputChange.value,
-    FrontendEventType.DialogClose.value])
+_STATE_CHANGE_EVENTS = set([FrontendEventType.Change.value, FrontendEventType.InputChange.value,
+    FrontendEventType.DialogClose.value, ])
+
+_ONEARG_EVENTS = set(ALL_POINTER_EVENTS)
+
+_NOARG_EVENTS = set([
+    FrontendEventType.Click.value,
+    FrontendEventType.DoubleClick.value,
+])
 
 async def handle_raw_event(ev: Any, comp: Component, just_run: bool = False):
     # ev: [type, data]
@@ -48,19 +55,29 @@ async def handle_standard_event(comp: Component, data: EventType, sync_first: bo
         # await comp.send_and_wait(msg)
         return
     elif comp.props.status == UIRunStatus.Stop.value:
-        if data[0] in _ONEARG_EVENTS:
+        if data[0] in _STATE_CHANGE_EVENTS:
             handler = comp.get_event_handler(data[0])
             comp.state_change_callback(data[1], data[0])
             if handler is not None:
                 def ccb(cb):
                     return lambda: cb(data[1])
+                # state change events must sync state after callback
                 comp._task = asyncio.create_task(comp.run_callback(ccb(handler.cb), True, sync_first=sync_first))
             else:
                 await comp.sync_status(True)
-        elif data[0] == FrontendEventType.Click.value:
-            handler = comp.get_event_handler(FrontendEventType.Click.value)
+        elif data[0] in _ONEARG_EVENTS:
+            handler = comp.get_event_handler(data[0])
+            # other events don't need to sync state
+            if handler is not None:
+                def ccb(cb):
+                    return lambda: cb(data[1])
+                comp._task = asyncio.create_task(comp.run_callback(ccb(handler.cb), sync_first=sync_first))
+        elif data[0] in _NOARG_EVENTS:
+            handler = comp.get_event_handler(data[0])
+            # other events don't need to sync state
             if handler is not None:
                 comp._task = asyncio.create_task(comp.run_callback(handler.cb, sync_first=sync_first))
+
         else:
             raise NotImplementedError
 

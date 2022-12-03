@@ -1247,6 +1247,7 @@ class FlexManualReflow(ThreeComponentBase[FlexManualReflowProps]):
         await self.send_and_wait(
             self.update_event(timestamp=str(time.time())))
 
+@dataclasses.dataclass
 class ThreeCanvasProps(MUIFlexBoxProps):
     three_background_color: Union[str, Undefined] = undefined 
 
@@ -1263,7 +1264,7 @@ class ThreeCanvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
         super().__init__(UIType.ThreeCanvas, ThreeCanvasProps, uid_to_comp,
                          children, inited)
         self.props.three_background_color = background
-
+        
     @property
     def prop(self):
         propcls = self.propcls

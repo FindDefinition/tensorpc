@@ -211,6 +211,16 @@ class FrontendEventType(enum.Enum):
     MapZoom = 60 
     MapMove = 61
 
+ALL_POINTER_EVENTS = [ 
+    FrontendEventType.Down.value,
+    FrontendEventType.Up.value,
+    FrontendEventType.Move.value,
+    FrontendEventType.Enter.value,
+    FrontendEventType.Leave.value,
+    FrontendEventType.Over.value,
+    FrontendEventType.Out.value,
+
+]
 
 class UIRunStatus(enum.Enum):
     Stop = 0
