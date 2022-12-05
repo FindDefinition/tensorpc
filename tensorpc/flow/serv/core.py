@@ -162,6 +162,9 @@ class Node:
 
         self._schedulable = schedulable
 
+    def before_save(self):
+        pass 
+
     @property
     def schedulable(self):
         return self._schedulable
@@ -173,6 +176,9 @@ class Node:
     def schedule_next(self, ev: ScheduleEvent,
                       graph: "FlowGraph") -> Dict[str, ScheduleEvent]:
         return {}
+
+    def to_save_dict(self):
+        return self.to_dict()
 
     def to_dict(self):
         # currently this method is only used for remote worker.
@@ -335,13 +341,65 @@ class DirectSSHNode(Node):
 
 @ALL_NODES.register
 class MarkdownNode(Node):
+    def __init__(self, flow_data: Dict[str, Any], graph_id: str = "", schedulable: bool = False) -> None:
+        super().__init__(flow_data, graph_id, schedulable)
+        node_data = flow_data["data"]
+        if "pages" not in node_data:
+            root: Path = FLOW_FOLDER_DATA_PATH / flow_data["id"]
+            if not root.exists():
+                root.mkdir(mode=0o755, parents=True)
+            mds = list(root.glob("*.md"))
+            pages: List[Dict[str, str]] = []
+            all_pgs: Set[str] = set()
+            for md_path in mds:
+                with md_path.open("r") as f:
+                    data = f.read()
+                pages.append({
+                    "label": md_path.stem,
+                    "content": data,
+                })
+                all_pgs.add(md_path.stem)
+            cur_key = node_data["currentKey"]
+            if cur_key not in all_pgs:
+                cur_key = pages[0]["label"]
+                node_data["currentKey"] = cur_ke
+            node_data["pages"] = pages
+        else:
+            for p in node_data["pages"]:
+                save_path = self.get_save_path(p["label"])
+                with save_path.open("w") as f:
+                    f.write(p["content"])
+
+
+    def before_save(self):
+        return super().before_save()
+
+    def to_save_dict(self):
+        res = self.to_dict()
+        for p in res["data"]["pages"]:
+            save_path = self.get_save_path(p["label"])
+            with save_path.open("w") as f:
+                f.write(p["content"])
+        if "pages" in res["data"]:
+            res["data"].pop("pages")
+        return res 
+
     def set_page(self, page: str, current_key: str):
         for p in self.node_data["pages"]:
             if p["label"] == current_key:
                 p["content"] = page
+                save_path = self.get_save_path(current_key)
+                with save_path.open("w") as f:
+                    f.write(page)
 
     def set_current_key(self, current_key):
         self.node_data["currentKey"] = current_key
+
+    def get_save_path(self, key: str):
+        root = FLOW_FOLDER_DATA_PATH / self.id 
+        if not root.exists():
+            root.mkdir(mode=0o755, parents=True)
+        return FLOW_FOLDER_DATA_PATH / self.id / f"{key}.md"
 
 @ALL_NODES.register
 class GroupNode(Node):
@@ -1131,6 +1189,13 @@ class FlowGraph:
 
         self.variable_dict = self._get_jinja_variable_dict(nodes)
 
+    def get_save_data(self):
+        flow_data = self.to_save_dict()
+        for n in flow_data["nodes"]:
+            n["data"]["graphId"] = self.graph_id
+            n["selected"] = False
+        return flow_data
+
     def render_command(self, cmd: str):
         template = JINJA2_VARIABLE_ENV.from_string(cmd)
         return template.render(**self.variable_dict)
@@ -1206,7 +1271,15 @@ class FlowGraph:
     def to_dict(self):
         return {
             "viewport": self.viewport,
-            "nodes": [n.raw_data for n in self.nodes],
+            "nodes": [n.to_dict() for n in self.nodes],
+            "edges": [n.raw_data for n in self.edges],
+            "id": self.graph_id,
+        }
+
+    def to_save_dict(self):
+        return {
+            "viewport": self.viewport,
+            "nodes": [n.to_save_dict() for n in self.nodes],
             "edges": [n.raw_data for n in self.edges],
             "id": self.graph_id,
         }
@@ -1797,9 +1870,6 @@ class Flow:
                 node.init_terminal_size = (width, height)
 
     def _save_graph_content_only(self, graph_id: str, flow_data):
-        for n in flow_data["nodes"]:
-            n["data"]["graphId"] = graph_id
-            n["selected"] = False
         flow_path = self.root / f"{graph_id}.json"
         with flow_path.open("w") as f:
             json.dump(flow_data, f)
@@ -1813,10 +1883,7 @@ class Flow:
             self.flow_dict[graph_id] = FlowGraph(flow_data, graph_id)
         # print ("SAVE GRAPH", [n.id for n in self.flow_dict[graph_id].nodes])
         graph = self.flow_dict[graph_id]
-        for n in flow_data["nodes"]:
-            n["data"]["graphId"] = graph_id
-            n["selected"] = False
-        self._save_graph_content_only(graph_id, flow_data)
+        self._save_graph_content_only(graph_id, graph.get_save_data())
         for node in graph.nodes:
             if isinstance(node, RemoteSSHNode):
                 # sync graph node to remote
@@ -1861,11 +1928,9 @@ class Flow:
     def markdown_save_content(self, graph_id: str, node_id: str, page: str, current_key: str):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node 
-        graph = node_desp.graph
         assert isinstance(node, MarkdownNode)
         node.set_page(page, current_key)
         node.set_current_key(current_key)
-        self._save_graph_content_only(graph_id, graph.to_dict())
 
     async def load_graph(self, graph_id: str, force_reload: bool = False):
         flow_path = self.root / f"{graph_id}.json"
