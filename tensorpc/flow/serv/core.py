@@ -332,6 +332,17 @@ class DirectSSHNode(Node):
         cmds = self.node_data["initCommands"].strip()
         return cmds
 
+
+@ALL_NODES.register
+class MarkdownNode(Node):
+    def set_page(self, page: str, current_key: str):
+        for p in self.node_data["pages"]:
+            if p["label"] == current_key:
+                p["content"] = page
+
+    def set_current_key(self, current_key):
+        self.node_data["currentKey"] = current_key
+
 @ALL_NODES.register
 class GroupNode(Node):
 
@@ -1044,6 +1055,8 @@ _TYPE_TO_NODE_CLS: Dict[str, Type[Node]] = {
     "app": AppNode,
     "datastorage": DataStorageNode,
     "group": GroupNode,
+    "markdown": MarkdownNode,
+
 }
 
 
@@ -1783,10 +1796,16 @@ class Flow:
             else:
                 node.init_terminal_size = (width, height)
 
+    def _save_graph_content_only(self, graph_id: str, flow_data):
+        for n in flow_data["nodes"]:
+            n["data"]["graphId"] = graph_id
+            n["selected"] = False
+        flow_path = self.root / f"{graph_id}.json"
+        with flow_path.open("w") as f:
+            json.dump(flow_data, f)
 
     async def save_graph(self, graph_id: str, flow_data):
         # TODO do we need a async lock here?    
-        # print(json.dumps(flow_data, indent=2 ))
         flow_data["id"] = graph_id
         if graph_id in self.flow_dict:
             await self.flow_dict[graph_id].update_graph(graph_id, flow_data)
@@ -1797,10 +1816,7 @@ class Flow:
         for n in flow_data["nodes"]:
             n["data"]["graphId"] = graph_id
             n["selected"] = False
-        flow_path = self.root / f"{graph_id}.json"
-        with flow_path.open("w") as f:
-            print(flow_path, flow_path)
-            json.dump(flow_data, f)
+        self._save_graph_content_only(graph_id, flow_data)
         for node in graph.nodes:
             if isinstance(node, RemoteSSHNode):
                 # sync graph node to remote
@@ -1842,6 +1858,14 @@ class Flow:
             with new_flow_path.open("w") as f:
                 json.dump(flow.to_dict(), f)
 
+    def markdown_save_content(self, graph_id: str, node_id: str, page: str, current_key: str):
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node 
+        graph = node_desp.graph
+        assert isinstance(node, MarkdownNode)
+        node.set_page(page, current_key)
+        node.set_current_key(current_key)
+        self._save_graph_content_only(graph_id, graph.to_dict())
 
     async def load_graph(self, graph_id: str, force_reload: bool = False):
         flow_path = self.root / f"{graph_id}.json"
