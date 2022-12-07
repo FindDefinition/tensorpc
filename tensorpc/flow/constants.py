@@ -13,8 +13,9 @@
 # limitations under the License.
 
 from pathlib import Path 
-
-FLOW_FOLDER_PATH = Path.home() / ".tensorpc" / "flow"
+import os
+_FLOW_FOLDER_PATH_ENV = os.getenv("TENSORPC_FLOW_ROOT", str(Path.home() / ".tensorpc" / "flow"))
+FLOW_FOLDER_PATH = Path(_FLOW_FOLDER_PATH_ENV)
 
 FLOW_DEFAULT_TIMEOUT = 10
 

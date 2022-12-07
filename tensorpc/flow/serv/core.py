@@ -71,6 +71,7 @@ from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.wait_tools import get_free_ports
 
 FLOW_FOLDER_DATA_PATH = FLOW_FOLDER_PATH / "data_nodes"
+FLOW_MARKDOWN_DATA_PATH = FLOW_FOLDER_PATH / "markdown_nodes"
 
 JINJA2_VARIABLE_ENV = Environment(loader=BaseLoader(),
                                   variable_start_string="{{",
@@ -183,6 +184,7 @@ class Node:
     def to_dict(self):
         # currently this method is only used for remote worker.
         raw = self._flow_data.copy()
+        raw["data"] = self._flow_data["data"].copy()
         raw.update({
             "tensorpc_flow": {
                 "graph_id": self.graph_id,
@@ -345,7 +347,7 @@ class MarkdownNode(Node):
         super().__init__(flow_data, graph_id, schedulable)
         node_data = flow_data["data"]
         if "pages" not in node_data:
-            root: Path = FLOW_FOLDER_DATA_PATH / flow_data["id"]
+            root: Path = FLOW_MARKDOWN_DATA_PATH / flow_data["id"]
             if not root.exists():
                 root.mkdir(mode=0o755, parents=True)
             mds = list(root.glob("*.md"))
@@ -362,14 +364,13 @@ class MarkdownNode(Node):
             cur_key = node_data["currentKey"]
             if cur_key not in all_pgs:
                 cur_key = pages[0]["label"]
-                node_data["currentKey"] = cur_ke
+                node_data["currentKey"] = cur_key
             node_data["pages"] = pages
         else:
             for p in node_data["pages"]:
                 save_path = self.get_save_path(p["label"])
                 with save_path.open("w") as f:
                     f.write(p["content"])
-
 
     def before_save(self):
         return super().before_save()
@@ -396,10 +397,10 @@ class MarkdownNode(Node):
         self.node_data["currentKey"] = current_key
 
     def get_save_path(self, key: str):
-        root = FLOW_FOLDER_DATA_PATH / self.id 
+        root = FLOW_MARKDOWN_DATA_PATH / self.id 
         if not root.exists():
             root.mkdir(mode=0o755, parents=True)
-        return FLOW_FOLDER_DATA_PATH / self.id / f"{key}.md"
+        return FLOW_MARKDOWN_DATA_PATH / self.id / f"{key}.md"
 
 @ALL_NODES.register
 class GroupNode(Node):
@@ -1899,7 +1900,7 @@ class Flow:
             if k != FLOW_DEFAULT_GRAPH_ID:
                 res = await self.load_graph(k, force_reload=False)
                 final_res.append(res)
-        return final_res 
+        return [g.to_dict() for g in final_res] 
 
     async def delete_graph(self, graph_id: str):
         flow = self.flow_dict[graph_id]
@@ -1962,8 +1963,7 @@ class Flow:
         if reload:
             # TODO we should shutdown all session first.
             self.flow_dict[graph_id] = FlowGraph(flow_data, graph_id)
-
-        return flow_data
+        return self.flow_dict[graph_id]
 
     def _get_node_envs(self, graph_id: str, node_id: str):
         node = self.flow_dict[graph_id].get_node_by_id(node_id)
