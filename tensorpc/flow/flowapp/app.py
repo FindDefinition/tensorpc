@@ -163,7 +163,8 @@ class App:
                  justify_content: Union[str, Undefined] = undefined,
                  align_items: Union[str, Undefined] = undefined,
                  maxqsize: int = 10,
-                 enable_value_cache: bool = False) -> None:
+                 enable_value_cache: bool = False,
+                 external_root: Optional[mui.FlexBox] = None) -> None:
         self._uid_to_comp: Dict[str, Component] = {}
         self._queue: "asyncio.Queue[AppEvent]" = asyncio.Queue(
             maxsize=maxqsize)
@@ -171,13 +172,27 @@ class App:
         self._send_callback: Optional[Callable[[AppEvent],
                                                Coroutine[None, None,
                                                          None]]] = None
-        root = mui.FlexBox(uid_to_comp=self._uid_to_comp,
-                           inited=True,
-                           uid=_ROOT,
-                           queue=self._queue)
-        root.prop(flex_flow=flex_flow,
-                  justify_content=justify_content,
-                  align_items=align_items)
+        self._is_external_root = False
+        if external_root is not None:
+            # TODO better mount
+            root = external_root 
+            external_root._flow_uid = _ROOT
+            if root._children is not None:
+                # consume this _children
+                root.add_layout(root._children)
+                root._children = None
+            # layout saved in external_root
+            self._uid_to_comp = root._uid_to_comp
+            root._attach_to_app(self._queue)
+            self._is_external_root = True
+        else:
+            root = mui.FlexBox(uid_to_comp=self._uid_to_comp,
+                            inited=True,
+                            uid=_ROOT,
+                            queue=self._queue)
+            root.prop(flex_flow=flex_flow,
+                    justify_content=justify_content,
+                    align_items=align_items)
         self._uid_to_comp[_ROOT] = root
         self.root = root
         self._enable_editor = False
@@ -201,6 +216,14 @@ class App:
 
         self.__flowapp_master_meta = MasterMeta()
         self.__flowapp_storage_cache: Dict[str, StorageDataItem] = {}
+
+    def _get_user_app_object(self):
+        if self._is_external_root:
+            if self.root._wrapped_obj is not None:
+                return self.root._wrapped_obj
+            return self.root 
+        else:
+            return self
 
     async def save_data_storage(self,
                                 key: str,
@@ -628,11 +651,12 @@ class EditableApp(App):
                  justify_content: Union[str, Undefined] = undefined,
                  align_items: Union[str, Undefined] = undefined,
                  maxqsize: int = 10,
-                 observed_files: Optional[List[str]] = None) -> None:
-        super().__init__(flex_flow, justify_content, align_items, maxqsize)
+                 observed_files: Optional[List[str]] = None,
+                 external_root: Optional[mui.FlexBox] = None) -> None:
+        super().__init__(flex_flow, justify_content, align_items, maxqsize, external_root=external_root)
         self._use_app_editor = use_app_editor
         if use_app_editor:
-            lines, lineno = inspect.findsource(type(self))
+            lines, lineno = inspect.findsource(type(self._get_user_app_object()))
             self.code_editor.value = "".join(lines)
             self.code_editor.language = "python"
             self.code_editor.set_init_line_number(lineno)
@@ -765,8 +789,15 @@ class EditableApp(App):
         #     cb = v.get_callback()
         #     if cb is not None:
         #         callback_dict[k] = cb
-        new_cb, code_changed = self._get_app_dynamic_cls().reload_obj_methods(
-            self, {})
+        if self._is_external_root:
+            obj = self.root
+            if self.root._wrapped_obj is not None:
+                obj = self.root._wrapped_obj
+            new_cb, code_changed = self._get_app_dynamic_cls().reload_obj_methods(
+                obj, {})
+        else:
+            new_cb, code_changed = self._get_app_dynamic_cls().reload_obj_methods(
+                self, {})
         self._get_app_service_unit().reload_metas()
         # for k, v in comps.items():
         #     if k in new_cb:
@@ -791,6 +822,7 @@ class EditableApp(App):
                     if layout_func_changed:
                         await self._app_run_layout_function(
                             True, with_code_editor=False, reload=True)
+                    self.__reload_callback(app_path, True)
         return
 
 
@@ -801,6 +833,8 @@ class EditableLayoutApp(EditableApp):
                  justify_content: Union[str, Undefined] = undefined,
                  align_items: Union[str, Undefined] = undefined,
                  maxqsize: int = 10,
-                 observed_files: Optional[List[str]] = None) -> None:
+                 observed_files: Optional[List[str]] = None,
+                 external_root: Optional[mui.FlexBox] = None) -> None:
         super().__init__(True, use_app_editor, flex_flow, justify_content,
-                         align_items, maxqsize, observed_files)
+                         align_items, maxqsize, observed_files, 
+                         external_root=external_root)

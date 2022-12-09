@@ -723,6 +723,17 @@ def init_anno_fwd(
 T_child = TypeVar("T_child")
 
 
+def _get_obj_def_path(obj):
+    try:
+        _flow_comp_def_path = str(Path(inspect.getfile(builtins.type(obj))).resolve())
+    except:
+        traceback.print_exc()
+        _flow_comp_def_path = ""
+    path = Path(_flow_comp_def_path)
+    if not path.exists() or path.suffix != ".py":
+        _flow_comp_def_path = ""
+    return _flow_comp_def_path
+
 class Component(Generic[T_base_props, T_child]):
     def __init__(self,
                  type: UIType,
@@ -748,14 +759,7 @@ class Component(Generic[T_base_props, T_child]):
         if allowed_events is not None:
             self._flow_allowed_events = set(allowed_events)
         self._flow_user_data: Any = None
-        try:
-            self._flow_comp_def_path = str(Path(inspect.getfile(builtins.type(self))).resolve())
-        except:
-            traceback.print_exc()
-            self._flow_comp_def_path = ""
-        path = Path(self._flow_comp_def_path)
-        if not path.exists() or path.suffix != ".py":
-            self._flow_comp_def_path = ""
+        self._flow_comp_def_path = _get_obj_def_path(self)
         
     @property
     def props(self) -> T_base_props:

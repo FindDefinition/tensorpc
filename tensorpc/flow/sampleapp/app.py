@@ -1037,3 +1037,15 @@ class SampleUIApp(EditableApp):
             mui.MultipleAutocomplete("Movies", self.options).prop(variant="checkbox", disable_close_on_select=True)
         ]
 
+class AnyLayout:
+    def __init__(self) -> None:
+        super().__init__()
+
+
+    def tensorpc_flow_layout(self):
+        return mui.FlexBox([
+            mui.Button("Hi", self.handle_click)
+        ])
+
+    def handle_click(self):
+        print("???2X???")

@@ -14,6 +14,7 @@
 
 import asyncio
 import base64
+import copy
 import dataclasses
 import enum
 import inspect
@@ -38,8 +39,9 @@ from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     Fragment, FrontendEventType, NumberType, T_base_props,
                     T_child, T_container_props, TaskLoopEvent, UIEvent,
                     UIRunStatus, UIType, Undefined, ValueType, undefined,
-                    create_ignore_usr_msg, ALL_POINTER_EVENTS)
-
+                    create_ignore_usr_msg, ALL_POINTER_EVENTS,
+                    _get_obj_def_path)
+from tensorpc.flow.constants import TENSORPC_ANYLAYOUT_FUNC_NAME
 if TYPE_CHECKING:
     from .three import ThreeCanvas
 
@@ -684,7 +686,7 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
     
-    async def update_items(self, btns: List[ToggleButton], value: Optional[ValueType] = None):
+    async def update_items(self, btns: List[ToggleButton], value: Optional[Union[ValueType, List[ValueType]]] = None):
         name_or_icons = []
         values = []
         for v in btns:
@@ -860,7 +862,8 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
                  base_type: UIType = UIType.FlexBox,
                  inited: bool = False,
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
+                 queue: Optional[asyncio.Queue] = None,
+                 wrapped_obj: Optional[Any] = None) -> None:
         if children is not None and isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(base_type,
@@ -870,6 +873,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
                          inited,
                          uid=uid,
                          queue=queue)
+        self._wrapped_obj = wrapped_obj
 
     @property
     def prop(self):
@@ -2344,3 +2348,17 @@ class LinearProgress(MUIComponentBase[LinearProgressProps]):
     async def update_value(self, value: NumberType):
         value = min(max(value, 0), 100)
         await self.send_and_wait(self.update_event(value=value))
+
+def flex_wrapper(obj: Any):
+    """wrap a object which define a layout function "tensorpc_flow_layout"
+    enable simple layout creation for arbitrary object without inherit
+    """
+    func_name = TENSORPC_ANYLAYOUT_FUNC_NAME
+    assert hasattr(obj, func_name), f"wrapped object must define a zero-arg function {func_name} that return a flexbox"
+    layout_flex = getattr(obj, func_name)()
+    assert isinstance(layout_flex, FlexBox), f"{func_name} must return a flexbox"
+    # set _flow_comp_def_path to this object
+    layout_flex._flow_comp_def_path = _get_obj_def_path(obj)
+    layout_flex._wrapped_obj = obj
+    return layout_flex
+

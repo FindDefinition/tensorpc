@@ -24,7 +24,7 @@ class DownloadFromSSH(EditableLayoutApp):
     def app_create_layout(self) -> Dict[str, Component]:
         self.ssh_url = mui.Input("Url")
         self.ssh_username = mui.Input("Username")
-        self.ssh_password = mui.Input("Password", password=True)
+        self.ssh_password = mui.Input("Password").prop(type="password")
 
         self.ssh_files = mui.Input("Files", True)
         self.target_loc = mui.Input("Target")

@@ -15,8 +15,9 @@
 import pickle
 from typing import Any, Dict, List, Optional
 from tensorpc.flow.coretypes import ScheduleEvent, get_uid
+from tensorpc.flow.flowapp.components.mui import FlexBox, flex_wrapper
 from tensorpc.flow.flowapp.core import AppEditorFrontendEvent, AppEvent, AppEventType, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UISaveStateEvent
-from tensorpc.flow.flowapp.app import App
+from tensorpc.flow.flowapp.app import App, EditableApp
 import asyncio
 from tensorpc.core import marker
 from tensorpc.core.httpclient import http_remote_call
@@ -52,9 +53,19 @@ class FlowApp:
             self._uid = ""
         self.headless = headless
         self.dynamic_app_cls = ReloadableDynamicClass(module_name)
-        self.app: App = self.dynamic_app_cls.obj_type(**self.config)
+        obj = self.dynamic_app_cls.obj_type(**self.config)
+        if isinstance(obj, App):
+            self.app: App = obj
+        elif isinstance(obj, FlexBox):
+            # external root
+            external_root = obj
+            self.app: App = EditableApp(external_root=external_root)
+        else:
+            # other object, must declare a tensorpc_flow_layout
+            external_root = flex_wrapper(obj)
+            self.app: App = EditableApp(external_root=external_root)
         self.app_su = ServiceUnit(module_name, config)
-        self.app_su.init_service(self.app)
+        self.app_su.init_service(obj)
         self.app._app_dynamic_cls = self.dynamic_app_cls
         self.app._app_service_unit = self.app_su
         self.app._flow_app_is_headless = headless
