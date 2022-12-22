@@ -197,7 +197,7 @@ class ReloadableDynamicClass(DynamicClass):
             v_static = inspect.getattr_static(type_obj, k)
             app_meta: Optional[AppFunctionMeta] = None
             if hasattr(v_static, TENSORPC_FLOW_FUNC_META_KEY):
-                app_meta = getattr(v_static, TENSORPC_FUNC_META_KEY)
+                app_meta = getattr(v_static, TENSORPC_FLOW_FUNC_META_KEY)
 
             v_sig = inspect.signature(v)
             serv_meta = ServFunctionMeta(v, k, ServiceType.Normal, v_sig, is_gen,
@@ -382,7 +382,7 @@ class ServiceUnit(DynamicClass):
                                                 is_static, meta.is_dynamic)
             app_meta: Optional[AppFunctionMeta] = None
             if hasattr(v_static, TENSORPC_FLOW_FUNC_META_KEY):
-                app_meta = getattr(v_static, TENSORPC_FUNC_META_KEY)
+                app_meta = getattr(v_static, TENSORPC_FLOW_FUNC_META_KEY)
 
             if serv_type == ServiceType.Exit:
                 assert self.exit_fn is None, "you can only register one exit"

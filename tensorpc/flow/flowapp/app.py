@@ -371,20 +371,21 @@ class App:
         self.root._flow_uid = _ROOT
         new_is_flex = False
         res: mui.LayoutType = {}
+        wrapped_obj = self.root._wrapped_obj
         try:
             if decorator_fn is not None:
                 temp_res = decorator_fn()
                 if isinstance(temp_res, mui.FlexBox):
+                    temp_res._flow_uid = _ROOT
                     if temp_res._children is not None:
                         # consume this _children
                         temp_res.add_layout(temp_res._children)
                         temp_res._children = None
-                    temp_res._flow_uid = _ROOT
                     temp_res._attach_to_app(self._queue)
                     self._uid_to_comp = temp_res._uid_to_comp
                     new_is_flex = True 
                     self.root = temp_res
-                    
+                    self.root._wrapped_obj = wrapped_obj
                 else:
                     res = temp_res
             else:
@@ -808,7 +809,7 @@ class EditableApp(App):
                                     app_reload_complete = True
                         if not app_reload_complete:
                             # TODO legacy method, will be deprecated soon.
-                            code_changed = [m[0].name for m in code_changed_metas]
+                            code_changed = [m[0].qualname for m in code_changed_metas]
                             layout_func_changed = type(self).app_create_layout.__qualname__ in code_changed
                             if layout_func_changed:
                                 fut = asyncio.run_coroutine_threadsafe(
@@ -821,7 +822,6 @@ class EditableApp(App):
                 except:
                     traceback.print_exc()
                     return
-
 
     def _reload_app_file(self):
         comps = self._uid_to_comp
@@ -859,8 +859,6 @@ class EditableApp(App):
                     if self._flow_comp_mgr is not None:
                         self._flow_comp_mgr.update_code_from_editor(app_path, event.data)
                     code_changed_metas = self._reload_app_file()
-
-                    code_changed = [m[0].name for m in code_changed_metas]
                     app_reload_complete = False
                     for m, c in code_changed_metas:
                         if hasattr(m.fn, TENSORPC_FLOW_FUNC_META_KEY):
@@ -869,12 +867,13 @@ class EditableApp(App):
                                 asyncio.create_task(_run_zeroarg_func(c))
                             elif meta.type == AppFuncType.CreateLayout and not app_reload_complete:
                                 await self._app_run_layout_function(
-                                    True, with_code_editor=False, reload=True)
+                                    True, with_code_editor=False, reload=True, decorator_fn=c)
                                 app_reload_complete = True
                     if not app_reload_complete:
                         # TODO legacy method, will be deprecated soon.
-                        code_changed = [m[0].name for m in code_changed_metas]
+                        code_changed = [m[0].qualname for m in code_changed_metas]
                         layout_func_changed = type(self).app_create_layout.__qualname__ in code_changed
+                        print(layout_func_changed, code_changed)
                         if layout_func_changed:
                             await self._app_run_layout_function(
                                 True, with_code_editor=False, reload=True)
