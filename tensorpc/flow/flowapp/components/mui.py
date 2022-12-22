@@ -31,6 +31,7 @@ from PIL import Image as PILImage
 from typing_extensions import Literal, TypeAlias
 
 from tensorpc.core.asynctools import cancel_task
+from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass
 from tensorpc.flow.flowapp.components.common import (handle_standard_event)
 
 from .. import colors
@@ -2353,12 +2354,14 @@ def flex_wrapper(obj: Any):
     """wrap a object which define a layout function "tensorpc_flow_layout"
     enable simple layout creation for arbitrary object without inherit
     """
-    func_name = TENSORPC_ANYLAYOUT_FUNC_NAME
-    assert hasattr(obj, func_name), f"wrapped object must define a zero-arg function {func_name} that return a flexbox"
-    layout_flex = getattr(obj, func_name)()
-    assert isinstance(layout_flex, FlexBox), f"{func_name} must return a flexbox"
-    # set _flow_comp_def_path to this object
-    layout_flex._flow_comp_def_path = _get_obj_def_path(obj)
-    layout_flex._wrapped_obj = obj
-    return layout_flex
-
+    metas = ReloadableDynamicClass.get_metas_of_regular_methods(type(obj))
+    for m in metas:
+        if m.user_app_meta is not None:
+            if m.user_app_meta.type == AppFuncType.CreateLayout:
+                layout_flex = getattr(obj, m.name)()
+                assert isinstance(layout_flex, FlexBox), f"{m.name} must return a flexbox"
+                # set _flow_comp_def_path to this object
+                layout_flex._flow_comp_def_path = _get_obj_def_path(obj)
+                layout_flex._wrapped_obj = obj
+                return layout_flex
+    raise ValueError(f"wrapped object must define a zero-arg function with @marker.mark_create_layout and return a flexbox")

@@ -1179,6 +1179,9 @@ class FlowGraph:
         self._update_connection(edges)
 
         self.graph_id = graph_id
+        self.group = None 
+        if "group" in graph_data:
+            self.group = graph_data["group"]
 
         self.messages: Dict[str, Message] = {}
 
@@ -1270,20 +1273,26 @@ class FlowGraph:
         return list(filter(lambda x: x.driver_id == driver.id, self.nodes))
 
     def to_dict(self):
-        return {
+        res = {
             "viewport": self.viewport,
             "nodes": [n.to_dict() for n in self.nodes],
             "edges": [n.raw_data for n in self.edges],
             "id": self.graph_id,
         }
+        if self.group is not None:
+            res["group"] = self.group 
+        return res 
 
     def to_save_dict(self):
-        return {
+        res = {
             "viewport": self.viewport,
             "nodes": [n.to_save_dict() for n in self.nodes],
             "edges": [n.raw_data for n in self.edges],
             "id": self.graph_id,
         }
+        if self.group is not None:
+            res["group"] = self.group 
+        return res 
 
     async def update_graph(self, graph_id: str, new_flow_data):
         """TODO delete message when node is deleted.
@@ -1292,7 +1301,8 @@ class FlowGraph:
         new_graph_data = new_flow_data
         if "viewport" in new_graph_data:
             self.viewport = new_graph_data["viewport"]
-        
+        if "group" in new_flow_data:
+            self.group = new_flow_data["group"]
         self.graph_id = graph_id
         nodes = [
             _TYPE_TO_NODE_CLS[d["type"]](d, graph_id)

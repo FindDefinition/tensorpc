@@ -41,10 +41,11 @@ import watchdog.events
 from PIL import Image
 from watchdog.observers import Observer
 from tensorpc import simple_chunk_call_async
-from tensorpc.constants import PACKAGE_ROOT
+from tensorpc.constants import PACKAGE_ROOT, TENSORPC_FLOW_FUNC_META_KEY
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceUnit
 from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem, get_object_type_meta
+from tensorpc.flow.marker import AppFuncType, AppFunctionMeta
 from tensorpc.flow.serv_names import serv_names
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.reload import reload_method
@@ -351,7 +352,8 @@ class App:
     async def _app_run_layout_function(self,
                                        send_layout_ev: bool = False,
                                        with_code_editor: bool = True,
-                                       reload: bool = False):
+                                       reload: bool = False,
+                                       decorator_fn: Optional[Callable[[], Union[mui.LayoutType, mui.FlexBox]]] = None):
         self.root._prevent_add_layout = False
         prev_comps = self.__previous_error_sync_props.copy()
         prev_user_states = self.__previous_error_persist_state.copy()
@@ -367,10 +369,26 @@ class App:
         await self.root._clear()
         self._uid_to_comp.clear()
         self.root._flow_uid = _ROOT
+        new_is_flex = False
+        res: mui.LayoutType = {}
         try:
-            res = self.app_create_layout()
-            if isinstance(res, list):
-                res = {str(i): v for i, v in enumerate(res)}
+            if decorator_fn is not None:
+                temp_res = decorator_fn()
+                if isinstance(temp_res, mui.FlexBox):
+                    if temp_res._children is not None:
+                        # consume this _children
+                        temp_res.add_layout(temp_res._children)
+                        temp_res._children = None
+                    temp_res._flow_uid = _ROOT
+                    temp_res._attach_to_app(self._queue)
+                    self._uid_to_comp = temp_res._uid_to_comp
+                    new_is_flex = True 
+                    self.root = temp_res
+                    
+                else:
+                    res = temp_res
+            else:
+                res = self.app_create_layout()
             self.__previous_error_sync_props.clear()
             self.__previous_error_persist_state.clear()
         except Exception as e:
@@ -394,8 +412,12 @@ class App:
                             self._get_fallback_layout(fbm, with_code_editor))
                     }))
             return
-        res_anno: Dict[str, Component] = {**res}
-        self.root.add_layout(res_anno)
+        if not new_is_flex:
+            if isinstance(res, list):
+                res = {str(i): v for i, v in enumerate(res)}
+            res_anno: Dict[str, Component] = {**res}
+            self.root.add_layout(res_anno)
+
         self._uid_to_comp[_ROOT] = self.root
         self.root._prevent_add_layout = True
         if reload:
@@ -754,6 +776,7 @@ class EditableApp(App):
                 if not self._flow_comp_mgr.update_code(ev.src_path):
                     return 
                 new_data = self._flow_comp_mgr.get_code(ev.src_path)
+                # parse first to show syntax error to users.
                 try:
                     ast.parse(new_data, filename=ev.src_path)
                 except:
@@ -767,14 +790,32 @@ class EditableApp(App):
                             fut = asyncio.run_coroutine_threadsafe(
                                 self.set_editor_value(new_data), self._loop)
                             fut.result()
-                        code_changed = self._reload_app_file()
-                        layout_func_changed = type(self).app_create_layout.__qualname__ in code_changed
-                        if layout_func_changed:
-                            fut = asyncio.run_coroutine_threadsafe(
-                                self._app_run_layout_function(
-                                    True, with_code_editor=False, reload=True),
-                                self._loop)
-                            fut.result()
+                        code_changed_metas = self._reload_app_file()
+                        app_reload_complete = False
+                        for m, c in code_changed_metas:
+                            if m.user_app_meta is not None:
+                                meta: AppFunctionMeta = m.user_app_meta
+                                if meta.type == AppFuncType.AutoRun:
+                                    asyncio.run_coroutine_threadsafe(
+                                        _run_zeroarg_func(c),
+                                        self._loop)
+                                elif meta.type == AppFuncType.CreateLayout and not app_reload_complete:
+                                    fut = asyncio.run_coroutine_threadsafe(
+                                        self._app_run_layout_function(
+                                            True, with_code_editor=False, reload=True, decorator_fn=c),
+                                        self._loop)
+                                    fut.result()
+                                    app_reload_complete = True
+                        if not app_reload_complete:
+                            # TODO legacy method, will be deprecated soon.
+                            code_changed = [m[0].name for m in code_changed_metas]
+                            layout_func_changed = type(self).app_create_layout.__qualname__ in code_changed
+                            if layout_func_changed:
+                                fut = asyncio.run_coroutine_threadsafe(
+                                    self._app_run_layout_function(
+                                        True, with_code_editor=False, reload=True),
+                                    self._loop)
+                                fut.result()
                     already_reloaded = is_app_file_changed
                     self.__reload_callback(resolved_path, already_reloaded)
                 except:
@@ -817,11 +858,27 @@ class EditableApp(App):
                     # self._watchdog_prev_content = event.data
                     if self._flow_comp_mgr is not None:
                         self._flow_comp_mgr.update_code_from_editor(app_path, event.data)
-                    code_changed = self._reload_app_file()
-                    layout_func_changed = type(self).app_create_layout.__qualname__ in code_changed
-                    if layout_func_changed:
-                        await self._app_run_layout_function(
-                            True, with_code_editor=False, reload=True)
+                    code_changed_metas = self._reload_app_file()
+
+                    code_changed = [m[0].name for m in code_changed_metas]
+                    app_reload_complete = False
+                    for m, c in code_changed_metas:
+                        if hasattr(m.fn, TENSORPC_FLOW_FUNC_META_KEY):
+                            meta: AppFunctionMeta = getattr(m.fn, TENSORPC_FLOW_FUNC_META_KEY)
+                            if meta.type == AppFuncType.AutoRun:
+                                asyncio.create_task(_run_zeroarg_func(c))
+                            elif meta.type == AppFuncType.CreateLayout and not app_reload_complete:
+                                await self._app_run_layout_function(
+                                    True, with_code_editor=False, reload=True)
+                                app_reload_complete = True
+                    if not app_reload_complete:
+                        # TODO legacy method, will be deprecated soon.
+                        code_changed = [m[0].name for m in code_changed_metas]
+                        layout_func_changed = type(self).app_create_layout.__qualname__ in code_changed
+                        if layout_func_changed:
+                            await self._app_run_layout_function(
+                                True, with_code_editor=False, reload=True)
+
                     self.__reload_callback(app_path, True)
         return
 
@@ -838,3 +895,13 @@ class EditableLayoutApp(EditableApp):
         super().__init__(True, use_app_editor, flex_flow, justify_content,
                          align_items, maxqsize, observed_files, 
                          external_root=external_root)
+
+
+async def _run_zeroarg_func(cb: Callable):
+    try:
+        coro = cb()
+        if inspect.iscoroutine(coro):
+            await coro
+    except:
+        traceback.print_exc()
+

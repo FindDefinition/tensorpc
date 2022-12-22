@@ -21,7 +21,7 @@ from tensorpc.flow.flowapp.app import App, EditableApp
 import asyncio
 from tensorpc.core import marker
 from tensorpc.core.httpclient import http_remote_call
-from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceUnit
+from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServiceUnit
 import tensorpc
 from ..client import MasterMeta
 from tensorpc import prim
@@ -76,7 +76,15 @@ class FlowApp:
     @marker.mark_async_init
     async def init(self):
         if self.app._force_special_layout_method:
-            await self.app._app_run_layout_function()
+            layout_created = False
+            for meta in self.app_su.serv_metas:
+                if meta.user_app_meta is not None:
+                    if meta.user_app_meta.type == AppFuncType.CreateLayout:
+                        await self.app._app_run_layout_function(decorator_fn=meta.fn)
+                        layout_created = True
+            if not layout_created:
+                await self.app._app_run_layout_function()
+
         lay = self.app._get_app_layout()
         self.app.app_initialize()
         await self.app.app_initialize_async()

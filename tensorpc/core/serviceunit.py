@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple
 import uuid
 
-from tensorpc.constants import TENSORPC_FUNC_META_KEY, TENSORPC_SPLIT
+from tensorpc.constants import TENSORPC_FLOW_FUNC_META_KEY, TENSORPC_FUNC_META_KEY, TENSORPC_SPLIT
 from tensorpc.core import inspecttools
 from tensorpc.core.defs import DynamicEvent
 import importlib.util
@@ -59,6 +59,23 @@ class ServiceType(Enum):
     WebSocketOnConnect = "WebSocketOnConnect"  # only support ws
     WebSocketOnDisConnect = "WebSocketOnDisConnect"  # only support ws
 
+class AppFuncType(Enum):
+    CreateLayout = "CreateLayout"
+    AutoRun = "AutoRun"
+
+class AppFunctionMeta:
+
+    def __init__(self,
+                 type: AppFuncType,
+                 name: str = "") -> None:
+        self.type = type
+        self.name = name
+
+    def to_dict(self):
+        return {
+            "type": self.type.value,
+            "name": self.name
+        }
 
 @dataclasses.dataclass
 class ServFunctionMeta:
@@ -72,10 +89,12 @@ class ServFunctionMeta:
     is_binded: bool
     code: str = ""
     qualname: str = ""
+    user_app_meta: Optional[AppFunctionMeta] = None 
 
     def __init__(self, fn: Callable, name: str, type: ServiceType,
                  sig: inspect.Signature, is_gen: bool, is_async: bool,
-                 is_static: bool, is_binded: bool, qualname: str = "") -> None:
+                 is_static: bool, is_binded: bool, qualname: str = "",
+                 user_app_meta: Optional[AppFunctionMeta] = None ) -> None:
         self.name = name
         self.type = type
         self.args = [ParamMeta(n, p) for n, p in sig.parameters.items()]
@@ -88,8 +107,13 @@ class ServFunctionMeta:
         self.fn = fn
         self.code = ""
         self.qualname = qualname
+        self.user_app_meta = user_app_meta
 
     def to_json(self):
+        if self.user_app_meta is not None:
+            user_app_meta = self.user_app_meta.to_dict()
+        else:
+            user_app_meta = None
         return {
             "name": self.name,
             "type": self.type.value,
@@ -99,6 +123,7 @@ class ServFunctionMeta:
             "is_static": self.is_static,
             "is_binded": self.is_binded,
             "code": self.code,
+            "user_app_meta": user_app_meta,
         }
 
 class DynamicClass:
@@ -169,9 +194,15 @@ class ReloadableDynamicClass(DynamicClass):
             is_static = inspecttools.isstaticmethod(type_obj, k)
             if is_async:
                 is_gen = is_async_gen
+            v_static = inspect.getattr_static(type_obj, k)
+            app_meta: Optional[AppFunctionMeta] = None
+            if hasattr(v_static, TENSORPC_FLOW_FUNC_META_KEY):
+                app_meta = getattr(v_static, TENSORPC_FUNC_META_KEY)
+
             v_sig = inspect.signature(v)
             serv_meta = ServFunctionMeta(v, k, ServiceType.Normal, v_sig, is_gen,
-                                         is_async, is_static, False, qualname=v.__qualname__)
+                                         is_async, is_static, False, qualname=v.__qualname__,
+                                         user_app_meta=app_meta)
             code, _ = inspect.getsourcelines(v)
             serv_meta.code = "".join(code)
             serv_metas.append(serv_meta)
@@ -194,6 +225,7 @@ class ReloadableDynamicClass(DynamicClass):
         # new_name_to_meta = {m.name: m for m in new_metas}
         name_to_meta = {m.name: m for m in self.serv_metas}
         code_changed_cb: List[str] = []
+        code_changed_metas: List[Tuple[ServFunctionMeta, Callable]] = []
         for new_meta in new_metas:
             if not new_meta.is_static:
                 new_method =  types.MethodType(new_meta.fn, obj)
@@ -207,12 +239,13 @@ class ReloadableDynamicClass(DynamicClass):
                     new_cb[callback_inv_dict[method]] = new_method
                 if new_meta.code != meta.code:
                     code_changed_cb.append(new_meta.qualname)
+                    code_changed_metas.append((new_meta, new_method))
             else:
                 setattr(obj, new_meta.name, new_method)
         self.serv_metas = new_metas
         self.obj_type = new_obj_type
 
-        return new_cb, code_changed_cb
+        return new_cb, code_changed_metas
 
 
 def get_cls_obj_from_module_name(module_name: str):
@@ -347,6 +380,10 @@ class ServiceUnit(DynamicClass):
                     # self.events.append(EventProvider(serv_key, meta.event_name, v, is_static))
                     ev_provider = EventProvider(serv_key, meta.event_name, v,
                                                 is_static, meta.is_dynamic)
+            app_meta: Optional[AppFunctionMeta] = None
+            if hasattr(v_static, TENSORPC_FLOW_FUNC_META_KEY):
+                app_meta = getattr(v_static, TENSORPC_FUNC_META_KEY)
+
             if serv_type == ServiceType.Exit:
                 assert self.exit_fn is None, "you can only register one exit"
                 self.exit_fn = v
@@ -362,7 +399,7 @@ class ServiceUnit(DynamicClass):
                 self.ws_ondisconn_fn = v
 
             serv_meta = ServFunctionMeta(v, k, serv_type, v_sig, is_gen,
-                                         is_async, is_static, False)
+                                         is_async, is_static, False, user_app_meta=app_meta)
             # if module_name == "distflow.services.for_test:Service2:Test3" and k == "client_stream":
             #     print(dir(v))
             # print(module_name, serv_meta, is_async, is_async_gen)

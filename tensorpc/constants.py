@@ -8,6 +8,8 @@ PACKAGE_ROOT = Path(__file__).parent.resolve()
 
 
 TENSORPC_FUNC_META_KEY = "__tensorpc_func_meta"
+TENSORPC_FLOW_FUNC_META_KEY = "__tensorpc_flow_func_meta"
+
 TENSORPC_CLASS_META_KEY = "__tensorpc_class_meta"
 
 TENSORPC_WEBSOCKET_MSG_SIZE = (4 << 20) - 128

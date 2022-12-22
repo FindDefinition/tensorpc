@@ -40,9 +40,9 @@ from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from ..flowapp.core import Component
 from tensorpc.core import prim
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.flow.flowapp.components import three, mui, leaflet, plus, plotly
+from tensorpc.flow.flowapp import three, mui, leaflet, plus, plotly
 import numpy as np
-
+from tensorpc.flow import mark_autorun, marker
 
 class SampleApp(App):
 
@@ -560,6 +560,10 @@ class SampleThreePointsApp(EditableApp):
         await self.points.set_colors_in_range("red", *self.prev_range)
 
 
+    @mark_autorun
+    def wtf(self):
+        print("RTD?")
+
 class SampleTestApp(App):
 
     def __init__(self) -> None:
@@ -1041,8 +1045,8 @@ class AnyLayout:
     def __init__(self) -> None:
         super().__init__()
 
-
-    def tensorpc_flow_layout(self):
+    @marker.mark_create_layout
+    def my_layout(self):
         return mui.FlexBox([
             mui.Button("Hi", self.handle_click)
         ])

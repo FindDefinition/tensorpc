@@ -7,6 +7,8 @@ def meta_decorator(func=None, meta: Optional[FunctionUserMeta] = None, name: Opt
         raise ValueError("this shouldn't happen")
 
     def wrapper(func):
+        if meta is None:
+            raise ValueError("this shouldn't happen")
         if meta.type == ServiceType.WebSocketEventProvider:
             name_ = func.__name__
             if name is not None:
