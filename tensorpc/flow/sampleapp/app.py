@@ -14,35 +14,38 @@
 
 import asyncio
 import base64
-from functools import partial
+import dataclasses
+import enum
 import io
 import time
 import traceback
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union
-import dataclasses
-from typing_extensions import Literal
+
 import cv2
-import enum
 import imageio
+import numpy as np
 from faker import Faker
+from typing_extensions import Literal
+
 import tensorpc
-from tensorpc.flow.client import AsyncAppClient, add_message, AppClient
+from tensorpc.core import prim
+from tensorpc.core.asynctools import cancel_task
+from tensorpc.flow import mark_autorun, marker
+from tensorpc.flow.client import AppClient, AsyncAppClient, add_message
 from tensorpc.flow.coretypes import MessageLevel, ScheduleEvent
-from tensorpc.flow.flowapp import App, EditableApp
-from tensorpc.flow.flowapp.app import EditableLayoutApp
+from tensorpc.flow.flowapp import (App, EditableApp, EditableLayoutApp,
+                                   leaflet, mui, plotly, plus, three)
 from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
                                                   ListItemText,
                                                   MUIComponentType, VBox,
                                                   VList)
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
+
 from ..flowapp.core import Component
-from tensorpc.core import prim
-from tensorpc.core.asynctools import cancel_task
-from tensorpc.flow.flowapp import three, mui, leaflet, plus, plotly
-import numpy as np
-from tensorpc.flow import mark_autorun, marker
+
 
 class SampleApp(App):
 
@@ -50,6 +53,8 @@ class SampleApp(App):
         super().__init__()
         self.img_ui = mui.Images()
         self.task_loop = mui.TaskLoop("Test", self.on_task_loop)
+        self.swi = mui.Switch("Switch Dynamic Layout", self.on_switch)
+        self.swi_box = mui.FlexBox()
         self.root.add_layout({
             "btn":
             mui.ButtonGroup({
@@ -69,7 +74,9 @@ class SampleApp(App):
             "btn2":
             mui.Button("Sleep", self.on_one_button_click),
             "swi":
-            mui.Switch("Switch", self.on_switch),
+            self.swi,
+            "swi_box": self.swi_box,
+
             "inp":
             mui.Input("Image Path", callback=self.on_input_change),
             "img_ui":
@@ -127,6 +134,12 @@ class SampleApp(App):
             print("SLEEP FINISHED")
 
     async def on_switch(self, checked: bool):
+        if checked:
+            await self.swi_box.set_new_layout({
+                "wtf": mui.Typography("Dynamic Layout")
+            })
+        else:
+            await self.swi_box.set_new_layout({})
         print(checked)
 
     async def on_input_change(self, value: str):

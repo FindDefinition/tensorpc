@@ -471,22 +471,28 @@ class LayoutEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.UpdateComponents.value)
 class UpdateComponentsEvent:
-    def __init__(self, data: Dict[str, Any]) -> None:
+    def __init__(self, data: Dict[str, Any], deleted: Optional[List[str]] = None) -> None:
         self.data = data
+        if deleted is None:
+            deleted = []
+        self.deleted = deleted
 
     def to_dict(self):
-        return self.data
+        return {
+            "new": self.data,
+            "del": self.deleted,
+        }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]):
-        return cls(data)
+        return cls(data["new"], data["del"])
 
     def merge_new(self, new):
         assert isinstance(new, UpdateComponentsEvent)
         return UpdateComponentsEvent({
             **new.data,
             **self.data,
-        })
+        }, list(set(self.deleted + new.deleted)))
 
 
 @ALL_APP_EVENTS.register(key=AppEventType.DeleteComponents.value)
@@ -760,6 +766,7 @@ class Component(Generic[T_base_props, T_child]):
             self._flow_allowed_events = set(allowed_events)
         self._flow_user_data: Any = None
         self._flow_comp_def_path = _get_obj_def_path(self)
+        self._flow_reference_count = 0
         
     @property
     def props(self) -> T_base_props:
@@ -769,8 +776,25 @@ class Component(Generic[T_base_props, T_child]):
     def propcls(self) -> Type[T_base_props]:
         return self.__prop_cls
 
+    def _attach(self, uid: str, queue: asyncio.Queue):
+        if self._flow_reference_count == 0:
+            self._flow_uid = uid
+            self._queue = queue
+        self._flow_reference_count += 1
+
+    def _detach(self) -> dict:
+        self._flow_reference_count -= 1
+        if self._flow_reference_count == 0:
+            res_uid = self._flow_uid
+            self._flow_uid = ""
+            self._queue = None
+            return {
+                res_uid: self
+            }
+        return {}
+
     def is_mounted(self):
-        return self._queue is not None
+        return self._queue is not None 
 
     def _prop_base(self, prop: Callable[P, Any], this: T3) -> Callable[P, T3]:
         def wrapper(*args: P.args, **kwargs: P.kwargs):
@@ -959,8 +983,8 @@ class Component(Generic[T_base_props, T_child]):
         if self.is_mounted():
             await ev.sent_event.wait()
 
-    def create_update_comp_event(self, updates: Dict[str, Any]):
-        ev = UpdateComponentsEvent(updates)
+    def create_update_comp_event(self, updates: Dict[str, Any], deleted: Optional[List[str]]):
+        ev = UpdateComponentsEvent(updates, deleted)
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UpdateComponents: ev})
 
@@ -1039,59 +1063,107 @@ class ContainerBase(Component[T_container_props, T_child]):
                  queue: Optional[asyncio.Queue] = None) -> None:
         super().__init__(base_type, prop_cls, allowed_events, uid, queue)
         if inited:
-            assert queue is not None and uid_to_comp is not None
+            assert queue is not None # and uid_to_comp is not None
         if uid_to_comp is None:
             uid_to_comp = {}
         self._pool = UniqueNamePool()
         self._uid_to_comp = uid_to_comp
-        self._children = _children
-
+        if _children is None:
+            _children = {}
+        # self._children = _children
+        self._child_comps: Dict[str, Component] = {}
+        for k, v in _children.items():
+            assert isinstance(v, Component)
+            self._child_comps[k] = v
         # self.props.childs: List[str] = []
-
         self.inited = inited
         self._prevent_add_layout = False
 
+    def _get_comp_by_uid(self, uid: str):
+        parts = uid.split(".")
+        # uid contains root, remove it at first.
+        return self._get_comp_by_uid_resursive(parts[1:])
+        
+    def _get_comp_by_uid_resursive(self, parts: List[str]) -> Component:
+        key = parts[0]
+        assert key in self._child_comps
+        child_comp = self._child_comps[key]
+        if len(parts) == 1:
+            return self._child_comps[key]
+        else:
+            assert isinstance(child_comp, ContainerBase)
+            return child_comp._get_comp_by_uid_resursive(parts[1:])
+
+    def _foreach_comp_recursive(self, child_ns: str, handler: Callable[[str, Component], None]):
+        for k, v in self._child_comps.items():
+            child_uid = f"{child_ns}.{k}"
+            if isinstance(v, ContainerBase):
+                handler(child_uid, v)
+                v._foreach_comp_recursive(child_uid, handler)
+            else:
+                handler(child_uid, v)
+
+    def _foreach_comp(self, handler: Callable[[str, Component], None]):
+        assert self._flow_uid != "", "_flow_uid must be set before modify_comp"
+        handler(self._flow_uid, self)
+        self._foreach_comp_recursive(self._flow_uid, handler)
+
+    def _update_uid(self):
+        def handler(uid, v: Component):
+            v._flow_uid = uid
+        self._foreach_comp(handler)
+
+    def _detach(self):
+        disposed_uids: Dict[str, Component] = super()._detach()
+        for v in self._child_comps.values():
+            disposed_uids.update(v._detach())
+        return disposed_uids
+
+    def _detach_child(self, childs: Optional[List[str]] = None):
+        disposed_uids: Dict[str, Component] = {}
+        if childs is None:
+            childs = list(self._child_comps.keys())
+        for k in childs:
+            v = self._child_comps[k]
+            disposed_uids.update(v._detach())
+        return disposed_uids
+
+    def _attach_child(self, queue: asyncio.Queue, childs: Optional[List[str]] = None):
+        if childs is None:
+            childs = list(self._child_comps.keys())
+        for k in childs:
+            v = self._child_comps[k]
+            v._attach(f"{self._flow_uid}.{k}", queue)
+
+    def _attach(self, uid: str, queue: asyncio.Queue):
+        super()._attach(uid, queue)
+        for k, v in self._child_comps.items():
+            v._attach(f"{uid}.{k}", queue)
+        
+    def _get_uid_to_comp_dict(self):
+        res: Dict[str, Component] = {}
+        def handler(uid, v: Component):
+            res[uid] = v
+        self._foreach_comp(handler)
+        return res 
 
     async def _clear(self):
-        for c in self.props.childs:
+        for c in self._child_comps:
             cc = self[c]
             await cc._clear()
-        self.props.childs.clear()
+        self._child_comps.clear()
         await super()._clear()
         self._pool.unique_set.clear()
 
-    def _attach_to_app(self, queue: asyncio.Queue):
-        # update queue of this and childs
-        if not self.inited:
-            self._queue = queue
-            for k, v in self._uid_to_comp.items():
-                v._queue = queue
-                if isinstance(v, ContainerBase):
-                    v.inited = True
-            self.inited = True
-
-    def _update_child_ns_and_comp_dict(self, ns: str,
-                                       uid_to_comp: Dict[str, Component]):
-        prev_uid_to_comp = self._uid_to_comp
-        self._uid_to_comp = uid_to_comp
-        for k, v in prev_uid_to_comp.items():
-            new_name = f"{ns}.{k}"
-            v._flow_uid = new_name
-            v._parent = ns
-            uid_to_comp[v._flow_uid] = v
-            if isinstance(v, ContainerBase):
-                v._uid_to_comp = uid_to_comp
-
     def __getitem__(self, key: str):
-        assert key in self.props.childs, f"{key}, {self.props.childs}"
-        # print(key, self, self.uid, self._get_uid_with_ns(key), len(self._uid_to_comp))
-        return self._uid_to_comp[self._get_uid_with_ns(key)]
+        assert key in self._child_comps, f"{key}, {self._child_comps.keys()}"
+        return self._child_comps[key]
 
     def _get_all_nested_child_recursive(self, name: str, res: List[Component]):
         comp = self[name]
         res.append(comp)
         if isinstance(comp, ContainerBase):
-            for child in comp.props.childs:
+            for child in comp._child_comps:
                 comp._get_all_nested_child_recursive(child, res)
 
     def _get_all_nested_child(self, name: str):
@@ -1099,9 +1171,11 @@ class ContainerBase(Component[T_container_props, T_child]):
         self._get_all_nested_child_recursive(name, res)
         return res
 
-    def _get_all_nested_childs(self):
+    def _get_all_nested_childs(self, names: Optional[List[str]] = None):
+        if names is None:
+            names = list(self._child_comps.keys())
         comps: List[Component] = []
-        for c in self.props.childs:
+        for c in names:
             comps.extend(self._get_all_nested_child(c))
         return comps
 
@@ -1109,83 +1183,6 @@ class ContainerBase(Component[T_container_props, T_child]):
         if self._flow_uid == "":
             return (f"{name}")
         return (f"{self._flow_uid}.{name}")
-
-    def _add_prop_to_ui(self, ui: Component):
-        if self.inited:
-            ui._queue = self.queue
-        ui._parent = self._flow_uid
-        if isinstance(ui, ContainerBase):
-            ui._pool = self._pool
-            ui._uid_to_comp = self._uid_to_comp
-
-    def add_component(self,
-                      name: str,
-                      comp: Component,
-                      add_to_state: bool = True,
-                      anonymous: bool = False):
-        uid = self._get_uid_with_ns(name)
-        if anonymous:
-            uid = self._pool(uid)
-        comp._flow_uid = uid
-        if add_to_state:
-            assert uid not in self._uid_to_comp
-        assert comp._parent == "", "this component must not be added before."
-        self._add_prop_to_ui(comp)
-        if add_to_state:
-            self._uid_to_comp[comp._flow_uid] = comp
-            self.props.childs.append(name)
-        return comp
-
-    def add_component_v2(self,
-                      name: str,
-                      comp: Component):
-        """ 
-        we assume self uid is ready.
-        if non-container
-            1. set uid to ns + component name
-            2. set queue, 
-            done
-        if container
-            2.1 set uid_to_comp
-            3. if has init dict, consume it
-            4. change uid/parent of all nested childs with new namespace
-        """
-        # consume children  before assign uid to 
-        # ensure comp is a child-inited standclone component.
-        if isinstance(comp, ContainerBase):
-            if comp._children is not None:
-                # consume this _children
-                comp.add_layout(comp._children)
-                comp._children = None
-
-        namespace = self._flow_uid
-        if namespace == "":
-            comp._flow_uid = name
-        else:
-            comp._flow_uid = namespace + "." + name
-        comp_child_ns = comp._flow_uid
-        # print("WTF", comp_child_ns, comp.uid)
-        comp._queue = self._queue
-        self._uid_to_comp[comp._flow_uid] = comp
-        comps_added: List[Component] = [comp]
-        if isinstance(comp, ContainerBase):
-            comp_uid_to_comp = comp._uid_to_comp
-            # set all uid/parent of child with new uid
-            for k, v in comp_uid_to_comp.items():
-                new_name = f"{comp_child_ns}.{k}"
-                new_parent = f"{comp_child_ns}.{v._parent}"
-                v._flow_uid = new_name
-                v._parent = new_parent
-                v._queue = self._queue
-                # add standclone comp map to main map
-                self._uid_to_comp[v._flow_uid] = v
-                # print("WTF2", comp_child_ns, k)
-                comps_added.append(v)
-                if isinstance(v, ContainerBase):
-                    v._uid_to_comp = self._uid_to_comp
-            comp._uid_to_comp = self._uid_to_comp
-        self.props.childs.append(name)
-        return comp, comps_added
 
     def add_layout(self, layout: Union[Dict[str, Component], List[Component]]):
         """ {
@@ -1198,114 +1195,70 @@ class ContainerBase(Component[T_container_props, T_child]):
         """
         if isinstance(layout, list):
             layout = {str(i): v for i, v in enumerate(layout)}
+        # for k, v in layout.items():
+        #     v._flow_name = k
         if self._prevent_add_layout:
             raise ValueError("you must init layout in app_create_layout")
-        comps_added: List[Component] = []
-        # we assume layout is a ordered dict (python >= 3.7)
-        for k, v in layout.items():
-            comps_added.extend(self.add_component_v2(k, v)[1])
-        return comps_added
+        return self.update_childs_locally(layout)
 
     def get_props(self):
         state = super().get_props()
-        state["childs"] = [self[n]._flow_uid for n in self.props.childs]
+        state["childs"] = [self[n]._flow_uid for n in self._child_comps]
         return state
 
-    def remove_child(self, name: str):
-        """if child isn't a container, just stop callback task, reset uid/_parent and remove from 
-        self child.
-        if child is a container, we need to reset namespace/parent to 
-        standalone component.
-        """
-        # TODO we may need a global aio lock here.
-        comp = self[name]
-        self.props.childs.remove(name)
-        return _detach_component(comp)
-
-    async def set_new_layout(self, layout: Dict[str, Component]):
-        # for k, v in layout.items():
-        #     print("-------------", k, v._flow_uid, type(v), len(v._uid_to_comp))
-        #     for vv in v._uid_to_comp.values():
-        #         print(vv._flow_uid)
-        # print("===================")
-        # TODO we need to remove from parent when we detach a component.
-        for k, v in layout.items():
-            _detach_component(v)
-        #     _detach_component(v)
-
-        # for k, v in layout.items():
-        #     print("-------------", k, type(v), len(v._uid_to_comp))
-        #     for vv in v._uid_to_comp.values():
-        #         print(vv._flow_uid)
-
-        # remove all first
-        # TODO we may need to stop task of a comp
-        comps_to_remove: List[Component] = []
-        comp_uids_to_remove: List[str] = []
-        for c in self.props.childs.copy():
-            comp, comp_to_remove_this, comp_to_remove_uids = self.remove_child(c)
-            comps_to_remove.extend(comp_to_remove_this)
-            comp_uids_to_remove.extend(comp_to_remove_uids)
-        for comp in comps_to_remove:
-            await comp._cancel_task()
-        # TODO should we merge two events to one?
-        await self.put_app_event(
-            self.create_delete_comp_event(comp_uids_to_remove))
-        self.add_layout(layout)
+    def set_new_layout_locally(self, layout: Dict[str, Component]):
+        detached_uid_to_comp = self._detach_child()
+        self._child_comps = layout
+        self._attach_child(self.queue)
+        # update all childs of this component
         comps_frontend = {
             c._flow_uid: c.to_dict()
             for c in self._get_all_nested_childs()
         }
-        # make sure all child of this box is rerendered.
-        # TODO merge events
         comps_frontend[self._flow_uid] = self.to_dict()
-        await self.put_app_event(self.create_update_comp_event(comps_frontend))
-        child_uids = [self[c]._flow_uid for c in self.props.childs]
-        await self.put_app_event(self.create_update_event({"childs": child_uids}))
+        return self.create_update_comp_event(comps_frontend, list(detached_uid_to_comp.keys())), list(detached_uid_to_comp.values())
+
+    async def set_new_layout(self, layout: Union[Dict[str, Component], List[Component]]):
+        if isinstance(layout, list):
+            layout = {str(i): v for i, v in enumerate(layout)}
+        new_ev, removed = self.set_new_layout_locally(layout)
+        for deleted in removed:
+            await deleted._cancel_task()
+        await self.put_app_event(new_ev)
 
     async def remove_childs_by_keys(self, keys: List[str]):
-        comps_to_remove: List[Component] = []
-        comp_uids_to_remove: List[str] = []
-        for c in keys:
-            if c not in self.props.childs:
-                continue
-            comp, comp_to_remove_this, comp_to_remove_uids = self.remove_child(c)
-            comps_to_remove.extend(comp_to_remove_this)
-            comp_uids_to_remove.extend(comp_to_remove_uids)
-        for comp in comps_to_remove:
+        detached_uid_to_comp = self._detach_child(keys)
+        for comp in detached_uid_to_comp.values():
             await comp._cancel_task()
-        if not comps_to_remove:
+        if not detached_uid_to_comp:
             return
         await self.put_app_event(
-            self.create_delete_comp_event(comp_uids_to_remove))
-        child_uids = [self[c]._flow_uid for c in self.props.childs]
+            self.create_delete_comp_event(list(detached_uid_to_comp.keys())))
+        child_uids = [self[c]._flow_uid for c in self._child_comps]
         await self.put_app_event(self.create_update_event({"childs": child_uids}))
 
-    async def update_childs(self, layout: Dict[str, Component]):
-        for k, v in layout.items():
-            if k not in self.props.childs:
-                _detach_component(v)
+    def update_childs_locally(self, layout: Dict[str, Component]):
+        intersect = set(layout.keys()).intersection(self._child_comps.keys())
+        detached = self._detach_child(list(intersect))
+        self._child_comps.update(layout)
+        self._attach_child(self.queue, list(layout.keys()))
         # remove replaced components first.
-        comps_to_remove: List[Component] = []
-        comp_uids_to_remove: List[str] = []
-        for c in self.props.childs:
-            comp = self[c]
-            if c in layout:
-                comp_detached, comp_to_remove_this, comp_to_remove_uids = self.remove_child(c)
-                comps_to_remove.extend(comp_to_remove_this)
-                comp_uids_to_remove.extend(comp_to_remove_uids)
-        for comp in comps_to_remove:
-            await comp._cancel_task()
-        comp_added = self.add_layout(layout)
-        update_comps_frontend = {c._flow_uid: c.to_dict() for c in comp_added}
-        # make sure all child of this box is rerendered.
-        update_comps_frontend[self._flow_uid] = self.to_dict()
-        await self.put_app_event(
-            self.create_update_comp_event(update_comps_frontend))
+        comps_frontend = {
+            c._flow_uid: c.to_dict()
+            for c in self._get_all_nested_childs(list(layout.keys()))
+        }
+        comps_frontend[self._flow_uid] = self.to_dict()
+        return self.create_update_comp_event(comps_frontend, list(detached.keys())), list(detached.values())
+
+    async def update_childs(self, layout: Dict[str, Component]):
+        new_ev, removed = self.update_childs_locally(layout)
+        for deleted in removed:
+            await deleted._cancel_task()
+        await self.put_app_event(new_ev)
 
     async def replace_childs(self, layout: Dict[str, Component]):
         for k in layout.keys():
-            assert k in self.props.childs
+            assert k in self._child_comps
         return await self.update_childs(layout)
 
 

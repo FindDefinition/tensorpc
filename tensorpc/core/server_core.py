@@ -174,7 +174,7 @@ class ServiceCore(object):
     def _remote_exception_dict(self, e: BaseException, detail: Optional[Any] = None):
         if detail is None:
             detail = traceback.format_exc()
-        exception_json = {"error": str(e), "detail": detail}
+        exception_json = {"error": type(e).__qualname__, "detail": detail}
         return exception_json
 
     def get_service_meta(self):
@@ -254,6 +254,7 @@ class ServiceCore(object):
                 else:
                     res = func(*args, **kwargs)
         except Exception as e:
+            
             res = self._remote_exception_json(e)
             is_exception = True
         return res, is_exception

@@ -166,7 +166,7 @@ class App:
                  maxqsize: int = 10,
                  enable_value_cache: bool = False,
                  external_root: Optional[mui.FlexBox] = None) -> None:
-        self._uid_to_comp: Dict[str, Component] = {}
+        # self._uid_to_comp: Dict[str, Component] = {}
         self._queue: "asyncio.Queue[AppEvent]" = asyncio.Queue(
             maxsize=maxqsize)
 
@@ -178,23 +178,22 @@ class App:
             # TODO better mount
             root = external_root 
             external_root._flow_uid = _ROOT
-            if root._children is not None:
-                # consume this _children
-                root.add_layout(root._children)
-                root._children = None
+            # if root._children is not None:
+            #     # consume this _children
+            #     root.add_layout(root._children)
+            #     root._children = None
             # layout saved in external_root
-            self._uid_to_comp = root._uid_to_comp
-            root._attach_to_app(self._queue)
+            # self._uid_to_comp = root._uid_to_comp
+            root._attach(_ROOT, self._queue)
             self._is_external_root = True
         else:
-            root = mui.FlexBox(uid_to_comp=self._uid_to_comp,
-                            inited=True,
+            root = mui.FlexBox(inited=True,
                             uid=_ROOT,
                             queue=self._queue)
             root.prop(flex_flow=flex_flow,
                     justify_content=justify_content,
                     align_items=align_items)
-        self._uid_to_comp[_ROOT] = root
+        # self._uid_to_comp[_ROOT] = root
         self.root = root
         self._enable_editor = False
 
@@ -225,6 +224,9 @@ class App:
             return self.root 
         else:
             return self
+
+    def _is_wrapped_obj(self):
+        return self._is_external_root and self.root._wrapped_obj is not None
 
     async def save_data_storage(self,
                                 key: str,
@@ -324,18 +326,19 @@ class App:
         # print("persist_storage", state["persist_storage"])
         if state["persist_storage"]:
             self.__persist_storage.update(state["persist_storage"])
+        uid_to_comp = self.root._get_uid_to_comp_dict()
         if self._enable_value_cache:
             ev = AppEvent("", {})
             for k, s in uistate.items():
-                if k in self.root._uid_to_comp:
-                    comp_to_restore = self.root._uid_to_comp[k]
+                if k in uid_to_comp:
+                    comp_to_restore = uid_to_comp[k]
                     if comp_to_restore._flow_comp_type.value == s["type"]:
                         comp_to_restore.set_props(s["props"])
                         ev += comp_to_restore.get_sync_event(True)
             with _enter_app_conetxt(self):
                 for k, s in userstate.items():
-                    if k in self.root._uid_to_comp:
-                        comp_to_restore = self.root._uid_to_comp[k]
+                    if k in uid_to_comp:
+                        comp_to_restore = uid_to_comp[k]
                         if comp_to_restore._flow_comp_type.value == s["type"]:
                             try:
                                 await comp_to_restore.set_persist_props_async(
@@ -357,8 +360,9 @@ class App:
         self.root._prevent_add_layout = False
         prev_comps = self.__previous_error_sync_props.copy()
         prev_user_states = self.__previous_error_persist_state.copy()
+        uid_to_comp = self.root._get_uid_to_comp_dict()
         if reload:
-            for u, c in self._uid_to_comp.items():
+            for u, c in uid_to_comp.items():
                 prev_comps[u] = c._to_dict_with_sync_props()
                 user_state = c.get_persist_props()
                 if user_state is not None:
@@ -367,7 +371,7 @@ class App:
                         "state": user_state,
                     }
         await self.root._clear()
-        self._uid_to_comp.clear()
+        # self._uid_to_comp.clear()
         self.root._flow_uid = _ROOT
         new_is_flex = False
         res: mui.LayoutType = {}
@@ -375,13 +379,13 @@ class App:
             if decorator_fn is not None:
                 temp_res = decorator_fn()
                 if isinstance(temp_res, mui.FlexBox):
-                    if temp_res._children is not None:
-                        # consume this _children
-                        temp_res.add_layout(temp_res._children)
-                        temp_res._children = None
-                    temp_res._flow_uid = _ROOT
-                    temp_res._attach_to_app(self._queue)
-                    self._uid_to_comp = temp_res._uid_to_comp
+                    # if temp_res._children is not None:
+                    #     # consume this _children
+                    #     temp_res.add_layout(temp_res._children)
+                    #     temp_res._children = None
+                    # temp_res._flow_uid = _ROOT
+                    temp_res._attach(_ROOT, self._queue)
+                    # self._uid_to_comp = temp_res._uid_to_comp
                     new_is_flex = True 
                     self.root = temp_res
                     
@@ -417,14 +421,13 @@ class App:
                 res = {str(i): v for i, v in enumerate(res)}
             res_anno: Dict[str, Component] = {**res}
             self.root.add_layout(res_anno)
-
-        self._uid_to_comp[_ROOT] = self.root
+        uid_to_comp = self.root._get_uid_to_comp_dict()
+        # self._uid_to_comp[_ROOT] = self.root
         self.root._prevent_add_layout = True
         if reload:
             # comps = self.root._get_all_nested_childs()
             with _enter_app_conetxt(self):
-
-                for comp in self._uid_to_comp.values():
+                for comp in uid_to_comp.values():
                     if comp._flow_uid in prev_comps:
                         if comp._flow_comp_type.value == prev_comps[
                                 comp._flow_uid]["type"]:
@@ -481,9 +484,11 @@ class App:
         return self._app_service_unit
 
     def _get_app_layout(self, with_code_editor: bool = True):
+        uid_to_comp = self.root._get_uid_to_comp_dict()
+        # print({k: v._flow_uid for k, v in uid_to_comp.items()})
         res = {
             "layout": {u: c.to_dict()
-                       for u, c in self._uid_to_comp.items()},
+                       for u, c in uid_to_comp.items()},
             "enableEditor": self._enable_editor,
             "fallback": "",
         }
@@ -569,14 +574,14 @@ class App:
 
     async def handle_event(self, ev: UIEvent):
         for uid, data in ev.uid_to_data.items():
-            comp = self._uid_to_comp[uid]
+            comp = self.root._get_comp_by_uid(uid)
             await comp.handle_event(data)
 
     async def _handle_event_with_ctx(self, ev: UIEvent):
         # TODO run control from other component
         with _enter_app_conetxt(self):
             for uid, data in ev.uid_to_data.items():
-                comp = self._uid_to_comp[uid]
+                comp = self.root._get_comp_by_uid(uid)
                 await comp.handle_event(data)
 
     async def copy_text_to_clipboard(self, text: str):
@@ -720,8 +725,9 @@ class EditableApp(App):
         self._watch_lock = threading.Lock()
 
     def __get_default_observe_paths(self):
+        uid_to_comp = self.root._get_uid_to_comp_dict()
         res: Set[str] = set()
-        for k, v in self._uid_to_comp.items():
+        for k, v in uid_to_comp.items():
             v_file = v._flow_comp_def_path
             if not v_file:
                 continue 
@@ -738,9 +744,11 @@ class EditableApp(App):
     def __reload_callback(self, change_file: str, mod_is_reloaded: bool):
         # TODO find a way to record history callback code and 
         # reload only if code change
+        uid_to_comp = self.root._get_uid_to_comp_dict()
+
         assert self._flow_comp_mgr is not None 
         resolved_path = str(Path(change_file).resolve())
-        reload_metas = _create_reload_metas(self._uid_to_comp, resolved_path)
+        reload_metas = _create_reload_metas(uid_to_comp, resolved_path)
         if reload_metas:
             module = inspect.getmodule(reload_metas[0].handler.cb)
             if module is None:
@@ -824,7 +832,7 @@ class EditableApp(App):
 
 
     def _reload_app_file(self):
-        comps = self._uid_to_comp
+        # comps = self._uid_to_comp
         # callback_dict = {}
         # for k, v in comps.items():
         #     cb = v.get_callback()
