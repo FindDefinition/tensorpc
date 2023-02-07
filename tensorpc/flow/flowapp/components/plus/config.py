@@ -108,7 +108,7 @@ class ConfigPanel(mui.FlexBox):
         super().__init__()
         if append_childs is not None:
             layout.update(append_childs)
-        self.add_layout(layout)
+        self.init_add_layout(layout)
         self.props.flex_flow = "column nowrap"
         self.__config_obj = config_obj
         self.props.overflow_y = "auto"

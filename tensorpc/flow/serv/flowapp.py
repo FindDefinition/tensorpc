@@ -84,7 +84,8 @@ class FlowApp:
                         layout_created = True
             if not layout_created:
                 await self.app._app_run_layout_function()
-
+        else:
+            self.app.root._attach("root", self.app._queue)
         lay = self.app._get_app_layout()
         self.app.app_initialize()
         await self.app.app_initialize_async()

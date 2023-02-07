@@ -863,7 +863,7 @@ class Component(Generic[T_base_props, T_child]):
         }
         evs = []
         for k, v in self._flow_event_handlers.items():
-            if not isinstance(v, Undefined):
+            if not isinstance(v, Undefined) and not v.backend_only:
                 d = v.to_dict()
                 d["type"] = k
                 evs.append(d)
@@ -926,10 +926,12 @@ class Component(Generic[T_base_props, T_child]):
     def register_event_handler(self, type: ValueType, cb: Callable,
                     stop_propagation: bool = False,
                     throttle: Optional[NumberType] = None,
-                    debounce: Optional[NumberType] = None):
+                    debounce: Optional[NumberType] = None,
+                    backend_only: bool = False):
         if self._flow_allowed_events:
-            assert type in self._flow_allowed_events, f"only support events: {self._flow_allowed_events}"
-        evh = EventHandler(cb, stop_propagation, throttle, debounce)
+            if not backend_only:
+                assert type in self._flow_allowed_events, f"only support events: {self._flow_allowed_events}"
+        evh = EventHandler(cb, stop_propagation, throttle, debounce, backend_only)
         self._flow_event_handlers[type] = evh
         return evh
 
@@ -1185,6 +1187,10 @@ class ContainerBase(Component[T_container_props, T_child]):
         return (f"{self._flow_uid}.{name}")
 
     def add_layout(self, layout: Union[Dict[str, Component], List[Component]]):
+        return self.init_add_layout(layout)
+
+    def init_add_layout(self, layout: Union[Dict[str, Component], List[Component]]):
+        # TODO prevent call this in layout function
         """ {
             btn0: Button(...),
             box0: VBox({
@@ -1199,7 +1205,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         #     v._flow_name = k
         if self._prevent_add_layout:
             raise ValueError("you must init layout in app_create_layout")
-        return self.update_childs_locally(layout)
+        self._child_comps.update(layout)
 
     def get_props(self):
         state = super().get_props()
@@ -1321,11 +1327,13 @@ class EventHandler:
                  cb: Callable,
                  stop_propagation: bool = False,
                  throttle: Optional[NumberType] = None,
-                 debounce: Optional[NumberType] = None) -> None:
+                 debounce: Optional[NumberType] = None,
+                 backend_only: bool = False) -> None:
         self.cb = cb
         self.stop_propagation = stop_propagation
         self.debounce = debounce
         self.throttle = throttle
+        self.backend_only = backend_only
 
     def to_dict(self):
         res: Dict[str, Any] = {

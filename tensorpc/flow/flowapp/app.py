@@ -26,6 +26,7 @@ import io
 import json
 from pathlib import Path
 import pickle
+import runpy
 import threading
 import time
 import traceback
@@ -194,7 +195,7 @@ class App:
                     justify_content=justify_content,
                     align_items=align_items)
         # self._uid_to_comp[_ROOT] = root
-        self.root = root
+        self.root = root.prop(min_height=0, min_width=0)
         self._enable_editor = False
 
         self.code_editor = AppEditor("", "python", self._queue)
@@ -422,6 +423,7 @@ class App:
                 res = {str(i): v for i, v in enumerate(res)}
             res_anno: Dict[str, Component] = {**res}
             self.root.add_layout(res_anno)
+            self.root._attach(_ROOT, self._queue)
         uid_to_comp = self.root._get_uid_to_comp_dict()
         # self._uid_to_comp[_ROOT] = self.root
         self.root._prevent_add_layout = True
@@ -751,20 +753,24 @@ class EditableApp(App):
         resolved_path = str(Path(change_file).resolve())
         reload_metas = _create_reload_metas(uid_to_comp, resolved_path)
         if reload_metas:
-            module = inspect.getmodule(reload_metas[0].handler.cb)
-            if module is None:
-                return
-            # now module is valid, reload it.
             if not mod_is_reloaded:
+                # TODO when not mod_is_reloaded, changed file isn't app_file
+                module = inspect.getmodule(reload_metas[0].handler.cb)
+                if module is None:
+                    return
+                # now module is valid, reload it.
                 try:
                     importlib.reload(module)
                 except:
                     traceback.print_exc()
                     return
+                module_dict = module.__dict__
+            else:
+                module_dict = self._get_app_dynamic_cls().module_dict
             for meta in reload_metas:
                 handler = meta.handler
                 cb = handler.cb 
-                new_method, new_code = reload_method(cb, module.__dict__)
+                new_method, new_code = reload_method(cb, module_dict)
                 # if new_code:
                 #     meta.code = new_code
                 if new_method is not None:
@@ -800,6 +806,7 @@ class EditableApp(App):
                                 self.set_editor_value(new_data), self._loop)
                             fut.result()
                         code_changed_metas = self._reload_app_file()
+                        # print(code_changed_metas)
                         app_reload_complete = False
                         for m, c in code_changed_metas:
                             if m.user_app_meta is not None:

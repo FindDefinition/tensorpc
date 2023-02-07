@@ -1043,7 +1043,6 @@ class AppNode(CommandNode):
         else:
             # query two local ports in flow remote worker, then use them as app ports
             ports = get_free_ports(2)
-        # print("APP PORTS", ports)
         if len(ports) != 2:
             raise ValueError("get free port failed. exit.")
 
@@ -1372,6 +1371,7 @@ async def _get_free_port(count: int, url: str, username: str, password: str, ini
     ports = []
     # res = await client.simple_run_command(f"python -m tensorpc.cli.free_port {count}")
     # print(res)
+    stderr = ""
     async with client.simple_connect() as conn:
         try:
             if init_cmds:
@@ -1390,7 +1390,10 @@ async def _get_free_port(count: int, url: str, username: str, password: str, ini
         except asyncssh.process.ProcessError as e:
             traceback.print_exc()
             print(e.stdout)
+            print("-----------")
             print(e.stderr)
+            stderr = e.stderr
+            raise e
     return ports
 
 class NodeDesp:

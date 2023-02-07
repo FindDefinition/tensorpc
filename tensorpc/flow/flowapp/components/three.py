@@ -463,7 +463,7 @@ class Points(ThreeComponentBase[PointProps]):
     def _check_colors(self, colors, points: Optional[np.ndarray] = None):
         if isinstance(colors, np.ndarray):
             if colors.ndim == 1:
-                assert colors.dtype == np.uint8, "when gray, must be int8"
+                assert colors.dtype == np.uint8, "when gray, must be uint8"
             else:
                 assert colors.ndim == 2 and colors.shape[1] == 3
             if points is not None:
@@ -492,7 +492,7 @@ class Points(ThreeComponentBase[PointProps]):
         self.props.attrs = undefined
         self.props.attr_fields = undefined
 
-        return self.send_and_wait(self.update_event(points=undefined, 
+        return await self.send_and_wait(self.update_event(points=self.props.points, 
             colors=undefined, attrs=undefined, attr_fields=undefined))
 
     async def update_points(self,
@@ -508,6 +508,7 @@ class Points(ThreeComponentBase[PointProps]):
         ], "only support 3 or 4 features for points"
         assert points.shape[
             0] <= self.props.limit, f"your points size must smaller than limit {self.props.limit}"
+        assert points.dtype == np.float32, "only support fp32 points"
         if points.shape[1] == 4 and colors is None:
             colors = points[:, 3].astype(np.uint8)
             points = points[:, :3]
@@ -737,17 +738,18 @@ class BoundingBoxProps(Object3dBaseProps):
     color: Union[str, Undefined] = undefined
     opacity: Union[float, Undefined] = undefined
     edge_opacity: Union[float, Undefined] = undefined
+    checked: bool = False
 
 
 class BoundingBox(Object3dWithEventBase[BoundingBoxProps]):
 
     def __init__(self,
                  dimension: Vector3Type,
-                 edge_width: float = 4,
+                 edge_width: float = 1,
                  edge_color: str = "green",
                  emissive: str = "red",
                  color: str = "red",
-                 opacity: float = 0.5,
+                 opacity: float = 0.2,
                  edge_opacity: float = 0.5) -> None:
         super().__init__(UIType.ThreeBoundingBox, BoundingBoxProps)
         self.props.dimension = dimension
@@ -773,6 +775,14 @@ class BoundingBox(Object3dWithEventBase[BoundingBoxProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+    async def handle_event(self, ev: EventType):
+        await handle_standard_event(self, ev)
+        
+    def state_change_callback(
+            self,
+            data: bool,
+            type: ValueType = FrontendEventType.Change.value):
+        self.props.checked = data
 
 @dataclasses.dataclass
 class AxesHelperProps(Object3dBaseProps):
@@ -916,22 +926,27 @@ class PerspectiveCameraProps(Object3dBaseProps):
 class PerspectiveCamera(Object3dBase[PerspectiveCameraProps]):
 
     def __init__(self,
-                 makeDefault: bool,
+                 make_default: bool = True,
                  fov: Union[float, Undefined] = undefined,
                  aspect: Union[float, Undefined] = undefined,
                  near: Union[float, Undefined] = undefined,
-                 far: Union[float, Undefined] = undefined) -> None:
+                 far: Union[float, Undefined] = undefined,
+                 position: Vector3Type = (0, 0, 1),
+                 up: Vector3Type = (0, 0, 1)) -> None:
         super().__init__(UIType.ThreePerspectiveCamera, PerspectiveCameraProps)
         self.props.fov = fov
         self.props.aspect = aspect
         self.props.near = near
         self.props.far = far
-        self.makeDefault = makeDefault
+        self.props.position = position
+        self.props.up = up
+
+        self.make_default = make_default
 
     # TODO from camera matrix and intrinsics
     def to_dict(self):
         res = super().to_dict()
-        res["makeDefault"] = self.makeDefault
+        res["makeDefault"] = self.make_default
         return res
 
     @property
@@ -955,21 +970,25 @@ class OrthographicCameraProps(Object3dBaseProps):
 class OrthographicCamera(Object3dBase[OrthographicCameraProps]):
 
     def __init__(self,
-                 makeDefault: bool,
+                 make_default: bool = True,
                  near: Union[float, Undefined] = undefined,
                  far: Union[float, Undefined] = undefined,
-                 zoom: Union[float, Undefined] = undefined) -> None:
+                 zoom: Union[float, Undefined] = undefined,
+                 position: Vector3Type = (0, 0, 1),
+                 up: Vector3Type = (0, 0, 1)) -> None:
         super().__init__(UIType.ThreeOrthographicCamera,
                          OrthographicCameraProps)
         self.props.zoom = zoom
         self.props.near = near
         self.props.far = far
-        self.makeDefault = makeDefault
+        self.props.position = position
+        self.props.up = up
+        self.make_default = make_default
 
     # TODO from camera matrix and intrinsics
     def to_dict(self):
         res = super().to_dict()
-        res["makeDefault"] = self.makeDefault
+        res["makeDefault"] = self.make_default
         return res
 
     @property
@@ -1004,6 +1023,9 @@ class OrbitControlProps(ThreeBasicProps):
 @dataclasses.dataclass
 class CameraControlProps(ThreeBasicProps):
     damping_factor: Union[NumberType, Undefined] = undefined
+    smooth_time: Union[NumberType, Undefined] = undefined
+    dragging_smooth_time: Union[NumberType, Undefined] = undefined
+
     min_distance: Union[NumberType, Undefined] = undefined
     max_distance: Union[NumberType, Undefined] = undefined
     min_polar_angle: Union[NumberType, Undefined] = undefined
@@ -1048,6 +1070,8 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
 
         # self.props.enable_damping = True
         self.props.damping_factor = 1
+        # self.props.dragging_smooth_time = 0
+        # self.props.smooth_time = 0
         # self.props.min_distance = 1
         # self.props.max_distance = 100
 
