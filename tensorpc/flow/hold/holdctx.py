@@ -20,7 +20,8 @@ _WATCHDOG_MODIFY_EVENT_TYPES = Union[watchdog.events.DirModifiedEvent,
                                      watchdog.events.FileModifiedEvent]
 T = TypeVar("T")
 
-class _WatchDogForHoldFile(FileSystemEventHandler):
+
+class HoldContext(FileSystemEventHandler):
 
     def __init__(self,
                  key: str,
@@ -173,7 +174,12 @@ def _find_hold_ctx_node(func_node: Union[ast.FunctionDef,
 
 
 @contextlib.contextmanager
-def hold_ctx(key: str, reload_file=True, yield_obj: Optional[T] = None, *, _frame_cnt=2, ) -> Iterator[Optional[T]]:
+def hold_ctx(
+    key: str,
+    reload_file=True,
+    *,
+    _frame_cnt=2,
+) -> Iterator[Optional[HoldContext]]:
     # capture prev locals
     cur_frame = inspect.currentframe()
     assert cur_frame is not None
@@ -187,7 +193,7 @@ def hold_ctx(key: str, reload_file=True, yield_obj: Optional[T] = None, *, _fram
     file_name = Path(frame.f_code.co_filename)
     if not file_name.exists():
         print("your file not exist", file_name)
-        yield yield_obj
+        yield None
         return
     first_lineno = frame.f_code.co_firstlineno
     _locals = frame.f_locals
@@ -200,13 +206,13 @@ def hold_ctx(key: str, reload_file=True, yield_obj: Optional[T] = None, *, _fram
         tree = ast.parse(file_source)
     except SyntaxError:
         traceback.print_exc()
-        yield yield_obj
+        yield None
         return
     func_node_ns = funcid.find_toplevel_func_node_by_lineno(tree, first_lineno)
     # find with xxx.hold()
     if func_node_ns is None:
         # this shouldn't happen
-        yield yield_obj
+        yield None
         return
     func_node, namespaces = func_node_ns
     local_fid = ".".join([n.name for n in namespaces] + [func_node.name])
@@ -218,27 +224,31 @@ def hold_ctx(key: str, reload_file=True, yield_obj: Optional[T] = None, *, _fram
     assert hold_key is not None and hold_key == key, f"{key} {hold_key}"
     observer = Observer()
     source_lines = file_source.split("\n")
-    hold_source, hold_except_source = _WatchDogForHoldFile._extract_hold_body_lines(
+    hold_source, hold_except_source = HoldContext._extract_hold_body_lines(
         func_node, hold_context_node, source_lines)
-    handler = _WatchDogForHoldFile(hold_key,
-                                   _locals,
-                                   _globals,
-                                   mod,
-                                   file_source,
-                                   hold_source,
-                                   hold_except_source,
-                                   observer,
-                                   local_fid,
-                                   reload_file=reload_file)
-    
-    yield yield_obj
+    handler = HoldContext(hold_key,
+                          _locals,
+                          _globals,
+                          mod,
+                          file_source,
+                          hold_source,
+                          hold_except_source,
+                          observer,
+                          local_fid,
+                          reload_file=reload_file)
+
+    yield handler
     observer.schedule(handler, file_name, recursive=False)
     observer.start()
     observer.join()
     return
 
+
 @contextlib.asynccontextmanager
-async def hold_ctx_async(key: str, reload_file=True, yield_obj: Optional[T] = None, *, _frame_cnt=2) -> AsyncIterator[Optional[T]]:
+async def hold_ctx_async(key: str,
+                         reload_file=True,
+                         *,
+                         _frame_cnt=2) -> AsyncIterator[Optional[HoldContext]]:
     # capture prev locals
     cur_frame = inspect.currentframe()
     assert cur_frame is not None
@@ -252,7 +262,7 @@ async def hold_ctx_async(key: str, reload_file=True, yield_obj: Optional[T] = No
     file_name = Path(frame.f_code.co_filename)
     if not file_name.exists():
         print("your file not exist", file_name)
-        yield yield_obj
+        yield None
         return
     first_lineno = frame.f_code.co_firstlineno
     _locals = frame.f_locals
@@ -265,13 +275,13 @@ async def hold_ctx_async(key: str, reload_file=True, yield_obj: Optional[T] = No
         tree = ast.parse(file_source)
     except SyntaxError:
         traceback.print_exc()
-        yield yield_obj
+        yield None
         return
     func_node_ns = funcid.find_toplevel_func_node_by_lineno(tree, first_lineno)
     # find with xxx.hold()
     if func_node_ns is None:
         # this shouldn't happen
-        yield yield_obj
+        yield None
         return
     func_node, namespaces = func_node_ns
     local_fid = ".".join([n.name for n in namespaces] + [func_node.name])
@@ -284,21 +294,21 @@ async def hold_ctx_async(key: str, reload_file=True, yield_obj: Optional[T] = No
     observer = Observer()
     source_lines = file_source.split("\n")
 
-    hold_source, hold_except_source = _WatchDogForHoldFile._extract_hold_body_lines(
+    hold_source, hold_except_source = HoldContext._extract_hold_body_lines(
         func_node, hold_context_node, source_lines)
     ev = asyncio.Event()
-    yield yield_obj
-    handler = _WatchDogForHoldFile(hold_key,
-                                   _locals,
-                                   _globals,
-                                   mod,
-                                   file_source,
-                                   hold_source,
-                                   hold_except_source,
-                                   observer,
-                                   local_fid,
-                                   shutdown_ev=ev,
-                                   reload_file=reload_file)
+    handler = HoldContext(hold_key,
+                          _locals,
+                          _globals,
+                          mod,
+                          file_source,
+                          hold_source,
+                          hold_except_source,
+                          observer,
+                          local_fid,
+                          shutdown_ev=ev,
+                          reload_file=reload_file)
+    yield handler
     observer.schedule(handler, file_name, recursive=False)
     observer.start()
     await ev.wait()

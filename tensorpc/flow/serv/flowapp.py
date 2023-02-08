@@ -35,7 +35,7 @@ class FlowApp:
     """
 
     def __init__(self, module_name: str, config: Dict[str, Any], headless: bool = False) -> None:
-        print(module_name, config)
+        # print(module_name, config)
         self.module_name = module_name
         self.config = config
         self.shutdown_ev = asyncio.Event()

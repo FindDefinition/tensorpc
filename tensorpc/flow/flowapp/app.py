@@ -33,7 +33,7 @@ import traceback
 from types import ModuleType
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, TypeVar, Union)
-
+import pyee
 import numpy as np
 import importlib.machinery
 import importlib
@@ -46,6 +46,7 @@ from tensorpc.constants import PACKAGE_ROOT, TENSORPC_FLOW_FUNC_META_KEY
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceUnit
 from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem, get_object_type_meta
+from tensorpc.flow.hold.holdctx import HoldContext
 from tensorpc.flow.marker import AppFuncType, AppFunctionMeta
 from tensorpc.flow.serv_names import serv_names
 from tensorpc.utils.registry import HashableRegistry
@@ -154,6 +155,13 @@ class AppEditor:
         })
         await self._send_editor_event(app_ev)
 
+class AppSpecialEventType(enum.Enum):
+    EnterHoldContext = "EnterHoldContext"
+    ExitHoldContext = "ExitHoldContext"
+    FlowForward = "FlowForward"
+    Initialize = "Initialize"
+    Exit = "Exit"
+
 class App:
     """
     App Init Callbacks:
@@ -198,6 +206,8 @@ class App:
         self.root = root.prop(min_height=0, min_width=0)
         self._enable_editor = False
 
+        self._flowapp_special_eemitter = pyee.AsyncIOEventEmitter()
+
         self.code_editor = AppEditor("", "python", self._queue)
         self._app_dynamic_cls: Optional[ReloadableDynamicClass] = None
         # other app can call app methods via service_unit
@@ -217,6 +227,29 @@ class App:
 
         self.__flowapp_master_meta = MasterMeta()
         self.__flowapp_storage_cache: Dict[str, StorageDataItem] = {}
+        self.__flow_hold_context:  Optional[HoldContext] = None
+
+    @property 
+    def hold_context(self):
+        return self.__flow_hold_context
+    
+    @hold_context.setter
+    def hold_context(self, val: Optional[HoldContext]):
+        if val is not None:
+            assert self.__flow_hold_context is None, "you can't nest hold context"
+        self.__flow_hold_context = val
+
+    def register_app_special_event_handler(self, type: AppSpecialEventType, handler: Callable[[Any], mui._CORO_NONE]):
+        assert isinstance(type, AppSpecialEventType)
+        self._flowapp_special_eemitter.on(type.value, handler)
+
+    def unregister_app_special_event_handler(self, type: AppSpecialEventType, handler: Callable[[Any], mui._CORO_NONE]):
+        assert isinstance(type, AppSpecialEventType)
+        self._flowapp_special_eemitter.remove_listener(type.value, handler)
+
+    def unregister_app_special_event_handlers(self, type: AppSpecialEventType):
+        assert isinstance(type, AppSpecialEventType)
+        self._flowapp_special_eemitter.remove_all_listeners(type.value)
 
     def _get_user_app_object(self):
         if self._is_external_root:
