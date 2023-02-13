@@ -62,6 +62,7 @@ class ServiceType(Enum):
 class AppFuncType(Enum):
     CreateLayout = "CreateLayout"
     AutoRun = "AutoRun"
+    CreateObject = "CreateObject"
 
 class AppFunctionMeta:
 
@@ -208,6 +209,12 @@ class ReloadableDynamicClass(DynamicClass):
             serv_metas.append(serv_meta)
         return serv_metas
 
+    def get_object_creator_if_exists(self):
+        for m in self.serv_metas:
+            if m.user_app_meta is not None:
+                if m.type == AppFuncType.CreateObject:
+                    return m.fn 
+        return None 
 
     def reload_obj_methods(self, obj, callback_dict: Optional[Dict[str, Any]] = None):
         # reload regular methods/static methods

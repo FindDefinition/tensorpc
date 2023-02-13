@@ -53,7 +53,11 @@ class FlowApp:
             self._uid = ""
         self.headless = headless
         self.dynamic_app_cls = ReloadableDynamicClass(module_name)
-        obj = self.dynamic_app_cls.obj_type(**self.config)
+        static_creator = self.dynamic_app_cls.get_object_creator_if_exists()
+        if static_creator is not None:
+            obj = static_creator()
+        else:
+            obj = self.dynamic_app_cls.obj_type(**self.config)
         if isinstance(obj, App):
             self.app: App = obj
         elif isinstance(obj, FlexBox):

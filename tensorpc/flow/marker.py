@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import enum 
-from typing import Optional
+from typing import Callable, Optional
 from tensorpc.constants import TENSORPC_FLOW_FUNC_META_KEY
 from tensorpc.core.serviceunit import AppFuncType, AppFunctionMeta
+import inspect 
 
-def meta_decorator(func=None, meta: Optional[AppFunctionMeta] = None, name: Optional[str] = None):
+def meta_decorator(func=None, meta: Optional[AppFunctionMeta] = None, name: Optional[str] = None, func_checker: Optional[Callable[[Callable], None]] = None):
     if meta is None:
         raise ValueError("this shouldn't happen")
 
@@ -24,6 +25,8 @@ def meta_decorator(func=None, meta: Optional[AppFunctionMeta] = None, name: Opti
         if meta is None:
             raise ValueError("this shouldn't happen")
         name_ = func.__name__
+        if func_checker:
+            func_checker(func)
         if name is not None:
             name_ = name
         meta.name = name_
@@ -46,3 +49,9 @@ def mark_create_layout(func=None):
     meta = AppFunctionMeta(AppFuncType.CreateLayout)
     return meta_decorator(func, meta)
 
+def mark_create_object(func=None):
+    meta = AppFunctionMeta(AppFuncType.CreateObject)
+    def func_checker(func):
+        assert isinstance(func, staticmethod), "create_object decorator only works on static"
+        assert len(inspect.signature(func.__func__).parameters) == 0, "create_object decorator can't have any params"
+    return meta_decorator(func, meta, func_checker=func_checker)

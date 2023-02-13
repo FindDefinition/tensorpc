@@ -158,9 +158,12 @@ class AppEditor:
 class AppSpecialEventType(enum.Enum):
     EnterHoldContext = "EnterHoldContext"
     ExitHoldContext = "ExitHoldContext"
+    # emitted when a flow event comes
     FlowForward = "FlowForward"
     Initialize = "Initialize"
     Exit = "Exit"
+    # emitted after autorun exit
+    AutoRunEnd = "AutoRunEnd"
 
 class App:
     """
@@ -846,7 +849,7 @@ class EditableApp(App):
                                 meta: AppFunctionMeta = m.user_app_meta
                                 if meta.type == AppFuncType.AutoRun:
                                     asyncio.run_coroutine_threadsafe(
-                                        _run_zeroarg_func(c),
+                                        self._run_autorun(c),
                                         self._loop)
                                 elif meta.type == AppFuncType.CreateLayout and not app_reload_complete:
                                     fut = asyncio.run_coroutine_threadsafe(
@@ -870,6 +873,15 @@ class EditableApp(App):
                 except:
                     traceback.print_exc()
                     return
+
+    async def _run_autorun(self, cb: Callable):
+        try:
+            coro = cb()
+            if inspect.iscoroutine(coro):
+                await coro
+            self._flowapp_special_eemitter.emit(AppSpecialEventType.AutoRunEnd.value, None)
+        except:
+            traceback.print_exc()
 
     def _reload_app_file(self):
         # comps = self._uid_to_comp
