@@ -36,7 +36,7 @@ from tensorpc.core.asynctools import cancel_task
 from tensorpc.flow import mark_autorun, marker
 from tensorpc.flow.client import AppClient, AsyncAppClient, add_message
 from tensorpc.flow.coretypes import MessageLevel, ScheduleEvent
-from tensorpc.flow.flowapp import (App, EditableApp, EditableLayoutApp,
+from tensorpc.flow import (App, EditableApp, EditableLayoutApp,
                                    leaflet, mui, plotly, plus, three)
 from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
                                                   ListItemText,
@@ -1063,6 +1063,26 @@ class AnyLayout:
         return mui.FlexBox([
             mui.Button("Hi", self.handle_click)
         ])
+
+    def handle_click(self):
+        print("???2X???")
+
+
+class SampleTreeApp(EditableLayoutApp):
+    def __init__(self) -> None:
+        super().__init__()
+        self.set_init_window_size([640, 480])
+
+    @marker.mark_create_layout
+    def my_latout(self):
+        tree = mui.JsonLikeNode(
+            "root", "root", mui.JsonLikeType.List.value, children=[
+                mui.JsonLikeNode("c1", "a1", mui.JsonLikeType.Int.value, value="0")
+            ], lazyExpandCount=5
+        )
+        return [
+            mui.JsonLikeTree(tree)
+        ]
 
     def handle_click(self):
         print("???2X???")

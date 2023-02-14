@@ -501,7 +501,8 @@ class Points(ThreeComponentBase[PointProps]):
                                                    Undefined]] = None,
                             attrs: Optional[Union[np.ndarray,
                                                   Undefined]] = None,
-                            attr_fields: Optional[List[str]] = None):
+                            attr_fields: Optional[List[str]] = None,
+                            limit: Optional[int] = None):
         # TODO better check, we must handle all errors before sent to frontend.
         assert points.ndim == 2 and points.shape[1] in [
             3, 4
@@ -531,6 +532,9 @@ class Points(ThreeComponentBase[PointProps]):
             upd["attr_fields"] = attr_fields
             if attr_fields is not None:
                 self.props.attr_fields = attr_fields
+        if limit is not None:
+            assert limit > 0
+            upd["limit"] = limit
         self.props.points = points
         await self.send_and_wait(self.create_update_event(upd))
 

@@ -19,8 +19,10 @@ import numpy as np
 class SimpleCanvas(mui.FlexBox):
 
     def __init__(self,
-                 camera: three.PerspectiveCamera,
+                 camera: Optional[three.PerspectiveCamera] = None,
                  with_grid: bool = True):
+        if camera is None:
+            camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         self.camera = camera
         self.ctrl = three.CameraControl()
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
@@ -42,7 +44,7 @@ class SimpleCanvas(mui.FlexBox):
         if with_grid:
             canvas_layout.append(infgrid)
 
-        self.canvas = three.ThreeCanvas(canvas_layout)
+        self.canvas = three.ThreeCanvas(canvas_layout).prop(flex=1)
         layout: mui.LayoutType = [ 
             self.canvas, 
             mui.ToggleButton("wtf", icon=mui.IconType.SwapVert, callback=self._on_pan_to_fwd).prop(
@@ -79,7 +81,7 @@ class SimpleCanvas(mui.FlexBox):
             self._point_dict[key] = three.Points(limit)
             await self._dynamic_pcs.set_new_layout({**self._point_dict})
         point_ui = self._point_dict[key]
-        await point_ui.update_points(points, colors)
+        await point_ui.update_points(points, colors, limit=limit)
 
     async def clear_points(self, clear_keys: Optional[List[str]] = None):
         if clear_keys is None:

@@ -78,6 +78,9 @@ class AppFunctionMeta:
             "name": self.name
         }
 
+    def __repr__(self):
+        return f"{self.type}|{self.name}"
+
 @dataclasses.dataclass
 class ServFunctionMeta:
     fn: Callable
@@ -212,7 +215,7 @@ class ReloadableDynamicClass(DynamicClass):
     def get_object_creator_if_exists(self):
         for m in self.serv_metas:
             if m.user_app_meta is not None:
-                if m.type == AppFuncType.CreateObject:
+                if m.user_app_meta.type == AppFuncType.CreateObject:
                     return m.fn 
         return None 
 

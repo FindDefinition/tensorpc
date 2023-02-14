@@ -1495,6 +1495,7 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
             self,
             value: Union[str, Optional[Dict[str, Any]]],
             type: ValueType = FrontendEventType.Change.value):
+        # TODO handle str
         if type == FrontendEventType.Change.value:
             if value is not None:
                 assert isinstance(value, dict)
@@ -2349,6 +2350,70 @@ class LinearProgress(MUIComponentBase[LinearProgressProps]):
     async def update_value(self, value: NumberType):
         value = min(max(value, 0), 100)
         await self.send_and_wait(self.update_event(value=value))
+
+class JsonLikeType(enum.Enum):
+    Int = 0
+    Float = 1
+    Bool = 2
+    Constant = 3
+    String = 4
+    List = 5
+    Dict = 6
+    Tuple = 7
+    Set = 8
+    Tensor = 9
+    Object = 10
+    Complex = 11
+
+@dataclasses.dataclass
+class JsonLikeNode:
+    id: str
+    name: str 
+    type: int
+    typeStr: Union[Undefined, str] = undefined
+    value: Union[Undefined, str] = undefined
+    lazyExpandCount: int = 0
+    children: "List[JsonLikeNode]" = dataclasses.field(default_factory=list)
+
+_DEFAULT_JSON_TREE = JsonLikeNode("root", "root", JsonLikeType.Object.value, "Object", undefined, 0, [])
+
+@dataclasses.dataclass
+class JsonLikeTreeProps(MUIFlexBoxProps):
+    tree: JsonLikeNode = _DEFAULT_JSON_TREE
+    multi_select: Union[Undefined, bool] = undefined
+    disabled_items_focusable: Union[Undefined, bool] = undefined
+    disable_selection: Union[Undefined, bool] = undefined
+
+class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
+    def __init__(
+        self,
+        tree: JsonLikeNode = _DEFAULT_JSON_TREE,
+    ) -> None:
+        tview_events = [
+            FrontendEventType.TreeItemSelect.value,
+            FrontendEventType.TreeItemToggle.value,
+            FrontendEventType.TreeLazyExpand.value,
+            FrontendEventType.TreeItemFocus.value,
+        ]
+        super().__init__(UIType.JsonLikeTreeView, JsonLikeTreeProps,
+            allowed_events=tview_events)
+        self.props.tree = tree
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def update_tree(self, tree: JsonLikeNode):
+        await self.send_and_wait(self.update_event(tree=tree))
+
+    async def handle_event(self, ev: EventType):
+        await handle_standard_event(self, ev, sync_first=True)
 
 def flex_wrapper(obj: Any):
     """wrap a object which define a layout function "tensorpc_flow_layout"

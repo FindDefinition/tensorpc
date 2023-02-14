@@ -24,17 +24,20 @@ def meta_decorator(func=None, meta: Optional[AppFunctionMeta] = None, name: Opti
     def wrapper(func):
         if meta is None:
             raise ValueError("this shouldn't happen")
-        name_ = func.__name__
         if func_checker:
             func_checker(func)
-        if name is not None:
-            name_ = name
-        meta.name = name_
         if hasattr(func, TENSORPC_FLOW_FUNC_META_KEY):
             raise ValueError(
                 "you can only use one meta decorator in a function.")
-        setattr(func, TENSORPC_FLOW_FUNC_META_KEY, meta)
+        if isinstance(func, staticmethod):
+            name_ = func.__func__.__name__
+        else:
+            name_ = func.__name__
+        if name is not None:
+            name_ = name
+        meta.name = name_
 
+        setattr(func, TENSORPC_FLOW_FUNC_META_KEY, meta)
         return func
     if func is not None:
         return wrapper(func)

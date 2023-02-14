@@ -96,6 +96,7 @@ class UIType(enum.Enum):
     AutoComplete = 0x24
     MultipleAutoComplete = 0x25
     IconButton = 0x26
+    JsonLikeTreeView = 0x27
 
     # special
     TaskLoop = 0x100
@@ -206,10 +207,19 @@ class FrontendEventType(enum.Enum):
     Delete = 21
     InputChange = 22
     DialogClose = 23
-    
+
+    TreeLazyExpand = 30
+    TreeItemSelect = 31
+    TreeItemToggle = 32
+    TreeItemFocus = 33
+
     # leaflet events
     MapZoom = 60 
     MapMove = 61
+
+    PlotlyClickData = 100
+    PlotlyClickAnnotation = 101
+
 
 ALL_POINTER_EVENTS = [ 
     FrontendEventType.Down.value,

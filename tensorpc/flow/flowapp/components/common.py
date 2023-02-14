@@ -19,7 +19,14 @@ from tensorpc.flow.flowapp.core import Component, EventType, create_ignore_usr_m
 _STATE_CHANGE_EVENTS = set([FrontendEventType.Change.value, FrontendEventType.InputChange.value,
     FrontendEventType.DialogClose.value, ])
 
-_ONEARG_EVENTS = set(ALL_POINTER_EVENTS)
+_ONEARG_TREE_EVENTS = set([
+    FrontendEventType.TreeItemSelect.value,
+    FrontendEventType.TreeItemToggle.value,
+    FrontendEventType.TreeLazyExpand.value,
+    FrontendEventType.TreeItemFocus.value,
+])
+
+_ONEARG_EVENTS = set(ALL_POINTER_EVENTS) | _ONEARG_TREE_EVENTS
 
 _NOARG_EVENTS = set([
     FrontendEventType.Click.value,
