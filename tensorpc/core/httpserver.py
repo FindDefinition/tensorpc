@@ -6,7 +6,7 @@ import sys
 import threading
 import traceback
 from functools import partial
-from typing import Awaitable, Callable, Dict, List, Optional, Set, Type, Union
+from typing import Awaitable, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import aiohttp
 from aiohttp import web
@@ -490,7 +490,7 @@ class AllWebsocketHandler:
             wait_tasks.append(wait_del_ev_task)
             wait_tasks.extend(new_tasks.values())
             self._delete_events.clear()
-            sending_tasks = []
+            sending_tasks: List[Tuple[asyncio.Task, str]] = []
             for task in done:
                 # done may contains deleted tasks. they will be removed in task_to_ev before.
                 if task in task_to_ev:
@@ -516,13 +516,13 @@ class AllWebsocketHandler:
                             # we need to generate a rpc id for event
                             for client in ev_clients:
                                 rpc_id = client.get_event_id()
-                                sending_tasks.append(
-                                    client.send(data_to_send,
+                                task = asyncio.create_task(client.send(data_to_send,
                                                 service_key=ev_str,
                                                 msg_type=msg_type,
                                                 request_id=rpc_id,
                                                 is_json=exc is not None,
                                                 dynamic_key=dykey))
+                                sending_tasks.append((task, ev_str))
                     else:
 
                         if isinstance(res, defs.DynamicEvent):
@@ -541,13 +541,13 @@ class AllWebsocketHandler:
                         # we need to generate a rpc id for event
                         for client in ev_clients:
                             rpc_id = client.get_event_id()
-                            sending_tasks.append(
-                                client.send(data_to_send,
+                            task = asyncio.create_task(client.send(data_to_send,
                                             service_key=ev_str,
                                             msg_type=msg_type,
                                             request_id=rpc_id,
                                             is_json=exc is not None,
                                             dynamic_key=dynamic_key))
+                            sending_tasks.append((task, ev_str))
             # we must cancel task AFTER clear _delete_events
             for task in task_to_be_canceled:
                 # TODO better cancel, don't await here.
@@ -556,9 +556,29 @@ class AllWebsocketHandler:
             if sending_tasks:
                 try:
                     # TODO if this function fail...
-                    await asyncio.wait(sending_tasks)
+                    await asyncio.wait([x[0] for x in sending_tasks])
                 except ConnectionResetError:
                     print("Cannot write to closing transport")
+            for task, ev_str in sending_tasks:
+                exc = task.exception()
+                if exc is not None:
+                    msg_type = core_io.SocketMsgType.EventError
+                    ss = io.StringIO()
+                    task.print_stack(file=ss)
+                    detail = ss.getvalue()
+                    res = self.service_core._remote_exception_dict(
+                        exc, detail)
+                    ev_clients = self.event_to_clients[ev_str]
+                    # we need to generate a rpc id for event
+                    for client in ev_clients:
+                        rpc_id = client.get_event_id()
+                        asyncio.create_task(client.send(res,
+                                    service_key=ev_str,
+                                    msg_type=msg_type,
+                                    request_id=rpc_id,
+                                    is_json=True,
+                                    dynamic_key=""))
+
             # print("SEND TIME", cur_ev, time.time() - t)
             task_to_ev = new_task_to_ev
 

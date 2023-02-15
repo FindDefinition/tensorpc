@@ -2364,6 +2364,8 @@ class JsonLikeType(enum.Enum):
     Tensor = 9
     Object = 10
     Complex = 11
+    Enum = 12
+
 
 @dataclasses.dataclass
 class JsonLikeNode:
@@ -2374,6 +2376,28 @@ class JsonLikeNode:
     value: Union[Undefined, str] = undefined
     lazyExpandCount: int = 0
     children: "List[JsonLikeNode]" = dataclasses.field(default_factory=list)
+
+    def _get_node_by_uid(self, uid: str):
+        parts = uid.split("-")
+        if len(parts) == 1:
+            return self
+        # uid contains root, remove it at first.
+        return self._get_node_by_uid_resursive(parts[1:])
+        
+    def _get_node_by_uid_resursive(self, parts: List[str]) -> "JsonLikeNode":
+        key = parts[0]
+        node: Optional[JsonLikeNode] = None
+        for c in self.children:
+            if c.name == key:
+                node = c 
+                break
+        assert node is not None, f"{key} missing"
+        if len(parts) == 1:
+            return node
+        else:
+            return node._get_node_by_uid_resursive(parts[1:])
+
+
 
 _DEFAULT_JSON_TREE = JsonLikeNode("root", "root", JsonLikeType.Object.value, "Object", undefined, 0, [])
 

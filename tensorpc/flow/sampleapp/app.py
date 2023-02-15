@@ -1086,3 +1086,15 @@ class SampleTreeApp(EditableLayoutApp):
 
     def handle_click(self):
         print("???2X???")
+
+
+class SampleObjectInspectApp(EditableLayoutApp):
+    def __init__(self) -> None:
+        super().__init__()
+        self.set_init_window_size([640, 480])
+
+    @marker.mark_create_layout
+    def my_latout(self):
+        return [
+            plus.ObjectInspector(self) 
+        ]

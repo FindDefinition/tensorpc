@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import io
 import pickle
 from typing import Any, Dict, List, Optional
 from tensorpc.flow.coretypes import ScheduleEvent, get_uid
 from tensorpc.flow.flowapp.components.mui import FlexBox, flex_wrapper
-from tensorpc.flow.flowapp.core import AppEditorFrontendEvent, AppEvent, AppEventType, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UISaveStateEvent
+from tensorpc.flow.flowapp.core import AppEditorFrontendEvent, AppEvent, AppEventType, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
 from tensorpc.flow.flowapp.app import App, EditableApp
 import asyncio
 from tensorpc.core import marker
@@ -238,6 +239,11 @@ class FlowApp:
                         # print("SEND", ev.type, "FINISH")
                     except Exception as e:
                         traceback.print_exc()
+                        # ss = io.StringIO()
+                        # traceback.print_exc(file=ss)
+                        # user_exc = UserMessage.create_error(ev.uid, repr(e), ss.getvalue())
+                        # exc_ev = AppEvent("", {AppEventType.UIException: UIExceptionEvent([user_exc])})
+                        # await self._send_grpc_event_large(exc_ev, robj)
                         # remote call may fail by connection broken
                         # when disconnect to master/remote worker, enter slient mode
                         previous_event = previous_event.merge_new(ev)
