@@ -29,7 +29,7 @@ class ObjectInspector(mui.FlexBox):
             layout.append(mui.Divider())
             layout.append(self.detail_container)
         super().__init__(layout)
-        self.prop(flex_direction="column", flex=1, overflow="hidden")
+        self.prop(flex_direction="column", flex=1, overflow="hidden", min_height=0, min_width=0)
         if with_detail:
             self.tree.tree.register_event_handler(
                 FrontendEventType.TreeItemSelect.value, self._on_select)

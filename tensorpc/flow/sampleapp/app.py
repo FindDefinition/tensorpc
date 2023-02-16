@@ -1097,10 +1097,12 @@ class SampleObjectInspectApp(EditableLayoutApp):
         import torch
         self.ten_cpu = torch.rand(1, 3, 224, 224)
         self.ten_gpu = self.ten_cpu.cuda()
+        self.ten_gpu_non_c = self.ten_gpu[..., 1:]
+
         from cumm import tensorview as tv 
         self.tv_ten_cpu = tv.zeros([224, 224], tv.float32, -1)
         self.tv_ten_gpu = self.tv_ten_cpu.cuda()
-
+        self.non_contig_arr = np.random.uniform(-1, 1, size=[500, 3])[:, 1:]
 
     @marker.mark_create_layout
     def my_latout(self):

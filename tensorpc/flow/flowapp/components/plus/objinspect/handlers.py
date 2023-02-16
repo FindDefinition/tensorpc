@@ -22,7 +22,7 @@ class TensorHandler(ObjectHandler):
             mui.Divider().prop(padding="3px"),
             mui.HBox([
                 self.slice_val.prop(flex=1),
-                mui.Button("show slice", self._on_show_slice),
+                mui.Button("show sliced", self._on_show_slice),
             ]),
             self.data_print,
         ]
