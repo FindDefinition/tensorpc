@@ -21,7 +21,6 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Tuple, Type, TypeVar, Union)
 
 from tensorpc import compat
-import numpy.typing as npt
 if compat.Python3_8AndLater:
     from typing import Literal
 else:

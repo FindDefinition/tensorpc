@@ -1921,6 +1921,7 @@ class Typography(MUIComponentBase[TypographyProps]):
         self.props.value = init
 
     async def write(self, content: str):
+        assert isinstance(content, str)
         self.props.value = content
         await self.put_app_event(
             self.create_update_event({"value": self.props.value}))
@@ -2407,6 +2408,7 @@ class JsonLikeTreeProps(MUIFlexBoxProps):
     multi_select: Union[Undefined, bool] = undefined
     disabled_items_focusable: Union[Undefined, bool] = undefined
     disable_selection: Union[Undefined, bool] = undefined
+    ignore_root: Union[Undefined, bool] = undefined
 
 class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
     def __init__(

@@ -43,6 +43,9 @@ REQUIRED = [
     "watchdog",
     "typing_extensions>=4.3.0",
     "pyee",
+    # to avoid a serious problem
+    "pyOpenSSL>=23.0.0",
+    "cryptography>=39.0.0",
 ]
 
 # What packages are optional?

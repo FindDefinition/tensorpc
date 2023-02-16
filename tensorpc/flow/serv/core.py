@@ -321,11 +321,11 @@ class DirectSSHNode(Node):
 
     @property
     def url(self) -> str:
-        return self.node_data["url"]
+        return self.node_data["url"].strip()
 
     @property
     def username(self) -> str:
-        return self.node_data["username"]
+        return self.node_data["username"].strip()
 
     @property
     def password(self) -> str:
@@ -407,7 +407,7 @@ class GroupNode(Node):
 
     @property
     def name(self) -> str:
-        return self.node_data["name"]
+        return self.node_data["name"].strip()
 
     @property
     def roles(self) -> List[str]:
@@ -415,7 +415,7 @@ class GroupNode(Node):
 
     @property
     def color(self) -> str:
-        return self.node_data["color"]
+        return self.node_data["color"].strip()
 
 class NodeWithSSHBase(RunnableNodeBase):
 
@@ -447,6 +447,8 @@ class NodeWithSSHBase(RunnableNodeBase):
 
         self.queued_commands: List[ScheduleEvent] = []
         self.running_driver_id = ""
+
+        self.session_identify_key = None
 
     @property 
     def terminal_state(self):
@@ -488,11 +490,13 @@ class NodeWithSSHBase(RunnableNodeBase):
         """
         self.shutdown_ev.set()
 
-    def set_start_status(self):
+    def set_start_status(self, key):
         self.session_status = SessionStatus.Running
+        self.session_identify_key = key
 
     def set_stop_status(self):
         self.session_status = SessionStatus.Stop
+        self.session_identify_key = None
 
     def is_session_started(self):
         return self.session_status == SessionStatus.Running
@@ -602,11 +606,11 @@ class RemoteSSHNode(NodeWithSSHBase):
 
     @property
     def url(self) -> str:
-        return self.node_data["url"]
+        return self.node_data["url"].strip()
 
     @property
     def username(self) -> str:
-        return self.node_data["username"]
+        return self.node_data["username"].strip()
 
     @property
     def password(self) -> str:
@@ -646,6 +650,7 @@ class RemoteSSHNode(NodeWithSSHBase):
                             url: str,
                             username: str,
                             password: str,
+                            session_key: str,
                             rfports: Optional[List[int]] = None):
         assert self.task is None
         new_sess_name = TENSORPC_FLOW_DEFAULT_TMUX_NAME
@@ -722,7 +727,7 @@ class RemoteSSHNode(NodeWithSSHBase):
                                  client_ip_callback=client_ip_callback,
                                  init_event=init_event,
                                  exit_event=self.exit_event))
-        self.set_start_status()
+        self.set_start_status(session_key)
 
         await self.input_queue.put(
             SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
@@ -952,6 +957,7 @@ class CommandNode(NodeWithSSHBase):
                             url: str,
                             username: str,
                             password: str,
+                            session_key: str,
                             envs: Dict[str, str],
                             is_worker: bool,
                             enable_port_forward: bool,
@@ -984,7 +990,7 @@ class CommandNode(NodeWithSSHBase):
                                  exit_callback=exit_callback,
                                  init_event=init_event,
                                  exit_event=self.exit_event))
-        self.set_start_status()
+        self.set_start_status(session_key)
 
         await self.input_queue.put(
             SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
@@ -1025,6 +1031,7 @@ class AppNode(CommandNode):
                             url: str,
                             username: str,
                             password: str,
+                            session_key: str,
                             envs: Dict[str, str],
                             is_worker: bool,
                             enable_port_forward: bool,
@@ -1080,7 +1087,7 @@ class AppNode(CommandNode):
                                  exit_callback=exit_callback,
                                  init_event=init_event,
                                  exit_event=self.exit_event))
-        self.set_start_status()
+        self.set_start_status(session_key)
         await self.input_queue.put(
             SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
         return True, init_event
@@ -2018,6 +2025,7 @@ class Flow:
                     node.url,
                     node.username,
                     node.password,
+                    node.id,
                     rfports=rfports)
                 await ssh_init_event.wait()
             await node.run_command(cmd_renderer=graph.render_command)
@@ -2064,6 +2072,7 @@ class Flow:
             driver.url,
             driver.username,
             driver.password,
+            driver.id,
             is_worker=False,
             enable_port_forward=driver.enable_port_forward,
             envs=envs,
@@ -2090,6 +2099,13 @@ class Flow:
                 print("DRIVER", driver.url)
                 if not node.is_session_started():
                     await self._start_session_direct(graph_id, node, driver)
+                else:
+                    if driver.id != node.session_identify_key:
+                        # shutdown ssh 
+                        print("SHUTDOWN SSH SESSION")
+                        await self.stop_session(graph_id, node_id)
+                        await node.exit_event.wait()
+                        await self._start_session_direct(graph_id, node, driver)
                 await node.run_command(cmd_renderer=graph.render_command)
             elif isinstance(driver, RemoteSSHNode):
                 assert (driver.url != "" and driver.username != ""

@@ -824,8 +824,9 @@ class SampleMapApp(EditableApp):
         self.root.props.flex_flow = "row nowrap"
 
     def app_create_layout(self) -> Dict[str, MUIComponentType]:
+        google_url = "https://{s}.google.com/vt?lyrs=m&x={x}&y={y}&z={z}"
         self.leaflet = leaflet.MapContainer((30, 100), 13, {
-            "tile": leaflet.TileLayer(),
+            "tile": leaflet.TileLayer(google_url),
         }).prop(height="100%", flex=3)
         return {
             "control":
@@ -1092,9 +1093,71 @@ class SampleObjectInspectApp(EditableLayoutApp):
     def __init__(self) -> None:
         super().__init__()
         self.set_init_window_size([640, 480])
+        self.array = np.random.uniform(-1, 1, size=[500])
+        import torch
+        self.ten_cpu = torch.rand(1, 3, 224, 224)
+        self.ten_gpu = self.ten_cpu.cuda()
+        from cumm import tensorview as tv 
+        self.tv_ten_cpu = tv.zeros([224, 224], tv.float32, -1)
+        self.tv_ten_gpu = self.tv_ten_cpu.cuda()
+
 
     @marker.mark_create_layout
     def my_latout(self):
         return [
             plus.ObjectInspector(self) 
+        ]
+from tensorpc.flow import mui, three, plus, EditableLayoutApp, mark_create_layout
+import numpy as np 
+
+
+class MyApp(EditableLayoutApp):
+    @mark_create_layout
+    def my_layout(self):
+        cam = three.PerspectiveCamera(True, fov=75, near=0.1, far=1000)
+
+        self.canvas = plus.SimpleCanvas(cam)
+        self.slider = mui.Slider("Slider", 0, 1, 1, callback=self._on_slider_select)
+
+        return [
+            mui.HBox([
+                mui.Button("Change Slider Range", self._on_slider_range_change),
+                self.slider.prop(flex=1),
+            ]),
+            self.canvas.prop(flex=1),
+        ]
+
+    async def _on_slider_range_change(self):
+        await self.slider.update_ranges(0, 10, 1)
+
+    async def _on_slider_select(self, value):
+        print("select slider!", value)
+        # you need to specify a key for a group of point
+        # you also need to specify number limit of current point
+        points = np.random.uniform(-1, 1, size=[1000, 3]).astype(np.float32)
+        # colors can be: 
+        # 1. [N, 3] float, value range: [0, 1]
+        # 2. [N], int8 (intensity), value range: [0, 255]
+        # 3. a color string, e.g. red, green
+        colors = np.random.uniform(0, 1, size=[1000, 3]).astype(np.float32)
+
+        await self.canvas.show_points("key0", points, limit=100000, colors=colors)
+        # boxes: dims, locs, rots, colors (string list, don't support ndarray currently)
+        dims = np.random.uniform(1, 2, size=[5, 3])
+        locs = np.random.uniform(-5, 5, size=[5, 3])
+        rots = np.random.uniform(-1, 1, size=[5, 3])
+        rots[:, :2] = 0
+        colors = ["red", "yellow", "red", "blue", "yellow"]
+        await self.canvas.show_boxes(dims, locs, rots, colors)
+
+        # lines: [N, 2, 3]
+        lines = np.random.uniform(-3, 3, size=[10, 2, 3])
+        await self.canvas.show_lines("key0", lines, limit=10000, color="aqua")
+
+
+class CollectionApp(EditableLayoutApp):
+    @mark_create_layout
+    def my_layout(self):
+        return [
+            mui.HBox([])
         ]
