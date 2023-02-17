@@ -132,6 +132,7 @@ class FlexComponentBaseProps(BasicProps):
     white_space: Union[Literal["normal", "pre", "nowrap", "pre-wrap",
                                "pre-line", "break-spaces"],
                        Undefined] = undefined
+    word_break: Union[Literal["normal", "break-all", "keep-all", "break-word"], Undefined] = undefined
     pointer_events: Union[PointerEventsProperties, Undefined] = undefined
 
 

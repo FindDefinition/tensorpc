@@ -63,6 +63,7 @@ class AppFuncType(Enum):
     CreateLayout = "CreateLayout"
     AutoRun = "AutoRun"
     CreateObject = "CreateObject"
+    RunInExecutor = "RunInExecutor"
 
 class AppFunctionMeta:
 

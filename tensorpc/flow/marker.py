@@ -58,3 +58,8 @@ def mark_create_object(func=None):
         assert isinstance(func, staticmethod), "create_object decorator only works on static"
         assert len(inspect.signature(func.__func__).parameters) == 0, "create_object decorator can't have any params"
     return meta_decorator(func, meta, func_checker=func_checker)
+
+def mark_run_in_executor(func=None):
+    meta = AppFunctionMeta(AppFuncType.RunInExecutor)
+    return meta_decorator(func, meta)
+

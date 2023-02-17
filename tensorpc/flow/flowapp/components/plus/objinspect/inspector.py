@@ -1,15 +1,73 @@
-from functools import partial
+import enum
+import inspect
 import types
-from tensorpc.flow.flowapp.components import mui, three
-from typing import Any, Callable, Dict, Hashable, Iterable, Optional, Set, Tuple, Type, Union, List
+from functools import partial
+from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
+                    Set, Tuple, Type, Union)
+
 import numpy as np
+
+from tensorpc.core.inspecttools import get_members
+from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.core import FrontendEventType
 from tensorpc.utils.moduleid import get_qualname_of_type
-import inspect
-import enum
-from tensorpc.core.inspecttools import get_members
-from .tree import ObjectTree, _DEFAULT_OBJ_NAME
+
 from .core import ALL_OBJECT_HANDLERS, ObjectHandler
+from .tree import _DEFAULT_OBJ_NAME, ObjectTree
+
+_DEFAULT_LOCALS_NAME = "locals"
+
+_MAX_STRING_IN_DETAIL = 10000
+
+
+class DefaultHandler(ObjectHandler):
+    """
+    TODO if the object support any-layout, add a button to enable it.
+    """
+
+    def __init__(self) -> None:
+        self.tags = mui.FlexBox().prop(flex_flow="row wrap")
+        self.title = mui.Typography("").prop(word_break="break-word")
+        self.path = mui.Typography("").prop(word_break="break-word")
+
+        self.data_print = mui.Typography("").prop(font_family="monospace",
+                                                  font_size="12px",
+                                                  white_space="pre-line")
+        layout = [
+            self.title.prop(font_size="14px", font_family="monospace"),
+            self.path.prop(font_size="14px", font_family="monospace"),
+            self.tags,
+            mui.Divider().prop(padding="3px"),
+            mui.HBox([
+                mui.Button("print", self._on_print),
+            ]),
+            self.data_print,
+        ]
+
+        super().__init__(layout)
+        self.prop(flex_direction="column")
+        self.obj: Any = np.zeros([1])
+
+    async def _on_print(self):
+        string = str(self.obj)
+        if len(string) > _MAX_STRING_IN_DETAIL:
+            string = string[:_MAX_STRING_IN_DETAIL] + "..."
+        await self.data_print.write(string)
+
+    async def bind(self, obj):
+        # bind np object, update all metadata
+        self.obj = obj
+        ev = self.data_print.update_event(value="")
+        ev += self.title.update_event(value=get_qualname_of_type(type(obj)))
+        try:
+            sf = inspect.getsourcefile(type(obj))
+        except TypeError:
+            sf = None
+        if sf is None:
+            sf = ""
+        ev += self.path.update_event(value=sf)
+        await self.send_and_wait(ev)
+        # await self.tags.set_new_layout([*tags])
 
 
 class ObjectInspector(mui.FlexBox):
@@ -28,8 +86,13 @@ class ObjectInspector(mui.FlexBox):
         if with_detail:
             layout.append(mui.Divider())
             layout.append(self.detail_container)
+        self.default_handler = DefaultHandler()
         super().__init__(layout)
-        self.prop(flex_direction="column", flex=1, overflow="hidden", min_height=0, min_width=0)
+        self.prop(flex_direction="column",
+                  flex=1,
+                  overflow="hidden",
+                  min_height=0,
+                  min_width=0)
         if with_detail:
             self.tree.tree.register_event_handler(
                 FrontendEventType.TreeItemSelect.value, self._on_select)
@@ -50,11 +113,15 @@ class ObjectInspector(mui.FlexBox):
                 handler_type = ALL_OBJECT_HANDLERS[obj_type]
             elif obj_qualname in ALL_OBJECT_HANDLERS:
                 handler_type = ALL_OBJECT_HANDLERS[obj_qualname]
+            # else:
+            #     handler_type = DefaultHandler
+            # TODO use a base handler here.
+            # await self.detail_container.set_new_layout([])
+            # return
+            if handler_type is not None:
+                handler = handler_type()
             else:
-                # TODO use a base handler here.
-                await self.detail_container.set_new_layout([])
-                return
-            handler = handler_type()
+                handler = self.default_handler
             self._type_to_handler_object[obj_type] = handler
         childs = list(self.detail_container._child_comps.values())
         if not childs or childs[0] is not handler:
@@ -63,7 +130,25 @@ class ObjectInspector(mui.FlexBox):
 
     async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):
         await self.tree.set_object(obj, key)
-    
+
+    async def update_locals(self,
+                            key: str = _DEFAULT_LOCALS_NAME,
+                            *,
+                            _frame_cnt: int = 1):
+        cur_frame = inspect.currentframe()
+        assert cur_frame is not None
+        frame = cur_frame
+        while _frame_cnt > 0:
+            frame = cur_frame.f_back
+            assert frame is not None
+            cur_frame = frame
+            _frame_cnt -= 1
+        # del frame
+        local_vars = cur_frame.f_locals.copy()
+        del frame
+        del cur_frame
+        await self.tree.set_object(local_vars, key)
+
     async def update_tree(self):
         await self.tree.update_tree()
 

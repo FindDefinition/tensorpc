@@ -1,13 +1,16 @@
-from functools import partial
+import enum
+import inspect
 import types
-from tensorpc.flow.flowapp.components import mui, three
-from typing import Any, Callable, Dict, Hashable, Iterable, Optional, Set, Tuple, Type, Union, List
+from functools import partial
+from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
+                    Set, Tuple, Type, Union)
+
 import numpy as np
+
+from tensorpc.core.inspecttools import get_members
+from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.core import FrontendEventType
 from tensorpc.utils.moduleid import get_qualname_of_type
-import inspect
-import enum
-from tensorpc.core.inspecttools import get_members
 
 _DEFAULT_OBJ_NAME = "default"
 _ROOT = "root"
@@ -181,7 +184,10 @@ def _get_obj_dict(obj,
                   check_obj: bool = True):
     res: Dict[str, Any] = {}
     if isinstance(obj, (list, tuple, set)):
-        obj_list = list(obj)
+        if isinstance(obj, set):
+            obj_list = list(obj)
+        else:
+            obj_list = obj
         return {str(i): obj_list[i] for i in range(len(obj))}
     elif isinstance(obj, dict):
         return {str(k): v for k, v in obj.items()}
@@ -193,13 +199,13 @@ def _get_obj_dict(obj,
         return {}
     # if isinstance(obj, mui.Component):
     #     return {}
-    members = get_members(obj, no_parent=False)
-    member_keys = set([m[0] for m in members])
+    # members = get_members(obj, no_parent=False)
+    # member_keys = set([m[0] for m in members])
     for k in dir(obj):
         if k.startswith("__"):
             continue
-        if k in member_keys:
-            continue
+        # if k in member_keys:
+        #     continue
         try:
             v = getattr(obj, k)
         except:
@@ -214,6 +220,47 @@ def _get_obj_dict(obj,
         res[k] = v
     return res
 
+def _get_obj_single_attr(obj, key: str,
+                  checker: Callable[[Type], bool],
+                  check_obj: bool = True) -> Union[mui.Undefined, Any]:
+    # if isinstance(obj, (list, tuple, set)):
+    #     try:
+    #         key_int = int(key)
+    #     except:
+    #         return mui.undefined
+    #     if key_int < 0 or key_int >= len(obj):
+    #         return mui.undefined 
+    #     obj_list = list(obj)
+    #     return obj_list[key_int]
+    # elif isinstance(obj, dict):
+    #     if key not in obj:
+    #         return mui.undefined 
+    #     return obj[key]
+    if inspect.isbuiltin(obj):
+        return mui.undefined
+    if not checker(obj) and check_obj:
+        return mui.undefined
+    if isinstance(obj, types.ModuleType):
+        return mui.undefined
+    # if isinstance(obj, mui.Component):
+    #     return {}
+    # members = get_members(obj, no_parent=False)
+    # member_keys = set([m[0] for m in members])
+    obj_keys = dir(obj)
+    if key in obj_keys:
+        try:
+            v = getattr(obj, key)
+        except:
+            return mui.undefined
+        if not (checker(v)):
+            return mui.undefined
+        if isinstance(v, types.ModuleType):
+            return mui.undefined
+        if inspect.isfunction(v) or inspect.ismethod(v) or inspect.isbuiltin(
+                v):
+            return mui.undefined
+        return v
+    return mui.undefined
 
 def _get_obj_by_uid(obj, uid: str,
                     checker: Callable[[Type], bool]) -> Tuple[Any, bool]:
@@ -229,8 +276,14 @@ def _get_obj_by_uid_resursive(
                                                  bool]) -> Tuple[Any, bool]:
     key = parts[0]
     if isinstance(obj, (list, tuple, set)):
-        obj_list = list(obj)
-        key_index = int(key)
+        if isinstance(obj, set):
+            obj_list = list(obj)
+        else:
+            obj_list = obj
+        try:
+            key_index = int(key)
+        except:
+            return obj, False
         if key_index < 0 or key_index >= len(obj_list):
             return obj, False
         child_obj = obj_list[key_index]
@@ -240,10 +293,9 @@ def _get_obj_by_uid_resursive(
             return obj, False
         child_obj = obj_dict[key]
     else:
-        obj_dict = _get_obj_dict(obj, checker)
-        if key not in obj_dict:
+        child_obj = _get_obj_single_attr(obj, key, checker)
+        if isinstance(obj, mui.Undefined):
             return obj, False
-        child_obj = obj_dict[key]
     if len(parts) == 1:
         return child_obj, True
     else:
