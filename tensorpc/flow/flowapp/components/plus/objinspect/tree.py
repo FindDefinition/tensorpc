@@ -157,7 +157,8 @@ def parse_obj_item(obj, name: str, id: str, checker: Callable[[Type], bool]):
                                 name,
                                 t.value,
                                 typeStr=obj_type.__qualname__,
-                                lazyExpandCount=len(obj_dict))
+                                lazyExpandCount=len(obj_dict),
+                                draggable=True)
 
 
 def parse_obj_dict(obj_dict: Dict[str, Any], ns: str, checker: Callable[[Type],

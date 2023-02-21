@@ -1163,3 +1163,26 @@ class CollectionApp(EditableLayoutApp):
         return [
             mui.HBox([])
         ]
+    
+
+class AllotmentDevApp(EditableLayoutApp):
+    @mark_create_layout
+    def my_layout(self):
+        self.root.prop(flex_flow="row nowrap")
+
+        return [
+            plus.ObjectInspector(self).prop(flex=1),
+            mui.Divider(orientation="vertical"),
+            mui.HBox([
+            mui.Allotment([
+                mui.AllotmentPane([
+                    
+                ]),
+                mui.AllotmentPane([
+                    
+                ])
+            ]).prop(default_sizes=[300, 200])
+
+            ]).prop(flex=2)
+        ]
+

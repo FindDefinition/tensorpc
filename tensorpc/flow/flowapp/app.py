@@ -56,7 +56,7 @@ from tensorpc.flow.client import MasterMeta
 from .components import mui, three
 from .core import (AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
                    AppEditorFrontendEventType, AppEvent, AppEventType,
-                   BasicProps, Component, ContainerBase, CopyToClipboardEvent,
+                   BasicProps, Component, ContainerBase, CopyToClipboardEvent, FrontendEventType,
                    LayoutEvent, TaskLoopEvent, UIEvent, UIExceptionEvent,
                    UIRunStatus, UIType, UIUpdateEvent, Undefined, UserMessage, ValueType,
                    undefined, EventHandler)
@@ -611,17 +611,32 @@ class App:
             })
         await self._send_editor_event(app_ev)
 
+    @staticmethod 
+    async def __handle_dnd_event(handler: EventHandler, src_handler: EventHandler, src_data):
+        res = await src_handler.cb(src_data)
+        await handler.cb(res)
+
     async def handle_event(self, ev: UIEvent):
         for uid, data in ev.uid_to_data.items():
-            comp = self.root._get_comp_by_uid(uid)
-            await comp.handle_event(data)
+            ev_type = data[0]
+            if ev_type == FrontendEventType.Drop.value:
+                src_data = data[1]
+                src_uid = src_data["uid"]
+                src_comp = self.root._get_comp_by_uid(src_uid)
+                collect_handler = src_comp.get_event_handler(FrontendEventType.DragCollect.value)
+                comp = self.root._get_comp_by_uid(uid)
+                handler = comp.get_event_handler(data[0])
+                if handler is not None and collect_handler is not None:
+                    cb = partial(self.__handle_dnd_event, handler=handler, src_handler=collect_handler, src_data=src_data["data"])
+                    comp._task = asyncio.create_task(comp.run_callback(cb, sync_first=False))
+            else:
+                comp = self.root._get_comp_by_uid(uid)
+                await comp.handle_event(data)
 
     async def _handle_event_with_ctx(self, ev: UIEvent):
         # TODO run control from other component
         with _enter_app_conetxt(self):
-            for uid, data in ev.uid_to_data.items():
-                comp = self.root._get_comp_by_uid(uid)
-                await comp.handle_event(data)
+            await self.handle_event(ev)
 
     async def copy_text_to_clipboard(self, text: str):
         """copy to clipboard in frontend."""

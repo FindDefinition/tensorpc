@@ -2130,7 +2130,7 @@ class ShapeButton(Group):
         return res
 
     async def headless_click(self):
-        uiev = UIEvent({self._flow_uid: [FrontendEventType.Click, self.name]})
+        uiev = UIEvent({self._flow_uid: (FrontendEventType.Click.value, self.name)})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -2195,7 +2195,7 @@ class Button(Group):
         return res
 
     async def headless_click(self):
-        uiev = UIEvent({self._flow_uid: [FrontendEventType.Click, self.name]})
+        uiev = UIEvent({self._flow_uid: (FrontendEventType.Click.value, self.name)})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -2255,7 +2255,7 @@ class ToggleButton(Group):
         return res
 
     async def headless_toggle(self):
-        uiev = UIEvent({self._flow_uid: [FrontendEventType.Change, self.name]})
+        uiev = UIEvent({self._flow_uid: (FrontendEventType.Change.value, self.name)})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 

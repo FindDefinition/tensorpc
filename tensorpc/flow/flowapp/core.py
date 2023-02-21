@@ -97,7 +97,11 @@ class UIType(enum.Enum):
     MultipleAutoComplete = 0x25
     IconButton = 0x26
     JsonLikeTreeView = 0x27
-
+    Allotment = 0x28
+    AllotmentPane = 0x29
+    FlexLayout = 0x30
+    MosaicLayout = 0x31
+    
     # special
     TaskLoop = 0x100
     FlexBox = 0x101
@@ -193,6 +197,10 @@ class AppEventType(enum.Enum):
     ComponentEvent = 300
 
 class FrontendEventType(enum.Enum):
+    # only used on backend
+    # if user don't define DragCollect handler, Drop won't be scheduled.
+    DragCollect = -1
+
     Click = 0
     DoubleClick = 1
     Enter = 2
@@ -207,6 +215,8 @@ class FrontendEventType(enum.Enum):
     Delete = 21
     InputChange = 22
     DialogClose = 23
+    Drag = 24
+    Drop = 25
 
     TreeLazyExpand = 30
     TreeItemSelect = 31
@@ -304,7 +314,7 @@ class AppEditorFrontendEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.UIEvent.value)
 class UIEvent:
-    def __init__(self, uid_to_data: Dict[str, Any]) -> None:
+    def __init__(self, uid_to_data: Dict[str, EventType]) -> None:
         self.uid_to_data = uid_to_data
 
     def to_dict(self):
@@ -1018,7 +1028,8 @@ class Component(Generic[T_base_props, T_child]):
     async def run_callback(self,
                            cb: Callable[[], _CORO_NONE],
                            sync_state: bool = False,
-                           sync_first: bool = True):
+                           sync_first: bool = True,
+                           res_callback: Optional[Callable[[Any], _CORO_NONE]] = None):
         self.props.status = UIRunStatus.Running.value
         # only ui with loading support need sync first.
         # otherwise don't use this because slow
@@ -1026,10 +1037,18 @@ class Component(Generic[T_base_props, T_child]):
             ev = asyncio.Event()
             await self.sync_status(sync_state, ev)
             await ev.wait()
+        res = None 
         try:
             coro = cb()
             if inspect.iscoroutine(coro):
-                await coro
+                res = await coro
+            else:
+                res = coro
+            if res_callback is not None:
+                res_coro = res_callback(res)
+                if inspect.iscoroutine(res_coro):
+                    await res_coro
+            
         except Exception as e:
             traceback.print_exc()
             ss = io.StringIO()
@@ -1039,8 +1058,8 @@ class Component(Generic[T_base_props, T_child]):
         finally:
             self.props.status = UIRunStatus.Stop.value 
             await self.sync_status(sync_state)
-
-
+        return res 
+    
     async def sync_status(self,
                           sync_state: bool = False,
                           sent_event: Optional[asyncio.Event] = None):
