@@ -627,6 +627,7 @@ class App:
                 collect_handler = src_comp.get_event_handler(FrontendEventType.DragCollect.value)
                 comp = self.root._get_comp_by_uid(uid)
                 handler = comp.get_event_handler(data[0])
+                # print(src_uid, comp, src_comp, handler, collect_handler)
                 if handler is not None and collect_handler is not None:
                     cb = partial(self.__handle_dnd_event, handler=handler, src_handler=collect_handler, src_data=src_data["data"])
                     comp._task = asyncio.create_task(comp.run_callback(cb, sync_first=False))

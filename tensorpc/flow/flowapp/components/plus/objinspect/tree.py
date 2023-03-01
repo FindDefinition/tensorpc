@@ -350,7 +350,7 @@ class ObjectTree(mui.FlexBox):
         self.tree.register_event_handler(
             FrontendEventType.TreeLazyExpand.value, self._on_expand)
         self.tree.register_event_handler(
-            FrontendEventType.DragCollect.value, self._on_drag_collect)
+            FrontendEventType.DragCollect.value, self._on_drag_collect, backend_only=True)
 
 
     def _checker(self, obj):
@@ -372,6 +372,8 @@ class ObjectTree(mui.FlexBox):
         obj, found = _get_obj_by_uid(self.root, uid, self._valid_checker)
         if not found:
             return None 
+        if "complexLayoutTabNodeId" in data:
+            uid = data["complexLayoutTabNodeId"]
         return mui.flex_wrapper(obj), uid
 
     async def _on_expand(self, uid: str):

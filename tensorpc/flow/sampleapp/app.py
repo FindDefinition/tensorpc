@@ -1172,7 +1172,7 @@ class AllotmentDevApp(EditableLayoutApp):
             plus.ObjectInspector(self).prop(flex=1),
             mui.Divider(orientation="vertical"),
             mui.HBox([
-                mui.FlexLayout([]),
+                plus.AnyFlexLayout(),
             ]).prop(flex=2)
         ]
 

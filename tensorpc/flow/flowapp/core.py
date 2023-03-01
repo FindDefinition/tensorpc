@@ -231,6 +231,9 @@ class FrontendEventType(enum.Enum):
     TreeItemToggle = 32
     TreeItemFocus = 33
 
+    ComplexLayoutCloseTab = 40
+    ComplexLayoutSelectTab = 41
+
     # leaflet events
     MapZoom = 60
     MapMove = 61

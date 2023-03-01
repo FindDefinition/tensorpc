@@ -24,9 +24,15 @@ _ONEARG_TREE_EVENTS = set([
     FrontendEventType.TreeItemToggle.value,
     FrontendEventType.TreeLazyExpand.value,
     FrontendEventType.TreeItemFocus.value,
+
 ])
 
-_ONEARG_EVENTS = set(ALL_POINTER_EVENTS) | _ONEARG_TREE_EVENTS
+_ONEARG_COMPLEXL_EVENTS = set([
+    FrontendEventType.ComplexLayoutCloseTab.value,
+    FrontendEventType.ComplexLayoutSelectTab.value,
+])
+
+_ONEARG_EVENTS = set(ALL_POINTER_EVENTS) | _ONEARG_TREE_EVENTS | _ONEARG_COMPLEXL_EVENTS
 
 _NOARG_EVENTS = set([
     FrontendEventType.Click.value,

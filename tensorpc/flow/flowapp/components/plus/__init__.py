@@ -16,4 +16,4 @@ from .core import ListSlider
 from .config import ConfigPanel
 from .figure import HomogeneousMetricFigure
 from .canvas import SimpleCanvas
-from .objinspect import ObjectInspector
+from .objinspect import ObjectInspector, AnyFlexLayout

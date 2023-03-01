@@ -2430,6 +2430,8 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+    async def handle_event(self, ev: EventType):
+        return await handle_standard_event(self, ev, sync_first=True)
 
 @dataclasses.dataclass
 class CircularProgressProps(MUIFlexBoxProps):
