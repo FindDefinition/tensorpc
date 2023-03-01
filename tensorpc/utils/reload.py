@@ -15,7 +15,7 @@
 from functools import partial
 import importlib
 import traceback
-from typing import Callable
+from typing import Any, Callable
 import types
 import inspect
 import importlib.machinery
@@ -57,3 +57,6 @@ def reload_method(method: Callable, module_dict: dict, prev_code: str = ""):
     if isinstance(method, partial):
         new_method = partial(new_method, *method.args, **method.keywords)
     return new_method, new_method_code
+
+def rebind_object(obj: Any):
+    pass 

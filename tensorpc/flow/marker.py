@@ -63,3 +63,10 @@ def mark_run_in_executor(func=None):
     meta = AppFunctionMeta(AppFuncType.RunInExecutor)
     return meta_decorator(func, meta)
 
+def mark_did_mount(func=None):
+    meta = AppFunctionMeta(AppFuncType.ComponentDidMount)
+    return meta_decorator(func, meta)
+
+def mark_will_unmount(func=None):
+    meta = AppFunctionMeta(AppFuncType.ComponentWillUnmount)
+    return meta_decorator(func, meta)

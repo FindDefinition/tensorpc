@@ -64,6 +64,8 @@ class AppFuncType(Enum):
     AutoRun = "AutoRun"
     CreateObject = "CreateObject"
     RunInExecutor = "RunInExecutor"
+    ComponentDidMount = "ComponentDidMount"
+    ComponentWillUnmount = "ComponentWillUnmount"
 
 class AppFunctionMeta:
 
@@ -95,6 +97,7 @@ class ServFunctionMeta:
     code: str = ""
     qualname: str = ""
     user_app_meta: Optional[AppFunctionMeta] = None 
+    binded_fn: Optional[Callable] = None
 
     def __init__(self, fn: Callable, name: str, type: ServiceType,
                  sig: inspect.Signature, is_gen: bool, is_async: bool,
@@ -130,6 +133,21 @@ class ServFunctionMeta:
             "code": self.code,
             "user_app_meta": user_app_meta,
         }
+
+    def bind(self, obj):
+        if not self.is_binded:
+            if not self.is_static:
+                new_method =  types.MethodType(self.fn, obj)
+            else:
+                new_method = self.fn
+            self.binded_fn = new_method
+            return self.binded_fn 
+        assert self.binded_fn is not None 
+        return self.binded_fn 
+
+    def get_binded_fn(self):
+        assert self.binded_fn is not None 
+        return self.binded_fn
 
 class DynamicClass:
     def __init__(self, module_name: str, ) -> None:
@@ -183,14 +201,14 @@ class ReloadableDynamicClass(DynamicClass):
         self.serv_metas = self.get_metas_of_regular_methods(self.obj_type)
 
     @staticmethod
-    def get_metas_of_regular_methods(type_obj):
+    def get_metas_of_regular_methods(type_obj, include_base: bool = False):
         serv_metas: List[ServFunctionMeta] = []
-        members = inspecttools.get_members_by_type(type_obj, True)
+        members = inspecttools.get_members_by_type(type_obj, not include_base)
         for k, v in members:
             if inspecttools.isclassmethod(v) or inspecttools.isproperty(v):
                 # ignore property and classmethod
                 continue
-            if k.startswith("__"):
+            if k.startswith("__") and k.endswith("__"):
                 # ignore all magic methods
                 continue
             is_gen = inspect.isgeneratorfunction(v)
@@ -236,12 +254,13 @@ class ReloadableDynamicClass(DynamicClass):
         # new_name_to_meta = {m.name: m for m in new_metas}
         name_to_meta = {m.name: m for m in self.serv_metas}
         code_changed_cb: List[str] = []
-        code_changed_metas: List[Tuple[ServFunctionMeta, Callable]] = []
+        code_changed_metas: List[ServFunctionMeta] = []
         for new_meta in new_metas:
-            if not new_meta.is_static:
-                new_method =  types.MethodType(new_meta.fn, obj)
-            else:
-                new_method = new_meta.fn
+            new_method = new_meta.bind(obj)
+            # if not new_meta.is_static:
+            #     new_method =  types.MethodType(new_meta.fn, obj)
+            # else:
+            #     new_method = new_meta.fn
             if new_meta.name in name_to_meta:
                 meta = name_to_meta[new_meta.name]
                 method = getattr(obj, meta.name)
@@ -250,7 +269,7 @@ class ReloadableDynamicClass(DynamicClass):
                     new_cb[callback_inv_dict[method]] = new_method
                 if new_meta.code != meta.code:
                     code_changed_cb.append(new_meta.qualname)
-                    code_changed_metas.append((new_meta, new_method))
+                    code_changed_metas.append(new_meta)
             else:
                 setattr(obj, new_meta.name, new_method)
         self.serv_metas = new_metas

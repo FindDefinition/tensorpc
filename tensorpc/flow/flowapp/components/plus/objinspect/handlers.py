@@ -1,7 +1,6 @@
 from typing import Any
 
 import numpy as np
-from pytools import word_wrap
 
 from tensorpc.flow.flowapp.components import mui
 from tensorpc.utils.moduleid import get_qualname_of_type

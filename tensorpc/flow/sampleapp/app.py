@@ -33,6 +33,7 @@ from typing_extensions import Literal
 import tensorpc
 from tensorpc.core import prim
 from tensorpc.core.asynctools import cancel_task
+from tensorpc.core.inspecttools import get_all_members_by_type
 from tensorpc.flow import mark_autorun, marker
 from tensorpc.flow.client import AppClient, AsyncAppClient, add_message
 from tensorpc.flow.coretypes import MessageLevel, ScheduleEvent
@@ -43,8 +44,6 @@ from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
                                                   MUIComponentType, VBox,
                                                   VList)
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
-
-from ..flowapp.core import Component
 
 
 class SampleApp(App):
@@ -1163,26 +1162,25 @@ class CollectionApp(EditableLayoutApp):
         return [
             mui.HBox([])
         ]
-    
 
 class AllotmentDevApp(EditableLayoutApp):
     @mark_create_layout
     def my_layout(self):
         self.root.prop(flex_flow="row nowrap")
-
+        self.anylayout = AnyLayout()
         return [
             plus.ObjectInspector(self).prop(flex=1),
             mui.Divider(orientation="vertical"),
             mui.HBox([
-            mui.Allotment([
-                mui.AllotmentPane([
-                    
-                ]),
-                mui.AllotmentPane([
-                    
-                ])
-            ]).prop(default_sizes=[300, 200])
-
+                mui.FlexLayout([]),
             ]).prop(flex=2)
         ]
+
+if __name__ == "__main__":
+    import time 
+    tps = get_all_members_by_type(mui.FlexBox)
+    for _ in range(10):
+        t = time.time()
+        tps = get_all_members_by_type(mui.FlexBox)
+        print(len(tps), time.time() - t)
 

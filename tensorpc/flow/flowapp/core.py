@@ -16,20 +16,26 @@ import abc
 import enum
 import io
 import builtins
-from pathlib import Path 
+from pathlib import Path
+import threading
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Generic, Iterable, List, Optional, Tuple, Type, TypeVar,
                     Union, Set)
 import asyncio
 import traceback
 import inspect
+
+import cachetools
+from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.uniquename import UniqueNamePool
+from tensorpc.flow.constants import TENSORPC_ANYLAYOUT_FUNC_NAME, TENSORPC_LEGACY_LAYOUT_FUNC_NAME
 import dataclasses
 import re
 import sys
 from typing_extensions import Literal, ParamSpec, Concatenate, Self, TypeAlias, Protocol
 from tensorpc.flow.coretypes import MessageLevel
+
 ALL_APP_EVENTS = HashableRegistry()
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
@@ -41,7 +47,9 @@ NumberType: TypeAlias = Union[int, float]
 
 EventType: TypeAlias = Tuple[ValueType, Any]
 
+
 class Undefined:
+
     def __repr__(self) -> str:
         return "undefined"
 
@@ -101,7 +109,7 @@ class UIType(enum.Enum):
     AllotmentPane = 0x29
     FlexLayout = 0x30
     MosaicLayout = 0x31
-    
+
     # special
     TaskLoop = 0x100
     FlexBox = 0x101
@@ -115,7 +123,7 @@ class UIType(enum.Enum):
 
     MASK_THREE = 0x1000
     MASK_THREE_GEOMETRY = 0x0100
-    
+
     ThreeCanvas = 0x1000
     ThreePoints = 0x1001
 
@@ -126,7 +134,7 @@ class UIType(enum.Enum):
     ThreeFlex = 0x1005
     ThreeFlexItemBox = 0x1006
     ThreeHtml = 0x1007
-    
+
     ThreeHud = 0x1008
 
     ThreeMapControl = 0x1010
@@ -168,8 +176,7 @@ class UIType(enum.Enum):
 
     # composite elements
     # a poly line and lots of circle markers/tooltips (typo) in single flowapp element.
-    LeafletTracklet = 0x2100 
-
+    LeafletTracklet = 0x2100
 
 
 class AppEventType(enum.Enum):
@@ -192,9 +199,10 @@ class AppEventType(enum.Enum):
     ScheduleNext = 100
     # special UI event
     AppEditor = 200
-    # send event to component, for append update 
+    # send event to component, for append update
     # and uncontrolled component.
     ComponentEvent = 300
+
 
 class FrontendEventType(enum.Enum):
     # only used on backend
@@ -224,14 +232,14 @@ class FrontendEventType(enum.Enum):
     TreeItemFocus = 33
 
     # leaflet events
-    MapZoom = 60 
+    MapZoom = 60
     MapMove = 61
 
     PlotlyClickData = 100
     PlotlyClickAnnotation = 101
 
 
-ALL_POINTER_EVENTS = [ 
+ALL_POINTER_EVENTS = [
     FrontendEventType.Down.value,
     FrontendEventType.Up.value,
     FrontendEventType.Move.value,
@@ -239,8 +247,8 @@ ALL_POINTER_EVENTS = [
     FrontendEventType.Leave.value,
     FrontendEventType.Over.value,
     FrontendEventType.Out.value,
-
 ]
+
 
 class UIRunStatus(enum.Enum):
     Stop = 0
@@ -264,10 +272,11 @@ class AppEditorFrontendEventType(enum.Enum):
     Change = 1
     SaveEditorState = 2
 
+
 @dataclasses.dataclass
 class UserMessage:
     uid: str
-    error: str 
+    error: str
     level: MessageLevel
     detail: str
 
@@ -281,8 +290,10 @@ class UserMessage:
 
     @classmethod
     def from_dict(cls, dc: Dict[str, str]):
-        return cls(uid=dc["uid"], error=dc["error"], 
-                detail=dc["detail"], level=MessageLevel(dc["level"]))
+        return cls(uid=dc["uid"],
+                   error=dc["error"],
+                   detail=dc["detail"],
+                   level=MessageLevel(dc["level"]))
 
     @classmethod
     def create_error(cls, uid: str, error: str, detail: str):
@@ -296,7 +307,9 @@ class UserMessage:
     def createinfo(cls, uid: str, error: str, detail: str):
         return cls(uid, error, MessageLevel.Info, detail)
 
+
 class AppEditorFrontendEvent:
+
     def __init__(self, type: AppEditorFrontendEventType, data: Any) -> None:
         self.type = type
         self.data = data
@@ -314,6 +327,7 @@ class AppEditorFrontendEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.UIEvent.value)
 class UIEvent:
+
     def __init__(self, uid_to_data: Dict[str, EventType]) -> None:
         self.uid_to_data = uid_to_data
 
@@ -327,9 +341,13 @@ class UIEvent:
     def merge_new(self, new):
         return new
 
+
 @ALL_APP_EVENTS.register(key=AppEventType.FrontendUIEvent.value)
 class FrontendUIEvent:
-    def __init__(self, uid_to_data: Dict[str, Tuple[Union[NumberType, str], Any]]) -> None:
+
+    def __init__(
+            self, uid_to_data: Dict[str, Tuple[Union[NumberType, str],
+                                               Any]]) -> None:
         self.uid_to_data = uid_to_data
 
     def to_dict(self):
@@ -342,6 +360,7 @@ class FrontendUIEvent:
     def merge_new(self, new):
         return new
 
+
 class NotifyType(enum.Enum):
     AppStart = 0
     AppStop = 1
@@ -350,6 +369,7 @@ class NotifyType(enum.Enum):
 
 @ALL_APP_EVENTS.register(key=AppEventType.Notify.value)
 class NotifyEvent:
+
     def __init__(self, type: NotifyType) -> None:
         self.type = type
 
@@ -364,8 +384,10 @@ class NotifyEvent:
         assert isinstance(new, NotifyEvent)
         return new
 
+
 @ALL_APP_EVENTS.register(key=AppEventType.ComponentEvent.value)
 class ComponentEvent:
+
     def __init__(self, uid_to_data: Dict[str, Any]) -> None:
         self.uid_to_data = uid_to_data
 
@@ -383,8 +405,10 @@ class ComponentEvent:
             **self.uid_to_data,
         })
 
+
 @ALL_APP_EVENTS.register(key=AppEventType.UISaveStateEvent.value)
 class UISaveStateEvent:
+
     def __init__(self, uid_to_data: Dict[str, Any]) -> None:
         self.uid_to_data = uid_to_data
 
@@ -405,6 +429,7 @@ class UISaveStateEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.UIUpdateEvent.value)
 class UIUpdateEvent:
+
     def __init__(
         self, uid_to_data_undefined: Dict[str, Tuple[Dict[str, Any],
                                                      List[str]]]
@@ -431,10 +456,11 @@ class UIUpdateEvent:
                 res_uid_to_data[k] = v
         return UIUpdateEvent(res_uid_to_data)
 
+
 @ALL_APP_EVENTS.register(key=AppEventType.UIException.value)
 class UIExceptionEvent:
-    def __init__(
-        self, user_excs: List[UserMessage]) -> None:
+
+    def __init__(self, user_excs: List[UserMessage]) -> None:
         self.user_excs = user_excs
 
     def to_dict(self):
@@ -452,6 +478,7 @@ class UIExceptionEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.AppEditor.value)
 class AppEditorEvent:
+
     def __init__(self, type: AppEditorEventType, data) -> None:
         self.data = data
         self.type = type
@@ -473,6 +500,7 @@ class AppEditorEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.UpdateLayout.value)
 class LayoutEvent:
+
     def __init__(self, data) -> None:
         self.data = data
 
@@ -491,7 +519,10 @@ class LayoutEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.UpdateComponents.value)
 class UpdateComponentsEvent:
-    def __init__(self, data: Dict[str, Any], deleted: Optional[List[str]] = None) -> None:
+
+    def __init__(self,
+                 data: Dict[str, Any],
+                 deleted: Optional[List[str]] = None) -> None:
         self.data = data
         if deleted is None:
             deleted = []
@@ -517,6 +548,7 @@ class UpdateComponentsEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.DeleteComponents.value)
 class DeleteComponentsEvent:
+
     def __init__(self, data: List[str]) -> None:
         self.data = data
 
@@ -534,6 +566,7 @@ class DeleteComponentsEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.CopyToClipboard.value)
 class CopyToClipboardEvent:
+
     def __init__(self, text: str) -> None:
         self.text = text
 
@@ -553,6 +586,7 @@ class CopyToClipboardEvent:
 
 @ALL_APP_EVENTS.register(key=AppEventType.ScheduleNext.value)
 class ScheduleNextForApp:
+
     def __init__(self, data) -> None:
         self.data = data
 
@@ -600,6 +634,7 @@ def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":
 
 
 class AppEvent:
+
     def __init__(self,
                  uid: str,
                  type_to_event: Dict[AppEventType, APP_EVENT_TYPES],
@@ -637,7 +672,7 @@ class AppEvent:
     def get_event_uid(self):
         if self.event_id:
             return self.uid + "-" + self.event_id
-        return self.uid 
+        return self.uid
 
     def __add__(self, other: "AppEvent"):
         return self.merge_new(other)
@@ -647,6 +682,7 @@ class AppEvent:
         self.type_to_event = ret.type_to_event
         self.sent_event = ret.sent_event
         return self
+
 
 def camel_to_snake(name: str):
     name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
@@ -660,15 +696,17 @@ def snake_to_camel(name: str):
     res = res[0].lower() + res[1:]
     return res
 
+
 def _split_props_to_undefined(props: Dict[str, Any]):
-        res = {}
-        res_und = []
-        for res_camel, val in props.items():
-            if isinstance(val, Undefined):
-                res_und.append(res_camel)
-            else:
-                res[res_camel] = val
-        return res, res_und
+    res = {}
+    res_und = []
+    for res_camel, val in props.items():
+        if isinstance(val, Undefined):
+            res_und.append(res_camel)
+        else:
+            res[res_camel] = val
+    return res, res_und
+
 
 def _undefined_dict_factory(x: List[Tuple[str, Any]]):
     res: Dict[str, Any] = {}
@@ -677,21 +715,27 @@ def _undefined_dict_factory(x: List[Tuple[str, Any]]):
             res[k] = v
     return res
 
+
 @dataclasses.dataclass
 class _DataclassSer:
     obj: Any
 
+
 def as_dict_no_undefined(obj: Any):
-    return dataclasses.asdict(_DataclassSer(obj), dict_factory=_undefined_dict_factory)["obj"]
+    return dataclasses.asdict(_DataclassSer(obj),
+                              dict_factory=_undefined_dict_factory)["obj"]
+
 
 @dataclasses.dataclass
 class DataClassWithUndefined:
+
     def get_dict_and_undefined(self, state: Dict[str, Any]):
         this_type = type(self)
         res = {}
         # we only support update in first-level dict,
         # so we ignore all undefined in childs.
-        ref_dict = dataclasses.asdict(self, dict_factory=_undefined_dict_factory)
+        ref_dict = dataclasses.asdict(self,
+                                      dict_factory=_undefined_dict_factory)
         res_und = []
         for field in dataclasses.fields(this_type):
             if field.name in state:
@@ -707,27 +751,30 @@ class DataClassWithUndefined:
     def get_dict(self):
         this_type = type(self)
         res = {}
-        ref_dict = dataclasses.asdict(self, dict_factory=_undefined_dict_factory)
+        ref_dict = dataclasses.asdict(self,
+                                      dict_factory=_undefined_dict_factory)
         for field in dataclasses.fields(this_type):
             res_camel = snake_to_camel(field.name)
             if field.name not in ref_dict:
-                val = undefined 
+                val = undefined
             else:
                 val = ref_dict[field.name]
             res[res_camel] = val
         return res
 
+
 @dataclasses.dataclass
 class BasicProps(DataClassWithUndefined):
     status: int = UIRunStatus.Stop.value
+
 
 @dataclasses.dataclass
 class ContainerBaseProps(BasicProps):
     childs: List[str] = dataclasses.field(default_factory=list)
 
+
 T_base_props = TypeVar("T_base_props", bound=BasicProps)
 T_container_props = TypeVar("T_container_props", bound=ContainerBaseProps)
-
 
 P = ParamSpec('P')
 T3 = TypeVar('T3')
@@ -736,13 +783,16 @@ T3 = TypeVar('T3')
 def init_anno_fwd(
         this: Callable[P, Any],
         val: Optional[T3] = None) -> Callable[[Callable], Callable[P, T3]]:
+
     def decorator(real_function: Callable) -> Callable[P, T3]:
+
         def new_function(*args: P.args, **kwargs: P.kwargs) -> T3:
             return real_function(*args, **kwargs)
 
         return new_function
 
     return decorator
+
 
 # TProp = TypeVar('TProp', covariant=True)
 
@@ -751,7 +801,8 @@ T_child = TypeVar("T_child")
 
 def _get_obj_def_path(obj):
     try:
-        _flow_comp_def_path = str(Path(inspect.getfile(builtins.type(obj))).resolve())
+        _flow_comp_def_path = str(
+            Path(inspect.getfile(builtins.type(obj))).resolve())
     except:
         traceback.print_exc()
         _flow_comp_def_path = ""
@@ -760,7 +811,62 @@ def _get_obj_def_path(obj):
         _flow_comp_def_path = ""
     return _flow_comp_def_path
 
+
+class FlowSpecialMethods:
+
+    def __init__(self, metas: List[ServFunctionMeta]) -> None:
+        self.create_layout: Optional[ServFunctionMeta] = None
+        self.auto_run: Optional[ServFunctionMeta] = None
+        self.did_mount: Optional[ServFunctionMeta] = None
+        self.will_unmount: Optional[ServFunctionMeta] = None
+        self.create_object: Optional[ServFunctionMeta] = None
+
+        self.metas = metas
+        for m in self.metas:
+            # assert m.is_binded, "metas must be binded before this class"
+            if m.name == TENSORPC_ANYLAYOUT_FUNC_NAME:
+                self.create_layout = m
+            elif m.name == TENSORPC_LEGACY_LAYOUT_FUNC_NAME:
+                self.create_layout = m
+            elif m.user_app_meta is not None:
+                if m.user_app_meta.type == AppFuncType.CreateLayout:
+                    self.create_layout = m
+                elif m.user_app_meta.type == AppFuncType.ComponentDidMount:
+                    self.did_mount = m
+                elif m.user_app_meta.type == AppFuncType.ComponentWillUnmount:
+                    self.will_unmount = m
+                elif m.user_app_meta.type == AppFuncType.CreateObject:
+                    self.create_object = m
+                elif m.user_app_meta.type == AppFuncType.AutoRun:
+                    self.auto_run = m
+
+    def bind(self, obj):
+        if self.create_layout is not None:
+            self.create_layout.bind(obj)
+        if self.auto_run is not None:
+            self.auto_run.bind(obj)
+        if self.did_mount is not None:
+            self.did_mount.bind(obj)
+        if self.will_unmount is not None:
+            self.will_unmount.bind(obj)
+        if self.create_object is not None:
+            self.create_object.bind(obj)
+
+
+
+_TYPE_METHOD_CACHE = {}
+
+
+@cachetools.cached(_TYPE_METHOD_CACHE, lock=threading.Lock())
+def get_special_methods(obj_type):
+    new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
+        obj_type, include_base=True)
+    flow_special = FlowSpecialMethods(new_metas)
+    return flow_special
+
+
 class Component(Generic[T_base_props, T_child]):
+
     def __init__(self,
                  type: UIType,
                  prop_cls: Type[T_base_props],
@@ -779,7 +885,8 @@ class Component(Generic[T_base_props, T_child]):
         self.__props = prop_cls()
         self.__prop_cls = prop_cls
         self._mounted_override = False
-        self._flow_event_handlers: Dict[ValueType, Union[EventHandler, Undefined]] = {}
+        self._flow_event_handlers: Dict[ValueType, Union[EventHandler,
+                                                         Undefined]] = {}
         self.__sx_props: Dict[str, Any] = {}
         self._flow_allowed_events: Set[ValueType] = set()
         if allowed_events is not None:
@@ -787,7 +894,12 @@ class Component(Generic[T_base_props, T_child]):
         self._flow_user_data: Any = None
         self._flow_comp_def_path = _get_obj_def_path(self)
         self._flow_reference_count = 0
-        
+
+    def get_special_methods(self):
+        res = get_special_methods(type(self))
+        res.bind(self)
+        return res 
+
     @property
     def props(self) -> T_base_props:
         return self.__props
@@ -808,27 +920,29 @@ class Component(Generic[T_base_props, T_child]):
             res_uid = self._flow_uid
             self._flow_uid = ""
             self._queue = None
-            return {
-                res_uid: self
-            }
+            return {res_uid: self}
         return {}
 
     def is_mounted(self):
-        return self._queue is not None 
+        return self._queue is not None
 
     def _prop_base(self, prop: Callable[P, Any], this: T3) -> Callable[P, T3]:
+
         def wrapper(*args: P.args, **kwargs: P.kwargs):
             for k, v in kwargs.items():
                 setattr(self.__props, k, v)
             return this
-        return wrapper 
+
+        return wrapper
 
     def _update_props_base(self, prop: Callable[P, Any]):
+
         def wrapper(*args: P.args, **kwargs: P.kwargs):
             for k, v in kwargs.items():
                 setattr(self.__props, k, v)
             return self.create_update_event(kwargs)
-        return wrapper 
+
+        return wrapper
 
     async def handle_event(self, ev: EventType):
         pass
@@ -943,15 +1057,18 @@ class Component(Generic[T_base_props, T_child]):
         assert self._queue is not None, f"you must add ui by flexbox.add_xxx"
         return self._queue
 
-    def register_event_handler(self, type: ValueType, cb: Callable,
-                    stop_propagation: bool = False,
-                    throttle: Optional[NumberType] = None,
-                    debounce: Optional[NumberType] = None,
-                    backend_only: bool = False):
+    def register_event_handler(self,
+                               type: ValueType,
+                               cb: Callable,
+                               stop_propagation: bool = False,
+                               throttle: Optional[NumberType] = None,
+                               debounce: Optional[NumberType] = None,
+                               backend_only: bool = False):
         if self._flow_allowed_events:
             if not backend_only:
                 assert type in self._flow_allowed_events, f"only support events: {self._flow_allowed_events}"
-        evh = EventHandler(cb, stop_propagation, throttle, debounce, backend_only)
+        evh = EventHandler(cb, stop_propagation, throttle, debounce,
+                           backend_only)
         self._flow_event_handlers[type] = evh
         return evh
 
@@ -961,10 +1078,13 @@ class Component(Generic[T_base_props, T_child]):
     def get_event_handler(self, type: ValueType):
         res = self._flow_event_handlers.get(type)
         if isinstance(res, Undefined):
-            res = None 
-        return res 
+            res = None
+        return res
 
-    def state_change_callback(self, data: Any, type: ValueType = FrontendEventType.Change.value):
+    def state_change_callback(self,
+                              data: Any,
+                              type: ValueType = FrontendEventType.Change.value
+                              ):
         pass
 
     def create_update_event(self, data: Dict[str, Union[Any, Undefined]]):
@@ -1005,7 +1125,8 @@ class Component(Generic[T_base_props, T_child]):
         if self.is_mounted():
             await ev.sent_event.wait()
 
-    def create_update_comp_event(self, updates: Dict[str, Any], deleted: Optional[List[str]]):
+    def create_update_comp_event(self, updates: Dict[str, Any],
+                                 deleted: Optional[List[str]]):
         ev = UpdateComponentsEvent(updates, deleted)
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UpdateComponents: ev})
@@ -1029,15 +1150,18 @@ class Component(Generic[T_base_props, T_child]):
                            cb: Callable[[], _CORO_NONE],
                            sync_state: bool = False,
                            sync_first: bool = True,
-                           res_callback: Optional[Callable[[Any], _CORO_NONE]] = None):
-        self.props.status = UIRunStatus.Running.value
+                           res_callback: Optional[Callable[[Any],
+                                                           _CORO_NONE]] = None,
+                           change_status: bool = True):
+        if change_status:
+            self.props.status = UIRunStatus.Running.value
         # only ui with loading support need sync first.
         # otherwise don't use this because slow
         if sync_first:
             ev = asyncio.Event()
             await self.sync_status(sync_state, ev)
             await ev.wait()
-        res = None 
+        res = None
         try:
             coro = cb()
             if inspect.iscoroutine(coro):
@@ -1048,18 +1172,20 @@ class Component(Generic[T_base_props, T_child]):
                 res_coro = res_callback(res)
                 if inspect.iscoroutine(res_coro):
                     await res_coro
-            
+
         except Exception as e:
             traceback.print_exc()
             ss = io.StringIO()
             traceback.print_exc(file=ss)
-            user_exc = UserMessage.create_error(self._flow_uid, repr(e), ss.getvalue())
+            user_exc = UserMessage.create_error(self._flow_uid, repr(e),
+                                                ss.getvalue())
             await self.put_app_event(self.create_user_msg_event(user_exc))
         finally:
-            self.props.status = UIRunStatus.Stop.value 
-            await self.sync_status(sync_state)
-        return res 
-    
+            if change_status:
+                self.props.status = UIRunStatus.Stop.value
+                await self.sync_status(sync_state)
+        return res
+
     async def sync_status(self,
                           sync_state: bool = False,
                           sent_event: Optional[asyncio.Event] = None):
@@ -1083,6 +1209,7 @@ class Component(Generic[T_base_props, T_child]):
 
 
 class ContainerBase(Component[T_container_props, T_child]):
+
     def __init__(self,
                  base_type: UIType,
                  prop_cls: Type[T_container_props],
@@ -1094,7 +1221,7 @@ class ContainerBase(Component[T_container_props, T_child]):
                  queue: Optional[asyncio.Queue] = None) -> None:
         super().__init__(base_type, prop_cls, allowed_events, uid, queue)
         if inited:
-            assert queue is not None # and uid_to_comp is not None
+            assert queue is not None  # and uid_to_comp is not None
         if uid_to_comp is None:
             uid_to_comp = {}
         self._pool = UniqueNamePool()
@@ -1114,7 +1241,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         parts = uid.split(".")
         # uid contains root, remove it at first.
         return self._get_comp_by_uid_resursive(parts[1:])
-        
+
     def _get_comp_by_uid_resursive(self, parts: List[str]) -> Component:
         key = parts[0]
         assert key in self._child_comps
@@ -1125,7 +1252,8 @@ class ContainerBase(Component[T_container_props, T_child]):
             assert isinstance(child_comp, ContainerBase)
             return child_comp._get_comp_by_uid_resursive(parts[1:])
 
-    def _foreach_comp_recursive(self, child_ns: str, handler: Callable[[str, Component], None]):
+    def _foreach_comp_recursive(self, child_ns: str,
+                                handler: Callable[[str, Component], None]):
         for k, v in self._child_comps.items():
             child_uid = f"{child_ns}.{k}"
             if isinstance(v, ContainerBase):
@@ -1140,8 +1268,10 @@ class ContainerBase(Component[T_container_props, T_child]):
         self._foreach_comp_recursive(self._flow_uid, handler)
 
     def _update_uid(self):
+
         def handler(uid, v: Component):
             v._flow_uid = uid
+
         self._foreach_comp(handler)
 
     def _detach(self):
@@ -1159,7 +1289,9 @@ class ContainerBase(Component[T_container_props, T_child]):
             disposed_uids.update(v._detach())
         return disposed_uids
 
-    def _attach_child(self, queue: asyncio.Queue, childs: Optional[List[str]] = None):
+    def _attach_child(self,
+                      queue: asyncio.Queue,
+                      childs: Optional[List[str]] = None):
         if childs is None:
             childs = list(self._child_comps.keys())
         for k in childs:
@@ -1170,13 +1302,15 @@ class ContainerBase(Component[T_container_props, T_child]):
         super()._attach(uid, queue)
         for k, v in self._child_comps.items():
             v._attach(f"{uid}.{k}", queue)
-        
+
     def _get_uid_to_comp_dict(self):
         res: Dict[str, Component] = {}
+
         def handler(uid, v: Component):
             res[uid] = v
+
         self._foreach_comp(handler)
-        return res 
+        return res
 
     async def _clear(self):
         for c in self._child_comps:
@@ -1218,7 +1352,8 @@ class ContainerBase(Component[T_container_props, T_child]):
     def add_layout(self, layout: Union[Dict[str, Component], List[Component]]):
         return self.init_add_layout(layout)
 
-    def init_add_layout(self, layout: Union[Dict[str, Component], List[Component]]):
+    def init_add_layout(self, layout: Union[Dict[str, Component],
+                                            List[Component]]):
         # TODO prevent call this in layout function
         """ {
             btn0: Button(...),
@@ -1240,6 +1375,23 @@ class ContainerBase(Component[T_container_props, T_child]):
         state = super().get_props()
         state["childs"] = [self[n]._flow_uid for n in self._child_comps]
         return state
+    
+    async def __run_special_methods(self, attached: List[Component],
+                                    detached: List[Component]):
+        for attach in attached:
+            special_methods = attach.get_special_methods()
+            if special_methods.did_mount is not None:
+                await self.run_callback(
+                    special_methods.did_mount.get_binded_fn(),
+                    sync_first=False,
+                    change_status=False)
+        for deleted in detached:
+            special_methods = deleted.get_special_methods()
+            if special_methods.will_unmount is not None:
+                await self.run_callback(
+                    special_methods.will_unmount.get_binded_fn(),
+                    sync_first=False,
+                    change_status=False)
 
     def set_new_layout_locally(self, layout: Dict[str, Component]):
         detached_uid_to_comp = self._detach_child()
@@ -1247,18 +1399,26 @@ class ContainerBase(Component[T_container_props, T_child]):
         self._attach_child(self.queue)
         # update all childs of this component
         comps_frontend = {
-            c._flow_uid: c.to_dict()
+            c._flow_uid: c
             for c in self._get_all_nested_childs()
         }
-        comps_frontend[self._flow_uid] = self.to_dict()
-        return self.create_update_comp_event(comps_frontend, list(detached_uid_to_comp.keys())), list(detached_uid_to_comp.values())
+        comps_frontend[self._flow_uid] = self
+        comps_frontend_dict = {
+            k: v.to_dict()
+            for k, v in comps_frontend.items()
+        }
+        return self.create_update_comp_event(
+            comps_frontend_dict, list(detached_uid_to_comp.keys())), list(
+                comps_frontend.values()), list(detached_uid_to_comp.values())
 
-    async def set_new_layout(self, layout: Union[Dict[str, Component], List[Component]]):
+    async def set_new_layout(self, layout: Union[Dict[str, Component],
+                                                 List[Component]]):
         if isinstance(layout, list):
             layout = {str(i): v for i, v in enumerate(layout)}
-        new_ev, removed = self.set_new_layout_locally(layout)
+        new_ev, attached, removed = self.set_new_layout_locally(layout)
         for deleted in removed:
             await deleted._cancel_task()
+        await self.__run_special_methods(attached, removed)
         await self.put_app_event(new_ev)
 
     async def remove_childs_by_keys(self, keys: List[str]):
@@ -1267,10 +1427,13 @@ class ContainerBase(Component[T_container_props, T_child]):
             await comp._cancel_task()
         if not detached_uid_to_comp:
             return
+        await self.__run_special_methods([],
+                                         list(detached_uid_to_comp.values()))
         await self.put_app_event(
             self.create_delete_comp_event(list(detached_uid_to_comp.keys())))
         child_uids = [self[c]._flow_uid for c in self._child_comps]
-        await self.put_app_event(self.create_update_event({"childs": child_uids}))
+        await self.put_app_event(
+            self.create_update_event({"childs": child_uids}))
 
     def update_childs_locally(self, layout: Dict[str, Component]):
         intersect = set(layout.keys()).intersection(self._child_comps.keys())
@@ -1279,16 +1442,23 @@ class ContainerBase(Component[T_container_props, T_child]):
         self._attach_child(self.queue, list(layout.keys()))
         # remove replaced components first.
         comps_frontend = {
-            c._flow_uid: c.to_dict()
-            for c in self._get_all_nested_childs(list(layout.keys()))
+            c._flow_uid: c
+            for c in self._get_all_nested_childs()
         }
-        comps_frontend[self._flow_uid] = self.to_dict()
-        return self.create_update_comp_event(comps_frontend, list(detached.keys())), list(detached.values())
+        comps_frontend[self._flow_uid] = self
+        comps_frontend_dict = {
+            k: v.to_dict()
+            for k, v in comps_frontend.items()
+        }
+        return self.create_update_comp_event(
+            comps_frontend_dict, list(detached.keys())), list(
+                comps_frontend.values()), list(detached.values())
 
     async def update_childs(self, layout: Dict[str, Component]):
-        new_ev, removed = self.update_childs_locally(layout)
+        new_ev, attached, removed = self.update_childs_locally(layout)
         for deleted in removed:
             await deleted._cancel_task()
+        await self.__run_special_methods(attached, removed)
         await self.put_app_event(new_ev)
 
     async def replace_childs(self, layout: Dict[str, Component]):
@@ -1324,31 +1494,36 @@ def _detach_component(comp: Component):
     comp._queue = None
     return comp, all_removed, all_removed_prev_uids
 
+
 @dataclasses.dataclass
 class FragmentProps(ContainerBaseProps):
     disabled: Union[Undefined, bool] = undefined
 
+
 class Fragment(ContainerBase[FragmentProps, Component]):
+
     def __init__(self,
                  children: Union[List[Component], Dict[str, Component]],
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.Fragment, FragmentProps,
-                         uid_to_comp, children, inited)
-    @property 
+        super().__init__(UIType.Fragment, FragmentProps, uid_to_comp, children,
+                         inited)
+
+    @property
     def prop(self):
         propcls = self.propcls
         return self._prop_base(propcls, self)
 
-    @property 
+    @property
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
     async def set_disabled(self, disabled: bool):
         await self.send_and_wait(self.update_event(disabled=disabled))
+
 
 class EventHandler:
 
@@ -1372,11 +1547,12 @@ class EventHandler:
             res["debounce"] = self.debounce
         if self.throttle is not None:
             res["throttle"] = self.throttle
-        return res 
+        return res
 
 
 def create_ignore_usr_msg(comp: Component):
-    msg = comp.create_user_msg_event((UserMessage.create_warning(comp._flow_uid, "UI Running", 
-        f"UI {comp._flow_uid}@{str(type(comp).__name__)} is still running, so ignore your control")))
+    msg = comp.create_user_msg_event((UserMessage.create_warning(
+        comp._flow_uid, "UI Running",
+        f"UI {comp._flow_uid}@{str(type(comp).__name__)} is still running, so ignore your control"
+    )))
     return msg
-

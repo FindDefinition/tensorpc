@@ -8,8 +8,9 @@ from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
 import numpy as np
 
 from tensorpc.core.inspecttools import get_members
+from tensorpc.core.serviceunit import ReloadableDynamicClass
 from tensorpc.flow.flowapp.components import mui, three
-from tensorpc.flow.flowapp.core import FrontendEventType
+from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType
 from tensorpc.utils.moduleid import get_qualname_of_type
 
 _DEFAULT_OBJ_NAME = "default"
@@ -153,12 +154,16 @@ def parse_obj_item(obj, name: str, id: str, checker: Callable[[Type], bool]):
     else:
         t = mui.JsonLikeType.Object
         obj_dict = _get_obj_dict(obj, checker)
+
+        metas = ReloadableDynamicClass.get_metas_of_regular_methods(type(obj), True)
+        special_methods = FlowSpecialMethods(metas)
+        is_draggable = special_methods.create_layout is not None 
         return mui.JsonLikeNode(id,
                                 name,
                                 t.value,
                                 typeStr=obj_type.__qualname__,
                                 lazyExpandCount=len(obj_dict),
-                                draggable=True)
+                                draggable=is_draggable)
 
 
 def parse_obj_dict(obj_dict: Dict[str, Any], ns: str, checker: Callable[[Type],
@@ -344,6 +349,9 @@ class ObjectTree(mui.FlexBox):
         # inspect.isbuiltin()
         self.tree.register_event_handler(
             FrontendEventType.TreeLazyExpand.value, self._on_expand)
+        self.tree.register_event_handler(
+            FrontendEventType.DragCollect.value, self._on_drag_collect)
+
 
     def _checker(self, obj):
         return _check_is_valid(type(obj), self._cared_types,
@@ -358,6 +366,13 @@ class ObjectTree(mui.FlexBox):
 
     def _get_obj_by_uid(self, uid: str):
         return _get_obj_by_uid(self.root, uid, self._valid_checker)
+    
+    async def _on_drag_collect(self, data):
+        uid = data["id"]
+        obj, found = _get_obj_by_uid(self.root, uid, self._valid_checker)
+        if not found:
+            return None 
+        return mui.flex_wrapper(obj), uid
 
     async def _on_expand(self, uid: str):
         node = self._objinspect_root._get_node_by_uid(uid)

@@ -44,6 +44,7 @@ from watchdog.observers import Observer
 from tensorpc import simple_chunk_call_async
 from tensorpc.constants import PACKAGE_ROOT, TENSORPC_FLOW_FUNC_META_KEY
 from tensorpc.core.asynctools import cancel_task
+from tensorpc.core.inspecttools import get_all_members_by_type
 from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceUnit
 from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem, get_object_type_meta
 from tensorpc.flow.hold.holdctx import HoldContext
@@ -56,7 +57,7 @@ from tensorpc.flow.client import MasterMeta
 from .components import mui, three
 from .core import (AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
                    AppEditorFrontendEventType, AppEvent, AppEventType,
-                   BasicProps, Component, ContainerBase, CopyToClipboardEvent, FrontendEventType,
+                   BasicProps, Component, ContainerBase, CopyToClipboardEvent, FlowSpecialMethods, FrontendEventType,
                    LayoutEvent, TaskLoopEvent, UIEvent, UIExceptionEvent,
                    UIRunStatus, UIType, UIUpdateEvent, Undefined, UserMessage, ValueType,
                    undefined, EventHandler)
@@ -795,6 +796,7 @@ class EditableApp(App):
         res.add(self._get_app_dynamic_cls().file_path)
         return res
 
+
     def __reload_callback(self, change_file: str, mod_is_reloaded: bool):
         # TODO find a way to record history callback code and 
         # reload only if code change
@@ -857,32 +859,19 @@ class EditableApp(App):
                                 self.set_editor_value(new_data), self._loop)
                             fut.result()
                         code_changed_metas = self._reload_app_file()
+                        flow_special = FlowSpecialMethods(code_changed_metas)
+                        if flow_special.auto_run is not None:
+                            asyncio.run_coroutine_threadsafe(
+                                self._run_autorun(flow_special.auto_run.get_binded_fn()),
+                                self._loop)
                         # print(code_changed_metas)
-                        app_reload_complete = False
-                        for m, c in code_changed_metas:
-                            if m.user_app_meta is not None:
-                                meta: AppFunctionMeta = m.user_app_meta
-                                if meta.type == AppFuncType.AutoRun:
-                                    asyncio.run_coroutine_threadsafe(
-                                        self._run_autorun(c),
-                                        self._loop)
-                                elif meta.type == AppFuncType.CreateLayout and not app_reload_complete:
-                                    fut = asyncio.run_coroutine_threadsafe(
-                                        self._app_run_layout_function(
-                                            True, with_code_editor=False, reload=True, decorator_fn=c),
-                                        self._loop)
-                                    fut.result()
-                                    app_reload_complete = True
-                        if not app_reload_complete:
-                            # TODO legacy method, will be deprecated soon.
-                            code_changed = [m[0].qualname for m in code_changed_metas]
-                            layout_func_changed = type(self).app_create_layout.__qualname__ in code_changed
-                            if layout_func_changed:
-                                fut = asyncio.run_coroutine_threadsafe(
-                                    self._app_run_layout_function(
-                                        True, with_code_editor=False, reload=True),
-                                    self._loop)
-                                fut.result()
+                        if flow_special.create_layout:
+                            fn = flow_special.create_layout.get_binded_fn()
+                            fut = asyncio.run_coroutine_threadsafe(
+                                self._app_run_layout_function(
+                                    True, with_code_editor=False, reload=True, decorator_fn=fn),
+                                self._loop)
+                            fut.result()
                     already_reloaded = is_app_file_changed
                     self.__reload_callback(resolved_path, already_reloaded)
                 except:
@@ -934,25 +923,12 @@ class EditableApp(App):
                     if self._flow_comp_mgr is not None:
                         self._flow_comp_mgr.update_code_from_editor(app_path, event.data)
                     code_changed_metas = self._reload_app_file()
-                    app_reload_complete = False
-                    for m, c in code_changed_metas:
-                        if hasattr(m.fn, TENSORPC_FLOW_FUNC_META_KEY):
-                            meta: AppFunctionMeta = getattr(m.fn, TENSORPC_FLOW_FUNC_META_KEY)
-                            if meta.type == AppFuncType.AutoRun:
-                                asyncio.create_task(_run_zeroarg_func(c))
-                            elif meta.type == AppFuncType.CreateLayout and not app_reload_complete:
-                                await self._app_run_layout_function(
-                                    True, with_code_editor=False, reload=True, decorator_fn=c)
-                                app_reload_complete = True
-                    if not app_reload_complete:
-                        # TODO legacy method, will be deprecated soon.
-                        code_changed = [m[0].qualname for m in code_changed_metas]
-                        layout_func_changed = type(self).app_create_layout.__qualname__ in code_changed
-                        print(layout_func_changed, code_changed)
-                        if layout_func_changed:
-                            await self._app_run_layout_function(
-                                True, with_code_editor=False, reload=True)
-
+                    flow_special = FlowSpecialMethods(code_changed_metas)
+                    if flow_special.auto_run is not None:
+                        asyncio.create_task(_run_zeroarg_func(flow_special.auto_run.get_binded_fn()))
+                    if flow_special.create_layout is not None:
+                        await self._app_run_layout_function(
+                            True, with_code_editor=False, reload=True, decorator_fn=flow_special.create_layout.get_binded_fn())
                     self.__reload_callback(app_path, True)
         return
 
@@ -978,4 +954,5 @@ async def _run_zeroarg_func(cb: Callable):
             await coro
     except:
         traceback.print_exc()
+
 

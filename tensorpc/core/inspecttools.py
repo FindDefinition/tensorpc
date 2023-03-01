@@ -46,6 +46,13 @@ def get_members_by_type(obj_type: Any, no_parent: bool = True):
     res.sort(key=lambda x: x[1].__code__.co_firstlineno)
     return res
 
+def get_all_members_by_type(obj_type: Any):
+    """this function return all member functions
+    """
+    this_cls = obj_type
+    child_methods = inspect.getmembers(this_cls, predicate=inspect.isfunction)
+    return child_methods
+
 
 def get_members(obj: Any, no_parent: bool = True):
     return get_members_by_type( type(obj), no_parent)

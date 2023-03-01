@@ -36,12 +36,12 @@ from tensorpc.flow.flowapp.components.common import (handle_standard_event)
 
 from .. import colors
 from ..core import (AppEvent, AppEventType, BasicProps, Component,
-                    ContainerBase, ContainerBaseProps, EventHandler, EventType,
+                    ContainerBase, ContainerBaseProps, EventHandler, EventType, FlowSpecialMethods,
                     Fragment, FrontendEventType, NumberType, T_base_props,
                     T_child, T_container_props, TaskLoopEvent, UIEvent,
                     UIRunStatus, UIType, Undefined, ValueType, undefined,
                     create_ignore_usr_msg, ALL_POINTER_EVENTS,
-                    _get_obj_def_path)
+                    _get_obj_def_path, get_special_methods)
 from tensorpc.flow.constants import TENSORPC_ANYLAYOUT_FUNC_NAME
 if TYPE_CHECKING:
     from .three import ThreeCanvas
@@ -922,6 +922,10 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+    def get_special_methods(self):
+        if self._wrapped_obj is not None:
+            return get_special_methods(type(self._wrapped_obj))
+        return get_special_methods(type(self))
 
 @dataclasses.dataclass
 class MUIListProps(MUIFlexBoxProps):
@@ -2593,17 +2597,17 @@ def flex_wrapper(obj: Any):
     """wrap a object which define a layout function "tensorpc_flow_layout"
     enable simple layout creation for arbitrary object without inherit
     """
-    metas = ReloadableDynamicClass.get_metas_of_regular_methods(type(obj))
-    for m in metas:
-        if m.user_app_meta is not None:
-            if m.user_app_meta.type == AppFuncType.CreateLayout:
-                layout_flex = getattr(obj, m.name)()
-                assert isinstance(layout_flex,
-                                  FlexBox), f"{m.name} must return a flexbox"
-                # set _flow_comp_def_path to this object
-                layout_flex._flow_comp_def_path = _get_obj_def_path(obj)
-                layout_flex._wrapped_obj = obj
-                return layout_flex
+    metas = ReloadableDynamicClass.get_metas_of_regular_methods(type(obj), True)
+    methods = FlowSpecialMethods(metas)
+    if methods.create_layout is not None:
+        fn = methods.create_layout.bind(obj)
+        layout_flex = fn()
+        assert isinstance(layout_flex,
+                            FlexBox), f"create_layout must return a flexbox when use anylayout"
+        # set _flow_comp_def_path to this object
+        layout_flex._flow_comp_def_path = _get_obj_def_path(obj)
+        layout_flex._wrapped_obj = obj
+        return layout_flex
     raise ValueError(
         f"wrapped object must define a zero-arg function with @marker.mark_create_layout and return a flexbox"
     )
