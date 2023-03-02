@@ -2517,6 +2517,7 @@ class JsonLikeType(enum.Enum):
     Object = 10
     Complex = 11
     Enum = 12
+    Layout = 13
 
 
 @dataclasses.dataclass
@@ -2526,9 +2527,10 @@ class JsonLikeNode:
     type: int
     typeStr: Union[Undefined, str] = undefined
     value: Union[Undefined, str] = undefined
-    lazyExpandCount: int = 0
+    childCnt: int = 0
     children: "List[JsonLikeNode]" = dataclasses.field(default_factory=list)
     draggable: Union[Undefined, bool] = undefined
+    iconButtons: Union[Undefined, List[Tuple[str, int]]] = undefined
 
     def _get_node_by_uid(self, uid: str):
         parts = uid.split("-")
@@ -2575,6 +2577,7 @@ class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
             FrontendEventType.TreeItemToggle.value,
             FrontendEventType.TreeLazyExpand.value,
             FrontendEventType.TreeItemFocus.value,
+            FrontendEventType.TreeItemButton.value,
         ]
         super().__init__(UIType.JsonLikeTreeView,
                          JsonLikeTreeProps,

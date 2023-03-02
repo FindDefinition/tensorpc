@@ -76,23 +76,40 @@ class ObjectInspector(mui.FlexBox):
                  init: Optional[Any] = None,
                  cared_types: Optional[Set[Type]] = None,
                  ignored_types: Optional[Set[Type]] = None,
-                 with_detail: bool = True) -> None:
-        self.detail_container = mui.FlexBox([]).prop(flex=1,
-                                                     overflow="auto",
+                 with_detail: bool = True,
+                 use_allotment: bool = False) -> None:
+        
+        self.detail_container = mui.FlexBox([]).prop(overflow="auto",
                                                      padding="3px")
+        if use_allotment:
+            self.detail_container.prop(height="100%")
+        else:
+            self.detail_container.prop(flex=1)
+
         self.with_detail = with_detail
         self.tree = ObjectTree(init, cared_types, ignored_types)
-        layout: mui.LayoutType = [self.tree.prop(flex=1)]
+        if use_allotment:
+            layout: mui.LayoutType = [self.tree.prop(overflow="auto", height="100%",)]
+        else:
+            layout: mui.LayoutType = [self.tree.prop(flex=1)]
+
         if with_detail:
-            layout.append(mui.Divider())
+            if not use_allotment:
+                layout.append(mui.Divider())
             layout.append(self.detail_container)
         self.default_handler = DefaultHandler()
         super().__init__(layout)
-        self.prop(flex_direction="column",
-                  flex=1,
-                  overflow="hidden",
-                  min_height=0,
-                  min_width=0)
+        if use_allotment:
+            self.prop(overflow="hidden",
+                    default_sizes=[1, 1] if with_detail else [1],
+                    vertical=True)
+        else:
+            self.prop(flex_direction="column",
+                    flex=1,
+                    overflow="hidden",
+                    min_height=0,
+                    min_width=0)
+
         if with_detail:
             self.tree.tree.register_event_handler(
                 FrontendEventType.TreeItemSelect.value, self._on_select)

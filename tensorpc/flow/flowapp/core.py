@@ -230,6 +230,7 @@ class FrontendEventType(enum.Enum):
     TreeItemSelect = 31
     TreeItemToggle = 32
     TreeItemFocus = 33
+    TreeItemButton = 34
 
     ComplexLayoutCloseTab = 40
     ComplexLayoutSelectTab = 41
@@ -695,6 +696,8 @@ def camel_to_snake(name: str):
 
 
 def snake_to_camel(name: str):
+    if "_" not in name:
+        return name 
     res = ''.join(word.title() for word in name.split('_'))
     res = res[0].lower() + res[1:]
     return res
@@ -1293,8 +1296,6 @@ class ContainerBase(Component[T_container_props, T_child]):
         for k in childs:
             v = self._child_comps[k]
             disposed_uids.update(v._detach())
-            print(k, v, v._flow_reference_count, disposed_uids)
-
         return disposed_uids
 
     def _attach_child(self,
@@ -1568,3 +1569,6 @@ def create_ignore_usr_msg(comp: Component):
         f"UI {comp._flow_uid}@{str(type(comp).__name__)} is still running, so ignore your control"
     )))
     return msg
+
+if __name__ == "__main__":
+    print(snake_to_camel("sizeAttention"))

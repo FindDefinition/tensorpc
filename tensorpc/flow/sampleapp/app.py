@@ -1078,7 +1078,7 @@ class SampleTreeApp(EditableLayoutApp):
         tree = mui.JsonLikeNode(
             "root", "root", mui.JsonLikeType.List.value, children=[
                 mui.JsonLikeNode("c1", "a1", mui.JsonLikeType.Int.value, value="0")
-            ], lazyExpandCount=5
+            ], childCnt=5
         )
         return [
             mui.JsonLikeTree(tree)
@@ -1132,7 +1132,7 @@ class MyApp(EditableLayoutApp):
         await self.slider.update_ranges(0, 10, 1)
 
     async def _on_slider_select(self, value):
-        print("select slider!", value)
+        print("select slider!!!", value)
         # you need to specify a key for a group of point
         # you also need to specify number limit of current point
         points = np.random.uniform(-1, 1, size=[1000, 3]).astype(np.float32)
@@ -1141,8 +1141,9 @@ class MyApp(EditableLayoutApp):
         # 2. [N], int8 (intensity), value range: [0, 255]
         # 3. a color string, e.g. red, green
         colors = np.random.uniform(0, 1, size=[1000, 3]).astype(np.float32)
+        sizes = np.random.uniform(0.5, 10.5, size=[1000]).astype(np.float32) * 1
 
-        await self.canvas.show_points("key0", points, limit=100000, colors=colors)
+        await self.canvas.show_points("key0", points, limit=100000, colors=colors, sizes=sizes)
         # boxes: dims, locs, rots, colors (string list, don't support ndarray currently)
         dims = np.random.uniform(1, 2, size=[5, 3])
         locs = np.random.uniform(-5, 5, size=[5, 3])
@@ -1169,12 +1170,16 @@ class AllotmentDevApp(EditableLayoutApp):
         self.root.prop(flex_flow="row nowrap")
         self.anylayout = AnyLayout()
         self.monitor = plus.ComputeResourceMonitor()
+        cam = three.PerspectiveCamera(True, fov=75, near=0.1, far=1000)
+
+        self.canvas = plus.SimpleCanvas(cam).prop(width="100%", height="100%", overflow="hidden")
         return [
-            plus.ObjectInspector(self).prop(flex=1),
-            mui.Divider(orientation="vertical"),
-            mui.HBox([
-                plus.AnyFlexLayout(),
-            ]).prop(flex=2)
+            mui.Allotment([
+                plus.ObjectInspector(self).prop(width="100%", height="100%", overflow="hidden"),
+                mui.HBox([
+                    plus.AnyFlexLayout(),
+                ]).prop(width="100%", height="100%", overflow="hidden")
+            ]).prop(default_sizes=[1, 3], width="100%", height="100%")
         ]
 
 if __name__ == "__main__":

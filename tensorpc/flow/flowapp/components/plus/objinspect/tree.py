@@ -1,3 +1,4 @@
+import dataclasses
 import enum
 import inspect
 import types
@@ -12,7 +13,7 @@ from tensorpc.core.serviceunit import ReloadableDynamicClass
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType
 from tensorpc.utils.moduleid import get_qualname_of_type
-
+from tensorpc.flow.flowapp.components.plus.monitor import ComputeResourceMonitor
 _DEFAULT_OBJ_NAME = "default"
 
 _DEFAULT_BUILTINS_NAME = "builtins"
@@ -133,41 +134,50 @@ def parse_obj_item(obj, name: str, id: str, checker: Callable[[Type], bool]):
             t = mui.JsonLikeType.Set
         else:
             raise NotImplementedError
-        return mui.JsonLikeNode(id, name, t.value, lazyExpandCount=len(obj))
+        return mui.JsonLikeNode(id, name, t.value, childCnt=len(obj))
     elif isinstance(obj, np.ndarray):
         t = mui.JsonLikeType.Tensor
         return mui.JsonLikeNode(id,
                                 name,
                                 t.value,
                                 typeStr="np.ndarray",
-                                value=f"{obj.shape}|{obj.dtype}")
+                                value=f"{obj.shape}|{obj.dtype}",
+                                draggable=True)
     elif get_qualname_of_type(obj_type) == TORCH_TENSOR_NAME:
         t = mui.JsonLikeType.Tensor
         return mui.JsonLikeNode(id,
                                 name,
                                 t.value,
                                 typeStr="torch.Tensor",
-                                value=f"{list(obj.shape)}|{obj.dtype}")
+                                value=f"{list(obj.shape)}|{obj.dtype}",
+                                draggable=True)
     elif get_qualname_of_type(obj_type) == TV_TENSOR_NAME:
         t = mui.JsonLikeType.Tensor
         return mui.JsonLikeNode(id,
                                 name,
                                 t.value,
                                 typeStr="tv.Tensor",
-                                value=f"{obj.shape}|{obj.dtype}")
+                                value=f"{obj.shape}|{obj.dtype}",
+                                draggable=True)
     else:
         t = mui.JsonLikeType.Object
-        obj_dict = _get_obj_dict(obj, checker)
+        # obj_dict = _get_obj_dict(obj, checker)
 
         metas = ReloadableDynamicClass.get_metas_of_regular_methods(type(obj), True)
         special_methods = FlowSpecialMethods(metas)
-        is_draggable = special_methods.create_layout is not None 
-        is_draggable |= isinstance(obj, mui.FlexBox)
+        is_layout = special_methods.create_layout is not None 
+        is_draggable = is_layout
+        if isinstance(obj, mui.FlexBox):
+            is_layout = True
+            is_draggable = obj._flow_reference_count == 0
+        is_draggable = True
+        if is_layout:
+            t = mui.JsonLikeType.Layout
         return mui.JsonLikeNode(id,
                                 name,
                                 t.value,
                                 typeStr=obj_type.__qualname__,
-                                lazyExpandCount=len(obj_dict),
+                                childCnt=1,
                                 draggable=is_draggable)
 
 
@@ -319,10 +329,16 @@ def _get_root_tree(obj, checker: Callable[[Type], bool], key: str):
     root_node.children = parse_obj_dict(obj_dict, key, checker)
     for (k, o), c in zip(obj_dict.items(), root_node.children):
         obj_child_dict = _get_obj_dict(o, checker)
+        c.draggable = False
         c.children = parse_obj_dict(obj_child_dict, c.id, checker)
-    root_node.lazyExpandCount = len(obj_dict)
+    root_node.childCnt = len(obj_dict)
     return root_node
 
+@dataclasses.dataclass
+class TreeDragTarget:
+    obj: Any 
+    tree_id: str
+    tab_id: str = ""
 
 class ObjectTree(mui.FlexBox):
 
@@ -342,14 +358,20 @@ class ObjectTree(mui.FlexBox):
             ignored_types = set()
         self._cared_types = cared_types
         self._ignored_types = ignored_types
+        default_builtins = {
+            _DEFAULT_BUILTINS_NAME: {
+                "monitor": ComputeResourceMonitor()
+            }
+        }
         if init is None:
-            self.tree.props.tree = mui.JsonLikeNode(
-                _ROOT, _ROOT, mui.JsonLikeType.Dict.value)
             self.root = {}
+            # self.tree.props.tree = mui.JsonLikeNode(
+            #     _ROOT, _ROOT, mui.JsonLikeType.Dict.value)
         else:
             self.root = {_DEFAULT_OBJ_NAME: init}
-            self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
-                                   _ROOT)
+        self.root.update(default_builtins)
+        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
+                                _ROOT)
         # print(self.tree.props.tree)
         # inspect.isbuiltin()
         self.tree.register_event_handler(
@@ -377,13 +399,15 @@ class ObjectTree(mui.FlexBox):
         obj, found = _get_obj_by_uid(self.root, uid, self._valid_checker)
         if not found:
             return None 
+        tab_id = ""
         if "complexLayoutTabNodeId" in data:
-            uid = data["complexLayoutTabNodeId"]
-        if isinstance(obj, mui.FlexBox):
-            wrapped_obj = obj
-        else:
-            wrapped_obj = mui.flex_wrapper(obj)
-        return wrapped_obj, uid
+            # for complex layout UI: FlexLayout
+            tab_id = data["complexLayoutTabNodeId"]
+        # if isinstance(obj, mui.FlexBox):
+        #     wrapped_obj = obj
+        # else:
+        #     wrapped_obj = mui.flex_wrapper(obj)
+        return TreeDragTarget(obj, uid, tab_id)
 
     async def _on_expand(self, uid: str):
         node = self._objinspect_root._get_node_by_uid(uid)

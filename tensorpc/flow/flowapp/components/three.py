@@ -435,6 +435,7 @@ class PointProps(ThreeBasicProps):
     attr_fields: Union[List[str], Undefined] = undefined
     size_attenuation: bool = False
     size: float = 3.0
+    sizes: Union[np.ndarray, Undefined] = undefined
 
 class PointsControlType(enum.Enum):
     SetColors = 0
@@ -450,6 +451,7 @@ class Points(ThreeComponentBase[PointProps]):
         res = super().get_sync_props()
         res["points"] = self.props.points
         res["colors"] = self.props.colors
+        res["sizes"] = self.props.sizes
         res["attrs"] = self.props.attrs
         res["attr_fields"] = self.props.attr_fields
         return res
@@ -490,9 +492,11 @@ class Points(ThreeComponentBase[PointProps]):
         self.props.colors = undefined
         self.props.attrs = undefined
         self.props.attr_fields = undefined
+        self.props.sizes = undefined
 
         return await self.send_and_wait(self.update_event(points=self.props.points, 
-            colors=undefined, attrs=undefined, attr_fields=undefined))
+            colors=undefined, attrs=undefined, attr_fields=undefined,
+            sizes=undefined))
 
     async def update_points(self,
                             points: np.ndarray,
@@ -501,7 +505,10 @@ class Points(ThreeComponentBase[PointProps]):
                             attrs: Optional[Union[np.ndarray,
                                                   Undefined]] = None,
                             attr_fields: Optional[List[str]] = None,
-                            limit: Optional[int] = None):
+                            limit: Optional[int] = None,
+                            sizes: Optional[Union[np.ndarray,
+                                                   Undefined]] = None,
+                            size_attenuation: bool = False):
         # TODO better check, we must handle all errors before sent to frontend.
         assert points.ndim == 2 and points.shape[1] in [
             3, 4
@@ -516,7 +523,14 @@ class Points(ThreeComponentBase[PointProps]):
 
         upd: Dict[str, Any] = {
             "points": points,
+            "size_attenuation": size_attenuation,
         }
+        if sizes is not None:
+            if not isinstance(sizes, Undefined):
+                assert sizes.shape[0] == points.shape[0] and sizes.dtype == np.float32
+            upd["sizes"] = sizes
+            self.props.sizes = sizes
+
         if colors is not None:
             upd["colors"] = colors
             self.props.colors = colors
