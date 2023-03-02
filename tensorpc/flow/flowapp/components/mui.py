@@ -924,8 +924,11 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
 
     def get_special_methods(self):
         if self._wrapped_obj is not None:
-            return get_special_methods(type(self._wrapped_obj))
-        return get_special_methods(type(self))
+            res = get_special_methods(type(self._wrapped_obj))
+        else:
+            res = get_special_methods(type(self))
+        res.bind(self)
+        return res 
 
 @dataclasses.dataclass
 class MUIListProps(MUIFlexBoxProps):

@@ -911,11 +911,14 @@ class Component(Generic[T_base_props, T_child]):
     def propcls(self) -> Type[T_base_props]:
         return self.__prop_cls
 
-    def _attach(self, uid: str, queue: asyncio.Queue):
+    def _attach(self, uid: str, queue: asyncio.Queue) -> dict:
         if self._flow_reference_count == 0:
             self._flow_uid = uid
             self._queue = queue
+            self._flow_reference_count += 1
+            return {uid: self}
         self._flow_reference_count += 1
+        return {}
 
     def _detach(self) -> dict:
         self._flow_reference_count -= 1
@@ -1290,22 +1293,27 @@ class ContainerBase(Component[T_container_props, T_child]):
         for k in childs:
             v = self._child_comps[k]
             disposed_uids.update(v._detach())
+            print(k, v, v._flow_reference_count, disposed_uids)
+
         return disposed_uids
 
     def _attach_child(self,
                       queue: asyncio.Queue,
                       childs: Optional[List[str]] = None):
+        atached_uids: Dict[str, Component] = {}
         if childs is None:
             childs = list(self._child_comps.keys())
         for k in childs:
             v = self._child_comps[k]
-            v._attach(f"{self._flow_uid}.{k}", queue)
-
+            atached_uids.update(v._attach(f"{self._flow_uid}.{k}", queue))
+        return atached_uids
+    
     def _attach(self, uid: str, queue: asyncio.Queue):
-        super()._attach(uid, queue)
+        attached: Dict[str, Component] = super()._attach(uid, queue)
         for k, v in self._child_comps.items():
-            v._attach(f"{uid}.{k}", queue)
-
+            attached.update(v._attach(f"{uid}.{k}", queue))
+        return attached
+    
     def _get_uid_to_comp_dict(self):
         res: Dict[str, Component] = {}
 
@@ -1383,6 +1391,7 @@ class ContainerBase(Component[T_container_props, T_child]):
                                     detached: List[Component]):
         for attach in attached:
             special_methods = attach.get_special_methods()
+
             if special_methods.did_mount is not None:
                 await self.run_callback(
                     special_methods.did_mount.get_binded_fn(),
@@ -1399,7 +1408,7 @@ class ContainerBase(Component[T_container_props, T_child]):
     def set_new_layout_locally(self, layout: Dict[str, Component]):
         detached_uid_to_comp = self._detach_child()
         self._child_comps = layout
-        self._attach_child(self.queue)
+        attached = self._attach_child(self.queue)
         # update all childs of this component
         comps_frontend = {
             c._flow_uid: c
@@ -1412,7 +1421,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         }
         return self.create_update_comp_event(
             comps_frontend_dict, list(detached_uid_to_comp.keys())), list(
-                comps_frontend.values()), list(detached_uid_to_comp.values())
+                attached.values()), list(detached_uid_to_comp.values())
 
     async def set_new_layout(self, layout: Union[Dict[str, Component],
                                                  List[Component]]):
@@ -1442,7 +1451,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         intersect = set(layout.keys()).intersection(self._child_comps.keys())
         detached = self._detach_child(list(intersect))
         self._child_comps.update(layout)
-        self._attach_child(self.queue, list(layout.keys()))
+        attached = self._attach_child(self.queue, list(layout.keys()))
         # remove replaced components first.
         comps_frontend = {
             c._flow_uid: c
@@ -1455,7 +1464,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         }
         return self.create_update_comp_event(
             comps_frontend_dict, list(detached.keys())), list(
-                comps_frontend.values()), list(detached.values())
+                attached.values()), list(detached.values())
 
     async def update_childs(self, layout: Dict[str, Component]):
         new_ev, attached, removed = self.update_childs_locally(layout)

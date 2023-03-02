@@ -1168,6 +1168,7 @@ class AllotmentDevApp(EditableLayoutApp):
     def my_layout(self):
         self.root.prop(flex_flow="row nowrap")
         self.anylayout = AnyLayout()
+        self.monitor = plus.ComputeResourceMonitor()
         return [
             plus.ObjectInspector(self).prop(flex=1),
             mui.Divider(orientation="vertical"),

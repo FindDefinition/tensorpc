@@ -17,3 +17,4 @@ from .config import ConfigPanel
 from .figure import HomogeneousMetricFigure
 from .canvas import SimpleCanvas
 from .objinspect import ObjectInspector, AnyFlexLayout
+from .monitor import ComputeResourceMonitor

@@ -14,6 +14,9 @@ from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType
 from tensorpc.utils.moduleid import get_qualname_of_type
 
 _DEFAULT_OBJ_NAME = "default"
+
+_DEFAULT_BUILTINS_NAME = "builtins"
+
 _ROOT = "root"
 
 
@@ -34,9 +37,10 @@ class ObjectHandlerRegistry:
                  key: Optional[Hashable] = None):
 
         def wrapper(func: Type[ObjectHandler]):
-            key_ = key
             if key is None:
                 key_ = func.__name__
+            else:
+                key_ = key
             if not self.allow_duplicate and key_ in self.global_dict:
                 raise KeyError("key {} already exists".format(key_))
             self.global_dict[key_] = func
@@ -158,6 +162,7 @@ def parse_obj_item(obj, name: str, id: str, checker: Callable[[Type], bool]):
         metas = ReloadableDynamicClass.get_metas_of_regular_methods(type(obj), True)
         special_methods = FlowSpecialMethods(metas)
         is_draggable = special_methods.create_layout is not None 
+        is_draggable |= isinstance(obj, mui.FlexBox)
         return mui.JsonLikeNode(id,
                                 name,
                                 t.value,
@@ -374,7 +379,11 @@ class ObjectTree(mui.FlexBox):
             return None 
         if "complexLayoutTabNodeId" in data:
             uid = data["complexLayoutTabNodeId"]
-        return mui.flex_wrapper(obj), uid
+        if isinstance(obj, mui.FlexBox):
+            wrapped_obj = obj
+        else:
+            wrapped_obj = mui.flex_wrapper(obj)
+        return wrapped_obj, uid
 
     async def _on_expand(self, uid: str):
         node = self._objinspect_root._get_node_by_uid(uid)
