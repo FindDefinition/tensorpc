@@ -12,7 +12,7 @@ from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.core import FrontendEventType
 from tensorpc.utils.moduleid import get_qualname_of_type
 
-from .core import ALL_OBJECT_HANDLERS, ObjectHandler
+from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler
 from .tree import _DEFAULT_OBJ_NAME, ObjectTree
 
 _DEFAULT_LOCALS_NAME = "locals"
@@ -20,7 +20,7 @@ _DEFAULT_LOCALS_NAME = "locals"
 _MAX_STRING_IN_DETAIL = 10000
 
 
-class DefaultHandler(ObjectHandler):
+class DefaultHandler(ObjectPreviewHandler):
     """
     TODO if the object support any-layout, add a button to enable it.
     """
@@ -113,7 +113,7 @@ class ObjectInspector(mui.FlexBox):
         if with_detail:
             self.tree.tree.register_event_handler(
                 FrontendEventType.TreeItemSelect.value, self._on_select)
-        self._type_to_handler_object: Dict[Type[Any], ObjectHandler] = {}
+        self._type_to_handler_object: Dict[Type[Any], ObjectPreviewHandler] = {}
 
     async def _on_select(self, uid: str):
         obj, found = self.tree._get_obj_by_uid(uid)
@@ -125,11 +125,11 @@ class ObjectInspector(mui.FlexBox):
             handler = self._type_to_handler_object[obj_type]
         else:
             obj_qualname = get_qualname_of_type(type(obj))
-            handler_type: Optional[Type[ObjectHandler]] = None
-            if obj_type in ALL_OBJECT_HANDLERS:
-                handler_type = ALL_OBJECT_HANDLERS[obj_type]
-            elif obj_qualname in ALL_OBJECT_HANDLERS:
-                handler_type = ALL_OBJECT_HANDLERS[obj_qualname]
+            handler_type: Optional[Type[ObjectPreviewHandler]] = None
+            if obj_type in ALL_OBJECT_PREVIEW_HANDLERS:
+                handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_type]
+            elif obj_qualname in ALL_OBJECT_PREVIEW_HANDLERS:
+                handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_qualname]
             # else:
             #     handler_type = DefaultHandler
             # TODO use a base handler here.

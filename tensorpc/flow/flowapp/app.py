@@ -79,6 +79,10 @@ APP_CONTEXT_VAR: contextvars.ContextVar[
 def get_app_context() -> Optional[AppContext]:
     return APP_CONTEXT_VAR.get()
 
+def get_app() -> "App":
+    ctx = get_app_context()
+    assert ctx is not None
+    return ctx.app
 
 def get_app_storage():
     ctx = get_app_context()
@@ -415,23 +419,24 @@ class App:
         res: mui.LayoutType = {}
         wrapped_obj = self.root._wrapped_obj
         try:
-            if decorator_fn is not None:
-                temp_res = decorator_fn()
-                if isinstance(temp_res, mui.FlexBox):
-                    # if temp_res._children is not None:
-                    #     # consume this _children
-                    #     temp_res.add_layout(temp_res._children)
-                    #     temp_res._children = None
-                    # temp_res._flow_uid = _ROOT
-                    temp_res._attach(_ROOT, self._queue)
-                    # self._uid_to_comp = temp_res._uid_to_comp
-                    new_is_flex = True 
-                    self.root = temp_res
-                    self.root._wrapped_obj = wrapped_obj
+            with _enter_app_conetxt(self):
+                if decorator_fn is not None:
+                    temp_res = decorator_fn()
+                    if isinstance(temp_res, mui.FlexBox):
+                        # if temp_res._children is not None:
+                        #     # consume this _children
+                        #     temp_res.add_layout(temp_res._children)
+                        #     temp_res._children = None
+                        # temp_res._flow_uid = _ROOT
+                        temp_res._attach(_ROOT, self._queue)
+                        # self._uid_to_comp = temp_res._uid_to_comp
+                        new_is_flex = True 
+                        self.root = temp_res
+                        self.root._wrapped_obj = wrapped_obj
+                    else:
+                        res = temp_res
                 else:
-                    res = temp_res
-            else:
-                res = self.app_create_layout()
+                    res = self.app_create_layout()
             self.__previous_error_sync_props.clear()
             self.__previous_error_persist_state.clear()
         except Exception as e:
@@ -861,18 +866,19 @@ class EditableApp(App):
                             fut.result()
                         code_changed_metas = self._reload_app_file()
                         flow_special = FlowSpecialMethods(code_changed_metas)
-                        if flow_special.auto_run is not None:
-                            asyncio.run_coroutine_threadsafe(
-                                self._run_autorun(flow_special.auto_run.get_binded_fn()),
-                                self._loop)
-                        # print(code_changed_metas)
-                        if flow_special.create_layout:
-                            fn = flow_special.create_layout.get_binded_fn()
-                            fut = asyncio.run_coroutine_threadsafe(
-                                self._app_run_layout_function(
-                                    True, with_code_editor=False, reload=True, decorator_fn=fn),
-                                self._loop)
-                            fut.result()
+                        with _enter_app_conetxt(self):
+                            if flow_special.auto_run is not None:
+                                asyncio.run_coroutine_threadsafe(
+                                    self._run_autorun(flow_special.auto_run.get_binded_fn()),
+                                    self._loop)
+                            # print(code_changed_metas)
+                            if flow_special.create_layout:
+                                fn = flow_special.create_layout.get_binded_fn()
+                                fut = asyncio.run_coroutine_threadsafe(
+                                    self._app_run_layout_function(
+                                        True, with_code_editor=False, reload=True, decorator_fn=fn),
+                                    self._loop)
+                                fut.result()
                     already_reloaded = is_app_file_changed
                     self.__reload_callback(resolved_path, already_reloaded)
                 except:
@@ -925,11 +931,12 @@ class EditableApp(App):
                         self._flow_comp_mgr.update_code_from_editor(app_path, event.data)
                     code_changed_metas = self._reload_app_file()
                     flow_special = FlowSpecialMethods(code_changed_metas)
-                    if flow_special.auto_run is not None:
-                        asyncio.create_task(_run_zeroarg_func(flow_special.auto_run.get_binded_fn()))
-                    if flow_special.create_layout is not None:
-                        await self._app_run_layout_function(
-                            True, with_code_editor=False, reload=True, decorator_fn=flow_special.create_layout.get_binded_fn())
+                    with _enter_app_conetxt(self):
+                        if flow_special.auto_run is not None:
+                            asyncio.create_task(_run_zeroarg_func(flow_special.auto_run.get_binded_fn()))
+                        if flow_special.create_layout is not None:
+                            await self._app_run_layout_function(
+                                True, with_code_editor=False, reload=True, decorator_fn=flow_special.create_layout.get_binded_fn())
                     self.__reload_callback(app_path, True)
         return
 

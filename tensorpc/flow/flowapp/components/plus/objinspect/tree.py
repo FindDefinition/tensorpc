@@ -21,23 +21,23 @@ _DEFAULT_BUILTINS_NAME = "builtins"
 _ROOT = "root"
 
 
-class ObjectHandler(mui.FlexBox):
+class ObjectPreviewHandler(mui.FlexBox):
 
     async def bind(self, obj):
         raise NotImplementedError
 
 
-class ObjectHandlerRegistry:
+class ObjectPreviewHandlerRegistry:
 
     def __init__(self, allow_duplicate: bool = False):
-        self.global_dict: Dict[Hashable, Type[ObjectHandler]] = {}
+        self.global_dict: Dict[Hashable, Type[ObjectPreviewHandler]] = {}
         self.allow_duplicate = allow_duplicate
 
     def register(self,
-                 func: Optional[Type[ObjectHandler]] = None,
+                 func: Optional[Type[ObjectPreviewHandler]] = None,
                  key: Optional[Hashable] = None):
 
-        def wrapper(func: Type[ObjectHandler]):
+        def wrapper(func: Type[ObjectPreviewHandler]):
             if key is None:
                 key_ = func.__name__
             else:
@@ -62,7 +62,7 @@ class ObjectHandlerRegistry:
         yield from self.global_dict.items()
 
 
-ALL_OBJECT_HANDLERS = ObjectHandlerRegistry()
+ALL_OBJECT_PREVIEW_HANDLERS = ObjectPreviewHandlerRegistry()
 
 TORCH_TENSOR_NAME = "torch.Tensor"
 TV_TENSOR_NAME = "cumm.core_cc.tensorview_bind.Tensor"
@@ -77,6 +77,8 @@ BASE_OBJ_TO_TYPE = {
 
 STRING_LENGTH_LIMIT = 2000
 
+class ButtonType(enum.Enum):
+    Reload = "reload"
 
 def parse_obj_item(obj, name: str, id: str, checker: Callable[[Type], bool]):
     obj_type = type(obj)
@@ -178,7 +180,8 @@ def parse_obj_item(obj, name: str, id: str, checker: Callable[[Type], bool]):
                                 t.value,
                                 typeStr=obj_type.__qualname__,
                                 childCnt=1,
-                                draggable=is_draggable)
+                                draggable=is_draggable,
+                                iconButtons=[(ButtonType.Reload.value, mui.IconType.Refresh.value)])
 
 
 def parse_obj_dict(obj_dict: Dict[str, Any], ns: str, checker: Callable[[Type],
@@ -348,7 +351,7 @@ class ObjectTree(mui.FlexBox):
                  ignored_types: Optional[Set[Type]] = None) -> None:
         self.tree = mui.JsonLikeTree()
         super().__init__([
-            self.tree.prop(ignore_root=True),
+            self.tree.prop(ignore_root=True, use_fast_tree=True),
         ])
         self.prop(overflow="auto")
         self._uid_to_node: Dict[str, mui.JsonLikeNode] = {}
@@ -376,6 +379,9 @@ class ObjectTree(mui.FlexBox):
         # inspect.isbuiltin()
         self.tree.register_event_handler(
             FrontendEventType.TreeLazyExpand.value, self._on_expand)
+        self.tree.register_event_handler(
+            FrontendEventType.TreeItemButton.value, self._on_custom_button)
+
         self.tree.register_event_handler(
             FrontendEventType.DragCollect.value, self._on_drag_collect, backend_only=True)
 
@@ -418,6 +424,12 @@ class ObjectTree(mui.FlexBox):
         node.children = tree
         upd = self.tree.update_event(tree=self._objinspect_root)
         await self.tree.send_and_wait(upd)
+
+    async def _on_custom_button(self, uid_btn: Tuple[str, str]):
+        uid = uid_btn[0]
+        btn = ButtonType(uid_btn[1])
+        if btn == ButtonType.Reload:
+            print("!")
 
     async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):
         self.root[key] = obj

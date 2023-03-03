@@ -5,14 +5,14 @@ import numpy as np
 from tensorpc.flow.flowapp.components import mui
 from tensorpc.utils.moduleid import get_qualname_of_type
 
-from .core import ALL_OBJECT_HANDLERS, ObjectHandler
+from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler
 from .tree import TORCH_TENSOR_NAME, TV_TENSOR_NAME
 
 
-@ALL_OBJECT_HANDLERS.register(np.ndarray)
-@ALL_OBJECT_HANDLERS.register(TORCH_TENSOR_NAME)
-@ALL_OBJECT_HANDLERS.register(TV_TENSOR_NAME)
-class TensorHandler(ObjectHandler):
+@ALL_OBJECT_PREVIEW_HANDLERS.register(np.ndarray)
+@ALL_OBJECT_PREVIEW_HANDLERS.register(TORCH_TENSOR_NAME)
+@ALL_OBJECT_PREVIEW_HANDLERS.register(TV_TENSOR_NAME)
+class TensorHandler(ObjectPreviewHandler):
 
     def __init__(self) -> None:
         self.tags = mui.FlexBox().prop(flex_flow="row wrap")
@@ -89,11 +89,11 @@ class TensorHandler(ObjectHandler):
         await self.tags.set_new_layout([*tags])
 
 
-@ALL_OBJECT_HANDLERS.register(str)
-@ALL_OBJECT_HANDLERS.register(int)
-@ALL_OBJECT_HANDLERS.register(float)
-@ALL_OBJECT_HANDLERS.register(complex)
-class StringHandler(ObjectHandler):
+@ALL_OBJECT_PREVIEW_HANDLERS.register(str)
+@ALL_OBJECT_PREVIEW_HANDLERS.register(int)
+@ALL_OBJECT_PREVIEW_HANDLERS.register(float)
+@ALL_OBJECT_PREVIEW_HANDLERS.register(complex)
+class StringHandler(ObjectPreviewHandler):
 
     def __init__(self) -> None:
         self.text = mui.Typography("").prop(font_family="monospace",

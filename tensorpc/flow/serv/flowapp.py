@@ -229,7 +229,8 @@ class FlowApp:
                             master_disconnect = -1
                             previous_event = AppEvent(self._uid, {})
                         except Exception as e:
-                            print("Retry connection Fail.")
+                            traceback.print_exc()
+                            # print("Retry connection Fail.")
                             master_disconnect = ts   
                 else:
                     try:

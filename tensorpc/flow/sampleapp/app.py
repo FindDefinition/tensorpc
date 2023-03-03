@@ -823,7 +823,7 @@ class SampleMapApp(EditableApp):
         self.root.props.flex_flow = "row nowrap"
 
     def app_create_layout(self) -> Dict[str, MUIComponentType]:
-        google_url = "https://{s}.google.com/vt?lyrs=m&x={x}&y={y}&z={z}"
+        google_url = "http://{s}.google.com/vt?lyrs=m&x={x}&y={y}&z={z}"
         self.leaflet = leaflet.MapContainer((30, 100), 13, {
             "tile": leaflet.TileLayer(google_url),
         }).prop(height="100%", flex=3)

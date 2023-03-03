@@ -452,6 +452,7 @@ class IconType(enum.IntEnum):
     DataArray = 26
     Cached = 27
     SwapVert = 28
+    Refresh = 29
 
 
 @dataclasses.dataclass
@@ -2564,6 +2565,8 @@ class JsonLikeTreeProps(MUIFlexBoxProps):
     disabled_items_focusable: Union[Undefined, bool] = undefined
     disable_selection: Union[Undefined, bool] = undefined
     ignore_root: Union[Undefined, bool] = undefined
+    use_fast_tree: Union[Undefined, bool] = undefined
+
 
 
 class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
