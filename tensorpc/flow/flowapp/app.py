@@ -61,8 +61,8 @@ from .core import (AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
                    LayoutEvent, TaskLoopEvent, UIEvent, UIExceptionEvent,
                    UIRunStatus, UIType, UIUpdateEvent, Undefined, UserMessage, ValueType,
                    undefined, EventHandler)
-from tensorpc.utils.moduleid import get_qualname_of_type
-from tensorpc.utils.moduleid import is_lambda, is_valid_function
+from tensorpc.core.moduleid import get_qualname_of_type
+from tensorpc.core.moduleid import is_lambda, is_valid_function
 ALL_APP_EVENTS = HashableRegistry()
 
 

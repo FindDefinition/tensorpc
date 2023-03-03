@@ -3,7 +3,7 @@ import enum
 from typing import Any, Dict, List
 import dataclasses
 from tensorpc.autossh.core import Event, event_from_dict
-from tensorpc.utils.moduleid import get_qualname_of_type
+from tensorpc.core.moduleid import get_qualname_of_type
 import numpy as np 
 
 def get_uid(graph_id: str, node_id: str):

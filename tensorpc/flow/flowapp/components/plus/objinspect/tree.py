@@ -12,8 +12,9 @@ from tensorpc.core.inspecttools import get_members
 from tensorpc.core.serviceunit import ReloadableDynamicClass
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType
-from tensorpc.utils.moduleid import get_qualname_of_type
+from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.flow.flowapp.components.plus.monitor import ComputeResourceMonitor
+from tensorpc.flow.flowapp.reload import reload_object_methods
 _DEFAULT_OBJ_NAME = "default"
 
 _DEFAULT_BUILTINS_NAME = "builtins"
@@ -427,9 +428,18 @@ class ObjectTree(mui.FlexBox):
 
     async def _on_custom_button(self, uid_btn: Tuple[str, str]):
         uid = uid_btn[0]
+        obj, found = _get_obj_by_uid(self.root, uid, self._valid_checker)
+        if not found:
+            return 
         btn = ButtonType(uid_btn[1])
         if btn == ButtonType.Reload:
-            print("!")
+            metas = reload_object_methods(obj)
+            print(metas)
+            if metas is not None:
+                special_methods = FlowSpecialMethods(metas)
+            else:
+                print("reload failed.")
+
 
     async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):
         self.root[key] = obj

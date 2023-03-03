@@ -1061,11 +1061,15 @@ class AnyLayout:
     @marker.mark_create_layout
     def my_layout(self):
         return mui.FlexBox([
-            mui.Button("Hi", self.handle_click)
+            mui.Button("Hi2345", self.handle_click)
         ])
 
+    def reload_wtf(self):
+        print("??4")
+
     def handle_click(self):
-        print("???2X???")
+        print("???22X???")
+        self.reload_wtf()
 
 
 class SampleTreeApp(EditableLayoutApp):
@@ -1164,23 +1168,23 @@ class CollectionApp(EditableLayoutApp):
             mui.HBox([])
         ]
 
-class AllotmentDevApp(EditableLayoutApp):
+class AllotmentDevApp:
     @mark_create_layout
     def my_layout(self):
-        self.root.prop(flex_flow="row nowrap")
         self.anylayout = AnyLayout()
         self.monitor = plus.ComputeResourceMonitor()
         cam = three.PerspectiveCamera(True, fov=75, near=0.1, far=1000)
 
         self.canvas = plus.SimpleCanvas(cam).prop(width="100%", height="100%", overflow="hidden")
-        return [
+        self.drag_pc = np.random.uniform(-3, 3, size=[1000, 3])
+        return mui.HBox([
             mui.Allotment([
                 plus.ObjectInspector(self).prop(width="100%", height="100%", overflow="hidden"),
                 mui.HBox([
                     plus.AnyFlexLayout(),
                 ]).prop(width="100%", height="100%", overflow="hidden")
             ]).prop(default_sizes=[1, 3], width="100%", height="100%")
-        ]
+        ]).prop(flex_flow="row nowrap")
 
 if __name__ == "__main__":
     import time 

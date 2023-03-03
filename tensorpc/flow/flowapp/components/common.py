@@ -31,6 +31,8 @@ _ONEARG_TREE_EVENTS = set([
 _ONEARG_COMPLEXL_EVENTS = set([
     FrontendEventType.ComplexLayoutCloseTab.value,
     FrontendEventType.ComplexLayoutSelectTab.value,
+    FrontendEventType.ComplexLayoutTabReload.value,
+
 ])
 
 _ONEARG_EVENTS = set(ALL_POINTER_EVENTS) | _ONEARG_TREE_EVENTS | _ONEARG_COMPLEXL_EVENTS

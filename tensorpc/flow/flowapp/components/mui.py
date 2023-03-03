@@ -161,7 +161,10 @@ class FlexBoxProps(FlexComponentBaseProps):
 # we can't let mui use three component.
 @dataclasses.dataclass
 class MUIFlexBoxProps(FlexBoxProps, ContainerBaseProps):
-    pass
+    draggable: Union[bool, Undefined] = undefined
+    droppable: Union[bool, Undefined] = undefined
+    allowed_dnd_types: Union[str, List[str], Undefined] = undefined
+
 
 
 _TypographyVarient: TypeAlias = Literal['body1', 'body2', 'button', 'caption',

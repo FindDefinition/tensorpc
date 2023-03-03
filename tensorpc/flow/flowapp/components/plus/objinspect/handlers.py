@@ -3,7 +3,7 @@ from typing import Any
 import numpy as np
 
 from tensorpc.flow.flowapp.components import mui
-from tensorpc.utils.moduleid import get_qualname_of_type
+from tensorpc.core.moduleid import get_qualname_of_type
 
 from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler
 from .tree import TORCH_TENSOR_NAME, TV_TENSOR_NAME

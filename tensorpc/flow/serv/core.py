@@ -29,7 +29,7 @@ from functools import partial
 from pathlib import Path
 from typing import (Any, Awaitable, Callable, Coroutine, Dict, Iterable, List,
                     Optional, Set, Tuple, Type, Union)
-from tensorpc.utils.moduleid import get_qualname_of_type
+from tensorpc.core.moduleid import get_qualname_of_type
 import aiohttp
 import asyncssh
 import bcrypt

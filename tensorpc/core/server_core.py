@@ -413,6 +413,7 @@ class ProtobufServiceCore(ServiceCore):
                                                      data=decoupled,
                                                      flags=flags)
 
+
     def chunked_remote_call(
             self, request_iter: Iterator[rpc_msg_pb2.RemoteCallStream]):
         self._reset_timeout()

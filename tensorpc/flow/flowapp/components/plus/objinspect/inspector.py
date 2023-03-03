@@ -10,7 +10,7 @@ import numpy as np
 from tensorpc.core.inspecttools import get_members
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.core import FrontendEventType
-from tensorpc.utils.moduleid import get_qualname_of_type
+from tensorpc.core.moduleid import get_qualname_of_type
 
 from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler
 from .tree import _DEFAULT_OBJ_NAME, ObjectTree

@@ -9,7 +9,7 @@ import numpy as np
 
 from tensorpc.core.inspecttools import get_members
 from tensorpc.flow.flowapp.components import mui
-from tensorpc.utils.moduleid import get_qualname_of_type
+from tensorpc.core.moduleid import get_qualname_of_type
 
 
 class ObjectPreviewHandler(mui.FlexBox):

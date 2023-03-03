@@ -12,9 +12,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from tensorpc.flow.flowapp.components import mui, three
+from tensorpc.flow import marker
+
 from typing import Dict, Iterable, Optional, Union, List
 import numpy as np
+from tensorpc.flow.flowapp.components.plus.objinspect.tree import TreeDragTarget
 
+from tensorpc.flow.flowapp.core import FrontendEventType
+
+def _is_point_cloud(obj: np.ndarray):
+    ndim = obj.ndim 
+    if ndim == 2:
+        dtype = obj.dtype 
+        if dtype == np.float32 or dtype == np.float16 or dtype == np.float64:
+            num_ft = obj.shape[1]
+            if num_ft >= 3 and num_ft <= 4:
+                return True 
+    return False
+
+def _is_array_image(obj: np.ndarray):
+    ndim = obj.ndim 
+    if ndim == 2:
+        return obj.dtype == np.uint8 
+    elif ndim == 3:
+        return obj.dtype == np.uint8 and obj.shape[2] == 3
+    return False
 
 class SimpleCanvas(mui.FlexBox):
     def __init__(self,
@@ -44,28 +66,51 @@ class SimpleCanvas(mui.FlexBox):
             canvas_layout.append(infgrid)
 
         self.canvas = three.ThreeCanvas(canvas_layout).prop(flex=1)
-        layout: mui.LayoutType = [
-            self.canvas,
-            mui.ToggleButton("wtf",
-                             icon=mui.IconType.SwapVert,
-                             callback=self._on_pan_to_fwd).prop(
-                                 position="absolute",
-                                 top=3,
-                                 left=3,
-                                 z_index=5,
-                                 selected=True)
-        ]
         self._point_dict: Dict[str, three.Points] = {}
         self._image_dict: Dict[str, three.Image] = {}
         self._segment_dict: Dict[str, three.Segments] = {}
         self._box_dict: Dict[str, three.BoundingBox] = {}
+        super().__init__()
+        self.init_add_layout([*self._layout_func()])
 
-        super().__init__(layout)
-        self.prop(min_height=0, min_width=0, flex=1, position="relative")
+    @marker.mark_create_layout
+    def _layout_func(self):
+        layout: mui.LayoutType = [
+            self.canvas,
+            mui.VBox([
+                mui.ToggleButton("wtf",
+                             icon=mui.IconType.SwapVert,
+                             callback=self._on_pan_to_fwd).prop(selected=True),
+                mui.IconButton(mui.IconType.Clear,
+                             callback=self._on_clear),
+
+            ]).prop(position="absolute",
+                                 top=3,
+                                 left=3,
+                                 z_index=5)
+        ]
+        self.register_event_handler(FrontendEventType.Drop.value, self._on_drop)
+        self.prop(min_height=0, min_width=0, flex=1, position="relative", droppable=True)
+        return layout
+
+    async def _on_drop(self, data):
+        if isinstance(data, TreeDragTarget):
+            obj = data.obj
+            if isinstance(obj, np.ndarray):
+                if _is_point_cloud(obj):
+                    await self.show_points(data.tree_id, obj.astype(np.float32), obj.shape[0]) 
+
+            print(data) 
 
     async def _on_pan_to_fwd(self, selected):
         await self.ctrl.send_and_wait(
             self.ctrl.update_event(vertical_drag_to_forward=not selected))
+
+    async def _on_clear(self):
+        await self.clear_all_boxes()
+        await self.clear_all_images()
+        await self.clear_all_lines()
+        await self.clear_all_points()
 
     async def set_cam2world(self, cam2world: Union[List[float], np.ndarray],
                             distance: float):

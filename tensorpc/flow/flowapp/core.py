@@ -234,6 +234,7 @@ class FrontendEventType(enum.Enum):
 
     ComplexLayoutCloseTab = 40
     ComplexLayoutSelectTab = 41
+    ComplexLayoutTabReload = 42
 
     # leaflet events
     MapZoom = 60
@@ -241,6 +242,9 @@ class FrontendEventType(enum.Enum):
 
     PlotlyClickData = 100
     PlotlyClickAnnotation = 101
+
+class AppDraggableType(enum.Enum):
+    JsonLikeTreeItem = "JsonLikeTreeItem"
 
 
 ALL_POINTER_EVENTS = [
