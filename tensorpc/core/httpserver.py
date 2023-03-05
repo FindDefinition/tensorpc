@@ -583,12 +583,6 @@ class AllWebsocketHandler:
             # print("SEND TIME", cur_ev, time.time() - t)
             task_to_ev = new_task_to_ev
 
-@dataclass
-class File:
-    name: str 
-    content: bytes 
-    data: Any
-
 class HttpService:
     def __init__(self, service_core: ProtobufServiceCore):
         self.service_core = service_core
@@ -617,39 +611,43 @@ class HttpService:
         reader = await request.multipart()
         # /!\ Don't forget to validate your inputs /!\
         # reader.next() will `yield` the fields of your form
-
-        field = await reader.next()
-        assert field.name == 'file'
-        filename = field.filename
-        content = field.read()
-        field = await reader.next()
-        assert field is not None
-        assert field.name == 'data'
-        data = field.read()
-        data = json.load(data)
-        serv_key = data["serv_key"]
-        serv_data = data["serv_data"]
-        f = File(filename, content, serv_data)
-        print(serv_data, serv_key)
-        # try:
-        #     data_bin = await request.read()
-        #     pb_data = rpc_message_pb2.RemoteJsonCallRequest()
-        #     pb_data.ParseFromString(data_bin)
-        #     pb_data.flags = rpc_message_pb2.JsonArray
-        #     res = await self.service_core.remote_json_call_async(pb_data)
-        # except Exception as e:
-        #     data = self.service_core._remote_exception_json(e)
-        #     res = rpc_message_pb2.RemoteCallReply(exception=data)
-
-        # You cannot rely on Content-Length if transfer is chunked.
         headers = {
             'Access-Control-Allow-Origin': '*',
             # 'Access-Control-Allow-Headers': '*',
             # 'Access-Control-Allow-Method': 'POST',
         }
 
-        return web.Response(text='{} sized of {} successfully stored'
-                                ''.format(filename, content), headers=headers)
+        field = await reader.next()
+        assert field is not None
+        assert field.name == 'data'
+        # TODO how to handle large file?
+        data = await field.read()
+        data = json.loads(data)
+        serv_key = data["serv_key"]
+        serv_data = data["serv_data"]
+        file_size = data["file_size"]
+
+        field = await reader.next()
+        assert field is not None
+        assert field.name == 'file'
+        filename = field.filename
+        content = await field.read()
+        f = defs.File(filename, content, serv_data)
+        # print(serv_data, serv_key, len(content))
+
+        # return web.Response(text='{} sized of {} successfully stored'
+        #                             ''.format(filename, content), headers=headers)
+        res, is_exc = await self.service_core.execute_async_service(serv_key,
+                                                        [f],
+                                                        {},
+                                                        json_call=False)
+        # You cannot rely on Content-Length if transfer is chunked.
+        if not is_exc:
+            return web.Response(text='{} sized of {} successfully stored'
+                                    ''.format(filename, content), headers=headers)
+        else:
+            return web.Response(status=500, text=res, headers=headers)
+
 
     async def remote_pickle_call_http(self, request: web.Request):
         try:

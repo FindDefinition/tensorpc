@@ -29,6 +29,7 @@ from functools import partial
 from pathlib import Path
 from typing import (Any, Awaitable, Callable, Coroutine, Dict, Iterable, List,
                     Optional, Set, Tuple, Type, Union)
+from tensorpc.core.defs import File
 from tensorpc.core.moduleid import get_qualname_of_type
 import aiohttp
 import asyncssh
@@ -61,9 +62,9 @@ from tensorpc.flow.coretypes import (DataStorageItemType, Message,
                                      UserContentEvent, UserDataUpdateEvent,
                                      UserEvent, UserStatusEvent, get_uid,
                                      DataItemMeta)
-from tensorpc.flow.flowapp.core import (AppEvent, AppEventType, ComponentEvent,
+from tensorpc.flow.flowapp.core import (AppEvent, AppEventType, ComponentEvent, FrontendEventType,
                                         NotifyEvent, NotifyType,
-                                        ScheduleNextForApp, UISaveStateEvent,
+                                        ScheduleNextForApp, UIEvent, UISaveStateEvent,
                                         app_event_from_data)
 from tensorpc.flow.serv_names import serv_names
 from tensorpc.utils.address import get_url_port
@@ -1627,8 +1628,22 @@ class Flow:
     async def run_app_editor_event(self, graph_id: str, node_id: str,
                            ui_ev_dict: Dict[str, Any]):
         return await self.run_single_event(graph_id, node_id, AppEventType.AppEditor.value, ui_ev_dict)
+    
+    async def run_app_file_event(self, file: File):
+        data = file.data 
+        node_uid = data["node_uid"]
+        graph_id = node_uid.split("@")[0]
+        node_id = node_uid.split("@")[1]
 
-    async def query_app_state(self, graph_id: str, node_id: str):
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node 
+        if isinstance(node, AppNode):
+            ev = UIEvent({
+                data["comp_uid"]: (FrontendEventType.FileDrop.value, file)
+            })
+            return await self.run_single_event(graph_id, node_id, AppEventType.UIEvent.value, ev.to_dict(), True)
+
+    async def query_app_state(self, graph_id: str, node_id: str, editor_only: bool = False):
         node, driver = self._get_app_node_and_driver(graph_id, node_id)
         if not node.is_session_started():
             return None
@@ -1636,14 +1651,15 @@ class Flow:
             return None
         if isinstance(driver, RemoteSSHNode):
             return await driver.http_remote_call(
-                serv_names.FLOWWORKER_APP_GET_LAYOUT, graph_id, node_id)
+                serv_names.FLOWWORKER_APP_GET_LAYOUT, graph_id, node_id, editor_only)
         else:
             sess = prim.get_http_client_session()
             http_port = node.http_port
             durl, _ = get_url_port(driver.url)
             app_url = get_http_url(durl, http_port)
             return await http_remote_call(sess, app_url,
-                                          serv_names.APP_GET_LAYOUT)
+                                          serv_names.APP_GET_LAYOUT, editor_only)
+    
 
     def query_app_node_urls(self, graph_id: str, node_id: str):
         node, driver = self._get_app_node_and_driver(graph_id, node_id)
@@ -1826,6 +1842,7 @@ class Flow:
             node.terminal_state = state
             node.terminal_close_ts = timestamp_ms * 1000000
         self.selected_node_uid = ""
+
 
     async def select_node(self,
                           graph_id: str,

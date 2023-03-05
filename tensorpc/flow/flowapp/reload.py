@@ -1,7 +1,51 @@
-from typing import Any, List, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
-from tensorpc.core.moduleid import get_obj_type_meta
+from tensorpc.core.moduleid import get_obj_type_meta, TypeMeta
 from tensorpc.core.serviceunit import ReloadableDynamicClass, ServFunctionMeta
+from tensorpc.flow.constants import TENSORPC_ANYLAYOUT_FUNC_NAME, TENSORPC_LEGACY_LAYOUT_FUNC_NAME
+from tensorpc.core.serviceunit import AppFuncType
+
+class FlowSpecialMethods:
+
+    def __init__(self, metas: List[ServFunctionMeta]) -> None:
+        self.create_layout: Optional[ServFunctionMeta] = None
+        self.auto_run: Optional[ServFunctionMeta] = None
+        self.did_mount: Optional[ServFunctionMeta] = None
+        self.will_unmount: Optional[ServFunctionMeta] = None
+        self.create_object: Optional[ServFunctionMeta] = None
+
+        self.metas = metas
+        for m in self.metas:
+            # assert m.is_binded, "metas must be binded before this class"
+            if m.name == TENSORPC_ANYLAYOUT_FUNC_NAME:
+                self.create_layout = m
+            elif m.name == TENSORPC_LEGACY_LAYOUT_FUNC_NAME:
+                self.create_layout = m
+            elif m.user_app_meta is not None:
+                if m.user_app_meta.type == AppFuncType.CreateLayout:
+                    self.create_layout = m
+                elif m.user_app_meta.type == AppFuncType.ComponentDidMount:
+                    self.did_mount = m
+                elif m.user_app_meta.type == AppFuncType.ComponentWillUnmount:
+                    self.will_unmount = m
+                elif m.user_app_meta.type == AppFuncType.CreateObject:
+                    self.create_object = m
+                elif m.user_app_meta.type == AppFuncType.AutoRun:
+                    self.auto_run = m
+
+    def bind(self, obj):
+        if self.create_layout is not None:
+            self.create_layout.bind(obj)
+        if self.auto_run is not None:
+            self.auto_run.bind(obj)
+        if self.did_mount is not None:
+            self.did_mount.bind(obj)
+        if self.will_unmount is not None:
+            self.will_unmount.bind(obj)
+        if self.create_object is not None:
+            self.create_object.bind(obj)
+
 
 def reload_object_methods(obj: Any, previous_metas: Optional[List[ServFunctionMeta]] = None):
     obj_type = type(obj)
@@ -30,3 +74,25 @@ def reload_object_methods(obj: Any, previous_metas: Optional[List[ServFunctionMe
             setattr(obj, new_meta.name, new_method)
             code_changed_metas.append(new_meta)
     return code_changed_metas
+
+@dataclass
+class AppObjectMeta:
+    is_anylayout: bool = False
+
+class ObjectReloadManager:
+    """to resolve some side effects, users should
+    always use reloader defined in app.
+    """
+    def __init__(self) -> None:
+        self.obj_layout_meta_cache: Dict[Any, AppObjectMeta] = {}
+
+    def query_obj_is_anylayout(self, obj):
+        obj_type = type(obj)
+        if obj_type in self.obj_layout_meta_cache:
+            return self.obj_layout_meta_cache[obj_type].is_anylayout
+        
+        new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
+            obj_type, include_base=True)
+        flow_special = FlowSpecialMethods(new_metas)
+        self.obj_layout_meta_cache[obj_type] = AppObjectMeta(flow_special.create_layout is not None)
+        return self.obj_layout_meta_cache[obj_type].is_anylayout

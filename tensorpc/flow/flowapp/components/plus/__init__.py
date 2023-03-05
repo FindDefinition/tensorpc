@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from .core import ListSlider
-from .config import ConfigPanel
+from .config import ConfigPanel, ConfigPanelV1
 from .figure import HomogeneousMetricFigure
 from .canvas import SimpleCanvas
 from .objinspect import ObjectInspector, AnyFlexLayout, TreeDragTarget

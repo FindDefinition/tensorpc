@@ -35,7 +35,7 @@ from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass
 from tensorpc.flow.flowapp.components.common import (handle_standard_event)
 
 from .. import colors
-from ..core import (AppEvent, AppEventType, BasicProps, Component,
+from ..core import (AppComponentCore, AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, ContainerBaseProps, EventHandler, EventType, FlowSpecialMethods,
                     Fragment, FrontendEventType, NumberType, T_base_props,
                     T_child, T_container_props, TaskLoopEvent, UIEvent,
@@ -456,6 +456,7 @@ class IconType(enum.IntEnum):
     Cached = 27
     SwapVert = 28
     Refresh = 29
+    Grid3x3 = 30
 
 
 @dataclasses.dataclass
@@ -903,7 +904,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
                  base_type: UIType = UIType.FlexBox,
                  inited: bool = False,
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None,
+                 app_comp_core: Optional[AppComponentCore] = None,
                  wrapped_obj: Optional[Any] = None) -> None:
         if children is not None and isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
@@ -913,7 +914,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
                          children,
                          inited,
                          uid=uid,
-                         queue=queue)
+                         app_comp_core=app_comp_core)
         self._wrapped_obj = wrapped_obj
 
     @property
@@ -2188,8 +2189,8 @@ def get_control_value(comp: Union[Input, Switch, RadioGroup, Select,
 
 
 @dataclasses.dataclass
-class AppTerminalProps(BasicProps):
-    flex: Union[ValueType, Undefined] = undefined
+class AppTerminalProps(MUIFlexBoxProps):
+    pass
 
 
 class AppTerminal(MUIComponentBase[AppTerminalProps]):
@@ -2424,8 +2425,15 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
     def __init__(self, children: LayoutType) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
+        events = [
+            FrontendEventType.ComplexLayoutCloseTab,
+            FrontendEventType.ComplexLayoutSelectTab,
+            FrontendEventType.ComplexLayoutSelectTabSet,
+            FrontendEventType.ComplexLayoutTabReload,
+            FrontendEventType.Drop,
+        ]
         super().__init__(UIType.FlexLayout, FlexLayoutProps, None, children,
-                         False)
+                         False, allowed_events=[x.value for x in events])
 
     @property
     def prop(self):
@@ -2606,6 +2614,67 @@ class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
     async def handle_event(self, ev: EventType):
         return await handle_standard_event(self, ev, sync_first=True)
 
+
+class ControlNodeType(enum.IntEnum):
+    Number = 0
+    RangeNumber = 1
+    Color = 2
+    Bool = 3 
+    Select = 4 
+    String = 5
+    Folder = 6
+
+
+@dataclasses.dataclass
+class ControlNode:
+    id: str
+    name: str
+    type: int
+    initValue: Union[Undefined, NumberType, str] = undefined
+    children: "List[ControlNode]" = dataclasses.field(default_factory=list)
+    # for range
+    min: Union[Undefined, NumberType] = undefined
+    max: Union[Undefined, NumberType] = undefined
+    # for select
+    selects: Union[Undefined, List[ValueType]] = undefined
+    # for string
+    rows: Union[Undefined, bool, int] = undefined
+
+
+@dataclasses.dataclass
+class DynamicControlsProps(MUIFlexBoxProps):
+    nodes: List[ControlNode] = dataclasses.field(default_factory=list)
+    # use_leva_style: bool = True
+    collapsed: Union[Undefined, bool] = undefined
+    debounce: Union[Undefined, NumberType] = undefined
+    throttle: Union[Undefined, NumberType] = undefined
+    title: Union[Undefined, str] = undefined
+
+
+class DynamicControls(MUIComponentBase[DynamicControlsProps]):
+
+    def __init__(self, callback: Optional[Callable[[Tuple[str, Any]], _CORO_NONE]] = None, init: Optional[List[ControlNode]] = None) -> None:
+        super().__init__(UIType.DynamicControls,
+                         DynamicControlsProps,
+                         allowed_events=[FrontendEventType.Change.value])
+        if init is not None:
+            self.props.nodes = init
+        if callback is not None:
+            self.register_event_handler(FrontendEventType.Change.value,
+                                        callback)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def handle_event(self, ev: EventType):
+        return await handle_standard_event(self, ev, sync_first=True)
 
 def flex_wrapper(obj: Any):
     """wrap a object which define a layout function "tensorpc_flow_layout"

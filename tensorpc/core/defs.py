@@ -30,6 +30,13 @@ class DynamicEvents:
         self.name_and_datas = name_and_datas
 
 
+@dataclass
+class File:
+    name: str 
+    content: bytes 
+    data: Any
+
+
 def from_yaml_path(path: Union[Path, str]) -> ServiceDef:
     """read yaml config with strong-type check
     """

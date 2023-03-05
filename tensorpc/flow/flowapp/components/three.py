@@ -508,7 +508,9 @@ class Points(ThreeComponentBase[PointProps]):
                             limit: Optional[int] = None,
                             sizes: Optional[Union[np.ndarray,
                                                    Undefined]] = None,
-                            size_attenuation: bool = False):
+                            size_attenuation: bool = False,
+                            size: Optional[Union[NumberType,
+                                                   Undefined]] = None):
         # TODO better check, we must handle all errors before sent to frontend.
         assert points.ndim == 2 and points.shape[1] in [
             3, 4
@@ -525,6 +527,8 @@ class Points(ThreeComponentBase[PointProps]):
             "points": points,
             "size_attenuation": size_attenuation,
         }
+        if size is not None:
+            upd["size"] = size
         if sizes is not None:
             if not isinstance(sizes, Undefined):
                 assert sizes.shape[0] == points.shape[0] and sizes.dtype == np.float32
@@ -756,6 +760,7 @@ class BoundingBoxProps(Object3dBaseProps):
     opacity: Union[float, Undefined] = undefined
     edge_opacity: Union[float, Undefined] = undefined
     checked: bool = False
+    add_cross: bool = True
 
 
 class BoundingBox(Object3dWithEventBase[BoundingBoxProps]):
@@ -860,9 +865,11 @@ class Group(Object3dContainerBase[Object3dContainerBaseProps,
                                   ThreeComponentType]):
     # TODO can/should group accept event?
     def __init__(self,
-                 children: Dict[str, ThreeComponentType],
+                 children: Union[Dict[str, ThreeComponentType], List[ThreeComponentType]],
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ThreeGroup, Object3dContainerBaseProps,
                          children, uid_to_comp, inited)
 

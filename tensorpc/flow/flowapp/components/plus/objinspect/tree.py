@@ -15,55 +15,14 @@ from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.flow.flowapp.components.plus.monitor import ComputeResourceMonitor
 from tensorpc.flow.flowapp.reload import reload_object_methods
+from tensorpc.flow.flowapp.components.plus.objinspect.core import ALL_OBJECT_PREVIEW_HANDLERS, ALL_OBJECT_LAYOUT_HANDLERS
+
+
 _DEFAULT_OBJ_NAME = "default"
 
 _DEFAULT_BUILTINS_NAME = "builtins"
 
 _ROOT = "root"
-
-
-class ObjectPreviewHandler(mui.FlexBox):
-
-    async def bind(self, obj):
-        raise NotImplementedError
-
-
-class ObjectPreviewHandlerRegistry:
-
-    def __init__(self, allow_duplicate: bool = False):
-        self.global_dict: Dict[Hashable, Type[ObjectPreviewHandler]] = {}
-        self.allow_duplicate = allow_duplicate
-
-    def register(self,
-                 func: Optional[Type[ObjectPreviewHandler]] = None,
-                 key: Optional[Hashable] = None):
-
-        def wrapper(func: Type[ObjectPreviewHandler]):
-            if key is None:
-                key_ = func.__name__
-            else:
-                key_ = key
-            if not self.allow_duplicate and key_ in self.global_dict:
-                raise KeyError("key {} already exists".format(key_))
-            self.global_dict[key_] = func
-            return func
-
-        if func is None:
-            return wrapper
-        else:
-            return wrapper(func)
-
-    def __contains__(self, key: Hashable):
-        return key in self.global_dict
-
-    def __getitem__(self, key: Hashable):
-        return self.global_dict[key]
-
-    def items(self):
-        yield from self.global_dict.items()
-
-
-ALL_OBJECT_PREVIEW_HANDLERS = ObjectPreviewHandlerRegistry()
 
 TORCH_TENSOR_NAME = "torch.Tensor"
 TV_TENSOR_NAME = "cumm.core_cc.tensorview_bind.Tensor"
@@ -81,7 +40,7 @@ STRING_LENGTH_LIMIT = 2000
 class ButtonType(enum.Enum):
     Reload = "reload"
 
-def parse_obj_item(obj, name: str, id: str, checker: Callable[[Type], bool]):
+def parse_obj_item(obj, name: str, id: str, checker: Callable[[Type], bool], obj_meta_cache = None):
     obj_type = type(obj)
     if obj is None or obj is Ellipsis:
         return mui.JsonLikeNode(id,
@@ -164,13 +123,22 @@ def parse_obj_item(obj, name: str, id: str, checker: Callable[[Type], bool]):
                                 draggable=True)
     else:
         t = mui.JsonLikeType.Object
+        obj_type = type(obj)
         # obj_dict = _get_obj_dict(obj, checker)
-
-        metas = ReloadableDynamicClass.get_metas_of_regular_methods(type(obj), True)
-        special_methods = FlowSpecialMethods(metas)
-        is_layout = special_methods.create_layout is not None 
+        if obj_meta_cache is None:
+            obj_meta_cache = {}
+        if obj_type in obj_meta_cache:
+            is_layout = obj_meta_cache[obj_type]
+        else:
+            if obj_type in ALL_OBJECT_LAYOUT_HANDLERS:
+                is_layout = True 
+            else:
+                metas = ReloadableDynamicClass.get_metas_of_regular_methods(obj_type, True)
+                special_methods = FlowSpecialMethods(metas)
+                is_layout = special_methods.create_layout is not None 
+            obj_meta_cache[obj_type] = is_layout
         is_draggable = is_layout
-        if isinstance(obj, mui.FlexBox):
+        if isinstance(obj, mui.Component):
             is_layout = True
             is_draggable = obj._flow_reference_count == 0
         is_draggable = True
@@ -186,10 +154,11 @@ def parse_obj_item(obj, name: str, id: str, checker: Callable[[Type], bool]):
 
 
 def parse_obj_dict(obj_dict: Dict[str, Any], ns: str, checker: Callable[[Type],
-                                                                        bool]):
+                                                                        bool],
+                                                        obj_meta_cache = None):
     res_node: List[mui.JsonLikeNode] = []
     for k, v in obj_dict.items():
-        node = parse_obj_item(v, k, f"{ns}-{k}", checker)
+        node = parse_obj_item(v, k, f"{ns}-{k}", checker, obj_meta_cache=obj_meta_cache)
         res_node.append(node)
     return res_node
 
@@ -327,14 +296,14 @@ def _get_obj_by_uid_resursive(
         return _get_obj_by_uid_resursive(child_obj, parts[1:], checker)
 
 
-def _get_root_tree(obj, checker: Callable[[Type], bool], key: str):
+def _get_root_tree(obj, checker: Callable[[Type], bool], key: str, obj_meta_cache = None):
     obj_dict = _get_obj_dict(obj, checker)
-    root_node = parse_obj_item(obj, key, key, checker)
-    root_node.children = parse_obj_dict(obj_dict, key, checker)
+    root_node = parse_obj_item(obj, key, key, checker, obj_meta_cache)
+    root_node.children = parse_obj_dict(obj_dict, key, checker, obj_meta_cache)
     for (k, o), c in zip(obj_dict.items(), root_node.children):
         obj_child_dict = _get_obj_dict(o, checker)
         c.draggable = False
-        c.children = parse_obj_dict(obj_child_dict, c.id, checker)
+        c.children = parse_obj_dict(obj_child_dict, c.id, checker, obj_meta_cache)
     root_node.childCnt = len(obj_dict)
     return root_node
 
@@ -362,9 +331,11 @@ class ObjectTree(mui.FlexBox):
             ignored_types = set()
         self._cared_types = cared_types
         self._ignored_types = ignored_types
+        self._obj_meta_cache = {}
         default_builtins = {
             _DEFAULT_BUILTINS_NAME: {
-                "monitor": ComputeResourceMonitor()
+                "monitor": ComputeResourceMonitor(),
+                "App Terminal": mui.AppTerminal(),
             }
         }
         if init is None:
@@ -375,7 +346,7 @@ class ObjectTree(mui.FlexBox):
             self.root = {_DEFAULT_OBJ_NAME: init}
         self.root.update(default_builtins)
         self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
-                                _ROOT)
+                                _ROOT, self._obj_meta_cache)
         # print(self.tree.props.tree)
         # inspect.isbuiltin()
         self.tree.register_event_handler(
@@ -421,7 +392,7 @@ class ObjectTree(mui.FlexBox):
         obj, found = _get_obj_by_uid(self.root, uid, self._valid_checker)
         # if not found, we expand (update) the deepest valid object.
         obj_dict = _get_obj_dict(obj, self._checker)
-        tree = parse_obj_dict(obj_dict, node.id, self._checker)
+        tree = parse_obj_dict(obj_dict, node.id, self._checker, self._obj_meta_cache)
         node.children = tree
         upd = self.tree.update_event(tree=self._objinspect_root)
         await self.tree.send_and_wait(upd)
@@ -434,7 +405,6 @@ class ObjectTree(mui.FlexBox):
         btn = ButtonType(uid_btn[1])
         if btn == ButtonType.Reload:
             metas = reload_object_methods(obj)
-            print(metas)
             if metas is not None:
                 special_methods = FlowSpecialMethods(metas)
             else:
@@ -443,17 +413,17 @@ class ObjectTree(mui.FlexBox):
 
     async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):
         self.root[key] = obj
-        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker, _ROOT)
+        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker, _ROOT, self._obj_meta_cache)
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
     
     async def update_tree(self):
-        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker, _ROOT)
+        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker, _ROOT, self._obj_meta_cache)
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
 
     async def remove_object(self, key: str):
         assert key in self.root 
-        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker, _ROOT)
+        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker, _ROOT, self._obj_meta_cache)
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))

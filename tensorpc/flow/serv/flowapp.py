@@ -90,7 +90,7 @@ class FlowApp:
             if not layout_created:
                 await self.app._app_run_layout_function()
         else:
-            self.app.root._attach("root", self.app._queue)
+            self.app.root._attach("root", self.app._flow_app_comp_core)
         lay = self.app._get_app_layout()
         self.app.app_initialize()
         await self.app.app_initialize_async()
@@ -140,7 +140,9 @@ class FlowApp:
                 AppEventType.ScheduleNext: appev,
             }))
 
-    def get_layout(self):
+    def get_layout(self, editor_only: bool = False):
+        if editor_only:
+            return self.app._get_app_editor_state()
         return self.app._get_app_layout()
 
     async def _http_remote_call(self, key: str, *args, **kwargs):
@@ -229,6 +231,7 @@ class FlowApp:
                             master_disconnect = -1
                             previous_event = AppEvent(self._uid, {})
                         except Exception as e:
+                            # TODO send error event to frontend
                             traceback.print_exc()
                             # print("Retry connection Fail.")
                             master_disconnect = ts   

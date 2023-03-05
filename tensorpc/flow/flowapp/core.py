@@ -29,12 +29,12 @@ import cachetools
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.uniquename import UniqueNamePool
-from tensorpc.flow.constants import TENSORPC_ANYLAYOUT_FUNC_NAME, TENSORPC_LEGACY_LAYOUT_FUNC_NAME
 import dataclasses
 import re
 import sys
 from typing_extensions import Literal, ParamSpec, Concatenate, Self, TypeAlias, Protocol
 from tensorpc.flow.coretypes import MessageLevel
+from tensorpc.flow.flowapp.reload import FlowSpecialMethods, ObjectReloadManager
 
 ALL_APP_EVENTS = HashableRegistry()
 
@@ -57,6 +57,10 @@ class Undefined:
 class NoDefault:
     pass
 
+class AppComponentCore:
+    def __init__(self, queue: asyncio.Queue, reload_mgr: ObjectReloadManager) -> None:
+        self.queue = queue
+        self.reload_mgr = reload_mgr
 
 # DON'T MODIFY THIS VALUE!!!
 undefined = Undefined()
@@ -108,7 +112,8 @@ class UIType(enum.Enum):
     Allotment = 0x28
     AllotmentPane = 0x29
     FlexLayout = 0x30
-    MosaicLayout = 0x31
+    DynamicControls = 0x31
+
 
     # special
     TaskLoop = 0x100
@@ -208,6 +213,8 @@ class FrontendEventType(enum.Enum):
     # only used on backend
     # if user don't define DragCollect handler, Drop won't be scheduled.
     DragCollect = -1
+    # file drop use special path to handle
+    FileDrop = -2
 
     Click = 0
     DoubleClick = 1
@@ -235,6 +242,7 @@ class FrontendEventType(enum.Enum):
     ComplexLayoutCloseTab = 40
     ComplexLayoutSelectTab = 41
     ComplexLayoutTabReload = 42
+    ComplexLayoutSelectTabSet = 43
 
     # leaflet events
     MapZoom = 60
@@ -822,48 +830,6 @@ def _get_obj_def_path(obj):
     return _flow_comp_def_path
 
 
-class FlowSpecialMethods:
-
-    def __init__(self, metas: List[ServFunctionMeta]) -> None:
-        self.create_layout: Optional[ServFunctionMeta] = None
-        self.auto_run: Optional[ServFunctionMeta] = None
-        self.did_mount: Optional[ServFunctionMeta] = None
-        self.will_unmount: Optional[ServFunctionMeta] = None
-        self.create_object: Optional[ServFunctionMeta] = None
-
-        self.metas = metas
-        for m in self.metas:
-            # assert m.is_binded, "metas must be binded before this class"
-            if m.name == TENSORPC_ANYLAYOUT_FUNC_NAME:
-                self.create_layout = m
-            elif m.name == TENSORPC_LEGACY_LAYOUT_FUNC_NAME:
-                self.create_layout = m
-            elif m.user_app_meta is not None:
-                if m.user_app_meta.type == AppFuncType.CreateLayout:
-                    self.create_layout = m
-                elif m.user_app_meta.type == AppFuncType.ComponentDidMount:
-                    self.did_mount = m
-                elif m.user_app_meta.type == AppFuncType.ComponentWillUnmount:
-                    self.will_unmount = m
-                elif m.user_app_meta.type == AppFuncType.CreateObject:
-                    self.create_object = m
-                elif m.user_app_meta.type == AppFuncType.AutoRun:
-                    self.auto_run = m
-
-    def bind(self, obj):
-        if self.create_layout is not None:
-            self.create_layout.bind(obj)
-        if self.auto_run is not None:
-            self.auto_run.bind(obj)
-        if self.did_mount is not None:
-            self.did_mount.bind(obj)
-        if self.will_unmount is not None:
-            self.will_unmount.bind(obj)
-        if self.create_object is not None:
-            self.create_object.bind(obj)
-
-
-
 _TYPE_METHOD_CACHE = {}
 
 
@@ -881,9 +847,8 @@ class Component(Generic[T_base_props, T_child]):
                  type: UIType,
                  prop_cls: Type[T_base_props],
                  allowed_events: Optional[Iterable[ValueType]] = None,
-                 uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        self._queue: Optional[asyncio.Queue] = queue
+                 uid: str = "") -> None:
+        self._flow_comp_core: Optional[AppComponentCore] = None
         self._flow_uid = uid
         self._flow_comp_type = type
         # self._status = UIRunStatus.Stop
@@ -918,10 +883,10 @@ class Component(Generic[T_base_props, T_child]):
     def propcls(self) -> Type[T_base_props]:
         return self.__prop_cls
 
-    def _attach(self, uid: str, queue: asyncio.Queue) -> dict:
+    def _attach(self, uid: str, comp_core: AppComponentCore) -> dict:
         if self._flow_reference_count == 0:
             self._flow_uid = uid
-            self._queue = queue
+            self._flow_comp_core = comp_core
             self._flow_reference_count += 1
             return {uid: self}
         self._flow_reference_count += 1
@@ -932,12 +897,12 @@ class Component(Generic[T_base_props, T_child]):
         if self._flow_reference_count == 0:
             res_uid = self._flow_uid
             self._flow_uid = ""
-            self._queue = None
+            self._flow_comp_core = None
             return {res_uid: self}
         return {}
 
     def is_mounted(self):
-        return self._queue is not None
+        return self._flow_comp_core is not None
 
     def _prop_base(self, prop: Callable[P, Any], this: T3) -> Callable[P, T3]:
 
@@ -1067,8 +1032,13 @@ class Component(Generic[T_base_props, T_child]):
 
     @property
     def queue(self):
-        assert self._queue is not None, f"you must add ui by flexbox.add_xxx"
-        return self._queue
+        assert self._flow_comp_core is not None, f"you must add ui by flexbox.add_xxx"
+        return self._flow_comp_core.queue
+    
+    @property
+    def flow_app_comp_core(self):
+        assert self._flow_comp_core is not None, f"you must add ui by flexbox.add_xxx"
+        return self._flow_comp_core
 
     def register_event_handler(self,
                                type: ValueType,
@@ -1231,10 +1201,11 @@ class ContainerBase(Component[T_container_props, T_child]):
                  inited: bool = False,
                  allowed_events: Optional[Iterable[ValueType]] = None,
                  uid: str = "",
-                 queue: Optional[asyncio.Queue] = None) -> None:
-        super().__init__(base_type, prop_cls, allowed_events, uid, queue)
+                 app_comp_core: Optional[AppComponentCore] = None) -> None:
+        super().__init__(base_type, prop_cls, allowed_events, uid)
+        self._flow_comp_core = app_comp_core
         if inited:
-            assert queue is not None  # and uid_to_comp is not None
+            assert app_comp_core is not None  # and uid_to_comp is not None
         if uid_to_comp is None:
             uid_to_comp = {}
         self._pool = UniqueNamePool()
@@ -1266,16 +1237,20 @@ class ContainerBase(Component[T_container_props, T_child]):
             return child_comp._get_comp_by_uid_resursive(parts[1:])
 
     def _foreach_comp_recursive(self, child_ns: str,
-                                handler: Callable[[str, Component], None]):
+                                handler: Callable[[str, Component], Union[bool, None]]):
         for k, v in self._child_comps.items():
             child_uid = f"{child_ns}.{k}"
             if isinstance(v, ContainerBase):
-                handler(child_uid, v)
+                res = handler(child_uid, v)
+                if res == True:
+                    return
                 v._foreach_comp_recursive(child_uid, handler)
             else:
-                handler(child_uid, v)
+                res = handler(child_uid, v)
+                if res == True:
+                    return
 
-    def _foreach_comp(self, handler: Callable[[str, Component], None]):
+    def _foreach_comp(self, handler: Callable[[str, Component], Union[bool, None]]):
         assert self._flow_uid != "", "_flow_uid must be set before modify_comp"
         handler(self._flow_uid, self)
         self._foreach_comp_recursive(self._flow_uid, handler)
@@ -1303,20 +1278,20 @@ class ContainerBase(Component[T_container_props, T_child]):
         return disposed_uids
 
     def _attach_child(self,
-                      queue: asyncio.Queue,
+                      comp_core: AppComponentCore,
                       childs: Optional[List[str]] = None):
         atached_uids: Dict[str, Component] = {}
         if childs is None:
             childs = list(self._child_comps.keys())
         for k in childs:
             v = self._child_comps[k]
-            atached_uids.update(v._attach(f"{self._flow_uid}.{k}", queue))
+            atached_uids.update(v._attach(f"{self._flow_uid}.{k}", comp_core))
         return atached_uids
     
-    def _attach(self, uid: str, queue: asyncio.Queue):
-        attached: Dict[str, Component] = super()._attach(uid, queue)
+    def _attach(self, uid: str, comp_core: AppComponentCore):
+        attached: Dict[str, Component] = super()._attach(uid, comp_core)
         for k, v in self._child_comps.items():
-            attached.update(v._attach(f"{uid}.{k}", queue))
+            attached.update(v._attach(f"{uid}.{k}", comp_core))
         return attached
     
     def _get_uid_to_comp_dict(self):
@@ -1413,7 +1388,7 @@ class ContainerBase(Component[T_container_props, T_child]):
     def set_new_layout_locally(self, layout: Dict[str, Component]):
         detached_uid_to_comp = self._detach_child()
         self._child_comps = layout
-        attached = self._attach_child(self.queue)
+        attached = self._attach_child(self.flow_app_comp_core)
         # update all childs of this component
         comps_frontend = {
             c._flow_uid: c
@@ -1456,7 +1431,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         intersect = set(layout.keys()).intersection(self._child_comps.keys())
         detached = self._detach_child(list(intersect))
         self._child_comps.update(layout)
-        attached = self._attach_child(self.queue, list(layout.keys()))
+        attached = self._attach_child(self.flow_app_comp_core, list(layout.keys()))
         # remove replaced components first.
         comps_frontend = {
             c._flow_uid: c
@@ -1482,34 +1457,6 @@ class ContainerBase(Component[T_container_props, T_child]):
         for k in layout.keys():
             assert k in self._child_comps
         return await self.update_childs(layout)
-
-
-def _detach_component(comp: Component):
-    """detach a component from app.
-    """
-    # print("-----DETACH------", comp.uid, comp)
-    standalone_map: Dict[str, Component] = {}
-    all_removed_prev_uids = [comp._flow_uid]
-    all_removed = [comp]
-
-    if isinstance(comp, ContainerBase):
-        all_child = comp._get_all_nested_childs()
-        for c in all_child:
-            all_removed_prev_uids.append(c._flow_uid)
-            c._queue = None
-            if comp._flow_uid:
-                c._parent = c._parent[len(comp._flow_uid) + 1:]
-                c._flow_uid = c._flow_uid[len(comp._flow_uid) + 1:]
-            if isinstance(c, ContainerBase):
-                c._uid_to_comp = standalone_map
-            standalone_map[c._flow_uid] = c
-        all_removed.extend(all_removed)
-        comp._uid_to_comp = standalone_map
-
-    comp._flow_uid = ""
-    comp._parent = ""
-    comp._queue = None
-    return comp, all_removed, all_removed_prev_uids
 
 
 @dataclasses.dataclass

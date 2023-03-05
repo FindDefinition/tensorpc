@@ -34,11 +34,11 @@ import tensorpc
 from tensorpc.core import prim
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.inspecttools import get_all_members_by_type
-from tensorpc.flow import mark_autorun, marker
+from tensorpc.flow import (App, EditableApp, EditableLayoutApp, leaflet,
+                           mark_autorun, mark_create_layout, marker, mui,
+                           plotly, plus, three)
 from tensorpc.flow.client import AppClient, AsyncAppClient, add_message
 from tensorpc.flow.coretypes import MessageLevel, ScheduleEvent
-from tensorpc.flow import (App, EditableApp, EditableLayoutApp,
-                                   leaflet, mui, plotly, plus, three)
 from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
                                                   ListItemText,
                                                   MUIComponentType, VBox,
@@ -74,8 +74,8 @@ class SampleApp(App):
             mui.Button("Sleep", self.on_one_button_click),
             "swi":
             self.swi,
-            "swi_box": self.swi_box,
-
+            "swi_box":
+            self.swi_box,
             "inp":
             mui.Input("Image Path", callback=self.on_input_change),
             "img_ui":
@@ -134,9 +134,8 @@ class SampleApp(App):
 
     async def on_switch(self, checked: bool):
         if checked:
-            await self.swi_box.set_new_layout({
-                "wtf": mui.Typography("Dynamic Layout")
-            })
+            await self.swi_box.set_new_layout(
+                {"wtf": mui.Typography("Dynamic Layout")})
         else:
             await self.swi_box.set_new_layout({})
         print(checked)
@@ -231,47 +230,6 @@ class SampleDictApp(App):
         self.cnt += 1
 
 
-class SamplePlotApp(App):
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.plot = plotly.Plotly().prop(
-            data=[
-                plotly.Trace(x=[1, 2, 3],
-                             y=[2, 6, 3],
-                             type="scatter",
-                             mode="lines")
-            ],
-            layout=plotly.Layout(
-                height=240,
-                autosize=True,
-                margin=plotly.Margin(l=0, r=0, b=0, t=0),
-                xaxis=plotly.Axis(automargin=True),
-                yaxis=plotly.Axis(automargin=True),
-            ))
-        self.root.add_layout({
-            "plot0": self.plot,
-            "btn": Button("Show", self._show_plot)
-        })
-        self.set_init_window_size([480, 320])
-
-    async def _show_plot(self):
-        data = [
-            plotly.Trace(x=[1, 2, 3],
-                         y=[2, 6, 3],
-                         type="scatter",
-                         mode="lines",
-                         marker=plotly.Marker(color="red"))
-        ]
-        layout = plotly.Layout(
-            height=240,
-            autosize=True,
-            margin=plotly.Margin(l=0, r=0, b=0, t=0),
-            xaxis=plotly.Axis(automargin=True),
-            yaxis=plotly.Axis(automargin=True),
-        )
-        await self.plot.show_raw(data, layout)
-
 
 class SamplePlotMetricApp(App):
 
@@ -280,34 +238,40 @@ class SamplePlotMetricApp(App):
         self.plots = plus.HomogeneousMetricFigure(300, 300)
 
         self.root.add_layout({
-            "plot0": self.plots,
-            "btn": mui.Button("Increment", self._increment),
-            "btn2": mui.Button("MaskFirstTrace", self._mask_first_trace)
-
+            "plot0":
+            self.plots,
+            "btn":
+            mui.Button("Increment", self._increment),
+            "btn2":
+            mui.Button("MaskFirstTrace", self._mask_first_trace)
         })
         self.set_init_window_size([640, 480])
         self.cnt = 0
         self.visible_test = True
 
     async def _increment(self):
-        await self.plots.update_metric(self.cnt, "x", "green", {
-            "sinx": float(np.sin(self.cnt / 10)),
-            "cosx": float(np.cos(self.cnt / 10)),
-        })
-        await self.plots.update_metric(self.cnt, "y", "red", {
-            "sinx": float(np.sin((self.cnt + 5) / 10)),
-            "cosx": float(np.cos((self.cnt + 5) / 10)),
-        })
-        await self.plots.update_metric(self.cnt, "z", "blue", {
-            "sinx": float(np.sin((self.cnt + 8) / 10)),
-            "cosx": float(np.cos((self.cnt + 8) / 10)),
-        })
+        await self.plots.update_metric(
+            self.cnt, "x", "green", {
+                "sinx": float(np.sin(self.cnt / 10)),
+                "cosx": float(np.cos(self.cnt / 10)),
+            })
+        await self.plots.update_metric(
+            self.cnt, "y", "red", {
+                "sinx": float(np.sin((self.cnt + 5) / 10)),
+                "cosx": float(np.cos((self.cnt + 5) / 10)),
+            })
+        await self.plots.update_metric(
+            self.cnt, "z", "blue", {
+                "sinx": float(np.sin((self.cnt + 8) / 10)),
+                "cosx": float(np.cos((self.cnt + 8) / 10)),
+            })
 
         self.cnt += 1
 
     async def _mask_first_trace(self):
         await self.plots.set_trace_visible("x", not self.visible_test)
         self.visible_test = not self.visible_test
+
 
 class SampleFlowApp(App):
 
@@ -438,7 +402,6 @@ class SampleThreeApp(EditableApp):
                 Button("rpcTest", self.rpc_test),
                 "btn3":
                 Button("Reset Camera", self.reset_camera),
-
             }).prop(flex=1, min_height=0),
         }
 
@@ -482,7 +445,7 @@ class SampleThreeApp(EditableApp):
         mat[0, 3] = 1
         mat[1, 3] = 1
         mat[2, 3] = 1
-        
+
         await self.ctrl.set_cam2world(mat, 50)
 
     async def show_pc(self, pc):
@@ -547,18 +510,21 @@ class SampleThreePointsApp(EditableApp):
             "axes": three.AxesHelper(10),
             "infgrid": infgrid,
         })
-        self.show_pcs = [np.random.uniform(-100, 100, size=[100000, 3]) for _ in range(10)]
+        self.show_pcs = [
+            np.random.uniform(-100, 100, size=[100000, 3]) for _ in range(10)
+        ]
         self.offsets = []
         start = 0
         for p in self.show_pcs:
             self.offsets.append((start, start + p.shape[0]))
             start += p.shape[0]
-        slider = mui.Slider("Frames", 0, len(self.show_pcs) - 1, 1, self._on_frame_select)
+        slider = mui.Slider("Frames", 0,
+                            len(self.show_pcs) - 1, 1, self._on_frame_select)
         self.points.prop(points=np.concatenate(self.show_pcs))
         self.prev_range = None
         return [
-            mui.VBox([ 
-                mui.VBox([ 
+            mui.VBox([
+                mui.VBox([
                     self.canvas,
                 ]).prop(flex=1, min_height=0, min_width=0),
                 slider,
@@ -571,10 +537,10 @@ class SampleThreePointsApp(EditableApp):
         self.prev_range = self.offsets[index]
         await self.points.set_colors_in_range("red", *self.prev_range)
 
-
     @mark_autorun
     def wtf(self):
         print("RTD?")
+
 
 class SampleTestApp(App):
 
@@ -824,9 +790,10 @@ class SampleMapApp(EditableApp):
 
     def app_create_layout(self) -> Dict[str, MUIComponentType]:
         google_url = "http://{s}.google.com/vt?lyrs=m&x={x}&y={y}&z={z}"
-        self.leaflet = leaflet.MapContainer((30, 100), 13, {
-            "tile": leaflet.TileLayer(google_url),
-        }).prop(height="100%", flex=3)
+        self.leaflet = leaflet.MapContainer(
+            (30, 100), 13, {
+                "tile": leaflet.TileLayer(google_url),
+            }).prop(height="100%", flex=3)
         return {
             "control":
             mui.VBox({
@@ -867,7 +834,8 @@ class WTF:
     e: str = "RTX"
     h: TestEnum = TestEnum.C
     i: int = dataclasses.field(default=1,
-                               metadata=ConfigPanel.slider_meta(0, 10, 1))
+                               metadata=ConfigPanel.slider_meta(0, 10))
+    j: TestEnumInt = TestEnumInt.C
 
 
 class SampleConfigApp(EditableApp):
@@ -906,163 +874,54 @@ class SampleDataControlApp(EditableApp):
         }
 
     async def add_data(self):
-        await self.save_data_storage("default_flow.Data.arr0", np.zeros((500, 3)))
+        await self.save_data_storage("default_flow.Data.arr0",
+                                     np.zeros((500, 3)))
 
     async def read_data(self):
         print(await self.read_data_storage("Data.arr0"))
 
-class SampleUIApp(EditableApp):
 
-    def __init__(self) -> None:
-        super().__init__(reloadable_layout=True)
-        # makesure three canvas size fit parent.
-        # self.root.props.min_height = 0
-        # store components here if you want to keep
-        # data after reload layout.
-        self.root.props.flex_flow = "column nowrap"
-        self.set_init_window_size([640, 480])
+class AutoComputeApp:
+    @mark_create_layout
+    def create_layout(self):
 
         self.options = [
-            { "label": 'The Shawshank Redemption', "year": 1994 },
-            { "label": 'The Godfather', "year": 1972 },
-            { "label": 'The Godfather: Part II', "year": 1974 },
-            { "label": 'The Dark Knight', "year": 2008 },
-            { "label": '12 Angry Men', "year": 1957 },
-            { "label": "Schindler's List", "year": 1993 },
-            { "label": 'Pulp Fiction', "year": 1994 },
             {
-                "label": 'The Lord of the Rings: The Return of the King',
-                "year": 2003,
-            },
-            { "label": 'The Good, the Bad and the Ugly', "year": 1966 },
-            { "label": 'Fight Club', "year": 1999 },
-            {
-                "label": 'The Lord of the Rings: The Fellowship of the Ring',
-                "year": 2001,
+                "label": 'The Shawshank Redemption',
+                "year": 1994
             },
             {
-                "label": 'Star Wars: Episode V - The Empire Strikes Back',
-                "year": 1980,
+                "label": 'The Godfather',
+                "year": 1972
             },
-            { "label": 'Forrest Gump', "year": 1994 },
-            { "label": 'Inception', "year": 2010 },
             {
-                "label": 'The Lord of the Rings: The Two Towers',
-                "year": 2002,
+                "label": 'The Godfather: Part II',
+                "year": 1974
             },
-            { "label": "One Flew Over the Cuckoo's Nest", "year": 1975 },
-            { "label": 'Goodfellas', "year": 1990 },
-            { "label": 'The Matrix', "year": 1999 },
-            { "label": 'Seven Samurai', "year": 1954 },
             {
-                "label": 'Star Wars: Episode IV - A New Hope',
-                "year": 1977,
+                "label": 'The Dark Knight',
+                "year": 2008
             },
-            { "label": 'City of God', "year": 2002 },
-            { "label": 'Se7en', "year": 1995 },
-            { "label": 'The Silence of the Lambs', "year": 1991 },
-            { "label": "It's a Wonderful Life", "year": 1946 },
-            { "label": 'Life Is Beautiful', "year": 1997 },
-            { "label": 'The Usual Suspects', "year": 1995 },
-            { "label": 'Léon: The Professional', "year": 1994 },
-            { "label": 'Spirited Away', "year": 2001 },
-            { "label": 'Saving Private Ryan', "year": 1998 },
-            { "label": 'Once Upon a Time in the West', "year": 1968 },
-            { "label": 'American History X', "year": 1998 },
-            { "label": 'Interstellar', "year": 2014 },
-            { "label": 'Casablanca', "year": 1942 },
-            { "label": 'City Lights', "year": 1931 },
-            { "label": 'Psycho', "year": 1960 },
-            { "label": 'The Green Mile', "year": 1999 },
-            { "label": 'The Intouchables', "year": 2011 },
-            { "label": 'Modern Times', "year": 1936 },
-            { "label": 'Raiders of the Lost Ark', "year": 1981 },
-            { "label": 'Rear Window', "year": 1954 },
-            { "label": 'The Pianist', "year": 2002 },
-            { "label": 'The Departed', "year": 2006 },
-            { "label": 'Terminator 2: Judgment Day', "year": 1991 },
-            { "label": 'Back to the Future', "year": 1985 },
-            { "label": 'Whiplash', "year": 2014 },
-            { "label": 'Gladiator', "year": 2000 },
-            { "label": 'Memento', "year": 2000 },
-            { "label": 'The Prestige', "year": 2006 },
-            { "label": 'The Lion King', "year": 1994 },
-            { "label": 'Apocalypse Now', "year": 1979 },
-            { "label": 'Alien', "year": 1979 },
-            { "label": 'Sunset Boulevard', "year": 1950 },
             {
-                "label": 'Dr. Strangelove or: How I Learned to Stop Worrying and Love the Bomb',
-                "year": 1964,
+                "label": 'Monty Python and the Holy Grail',
+                "year": 1975
             },
-            { "label": 'The Great Dictator', "year": 1940 },
-            { "label": 'Cinema Paradiso', "year": 1988 },
-            { "label": 'The Lives of Others', "year": 2006 },
-            { "label": 'Grave of the Fireflies', "year": 1988 },
-            { "label": 'Paths of Glory', "year": 1957 },
-            { "label": 'Django Unchained', "year": 2012 },
-            { "label": 'The Shining', "year": 1980 },
-            { "label": 'WALL·E', "year": 2008 },
-            { "label": 'American Beauty', "year": 1999 },
-            { "label": 'The Dark Knight Rises', "year": 2012 },
-            { "label": 'Princess Mononoke', "year": 1997 },
-            { "label": 'Aliens', "year": 1986 },
-            { "label": 'Oldboy', "year": 2003 },
-            { "label": 'Once Upon a Time in America', "year": 1984 },
-            { "label": 'Witness for the Prosecution', "year": 1957 },
-            { "label": 'Das Boot', "year": 1981 },
-            { "label": 'Citizen Kane', "year": 1941 },
-            { "label": 'North by Northwest', "year": 1959 },
-            { "label": 'Vertigo', "year": 1958 },
-            {
-                "label": 'Star Wars: Episode VI - Return of the Jedi',
-                "year": 1983,
-            },
-            { "label": 'Reservoir Dogs', "year": 1992 },
-            { "label": 'Braveheart', "year": 1995 },
-            { "label": 'M', "year": 1931 },
-            { "label": 'Requiem for a Dream', "year": 2000 },
-            { "label": 'Amélie', "year": 2001 },
-            { "label": 'A Clockwork Orange', "year": 1971 },
-            { "label": 'Like Stars on Earth', "year": 2007 },
-            { "label": 'Taxi Driver', "year": 1976 },
-            { "label": 'Lawrence of Arabia', "year": 1962 },
-            { "label": 'Double Indemnity', "year": 1944 },
-            {
-                "label": 'Eternal Sunshine of the Spotless Mind',
-                "year": 2004,
-            },
-            { "label": 'Amadeus', "year": 1984 },
-            { "label": 'To Kill a Mockingbird', "year": 1962 },
-            { "label": 'Toy Story 3', "year": 2010 },
-            { "label": 'Logan', "year": 2017 },
-            { "label": 'Full Metal Jacket', "year": 1987 },
-            { "label": 'Dangal', "year": 2016 },
-            { "label": 'The Sting', "year": 1973 },
-            { "label": '2001: A Space Odyssey', "year": 1968 },
-            { "label": "Singin' in the Rain", "year": 1952 },
-            { "label": 'Toy Story', "year": 1995 },
-            { "label": 'Bicycle Thieves', "year": 1948 },
-            { "label": 'The Kid', "year": 1921 },
-            { "label": 'Inglourious Basterds', "year": 2009 },
-            { "label": 'Snatch', "year": 2000 },
-            { "label": '3 Idiots', "year": 2009 },
-            { "label": 'Monty Python and the Holy Grail', "year": 1975 },
-            ]
-
-    def app_create_layout(self) -> mui.LayoutType:
-        return [
-            mui.MultipleAutocomplete("Movies", self.options).prop(variant="checkbox", disable_close_on_select=True)
         ]
 
+        return mui.VBox([
+            mui.MultipleAutocomplete("Movies", self.options).prop(
+                variant="checkbox", disable_close_on_select=True),
+        ]).prop(width=640, height=480)
+
+
 class AnyLayout:
+
     def __init__(self) -> None:
         super().__init__()
 
     @marker.mark_create_layout
     def my_layout(self):
-        return mui.FlexBox([
-            mui.Button("Hi2345", self.handle_click)
-        ])
+        return mui.FlexBox([mui.Button("Hi2345", self.handle_click)])
 
     def reload_wtf(self):
         print("??4")
@@ -1072,65 +931,52 @@ class AnyLayout:
         self.reload_wtf()
 
 
-class SampleTreeApp(EditableLayoutApp):
-    def __init__(self) -> None:
-        super().__init__()
-        self.set_init_window_size([640, 480])
+class ObjectInspectApp:
 
     @marker.mark_create_layout
     def my_latout(self):
-        tree = mui.JsonLikeNode(
-            "root", "root", mui.JsonLikeType.List.value, children=[
-                mui.JsonLikeNode("c1", "a1", mui.JsonLikeType.Int.value, value="0")
-            ], childCnt=5
-        )
-        return [
-            mui.JsonLikeTree(tree)
-        ]
-
-    def handle_click(self):
-        print("???2X???")
-
-
-class SampleObjectInspectApp(EditableLayoutApp):
-    def __init__(self) -> None:
-        super().__init__()
-        self.set_init_window_size([640, 480])
         self.array = np.random.uniform(-1, 1, size=[500])
-        import torch
-        self.ten_cpu = torch.rand(1, 3, 224, 224)
-        self.ten_gpu = self.ten_cpu.cuda()
-        self.ten_gpu_non_c = self.ten_gpu[..., 1:]
-
-        from cumm import tensorview as tv 
-        self.tv_ten_cpu = tv.zeros([224, 224], tv.float32, -1)
-        self.tv_ten_gpu = self.tv_ten_cpu.cuda()
         self.non_contig_arr = np.random.uniform(-1, 1, size=[500, 3])[:, 1:]
 
-    @marker.mark_create_layout
-    def my_latout(self):
-        return [
-            plus.ObjectInspector(self) 
-        ]
-from tensorpc.flow import mui, three, plus, EditableLayoutApp, mark_create_layout
-import numpy as np 
+        try:
+            import torch
+            self.ten_cpu = torch.rand(1, 3, 224, 224)
+            self.ten_gpu = self.ten_cpu.cuda()
+            self.ten_gpu_non_c = self.ten_gpu[..., 1:]
+
+        except:
+            pass
+
+        return mui.VBox([plus.ObjectInspector(self)]).prop(width=640,
+                                                           height=480)
 
 
-class MyApp(EditableLayoutApp):
+class PointCloudApp:
+
     @mark_create_layout
     def my_layout(self):
-        cam = three.PerspectiveCamera(True, fov=75, near=0.1, far=1000)
+        cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
 
         self.canvas = plus.SimpleCanvas(cam)
-        self.slider = mui.Slider("Slider", 0, 1, 1, callback=self._on_slider_select)
+        self.slider = mui.Slider("Slider",
+                                 0,
+                                 1,
+                                 1,
+                                 callback=self._on_slider_select)
 
-        return [
+        return mui.VBox([
             mui.HBox([
-                mui.Button("Change Slider Range", self._on_slider_range_change),
+                mui.Button("Change Slider Range",
+                           self._on_slider_range_change),
                 self.slider.prop(flex=1),
             ]),
             self.canvas.prop(flex=1),
-        ]
+        ]).prop(min_height=0,
+                min_width=0,
+                flex=1,
+                width="100%",
+                height="100%",
+                overflow="hidden")
 
     async def _on_slider_range_change(self):
         await self.slider.update_ranges(0, 10, 1)
@@ -1140,14 +986,19 @@ class MyApp(EditableLayoutApp):
         # you need to specify a key for a group of point
         # you also need to specify number limit of current point
         points = np.random.uniform(-1, 1, size=[1000, 3]).astype(np.float32)
-        # colors can be: 
+        # colors can be:
         # 1. [N, 3] float, value range: [0, 1]
         # 2. [N], int8 (intensity), value range: [0, 255]
         # 3. a color string, e.g. red, green
         colors = np.random.uniform(0, 1, size=[1000, 3]).astype(np.float32)
-        sizes = np.random.uniform(0.5, 10.5, size=[1000]).astype(np.float32) * 1
+        sizes = np.random.uniform(0.5, 10.5, size=[1000]).astype(
+            np.float32) * 1
 
-        await self.canvas.show_points("key0", points, limit=100000, colors=colors, sizes=sizes)
+        await self.canvas.show_points("key0",
+                                      points,
+                                      limit=100000,
+                                      colors=colors,
+                                      sizes=sizes)
         # boxes: dims, locs, rots, colors (string list, don't support ndarray currently)
         dims = np.random.uniform(1, 2, size=[5, 3])
         locs = np.random.uniform(-5, 5, size=[5, 3])
@@ -1160,37 +1011,82 @@ class MyApp(EditableLayoutApp):
         lines = np.random.uniform(-3, 3, size=[10, 2, 3])
         await self.canvas.show_lines("key0", lines, limit=10000, color="aqua")
 
+class PlotApp:
 
-class CollectionApp(EditableLayoutApp):
     @mark_create_layout
     def my_layout(self):
-        return [
-            mui.HBox([])
-        ]
+        self.plot = plotly.Plotly().prop(
+            data=[
+                plotly.Trace(x=[1, 2, 3],
+                             y=[2, 7, 3],
+                             type="scatter",
+                             mode="lines")
+            ],
+            layout=plotly.Layout(
+                height=240,
+                autosize=True,
+                margin=plotly.Margin(l=0, r=0, b=0, t=0),
+                xaxis=plotly.Axis(automargin=True),
+                yaxis=plotly.Axis(automargin=True),
+            ))
+        return mui.VBox([
+            self.plot,
+            Button("Show", self._show_plot),
+        ]).prop(width=640, height=480)
 
-class AllotmentDevApp:
+    async def _show_plot(self):
+        data = [
+            plotly.Trace(x=[1, 2, 3],
+                         y=[6, 2, 3],
+                         type="scatter",
+                         mode="lines",
+                         marker=plotly.Marker(color="red"))
+        ]
+        layout = plotly.Layout(
+            height=240,
+            autosize=True,
+            margin=plotly.Margin(l=0, r=0, b=0, t=0),
+            xaxis=plotly.Axis(automargin=True),
+            yaxis=plotly.Axis(automargin=True),
+        )
+        await self.plot.show_raw(data, layout)
+
+
+class CollectionApp:
+
     @mark_create_layout
     def my_layout(self):
         self.anylayout = AnyLayout()
         self.monitor = plus.ComputeResourceMonitor()
-        cam = three.PerspectiveCamera(True, fov=75, near=0.1, far=1000)
+        self.example_draggable_pc = np.random.uniform(-3, 3, size=[1000, 3])
+        self.example_3d_canvas = PointCloudApp()
+        self.example_object_inspector = ObjectInspectApp()
+        self.example_pyplot = PlotApp()
+        self.example_auto_complete = AutoComputeApp()
+        nodes = [
+            mui.ControlNode("1", "color", mui.ControlNodeType.Color.value, initValue="#ffffff")
+        ]
 
-        self.canvas = plus.SimpleCanvas(cam).prop(width="100%", height="100%", overflow="hidden")
-        self.drag_pc = np.random.uniform(-3, 3, size=[1000, 3])
+        self.wtf = mui.DynamicControls(init=nodes, callback=lambda x: print(x))
+        self.cfg = WTF(1, 0.5, WTF1(2), "WTF", [])
+        self.wtf2 = plus.ConfigPanel(self.cfg, lambda x, y: print(x, y))
+
         return mui.HBox([
             mui.Allotment([
-                plus.ObjectInspector(self).prop(width="100%", height="100%", overflow="hidden"),
+                plus.ObjectInspector(self).prop(width="100%",
+                                                height="100%",
+                                                overflow="hidden"),
                 mui.HBox([
                     plus.AnyFlexLayout(),
                 ]).prop(width="100%", height="100%", overflow="hidden")
             ]).prop(default_sizes=[1, 3], width="100%", height="100%")
         ]).prop(flex_flow="row nowrap")
 
+
 if __name__ == "__main__":
-    import time 
+    import time
     tps = get_all_members_by_type(mui.FlexBox)
     for _ in range(10):
         t = time.time()
         tps = get_all_members_by_type(mui.FlexBox)
         print(len(tps), time.time() - t)
-

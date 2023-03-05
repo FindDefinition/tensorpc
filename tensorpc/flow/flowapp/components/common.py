@@ -32,6 +32,7 @@ _ONEARG_COMPLEXL_EVENTS = set([
     FrontendEventType.ComplexLayoutCloseTab.value,
     FrontendEventType.ComplexLayoutSelectTab.value,
     FrontendEventType.ComplexLayoutTabReload.value,
+    FrontendEventType.ComplexLayoutSelectTabSet.value,
 
 ])
 

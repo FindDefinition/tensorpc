@@ -19,7 +19,7 @@ class ObjectPreviewHandler(mui.FlexBox):
 
 class ObjectLayoutHandler(mui.FlexBox):
     @classmethod 
-    def from_object(cls, obj):
+    def from_object(cls, obj) -> mui.FlexBox:
         raise NotImplementedError
 
 
