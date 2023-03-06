@@ -101,6 +101,7 @@ class AnyFlexLayout(mui.FlexLayout):
             if isinstance(app, EditableApp):
                 if app._watchdog_observer is not None:
                     app._watchdog_observer.unschedule(self._app_watchdog_watch)
+                    self._app_watchdog_watch = None
         app.register_app_special_event_handler(
             AppSpecialEventType.CodeEditorSave, self._app_save_reload_cb)
         if isinstance(app, EditableApp):
@@ -133,7 +134,6 @@ class AnyFlexLayout(mui.FlexLayout):
 
     async def _on_drop(self, target: Optional[TreeDragTarget]):
         if target is not None:
-            # print("DROP", comp_name)
             obj = target.obj
             uid = target.tab_id if target.tab_id else target.tree_id
             obj_is_anylayout = get_reload_manager().query_obj_is_anylayout(obj)
@@ -169,6 +169,7 @@ class AnyFlexLayout(mui.FlexLayout):
                     if app._watchdog_observer is not None:
                         app._watchdog_observer.unschedule(
                             self._app_watchdog_watch)
+                        app._watchdog_observer = None
             if self._app_watchdog_reload_cb is not None:
                 app.unregister_app_special_event_handler(
                     AppSpecialEventType.WatchDogChange,

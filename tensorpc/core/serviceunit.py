@@ -6,6 +6,7 @@ import inspect
 import os
 import runpy
 import sys
+import time
 import tokenize
 import types
 import uuid
@@ -192,17 +193,94 @@ class ModuleCacheEntry:
     module: ModuleType
     module_dict: Dict[str, Any]
 
+def _splitlines_no_ff(source):
+    """Split a string into lines ignoring form feed and other chars.
+
+    This mimics how the Python parser splits source code.
+    """
+    idx = 0
+    lines = []
+    next_line = ''
+    while idx < len(source):
+        c = source[idx]
+        next_line += c
+        idx += 1
+        # Keep \r\n together
+        if c == '\r' and idx < len(source) and source[idx] == '\n':
+            next_line += '\n'
+            idx += 1
+        if c in '\r\n':
+            lines.append(next_line)
+            next_line = ''
+
+    if next_line:
+        lines.append(next_line)
+    return lines
+
+
+def _pad_whitespace(source):
+    r"""Replace all chars except '\f\t' in a line with spaces."""
+    result = ''
+    for c in source:
+        if c in '\f\t':
+            result += c
+        else:
+            result += ' '
+    return result
+
+class SourceSegmentGetter:
+    def __init__(self, source: str) -> None:
+        self.lines = _splitlines_no_ff(source)
+
+    def get_source_segment(self, node, *, padded=False):
+        """Get source code segment of the *source* that generated *node*.
+
+        If some location information (`lineno`, `end_lineno`, `col_offset`,
+        or `end_col_offset`) is missing, return None.
+
+        If *padded* is `True`, the first line of a multi-line statement will
+        be padded with spaces to match its original position.
+        """
+        try:
+            lineno = node.lineno - 1
+            end_lineno = node.end_lineno - 1
+            col_offset = node.col_offset
+            end_col_offset = node.end_col_offset
+        except AttributeError:
+            return None
+
+        lines = self.lines
+        if end_lineno == lineno:
+            return lines[lineno].encode()[col_offset:end_col_offset].decode()
+
+        if padded:
+            padding = _pad_whitespace(lines[lineno].encode()[:col_offset].decode())
+        else:
+            padding = ''
+
+        first = padding + lines[lineno].encode()[col_offset:].decode()
+        last = lines[end_lineno].encode()[:end_col_offset].decode()
+        lines = lines[lineno+1:end_lineno]
+
+        lines.insert(0, first)
+        lines.append(last)
+        return ''.join(lines)
+
 def get_qualname_to_code(lines: List[str]):
     source = "".join(lines)
     tree = ast.parse(source)
     nodes = get_toplevel_func_node(tree)
     nodes += get_toplevel_class_node(tree)
     qualname_to_code: Dict[str, str] = {}
+    ssg = SourceSegmentGetter(source)
     for n, nss in nodes:
         ns = ".".join([nx.name for nx in nss])
         qualname = ns + "." + n.name
-        # TODO this function won't handle decorator
-        code = ast.get_source_segment(source, n)
+        # TODO this function won't handle decorator    
+        # here we can't use ast.get_source_segment
+        # because it's very slow. we need to cache
+        # lines. 
+        code = ssg.get_source_segment(n, padded=False)
         assert code is not None
         qualname_to_code[qualname] = code
     return qualname_to_code 
