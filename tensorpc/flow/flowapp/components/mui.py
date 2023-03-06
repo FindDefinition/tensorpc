@@ -387,6 +387,7 @@ class VDivider(Divider):
 
 _BtnGroupColor: TypeAlias = Literal['inherit', 'primary', 'secondary', 'error',
                                     'info', 'success', 'warning']
+_TooltipPlacement: TypeAlias = Literal['top', 'right', 'left', 'bottom']
 
 
 @dataclasses.dataclass
@@ -471,6 +472,9 @@ class IconType(enum.IntEnum):
 
 @dataclasses.dataclass
 class IconButtonProps(MUIComponentBaseProps):
+
+    tooltip: Union[str, Undefined] = undefined
+    tooltip_placement: Union[_TooltipPlacement, Undefined] = undefined
     mui_color: Union[_BtnGroupColor, Undefined] = undefined
     disabled: Union[bool, Undefined] = undefined
     size: Union[Literal["small", "medium", "large"], Undefined] = undefined
@@ -613,6 +617,7 @@ class ToggleButtonProps(MUIComponentBaseProps):
     name: str = ""
     selected: Union[Undefined, bool] = undefined
     tooltip: Union[str, Undefined] = undefined
+    tooltip_placement: Union[_TooltipPlacement, Undefined] = undefined
     mui_color: Union[_BtnGroupColor, Undefined] = undefined
     disabled: Union[bool, Undefined] = undefined
     full_width: Union[bool, Undefined] = undefined

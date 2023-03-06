@@ -79,6 +79,9 @@ class AppContext:
     def __init__(self, app: "App") -> None:
         self.app = app
 
+    def is_editable_app(self):
+        return isinstance(self.app, EditableApp)
+
 
 APP_CONTEXT_VAR: contextvars.ContextVar[
     Optional[AppContext]] = contextvars.ContextVar("flowapp_context",
@@ -189,6 +192,7 @@ class AppSpecialEventType(enum.Enum):
     AutoRunEnd = "AutoRunEnd"
 
     CodeEditorSave = "CodeEditorSave"
+    WatchDogChange = "WatchDogChange"
 
 
 T = TypeVar("T")
@@ -790,10 +794,13 @@ class _SimpleCodeManager:
 
     def update_code(self, change_file: str):
         resolved_path = str(Path(change_file).resolve())
-        if resolved_path not in self.file_to_code:
-            return False
+        # if resolved_path not in self.file_to_code:
+        #     return False
         with open(change_file, "r") as f:
             new_data = f.read()
+        if resolved_path not in self.file_to_code:
+            self.file_to_code[resolved_path] = new_data
+            return True
         if new_data == self.file_to_code[resolved_path]:
             return False
         self.file_to_code[resolved_path] = new_data
@@ -927,6 +934,13 @@ class EditableApp(App):
                 if not self._flow_comp_mgr.update_code(ev.src_path):
                     return
                 new_data = self._flow_comp_mgr.get_code(ev.src_path)
+                try:
+                    with _enter_app_conetxt(self):
+                        self._flowapp_special_eemitter.emit(
+                            AppSpecialEventType.WatchDogChange.value, (new_data, resolved_path))
+                except:
+                    traceback.print_exc()
+                    # return
                 # parse first to show syntax error to users.
                 try:
                     ast.parse(new_data, filename=ev.src_path)
@@ -938,9 +952,10 @@ class EditableApp(App):
                     code_changed: List[str] = []
                     if is_app_file_changed:
                         if self._use_app_editor:
-                            fut = asyncio.run_coroutine_threadsafe(
-                                self.set_editor_value(new_data), self._loop)
-                            fut.result()
+                            if not self.code_editor.is_external:
+                                fut = asyncio.run_coroutine_threadsafe(
+                                    self.set_editor_value(new_data), self._loop)
+                                fut.result()
                         code_changed_metas = self._reload_app_file()
                         flow_special = FlowSpecialMethods(code_changed_metas)
                         with _enter_app_conetxt(self):
@@ -1008,7 +1023,7 @@ class EditableApp(App):
                     # self._watchdog_ignore_next = True
                     if self.code_editor.is_external:
                         self._flowapp_special_eemitter.emit(
-                            AppSpecialEventType.CodeEditorSave.value, event)
+                            AppSpecialEventType.CodeEditorSave.value, event.data)
                     else:
                         with open(app_path, "w") as f:
                             f.write(event.data)

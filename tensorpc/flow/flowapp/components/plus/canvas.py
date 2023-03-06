@@ -71,6 +71,7 @@ class SimpleCanvas(mui.FlexBox):
             camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         self.camera = camera
         self.ctrl = three.CameraControl()
+
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.infgrid = infgrid
         self._dynamic_grid = three.Group([infgrid])
@@ -79,7 +80,8 @@ class SimpleCanvas(mui.FlexBox):
         self._cfg_panel.prop(border="1px solid",
                              border_color="gray",
                              collapsed=True,
-                             title="configs")
+                             title="configs",
+                             margin_left="5px")
         self._dynamic_pcs = three.Group({})
         self._dynamic_lines = three.Group({})
         self._dynamic_images = three.Group({})
@@ -130,20 +132,33 @@ class SimpleCanvas(mui.FlexBox):
     def _layout_func(self):
         layout: mui.LayoutType = [
             self.canvas,
-            mui.VBox([
-                mui.ToggleButton("wtf",
-                                 icon=mui.IconType.SwapVert,
-                                 callback=self._on_pan_to_fwd).prop(
-                                     selected=True, size="small"),
-                mui.ToggleButton("enableGrid",
-                                 icon=mui.IconType.Grid3x3,
-                                 callback=self._on_enable_grid).prop(
-                                     selected=True, size="small"),
-                mui.IconButton(mui.IconType.Clear, callback=self._on_clear),
-            ]).prop(position="absolute", top=3, left=3, z_index=5),
-            mui.VBox([
+            mui.HBox([
+                mui.VBox([
+                    mui.ToggleButton("switch",
+                                     icon=mui.IconType.SwapVert,
+                                     callback=self._on_pan_to_fwd).prop(
+                                         selected=True,
+                                         size="small",
+                                         tooltip="Mouse Right Button Mode",
+                                         tooltip_placement="right"),
+                    mui.ToggleButton("enableGrid",
+                                     icon=mui.IconType.Grid3x3,
+                                     callback=self._on_enable_grid).prop(
+                                         selected=True,
+                                         size="small",
+                                         tooltip="Enable Grid",
+                                         tooltip_placement="right"),
+                    mui.IconButton(mui.IconType.Clear,
+                                   callback=self._on_clear).prop(
+                                       tooltip="Clear",
+                                       tooltip_placement="right"),
+                    mui.IconButton(mui.IconType.Refresh,
+                                   callback=self._on_reset_cam).prop(
+                                       tooltip="Reset Camera",
+                                       tooltip_placement="right"),
+                ]),
                 self._cfg_panel,
-            ]).prop(position="absolute", top=3, right=3, z_index=5)
+            ]).prop(position="absolute", top=3, left=3, z_index=5),
         ]
         self.register_event_handler(FrontendEventType.Drop.value,
                                     self._on_drop)
@@ -166,6 +181,7 @@ class SimpleCanvas(mui.FlexBox):
     async def _on_drop(self, data):
         if isinstance(data, TreeDragTarget):
             obj = data.obj
+
             if isinstance(obj, np.ndarray):
                 if _is_point_cloud(obj):
                     await self.show_points(data.tree_id,
@@ -173,16 +189,18 @@ class SimpleCanvas(mui.FlexBox):
                                            obj.shape[0])
 
                 elif _is_array_image(obj):
-                    await self.show_image(data.tree_id,
-                                           obj, (0, 0, 0), (0, 0, 0 ), 3
-                                           )
-
-            print(data)
+                    await self.show_image(data.tree_id, obj, (0, 0, 0),
+                                          (0, 0, 0), 3)
+            else:
+                print(data)
         # print(data)
 
     async def _on_pan_to_fwd(self, selected):
         await self.ctrl.send_and_wait(
             self.ctrl.update_event(vertical_drag_to_forward=not selected))
+
+    async def _on_reset_cam(self):
+        await self.ctrl.reset_camera()
 
     async def _on_clear(self):
         self._point_dict.clear()

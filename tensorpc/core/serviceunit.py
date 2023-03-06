@@ -192,6 +192,20 @@ class ModuleCacheEntry:
     module: ModuleType
     module_dict: Dict[str, Any]
 
+def get_qualname_to_code(lines: List[str]):
+    source = "".join(lines)
+    tree = ast.parse(source)
+    nodes = get_toplevel_func_node(tree)
+    nodes += get_toplevel_class_node(tree)
+    qualname_to_code: Dict[str, str] = {}
+    for n, nss in nodes:
+        ns = ".".join([nx.name for nx in nss])
+        qualname = ns + "." + n.name
+        # TODO this function won't handle decorator
+        code = ast.get_source_segment(source, n)
+        assert code is not None
+        qualname_to_code[qualname] = code
+    return qualname_to_code 
 
 class ObjectReloadManager:
     """to resolve some side effects, users should
@@ -265,17 +279,7 @@ class ObjectReloadManager:
         self.file_cache[path] = entry
         if lines and compat.Python3_8AndLater:
             try:
-                source = "\n".join(lines)
-                tree = ast.parse(source)
-                nodes = get_toplevel_func_node(tree)
-                nodes += get_toplevel_class_node(tree)
-                qualname_to_code: Dict[str, str] = {}
-                for n, nss in nodes:
-                    ns = ".".join([nx.name for nx in nss])
-                    qualname = ns + "." + n.name
-                    code = ast.get_source_segment(source, n)
-                    assert code is not None
-                    qualname_to_code[qualname] = code
+                qualname_to_code = get_qualname_to_code(lines)
                 entry.qualname_to_code = qualname_to_code
             except:
                 pass
@@ -322,6 +326,13 @@ class ObjectReloadManager:
         # qualname_to_code always use code stored in manager.
         if path in self.file_cache:
             qualname_to_code = self.file_cache[path].qualname_to_code
+        else:
+            try:
+                with tokenize.open(path) as f:
+                    lines = f.readlines()
+                qualname_to_code = get_qualname_to_code(lines)
+            except:
+                pass 
         new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
             type, include_base=False, qualname_to_code=qualname_to_code)
         self.type_method_meta_cache[type] = new_metas
@@ -410,6 +421,7 @@ class ReloadableDynamicClass(DynamicClass):
                                          user_app_meta=app_meta)
             code = None
             if qualname_to_code is not None:
+                # TODO check mro
                 if v.__qualname__ in qualname_to_code:
                     code = [qualname_to_code[v.__qualname__]]
             if code is None:

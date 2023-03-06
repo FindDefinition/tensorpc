@@ -411,7 +411,6 @@ class ObjectTree(mui.FlexBox):
     async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):
         self.root[key] = obj
         self.tree.props.tree = _get_root_tree(self.root, self._valid_checker, _ROOT, self._obj_meta_cache)
-        print("self.tree.props.tree", len(self.tree.props.tree.children))
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
     

@@ -66,11 +66,8 @@ class RemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
         return rpc_message_pb2.SimpleReply(data=json.dumps(meta))
 
     def QueryServiceMeta(self, request, context):
-        print("?")
-
         service_key = request.service_key
         _, meta = self.server_core.service_units.get_service_and_meta(service_key)
-        print("?")
         return rpc_message_pb2.SimpleReply(
             data=json.dumps(meta.to_json()))
 
