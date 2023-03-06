@@ -24,6 +24,7 @@ from tensorpc.core import marker
 from tensorpc.core.httpclient import http_remote_call
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServiceUnit
 import tensorpc
+from tensorpc.flow.flowapp.reload import AppReloadManager
 from ..client import MasterMeta
 from tensorpc import prim
 from tensorpc.flow.serv_names import serv_names
@@ -53,7 +54,8 @@ class FlowApp:
         else:
             self._uid = ""
         self.headless = headless
-        self.dynamic_app_cls = ReloadableDynamicClass(module_name)
+        reload_mgr = AppReloadManager()
+        self.dynamic_app_cls = ReloadableDynamicClass(module_name, reload_mgr)
         static_creator = self.dynamic_app_cls.get_object_creator_if_exists()
         if static_creator is not None:
             obj = static_creator()
@@ -69,6 +71,7 @@ class FlowApp:
             # other object, must declare a tensorpc_flow_layout
             external_root = flex_wrapper(obj)
             self.app: App = EditableApp(external_root=external_root)
+        self.app._flow_reload_manager = reload_mgr
         self.app_su = ServiceUnit(module_name, config)
         self.app_su.init_service(obj)
         self.app._app_dynamic_cls = self.dynamic_app_cls

@@ -34,7 +34,7 @@ import re
 import sys
 from typing_extensions import Literal, ParamSpec, Concatenate, Self, TypeAlias, Protocol
 from tensorpc.flow.coretypes import MessageLevel
-from tensorpc.flow.flowapp.reload import FlowSpecialMethods, ObjectReloadManager
+from tensorpc.flow.flowapp.reload import AppReloadManager, FlowSpecialMethods
 
 ALL_APP_EVENTS = HashableRegistry()
 
@@ -58,7 +58,7 @@ class NoDefault:
     pass
 
 class AppComponentCore:
-    def __init__(self, queue: asyncio.Queue, reload_mgr: ObjectReloadManager) -> None:
+    def __init__(self, queue: asyncio.Queue, reload_mgr: AppReloadManager) -> None:
         self.queue = queue
         self.reload_mgr = reload_mgr
 

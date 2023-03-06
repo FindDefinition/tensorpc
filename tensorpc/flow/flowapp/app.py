@@ -20,51 +20,56 @@ import contextlib
 import contextvars
 import dataclasses
 import enum
-from functools import partial
+import importlib
+import importlib.machinery
 import inspect
 import io
 import json
-from pathlib import Path
 import pickle
 import runpy
 import threading
 import time
 import traceback
+from functools import partial
+from pathlib import Path
 from types import ModuleType
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
-import pyee
+
 import numpy as np
-import importlib.machinery
-import importlib
+import pyee
 import watchdog
 import watchdog.events
 from PIL import Image
 from watchdog.observers import Observer
+
 from tensorpc import simple_chunk_call_async
 from tensorpc.constants import PACKAGE_ROOT, TENSORPC_FLOW_FUNC_META_KEY
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.inspecttools import get_all_members_by_type
+from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
+                                    is_valid_function)
 from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceUnit
-from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem, get_object_type_meta
-from tensorpc.flow.flowapp.reload import ObjectReloadManager
+from tensorpc.flow.client import MasterMeta
+from tensorpc.flow.coretypes import (ScheduleEvent, StorageDataItem,
+                                     get_object_type_meta)
+from tensorpc.flow.flowapp.reload import AppReloadManager
 from tensorpc.flow.hold.holdctx import HoldContext
-from tensorpc.flow.marker import AppFuncType, AppFunctionMeta
+from tensorpc.flow.marker import AppFunctionMeta, AppFuncType
 from tensorpc.flow.serv_names import serv_names
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.reload import reload_method
 from tensorpc.utils.uniquename import UniqueNamePool
-from tensorpc.flow.client import MasterMeta
+
 from .components import mui, three
-from .core import (AppComponentCore, AppEditorEvent, AppEditorEventType, AppEditorFrontendEvent,
-                   AppEditorFrontendEventType, AppEvent, AppEventType,
-                   BasicProps, Component, ContainerBase, CopyToClipboardEvent,
+from .core import (AppComponentCore, AppEditorEvent, AppEditorEventType,
+                   AppEditorFrontendEvent, AppEditorFrontendEventType,
+                   AppEvent, AppEventType, BasicProps, Component,
+                   ContainerBase, CopyToClipboardEvent, EventHandler,
                    FlowSpecialMethods, FrontendEventType, LayoutEvent,
                    TaskLoopEvent, UIEvent, UIExceptionEvent, UIRunStatus,
                    UIType, UIUpdateEvent, Undefined, UserMessage, ValueType,
-                   undefined, EventHandler)
-from tensorpc.core.moduleid import get_qualname_of_type
-from tensorpc.core.moduleid import is_lambda, is_valid_function
+                   undefined)
 
 ALL_APP_EVENTS = HashableRegistry()
 
@@ -206,7 +211,7 @@ class App:
         # self._uid_to_comp: Dict[str, Component] = {}
         self._queue: "asyncio.Queue[AppEvent]" = asyncio.Queue(
             maxsize=maxqsize)
-        self._flow_reload_manager = ObjectReloadManager()
+        self._flow_reload_manager = AppReloadManager()
 
         self._flow_app_comp_core = AppComponentCore(self._queue, self._flow_reload_manager)
         self._send_callback: Optional[Callable[[AppEvent],
@@ -889,12 +894,10 @@ class EditableApp(App):
         if reload_metas:
             if not mod_is_reloaded:
                 # TODO when not mod_is_reloaded, changed file isn't app_file
-                module = inspect.getmodule(reload_metas[0].handler.cb)
-                if module is None:
-                    return
                 # now module is valid, reload it.
                 try:
-                    importlib.reload(module)
+                    res = self._flow_reload_manager.reload_type(reload_metas[0].handler.cb)
+                    module = res[0].module
                 except:
                     traceback.print_exc()
                     return
@@ -984,11 +987,11 @@ class EditableApp(App):
             if self.root._wrapped_obj is not None:
                 obj = self.root._wrapped_obj
             new_cb, code_changed = self._get_app_dynamic_cls(
-            ).reload_obj_methods(obj, {})
+            ).reload_obj_methods(obj, {}, self._flow_reload_manager)
         else:
             new_cb, code_changed = self._get_app_dynamic_cls(
-            ).reload_obj_methods(self, {})
-        self._get_app_service_unit().reload_metas()
+            ).reload_obj_methods(self, {}, self._flow_reload_manager)
+        self._get_app_service_unit().reload_metas(self._flow_reload_manager)
         # for k, v in comps.items():
         #     if k in new_cb:
         #         v.set_callback(new_cb[k])
@@ -1010,10 +1013,15 @@ class EditableApp(App):
                         with open(app_path, "w") as f:
                             f.write(event.data)
                         # self._watchdog_prev_content = event.data
+
                         if self._flow_comp_mgr is not None:
                             self._flow_comp_mgr.update_code_from_editor(
                                 app_path, event.data)
-                        code_changed_metas = self._reload_app_file()
+                        try:
+                            code_changed_metas = self._reload_app_file()
+                        except:
+                            traceback.print_exc()
+                            raise
                         flow_special = FlowSpecialMethods(code_changed_metas)
                         if flow_special.auto_run is not None:
                             asyncio.create_task(

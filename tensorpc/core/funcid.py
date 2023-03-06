@@ -31,10 +31,9 @@ def from_constant(node):
         else:
             raise ValueError("node not a constant")
 
-
 def get_toplevel_func_node(tree: ast.Module):
     from collections import deque
-    res = []  # type: List[Tuple[Union[ast.FunctionDef, ast.AsyncFunctionDef], List[ast.ClassDef]]]
+    res: List[Tuple[Union[ast.FunctionDef, ast.AsyncFunctionDef], List[ast.ClassDef]]] = [] 
     todo: Deque[Tuple[List[ast.AST], List[ast.ClassDef]]] = deque([([*tree.body], [])])
     while todo:
         body, cur_parent_ns = todo.popleft()
@@ -45,6 +44,17 @@ def get_toplevel_func_node(tree: ast.Module):
                 res.append((node, cur_parent_ns))
     return res
 
+def get_toplevel_class_node(tree: ast.Module):
+    from collections import deque
+    res: List[Tuple[ast.ClassDef, List[ast.ClassDef]]] = []
+    todo: Deque[Tuple[List[ast.AST], List[ast.ClassDef]]] = deque([([*tree.body], [])])
+    while todo:
+        body, cur_parent_ns = todo.popleft()
+        for node in body:
+            if isinstance(node, (ast.ClassDef)):
+                todo.append(([*node.body], [*cur_parent_ns, node]))
+                res.append((node, cur_parent_ns))
+    return res
 
 def find_toplevel_func_node_by_lineno(tree: ast.Module, lineno: int):
     # TODO should we check try block?

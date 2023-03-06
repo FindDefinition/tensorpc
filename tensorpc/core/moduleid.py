@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any, List, Optional
 import uuid
 
-from tensorpc.core.serviceunit import ServFunctionMeta
 import inspect 
 from typing import (Any, Callable, Deque, Dict, List, Optional, Set, Tuple,
                     Type, Union)
@@ -56,7 +55,7 @@ class TypeMeta:
     def module_id(self):
         return self.module_key + "::" + self.local_key
 
-    def get_reloaded_module_dict(self):
+    def get_reloaded_module(self):
         if not self.is_path:
             # use importlib to reload module
             module = importlib.import_module(self.module_key)
@@ -68,7 +67,7 @@ class TypeMeta:
                 traceback.print_exc()
                 return None
             module_dict = module.__dict__
-            return module_dict
+            return module_dict, module
         else:
             mod_name = Path(self.module_key).stem + "_" + uuid.uuid4().hex
             spec = importlib.util.spec_from_file_location(mod_name, self.module_key)
@@ -78,7 +77,13 @@ class TypeMeta:
             spec.loader.exec_module(standard_module)
             # do we need to add this module to sys?
             # sys.modules[mod_name] = standard_module
-            return standard_module.__dict__
+            return standard_module.__dict__, standard_module
+        
+    def get_reloaded_module_dict(self):
+        res = self.get_reloaded_module()
+        if res is not None:
+            return res[0]
+        return None
 
     def get_local_type_from_module_dict(self, module_dict: Dict[str, Any]):
         parts = self.local_key.split("::")
@@ -134,3 +139,4 @@ def get_obj_type_meta(
     if not is_standard_module:
         module_import_path = module_path
     return TypeMeta(module_import_path, local_import_path, not is_standard_module)
+

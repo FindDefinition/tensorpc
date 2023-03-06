@@ -1,18 +1,30 @@
+import ast
 import dataclasses
 import importlib
+import importlib.util
 import inspect
+import os
 import runpy
+import sys
+import tokenize
 import types
+import uuid
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple
-import uuid
+from types import ModuleType
+from typing import (Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple,
+                    Type)
 
-from tensorpc.constants import TENSORPC_FLOW_FUNC_META_KEY, TENSORPC_FUNC_META_KEY, TENSORPC_SPLIT
+from tensorpc import compat
+from tensorpc.constants import (TENSORPC_FLOW_FUNC_META_KEY,
+                                TENSORPC_FUNC_META_KEY, TENSORPC_SPLIT)
 from tensorpc.core import inspecttools
-from tensorpc.core.defs import DynamicEvent
-import importlib.util
-import sys
+from tensorpc.core.funcid import (get_toplevel_class_node,
+                                  get_toplevel_func_node)
+from tensorpc.core.moduleid import TypeMeta, get_obj_type_meta
+
+
 
 class ParamType(Enum):
     PosOnly = "PosOnly"
@@ -149,6 +161,173 @@ class ServFunctionMeta:
         assert self.binded_fn is not None 
         return self.binded_fn
 
+
+@dataclass
+class FileCacheEntry:
+    size: int
+    mtime: Optional[float]
+    fullname: str
+    lines: List[str]
+    qualname_to_code: Optional[Dict[str, str]] = None
+
+    @property
+    def invalid(self):
+        return self.mtime is None
+
+    @property
+    def source(self):
+        return "\n".join(self.lines)
+
+
+@dataclass
+class TypeCacheEntry:
+    type: Type[Any]
+    module: ModuleType
+    module_dict: Dict[str, Any]
+    method_metas: Optional[List[ServFunctionMeta]] = None
+
+
+@dataclass
+class ModuleCacheEntry:
+    module: ModuleType
+    module_dict: Dict[str, Any]
+
+
+class ObjectReloadManager:
+    """to resolve some side effects, users should
+    always use reload manager defined in app.
+    """
+
+    def __init__(self) -> None:
+        self.file_cache: Dict[str, FileCacheEntry] = {}
+        self.type_cache: Dict[str, TypeCacheEntry] = {}
+        self.type_meta_cache: Dict[str, TypeMeta] = {}
+        self.type_method_meta_cache: Dict[Type, List[ServFunctionMeta]] = {}
+        self.module_cache: Dict[str, ModuleCacheEntry] = {}
+
+    def check_file_cache(self, path: str):
+        if path not in self.file_cache:
+            return
+        entry = self.file_cache[path]
+        if entry.invalid:
+            return
+        try:
+            stat = os.stat(entry.fullname)
+        except OSError:
+            self.file_cache.pop(path)
+            return
+        if entry.size != stat.st_size or entry.mtime != stat.st_mtime:
+            self.file_cache.pop(path)
+
+    def cached_get_obj_meta(self, type):
+        if type in self.type_meta_cache:
+            meta = self.type_meta_cache[type]
+        else:
+            meta = get_obj_type_meta(type)
+            if meta is not None:
+                self.type_meta_cache[type] = meta
+        return meta
+
+    def _update_file_cache(self, path: str):
+        fullname = path
+        stat = None
+        try:
+            stat = os.stat(path)
+        except OSError:
+            basename = path
+            # Try looking through the module search path, which is only useful
+            # when handling a relative filename.
+            if os.path.isabs(path):
+                raise ValueError("can't reload this type", type)
+            found = False
+            for dirname in sys.path:
+                try:
+                    fullname = os.path.join(dirname, basename)
+                except (TypeError, AttributeError):
+                    # Not sufficiently string-like to do anything useful with.
+                    continue
+                try:
+                    stat = os.stat(fullname)
+                    found = True
+                    break
+                except OSError:
+                    pass
+            if not found:
+                raise ValueError("can't reload this type", type)
+        assert stat is not None
+        try:
+            with tokenize.open(fullname) as fp:
+                lines = fp.readlines()
+        except OSError:
+            lines = []
+        size, mtime = stat.st_size, stat.st_mtime
+        entry = FileCacheEntry(size, mtime, fullname, lines)
+        self.file_cache[path] = entry
+        if lines and compat.Python3_8AndLater:
+            try:
+                source = "\n".join(lines)
+                tree = ast.parse(source)
+                nodes = get_toplevel_func_node(tree)
+                nodes += get_toplevel_class_node(tree)
+                qualname_to_code: Dict[str, str] = {}
+                for n, nss in nodes:
+                    ns = ".".join([nx.name for nx in nss])
+                    qualname = ns + "." + n.name
+                    code = ast.get_source_segment(source, n)
+                    assert code is not None
+                    qualname_to_code[qualname] = code
+                entry.qualname_to_code = qualname_to_code
+            except:
+                pass
+
+    def reload_type(self, type):
+        meta = self.cached_get_obj_meta(type)
+        if meta is None:
+            raise ValueError("can't reload this type", type)
+        # determine should perform real reload
+        path = inspect.getfile(type)
+
+        self.check_file_cache(path)
+        if path in self.file_cache:
+            # no need to reload.
+            return self.module_cache[path], meta
+        # invalid type method cache
+        new_type_method_meta_cache = {}
+        for t, vv in self.type_method_meta_cache.items():
+            try:
+                patht = inspect.getfile(t)
+            except:
+                continue
+            if patht != path:
+                new_type_method_meta_cache[t] = vv
+        self.type_method_meta_cache = new_type_method_meta_cache
+        # do reload
+        res = meta.get_reloaded_module()
+        if res is None:
+            raise ValueError("can't reload this type", type)
+        self.module_cache[path] = ModuleCacheEntry(res[1], res[0])
+        # new_type = meta.get_local_type_from_module_dict(res[0])
+        # type_cache_entry = TypeCacheEntry(new_type, res[1], res[0])
+        # self.type_cache[type] = type_cache_entry
+        self._update_file_cache(path)
+        return self.module_cache[path], meta
+
+    def query_type_method_meta(self, type):
+        path = inspect.getfile(type)
+        if type in self.type_method_meta_cache:
+            return self.type_method_meta_cache[type]
+        qualname_to_code = None
+        # use qualname_to_code from ast to resolve some problem 
+        # if we just use inspect, inspect will use newest code
+        # qualname_to_code always use code stored in manager.
+        if path in self.file_cache:
+            qualname_to_code = self.file_cache[path].qualname_to_code
+        new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
+            type, include_base=False, qualname_to_code=qualname_to_code)
+        self.type_method_meta_cache[type] = new_metas
+        return new_metas
+
+
 class DynamicClass:
     def __init__(self, module_name: str, ) -> None:
         self.module_name = module_name
@@ -196,12 +375,15 @@ class DynamicClass:
 
 
 class ReloadableDynamicClass(DynamicClass):
-    def __init__(self, module_name: str) -> None:
+    def __init__(self, module_name: str, reload_mgr: Optional[ObjectReloadManager] = None) -> None:
         super().__init__(module_name)
-        self.serv_metas = self.get_metas_of_regular_methods(self.obj_type)
+        if reload_mgr is not None:
+            self.serv_metas = reload_mgr.query_type_method_meta(self.obj_type)
+        else:
+            self.serv_metas = self.get_metas_of_regular_methods(self.obj_type)
 
     @staticmethod
-    def get_metas_of_regular_methods(type_obj, include_base: bool = False):
+    def get_metas_of_regular_methods(type_obj, include_base: bool = False, qualname_to_code: Optional[Dict[str, str]] = None):
         serv_metas: List[ServFunctionMeta] = []
         members = inspecttools.get_members_by_type(type_obj, not include_base)
         for k, v in members:
@@ -226,7 +408,12 @@ class ReloadableDynamicClass(DynamicClass):
             serv_meta = ServFunctionMeta(v, k, ServiceType.Normal, v_sig, is_gen,
                                          is_async, is_static, False, qualname=v.__qualname__,
                                          user_app_meta=app_meta)
-            code, _ = inspect.getsourcelines(v)
+            code = None
+            if qualname_to_code is not None:
+                if v.__qualname__ in qualname_to_code:
+                    code = [qualname_to_code[v.__qualname__]]
+            if code is None:
+                code, _ = inspect.getsourcelines(v)
             serv_meta.code = "".join(code)
             serv_metas.append(serv_meta)
         return serv_metas
@@ -238,19 +425,26 @@ class ReloadableDynamicClass(DynamicClass):
                     return m.fn 
         return None 
 
-    def reload_obj_methods(self, obj, callback_dict: Optional[Dict[str, Any]] = None):
+    def reload_obj_methods(self, obj, callback_dict: Optional[Dict[str, Any]] = None, reload_mgr: Optional[ObjectReloadManager] = None):
         # reload regular methods/static methods
         new_cb: Dict[str, Any] = {}
         if callback_dict is None:
             callback_dict = {}
         callback_inv_dict = {v: k for k, v in callback_dict.items()}
-        if self.is_standard_module and self.standard_module is not None:
-            importlib.reload(self.standard_module) 
-            self.module_dict = self.standard_module.__dict__
+        if reload_mgr is not None:
+            res = reload_mgr.reload_type(type(obj))
+            self.module_dict = res[0].module_dict
         else:
-            self.module_dict = runpy.run_path(self.module_path)
+            if self.is_standard_module and self.standard_module is not None:
+                importlib.reload(self.standard_module) 
+                self.module_dict = self.standard_module.__dict__
+            else:
+                self.module_dict = runpy.run_path(self.module_path)
         new_obj_type = self.module_dict[self.cls_name]
-        new_metas = self.get_metas_of_regular_methods(new_obj_type)
+        if reload_mgr is not None:
+            new_metas = reload_mgr.query_type_method_meta(new_obj_type)
+        else:
+            new_metas = self.get_metas_of_regular_methods(new_obj_type)
         # new_name_to_meta = {m.name: m for m in new_metas}
         name_to_meta = {m.name: m for m in self.serv_metas}
         code_changed_cb: List[str] = []
@@ -355,14 +549,18 @@ class ServiceUnit(DynamicClass):
         self.obj: Optional[Any] = None
         self.config = config
 
-    def reload_metas(self):
+    def reload_metas(self, reload_mgr: Optional[ObjectReloadManager] = None):
         # reload regular methods/static methods
         new_cb: Dict[str, Any] = {}
-        if self.is_standard_module and self.standard_module is not None:
-            importlib.reload(self.standard_module) 
-            self.module_dict = self.standard_module.__dict__
+        if reload_mgr is not None:
+            res = reload_mgr.reload_type(type(self.obj))
+            self.module_dict = res[0].module_dict
         else:
-            self.module_dict = runpy.run_path(self.module_path)
+            if self.is_standard_module and self.standard_module is not None:
+                importlib.reload(self.standard_module) 
+                self.module_dict = self.standard_module.__dict__
+            else:
+                self.module_dict = runpy.run_path(self.module_path)
         new_obj_type = self.module_dict[self.cls_name]
         new_metas = self._init_all_metas(new_obj_type)
         self.serv_metas = new_metas
@@ -599,21 +797,3 @@ class ServiceUnits:
         self.init_service()
         for s in self.sus:
             await s.run_async_init()
-
-if __name__ == "__main__":
-    su = ServiceUnit("tensorpc.services.for_test::Service1::Test", {})
-    print(su.run_service("Test.add", 1, 2))
-
-    # cl = ReloadableDynamicClass("tensorpc.services.for_test::Service1::Test")
-    # obj = cl.obj_type()
-    # print(obj.add(1, 2))
-    # print(input("hold"))
-    # cl.reload_obj_methods(obj)
-    # print(obj.add(1, 2))
-
-    cl2 = ReloadableDynamicClass("!/home/yy/Projects/distflow/tensorpc/services/for_test.py::Service1::Test")
-    obj = cl2.obj_type()
-    print(obj.add(1, 2))
-    print(input("hold"))
-    cl2.reload_obj_methods(obj)
-    print(obj.add(1, 2))

@@ -17,7 +17,7 @@ from tensorpc.flow import marker
 
 from typing import Any, Dict, Iterable, Optional, Union, List
 import numpy as np
-from tensorpc.flow.flowapp.components.plus.objinspect.tree import TreeDragTarget
+from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from tensorpc.flow.flowapp.core import FrontendEventType
 
@@ -45,14 +45,14 @@ def _is_array_image(obj: np.ndarray):
 @dataclasses.dataclass
 class PointCfg:
     size: float = dataclasses.field(default=3,
-                                             metadata=ConfigPanel.slider_meta(
-                                                 1, 10))
+                                    metadata=ConfigPanel.slider_meta(1, 10))
 
 
 @dataclasses.dataclass
 class BoxCfg:
-    edge_width: float = dataclasses.field(
-        default=1, metadata=ConfigPanel.slider_meta(1, 5))
+    edge_width: float = dataclasses.field(default=1,
+                                          metadata=ConfigPanel.slider_meta(
+                                              1, 5))
     add_cross: bool = True
 
 
@@ -76,7 +76,10 @@ class SimpleCanvas(mui.FlexBox):
         self._dynamic_grid = three.Group([infgrid])
         self._cfg = CanvasGlobalCfg(PointCfg(), BoxCfg())
         self._cfg_panel = ConfigPanel(self._cfg, self._on_cfg_change)
-        self._cfg_panel.prop(border="1px solid", border_color="gray", collapsed=True, title="configs")
+        self._cfg_panel.prop(border="1px solid",
+                             border_color="gray",
+                             collapsed=True,
+                             title="configs")
         self._dynamic_pcs = three.Group({})
         self._dynamic_lines = three.Group({})
         self._dynamic_images = three.Group({})
@@ -148,7 +151,10 @@ class SimpleCanvas(mui.FlexBox):
                   min_width=0,
                   flex=1,
                   position="relative",
-                  droppable=True)
+                  droppable=True,
+                  width="100%",
+                  height="100%",
+                  overflow="hidden")
         return layout
 
     async def _on_enable_grid(self, selected):
@@ -165,6 +171,11 @@ class SimpleCanvas(mui.FlexBox):
                     await self.show_points(data.tree_id,
                                            obj.astype(np.float32),
                                            obj.shape[0])
+
+                elif _is_array_image(obj):
+                    await self.show_image(data.tree_id,
+                                           obj, (0, 0, 0), (0, 0, 0 ), 3
+                                           )
 
             print(data)
         # print(data)

@@ -1,8 +1,7 @@
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
-
+from typing import Any, Dict, List, Optional, Type
 from tensorpc.core.moduleid import get_obj_type_meta, TypeMeta
-from tensorpc.core.serviceunit import ReloadableDynamicClass, ServFunctionMeta
+from tensorpc.core.serviceunit import ObjectReloadManager, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.flow.constants import TENSORPC_ANYLAYOUT_FUNC_NAME, TENSORPC_LEGACY_LAYOUT_FUNC_NAME
 from tensorpc.core.serviceunit import AppFuncType
 
@@ -47,16 +46,24 @@ class FlowSpecialMethods:
             self.create_object.bind(obj)
 
 
-def reload_object_methods(obj: Any, previous_metas: Optional[List[ServFunctionMeta]] = None):
+def reload_object_methods(obj: Any,
+                          previous_metas: Optional[
+                              List[ServFunctionMeta]] = None,
+                        reload_mgr: Optional[ObjectReloadManager] = None):
     obj_type = type(obj)
     tmeta = get_obj_type_meta(obj_type)
     if tmeta is None:
-        return None 
-    module_dict = tmeta.get_reloaded_module_dict()
+        return None
+    if reload_mgr is not None:
+        res = reload_mgr.reload_type(type(obj))
+        module_dict = res[0].module_dict
+    else:
+        module_dict = tmeta.get_reloaded_module_dict()
     if module_dict is None:
-        return None 
+        return None
     new_obj_type = tmeta.get_local_type_from_module_dict(module_dict)
-    new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(new_obj_type)
+    new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
+        new_obj_type)
     code_changed_metas: List[ServFunctionMeta] = []
     # print(new_metas)
     if previous_metas is not None:
@@ -75,24 +82,26 @@ def reload_object_methods(obj: Any, previous_metas: Optional[List[ServFunctionMe
             code_changed_metas.append(new_meta)
     return code_changed_metas
 
+
 @dataclass
 class AppObjectMeta:
     is_anylayout: bool = False
 
-class ObjectReloadManager:
+class AppReloadManager(ObjectReloadManager):
     """to resolve some side effects, users should
-    always use reloader defined in app.
+    always use reload manager defined in app.
     """
+
     def __init__(self) -> None:
+        super().__init__()
         self.obj_layout_meta_cache: Dict[Any, AppObjectMeta] = {}
 
     def query_obj_is_anylayout(self, obj):
         obj_type = type(obj)
         if obj_type in self.obj_layout_meta_cache:
             return self.obj_layout_meta_cache[obj_type].is_anylayout
-        
-        new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
-            obj_type, include_base=True)
+        new_metas = self.query_type_method_meta(obj_type)
         flow_special = FlowSpecialMethods(new_metas)
-        self.obj_layout_meta_cache[obj_type] = AppObjectMeta(flow_special.create_layout is not None)
+        self.obj_layout_meta_cache[obj_type] = AppObjectMeta(
+            flow_special.create_layout is not None)
         return self.obj_layout_meta_cache[obj_type].is_anylayout

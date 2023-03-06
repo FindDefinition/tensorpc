@@ -25,7 +25,7 @@ class ObjectLayoutHandler(mui.FlexBox):
 
 class ObjectPreviewHandlerRegistry:
 
-    def __init__(self, allow_duplicate: bool = False):
+    def __init__(self, allow_duplicate: bool = True):
         self.global_dict: Dict[Hashable, Type[ObjectPreviewHandler]] = {}
         self.allow_duplicate = allow_duplicate
 
@@ -54,7 +54,7 @@ class ObjectPreviewHandlerRegistry:
 
 class ObjectLayoutHandlerRegistry:
 
-    def __init__(self, allow_duplicate: bool = False):
+    def __init__(self, allow_duplicate: bool = True):
         self.global_dict: Dict[Hashable, Type[ObjectLayoutHandler]] = {}
         self.allow_duplicate = allow_duplicate
 

@@ -8,7 +8,7 @@ from tensorpc.flow.flowapp.app import AppSpecialEventType
 
 from tensorpc.flow.flowapp.components import mui, three, plus
 from tensorpc.flow.flowapp.core import AppEditorFrontendEvent, FlowSpecialMethods, FrontendEventType, _get_obj_def_path
-from tensorpc.flow.flowapp.components.plus.objinspect.tree import TreeDragTarget
+from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 from tensorpc.flow.flowapp.reload import reload_object_methods
 from tensorpc.flow.flowapp.appctx import get_app, get_reload_manager
 from tensorpc.flow.flowapp.components.plus.objinspect.core import ALL_OBJECT_LAYOUT_HANDLERS
@@ -30,7 +30,7 @@ class AnyFlexLayout(mui.FlexLayout):
             if layout._wrapped_obj is not None:
                 # for anylayout, we support layout reload
                 # and onmount/onunmount reload.
-                metas = reload_object_methods(layout._wrapped_obj)
+                metas = reload_object_methods(layout._wrapped_obj, reload_mgr=get_reload_manager())
                 if metas is not None:
                     special_methods = FlowSpecialMethods(metas)
                     special_methods.bind(layout._wrapped_obj)
@@ -44,7 +44,7 @@ class AnyFlexLayout(mui.FlexLayout):
 
                         # await layout.set_new_layout(special_methods.create_layout.get_binded_fn()())
             else:
-                metas = reload_object_methods(layout)
+                metas = reload_object_methods(layout, reload_mgr=get_reload_manager())
                 if metas is not None:
                     special_methods = FlowSpecialMethods(metas)
                     special_methods.bind(layout)
@@ -96,14 +96,15 @@ class AnyFlexLayout(mui.FlexLayout):
     async def _on_tab_close(self, data):
         # print("TAB CLOSE", data)
         name = data["complexLayoutTabNodeId"]
-        await self.remove_childs_by_keys([name])
-        app = get_app()
-        if app.code_editor.is_external:
-            app.code_editor.is_external = False 
-            if self._app_save_reload_cb is not None:
-                app.unregister_app_special_event_handler(AppSpecialEventType.CodeEditorSave, self._app_save_reload_cb)
-                self._app_save_reload_cb = None 
-            await app._recover_code_editor()
+        if name in self._child_comps:
+            await self.remove_childs_by_keys([name])
+            app = get_app()
+            if app.code_editor.is_external:
+                app.code_editor.is_external = False 
+                if self._app_save_reload_cb is not None:
+                    app.unregister_app_special_event_handler(AppSpecialEventType.CodeEditorSave, self._app_save_reload_cb)
+                    self._app_save_reload_cb = None 
+                await app._recover_code_editor()
 
 
     async def _on_tab_select(self, data):

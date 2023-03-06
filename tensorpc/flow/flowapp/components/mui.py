@@ -50,6 +50,16 @@ _CORO_NONE = Union[Coroutine[None, None, None], None]
 
 _PIL_FORMAT_TO_SUFFIX = {"JPEG": "jpg", "PNG": "png"}
 
+class Position(enum.IntEnum):
+    TopLeft = 0
+    TopCenter = 1
+    TopRight = 2
+    LeftCenter = 3
+    Center = 4
+    RightCenter = 5
+    BottomLeft = 6
+    BottomCenter = 7
+    BottomRight = 8
 
 def _encode_image_bytes(img: np.ndarray, format: str = "JPEG"):
     pil_img = PILImage.fromarray(img)

@@ -16,7 +16,8 @@ from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.flow.flowapp.components.plus.monitor import ComputeResourceMonitor
 from tensorpc.flow.flowapp.reload import reload_object_methods
 from tensorpc.flow.flowapp.components.plus.objinspect.core import ALL_OBJECT_PREVIEW_HANDLERS, ALL_OBJECT_LAYOUT_HANDLERS
-
+from tensorpc.flow.flowapp.components.plus.canvas import SimpleCanvas
+from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 
 _DEFAULT_OBJ_NAME = "default"
 
@@ -177,6 +178,7 @@ def _get_obj_dict(obj,
                   checker: Callable[[Type], bool],
                   check_obj: bool = True):
     res: Dict[str, Any] = {}
+    # TODO size limit node
     if isinstance(obj, (list, tuple, set)):
         if isinstance(obj, set):
             obj_list = list(obj)
@@ -307,12 +309,6 @@ def _get_root_tree(obj, checker: Callable[[Type], bool], key: str, obj_meta_cach
     root_node.childCnt = len(obj_dict)
     return root_node
 
-@dataclasses.dataclass
-class TreeDragTarget:
-    obj: Any 
-    tree_id: str
-    tab_id: str = ""
-
 class ObjectTree(mui.FlexBox):
 
     def __init__(self,
@@ -336,6 +332,7 @@ class ObjectTree(mui.FlexBox):
             _DEFAULT_BUILTINS_NAME: {
                 "monitor": ComputeResourceMonitor(),
                 "App Terminal": mui.AppTerminal(),
+                "Simple Canvas": SimpleCanvas(),
             }
         }
         if init is None:
@@ -414,6 +411,7 @@ class ObjectTree(mui.FlexBox):
     async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):
         self.root[key] = obj
         self.tree.props.tree = _get_root_tree(self.root, self._valid_checker, _ROOT, self._obj_meta_cache)
+        print("self.tree.props.tree", len(self.tree.props.tree.children))
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
     

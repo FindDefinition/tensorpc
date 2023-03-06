@@ -10,7 +10,7 @@ from typing import AsyncIterator, Generator, Iterator, Optional, List, Dict, Typ
 import contextlib
 import time
 import typing
-from . import funcid
+from ...core import funcid
 import traceback
 import watchdog.events
 from watchdog.events import FileSystemEventHandler

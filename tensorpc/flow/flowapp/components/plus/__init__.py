@@ -12,9 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .core import ListSlider
-from .config import ConfigPanel, ConfigPanelV1
-from .figure import HomogeneousMetricFigure
 from .canvas import SimpleCanvas
-from .objinspect import ObjectInspector, AnyFlexLayout, TreeDragTarget
+from .config import ConfigPanel, ConfigPanelV1
+from .core import ListSlider
+from .figure import HomogeneousMetricFigure
 from .monitor import ComputeResourceMonitor
+from .objinspect import (AnyFlexLayout, InspectPanel, ObjectInspector,
+                         ObjectLayoutHandler, ObjectPreviewHandler,
+                         TreeDragTarget, register_obj_layout_handler,
+                         register_obj_preview_handler)
