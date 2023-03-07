@@ -1294,6 +1294,39 @@ class FlexManualReflow(ThreeComponentBase[FlexManualReflowProps]):
     async def reflow(self):
         await self.send_and_wait(
             self.update_event(timestamp=str(time.time())))
+        
+@dataclasses.dataclass
+class ScreenShotProps(ThreeBasicProps):
+    pass
+
+
+class ScreenShot(ThreeComponentBase[ScreenShotProps]):
+    """a special ui to get screen shot. steps:
+    1. use trigger_screen_shot
+    2. get image from callback.
+    currently impossible to get image from one function call.
+    """
+    def __init__(self, callback: Callable[[str], _CORO_NONE]) -> None:
+        super().__init__(UIType.ThreeScreenShot, ScreenShotProps)
+        self.register_event_handler(FrontendEventType.Change.value, callback)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def trigger_screen_shot(self):
+        await self.send_and_wait(self.create_comp_event({
+                "type": 0,
+            }))
+        
+    async def handle_event(self, ev: EventType):
+        return await handle_standard_event(self, ev, sync_first=True)
 
 @dataclasses.dataclass
 class ThreeCanvasProps(MUIFlexBoxProps):

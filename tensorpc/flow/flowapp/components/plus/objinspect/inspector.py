@@ -167,10 +167,11 @@ class ObjectInspector(mui.FlexBox):
         del cur_frame
         await self.tree.set_object(local_vars, key)
 
-    async def update_locals_sync(self, key: str = _DEFAULT_OBJ_NAME):
+    async def update_locals_sync(self, key: str = _DEFAULT_LOCALS_NAME, *,
+                                    _frame_cnt: int = 1):
         """update locals in sync manner, usually used on non-sync code via appctx.
         """
-        fut = asyncio.run_coroutine_threadsafe(self.update_locals(key, _frame_cnt=2), asyncio.get_running_loop())
+        fut = asyncio.run_coroutine_threadsafe(self.update_locals(key, _frame_cnt=1 + _frame_cnt), asyncio.get_running_loop())
         return fut.result()
 
     async def set_object_sync(self, obj, key: str = _DEFAULT_OBJ_NAME):

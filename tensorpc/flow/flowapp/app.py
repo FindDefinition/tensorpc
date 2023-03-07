@@ -103,6 +103,17 @@ def get_app_storage():
     assert ctx is not None
     return ctx.app.get_persist_storage()
 
+T_comp = TypeVar("T_comp")
+
+def find_component(type: Type[T_comp]) -> Optional[T_comp]:
+    appctx = get_app_context()
+    assert appctx is not None, "you must use this function in app"
+    return appctx.app.find_component(type)
+
+def get_reload_manager():
+    appctx = get_app_context()
+    assert appctx is not None, "you must use this function in app"
+    return appctx.app._flow_reload_manager
 
 @contextlib.contextmanager
 def _enter_app_conetxt(app: "App"):

@@ -6,12 +6,12 @@ from tensorpc.flow.flowapp.components import mui
 from tensorpc.core.moduleid import get_qualname_of_type
 
 from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler
-from .tree import TORCH_TENSOR_NAME, TV_TENSOR_NAME
+from ..common import CommonQualNames
 
 
 @ALL_OBJECT_PREVIEW_HANDLERS.register(np.ndarray)
-@ALL_OBJECT_PREVIEW_HANDLERS.register(TORCH_TENSOR_NAME)
-@ALL_OBJECT_PREVIEW_HANDLERS.register(TV_TENSOR_NAME)
+@ALL_OBJECT_PREVIEW_HANDLERS.register(CommonQualNames.TorchTensor)
+@ALL_OBJECT_PREVIEW_HANDLERS.register(CommonQualNames.TVTensor)
 class TensorHandler(ObjectPreviewHandler):
 
     def __init__(self) -> None:
@@ -40,7 +40,7 @@ class TensorHandler(ObjectPreviewHandler):
     async def _on_show_slice(self):
         slice_eval_expr = f"a{self.slice_val.value}"
         res = eval(slice_eval_expr, {"a": self.obj})
-        if get_qualname_of_type(type(res)) == TV_TENSOR_NAME:
+        if get_qualname_of_type(type(res)) == CommonQualNames.TVTensor:
             res = res.cpu().numpy()
         else:
             res = res
@@ -55,12 +55,12 @@ class TensorHandler(ObjectPreviewHandler):
         if isinstance(obj, np.ndarray):
             is_contig = obj.flags['C_CONTIGUOUS']
 
-        elif get_qualname_of_type(type(obj)) == TORCH_TENSOR_NAME:
+        elif get_qualname_of_type(type(obj)) == CommonQualNames.TorchTensor:
             qualname = "torch.Tensor"
             device = obj.device.type
             is_contig = obj.is_contiguous()
 
-        elif get_qualname_of_type(type(obj)) == TV_TENSOR_NAME:
+        elif get_qualname_of_type(type(obj)) == CommonQualNames.TVTensor:
             qualname = "tv.Tensor"
             device = "cpu" if obj.device == -1 else "cuda"
             is_contig = obj.is_contiguous()

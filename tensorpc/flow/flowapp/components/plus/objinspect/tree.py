@@ -18,15 +18,13 @@ from tensorpc.flow.flowapp.reload import reload_object_methods
 from tensorpc.flow.flowapp.components.plus.objinspect.core import ALL_OBJECT_PREVIEW_HANDLERS, ALL_OBJECT_LAYOUT_HANDLERS
 from tensorpc.flow.flowapp.components.plus.canvas import SimpleCanvas
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
+from tensorpc.flow.flowapp.components.plus.common import CommonQualNames
 
 _DEFAULT_OBJ_NAME = "default"
 
 _DEFAULT_BUILTINS_NAME = "builtins"
 
 _ROOT = "root"
-
-TORCH_TENSOR_NAME = "torch.Tensor"
-TV_TENSOR_NAME = "cumm.core_cc.tensorview_bind.Tensor"
 
 BASE_OBJ_TO_TYPE = {
     int: mui.JsonLikeType.Int,
@@ -106,7 +104,7 @@ def parse_obj_item(obj, name: str, id: str, checker: Callable[[Type], bool], obj
                                 typeStr="np.ndarray",
                                 value=f"{obj.shape}|{obj.dtype}",
                                 draggable=True)
-    elif get_qualname_of_type(obj_type) == TORCH_TENSOR_NAME:
+    elif get_qualname_of_type(obj_type) == CommonQualNames.TorchTensor:
         t = mui.JsonLikeType.Tensor
         return mui.JsonLikeNode(id,
                                 name,
@@ -114,7 +112,7 @@ def parse_obj_item(obj, name: str, id: str, checker: Callable[[Type], bool], obj
                                 typeStr="torch.Tensor",
                                 value=f"{list(obj.shape)}|{obj.dtype}",
                                 draggable=True)
-    elif get_qualname_of_type(obj_type) == TV_TENSOR_NAME:
+    elif get_qualname_of_type(obj_type) == CommonQualNames.TVTensor:
         t = mui.JsonLikeType.Tensor
         return mui.JsonLikeNode(id,
                                 name,

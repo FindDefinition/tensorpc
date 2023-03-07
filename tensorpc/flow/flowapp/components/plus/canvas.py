@@ -12,26 +12,88 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import dataclasses
-from tensorpc.flow.flowapp.components import mui, three
-from tensorpc.flow import marker
+import urllib.request
+from typing import Any, Callable, Dict, Iterable, List, Optional, Union
 
-from typing import Any, Dict, Iterable, Optional, Union, List
 import numpy as np
-from tensorpc.flow.flowapp.coretypes import TreeDragTarget
+
+from tensorpc.core.moduleid import get_qualname_of_type
+from tensorpc.flow import marker
+from tensorpc.flow.flowapp.components import mui, three
+from tensorpc.flow.flowapp.components.plus.common import CommonQualNames
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from tensorpc.flow.flowapp.core import FrontendEventType
+from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 
 
-def _is_point_cloud(obj: np.ndarray):
+def _try_cast_tensor_dtype(obj: Any):
+    try:
+        if isinstance(obj, np.ndarray):
+            return obj.dtype
+        elif get_qualname_of_type(type(obj)) == CommonQualNames.TVTensor:
+            from cumm.dtypes import get_npdtype_from_tvdtype
+            return get_npdtype_from_tvdtype(obj.dtype)
+        elif get_qualname_of_type(type(obj)) == CommonQualNames.TorchTensor:
+            import torch
+            _TORCH_DTYPE_TO_NP = {
+                torch.float32: np.dtype(np.float32),
+                torch.float64: np.dtype(np.float64),
+                torch.float16: np.dtype(np.float16),
+                torch.int32: np.dtype(np.int32),
+                torch.int64: np.dtype(np.int64),
+                torch.int8: np.dtype(np.int8),
+                torch.int16: np.dtype(np.int16),
+                torch.uint8: np.dtype(np.uint8),
+            }
+            return _TORCH_DTYPE_TO_NP[obj.dtype]
+    except:
+        return None
+
+def _cast_tensor_to_np(obj: Any) -> Optional[np.ndarray]:
+    if isinstance(obj, np.ndarray):
+        return obj
+    elif get_qualname_of_type(type(obj)) == CommonQualNames.TVTensor:
+        if obj.device == 0:
+            return obj.cpu().numpy()
+        return obj.numpy()
+
+    elif get_qualname_of_type(type(obj)) == CommonQualNames.TorchTensor:
+        if obj.is_cuda():
+            return obj.cpu().numpy()
+        return obj.numpy()
+    return None
+
+def _try_cast_to_point_cloud(obj: Any):
+    obj_dtype = _try_cast_tensor_dtype(obj)
+    if obj_dtype is None:
+        return None 
     ndim = obj.ndim
     if ndim == 2:
-        dtype = obj.dtype
+        dtype = obj_dtype
         if dtype == np.float32 or dtype == np.float16 or dtype == np.float64:
             num_ft = obj.shape[1]
             if num_ft >= 3 and num_ft <= 4:
-                return True
-    return False
+                return _cast_tensor_to_np(obj)
+    return None 
 
+def _try_cast_to_image(obj: Any):
+    obj_dtype = _try_cast_tensor_dtype(obj)
+    if obj_dtype is None:
+        return None 
+    ndim = obj.ndim
+    valid = False
+    is_rgba = False
+    if ndim == 2:
+        valid = obj_dtype == np.uint8
+    elif ndim == 3:
+        valid = obj_dtype == np.uint8 and (obj.shape[2] == 3 or obj.shape[2] == 4)
+        is_rgba = obj.shape[2] == 4
+    if valid:
+        res = _cast_tensor_to_np(obj)
+        if is_rgba and res is not None:
+            res = res[..., :3]
+        return res
+    return None 
 
 def _is_array_image(obj: np.ndarray):
     ndim = obj.ndim
@@ -66,15 +128,16 @@ class SimpleCanvas(mui.FlexBox):
 
     def __init__(self,
                  camera: Optional[three.PerspectiveCamera] = None,
-                 with_grid: bool = True):
+                 screenshot_callback: Optional[Callable[[bytes], mui._CORO_NONE]] = None):
         if camera is None:
             camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         self.camera = camera
         self.ctrl = three.CameraControl()
 
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
+        self.axis_helper = three.AxesHelper(20)
         self.infgrid = infgrid
-        self._dynamic_grid = three.Group([infgrid])
+        self._dynamic_grid = three.Group([infgrid, self.axis_helper])
         self._cfg = CanvasGlobalCfg(PointCfg(), BoxCfg())
         self._cfg_panel = ConfigPanel(self._cfg, self._on_cfg_change)
         self._cfg_panel.prop(border="1px solid",
@@ -87,7 +150,8 @@ class SimpleCanvas(mui.FlexBox):
         self._dynamic_images = three.Group({})
         self._dynamic_boxes = three.Group({})
         self._dynamic_custom_objs = three.Group({})
-
+        self._screen_shot = three.ScreenShot(self._on_screen_shot_finish)
+        self._screenshot_callback = screenshot_callback
         canvas_layout = [
             self.ctrl,
             self.camera,
@@ -95,8 +159,9 @@ class SimpleCanvas(mui.FlexBox):
             self._dynamic_lines,
             self._dynamic_images,
             self._dynamic_boxes,
-            three.AxesHelper(20),
+            # three.AxesHelper(20),
             self._dynamic_grid,
+            self._screen_shot,
         ]
         # if with_grid:
         #     canvas_layout.append(infgrid)
@@ -108,6 +173,16 @@ class SimpleCanvas(mui.FlexBox):
         self._box_dict: Dict[str, three.BoundingBox] = {}
         super().__init__()
         self.init_add_layout([*self._layout_func()])
+
+    async def _on_screen_shot_finish(self, img):
+        if self._screenshot_callback:
+            resp = urllib.request.urlopen(img)
+            self.screen_shot = resp.read()
+            self._screenshot_callback(resp.read())
+
+    async def trigger_screen_shot(self):
+        assert self._screenshot_callback is not None
+        await self._screen_shot.trigger_screen_shot()
 
     async def _on_cfg_change(self, uid: str, value: Any):
         if uid == "point.size":
@@ -174,25 +249,25 @@ class SimpleCanvas(mui.FlexBox):
 
     async def _on_enable_grid(self, selected):
         if selected:
-            await self._dynamic_grid.set_new_layout([self.infgrid])
+            await self._dynamic_grid.set_new_layout([self.infgrid, self.axis_helper])
         else:
             await self._dynamic_grid.set_new_layout([])
 
     async def _on_drop(self, data):
         if isinstance(data, TreeDragTarget):
             obj = data.obj
-
-            if isinstance(obj, np.ndarray):
-                if _is_point_cloud(obj):
-                    await self.show_points(data.tree_id,
-                                           obj.astype(np.float32),
-                                           obj.shape[0])
-
-                elif _is_array_image(obj):
-                    await self.show_image(data.tree_id, obj, (0, 0, 0),
-                                          (0, 0, 0), 3)
-            else:
-                print(data)
+            pc_obj = _try_cast_to_point_cloud(obj)
+            if pc_obj is not None:
+                await self.show_points(data.tree_id,
+                                        pc_obj.astype(np.float32),
+                                        pc_obj.shape[0])
+                return 
+            img_obj = _try_cast_to_image(obj)
+            if img_obj is not None:
+                await self.show_image(data.tree_id, img_obj, (0, 0, 0),
+                                        (0, 0, 0), 3)
+                return 
+            print(data)
         # print(data)
 
     async def _on_pan_to_fwd(self, selected):

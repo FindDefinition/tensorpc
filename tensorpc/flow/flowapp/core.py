@@ -164,6 +164,8 @@ class UIType(enum.Enum):
     ThreeLine = 0x102c
     ThreeFlexManualReflow = 0x102d
 
+    ThreeScreenShot = 0x102f
+
     ThreeSimpleGeometry = 0x1101
     ThreeShape = 0x1102
 

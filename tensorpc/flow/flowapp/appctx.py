@@ -12,18 +12,40 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from tensorpc.flow.flowapp.app import get_app_context, get_app
+from tensorpc.flow.flowapp.app import get_app_context, get_app, find_component, get_reload_manager
+from tensorpc.flow.flowapp.components import plus 
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
 
-T = TypeVar("T")
 
-def find_component(type: Type[T]) -> Optional[T]:
-    appctx = get_app_context()
-    assert appctx is not None, "you must use this function in app"
-    return appctx.app.find_component(type)
+async def obj_inspector_update_locals():
+    comp = find_component(plus.ObjectInspector)
+    assert comp is not None, "you must add inspector to your UI"
+    await comp.update_locals(_frame_cnt=2)
 
-def get_reload_manager():
-    appctx = get_app_context()
-    assert appctx is not None, "you must use this function in app"
-    return appctx.app._flow_reload_manager
+def obj_inspector_update_locals_sync():
+    comp = find_component(plus.ObjectInspector)
+    assert comp is not None, "you must add inspector to your UI"
+    return comp.update_locals_sync(_frame_cnt=2)
+
+async def obj_inspector_set_object(obj, key: str):
+    comp = find_component(plus.ObjectInspector)
+    assert comp is not None, "you must add inspector to your UI"
+    await comp.set_object(obj, key)
+
+def obj_inspector_set_object_sync(obj, key: str):
+    comp = find_component(plus.ObjectInspector)
+    assert comp is not None, "you must add inspector to your UI"
+    return comp.set_object_sync(obj, key)
+
+def get_simple_canvas():
+    comp = find_component(plus.SimpleCanvas)
+    assert comp is not None, "you must add simple canvas to your UI"
+    return comp 
+
+def get_simple_canvas_may_exist():
+    """for conditional visualization
+    """
+    comp = find_component(plus.SimpleCanvas)
+    return comp 
+
