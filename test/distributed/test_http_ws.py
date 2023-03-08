@@ -1,11 +1,11 @@
 # Copyright 2022 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,13 +21,14 @@ import asyncio
 from typing import Tuple
 import numpy as np
 import pytest
-import aiohttp 
+import aiohttp
 from tensorpc.core import asyncclient
 from tensorpc.utils.wait_tools import get_free_loopback_tcp_port
 from tensorpc import PACKAGE_ROOT
 from tensorpc.services.for_test import Service2
 from tensorpc.core.httpclient import http_remote_call, WebsocketClient
 import pytest_asyncio
+
 
 @pytest_asyncio.fixture
 async def sess_url():
@@ -56,6 +57,7 @@ async def sess_url():
                 "localhost:{}".format(port)) as robj:
             await robj.shutdown()
         proc.wait()
+
 
 @contextlib.asynccontextmanager
 async def sess_url_local():
@@ -114,10 +116,10 @@ async def test_remote_call(sess_url: Tuple[aiohttp.ClientSession, str, str]):
         await asyncio.sleep(2)
 
 
-
 async def main_async():
     async with sess_url_local() as robj:
         await test_remote_call(robj)
+
 
 if __name__ == "__main__":
     asyncio.run(main_async())

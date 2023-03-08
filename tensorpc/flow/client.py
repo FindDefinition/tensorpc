@@ -85,11 +85,14 @@ class MasterMeta:
         assert self._node_id is not None
         return self._node_id
 
+
 class AppLocalMeta:
+
     def __init__(self) -> None:
         gport = os.getenv(constants.TENSORPC_FLOW_APP_GRPC_PORT)
         port = os.getenv(constants.TENSORPC_FLOW_APP_HTTP_PORT)
-        self.module_name = os.getenv(constants.TENSORPC_FLOW_APP_MODULE_NAME, "")
+        self.module_name = os.getenv(constants.TENSORPC_FLOW_APP_MODULE_NAME,
+                                     "")
         url = ""
         grpc_url = ""
         if port is not None:
@@ -102,13 +105,16 @@ class AppLocalMeta:
         self.http_url = url
         self.is_inside_devflow = gport is not None and port is not None and self.module_name != ""
 
+
 def is_inside_devflow():
     meta = MasterMeta()
     return meta.is_inside_devflow
 
+
 def is_inside_app():
     meta = AppLocalMeta()
     return meta.is_inside_devflow
+
 
 def _get_ids_and_url():
     gid = os.getenv(constants.TENSORPC_FLOW_GRAPH_ID)
@@ -219,19 +225,24 @@ class AppClientBase(tensorpc.RemoteManager):
                  enabled: bool = True):
         if enabled:
             if master_url == "":
-                is_remote = False 
+                is_remote = False
                 local_meta = AppLocalMeta()
                 module_key = local_meta.module_name
                 assert local_meta.is_inside_devflow, "you can only use this in devflow."
                 app_urls = (local_meta.grpc_url, local_meta.http_url)
             else:
-                app_urls, is_remote, module_key = query_app_urls(master_url, graph_id, node_id)
+                app_urls, is_remote, module_key = query_app_urls(
+                    master_url, graph_id, node_id)
         else:
             app_urls = ("", "")
-            is_remote = False 
+            is_remote = False
             module_key = ""
-        super().__init__(app_urls[0], name, channel_options, credentials,
-                         print_stdout, enabled=enabled)
+        super().__init__(app_urls[0],
+                         name,
+                         channel_options,
+                         credentials,
+                         print_stdout,
+                         enabled=enabled)
         self.graph_id = graph_id
         self.node_id = node_id
         self.is_remote = is_remote
@@ -255,7 +266,8 @@ class AppClientBase(tensorpc.RemoteManager):
                         **kwargs):
         return self.remote_call(self.remote_key,
                                 self.module_key + "." + key,
-                                *self.graph_args, *args,
+                                *self.graph_args,
+                                *args,
                                 timeout=timeout,
                                 rpc_callback=rpc_callback,
                                 rpc_flags=rpc_flags,
@@ -269,25 +281,28 @@ class AppClientBase(tensorpc.RemoteManager):
                                 rpc_flags: int = rpc_message_pb2.PickleArray,
                                 **kwargs):
         return self.chunked_remote_call(self.remote_key,
-                                self.module_key + "." + key,
-                                        *self.graph_args, *args,
+                                        self.module_key + "." + key,
+                                        *self.graph_args,
+                                        *args,
                                         rpc_flags=rpc_flags,
                                         **kwargs)
 
-    def app_remote_generator(
-            self,
-            key: str,
-            *args,
-            timeout: Optional[int] = None,
-            rpc_callback="",
-            rpc_flags: int = rpc_message_pb2.PickleArray,
-            **kwargs) -> Generator[Any, None, None]:
+    def app_remote_generator(self,
+                             key: str,
+                             *args,
+                             timeout: Optional[int] = None,
+                             rpc_callback="",
+                             rpc_flags: int = rpc_message_pb2.PickleArray,
+                             **kwargs) -> Generator[Any, None, None]:
         for data in self.remote_generator(self.async_gen_key,
-                                self.module_key + "." + key, *self.graph_args, *args,
-                                        rpc_flags=rpc_flags,
-                                        rpc_callback=rpc_callback,
-                                        **kwargs):
+                                          self.module_key + "." + key,
+                                          *self.graph_args,
+                                          *args,
+                                          rpc_flags=rpc_flags,
+                                          rpc_callback=rpc_callback,
+                                          **kwargs):
             yield data
+
 
 class AppClient(AppClientBase):
 
@@ -301,7 +316,9 @@ class AppClient(AppClientBase):
                  print_stdout=True,
                  enabled: bool = True):
         assert master_url != "" and graph_id != "" and node_id != ""
-        super().__init__(master_url, graph_id, node_id,name, channel_options, credentials, print_stdout, enabled)
+        super().__init__(master_url, graph_id, node_id, name, channel_options,
+                         credentials, print_stdout, enabled)
+
 
 class AppLocalClient(AppClientBase):
 
@@ -311,7 +328,8 @@ class AppLocalClient(AppClientBase):
                  credentials=None,
                  print_stdout=True,
                  enabled: bool = True):
-        super().__init__("", "", "" ,name, channel_options, credentials, print_stdout, enabled)
+        super().__init__("", "", "", name, channel_options, credentials,
+                         print_stdout, enabled)
 
 
 class AsyncAppClientBase(tensorpc.AsyncRemoteManager):
@@ -327,20 +345,25 @@ class AsyncAppClientBase(tensorpc.AsyncRemoteManager):
                  enabled: bool = True):
         if enabled:
             if master_url == "":
-                is_remote = False 
+                is_remote = False
                 local_meta = AppLocalMeta()
                 module_key = local_meta.module_name
                 assert local_meta.is_inside_devflow, "you can only use this in devflow."
                 app_urls = (local_meta.grpc_url, local_meta.http_url)
             else:
-                app_urls, is_remote, module_key = query_app_urls(master_url, graph_id, node_id)
+                app_urls, is_remote, module_key = query_app_urls(
+                    master_url, graph_id, node_id)
         else:
             app_urls = ("", "")
-            is_remote = False 
+            is_remote = False
             module_key = ""
-            
-        super().__init__(app_urls[0], name, channel_options, credentials,
-                         print_stdout, enabled=enabled)
+
+        super().__init__(app_urls[0],
+                         name,
+                         channel_options,
+                         credentials,
+                         print_stdout,
+                         enabled=enabled)
         self.graph_id = graph_id
         self.node_id = node_id
         self.is_remote = is_remote
@@ -357,33 +380,36 @@ class AsyncAppClientBase(tensorpc.AsyncRemoteManager):
         self.module_key = module_key
 
     async def app_remote_call(self,
-                        key: str,
-                        *args,
-                        timeout: Optional[int] = None,
-                        rpc_callback="",
-                        rpc_flags: int = rpc_message_pb2.PickleArray,
-                        **kwargs):
+                              key: str,
+                              *args,
+                              timeout: Optional[int] = None,
+                              rpc_callback="",
+                              rpc_flags: int = rpc_message_pb2.PickleArray,
+                              **kwargs):
 
         return await self.remote_call(self.remote_key,
-                                self.module_key + "." + key,
-                                *self.graph_args, *args,
-                                timeout=timeout,
-                                rpc_callback=rpc_callback,
-                                rpc_flags=rpc_flags,
-                                **kwargs)
+                                      self.module_key + "." + key,
+                                      *self.graph_args,
+                                      *args,
+                                      timeout=timeout,
+                                      rpc_callback=rpc_callback,
+                                      rpc_flags=rpc_flags,
+                                      **kwargs)
 
-    async def app_chunked_remote_call(self,
-                                key: str,
-                                *args,
-                                timeout: Optional[int] = None,
-                                rpc_callback="",
-                                rpc_flags: int = rpc_message_pb2.PickleArray,
-                                **kwargs):
+    async def app_chunked_remote_call(
+            self,
+            key: str,
+            *args,
+            timeout: Optional[int] = None,
+            rpc_callback="",
+            rpc_flags: int = rpc_message_pb2.PickleArray,
+            **kwargs):
         return await self.chunked_remote_call(self.remote_key,
-                                self.module_key + "." + key,
-                                        *self.graph_args, *args,
-                                        rpc_flags=rpc_flags,
-                                        **kwargs)
+                                              self.module_key + "." + key,
+                                              *self.graph_args,
+                                              *args,
+                                              rpc_flags=rpc_flags,
+                                              **kwargs)
 
     async def app_remote_generator(
             self,
@@ -394,11 +420,14 @@ class AsyncAppClientBase(tensorpc.AsyncRemoteManager):
             rpc_flags: int = rpc_message_pb2.PickleArray,
             **kwargs) -> AsyncGenerator[Any, None]:
         async for data in self.remote_generator(self.async_gen_key,
-                                self.module_key + "." + key, *self.graph_args, *args,
-                                        rpc_flags=rpc_flags,
-                                        rpc_callback=rpc_callback,
-                                        **kwargs):
+                                                self.module_key + "." + key,
+                                                *self.graph_args,
+                                                *args,
+                                                rpc_flags=rpc_flags,
+                                                rpc_callback=rpc_callback,
+                                                **kwargs):
             yield data
+
 
 class AsyncAppClient(AsyncAppClientBase):
 
@@ -412,7 +441,9 @@ class AsyncAppClient(AsyncAppClientBase):
                  print_stdout=True,
                  enabled: bool = True):
         assert master_url != "" and graph_id != "" and node_id != ""
-        super().__init__(master_url, graph_id, node_id,name, channel_options, credentials, print_stdout, enabled)
+        super().__init__(master_url, graph_id, node_id, name, channel_options,
+                         credentials, print_stdout, enabled)
+
 
 class AsyncAppLocalClient(AsyncAppClientBase):
 
@@ -422,4 +453,5 @@ class AsyncAppLocalClient(AsyncAppClientBase):
                  credentials=None,
                  print_stdout=True,
                  enabled: bool = True):
-        super().__init__("", "", "" ,name, channel_options, credentials, print_stdout, enabled)
+        super().__init__("", "", "", name, channel_options, credentials,
+                         print_stdout, enabled)

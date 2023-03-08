@@ -1,17 +1,16 @@
 # Copyright 2022 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """The Python implementation of the GRPC RemoteCall.RemoteObject server."""
 
 import asyncio
@@ -67,9 +66,9 @@ class RemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
 
     def QueryServiceMeta(self, request, context):
         service_key = request.service_key
-        _, meta = self.server_core.service_units.get_service_and_meta(service_key)
-        return rpc_message_pb2.SimpleReply(
-            data=json.dumps(meta.to_json()))
+        _, meta = self.server_core.service_units.get_service_and_meta(
+            service_key)
+        return rpc_message_pb2.SimpleReply(data=json.dumps(meta.to_json()))
 
     def RemoteJsonCall(self, request, context):
         res = self.server_core.remote_json_call(request)
@@ -109,8 +108,10 @@ class RemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
     def ServerShutdown(self, request, context):
         print("Shutdown message received")
         self.server_core._reset_timeout()
+
         def shutdown_cb():
             self.server_core.shutdown_event.set()
+
         context.add_callback(shutdown_cb)
         return rpc_message_pb2.SimpleReply()
 
@@ -174,7 +175,7 @@ def serve_service(service: RemoteObjectService,
 
 
 def serve(service_def: ServiceDef,
-         wait_time=-1,
+          wait_time=-1,
           port=50051,
           length=-1,
           is_local=False,
@@ -187,7 +188,6 @@ def serve(service_def: ServiceDef,
     service = RemoteObjectService(server_core, is_local, length)
     return serve_service(service, wait_time, port, length, is_local,
                          max_threads, process_id, credentials)
-
 
 
 def serve_with_http(service_def: ServiceDef,
@@ -205,8 +205,7 @@ def serve_with_http(service_def: ServiceDef,
     url = '[::]:{}'.format(port)
     smeta = ServerMeta(port=port, http_port=http_port)
 
-    server_core = ProtobufServiceCore(url,
-                                      service_def, True, smeta)
+    server_core = ProtobufServiceCore(url, service_def, True, smeta)
     service = RemoteObjectService(server_core, is_local, length)
 
     kwargs = {

@@ -48,4 +48,3 @@ InMacOS = False
 if platform.system() == "Darwin":
     InMacOS = True
     OS = OSType.MacOS
-

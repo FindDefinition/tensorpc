@@ -1,11 +1,11 @@
 # Copyright 2022 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,6 +19,7 @@ from typing import Any, Callable
 import types
 import inspect
 import importlib.machinery
+
 
 def reload_method(method: Callable, module_dict: dict, prev_code: str = ""):
     if isinstance(method, partial):
@@ -42,7 +43,7 @@ def reload_method(method: Callable, module_dict: dict, prev_code: str = ""):
     #     module_dict = module.__dict__
     # except:
     #     traceback.print_exc()
-    #     return False 
+    #     return False
     new_method_unbound = module_dict[qual_parts[0]]
     for p in qual_parts[1:]:
         new_method_unbound = getattr(new_method_unbound, p)
@@ -58,5 +59,6 @@ def reload_method(method: Callable, module_dict: dict, prev_code: str = ""):
         new_method = partial(new_method, *method.args, **method.keywords)
     return new_method, new_method_code
 
+
 def rebind_object(obj: Any):
-    pass 
+    pass

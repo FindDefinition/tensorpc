@@ -4,10 +4,12 @@ from typing import Any, Dict, List
 import dataclasses
 from tensorpc.autossh.core import Event, event_from_dict
 from tensorpc.core.moduleid import get_qualname_of_type
-import numpy as np 
+import numpy as np
+
 
 def get_uid(graph_id: str, node_id: str):
     return f"{graph_id}@{node_id}"
+
 
 class DataStorageItemType(enum.Enum):
     Dict = 0
@@ -15,14 +17,18 @@ class DataStorageItemType(enum.Enum):
     Other = 2
     NdArray = 3
 
+
 @dataclasses.dataclass
 class DataItemMeta:
     name: str
     type: DataStorageItemType
     meta_str: str
 
+
 class StorageDataItem:
-    def __init__(self, data: bytes, timestamp: int, meta: DataItemMeta) -> None:
+
+    def __init__(self, data: bytes, timestamp: int,
+                 meta: DataItemMeta) -> None:
         self.data = data
         self.timestamp = timestamp
         self.meta = meta
@@ -40,6 +46,7 @@ class StorageDataItem:
             "meta": self.meta.meta_str
         }
 
+
 class MessageItemType(enum.Enum):
     Text = 0
     Image = 1
@@ -52,6 +59,7 @@ class MessageLevel(enum.Enum):
 
 
 class MessageItem:
+
     def __init__(self, type: MessageItemType, data: Any) -> None:
         self.type = type
         self.data = data
@@ -66,7 +74,9 @@ class MessageItem:
     def from_dict(cls, data):
         return cls(MessageItemType(data["type"]), data["data"])
 
+
 class Message:
+
     def __init__(self, uid: str, level: MessageLevel, timestamp: int,
                  graph_id: str, node_id: str, title: str,
                  items: List[MessageItem]) -> None:
@@ -101,19 +111,22 @@ class Message:
     def to_dict_with_detail(self):
         return self.to_dict(True)
 
-
     @classmethod
     def from_dict(cls, data):
-        return cls(data["uid"], MessageLevel(data["level"]), data["ts"], data["graphId"],
-            data["nodeId"], data["title"], [MessageItem.from_dict(it) for it in data["items"]])
+        return cls(data["uid"], MessageLevel(data["level"]), data["ts"],
+                   data["graphId"], data["nodeId"], data["title"],
+                   [MessageItem.from_dict(it) for it in data["items"]])
+
 
 class MessageEventType(enum.Enum):
     Update = "Update"
     Replace = "Replace"
 
+
 class MessageEvent:
+
     def __init__(self, type: MessageEventType, rawmsgs: List[Any]) -> None:
-        self.type = type 
+        self.type = type
         self.rawmsgs = rawmsgs
 
     def to_dict(self):
@@ -121,7 +134,7 @@ class MessageEvent:
             "type": self.type.value,
             "msgs": self.rawmsgs,
         }
-        
+
 
 class RelayEventType(enum.Enum):
     UpdateNodeStatus = "UpdateNodeStatus"
@@ -129,6 +142,7 @@ class RelayEventType(enum.Enum):
 
 
 class RelayEvent:
+
     def __init__(self, type: RelayEventType):
         self.type = type
 
@@ -139,6 +153,7 @@ class RelayEvent:
 
 
 class RelaySSHEvent(RelayEvent):
+
     def __init__(self, ev: Event, uid: str):
         super().__init__(RelayEventType.SSHEvent)
         self.uid = uid
@@ -158,6 +173,7 @@ class RelaySSHEvent(RelayEvent):
 
 
 class RelayUpdateNodeEvent(RelayEvent):
+
     def __init__(self, graph_id: str, node_id: str, content: Any):
         super().__init__(RelayEventType.UpdateNodeStatus)
         self.graph_id = graph_id
@@ -202,6 +218,7 @@ class UserEventType(enum.Enum):
 
 
 class UserEvent:
+
     def __init__(self, type: UserEventType):
         self.type = type
 
@@ -210,9 +227,11 @@ class UserEvent:
             "type": self.type.value,
         }
 
+
 class SessionStatus(enum.Enum):
     Running = 0
     Stop = 1
+
 
 class UserStatusEvent(UserEvent):
     ALL_STATUS = set(["idle", "running", "error", "success"])
@@ -233,7 +252,9 @@ class UserStatusEvent(UserEvent):
     def empty():
         return UserStatusEvent("idle", SessionStatus.Stop)
 
+
 class UserContentEvent(UserEvent):
+
     def __init__(self, content: Any):
         super().__init__(UserEventType.Content)
         self.content = content
@@ -243,7 +264,9 @@ class UserContentEvent(UserEvent):
         res["content"] = self.content
         return res
 
+
 class UserDataUpdateEvent(UserEvent):
+
     def __init__(self, content: Any):
         super().__init__(UserEventType.DataUpdate)
         self.content = content
@@ -255,7 +278,9 @@ class UserDataUpdateEvent(UserEvent):
 
 
 class ScheduleEvent:
-    def __init__(self, timestamp: int, data: Any, envs: Dict[str, Any]) -> None:
+
+    def __init__(self, timestamp: int, data: Any, envs: Dict[str,
+                                                             Any]) -> None:
         self.data = data
         self.timestamp = timestamp
         self.envs = envs

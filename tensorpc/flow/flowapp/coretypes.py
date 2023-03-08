@@ -1,8 +1,9 @@
-import dataclasses 
+import dataclasses
 from typing import Any
+
 
 @dataclasses.dataclass
 class TreeDragTarget:
-    obj: Any 
+    obj: Any
     tree_id: str
     tab_id: str = ""

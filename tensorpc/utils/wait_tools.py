@@ -5,7 +5,11 @@ import asyncio
 from typing import List
 from async_timeout import timeout
 
-def wait_until(func, max_retries: int=200, check_interval: float=1, check_func=None):
+
+def wait_until(func,
+               max_retries: int = 200,
+               check_interval: float = 1,
+               check_func=None):
     while max_retries > 0:
         res = func()
         if res:
@@ -18,8 +22,8 @@ def wait_until(func, max_retries: int=200, check_interval: float=1, check_func=N
 
 
 async def wait_until_async(func,
-                           max_retries: int=200,
-                           check_interval: float=1,
+                           max_retries: int = 200,
+                           check_interval: float = 1,
                            check_func=None):
     while max_retries > 0:
         res = await func()
@@ -31,22 +35,24 @@ async def wait_until_async(func,
         max_retries -= 1
     raise TimeoutError
 
+
 async def wait_blocking_async(blocking_func,
-                           max_retries: int=200,
-                           check_interval: float=1,
-                           check_func=None):
+                              max_retries: int = 200,
+                              check_interval: float = 1,
+                              check_func=None):
     while max_retries > 0:
         async with timeout(check_interval) as status:
             await blocking_func()
         if not status.expired:
-            return 
+            return
         max_retries -= 1
     raise TimeoutError
 
+
 def wait_until_noexcept_call(func,
                              *args,
-                             max_retries: int=200,
-                             check_interval: float=1,
+                             max_retries: int = 200,
+                             check_interval: float = 1,
                              **kw):
     while max_retries > 0:
         try:
@@ -80,6 +86,7 @@ def get_free_loopback_tcp_port():
         yield address_tuple[1]
     finally:
         tcp_socket.close()
+
 
 def get_free_ports(count: int):
     ports: List[int] = []

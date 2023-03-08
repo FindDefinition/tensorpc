@@ -26,7 +26,6 @@ from tensorpc.core.funcid import (get_toplevel_class_node,
 from tensorpc.core.moduleid import TypeMeta, get_obj_type_meta
 
 
-
 class ParamType(Enum):
     PosOnly = "PosOnly"
     PosOrKw = "PosOrKw"
@@ -72,6 +71,7 @@ class ServiceType(Enum):
     WebSocketOnConnect = "WebSocketOnConnect"  # only support ws
     WebSocketOnDisConnect = "WebSocketOnDisConnect"  # only support ws
 
+
 class AppFuncType(Enum):
     CreateLayout = "CreateLayout"
     AutoRun = "AutoRun"
@@ -80,22 +80,19 @@ class AppFuncType(Enum):
     ComponentDidMount = "ComponentDidMount"
     ComponentWillUnmount = "ComponentWillUnmount"
 
+
 class AppFunctionMeta:
 
-    def __init__(self,
-                 type: AppFuncType,
-                 name: str = "") -> None:
+    def __init__(self, type: AppFuncType, name: str = "") -> None:
         self.type = type
         self.name = name
 
     def to_dict(self):
-        return {
-            "type": self.type.value,
-            "name": self.name
-        }
+        return {"type": self.type.value, "name": self.name}
 
     def __repr__(self):
         return f"{self.type}|{self.name}"
+
 
 @dataclasses.dataclass
 class ServFunctionMeta:
@@ -109,13 +106,20 @@ class ServFunctionMeta:
     is_binded: bool
     code: str = ""
     qualname: str = ""
-    user_app_meta: Optional[AppFunctionMeta] = None 
+    user_app_meta: Optional[AppFunctionMeta] = None
     binded_fn: Optional[Callable] = None
 
-    def __init__(self, fn: Callable, name: str, type: ServiceType,
-                 sig: inspect.Signature, is_gen: bool, is_async: bool,
-                 is_static: bool, is_binded: bool, qualname: str = "",
-                 user_app_meta: Optional[AppFunctionMeta] = None ) -> None:
+    def __init__(self,
+                 fn: Callable,
+                 name: str,
+                 type: ServiceType,
+                 sig: inspect.Signature,
+                 is_gen: bool,
+                 is_async: bool,
+                 is_static: bool,
+                 is_binded: bool,
+                 qualname: str = "",
+                 user_app_meta: Optional[AppFunctionMeta] = None) -> None:
         self.name = name
         self.type = type
         self.args = [ParamMeta(n, p) for n, p in sig.parameters.items()]
@@ -150,16 +154,16 @@ class ServFunctionMeta:
     def bind(self, obj):
         if not self.is_binded:
             if not self.is_static:
-                new_method =  types.MethodType(self.fn, obj)
+                new_method = types.MethodType(self.fn, obj)
             else:
                 new_method = self.fn
             self.binded_fn = new_method
-            return self.binded_fn 
-        assert self.binded_fn is not None 
-        return self.binded_fn 
+            return self.binded_fn
+        assert self.binded_fn is not None
+        return self.binded_fn
 
     def get_binded_fn(self):
-        assert self.binded_fn is not None 
+        assert self.binded_fn is not None
         return self.binded_fn
 
 
@@ -192,6 +196,7 @@ class TypeCacheEntry:
 class ModuleCacheEntry:
     module: ModuleType
     module_dict: Dict[str, Any]
+
 
 def _splitlines_no_ff(source):
     """Split a string into lines ignoring form feed and other chars.
@@ -228,7 +233,9 @@ def _pad_whitespace(source):
             result += ' '
     return result
 
+
 class SourceSegmentGetter:
+
     def __init__(self, source: str) -> None:
         self.lines = _splitlines_no_ff(source)
 
@@ -254,17 +261,19 @@ class SourceSegmentGetter:
             return lines[lineno].encode()[col_offset:end_col_offset].decode()
 
         if padded:
-            padding = _pad_whitespace(lines[lineno].encode()[:col_offset].decode())
+            padding = _pad_whitespace(
+                lines[lineno].encode()[:col_offset].decode())
         else:
             padding = ''
 
         first = padding + lines[lineno].encode()[col_offset:].decode()
         last = lines[end_lineno].encode()[:end_col_offset].decode()
-        lines = lines[lineno+1:end_lineno]
+        lines = lines[lineno + 1:end_lineno]
 
         lines.insert(0, first)
         lines.append(last)
         return ''.join(lines)
+
 
 def get_qualname_to_code(lines: List[str]):
     source = "".join(lines)
@@ -276,14 +285,15 @@ def get_qualname_to_code(lines: List[str]):
     for n, nss in nodes:
         ns = ".".join([nx.name for nx in nss])
         qualname = ns + "." + n.name
-        # TODO this function won't handle decorator    
+        # TODO this function won't handle decorator
         # here we can't use ast.get_source_segment
         # because it's very slow. we need to cache
-        # lines. 
+        # lines.
         code = ssg.get_source_segment(n, padded=False)
         assert code is not None
         qualname_to_code[qualname] = code
-    return qualname_to_code 
+    return qualname_to_code
+
 
 class ObjectReloadManager:
     """to resolve some side effects, users should
@@ -399,7 +409,7 @@ class ObjectReloadManager:
         if type in self.type_method_meta_cache:
             return self.type_method_meta_cache[type]
         qualname_to_code = None
-        # use qualname_to_code from ast to resolve some problem 
+        # use qualname_to_code from ast to resolve some problem
         # if we just use inspect, inspect will use newest code
         # qualname_to_code always use code stored in manager.
         if path in self.file_cache:
@@ -410,7 +420,7 @@ class ObjectReloadManager:
                     lines = f.readlines()
                 qualname_to_code = get_qualname_to_code(lines)
             except:
-                pass 
+                pass
         new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
             type, include_base=False, qualname_to_code=qualname_to_code)
         self.type_method_meta_cache[type] = new_metas
@@ -418,7 +428,11 @@ class ObjectReloadManager:
 
 
 class DynamicClass:
-    def __init__(self, module_name: str, ) -> None:
+
+    def __init__(
+        self,
+        module_name: str,
+    ) -> None:
         self.module_name = module_name
         module_cls = module_name.split(TENSORPC_SPLIT)
         self.module_path = module_cls[0]
@@ -435,11 +449,13 @@ class DynamicClass:
             if self.module_path.startswith("!"):
                 self.module_path = self.module_path[1:]
                 self.file_path = self.module_path
-                assert Path(self.module_path).exists(), f"your {self.module_path} not exists"
+                assert Path(self.module_path).exists(
+                ), f"your {self.module_path} not exists"
                 # treat module_path as a file path
                 # import sys
                 mod_name = Path(self.module_path).stem + "_" + uuid.uuid4().hex
-                spec = importlib.util.spec_from_file_location(mod_name, self.module_path)
+                spec = importlib.util.spec_from_file_location(
+                    mod_name, self.module_path)
                 assert spec is not None, f"your {self.module_path} not exists"
                 self.standard_module = importlib.util.module_from_spec(spec)
                 assert spec.loader is not None, "shouldn't happen"
@@ -449,7 +465,8 @@ class DynamicClass:
                 self.is_standard_module = False
                 # self.module_dict = runpy.run_path(self.module_path)
             else:
-                self.standard_module = importlib.import_module(self.module_path)
+                self.standard_module = importlib.import_module(
+                    self.module_path)
                 file_path = inspect.getfile(self.standard_module)
                 assert file_path is not None, f"don't support compiled library, {file_path} must be .py"
                 self.file_path = file_path
@@ -460,11 +477,14 @@ class DynamicClass:
             raise
         obj_type = self.module_dict[self.cls_name]
         self.obj_type = obj_type
-        self.module_key =  f"{self.module_path}{TENSORPC_SPLIT}{self.cls_name}"
+        self.module_key = f"{self.module_path}{TENSORPC_SPLIT}{self.cls_name}"
 
 
 class ReloadableDynamicClass(DynamicClass):
-    def __init__(self, module_name: str, reload_mgr: Optional[ObjectReloadManager] = None) -> None:
+
+    def __init__(self,
+                 module_name: str,
+                 reload_mgr: Optional[ObjectReloadManager] = None) -> None:
         super().__init__(module_name)
         if reload_mgr is not None:
             self.serv_metas = reload_mgr.query_type_method_meta(self.obj_type)
@@ -472,7 +492,10 @@ class ReloadableDynamicClass(DynamicClass):
             self.serv_metas = self.get_metas_of_regular_methods(self.obj_type)
 
     @staticmethod
-    def get_metas_of_regular_methods(type_obj, include_base: bool = False, qualname_to_code: Optional[Dict[str, str]] = None):
+    def get_metas_of_regular_methods(
+            type_obj,
+            include_base: bool = False,
+            qualname_to_code: Optional[Dict[str, str]] = None):
         serv_metas: List[ServFunctionMeta] = []
         members = inspecttools.get_members_by_type(type_obj, not include_base)
         for k, v in members:
@@ -494,8 +517,15 @@ class ReloadableDynamicClass(DynamicClass):
                 app_meta = getattr(v_static, TENSORPC_FLOW_FUNC_META_KEY)
 
             v_sig = inspect.signature(v)
-            serv_meta = ServFunctionMeta(v, k, ServiceType.Normal, v_sig, is_gen,
-                                         is_async, is_static, False, qualname=v.__qualname__,
+            serv_meta = ServFunctionMeta(v,
+                                         k,
+                                         ServiceType.Normal,
+                                         v_sig,
+                                         is_gen,
+                                         is_async,
+                                         is_static,
+                                         False,
+                                         qualname=v.__qualname__,
                                          user_app_meta=app_meta)
             code = None
             if qualname_to_code is not None:
@@ -512,10 +542,13 @@ class ReloadableDynamicClass(DynamicClass):
         for m in self.serv_metas:
             if m.user_app_meta is not None:
                 if m.user_app_meta.type == AppFuncType.CreateObject:
-                    return m.fn 
-        return None 
+                    return m.fn
+        return None
 
-    def reload_obj_methods(self, obj, callback_dict: Optional[Dict[str, Any]] = None, reload_mgr: Optional[ObjectReloadManager] = None):
+    def reload_obj_methods(self,
+                           obj,
+                           callback_dict: Optional[Dict[str, Any]] = None,
+                           reload_mgr: Optional[ObjectReloadManager] = None):
         # reload regular methods/static methods
         new_cb: Dict[str, Any] = {}
         if callback_dict is None:
@@ -526,7 +559,7 @@ class ReloadableDynamicClass(DynamicClass):
             self.module_dict = res[0].module_dict
         else:
             if self.is_standard_module and self.standard_module is not None:
-                importlib.reload(self.standard_module) 
+                importlib.reload(self.standard_module)
                 self.module_dict = self.standard_module.__dict__
             else:
                 self.module_dict = runpy.run_path(self.module_path)
@@ -628,7 +661,8 @@ class ServiceUnit(DynamicClass):
         self.exit_fn: Optional[Any] = None
         self._is_exit_fn_async: bool = False
         self.ws_onconn_fn: Optional[Callable[[Any], None]] = None
-        self.async_init: Optional[Callable[[], Coroutine[None, None, None]]] = None
+        self.async_init: Optional[Callable[[], Coroutine[None, None,
+                                                         None]]] = None
         self.ws_ondisconn_fn: Optional[Callable[[Any], None]] = None
         self.name_to_events: Dict[str, EventProvider] = {}
         self.serv_metas = self._init_all_metas(self.obj_type)
@@ -647,7 +681,7 @@ class ServiceUnit(DynamicClass):
             self.module_dict = res[0].module_dict
         else:
             if self.is_standard_module and self.standard_module is not None:
-                importlib.reload(self.standard_module) 
+                importlib.reload(self.standard_module)
                 self.module_dict = self.standard_module.__dict__
             else:
                 self.module_dict = runpy.run_path(self.module_path)
@@ -716,8 +750,15 @@ class ServiceUnit(DynamicClass):
                 assert self.ws_ondisconn_fn is None, "you can only register one ws_onconn_fn"
                 self.ws_ondisconn_fn = v
 
-            serv_meta = ServFunctionMeta(v, k, serv_type, v_sig, is_gen,
-                                         is_async, is_static, False, user_app_meta=app_meta)
+            serv_meta = ServFunctionMeta(v,
+                                         k,
+                                         serv_type,
+                                         v_sig,
+                                         is_gen,
+                                         is_async,
+                                         is_static,
+                                         False,
+                                         user_app_meta=app_meta)
             # if module_name == "distflow.services.for_test:Service2:Test3" and k == "client_stream":
             #     print(dir(v))
             # print(module_name, serv_meta, is_async, is_async_gen)
@@ -734,9 +775,10 @@ class ServiceUnit(DynamicClass):
                     ev_provider.service_key = alias_key
                     self.name_to_events[alias_key] = ev_provider
         return new_metas
-            
 
-    def init_service(self, external_obj: Optional[Any] = None, rebind: bool = False):
+    def init_service(self,
+                     external_obj: Optional[Any] = None,
+                     rebind: bool = False):
         # lazy init
         if self.obj is None or rebind:
             if not rebind:

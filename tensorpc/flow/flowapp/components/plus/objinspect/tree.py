@@ -36,10 +36,16 @@ BASE_OBJ_TO_TYPE = {
 
 STRING_LENGTH_LIMIT = 2000
 
+
 class ButtonType(enum.Enum):
     Reload = "reload"
 
-def parse_obj_item(obj, name: str, id: str, checker: Callable[[Type], bool], obj_meta_cache = None):
+
+def parse_obj_item(obj,
+                   name: str,
+                   id: str,
+                   checker: Callable[[Type], bool],
+                   obj_meta_cache=None):
     obj_type = type(obj)
     if obj is None or obj is Ellipsis:
         return mui.JsonLikeNode(id,
@@ -130,11 +136,12 @@ def parse_obj_item(obj, name: str, id: str, checker: Callable[[Type], bool], obj
             is_layout = obj_meta_cache[obj_type]
         else:
             if obj_type in ALL_OBJECT_LAYOUT_HANDLERS:
-                is_layout = True 
+                is_layout = True
             else:
-                metas = ReloadableDynamicClass.get_metas_of_regular_methods(obj_type, True)
+                metas = ReloadableDynamicClass.get_metas_of_regular_methods(
+                    obj_type, True)
                 special_methods = FlowSpecialMethods(metas)
-                is_layout = special_methods.create_layout is not None 
+                is_layout = special_methods.create_layout is not None
             obj_meta_cache[obj_type] = is_layout
         is_draggable = is_layout
         if isinstance(obj, mui.Component):
@@ -149,15 +156,21 @@ def parse_obj_item(obj, name: str, id: str, checker: Callable[[Type], bool], obj
                                 typeStr=obj_type.__qualname__,
                                 childCnt=1,
                                 draggable=is_draggable,
-                                iconButtons=[(ButtonType.Reload.value, mui.IconType.Refresh.value)])
+                                iconButtons=[(ButtonType.Reload.value,
+                                              mui.IconType.Refresh.value)])
 
 
-def parse_obj_dict(obj_dict: Dict[str, Any], ns: str, checker: Callable[[Type],
-                                                                        bool],
-                                                        obj_meta_cache = None):
+def parse_obj_dict(obj_dict: Dict[str, Any],
+                   ns: str,
+                   checker: Callable[[Type], bool],
+                   obj_meta_cache=None):
     res_node: List[mui.JsonLikeNode] = []
     for k, v in obj_dict.items():
-        node = parse_obj_item(v, k, f"{ns}-{k}", checker, obj_meta_cache=obj_meta_cache)
+        node = parse_obj_item(v,
+                              k,
+                              f"{ns}-{k}",
+                              checker,
+                              obj_meta_cache=obj_meta_cache)
         res_node.append(node)
     return res_node
 
@@ -214,21 +227,23 @@ def _get_obj_dict(obj,
         res[k] = v
     return res
 
-def _get_obj_single_attr(obj, key: str,
-                  checker: Callable[[Type], bool],
-                  check_obj: bool = True) -> Union[mui.Undefined, Any]:
+
+def _get_obj_single_attr(obj,
+                         key: str,
+                         checker: Callable[[Type], bool],
+                         check_obj: bool = True) -> Union[mui.Undefined, Any]:
     # if isinstance(obj, (list, tuple, set)):
     #     try:
     #         key_int = int(key)
     #     except:
     #         return mui.undefined
     #     if key_int < 0 or key_int >= len(obj):
-    #         return mui.undefined 
+    #         return mui.undefined
     #     obj_list = list(obj)
     #     return obj_list[key_int]
     # elif isinstance(obj, dict):
     #     if key not in obj:
-    #         return mui.undefined 
+    #         return mui.undefined
     #     return obj[key]
     if inspect.isbuiltin(obj):
         return mui.undefined
@@ -255,6 +270,7 @@ def _get_obj_single_attr(obj, key: str,
             return mui.undefined
         return v
     return mui.undefined
+
 
 def _get_obj_by_uid(obj, uid: str,
                     checker: Callable[[Type], bool]) -> Tuple[Any, bool]:
@@ -296,16 +312,21 @@ def _get_obj_by_uid_resursive(
         return _get_obj_by_uid_resursive(child_obj, parts[1:], checker)
 
 
-def _get_root_tree(obj, checker: Callable[[Type], bool], key: str, obj_meta_cache = None):
+def _get_root_tree(obj,
+                   checker: Callable[[Type], bool],
+                   key: str,
+                   obj_meta_cache=None):
     obj_dict = _get_obj_dict(obj, checker)
     root_node = parse_obj_item(obj, key, key, checker, obj_meta_cache)
     root_node.children = parse_obj_dict(obj_dict, key, checker, obj_meta_cache)
     for (k, o), c in zip(obj_dict.items(), root_node.children):
         obj_child_dict = _get_obj_dict(o, checker)
         c.draggable = False
-        c.children = parse_obj_dict(obj_child_dict, c.id, checker, obj_meta_cache)
+        c.children = parse_obj_dict(obj_child_dict, c.id, checker,
+                                    obj_meta_cache)
     root_node.childCnt = len(obj_dict)
     return root_node
+
 
 class ObjectTree(mui.FlexBox):
 
@@ -341,7 +362,7 @@ class ObjectTree(mui.FlexBox):
             self.root = {_DEFAULT_OBJ_NAME: init}
         self.root.update(default_builtins)
         self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
-                                _ROOT, self._obj_meta_cache)
+                                              _ROOT, self._obj_meta_cache)
         # print(self.tree.props.tree)
         # inspect.isbuiltin()
         self.tree.register_event_handler(
@@ -349,9 +370,9 @@ class ObjectTree(mui.FlexBox):
         self.tree.register_event_handler(
             FrontendEventType.TreeItemButton.value, self._on_custom_button)
 
-        self.tree.register_event_handler(
-            FrontendEventType.DragCollect.value, self._on_drag_collect, backend_only=True)
-
+        self.tree.register_event_handler(FrontendEventType.DragCollect.value,
+                                         self._on_drag_collect,
+                                         backend_only=True)
 
     def _checker(self, obj):
         return _check_is_valid(type(obj), self._cared_types,
@@ -366,12 +387,12 @@ class ObjectTree(mui.FlexBox):
 
     def _get_obj_by_uid(self, uid: str):
         return _get_obj_by_uid(self.root, uid, self._valid_checker)
-    
+
     async def _on_drag_collect(self, data):
         uid = data["id"]
         obj, found = _get_obj_by_uid(self.root, uid, self._valid_checker)
         if not found:
-            return None 
+            return None
         tab_id = ""
         if "complexLayoutTabNodeId" in data:
             # for complex layout UI: FlexLayout
@@ -387,7 +408,8 @@ class ObjectTree(mui.FlexBox):
         obj, found = _get_obj_by_uid(self.root, uid, self._valid_checker)
         # if not found, we expand (update) the deepest valid object.
         obj_dict = _get_obj_dict(obj, self._checker)
-        tree = parse_obj_dict(obj_dict, node.id, self._checker, self._obj_meta_cache)
+        tree = parse_obj_dict(obj_dict, node.id, self._checker,
+                              self._obj_meta_cache)
         node.children = tree
         upd = self.tree.update_event(tree=self._objinspect_root)
         await self.tree.send_and_wait(upd)
@@ -396,7 +418,7 @@ class ObjectTree(mui.FlexBox):
         uid = uid_btn[0]
         obj, found = _get_obj_by_uid(self.root, uid, self._valid_checker)
         if not found:
-            return 
+            return
         btn = ButtonType(uid_btn[1])
         if btn == ButtonType.Reload:
             metas = reload_object_methods(obj)
@@ -405,20 +427,22 @@ class ObjectTree(mui.FlexBox):
             else:
                 print("reload failed.")
 
-
     async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):
         self.root[key] = obj
-        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker, _ROOT, self._obj_meta_cache)
+        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
+                                              _ROOT, self._obj_meta_cache)
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
-    
+
     async def update_tree(self):
-        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker, _ROOT, self._obj_meta_cache)
+        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
+                                              _ROOT, self._obj_meta_cache)
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
 
     async def remove_object(self, key: str):
-        assert key in self.root 
-        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker, _ROOT, self._obj_meta_cache)
+        assert key in self.root
+        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
+                                              _ROOT, self._obj_meta_cache)
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))

@@ -1,11 +1,11 @@
 # Copyright 2022 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -26,6 +26,7 @@ from tensorpc.utils.wait_tools import get_free_loopback_tcp_port
 from tensorpc import PACKAGE_ROOT
 from tensorpc.services.for_test import Service2
 
+
 @pytest.fixture
 def server_client():
     with get_free_loopback_tcp_port() as port:
@@ -44,6 +45,7 @@ def server_client():
             robj.shutdown()
         proc.wait()
 
+
 @contextlib.contextmanager
 def server_client_local():
     with get_free_loopback_tcp_port() as port:
@@ -61,6 +63,7 @@ def server_client_local():
         with client.simple_client("localhost:{}".format(port)) as robj:
             robj.shutdown()
         proc.wait()
+
 
 def local_func(a, b):
     return a + b
@@ -109,9 +112,7 @@ def test_remote_call(server_client: client.RemoteManager):
     assert np.allclose(res, expected)
     res = robj.remote_json_call("Test3.add", b=datas_b, a=datas_a)
     assert np.allclose(res, expected)
-    res = robj.chunked_remote_call("Test3.add",
-                                   b=datas_b,
-                                   a=datas_a)
+    res = robj.chunked_remote_call("Test3.add", b=datas_b, a=datas_a)
     assert np.allclose(res, expected)
 
     with pytest.raises(client.RemoteException):
@@ -138,6 +139,7 @@ def gen_2():
     for i in range(10):
         yield i
 
+
 def test_stream(server_client):
     robj = server_client
     serv = Service2(1)
@@ -147,6 +149,7 @@ def test_stream(server_client):
     res = list(robj.bi_stream("Test3.bi_stream", gen_2(), a=4, b=6))
     expected = list(serv.bi_stream(gen_2(), 4, 6))
     assert np.allclose(res, expected)
+
 
 if __name__ == "__main__":
     with server_client_local() as robj:

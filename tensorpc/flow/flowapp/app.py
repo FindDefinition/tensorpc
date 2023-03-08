@@ -27,6 +27,7 @@ import io
 import json
 import pickle
 import runpy
+import sys
 import threading
 import time
 import traceback
@@ -41,6 +42,7 @@ import pyee
 import watchdog
 import watchdog.events
 from PIL import Image
+from typing_extensions import ParamSpec
 from watchdog.observers import Observer
 
 from tensorpc import simple_chunk_call_async
@@ -61,7 +63,10 @@ from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.reload import reload_method
 from tensorpc.utils.uniquename import UniqueNamePool
 
-from .components import mui, three
+from .appcore import AppContext, AppSpecialEventType
+from .appcore import enter_app_conetxt as _enter_app_conetxt
+from .appcore import get_app, get_app_context, create_reload_metas
+from .components import mui, plus, three
 from .core import (AppComponentCore, AppEditorEvent, AppEditorEventType,
                    AppEditorFrontendEvent, AppEditorFrontendEventType,
                    AppEvent, AppEventType, BasicProps, Component,
@@ -72,57 +77,17 @@ from .core import (AppComponentCore, AppEditorEvent, AppEditorEventType,
                    undefined)
 
 ALL_APP_EVENTS = HashableRegistry()
+P = ParamSpec('P')
 
-
-class AppContext:
-
-    def __init__(self, app: "App") -> None:
-        self.app = app
-
-    def is_editable_app(self):
-        return isinstance(self.app, EditableApp)
-
-
-APP_CONTEXT_VAR: contextvars.ContextVar[
-    Optional[AppContext]] = contextvars.ContextVar("flowapp_context",
-                                                   default=None)
-
-
-def get_app_context() -> Optional[AppContext]:
-    return APP_CONTEXT_VAR.get()
-
-
-def get_app() -> "App":
-    ctx = get_app_context()
-    assert ctx is not None
-    return ctx.app
-
-
-def get_app_storage():
-    ctx = get_app_context()
-    assert ctx is not None
-    return ctx.app.get_persist_storage()
+T = TypeVar('T')
 
 T_comp = TypeVar("T_comp")
 
-def find_component(type: Type[T_comp]) -> Optional[T_comp]:
-    appctx = get_app_context()
-    assert appctx is not None, "you must use this function in app"
-    return appctx.app.find_component(type)
 
-def get_reload_manager():
-    appctx = get_app_context()
-    assert appctx is not None, "you must use this function in app"
-    return appctx.app._flow_reload_manager
-
-@contextlib.contextmanager
-def _enter_app_conetxt(app: "App"):
-    ctx = AppContext(app)
-    token = APP_CONTEXT_VAR.set(ctx)
-    try:
-        yield ctx
-    finally:
-        APP_CONTEXT_VAR.reset(token)
+def _run_func_with_app(app, func: Callable[P, T], *args: P.args,
+                       **kwargs: P.kwargs) -> T:
+    with _enter_app_conetxt(app):
+        return func(*args, **kwargs)
 
 
 _ROOT = "root"
@@ -192,20 +157,6 @@ class AppEditor:
         await self._send_editor_event(app_ev)
 
 
-class AppSpecialEventType(enum.Enum):
-    EnterHoldContext = "EnterHoldContext"
-    ExitHoldContext = "ExitHoldContext"
-    # emitted when a flow event comes
-    FlowForward = "FlowForward"
-    Initialize = "Initialize"
-    Exit = "Exit"
-    # emitted after autorun exit
-    AutoRunEnd = "AutoRunEnd"
-
-    CodeEditorSave = "CodeEditorSave"
-    WatchDogChange = "WatchDogChange"
-
-
 T = TypeVar("T")
 
 
@@ -228,7 +179,8 @@ class App:
             maxsize=maxqsize)
         self._flow_reload_manager = AppReloadManager()
 
-        self._flow_app_comp_core = AppComponentCore(self._queue, self._flow_reload_manager)
+        self._flow_app_comp_core = AppComponentCore(self._queue,
+                                                    self._flow_reload_manager)
         self._send_callback: Optional[Callable[[AppEvent],
                                                Coroutine[None, None,
                                                          None]]] = None
@@ -247,7 +199,9 @@ class App:
             root._attach(_ROOT, self._flow_app_comp_core)
             self._is_external_root = True
         else:
-            root = mui.FlexBox(inited=True, uid=_ROOT, app_comp_core=self._flow_app_comp_core)
+            root = mui.FlexBox(inited=True,
+                               uid=_ROOT,
+                               app_comp_core=self._flow_app_comp_core)
             root.prop(flex_flow=flex_flow,
                       justify_content=justify_content,
                       align_items=align_items)
@@ -256,6 +210,8 @@ class App:
         self._enable_editor = False
 
         self._flowapp_special_eemitter = pyee.AsyncIOEventEmitter()
+        self._flowapp_thread_id = threading.get_ident()
+        self._flowapp_enable_exception_inspect: bool = True
 
         self.code_editor = AppEditor("", "python", self._queue)
         self._app_dynamic_cls: Optional[ReloadableDynamicClass] = None
@@ -657,20 +613,22 @@ class App:
     async def _send_editor_event(self, event: AppEditorEvent):
         await self._queue.put(AppEvent("", {AppEventType.AppEditor: event}))
 
-    async def set_editor_value(self, value: str, language: str = "", lineno: Optional[int] = None):
+    async def set_editor_value(self,
+                               value: str,
+                               language: str = "",
+                               lineno: Optional[int] = None):
         """use this method to set editor value and language.
         """
         self.code_editor.value = value
         if language:
             self.code_editor.language = language
         res: Dict[str, Any] = {
-                "value": self.code_editor.value,
-                "language": self.code_editor.language,
+            "value": self.code_editor.value,
+            "language": self.code_editor.language,
         }
         if lineno is not None:
             res["lineno"] = lineno
-        app_ev = AppEditorEvent(
-            AppEditorEventType.SetValue, res)
+        app_ev = AppEditorEvent(AppEditorEventType.SetValue, res)
         await self._send_editor_event(app_ev)
 
     @staticmethod
@@ -678,6 +636,13 @@ class App:
                                  src_handler: EventHandler, src_data):
         res = await src_handler.cb(src_data)
         await handler.cb(res)
+
+    def _is_editable_app(self):
+        return isinstance(self, EditableApp)
+
+    def _get_self_as_editable_app(self):
+        assert isinstance(self, EditableApp)
+        return self
 
     async def handle_event(self, ev: UIEvent):
         for uid, data in ev.uid_to_data.items():
@@ -713,6 +678,31 @@ class App:
         with _enter_app_conetxt(self):
             await self.handle_event(ev)
 
+    async def _run_autorun(self, cb: Callable):
+        try:
+            coro = cb()
+            if inspect.iscoroutine(coro):
+                await coro
+            self._flowapp_special_eemitter.emit(
+                AppSpecialEventType.AutoRunEnd.value, None)
+        except:
+            traceback.print_exc()
+            if self._flowapp_enable_exception_inspect:
+                await self._inspect_exception()
+
+    async def _inspect_exception(self):
+        try:
+            comp = self.find_component(plus.ObjectInspector)
+            if comp is not None and comp.enable_exception_inspect:
+                _, _, exc_traceback = sys.exc_info()
+                target_f = None
+                for tb_frame, tb_lineno in traceback.walk_tb(exc_traceback):
+                    target_f = tb_frame
+                if target_f is not None:
+                    await comp.set_object(target_f.f_locals, "exception")
+        except:
+            traceback.print_exc()
+
     async def copy_text_to_clipboard(self, text: str):
         """copy to clipboard in frontend."""
         await self._queue.put(
@@ -735,7 +725,8 @@ class App:
         if self._use_app_editor:
             obj = type(self._get_user_app_object())
             lines, lineno = inspect.findsource(obj)
-            await self.set_editor_value(value = "".join(lines), lineno=lineno)
+            await self.set_editor_value(value="".join(lines), lineno=lineno)
+
 
 _WATCHDOG_MODIFY_EVENT_TYPES = Union[watchdog.events.DirModifiedEvent,
                                      watchdog.events.FileModifiedEvent]
@@ -751,40 +742,6 @@ class _WatchDogForAppFile(watchdog.events.FileSystemEventHandler):
 
     def on_modified(self, event: _WATCHDOG_MODIFY_EVENT_TYPES):
         return self._on_modified(event)
-
-
-@dataclasses.dataclass
-class _CompReloadMeta:
-    uid: str
-    handler: EventHandler
-
-
-def _create_reload_metas(uid_to_comp: Dict[str, Component], path: str):
-    path_resolve = str(Path(path).resolve())
-    metas: List[_CompReloadMeta] = []
-    for k, v in uid_to_comp.items():
-        # try:
-        #     # if comp is inside tensorpc official, ignore it.
-        #     Path(v_file).relative_to(PACKAGE_ROOT)
-        #     continue
-        # except:
-        #     pass
-        for handler_type, handler in v._flow_event_handlers.items():
-            if not isinstance(handler, Undefined):
-                cb = handler.cb
-                is_valid_func = is_valid_function(cb)
-                cb_real = cb
-                if isinstance(cb, partial):
-                    is_valid_func = is_valid_function(cb.func)
-                    cb_real = cb.func
-                if not is_valid_func or is_lambda(cb):
-                    continue
-                cb_file = str(Path(inspect.getfile(cb_real)).resolve())
-                if cb_file != path_resolve:
-                    continue
-                # code, _ = inspect.getsourcelines(cb_real)
-                metas.append(_CompReloadMeta(k, handler))
-    return metas
 
 
 class _SimpleCodeManager:
@@ -908,13 +865,14 @@ class EditableApp(App):
 
         assert self._flow_comp_mgr is not None
         resolved_path = str(Path(change_file).resolve())
-        reload_metas = _create_reload_metas(uid_to_comp, resolved_path)
+        reload_metas = create_reload_metas(uid_to_comp, resolved_path)
         if reload_metas:
             if not mod_is_reloaded:
                 # TODO when not mod_is_reloaded, changed file isn't app_file
                 # now module is valid, reload it.
                 try:
-                    res = self._flow_reload_manager.reload_type(reload_metas[0].handler.cb)
+                    res = self._flow_reload_manager.reload_type(
+                        reload_metas[0].handler.cb)
                     module = res[0].module
                 except:
                     traceback.print_exc()
@@ -948,7 +906,8 @@ class EditableApp(App):
                 try:
                     with _enter_app_conetxt(self):
                         self._flowapp_special_eemitter.emit(
-                            AppSpecialEventType.WatchDogChange.value, (new_data, resolved_path))
+                            AppSpecialEventType.WatchDogChange.value,
+                            (new_data, resolved_path))
                 except:
                     traceback.print_exc()
                     # return
@@ -965,7 +924,8 @@ class EditableApp(App):
                         if self._use_app_editor:
                             if not self.code_editor.is_external:
                                 fut = asyncio.run_coroutine_threadsafe(
-                                    self.set_editor_value(new_data), self._loop)
+                                    self.set_editor_value(new_data),
+                                    self._loop)
                                 fut.result()
                         code_changed_metas = self._reload_app_file()
                         flow_special = FlowSpecialMethods(code_changed_metas)
@@ -991,16 +951,6 @@ class EditableApp(App):
                     traceback.print_exc()
                     return
 
-    async def _run_autorun(self, cb: Callable):
-        try:
-            coro = cb()
-            if inspect.iscoroutine(coro):
-                await coro
-            self._flowapp_special_eemitter.emit(
-                AppSpecialEventType.AutoRunEnd.value, None)
-        except:
-            traceback.print_exc()
-
     def _reload_app_file(self):
         # comps = self._uid_to_comp
         # callback_dict = {}
@@ -1023,7 +973,6 @@ class EditableApp(App):
         #         v.set_callback(new_cb[k])
         return code_changed
 
-
     async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
         """override this method to support vscode editor.
         """
@@ -1034,7 +983,8 @@ class EditableApp(App):
                     # self._watchdog_ignore_next = True
                     if self.code_editor.is_external:
                         self._flowapp_special_eemitter.emit(
-                            AppSpecialEventType.CodeEditorSave.value, event.data)
+                            AppSpecialEventType.CodeEditorSave.value,
+                            event.data)
                     else:
                         with open(app_path, "w") as f:
                             f.write(event.data)
@@ -1051,7 +1001,7 @@ class EditableApp(App):
                         flow_special = FlowSpecialMethods(code_changed_metas)
                         if flow_special.auto_run is not None:
                             asyncio.create_task(
-                                _run_zeroarg_func(
+                                self._run_autorun(
                                     flow_special.auto_run.get_binded_fn()))
                         if flow_special.create_layout is not None:
                             await self._app_run_layout_function(

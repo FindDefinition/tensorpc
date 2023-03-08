@@ -19,13 +19,13 @@ from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Dict, Iterable,
                     List, Optional, Tuple, Type, TypeVar, Union)
 
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.flow.flowapp.components.common import (handle_standard_event
-                                                     )
+from tensorpc.flow.flowapp.components.common import (handle_standard_event)
 from typing_extensions import Literal, TypeAlias
 
 from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, NumberType, T_child, TaskLoopEvent, UIEvent,
-                    UIRunStatus, UIType, Undefined, undefined, as_dict_no_undefined)
+                    UIRunStatus, UIType, Undefined, undefined,
+                    as_dict_no_undefined)
 from .mui import MUIComponentBase
 
 

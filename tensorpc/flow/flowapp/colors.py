@@ -1,11 +1,11 @@
 # Copyright 2022 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -171,6 +171,7 @@ CSS_COLORS_TO_HEX = {
 
 HEX_COLOR_PATTERN = re.compile(r"#(?:[0-9a-fA-F]{3}){1,2}")
 
+
 def hex_to_rgb(hex_value: str) -> Tuple[int, int, int]:
     hex_value = hex_value.lstrip('#')
     hlen = len(hex_value)
@@ -187,8 +188,10 @@ def _hex_to_rgb_tuple(table: Dict[str, str]):
 
 CSS_COLORS_TO_RGB = _hex_to_rgb_tuple(CSS_COLORS_TO_HEX)
 
+
 def str_to_rgb(color: str):
     return CSS_COLORS_TO_RGB[color]
+
 
 def str_to_rgb_float(color: str):
     r, g, b = CSS_COLORS_TO_RGB[color]

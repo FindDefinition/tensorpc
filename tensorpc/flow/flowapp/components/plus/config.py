@@ -95,14 +95,17 @@ class ControlItemMeta:
     getter: Callable[[], Any]
     setter: Callable[[Any], None]
 
+
 def setattr_single(val, obj, name, mapper: Optional[Callable] = None):
     if mapper is not None:
         setattr(obj, name, mapper(val))
     else:
         setattr(obj, name, val)
 
+
 def getattr_single(obj, name):
     return getattr(obj, name)
+
 
 def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                            obj_uid_to_meta: Dict[str, ControlItemMeta]):
@@ -138,17 +141,26 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                 assert isinstance(meta, SwitchMeta)
             child_node.type = mui.ControlNodeType.Bool.value
             child_node.initValue = getattr(current_obj, f.name)
-            setter = partial(setattr_single, obj=current_obj, name=f.name, mapper=bool)
+            setter = partial(setattr_single,
+                             obj=current_obj,
+                             name=f.name,
+                             mapper=bool)
             # setter = lambda x: setattrV2(current_obj, f.name, bool(x))
 
         elif ty is int or ty is float:
             # use textfield with number type
             if ty is int:
-                setter = partial(setattr_single, obj=current_obj, name=f.name, mapper=int)
+                setter = partial(setattr_single,
+                                 obj=current_obj,
+                                 name=f.name,
+                                 mapper=int)
 
                 # setter = lambda x: setattrV2(current_obj, f.name, int(x))
             else:
-                setter = partial(setattr_single, obj=current_obj, name=f.name, mapper=float)
+                setter = partial(setattr_single,
+                                 obj=current_obj,
+                                 name=f.name,
+                                 mapper=float)
 
                 # setter = lambda x: setattrV2(current_obj, f.name, float(x))
             if isinstance(meta, SliderMeta):
@@ -163,7 +175,10 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
             #     raise NotImplementedError
         elif ty is str:
             # use textfield
-            setter = partial(setattr_single, obj=current_obj, name=f.name, mapper=str)
+            setter = partial(setattr_single,
+                             obj=current_obj,
+                             name=f.name,
+                             mapper=str)
 
             # setter = lambda x: setattr(current_obj, f.name, str(x))
             child_node.type = mui.ControlNodeType.String.value
@@ -187,7 +202,10 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                 child_node.initValue = getattr(current_obj, f.name).value
                 child_node.selects = list(x.value for x in ty)
                 # setter = lambda x: setattr(current_obj, f.name, ty(x))
-                setter = partial(setattr_single, obj=current_obj, name=f.name, mapper=ty)
+                setter = partial(setattr_single,
+                                 obj=current_obj,
+                                 name=f.name,
+                                 mapper=ty)
 
             else:
                 # use textfield with json

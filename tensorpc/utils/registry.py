@@ -1,11 +1,11 @@
 # Copyright 2022 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,11 +16,13 @@ from typing import Any, Callable, Dict, Hashable, Optional, Generic, TypeVar
 
 
 class HashableRegistry:
+
     def __init__(self, allow_duplicate: bool = False):
         self.global_dict = {}  # type: Dict[Hashable, Any]
         self.allow_duplicate = allow_duplicate
 
     def register(self, func=None, key: Optional[Hashable] = None):
+
         def wrapper(func):
             key_ = key
             if key is None:

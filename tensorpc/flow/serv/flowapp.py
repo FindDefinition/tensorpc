@@ -29,14 +29,18 @@ from ..client import MasterMeta
 from tensorpc import prim
 from tensorpc.flow.serv_names import serv_names
 import traceback
-import time 
+import time
+
 
 class FlowApp:
     """this service must run inside devflow.
     if headless is enabled, all event sent to frontend will be ignored.
     """
 
-    def __init__(self, module_name: str, config: Dict[str, Any], headless: bool = False) -> None:
+    def __init__(self,
+                 module_name: str,
+                 config: Dict[str, Any],
+                 headless: bool = False) -> None:
         # print(module_name, config)
         self.module_name = module_name
         self.config = config
@@ -88,7 +92,8 @@ class FlowApp:
             for meta in self.app_su.serv_metas:
                 if meta.user_app_meta is not None:
                     if meta.user_app_meta.type == AppFuncType.CreateLayout:
-                        await self.app._app_run_layout_function(decorator_fn=meta.fn)
+                        await self.app._app_run_layout_function(
+                            decorator_fn=meta.fn)
                         layout_created = True
             if not layout_created:
                 await self.app._app_run_layout_function()
@@ -101,7 +106,8 @@ class FlowApp:
             AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)}))
         # TODO should we just use grpc client to query init state here?
         await self._send_loop_queue.put(
-            AppEvent("", {AppEventType.Notify: NotifyEvent(NotifyType.AppStart)}))
+            AppEvent("",
+                     {AppEventType.Notify: NotifyEvent(NotifyType.AppStart)}))
 
     def _get_app(self):
         return self.app
@@ -139,9 +145,10 @@ class FlowApp:
         if res is not None:
             ev = ScheduleEvent(time.time_ns(), res, {})
             appev = ScheduleNextForApp(ev.to_dict())
-            await self._send_loop_queue.put(AppEvent(self._uid, {
-                AppEventType.ScheduleNext: appev,
-            }))
+            await self._send_loop_queue.put(
+                AppEvent(self._uid, {
+                    AppEventType.ScheduleNext: appev,
+                }))
 
     def get_layout(self, editor_only: bool = False):
         if editor_only:
@@ -184,15 +191,14 @@ class FlowApp:
                 serv_names.FLOW_PUT_APP_EVENT, ev.to_dict())
 
     def _send_grpc_event_large_sync(self, ev: AppEvent,
-                                     robj: tensorpc.RemoteManager):
+                                    robj: tensorpc.RemoteManager):
         if self.master_meta.is_worker:
             return robj.chunked_remote_call(
                 serv_names.FLOWWORKER_PUT_APP_EVENT, self.master_meta.graph_id,
                 ev.to_dict())
         else:
-            return robj.chunked_remote_call(
-                serv_names.FLOW_PUT_APP_EVENT, ev.to_dict())
-
+            return robj.chunked_remote_call(serv_names.FLOW_PUT_APP_EVENT,
+                                            ev.to_dict())
 
     async def _send_loop(self):
         # TODO unlike flowworker, the app shouldn't disconnect to master/flowworker.
@@ -203,14 +209,13 @@ class FlowApp:
             send_task = asyncio.create_task(self._send_loop_queue.get())
             wait_tasks: List[asyncio.Task] = [shut_task, send_task]
             master_disconnect = 0.0
-            retry_duration = 2.0 # 2s
+            retry_duration = 2.0  # 2s
             previous_event = AppEvent(self._uid, {})
             while True:
                 # if send fail, MERGE incoming app events, and send again after some time.
                 # all app event is "replace" in frontend.
-                (done,
-                pending) = await asyncio.wait(wait_tasks,
-                                            return_when=asyncio.FIRST_COMPLETED)
+                (done, pending) = await asyncio.wait(
+                    wait_tasks, return_when=asyncio.FIRST_COMPLETED)
                 if shut_task in done:
                     break
                 ev: AppEvent = send_task.result()
@@ -219,7 +224,7 @@ class FlowApp:
                         if k == AppEventType.UIEvent:
                             assert isinstance(v, UIEvent)
                             await self.app._handle_event_with_ctx(v)
-                    continue 
+                    continue
                 ts = time.time()
                 # assign uid here.
                 ev.uid = self._uid
@@ -230,14 +235,15 @@ class FlowApp:
                     if ts - master_disconnect > retry_duration:
                         try:
                             # await self._send_http_event(previous_event)
-                            await self._send_grpc_event_large(previous_event, robj)
+                            await self._send_grpc_event_large(
+                                previous_event, robj)
                             master_disconnect = -1
                             previous_event = AppEvent(self._uid, {})
                         except Exception as e:
                             # TODO send error event to frontend
                             traceback.print_exc()
                             # print("Retry connection Fail.")
-                            master_disconnect = ts   
+                            master_disconnect = ts
                 else:
                     try:
                         # print("SEND", ev.type)

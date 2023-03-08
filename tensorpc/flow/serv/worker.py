@@ -24,11 +24,10 @@ import grpc
 import tensorpc
 from tensorpc import prim
 from tensorpc.flow import constants as flowconstants
-from tensorpc.flow.coretypes import (Message, MessageEvent,
-                                          MessageEventType, RelayEvent,
-                                          RelayEventType, RelaySSHEvent,
-                                          RelayUpdateNodeEvent, ScheduleEvent,
-                                          relay_event_from_dict)
+from tensorpc.flow.coretypes import (Message, MessageEvent, MessageEventType,
+                                     RelayEvent, RelayEventType, RelaySSHEvent,
+                                     RelayUpdateNodeEvent, ScheduleEvent,
+                                     relay_event_from_dict)
 from tensorpc.flow.flowapp.core import AppEvent, AppEventType, ScheduleNextForApp, app_event_from_data
 from tensorpc.flow.serv_names import serv_names
 from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
@@ -40,8 +39,9 @@ from tensorpc.core.httpclient import http_remote_call
 from tensorpc.utils.address import convert_url_to_local, get_url_port
 from tensorpc.utils.wait_tools import get_free_ports
 
-from .core import (AppNode, CommandNode, HandleTypes, Node, NodeWithSSHBase, RemoteSSHNode, SessionStatus,
-                   _get_uid, node_from_data, JINJA2_VARIABLE_ENV, _extract_graph_node_id)
+from .core import (AppNode, CommandNode, HandleTypes, Node, NodeWithSSHBase,
+                   RemoteSSHNode, SessionStatus, _get_uid, node_from_data,
+                   JINJA2_VARIABLE_ENV, _extract_graph_node_id)
 
 ALL_EVENT_TYPES = Union[RelayEvent, MessageEvent, AppEvent]
 
@@ -61,7 +61,7 @@ class FlowClient:
         self.lock = asyncio.Lock()
         self.var_dict: Dict[str, str] = {}
 
-        self._driver_node : Optional[RemoteSSHNode] = None
+        self._driver_node: Optional[RemoteSSHNode] = None
 
     def get_driver_node(self):
         assert self._driver_node is not None, "this shouldn't happen"
@@ -115,7 +115,6 @@ class FlowClient:
                 res_not_here[h.target_node_id] = ev
         return res, res_not_here
 
-
     async def schedule_next(self, graph_id: str, node_id: str,
                             sche_ev_data: Dict[str, Any]):
         # schedule next node(s) of this node with data.
@@ -124,14 +123,16 @@ class FlowClient:
         cur_sche_ev = ScheduleEvent.from_dict(sche_ev_data)
         node = self._get_node(graph_id, node_id)
         assert node.schedulable, "only command node and scheduler node can be scheduled."
-        next_schedule, next_schedule_not_here = self.node_schedule_next(graph_id, node, cur_sche_ev)
+        next_schedule, next_schedule_not_here = self.node_schedule_next(
+            graph_id, node, cur_sche_ev)
         for (sche_node, sche_ev) in next_schedule.values():
-            
-            if isinstance(sche_node, CommandNode) and not isinstance(sche_node, AppNode):
+
+            if isinstance(sche_node,
+                          CommandNode) and not isinstance(sche_node, AppNode):
                 if not sche_node.is_session_started():
                     assert isinstance(sche_driv, DirectSSHNode)
-                    await self._start_session_direct(
-                        graph_id, sche_node, sche_driv)
+                    await self._start_session_direct(graph_id, sche_node,
+                                                     sche_driv)
                 if sche_node.is_running():
                     sche_node.queued_commands.append(sche_ev)
                 else:
@@ -143,12 +144,13 @@ class FlowClient:
                     http_port = sche_node.http_port
                     durl, _ = get_url_port(sche_driv.url)
                     if sche_driv.enable_port_forward:
-                        app_url = get_http_url("localhost", sche_node.fwd_http_port)
+                        app_url = get_http_url("localhost",
+                                               sche_node.fwd_http_port)
                     else:
                         app_url = get_http_url(durl, http_port)
                     await http_remote_call(sess, app_url,
-                                            serv_names.APP_RUN_SCHEDULE_EVENT,
-                                            sche_ev.to_dict())
+                                           serv_names.APP_RUN_SCHEDULE_EVENT,
+                                           sche_ev.to_dict())
 
     async def _send_event(self, ev: ALL_EVENT_TYPES,
                           robj: tensorpc.AsyncRemoteManager):
@@ -216,7 +218,8 @@ class FlowClient:
     async def schedule_node(self, graph_id: str, node_id: str, sche_ev_dict):
         sche_node = self._get_node(graph_id, node_id)
         sche_ev = ScheduleEvent.from_dict(sche_ev_dict)
-        if isinstance(sche_node, CommandNode) and not isinstance(sche_node, AppNode):
+        if isinstance(sche_node,
+                      CommandNode) and not isinstance(sche_node, AppNode):
             if sche_node.is_running():
                 sche_node.queued_commands.append(sche_ev)
             else:
@@ -228,9 +231,9 @@ class FlowClient:
                 http_port = sche_node.http_port
                 app_url = get_http_url("localhost", http_port)
                 await http_remote_call(sess, app_url,
-                                        serv_names.APP_RUN_SCHEDULE_EVENT,
-                                        sche_ev.to_dict())
-    
+                                       serv_names.APP_RUN_SCHEDULE_EVENT,
+                                       sche_ev.to_dict())
+
     async def create_connection(self, url: str, timeout: float):
         async with tensorpc.AsyncRemoteManager(url) as robj:
             await robj.wait_for_remote_ready(timeout)
@@ -258,31 +261,38 @@ class FlowClient:
             uid = self._readable_node_map[uid]
         return uid in self._cached_nodes
 
-    async def run_single_event(self, graph_id: str, node_id: str,
-                           type: int, ui_ev_dict: Dict[str, Any]):
+    async def run_single_event(self, graph_id: str, node_id: str, type: int,
+                               ui_ev_dict: Dict[str, Any]):
         node = self._get_node(graph_id, node_id)
         assert isinstance(node, AppNode)
         sess = prim.get_http_client_session()
         http_port = node.http_port
         app_url = get_http_url("localhost", http_port)
         return await http_remote_call(sess, app_url,
-                                      serv_names.APP_RUN_SINGLE_EVENT, type, ui_ev_dict)
-    
-    async def run_app_service(self, graph_id: str, node_id: str, key: str, *args, **kwargs):
+                                      serv_names.APP_RUN_SINGLE_EVENT, type,
+                                      ui_ev_dict)
+
+    async def run_app_service(self, graph_id: str, node_id: str, key: str,
+                              *args, **kwargs):
         node = self._get_node(graph_id, node_id)
         assert isinstance(node, AppNode)
         port = node.grpc_port
         app_url = get_grpc_url("localhost", port)
-        return await tensorpc.simple_chunk_call_async(app_url, key, *args, **kwargs)
+        return await tensorpc.simple_chunk_call_async(app_url, key, *args,
+                                                      **kwargs)
 
-    async def get_layout(self, graph_id: str, node_id: str, editor_only: bool = False):
+    async def get_layout(self,
+                         graph_id: str,
+                         node_id: str,
+                         editor_only: bool = False):
         node = self._get_node(graph_id, node_id)
         assert isinstance(node, AppNode)
         sess = prim.get_http_client_session()
         http_port = node.http_port
         app_url = get_http_url("localhost", http_port)
         print("GET LAYOUT", app_url)
-        return await http_remote_call(sess, app_url, serv_names.APP_GET_LAYOUT, editor_only)
+        return await http_remote_call(sess, app_url, serv_names.APP_GET_LAYOUT,
+                                      editor_only)
 
     async def add_message(self, raw_msgs: List[Any]):
         await self._send_loop_queue.put(
@@ -312,7 +322,8 @@ class FlowClient:
 
         return node.terminal_state
 
-    async def sync_graph(self, graph_id: str, driver_data: Dict[str, Any], node_datas: List[Dict[str, Any]],
+    async def sync_graph(self, graph_id: str, driver_data: Dict[str, Any],
+                         node_datas: List[Dict[str, Any]],
                          var_dict: Dict[str, str]):
         new_nodes = [node_from_data(d) for d in node_datas]
         # print("EXIST", self._cached_nodes)
@@ -448,12 +459,13 @@ class FlowClient:
                                      enable_port_forward=False,
                                      is_worker=True)
             if driver_node.remote_init_commands:
-                await node.input_queue.put(self.render_command(driver_node.remote_init_commands) + "\n")
+                await node.input_queue.put(
+                    self.render_command(driver_node.remote_init_commands) +
+                    "\n")
         await node.run_command(cmd_renderer=self.render_command)
 
-
-    async def create_ssh_session(self, flow_data: Dict[str,
-                                                       Any], graph_id: str):
+    async def create_ssh_session(self, flow_data: Dict[str, Any],
+                                 graph_id: str):
         # check connection, if not available, try to reconnect
         driver_node = self.get_driver_node()
         await self.check_and_reconnect(driver_node.master_grpc_url)
@@ -531,8 +543,8 @@ class FlowWorker:
             self._clients[graph_id] = FlowClient()
         return self._clients[graph_id]
 
-    async def sync_graph(self, graph_id: str, driver_data: Dict[str, Any], 
-                        node_datas: List[Dict[str, Any]],
+    async def sync_graph(self, graph_id: str, driver_data: Dict[str, Any],
+                         node_datas: List[Dict[str, Any]],
                          var_dict: Dict[str, str]):
         return await self._get_client(graph_id).sync_graph(
             graph_id, driver_data, node_datas, var_dict)
@@ -606,17 +618,22 @@ class FlowWorker:
     async def put_app_event(self, graph_id: str, ev_dict: Dict[str, Any]):
         return await self._get_client(graph_id).put_app_event(ev_dict)
 
-    async def run_app_service(self, graph_id: str, node_id: str, key: str, *args, **kwargs):
-        return await self._get_client(graph_id).run_app_service(graph_id, node_id, key, *args, **kwargs)
+    async def run_app_service(self, graph_id: str, node_id: str, key: str,
+                              *args, **kwargs):
+        return await self._get_client(graph_id).run_app_service(
+            graph_id, node_id, key, *args, **kwargs)
 
-    async def run_single_event(self, graph_id: str, node_id: str,
-                           type: int, ui_ev_dict: Dict[str, Any]):
+    async def run_single_event(self, graph_id: str, node_id: str, type: int,
+                               ui_ev_dict: Dict[str, Any]):
         return await self._get_client(graph_id).run_single_event(
             graph_id, node_id, type, ui_ev_dict)
 
-
-    async def get_layout(self, graph_id: str, node_id: str, editor_only: bool = False):
-        return await self._get_client(graph_id).get_layout(graph_id, node_id, editor_only)
+    async def get_layout(self,
+                         graph_id: str,
+                         node_id: str,
+                         editor_only: bool = False):
+        return await self._get_client(graph_id).get_layout(
+            graph_id, node_id, editor_only)
 
     async def stop_session(self, graph_id: str, node_id: str):
         return await self._get_client(graph_id).stop_session(graph_id, node_id)
@@ -630,6 +647,6 @@ class FlowWorker:
                         await n.exit_event.wait()
         prim.get_async_shutdown_event().set()
 
-
     async def schedule_node(self, graph_id: str, node_id: str, sche_ev_dict):
-        return await self._get_client(graph_id).schedule_node(graph_id, node_id, sche_ev_dict)
+        return await self._get_client(graph_id).schedule_node(
+            graph_id, node_id, sche_ev_dict)

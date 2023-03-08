@@ -46,25 +46,20 @@ from tensorpc.constants import TENSORPC_SPLIT
 from tensorpc.core import get_grpc_url
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.flow import constants as flowconstants
-from tensorpc.flow.constants import (FLOW_DEFAULT_GRAPH_ID, FLOW_FOLDER_PATH,
-                                     TENSORPC_FLOW_DEFAULT_TMUX_NAME,
-                                     TENSORPC_FLOW_GRAPH_ID,
-                                     TENSORPC_FLOW_MASTER_GRPC_PORT,
-                                     TENSORPC_FLOW_MASTER_HTTP_PORT,
-                                     TENSORPC_FLOW_NODE_ID,
-                                     TENSORPC_FLOW_NODE_READABLE_ID,
-                                     TENSORPC_FLOW_NODE_UID,
-                                     TENSORPC_FLOW_USE_REMOTE_FWD)
-from tensorpc.flow.coretypes import (DataStorageItemType, Message,
-                                     MessageEvent, MessageEventType,
-                                     MessageLevel, ScheduleEvent,
-                                     SessionStatus, StorageDataItem,
-                                     UserContentEvent, UserDataUpdateEvent,
-                                     UserEvent, UserStatusEvent, get_uid,
-                                     DataItemMeta)
-from tensorpc.flow.flowapp.core import (AppEvent, AppEventType, ComponentEvent, FrontendEventType,
-                                        NotifyEvent, NotifyType,
-                                        ScheduleNextForApp, UIEvent, UISaveStateEvent,
+from tensorpc.flow.constants import (
+    FLOW_DEFAULT_GRAPH_ID, FLOW_FOLDER_PATH, TENSORPC_FLOW_DEFAULT_TMUX_NAME,
+    TENSORPC_FLOW_GRAPH_ID, TENSORPC_FLOW_MASTER_GRPC_PORT,
+    TENSORPC_FLOW_MASTER_HTTP_PORT, TENSORPC_FLOW_NODE_ID,
+    TENSORPC_FLOW_NODE_READABLE_ID, TENSORPC_FLOW_NODE_UID,
+    TENSORPC_FLOW_USE_REMOTE_FWD)
+from tensorpc.flow.coretypes import (
+    DataStorageItemType, Message, MessageEvent, MessageEventType, MessageLevel,
+    ScheduleEvent, SessionStatus, StorageDataItem, UserContentEvent,
+    UserDataUpdateEvent, UserEvent, UserStatusEvent, get_uid, DataItemMeta)
+from tensorpc.flow.flowapp.core import (AppEvent, AppEventType, ComponentEvent,
+                                        FrontendEventType, NotifyEvent,
+                                        NotifyType, ScheduleNextForApp,
+                                        UIEvent, UISaveStateEvent,
                                         app_event_from_data)
 from tensorpc.flow.serv_names import serv_names
 from tensorpc.utils.address import get_url_port
@@ -104,8 +99,10 @@ class NodeStatus:
     def empty():
         return NodeStatus(CommandEventType.PROMPT_END, SessionStatus.Stop)
 
+
 ENCODING = "utf-8"
 ENCODING = None
+
 
 def _extract_graph_node_id(uid: str):
     parts = uid.split("@")
@@ -165,7 +162,7 @@ class Node:
         self._schedulable = schedulable
 
     def before_save(self):
-        pass 
+        pass
 
     @property
     def schedulable(self):
@@ -293,11 +290,11 @@ class Node:
         self.inputs.clear()
         self.outputs.clear()
 
-    @property 
+    @property
     def driver_id(self) -> str:
         return self._flow_data["data"].get("driver", "")
-    
-    @property 
+
+    @property
     def group_id(self) -> str:
         return self._flow_data["data"].get("group", "")
 
@@ -306,9 +303,10 @@ class Node:
         """
         pass
 
+
 class RunnableNodeBase(Node):
     pass
-    
+
 
 def node_from_data(data: Dict[str, Any]) -> Node:
     for k, v in ALL_NODES.items():
@@ -344,7 +342,11 @@ class DirectSSHNode(Node):
 
 @ALL_NODES.register
 class MarkdownNode(Node):
-    def __init__(self, flow_data: Dict[str, Any], graph_id: str = "", schedulable: bool = False) -> None:
+
+    def __init__(self,
+                 flow_data: Dict[str, Any],
+                 graph_id: str = "",
+                 schedulable: bool = False) -> None:
         super().__init__(flow_data, graph_id, schedulable)
         node_data = flow_data["data"]
         if "pages" not in node_data:
@@ -384,7 +386,7 @@ class MarkdownNode(Node):
                 f.write(p["content"])
         if "pages" in res["data"]:
             res["data"].pop("pages")
-        return res 
+        return res
 
     def set_page(self, page: str, current_key: str):
         for p in self.node_data["pages"]:
@@ -398,10 +400,11 @@ class MarkdownNode(Node):
         self.node_data["currentKey"] = current_key
 
     def get_save_path(self, key: str):
-        root = FLOW_MARKDOWN_DATA_PATH / self.id 
+        root = FLOW_MARKDOWN_DATA_PATH / self.id
         if not root.exists():
             root.mkdir(mode=0o755, parents=True)
         return FLOW_MARKDOWN_DATA_PATH / self.id / f"{key}.md"
+
 
 @ALL_NODES.register
 class GroupNode(Node):
@@ -417,6 +420,7 @@ class GroupNode(Node):
     @property
     def color(self) -> str:
         return self.node_data["color"].strip()
+
 
 class NodeWithSSHBase(RunnableNodeBase):
 
@@ -451,14 +455,15 @@ class NodeWithSSHBase(RunnableNodeBase):
 
         self.session_identify_key = None
 
-    @property 
+    @property
     def terminal_state(self):
         if self._raw_event_history:
-            self._terminal_state += b"".join([ev.raw for ev in self._raw_event_history])
+            self._terminal_state += b"".join(
+                [ev.raw for ev in self._raw_event_history])
             self._raw_event_history.clear()
         return self._terminal_state
 
-    @terminal_state.setter 
+    @terminal_state.setter
     def terminal_state(self, val: bytes):
         self._terminal_state = val
         self._raw_event_history.clear()
@@ -539,14 +544,14 @@ class RemoteSSHNode(NodeWithSSHBase):
 
     def to_dict(self):
         res = super().to_dict()
-        res["worker_port"] = self.worker_port 
-        res["worker_http_port"] = self.worker_http_port 
-        res["remote_master_port"] = self.remote_master_port 
-        res["remote_master_http_port"] = self.remote_master_http_port 
-        res["remote_port"] = self.remote_port 
-        res["remote_http_port"] = self.remote_http_port 
-        res["_remote_self_ip"] = self._remote_self_ip 
-        return res 
+        res["worker_port"] = self.worker_port
+        res["worker_http_port"] = self.worker_http_port
+        res["remote_master_port"] = self.remote_master_port
+        res["remote_master_http_port"] = self.remote_master_http_port
+        res["remote_port"] = self.remote_port
+        res["remote_http_port"] = self.remote_http_port
+        res["_remote_self_ip"] = self._remote_self_ip
+        return res
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]):
@@ -601,9 +606,8 @@ class RemoteSSHNode(NodeWithSSHBase):
                                       **kwargs)
 
     async def simple_grpc_remote_call(self, key: str, *args, **kwargs):
-        return await tensorpc.simple_chunk_call_async(self.worker_grpc_url, key, *args,
-                                      **kwargs)
-
+        return await tensorpc.simple_chunk_call_async(self.worker_grpc_url,
+                                                      key, *args, **kwargs)
 
     @property
     def url(self) -> str:
@@ -655,7 +659,8 @@ class RemoteSSHNode(NodeWithSSHBase):
                             rfports: Optional[List[int]] = None):
         assert self.task is None
         new_sess_name = TENSORPC_FLOW_DEFAULT_TMUX_NAME
-        client = SSHClient(url, username, password, None, self.get_uid(), ENCODING)
+        client = SSHClient(url, username, password, None, self.get_uid(),
+                           ENCODING)
         self.shutdown_ev.clear()
         self.exit_event.clear()
         # firstly we check if the tmux worker exists
@@ -715,7 +720,8 @@ class RemoteSSHNode(NodeWithSSHBase):
             ports_str = self.rfport_pairs
             if ports_str:
                 pair_strs = ports_str.split(",")
-                pair_ports = [(int(p.split(":")[0]), int(p.split(":")[1])) for p in pair_strs]
+                pair_ports = [(int(p.split(":")[0]), int(p.split(":")[1]))
+                              for p in pair_strs]
                 new_rfports.extend(pair_ports)
         self.task = asyncio.create_task(
             client.connect_queue(self.input_queue,
@@ -761,15 +767,19 @@ class EnvNode(Node):
     def value(self):
         return self.node_data["value"]
 
+
 @ALL_NODES.register
 class DataStorageNode(Node):
     """storage: 
     """
-    def __init__(self, flow_data: Dict[str, bytes], graph_id: str = "") -> None:
+
+    def __init__(self,
+                 flow_data: Dict[str, bytes],
+                 graph_id: str = "") -> None:
         super().__init__(flow_data, graph_id, True)
         self.stored_data: Dict[str, StorageDataItem] = {}
 
-    @property 
+    @property
     def in_memory_limit_bytes(self):
         return self.node_data["inMemoryLimit"] * 1024 * 1024
 
@@ -779,53 +789,54 @@ class DataStorageNode(Node):
         for item in items:
             data = self.read_meta_dict(item)
             res.append(data)
-        return res  
+        return res
 
-    @property 
+    @property
     def count(self):
         return sum(map(len, self.stored_data.values()), start=0)
 
     def get_items(self):
         res: List[str] = []
         if not (FLOW_FOLDER_DATA_PATH / self.id).exists():
-            return res 
+            return res
         for p in (FLOW_FOLDER_DATA_PATH / self.id).glob("*.pkl"):
             if (p.parent / f"{p.stem}.json").exists():
                 res.append(p.stem)
-        return res 
+        return res
 
     def get_item_metas(self):
         res: List[str] = []
         if not (FLOW_FOLDER_DATA_PATH / self.id).exists():
-            return res 
+            return res
         for p in (FLOW_FOLDER_DATA_PATH / self.id).glob("*.json"):
             if (p.parent / f"{p.stem}.pkl").exists():
                 res.append(p.stem)
-        return res 
+        return res
 
     def get_save_path(self, key: str):
-        root = FLOW_FOLDER_DATA_PATH / self.id 
+        root = FLOW_FOLDER_DATA_PATH / self.id
         if not root.exists():
             root.mkdir(mode=0o755, parents=True)
         return FLOW_FOLDER_DATA_PATH / self.id / f"{key}.pkl"
 
     def get_meta_path(self, key: str):
-        root = FLOW_FOLDER_DATA_PATH / self.id 
+        root = FLOW_FOLDER_DATA_PATH / self.id
         if not root.exists():
             root.mkdir(mode=0o755, parents=True)
         return FLOW_FOLDER_DATA_PATH / self.id / f"{key}.json"
 
-    def save_data(self, key: str, data: bytes, meta: DataItemMeta, timestamp: int):
+    def save_data(self, key: str, data: bytes, meta: DataItemMeta,
+                  timestamp: int):
         item = StorageDataItem(data, timestamp, meta)
         with self.get_save_path(key).open("wb") as f:
             pickle.dump(item, f)
         with self.get_meta_path(key).open("w") as f:
             json.dump(item.get_meta_dict(), f)
         if len(data) <= self.in_memory_limit_bytes:
-            self.stored_data[key] = item 
+            self.stored_data[key] = item
         else:
             self.stored_data[key] = StorageDataItem(bytes(), timestamp, meta)
-    
+
     def read_meta_dict(self, key: str) -> dict:
         if key in self.stored_data:
             data = self.stored_data[key]
@@ -834,30 +845,34 @@ class DataStorageNode(Node):
         if meta_path.exists():
             with meta_path.open("r") as f:
                 meta_dict = json.load(f)
-            meta = DataItemMeta(meta_dict["name"], DataStorageItemType(meta_dict["type"]), meta_dict["meta"])
-            return meta_dict 
+            meta = DataItemMeta(meta_dict["name"],
+                                DataStorageItemType(meta_dict["type"]),
+                                meta_dict["meta"])
+            return meta_dict
         raise FileNotFoundError(f"{meta_path} not exists")
-
 
     def read_data(self, key: str) -> StorageDataItem:
         if key in self.stored_data:
             data = self.stored_data[key]
             if len(data) > 0:
-                return data 
+                return data
         path = self.get_save_path(key)
         meta_path = self.get_meta_path(key)
 
         if path.exists() and meta_path.exists():
             with meta_path.open("r") as f:
                 meta_dict = json.load(f)
-            meta = DataItemMeta(meta_dict["name"], DataStorageItemType(meta_dict["type"]), meta_dict["meta"])
+            meta = DataItemMeta(meta_dict["name"],
+                                DataStorageItemType(meta_dict["type"]),
+                                meta_dict["meta"])
             with path.open("rb") as f:
                 data: StorageDataItem = pickle.load(f)
                 if len(data) <= self.in_memory_limit_bytes:
-                    self.stored_data[key] = data 
+                    self.stored_data[key] = data
                 else:
-                    self.stored_data[key] = StorageDataItem(bytes(), data.timestamp, meta)
-                return data 
+                    self.stored_data[key] = StorageDataItem(
+                        bytes(), data.timestamp, meta)
+                return data
         raise FileNotFoundError(f"{path} not exists")
 
     def need_update(self, key: str, timestamp: int):
@@ -866,32 +881,35 @@ class DataStorageNode(Node):
     def read_data_if_need_update(self, key: str, timestamp: int):
         if self.need_update(key, timestamp):
             return self.read_data(key)
-        return None 
+        return None
 
     def on_delete(self):
         if (FLOW_FOLDER_DATA_PATH / self.id).exists():
             try:
                 shutil.rmtree(FLOW_FOLDER_DATA_PATH / self.id)
             except:
-                traceback.print_exc() 
+                traceback.print_exc()
+
 
 class CommandResult:
-    def __init__(self, cmd: str, stdouts: List[bytes], return_code: int) -> None:
-        self.cmd = cmd 
+
+    def __init__(self, cmd: str, stdouts: List[bytes],
+                 return_code: int) -> None:
+        self.cmd = cmd
         self.stdouts = stdouts
         self.return_code = return_code
 
     def to_dict(self):
         return {
-            "cmd": self.cmd ,
+            "cmd": self.cmd,
             "stdouts": self.stdouts,
             "return_code": self.return_code,
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]):
         return cls(data["cmd"], data["stdouts"], data["return_code"])
-        
+
 
 @ALL_NODES.register
 class CommandNode(NodeWithSSHBase):
@@ -908,10 +926,12 @@ class CommandNode(NodeWithSSHBase):
             self._current_line_events.append(ev)
 
     def get_previous_cmd_result(self):
-        return CommandResult(self._previous_cmd, [l.line for l in self._current_line_events], self._previous_ret_code)
+        return CommandResult(self._previous_cmd,
+                             [l.line for l in self._current_line_events],
+                             self._previous_ret_code)
 
     def clear_previous_cmd(self):
-        self._start_record_stdout = False 
+        self._start_record_stdout = False
         self._previous_cmd = ""
         self._previous_ret_code = -1
         self._current_line_events.clear()
@@ -930,8 +950,7 @@ class CommandNode(NodeWithSSHBase):
         # self._start_record_stdout = True
         if newenvs:
             envs_stmt = [f"export {k}={v}" for k, v in newenvs.items()]
-            cmd = " && ".join(envs_stmt +
-                                                   [cmd])
+            cmd = " && ".join(envs_stmt + [cmd])
         self._previous_cmd = cmd
         await self.input_queue.put(cmd + "\n")
 
@@ -962,18 +981,22 @@ class CommandNode(NodeWithSSHBase):
                             envs: Dict[str, str],
                             is_worker: bool,
                             enable_port_forward: bool,
-                            rfports: Optional[List[Union[int, Tuple[int, int]]]] = None,
+                            rfports: Optional[List[Union[int,
+                                                         Tuple[int,
+                                                               int]]]] = None,
                             init_cmds: str = "",
                             running_driver_id: str = ""):
         assert self.task is None
         init_event = asyncio.Event()
         self.shutdown_ev.clear()
         self.exit_event.clear()
-        client = SSHClient(url, username, password, None, self.get_uid(), ENCODING)
+        client = SSHClient(url, username, password, None, self.get_uid(),
+                           ENCODING)
 
         # async def callback(ev: Event):
         #     await msg_q.put(ev)
         self.running_driver_id = running_driver_id
+
         async def exit_callback():
             self.task = None
             self.last_event = CommandEventType.PROMPT_END
@@ -1036,14 +1059,17 @@ class AppNode(CommandNode):
                             envs: Dict[str, str],
                             is_worker: bool,
                             enable_port_forward: bool,
-                            rfports: Optional[List[Union[int, Tuple[int, int]]]] = None,
+                            rfports: Optional[List[Union[int,
+                                                         Tuple[int,
+                                                               int]]]] = None,
                             init_cmds: str = "",
                             running_driver_id: str = ""):
         assert self.task is None
         init_event = asyncio.Event()
         self.shutdown_ev.clear()
         self.exit_event.clear()
-        client = SSHClient(url, username, password, None, self.get_uid(), ENCODING)
+        client = SSHClient(url, username, password, None, self.get_uid(),
+                           ENCODING)
         # print("APP", url, client.url_no_port, client.port)
         if not is_worker:
             # query two free port in target via ssh, then use them as app ports
@@ -1064,18 +1090,24 @@ class AppNode(CommandNode):
         # async def callback(ev: Event):
         #     await msg_q.put(ev)
         self.running_driver_id = running_driver_id
+
         async def exit_callback():
             self.task = None
             self.last_event = CommandEventType.PROMPT_END
             self.set_stop_status()
             self.running_driver_id = ""
+
         envs.update({
-            flowconstants.TENSORPC_FLOW_APP_GRPC_PORT: str(self.grpc_port),
-            flowconstants.TENSORPC_FLOW_APP_HTTP_PORT: str(self.http_port),
-            flowconstants.TENSORPC_FLOW_APP_MODULE_NAME: f"\"{self.module_name}\"",
+            flowconstants.TENSORPC_FLOW_APP_GRPC_PORT:
+            str(self.grpc_port),
+            flowconstants.TENSORPC_FLOW_APP_HTTP_PORT:
+            str(self.http_port),
+            flowconstants.TENSORPC_FLOW_APP_MODULE_NAME:
+            f"\"{self.module_name}\"",
         })
         if self.module_name.startswith("!"):
-            envs[flowconstants.TENSORPC_FLOW_APP_MODULE_NAME] = f"\"\\{self.module_name}\""
+            envs[flowconstants.
+                 TENSORPC_FLOW_APP_MODULE_NAME] = f"\"\\{self.module_name}\""
         sd_task = asyncio.create_task(self.shutdown_ev.wait())
         self.task = asyncio.create_task(
             client.connect_queue(self.input_queue,
@@ -1122,7 +1154,6 @@ _TYPE_TO_NODE_CLS: Dict[str, Type[Node]] = {
     "datastorage": DataStorageNode,
     "group": GroupNode,
     "markdown": MarkdownNode,
-
 }
 
 
@@ -1186,7 +1217,7 @@ class FlowGraph:
         self._update_connection(edges)
 
         self.graph_id = graph_id
-        self.group = None 
+        self.group = None
         if "group" in graph_data:
             self.group = graph_data["group"]
 
@@ -1248,7 +1279,7 @@ class FlowGraph:
             self.get_node_by_id(h.target_node_id) for h in out_handles
         ]
         return out_nodes
-                    
+
     def update_nodes(self, nodes: Iterable[Node]):
         self._node_id_to_node = {n.id: n for n in nodes}
         self._node_rid_to_node = {n.readable_id: n for n in nodes}
@@ -1287,8 +1318,8 @@ class FlowGraph:
             "id": self.graph_id,
         }
         if self.group is not None:
-            res["group"] = self.group 
-        return res 
+            res["group"] = self.group
+        return res
 
     def to_save_dict(self):
         res = {
@@ -1298,8 +1329,8 @@ class FlowGraph:
             "id": self.graph_id,
         }
         if self.group is not None:
-            res["group"] = self.group 
-        return res 
+            res["group"] = self.group
+        return res
 
     async def update_graph(self, graph_id: str, new_flow_data):
         """TODO delete message when node is deleted.
@@ -1324,7 +1355,8 @@ class FlowGraph:
                     graph_id, node.raw_data)
                 new_node_id_to_node[node.id] = self._node_id_to_node[node.id]
                 prev_node = self._node_id_to_node[node.id]
-                if isinstance(prev_node, CommandNode) and prev_node.driver_id != "":
+                if isinstance(prev_node,
+                              CommandNode) and prev_node.driver_id != "":
                     if self.node_exists(prev_node.driver_id):
                         driver = self.get_node_by_id(prev_node.driver_id)
                         if isinstance(driver, DirectSSHNode):
@@ -1374,7 +1406,11 @@ def _empty_flow_graph(graph_id: str = ""):
     return FlowGraph(data, graph_id)
 
 
-async def _get_free_port(count: int, url: str, username: str, password: str, init_cmds: str = ""):
+async def _get_free_port(count: int,
+                         url: str,
+                         username: str,
+                         password: str,
+                         init_cmds: str = ""):
     client = SSHClient(url, username, password, None, "", "utf-8")
     ports = []
     # res = await client.simple_run_command(f"python -m tensorpc.cli.free_port {count}")
@@ -1383,11 +1419,13 @@ async def _get_free_port(count: int, url: str, username: str, password: str, ini
     async with client.simple_connect() as conn:
         try:
             if init_cmds:
-                cmd = (f"bash -i -c "
-                    f'"{init_cmds} && python -m tensorpc.cli.free_port {count}"')
+                cmd = (
+                    f"bash -i -c "
+                    f'"{init_cmds} && python -m tensorpc.cli.free_port {count}"'
+                )
             else:
                 cmd = (f"bash -i -c "
-                    f'"python -m tensorpc.cli.free_port {count}"')
+                       f'"python -m tensorpc.cli.free_port {count}"')
             result = await conn.run(cmd, check=True)
             stdout = result.stdout
             if stdout is not None:
@@ -1404,16 +1442,21 @@ async def _get_free_port(count: int, url: str, username: str, password: str, ini
             raise e
     return ports
 
+
 class NodeDesp:
-    def __init__(self, node: Node, graph: FlowGraph, driver: Optional[Node]) -> None:
+
+    def __init__(self, node: Node, graph: FlowGraph,
+                 driver: Optional[Node]) -> None:
         self.node = node
         self.driver = driver
         self.graph = graph
         self.has_remote_driver = isinstance(driver, RemoteSSHNode)
 
     def get_remote_driver(self):
-        assert self.driver is not None and isinstance(self.driver, RemoteSSHNode)
+        assert self.driver is not None and isinstance(self.driver,
+                                                      RemoteSSHNode)
         return self.driver
+
 
 class Flow:
 
@@ -1515,8 +1558,12 @@ class Flow:
                 assert isinstance(v, NotifyEvent)
                 if v.type == NotifyType.AppStart and app_node.state is not None:
                     save_ev = UISaveStateEvent(app_node.state)
-                    await self.run_single_event(gid, nid, AppEventType.UISaveStateEvent.value, 
-                        save_ev.to_dict(), use_grpc=True)
+                    await self.run_single_event(
+                        gid,
+                        nid,
+                        AppEventType.UISaveStateEvent.value,
+                        save_ev.to_dict(),
+                        use_grpc=True)
             else:
                 new_t2e[k] = v
         ev.type_to_event = new_t2e
@@ -1529,7 +1576,7 @@ class Flow:
         cur_sche_ev = ScheduleEvent.from_dict(sche_ev_data)
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
-        
+
         # TODO if node is remote, run schedule_next in remote worker
         assert not node_desp.has_remote_driver, "TODO"
         assert node.schedulable, "only command node and scheduler node can be scheduled."
@@ -1553,7 +1600,8 @@ class Flow:
                 # TODO
                 raise NotImplementedError
             else:
-                if isinstance(sche_node, CommandNode) and not isinstance(sche_node, AppNode):
+                if isinstance(sche_node, CommandNode) and not isinstance(
+                        sche_node, AppNode):
                     if not sche_node.is_session_started():
                         assert isinstance(sche_driv, DirectSSHNode)
                         await self._start_session_direct(
@@ -1565,8 +1613,9 @@ class Flow:
                         await sche_node.run_schedule_event(sche_ev)
                 elif isinstance(sche_node, AppNode):
                     if sche_node.is_running():
-                        await self.run_single_event(graph_id, node_id, AppEventType.ScheduleNext.value, sche_ev.to_dict())
-
+                        await self.run_single_event(
+                            graph_id, node_id, AppEventType.ScheduleNext.value,
+                            sche_ev.to_dict())
 
     def _get_app_node_and_driver(self, graph_id: str, node_id: str):
         node_desp = self._get_node_desp(graph_id, node_id)
@@ -1581,8 +1630,12 @@ class Flow:
         # assert isinstance(driver, DirectSSHNode)
         # return node, driver
 
-    async def run_single_event(self, graph_id: str, node_id: str,
-                           type: int, ui_ev_dict: Dict[str, Any], use_grpc: bool = False):
+    async def run_single_event(self,
+                               graph_id: str,
+                               node_id: str,
+                               type: int,
+                               ui_ev_dict: Dict[str, Any],
+                               use_grpc: bool = False):
         worker_key = serv_names.FLOWWORKER_RUN_APP_SINGLE_EVENT
         app_key = serv_names.APP_RUN_SINGLE_EVENT
 
@@ -1591,12 +1644,10 @@ class Flow:
         if isinstance(driver, RemoteSSHNode):
             if use_grpc:
                 return await driver.simple_grpc_remote_call(
-                    worker_key, graph_id, node_id,
-                    type, ui_ev_dict)
+                    worker_key, graph_id, node_id, type, ui_ev_dict)
             else:
-                return await driver.http_remote_call(
-                    worker_key, graph_id, node_id,
-                    type, ui_ev_dict)
+                return await driver.http_remote_call(worker_key, graph_id,
+                                                     node_id, type, ui_ev_dict)
         else:
             if use_grpc:
                 sess = prim.get_http_client_session()
@@ -1606,9 +1657,8 @@ class Flow:
                     app_url = get_grpc_url("localhost", node.fwd_grpc_port)
                 else:
                     app_url = get_grpc_url(durl, grpc_port)
-                return await tensorpc.simple_chunk_call_async(app_url,
-                                            app_key,
-                                            type, ui_ev_dict)
+                return await tensorpc.simple_chunk_call_async(
+                    app_url, app_key, type, ui_ev_dict)
             else:
                 sess = prim.get_http_client_session()
                 http_port = node.http_port
@@ -1617,33 +1667,40 @@ class Flow:
                     app_url = get_http_url("localhost", node.fwd_http_port)
                 else:
                     app_url = get_http_url(durl, http_port)
-                return await http_remote_call(sess, app_url,
-                                            app_key,
-                                            type, ui_ev_dict)
+                return await http_remote_call(sess, app_url, app_key, type,
+                                              ui_ev_dict)
 
     async def run_ui_event(self, graph_id: str, node_id: str,
                            ui_ev_dict: Dict[str, Any]):
-        return await self.run_single_event(graph_id, node_id, AppEventType.UIEvent.value, ui_ev_dict)
+        return await self.run_single_event(graph_id, node_id,
+                                           AppEventType.UIEvent.value,
+                                           ui_ev_dict)
 
     async def run_app_editor_event(self, graph_id: str, node_id: str,
-                           ui_ev_dict: Dict[str, Any]):
-        return await self.run_single_event(graph_id, node_id, AppEventType.AppEditor.value, ui_ev_dict)
-    
+                                   ui_ev_dict: Dict[str, Any]):
+        return await self.run_single_event(graph_id, node_id,
+                                           AppEventType.AppEditor.value,
+                                           ui_ev_dict)
+
     async def run_app_file_event(self, file: File):
-        data = file.data 
+        data = file.data
         node_uid = data["node_uid"]
         graph_id = node_uid.split("@")[0]
         node_id = node_uid.split("@")[1]
 
         node_desp = self._get_node_desp(graph_id, node_id)
-        node = node_desp.node 
+        node = node_desp.node
         if isinstance(node, AppNode):
-            ev = UIEvent({
-                data["comp_uid"]: (FrontendEventType.FileDrop.value, file)
-            })
-            return await self.run_single_event(graph_id, node_id, AppEventType.UIEvent.value, ev.to_dict(), True)
+            ev = UIEvent(
+                {data["comp_uid"]: (FrontendEventType.FileDrop.value, file)})
+            return await self.run_single_event(graph_id, node_id,
+                                               AppEventType.UIEvent.value,
+                                               ev.to_dict(), True)
 
-    async def query_app_state(self, graph_id: str, node_id: str, editor_only: bool = False):
+    async def query_app_state(self,
+                              graph_id: str,
+                              node_id: str,
+                              editor_only: bool = False):
         node, driver = self._get_app_node_and_driver(graph_id, node_id)
         if not node.is_session_started():
             return None
@@ -1651,15 +1708,16 @@ class Flow:
             return None
         if isinstance(driver, RemoteSSHNode):
             return await driver.http_remote_call(
-                serv_names.FLOWWORKER_APP_GET_LAYOUT, graph_id, node_id, editor_only)
+                serv_names.FLOWWORKER_APP_GET_LAYOUT, graph_id, node_id,
+                editor_only)
         else:
             sess = prim.get_http_client_session()
             http_port = node.http_port
             durl, _ = get_url_port(driver.url)
             app_url = get_http_url(durl, http_port)
             return await http_remote_call(sess, app_url,
-                                          serv_names.APP_GET_LAYOUT, editor_only)
-    
+                                          serv_names.APP_GET_LAYOUT,
+                                          editor_only)
 
     def query_app_node_urls(self, graph_id: str, node_id: str):
         node, driver = self._get_app_node_and_driver(graph_id, node_id)
@@ -1674,7 +1732,8 @@ class Flow:
                 "is_remote": True,
                 "module_name": node.module_name,
             }
-            return (driver.worker_grpc_url, driver.worker_http_url, True, node.module_name)
+            return (driver.worker_grpc_url, driver.worker_http_url, True,
+                    node.module_name)
         else:
             http_port = node.http_port
             grpc_port = node.grpc_port
@@ -1783,7 +1842,7 @@ class Flow:
                     if isinstance(node, CommandNode):
                         current_cmd = event.arg.decode("utf-8")
                         if node._previous_cmd.strip() == current_cmd.strip():
-                            node._start_record_stdout = True 
+                            node._start_record_stdout = True
                 if event.type == CommandEventType.COMMAND_COMPLETE:
                     if isinstance(node, CommandNode):
                         if node._start_record_stdout:
@@ -1791,9 +1850,11 @@ class Flow:
                             if event.arg is not None:
                                 res.return_code = int(event.arg)
                             # print(res.cmd, res.return_code)
-                            sch_ev = ScheduleEvent(time.time_ns(), res.to_dict(), {})
+                            sch_ev = ScheduleEvent(time.time_ns(),
+                                                   res.to_dict(), {})
                             node.clear_previous_cmd()
-                            await self.schedule_next(graph_id, node_id, sch_ev.to_dict())
+                            await self.schedule_next(graph_id, node_id,
+                                                     sch_ev.to_dict())
                 if event.type == CommandEventType.PROMPT_END:
                     # schedule queued tasks here.
                     if isinstance(node, CommandNode) and node.queued_commands:
@@ -1826,7 +1887,6 @@ class Flow:
             return node_desp.node.get_node_status().to_dict()
         return UserStatusEvent.empty().to_dict()
 
-
     async def save_terminal_state(self, graph_id: str, node_id: str, state,
                                   timestamp_ms: int):
         if len(state) > 0:
@@ -1843,14 +1903,13 @@ class Flow:
             node.terminal_close_ts = timestamp_ms * 1000000
         self.selected_node_uid = ""
 
-
     async def select_node(self,
                           graph_id: str,
                           node_id: str,
                           width: int = -1,
                           height: int = -1):
         node_desp = self._get_node_desp(graph_id, node_id)
-        node = node_desp.node 
+        node = node_desp.node
         assert isinstance(node, (NodeWithSSHBase))
         if node_desp.has_remote_driver:
             driver = node_desp.get_remote_driver()
@@ -1877,7 +1936,7 @@ class Flow:
     async def command_node_input(self, graph_id: str, node_id: str, data: str):
         node_desp = self._get_node_desp(graph_id, node_id)
         # print("INPUT", data.encode("utf-8"))
-        node = node_desp.node 
+        node = node_desp.node
         if (isinstance(node, (NodeWithSSHBase))):
             if node_desp.has_remote_driver:
                 driver = node_desp.get_remote_driver()
@@ -1891,7 +1950,7 @@ class Flow:
     async def ssh_change_size(self, graph_id: str, node_id: str, width: int,
                               height: int):
         node_desp = self._get_node_desp(graph_id, node_id)
-        node = node_desp.node 
+        node = node_desp.node
 
         if isinstance(node, (NodeWithSSHBase)):
             if node_desp.has_remote_driver:
@@ -1913,7 +1972,7 @@ class Flow:
             json.dump(flow_data, f)
 
     async def save_graph(self, graph_id: str, flow_data):
-        # TODO do we need a async lock here?    
+        # TODO do we need a async lock here?
         flow_data["id"] = graph_id
         if graph_id in self.flow_dict:
             await self.flow_dict[graph_id].update_graph(graph_id, flow_data)
@@ -1928,16 +1987,19 @@ class Flow:
                 if node.is_session_started():
                     driv_nodes = graph.get_driver_nodes(node)
                     await node.http_remote_call(
-                        serv_names.FLOWWORKER_SYNC_GRAPH, graph_id, node.to_dict(),
-                        [n.to_dict() for n in driv_nodes], graph.variable_dict)
+                        serv_names.FLOWWORKER_SYNC_GRAPH, graph_id,
+                        node.to_dict(), [n.to_dict() for n in driv_nodes],
+                        graph.variable_dict)
 
     async def load_default_graph(self):
-        final_res = [await self.load_graph(FLOW_DEFAULT_GRAPH_ID, force_reload=False)]
-        for k, v in self.flow_dict.items(): 
+        final_res = [
+            await self.load_graph(FLOW_DEFAULT_GRAPH_ID, force_reload=False)
+        ]
+        for k, v in self.flow_dict.items():
             if k != FLOW_DEFAULT_GRAPH_ID:
                 res = await self.load_graph(k, force_reload=False)
                 final_res.append(res)
-        return [g.to_dict() for g in final_res] 
+        return [g.to_dict() for g in final_res]
 
     async def delete_graph(self, graph_id: str):
         flow = self.flow_dict[graph_id]
@@ -1951,10 +2013,10 @@ class Flow:
     async def configure_graph(self, graph_id: str, settings: Dict[str, Any]):
         flow = self.flow_dict[graph_id]
         if "name" in settings and settings["name"] != "":
-            # rename 
+            # rename
             new_name = settings["name"]
             flow = self.flow_dict.pop(graph_id)
-            self.flow_dict[new_name] = flow 
+            self.flow_dict[new_name] = flow
             flow.graph_id = new_name
             flow_path = self.root / f"{graph_id}.json"
             if flow_path.exists():
@@ -1963,9 +2025,10 @@ class Flow:
             with new_flow_path.open("w") as f:
                 json.dump(flow.to_dict(), f)
 
-    def markdown_save_content(self, graph_id: str, node_id: str, page: str, current_key: str):
+    def markdown_save_content(self, graph_id: str, node_id: str, page: str,
+                              current_key: str):
         node_desp = self._get_node_desp(graph_id, node_id)
-        node = node_desp.node 
+        node = node_desp.node
         assert isinstance(node, MarkdownNode)
         node.set_page(page, current_key)
         node.set_current_key(current_key)
@@ -2023,7 +2086,7 @@ class Flow:
 
     async def _start_remote_worker(self, graph_id: str, node_id: str):
         node_desp = self._get_node_desp(graph_id, node_id)
-        node = node_desp.node 
+        node = node_desp.node
         graph = node_desp.graph
         if isinstance(node, RemoteSSHNode):
             worker_exists: bool = False
@@ -2101,13 +2164,14 @@ class Flow:
 
     async def start(self, graph_id: str, node_id: str):
         node_desp = self._get_node_desp(graph_id, node_id)
-        node = node_desp.node 
+        node = node_desp.node
         graph = node_desp.graph
         if isinstance(node, RemoteSSHNode):
             return await self._start_remote_worker(graph_id, node_id)
         if isinstance(node, CommandNode):
             if node_desp.driver is None:
-                raise ValueError("you need to assign a driver to node first", node.readable_id)
+                raise ValueError("you need to assign a driver to node first",
+                                 node.readable_id)
             driver = node_desp.driver
             print("START", graph_id, node_id, node.is_session_started(),
                   type(node), driver, node.driver_id)
@@ -2118,11 +2182,12 @@ class Flow:
                     await self._start_session_direct(graph_id, node, driver)
                 else:
                     if driver.id != node.session_identify_key:
-                        # shutdown ssh 
+                        # shutdown ssh
                         print("SHUTDOWN SSH SESSION")
                         await self.stop_session(graph_id, node_id)
                         await node.exit_event.wait()
-                        await self._start_session_direct(graph_id, node, driver)
+                        await self._start_session_direct(
+                            graph_id, node, driver)
                 await node.run_command(cmd_renderer=graph.render_command)
             elif isinstance(driver, RemoteSSHNode):
                 assert (driver.url != "" and driver.username != ""
@@ -2140,10 +2205,10 @@ class Flow:
                 print("START REMOTE", driver_http_url)
                 # TODO add this to remote node setting
                 remote_ssh_url = "localhost:22"
-                await http_remote_call(
-                    prim.get_http_client_session(), driver_http_url,
-                    serv_names.FLOWWORKER_CREATE_SESSION, node.raw_data,
-                    graph_id)
+                await http_remote_call(prim.get_http_client_session(),
+                                       driver_http_url,
+                                       serv_names.FLOWWORKER_CREATE_SESSION,
+                                       node.raw_data, graph_id)
             else:
                 raise NotImplementedError
 
@@ -2167,15 +2232,15 @@ class Flow:
             if driver.is_session_started():
                 driver_http_url = driver.worker_http_url
                 await http_remote_call(prim.get_http_client_session(),
-                                        driver_http_url,
-                                        serv_names.FLOWWORKER_STOP, graph_id,
-                                        node_id)
+                                       driver_http_url,
+                                       serv_names.FLOWWORKER_STOP, graph_id,
+                                       node_id)
             # TODO raise a exception to front end if driver not start
             return
         if isinstance(node, CommandNode):
             if node.is_session_started():
                 if isinstance(node, AppNode):
-                    # query simple app state and save on 
+                    # query simple app state and save on
                     # master memory (inputs, switchs, etc)
                     pass
                 await node.send_ctrl_c()
@@ -2221,15 +2286,22 @@ class Flow:
         assert isinstance(node, DataStorageNode)
         return node.get_items()
 
-    async def save_data_to_storage(self, graph_id: str, node_id: str, key: str, data: bytes, meta: DataItemMeta, timestamp: int):
+    async def save_data_to_storage(self, graph_id: str, node_id: str, key: str,
+                                   data: bytes, meta: DataItemMeta,
+                                   timestamp: int):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
         assert isinstance(node, DataStorageNode)
         res = node.save_data(key, data, meta, timestamp)
-        await self._user_ev_q.put((node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
-        return res 
+        await self._user_ev_q.put(
+            (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
+        return res
 
-    async def read_data_from_storage(self, graph_id: str, node_id: str, key: str, timestamp: Optional[int] = None):
+    async def read_data_from_storage(self,
+                                     graph_id: str,
+                                     node_id: str,
+                                     key: str,
+                                     timestamp: Optional[int] = None):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
         assert isinstance(node, DataStorageNode)

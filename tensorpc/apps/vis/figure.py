@@ -4,9 +4,11 @@ from typing import Any, List, Optional
 
 import numpy as np
 from tensorpc.apps.vis import objects
-import abc 
+import abc
+
 
 class Layer(abc.ABC):
+
     def __init__(self, name: str):
         self.name = name
 
@@ -15,12 +17,14 @@ class Layer(abc.ABC):
         raise NotImplementedError
 
     def bound(self) -> Optional[List[float]]:
-        return None 
+        return None
+
 
 class Layer2d(Layer):
+
     def __init__(self, name: str):
         super().__init__(name)
-        self.objects = [] # type: List[objects.FigureObject2d]
+        self.objects = []  # type: List[objects.FigureObject2d]
 
     def move(self, x: float, y: float):
         # move the whole layer to another location.
@@ -34,14 +38,16 @@ class Layer2d(Layer):
 
     def data(self):
         return {
-            "name": self.name ,
+            "name": self.name,
             "objects": [obj.data() for obj in self.objects],
         }
 
+
 class Layer3d(Layer):
+
     def __init__(self, name: str):
         super().__init__(name)
-        self.objects = [] # type: List[objects.FigureObject3d]
+        self.objects = []  # type: List[objects.FigureObject3d]
 
     def move(self, x: float, y: float, z: float):
         # move the whole layer to another location.
@@ -55,11 +61,13 @@ class Layer3d(Layer):
 
     def data(self):
         return {
-            "name": self.name ,
+            "name": self.name,
             "objects": [obj.data() for obj in self.objects],
         }
 
+
 class ImageLayer(Layer2d):
+
     def polygon(self,
                 points: np.ndarray,
                 color: str,
@@ -67,8 +75,10 @@ class ImageLayer(Layer2d):
                 query=False,
                 select=True,
                 closed=True):
-        return self.add_object(objects.ImagePolygon(points, color, hovertext, query, select, closed))
-    
+        return self.add_object(
+            objects.ImagePolygon(points, color, hovertext, query, select,
+                                 closed))
+
     def lines(self, lines, color: str, width=1, opacity=0.5):
         obj = objects.Lines2d(lines, color, width, opacity)
         return self.add_object(obj)
@@ -85,16 +95,21 @@ class ImageLayer(Layer2d):
                    select=True):
         x0, y0, x1, y1 = box
         points = [x0, y0, x0, y1, x1, y1, x1, y0]
-        return self.polygon(np.array(points), color, hovertext, query, select=select)
+        return self.polygon(np.array(points),
+                            color,
+                            hovertext,
+                            query,
+                            select=select)
 
     def bound(self) -> Optional[List[float]]:
-        bounds = [] # type: List[List[float]]
+        bounds = []  # type: List[List[float]]
         for obj in self.objects:
             bound = obj.bound()
             if bound is not None:
                 bounds.append(bound)
         bounds_arr = np.array(bounds)
         return [*bounds_arr[:, :2].min(axis=0), *bounds_arr[:, 2:].max(axis=0)]
+
 
 def lines_to_polygon(lines: np.ndarray):
     assert len(lines.shape) == 2
@@ -104,6 +119,7 @@ def lines_to_polygon(lines: np.ndarray):
 
 
 class D3Layer(Layer3d):
+
     def box(self,
             dim,
             pos,
@@ -112,7 +128,8 @@ class D3Layer(Layer3d):
             hovertext: str = "",
             query=True,
             **props):
-        obj = objects.BoundingBox(dim, pos, rot, color, hovertext, query, **props)
+        obj = objects.BoundingBox(dim, pos, rot, color, hovertext, query,
+                                  **props)
         return self.add_object(obj)
 
     def element(self, elem_name: str, dynamic_props: dict, **props):
@@ -134,26 +151,29 @@ class D3Layer(Layer3d):
     def mesh_array(self, mesh, color: str, width=4, opacity=0.5):
         # mesh_array: [N, 9]
         mesh = mesh.reshape(-1, 3, 3)
-        lines = np.stack([mesh[:, [0, 1]], mesh[:, [1, 2]], mesh[:, [2, 0]]], axis=1).reshape(-1, 2, 3)
+        lines = np.stack([mesh[:, [0, 1]], mesh[:, [1, 2]], mesh[:, [2, 0]]],
+                         axis=1).reshape(-1, 2, 3)
         obj = objects.Lines3d(lines, color, width, opacity)
         return self.add_object(obj)
 
     def bound(self) -> Optional[List[float]]:
-        bounds = [] # type: List[List[float]]
+        bounds = []  # type: List[List[float]]
         for obj in self.objects:
             bound = obj.bound()
             if bound is not None:
                 bounds.append(bound)
         if not bounds:
-            return None 
+            return None
         bounds_arr = np.array(bounds)
         return [*bounds_arr[:, :3].min(axis=0), *bounds_arr[:, 3:].max(axis=0)]
 
+
 class Figure(object):
+
     def __init__(self, uid, data, name=None, **props):
         if name is None:
             name = uid
-        
+
         self._data = {
             "uid": uid,
             "name": name,
@@ -171,14 +191,14 @@ class Figure(object):
             "props": props,
             "tags": [],
         }
-        self.layers = [] # type: List[Layer]
+        self.layers = []  # type: List[Layer]
         self.props = self._data["props"]
         self.tags = self._data["tags"]
 
     def add_layer(self, layer):
         self.layers.append(layer)
 
-    @property 
+    @property
     def num_layers(self):
         return len(self.layers)
 
@@ -186,8 +206,12 @@ class Figure(object):
         self._data["layers"] = [l.data() for l in self.layers]
         return self._data
 
-    def set_overlay_rpc(self, addr: str, http_addr: str, service: str, 
-                        args: List[Any], use_http: bool = False):
+    def set_overlay_rpc(self,
+                        addr: str,
+                        http_addr: str,
+                        service: str,
+                        args: List[Any],
+                        use_http: bool = False):
         self._data["overlay_rpc"] = {
             "address": addr,
             "httpAddress": http_addr,
@@ -196,8 +220,12 @@ class Figure(object):
             "usehttp": use_http,
         }
 
-    def set_rpc(self, addr: str, http_addr: str, service: str, 
-                args: List[Any], use_http: bool = False):
+    def set_rpc(self,
+                addr: str,
+                http_addr: str,
+                service: str,
+                args: List[Any],
+                use_http: bool = False):
         self._data["rpc"] = {
             "address": addr,
             "httpAddress": http_addr,
@@ -208,7 +236,12 @@ class Figure(object):
 
 
 class ImageFigure(Figure):
-    def __init__(self, uid, data=None, autoscale=True, encode_suffix="jpg",
+
+    def __init__(self,
+                 uid,
+                 data=None,
+                 autoscale=True,
+                 encode_suffix="jpg",
                  **props):
         if data is not None:
             if isinstance(data, np.ndarray):
@@ -232,6 +265,7 @@ class ImageFigure(Figure):
 
 
 class RPCImageFigure(ImageFigure):
+
     def __init__(self, uid, addr, service: str, arguments: List[Any]):
         super(ImageFigure, self).__init__(uid, None)
         self._data["type"] = "image"
@@ -241,6 +275,7 @@ class RPCImageFigure(ImageFigure):
 
 
 class PointCloudFigure(Figure):
+
     def __init__(self,
                  uid,
                  data=None,
@@ -281,6 +316,7 @@ class PointCloudFigure(Figure):
 
 
 class RPCPointCloudFigure(PointCloudFigure):
+
     def __init__(self,
                  uid,
                  addr: str,

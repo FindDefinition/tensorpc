@@ -38,9 +38,11 @@ from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     Fragment, FrontendEventType, NumberType, T_base_props,
                     T_child, T_container_props, TaskLoopEvent, UIEvent,
                     UIRunStatus, UIType, Undefined, ValueType, undefined)
-from .mui import (FlexBoxProps, MUIFlexBoxProps, MUIComponentType, MUIContainerBase,
-                  PointerEventsProperties, _encode_image_bytes)
+from .mui import (FlexBoxProps, MUIFlexBoxProps, MUIComponentType,
+                  MUIContainerBase, PointerEventsProperties,
+                  _encode_image_bytes)
 from .common import handle_standard_event
+
 Vector3Type: TypeAlias = Tuple[float, float, float]
 
 _CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
@@ -49,7 +51,7 @@ _CORO_ANY: TypeAlias = Union[Coroutine[Any, None, None], Any]
 CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
 
 ThreeLayoutType: TypeAlias = Union[List["ThreeComponentType"],
-                                 Dict[str, "ThreeComponentType"]]
+                                   Dict[str, "ThreeComponentType"]]
 
 P = ParamSpec('P')
 
@@ -148,7 +150,6 @@ T_material_prop = TypeVar("T_material_prop", bound=ThreeMaterialPropsBase)
 T_geometry_prop = TypeVar("T_geometry_prop", bound=ThreeGeometryPropsBase)
 
 ThreeComponentType = Union[ThreeComponentBase, ThreeContainerBase, Fragment]
-
 
 
 @dataclasses.dataclass
@@ -369,10 +370,7 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
             if k == FrontendEventType.Change.value:
                 continue
             if not isinstance(v, Undefined):
-                evs.append({
-                    "type": k,
-                    "stopPropagation": v.stop_propagation
-                })
+                evs.append({"type": k, "stopPropagation": v.stop_propagation})
         res["props"]["usedEvents"] = evs
         return res
 
@@ -437,8 +435,10 @@ class PointProps(ThreeBasicProps):
     size: float = 3.0
     sizes: Union[np.ndarray, Undefined] = undefined
 
+
 class PointsControlType(enum.Enum):
     SetColors = 0
+
 
 class Points(ThreeComponentBase[PointProps]):
 
@@ -470,7 +470,8 @@ class Points(ThreeComponentBase[PointProps]):
             if points is not None:
                 assert points.shape[0] == colors.shape[0]
 
-    async def set_colors_in_range(self, colors: Union[str, np.ndarray], begin: int, end: int):
+    async def set_colors_in_range(self, colors: Union[str, np.ndarray],
+                                  begin: int, end: int):
         """
         Args: 
             cam2world: camera to world matrix, 4x4 ndaray or 16 list
@@ -494,9 +495,12 @@ class Points(ThreeComponentBase[PointProps]):
         self.props.attr_fields = undefined
         self.props.sizes = undefined
 
-        return await self.send_and_wait(self.update_event(points=self.props.points, 
-            colors=undefined, attrs=undefined, attr_fields=undefined,
-            sizes=undefined))
+        return await self.send_and_wait(
+            self.update_event(points=self.props.points,
+                              colors=undefined,
+                              attrs=undefined,
+                              attr_fields=undefined,
+                              sizes=undefined))
 
     async def update_points(self,
                             points: np.ndarray,
@@ -507,10 +511,10 @@ class Points(ThreeComponentBase[PointProps]):
                             attr_fields: Optional[List[str]] = None,
                             limit: Optional[int] = None,
                             sizes: Optional[Union[np.ndarray,
-                                                   Undefined]] = None,
+                                                  Undefined]] = None,
                             size_attenuation: bool = False,
                             size: Optional[Union[NumberType,
-                                                   Undefined]] = None):
+                                                 Undefined]] = None):
         # TODO better check, we must handle all errors before sent to frontend.
         assert points.ndim == 2 and points.shape[1] in [
             3, 4
@@ -531,7 +535,8 @@ class Points(ThreeComponentBase[PointProps]):
             upd["size"] = size
         if sizes is not None:
             if not isinstance(sizes, Undefined):
-                assert sizes.shape[0] == points.shape[0] and sizes.dtype == np.float32
+                assert sizes.shape[0] == points.shape[
+                    0] and sizes.dtype == np.float32
             upd["sizes"] = sizes
             self.props.sizes = sizes
 
@@ -604,7 +609,8 @@ class Segments(ThreeComponentBase[SegmentsProps]):
     async def clear(self):
         self.props.lines = np.zeros((0, 2, 3), np.float32)
         self.props.colors = undefined
-        return self.send_and_wait(self.update_event(lines=undefined, colors=undefined))
+        return self.send_and_wait(
+            self.update_event(lines=undefined, colors=undefined))
 
     async def update_lines(self,
                            lines: np.ndarray,
@@ -629,7 +635,8 @@ class Segments(ThreeComponentBase[SegmentsProps]):
     async def update_mesh_lines(self, mesh: np.ndarray):
         mesh = mesh.reshape(-1, 3, 3)
         indexes = [0, 1, 1, 2, 2, 0]
-        lines = np.stack([mesh[:, i] for i in indexes], axis=1).reshape(-1, 2, 3)
+        lines = np.stack([mesh[:, i] for i in indexes],
+                         axis=1).reshape(-1, 2, 3)
         await self.update_lines(lines)
 
     @property
@@ -799,12 +806,13 @@ class BoundingBox(Object3dWithEventBase[BoundingBoxProps]):
 
     async def handle_event(self, ev: EventType):
         await handle_standard_event(self, ev)
-        
+
     def state_change_callback(
             self,
             data: bool,
             type: ValueType = FrontendEventType.Change.value):
         self.props.checked = data
+
 
 @dataclasses.dataclass
 class AxesHelperProps(Object3dBaseProps):
@@ -865,7 +873,8 @@ class Group(Object3dContainerBase[Object3dContainerBaseProps,
                                   ThreeComponentType]):
     # TODO can/should group accept event?
     def __init__(self,
-                 children: Union[Dict[str, ThreeComponentType], List[ThreeComponentType]],
+                 children: Union[Dict[str, ThreeComponentType],
+                                 List[ThreeComponentType]],
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         if isinstance(children, list):
@@ -897,20 +906,16 @@ class Image(Object3dWithEventBase[ImageProps]):
     async def show(self, image: np.ndarray):
         encoded = _encode_image_bytes(image)
         self.props.image = encoded
-        await self.send_and_wait(
-            self.create_update_event({
-                "image": encoded,
-            }))
+        await self.send_and_wait(self.create_update_event({
+            "image": encoded,
+        }))
 
     async def clear(self):
         self.props.image = b''
-        await self.send_and_wait(
-            self.update_event(image=b''))
-    
+        await self.send_and_wait(self.update_event(image=b''))
 
     async def show_raw(self, image_bytes: bytes, suffix: str):
-        await self.send_and_wait(
-            self.show_raw_event(image_bytes, suffix))
+        await self.send_and_wait(self.show_raw_event(image_bytes, suffix))
 
     def encode_raw_to_web(self, raw: bytes, suffix: str):
         return b'data:image/' + suffix.encode(
@@ -939,6 +944,7 @@ class Image(Object3dWithEventBase[ImageProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
 @dataclasses.dataclass
 class PerspectiveCameraProps(Object3dBaseProps):
     fov: Union[float, Undefined] = undefined
@@ -949,14 +955,16 @@ class PerspectiveCameraProps(Object3dBaseProps):
 
 class PerspectiveCamera(Object3dBase[PerspectiveCameraProps]):
 
-    def __init__(self,
-                 make_default: bool = True,
-                 fov: Union[float, Undefined] = undefined,
-                 aspect: Union[float, Undefined] = undefined,
-                 near: Union[float, Undefined] = undefined,
-                 far: Union[float, Undefined] = undefined,
-                 position: Vector3Type = (0, 0, 1),
-                 up: Vector3Type = (0, 0, 1)) -> None:
+    def __init__(
+        self,
+        make_default: bool = True,
+        fov: Union[float, Undefined] = undefined,
+        aspect: Union[float, Undefined] = undefined,
+        near: Union[float, Undefined] = undefined,
+        far: Union[float, Undefined] = undefined,
+        position: Vector3Type = (0, 0, 1),
+        up: Vector3Type = (0, 0, 1)
+    ) -> None:
         super().__init__(UIType.ThreePerspectiveCamera, PerspectiveCameraProps)
         self.props.fov = fov
         self.props.aspect = aspect
@@ -993,13 +1001,15 @@ class OrthographicCameraProps(Object3dBaseProps):
 
 class OrthographicCamera(Object3dBase[OrthographicCameraProps]):
 
-    def __init__(self,
-                 make_default: bool = True,
-                 near: Union[float, Undefined] = undefined,
-                 far: Union[float, Undefined] = undefined,
-                 zoom: Union[float, Undefined] = undefined,
-                 position: Vector3Type = (0, 0, 1),
-                 up: Vector3Type = (0, 0, 1)) -> None:
+    def __init__(
+        self,
+        make_default: bool = True,
+        near: Union[float, Undefined] = undefined,
+        far: Union[float, Undefined] = undefined,
+        zoom: Union[float, Undefined] = undefined,
+        position: Vector3Type = (0, 0, 1),
+        up: Vector3Type = (0, 0, 1)
+    ) -> None:
         super().__init__(UIType.ThreeOrthographicCamera,
                          OrthographicCameraProps)
         self.props.zoom = zoom
@@ -1044,6 +1054,7 @@ class OrbitControlProps(ThreeBasicProps):
     pan_speed: Union[NumberType, Undefined] = undefined
     key_pan_speed: Union[NumberType, Undefined] = undefined
 
+
 @dataclasses.dataclass
 class CameraControlProps(ThreeBasicProps):
     damping_factor: Union[NumberType, Undefined] = undefined
@@ -1061,6 +1072,7 @@ class CameraControlProps(ThreeBasicProps):
     truck_speed: Union[NumberType, Undefined] = undefined
     dolly_speed: Union[NumberType, Undefined] = undefined
     vertical_drag_to_forward: Union[bool, Undefined] = undefined
+
 
 class MapControl(ThreeComponentBase[OrbitControlProps]):
 
@@ -1081,6 +1093,7 @@ class MapControl(ThreeComponentBase[OrbitControlProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
 class CameraUserControlType(enum.Enum):
     SetCamPose = 0
     SetLookAt = 1
@@ -1089,6 +1102,7 @@ class CameraUserControlType(enum.Enum):
 
 class CameraControl(ThreeComponentBase[CameraControlProps]):
     EvChange = FrontendEventType.Change.value
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeCameraControl, CameraControlProps)
 
@@ -1112,20 +1126,28 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def set_cam2world(self, cam2world: Union[List[float], np.ndarray], distance: float, fov_angle: float = -1):
+    async def set_cam2world(self,
+                            cam2world: Union[List[float], np.ndarray],
+                            distance: float,
+                            fov_angle: float = -1):
         """
         Args: 
-            cam2world: camera to world matrix, 4x4 ndaray or 16 list
+            cam2world: camera to world matrix, 4x4 ndaray or 16 list, R|T, not R/T
             distance: camera orbit target distance.
         """
         cam2world = np.array(cam2world, np.float32).reshape(4, 4)
-        cam2world = cam2world.T # R|T to R/T
+        cam2world = cam2world.T  # R|T to R/T
         return await self.send_and_wait(
             self.create_comp_event({
-                "type": CameraUserControlType.SetCamPose.value,
-                "pose": list(map(float, cam2world.reshape(-1).tolist())),
-                "targetDistance": distance,
-                "fov": fov_angle,
+                "type":
+                CameraUserControlType.SetCamPose.value,
+                "pose":
+                list(map(float,
+                         cam2world.reshape(-1).tolist())),
+                "targetDistance":
+                distance,
+                "fov":
+                fov_angle,
             }))
 
     async def set_lookat(self, origin: List[float], target: List[float]):
@@ -1147,27 +1169,30 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
             }))
 
     @staticmethod
-    def fov_size_to_intrinsic(fov_angle: float, width: NumberType, height: NumberType):
+    def fov_size_to_intrinsic(fov_angle: float, width: NumberType,
+                              height: NumberType):
         size_wh = [int(width), int(height)]
         fov = (np.pi / 180) * fov_angle
         tanHalfFov = np.tan((fov / 2))
         f = size_wh[1] / 2 / tanHalfFov
         intrinsic = np.zeros((3, 3), np.float32)
-        intrinsic[0, 0] = f 
-        intrinsic[1, 1] = f 
+        intrinsic[0, 0] = f
+        intrinsic[1, 1] = f
         intrinsic[0, 2] = size_wh[0] / 2
         intrinsic[1, 2] = size_wh[1] / 2
         intrinsic[2, 2] = 1
         return intrinsic
 
     @staticmethod
-    def intrinsic_size_to_fov(intrinsic: np.ndarray, width: NumberType, height: NumberType):
+    def intrinsic_size_to_fov(intrinsic: np.ndarray, width: NumberType,
+                              height: NumberType):
         f = intrinsic[0][0]
         size_wh = [int(width), int(height)]
         tanHalfFov = size_wh[1] / 2 / f
         fov = np.arctan(tanHalfFov) * 2
         fov_angle = fov / (np.pi / 180)
         return fov_angle
+
 
 class OrbitControl(ThreeComponentBase[OrbitControlProps]):
 
@@ -1194,7 +1219,7 @@ class PointerLockControlProps(Object3dBaseProps):
     enabled: Union[bool, Undefined] = undefined
     min_polar_angle: Union[float, Undefined] = undefined
     max_polar_angle: Union[float, Undefined] = undefined
-    
+
 
 class PointerLockControl(ThreeComponentBase[PointerLockControlProps]):
 
@@ -1270,7 +1295,6 @@ class FlexAutoReflow(ThreeComponentBase[ThreeBasicProps]):
         return self._update_props_base(propcls)
 
 
-
 @dataclasses.dataclass
 class FlexManualReflowProps(ThreeBasicProps):
     timestamp: str = ""
@@ -1292,9 +1316,9 @@ class FlexManualReflow(ThreeComponentBase[FlexManualReflowProps]):
         return self._update_props_base(propcls)
 
     async def reflow(self):
-        await self.send_and_wait(
-            self.update_event(timestamp=str(time.time())))
-        
+        await self.send_and_wait(self.update_event(timestamp=str(time.time())))
+
+
 @dataclasses.dataclass
 class ScreenShotProps(ThreeBasicProps):
     pass
@@ -1306,6 +1330,7 @@ class ScreenShot(ThreeComponentBase[ScreenShotProps]):
     2. get image from callback.
     currently impossible to get image from one function call.
     """
+
     def __init__(self, callback: Callable[[str], _CORO_NONE]) -> None:
         super().__init__(UIType.ThreeScreenShot, ScreenShotProps)
         self.register_event_handler(FrontendEventType.Change.value, callback)
@@ -1322,15 +1347,17 @@ class ScreenShot(ThreeComponentBase[ScreenShotProps]):
 
     async def trigger_screen_shot(self):
         await self.send_and_wait(self.create_comp_event({
-                "type": 0,
-            }))
-        
+            "type": 0,
+        }))
+
     async def handle_event(self, ev: EventType):
         return await handle_standard_event(self, ev, sync_first=True)
 
+
 @dataclasses.dataclass
 class ThreeCanvasProps(MUIFlexBoxProps):
-    three_background_color: Union[str, Undefined] = undefined 
+    three_background_color: Union[str, Undefined] = undefined
+
 
 class ThreeCanvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
 
@@ -1345,7 +1372,7 @@ class ThreeCanvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
         super().__init__(UIType.ThreeCanvas, ThreeCanvasProps, uid_to_comp,
                          children, inited)
         self.props.three_background_color = background
-        
+
     @property
     def prop(self):
         propcls = self.propcls
@@ -2109,7 +2136,10 @@ class Mesh(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
         res["toggled"] = self.props.toggled
         return res
 
-    def state_change_callback(self, data: bool, type: ValueType = FrontendEventType.Change.value):
+    def state_change_callback(
+            self,
+            data: bool,
+            type: ValueType = FrontendEventType.Change.value):
         self.props.toggled = data
 
     async def set_checked(self, checked: bool):
@@ -2184,7 +2214,8 @@ class ShapeButton(Group):
         return res
 
     async def headless_click(self):
-        uiev = UIEvent({self._flow_uid: (FrontendEventType.Click.value, self.name)})
+        uiev = UIEvent(
+            {self._flow_uid: (FrontendEventType.Click.value, self.name)})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -2249,7 +2280,8 @@ class Button(Group):
         return res
 
     async def headless_click(self):
-        uiev = UIEvent({self._flow_uid: (FrontendEventType.Click.value, self.name)})
+        uiev = UIEvent(
+            {self._flow_uid: (FrontendEventType.Click.value, self.name)})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -2309,7 +2341,8 @@ class ToggleButton(Group):
         return res
 
     async def headless_toggle(self):
-        uiev = UIEvent({self._flow_uid: (FrontendEventType.Change.value, self.name)})
+        uiev = UIEvent(
+            {self._flow_uid: (FrontendEventType.Change.value, self.name)})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 

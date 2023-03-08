@@ -5,6 +5,7 @@ from tensorpc.core.serviceunit import ObjectReloadManager, ReloadableDynamicClas
 from tensorpc.flow.constants import TENSORPC_ANYLAYOUT_FUNC_NAME, TENSORPC_LEGACY_LAYOUT_FUNC_NAME
 from tensorpc.core.serviceunit import AppFuncType
 
+
 class FlowSpecialMethods:
 
     def __init__(self, metas: List[ServFunctionMeta]) -> None:
@@ -46,10 +47,10 @@ class FlowSpecialMethods:
             self.create_object.bind(obj)
 
 
-def reload_object_methods(obj: Any,
-                          previous_metas: Optional[
-                              List[ServFunctionMeta]] = None,
-                        reload_mgr: Optional[ObjectReloadManager] = None):
+def reload_object_methods(
+        obj: Any,
+        previous_metas: Optional[List[ServFunctionMeta]] = None,
+        reload_mgr: Optional[ObjectReloadManager] = None):
     obj_type = type(obj)
     tmeta = get_obj_type_meta(obj_type)
     if tmeta is None:
@@ -86,6 +87,7 @@ def reload_object_methods(obj: Any,
 @dataclass
 class AppObjectMeta:
     is_anylayout: bool = False
+
 
 class AppReloadManager(ObjectReloadManager):
     """to resolve some side effects, users should

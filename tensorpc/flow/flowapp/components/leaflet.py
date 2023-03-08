@@ -33,11 +33,11 @@ import numpy as np
 from tensorpc.utils.uniquename import UniqueNamePool
 from typing_extensions import ParamSpec, TypeAlias
 
-from ..core import (BasicProps, Component, EventType, ContainerBase, FrontendEventType,
-                    NumberType, T_base_props, T_child, UIRunStatus, UIType,
-                    Undefined, undefined, ContainerBaseProps,
-                    T_container_props, Fragment, EventHandler,
-                    create_ignore_usr_msg)
+from ..core import (BasicProps, Component, EventType, ContainerBase,
+                    FrontendEventType, NumberType, T_base_props, T_child,
+                    UIRunStatus, UIType, Undefined, undefined,
+                    ContainerBaseProps, T_container_props, Fragment,
+                    EventHandler, create_ignore_usr_msg)
 from .mui import (FlexBoxProps, MUIComponentType, MUIContainerBase)
 from .common import handle_raw_event, handle_standard_event
 
@@ -108,13 +108,16 @@ class MapContainerProps(ContainerBaseProps, FlexBoxProps):
 class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
     EvMove = FrontendEventType.MapMove
     EvZoom = FrontendEventType.MapZoom
+
     def __init__(self,
                  center: Tuple[NumberType, NumberType],
                  zoom: NumberType,
                  children: Dict[str, MapComponentType],
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        allow_evs = [FrontendEventType.MapZoom.value, FrontendEventType.MapMove.value]
+        allow_evs = [
+            FrontendEventType.MapZoom.value, FrontendEventType.MapMove.value
+        ]
         super().__init__(UIType.LeafletMapContainer, MapContainerProps,
                          uid_to_comp, children, inited, allow_evs)
         self.center = center
@@ -131,7 +134,7 @@ class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
                                                  Undefined]] = None,
                          on_zoom: Optional[Union[EventHandler,
                                                  Undefined]] = None):
-        
+
         pointer_event_map = {
             FrontendEventType.MapZoom: on_move,
             FrontendEventType.MapMove: on_zoom,
@@ -147,13 +150,11 @@ class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
                      center: Tuple[NumberType, NumberType],
                      zoom: Optional[NumberType] = None):
         ev = MapEventFlyTo(center, zoom)
-        return await self.send_and_wait(
-            self.create_comp_event(ev.to_dict()))
+        return await self.send_and_wait(self.create_comp_event(ev.to_dict()))
 
     async def set_zoom(self, zoom: NumberType):
         ev = MapEventSetZoom(zoom)
-        return await self.send_and_wait(
-            self.create_comp_event(ev.to_dict()))
+        return await self.send_and_wait(self.create_comp_event(ev.to_dict()))
 
     @property
     def prop(self):
@@ -309,8 +310,7 @@ class Polyline(MapContainerBase[PolylineProps, MapElementChildType]):
 
     async def update_positions(self, positions: List[Tuple[NumberType,
                                                            NumberType]]):
-        await self.send_and_wait(
-            self.update_event(positions=positions))
+        await self.send_and_wait(self.update_event(positions=positions))
 
 
 @dataclasses.dataclass
@@ -357,7 +357,8 @@ class CircleMarker(MapContainerBase[CircleMarkerProps, MapElementChildType]):
                          allowed_events=[FrontendEventType.Click.value])
         self.props.center = center
         if callback is not None:
-            self.register_event_handler(FrontendEventType.Click.value, callback)
+            self.register_event_handler(FrontendEventType.Click.value,
+                                        callback)
 
     @property
     def prop(self):
@@ -386,11 +387,14 @@ class Marker(MapContainerBase[MarkerProps, MapElementChildType]):
                  position: Tuple[NumberType, NumberType],
                  children: Dict[str, MapElementChildType],
                  callback: Optional[Callable[[], _CORO_NONE]] = None) -> None:
-        super().__init__(UIType.LeafletMarker, MarkerProps, _children=children,
-            allowed_events=[FrontendEventType.Click.value])
+        super().__init__(UIType.LeafletMarker,
+                         MarkerProps,
+                         _children=children,
+                         allowed_events=[FrontendEventType.Click.value])
         self.props.position = position
         if callback is not None:
-            self.register_event_handler(FrontendEventType.Click.value, callback)
+            self.register_event_handler(FrontendEventType.Click.value,
+                                        callback)
 
     @property
     def prop(self):

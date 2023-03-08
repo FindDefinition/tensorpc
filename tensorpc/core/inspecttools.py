@@ -1,5 +1,6 @@
-import inspect 
+import inspect
 from typing import Any, Dict, List, Optional
+
 
 def isclassmethod(method):
     # https://stackoverflow.com/questions/19227724/check-if-a-function-uses-classmethod
@@ -14,12 +15,15 @@ def isclassmethod(method):
             return isinstance(descriptor, classmethod)
     return False
 
+
 def isproperty(method):
     return isinstance(method, property)
+
 
 def isstaticmethod(cls, method_name: str):
     method_static = inspect.getattr_static(cls, method_name)
     return isinstance(method_static, staticmethod)
+
 
 def get_members_by_type(obj_type: Any, no_parent: bool = True):
     """this function return member functions that keep def order.
@@ -46,6 +50,7 @@ def get_members_by_type(obj_type: Any, no_parent: bool = True):
     res.sort(key=lambda x: x[1].__code__.co_firstlineno)
     return res
 
+
 def get_all_members_by_type(obj_type: Any):
     """this function return all member functions
     """
@@ -55,4 +60,4 @@ def get_all_members_by_type(obj_type: Any):
 
 
 def get_members(obj: Any, no_parent: bool = True):
-    return get_members_by_type( type(obj), no_parent)
+    return get_members_by_type(type(obj), no_parent)

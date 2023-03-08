@@ -8,7 +8,7 @@ from typing import Any, Dict, Hashable, List, Tuple, Union
 import msgpack
 import numpy as np
 from tensorpc.protos import arraybuf_pb2, rpc_message_pb2, wsdef_pb2
-import traceback 
+import traceback
 
 JSON_INDEX_KEY = "__jsonarray_index"
 
@@ -23,6 +23,7 @@ class EncodeMethod(Enum):
 
 
 class Placeholder(object):
+
     def __init__(self, index: int, nbytes: int):
         self.index = index
         self.nbytes = nbytes
@@ -153,6 +154,7 @@ def data2pb(array_or_bytes: Union[bytes, np.ndarray],
 
 
 class FromBufferStream(object):
+
     def __init__(self):
         self.current_buf_idx = -1
         self.num_args = -1
@@ -662,6 +664,7 @@ def encode_protobuf_uint(val: int):
 def decode_protobuf_uint(val: int):
     return val - 1
 
+
 def json_only_encode(data, type: SocketMsgType, req: wsdef_pb2.Header):
     req.data = json.dumps(data)
     req_msg_size = req.ByteSize()
@@ -691,6 +694,7 @@ class SocketMessageEncoder:
     X~Y: array data
 
     """
+
     def __init__(self, data) -> None:
         arrays, data_skeleton = extract_arrays_from_data(data, json_index=True)
         self.arrays: List[Union[np.ndarray, bytes]] = arrays
@@ -720,7 +724,7 @@ class SocketMessageEncoder:
         req_msg_size = req.ByteSize()
         if req_msg_size + 5 > chunk_size:
             print(req_msg_size, self._ser_skeleton)
-        
+
         final_size = 5 + req_msg_size + self.get_total_array_binary_size()
         cnt_arr = np.array([0], np.int32)
         if final_size < chunk_size:
@@ -780,8 +784,10 @@ class SocketMessageEncoder:
         chunk[5:header_msg_size + 5] = chunk_header.SerializeToString()
         chunk_idx = 0
         start = header_msg_size + 5
-        remain_msg_size = num_chunks * (header_msg_size + 5) + self.get_total_array_binary_size()
-        chunk_remain_size = min(remain_msg_size, chunk_size) - header_msg_size - 5
+        remain_msg_size = num_chunks * (
+            header_msg_size + 5) + self.get_total_array_binary_size()
+        chunk_remain_size = min(remain_msg_size,
+                                chunk_size) - header_msg_size - 5
         for arr in self.arrays:
             if isinstance(arr, np.ndarray):
                 size = arr.nbytes
@@ -819,7 +825,9 @@ class SocketMessageEncoder:
                               5] = chunk_header.SerializeToString()
                         start = header_msg_size + 5
 
+
 class TensoRPCHeader:
+
     def __init__(self, binary) -> None:
         self.req_length = np.frombuffer(binary[1:5], dtype=np.int32)[0]
         req_arr = binary[5:self.req_length + 5]
@@ -828,6 +836,7 @@ class TensoRPCHeader:
 
         self.type = SocketMsgType(binary[0])
         self.req = req
+
 
 def parse_array_of_chunked_message(req: wsdef_pb2.Header, chunks: List[bytes]):
     assert req.chunk_index > 0, "chunked message req must have chunk_index > 0"
@@ -880,6 +889,7 @@ def parse_array_of_chunked_message(req: wsdef_pb2.Header, chunks: List[bytes]):
 
     return put_arrays_to_data(arrs, skeleton)
 
+
 def parse_message_chunks(header: TensoRPCHeader, chunks: List[bytes]):
     req = header.req
     meta, skeleton = json.loads(req.data)
@@ -903,17 +913,20 @@ def parse_message_chunks(header: TensoRPCHeader, chunks: List[bytes]):
                                   dtype=dtype_np).reshape(shape))
                 start += size
         data = put_arrays_to_data(arrs, skeleton, True)
-        return  data
+        return data
     res = parse_array_of_chunked_message(req, chunks)
     return res
 
+
 def get_error_json(type: str, detail: str):
     return {"error": type, "detail": detail}
+
 
 def get_exception_json(exc: BaseException):
     detail = traceback.format_exc()
     exception_json = {"error": str(exc), "detail": detail}
     return exception_json
+
 
 def _structured_data():
     return {

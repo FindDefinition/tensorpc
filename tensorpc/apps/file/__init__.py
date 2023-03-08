@@ -1,10 +1,11 @@
-import tensorpc 
-from pathlib import Path 
+import tensorpc
+from pathlib import Path
 from typing import Union
 from tensorpc.constants import TENSORPC_SPLIT
-import tqdm 
+import tqdm
 
 FILE_OPS_SERV = f"tensorpc.services.collection{TENSORPC_SPLIT}FileOps"
+
 
 def _file_gen(path: Path, start_chunk=0, chunk_size=65536):
     with path.open("rb") as f:
@@ -14,6 +15,7 @@ def _file_gen(path: Path, start_chunk=0, chunk_size=65536):
             if not data:
                 break
             yield data
+
 
 def upload_file(url,
                 path: Union[str, Path],
@@ -53,4 +55,3 @@ def get_file(url, path, save_folder="."):
                     print("retry {} with chunk idx {}".format(i, chunk_idx))
         if not finished:
             raise RuntimeError("get file failed")
-

@@ -1,19 +1,28 @@
 import asyncio
 import enum
 import inspect
+import traceback
 import types
 from functools import partial
+from pathlib import Path
 from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
                     Set, Tuple, Type, Union)
-from tensorpc.flow.flowapp.app import AppSpecialEventType, EditableApp
 
-from tensorpc.flow.flowapp.components import mui, three, plus
-from tensorpc.flow.flowapp.core import AppEditorFrontendEvent, FlowSpecialMethods, FrontendEventType, _get_obj_def_path
+import watchdog
+
+from tensorpc.flow.flowapp.appcore import (AppSpecialEventType,
+                                           _run_zeroarg_func,
+                                           create_reload_metas, get_app,
+                                           get_reload_manager)
+from tensorpc.flow.flowapp.components import mui, plus, three
+from tensorpc.flow.flowapp.components.plus.objinspect.core import \
+    ALL_OBJECT_LAYOUT_HANDLERS
+from tensorpc.flow.flowapp.core import (AppEditorFrontendEvent,
+                                        FlowSpecialMethods, FrontendEventType,
+                                        _get_obj_def_path)
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 from tensorpc.flow.flowapp.reload import reload_object_methods
-from tensorpc.flow.flowapp.app import get_app, get_reload_manager
-from tensorpc.flow.flowapp.components.plus.objinspect.core import ALL_OBJECT_LAYOUT_HANDLERS
-import watchdog
+from tensorpc.utils.reload import reload_method
 
 
 class AnyFlexLayout(mui.FlexLayout):
@@ -37,19 +46,50 @@ class AnyFlexLayout(mui.FlexLayout):
         self._app_save_reload_cb = None
         self._app_watchdog_reload_cb = None
         self._app_watchdog_watch = None
+        self._current_bind_code_id = None
 
-    async def _reload_child_and_set_code(self, code: str, layout, name: str):
+    async def _reload_child_and_set_code(self, code: str, layout, name: str,
+                                         path: str):
         app = get_app()
         await app.set_editor_value(value=code)
-        await self._reload_child(layout, name)
+        await self._reload_child(layout, name, path)
 
-    async def _reload_child(self, layout, name: str):
+    def __reload_callback(self, layout: mui.FlexBox, change_file: str):
+        # TODO find a way to record history callback code and
+        # reload only if code change
+        uid_to_comp = layout._get_uid_to_comp_dict()
+
+        resolved_path = str(Path(change_file).resolve())
+        reload_metas = create_reload_metas(uid_to_comp, resolved_path)
+        if reload_metas:
+            try:
+                res = self.flow_app_comp_core.reload_mgr.reload_type(
+                    reload_metas[0].handler.cb)
+                module = res[0].module
+                module_dict = res[0].module_dict
+            except:
+                traceback.print_exc()
+                return
+            for meta in reload_metas:
+                handler = meta.handler
+                cb = handler.cb
+                new_method, new_code = reload_method(cb, module_dict)
+                # if new_code:
+                #     meta.code = new_code
+                if new_method is not None:
+                    # print(new_method, "new_method")
+                    handler.cb = new_method
+
+    async def _reload_child(self, layout, name: str, path: str):
         if isinstance(layout, mui.FlexBox):
+            app = get_app()
+
             if layout._wrapped_obj is not None:
                 # for anylayout, we support layout reload
                 # and onmount/onunmount reload.
-                metas = reload_object_methods(layout._wrapped_obj,
-                                              reload_mgr=self.flow_app_comp_core.reload_mgr)
+                metas = reload_object_methods(
+                    layout._wrapped_obj,
+                    reload_mgr=self.flow_app_comp_core.reload_mgr)
                 if metas is not None:
                     special_methods = FlowSpecialMethods(metas)
                     special_methods.bind(layout._wrapped_obj)
@@ -63,17 +103,31 @@ class AnyFlexLayout(mui.FlexLayout):
                             layout._wrapped_obj)
                         layout_flex._wrapped_obj = layout._wrapped_obj
                         await self.update_childs({name: layout_flex})
-
+                        if path:
+                            self.__reload_callback(layout_flex, path)
+                    if special_methods.auto_run is not None:
+                        asyncio.create_task(
+                            app._run_autorun(
+                                special_methods.auto_run.get_binded_fn()))
+                else:
+                    if path:
+                        self.__reload_callback(layout, path)
                         # await layout.set_new_layout(special_methods.create_layout.get_binded_fn()())
             else:
-                metas = reload_object_methods(layout,
-                                              reload_mgr=self.flow_app_comp_core.reload_mgr)
+                metas = reload_object_methods(
+                    layout, reload_mgr=self.flow_app_comp_core.reload_mgr)
                 if metas is not None:
                     special_methods = FlowSpecialMethods(metas)
                     special_methods.bind(layout)
                     if special_methods.create_layout is not None:
                         await layout.set_new_layout(
                             special_methods.create_layout.get_binded_fn()())
+                    if special_methods.auto_run is not None:
+                        asyncio.create_task(
+                            app._run_autorun(
+                                special_methods.auto_run.get_binded_fn()))
+                if path:
+                    self.__reload_callback(layout, path)
 
     async def _bind_code_editor(self, obj, layout, name: str):
         app = get_app()
@@ -88,7 +142,8 @@ class AnyFlexLayout(mui.FlexLayout):
             self._app_save_reload_cb = None
         if self._app_watchdog_reload_cb is not None:
             app.unregister_app_special_event_handler(
-                AppSpecialEventType.WatchDogChange, self._app_watchdog_reload_cb)
+                AppSpecialEventType.WatchDogChange,
+                self._app_watchdog_reload_cb)
             self._app_watchdog_reload_cb = None
 
         self._app_save_reload_cb = partial(self._on_codeeditor_save,
@@ -96,40 +151,45 @@ class AnyFlexLayout(mui.FlexLayout):
                                            layout=layout,
                                            path=obj_path)
 
-
         if self._app_watchdog_watch is not None:
-            if isinstance(app, EditableApp):
-                if app._watchdog_observer is not None:
-                    app._watchdog_observer.unschedule(self._app_watchdog_watch)
+            if app._is_editable_app():
+                wo = app._get_self_as_editable_app()._watchdog_observer
+                if wo is not None:
+                    wo.unschedule(self._app_watchdog_watch)
                     self._app_watchdog_watch = None
         app.register_app_special_event_handler(
             AppSpecialEventType.CodeEditorSave, self._app_save_reload_cb)
-        if isinstance(app, EditableApp):
-            if app._watchdog_observer is not None:
-                self._app_watchdog_watch = app._watchdog_observer.schedule(
-                    app._watchdog_watcher, obj_path)
-                self._app_watchdog_reload_cb = partial(self._on_watchdog_change_save,
-                                                name=name,
-                                                layout=layout,
-                                                path=obj_path,
-                                                loop=app._loop)
+        if app._is_editable_app():
+            eapp = app._get_self_as_editable_app()
+            wo = eapp._watchdog_observer
+            if wo is not None:
+                self._app_watchdog_watch = wo.schedule(eapp._watchdog_watcher,
+                                                       obj_path)
+                self._app_watchdog_reload_cb = partial(
+                    self._on_watchdog_change_save,
+                    name=name,
+                    layout=layout,
+                    path=obj_path,
+                    loop=eapp._loop)
                 app.register_app_special_event_handler(
-                    AppSpecialEventType.WatchDogChange, self._app_watchdog_reload_cb)
-
+                    AppSpecialEventType.WatchDogChange,
+                    self._app_watchdog_reload_cb)
 
     async def _on_codeeditor_save(self, data: str, layout, name: str,
                                   path: str):
         with open(path, "w") as f:
             f.write(data)
-        await self._reload_child(layout, name)
+        await self._reload_child(layout, name, path)
 
     def _on_watchdog_change_save(self, data: Tuple[str, str], layout,
-                                       name: str, path: str, loop):
+                                 name: str, path: str, loop):
         # WARNING watchdog callback must be sync
         change_path = data[1]
         # print(path, change_path)
         if change_path == path:
-            ft = asyncio.run_coroutine_threadsafe(self._reload_child_and_set_code(data[0], layout, name), loop)
+            ft = asyncio.run_coroutine_threadsafe(
+                self._reload_child_and_set_code(data[0], layout, name, path),
+                loop)
             ft.result()
 
     async def _on_drop(self, target: Optional[TreeDragTarget]):
@@ -165,11 +225,12 @@ class AnyFlexLayout(mui.FlexLayout):
             app = get_app()
             if self._app_watchdog_watch is not None:
                 app = get_app()
-                if isinstance(app, EditableApp):
-                    if app._watchdog_observer is not None:
-                        app._watchdog_observer.unschedule(
+                if app._is_editable_app():
+                    eapp = app._get_self_as_editable_app()
+                    if eapp._watchdog_observer is not None:
+                        eapp._watchdog_observer.unschedule(
                             self._app_watchdog_watch)
-                        app._watchdog_observer = None
+                        eapp._watchdog_observer = None
             if self._app_watchdog_reload_cb is not None:
                 app.unregister_app_special_event_handler(
                     AppSpecialEventType.WatchDogChange,
@@ -183,27 +244,49 @@ class AnyFlexLayout(mui.FlexLayout):
                         self._app_save_reload_cb)
                     self._app_save_reload_cb = None
                 await app._recover_code_editor()
+                self._current_bind_code_id = None
 
     async def _on_tab_select(self, data):
         child_id = data["id"]
+        if child_id == self._current_bind_code_id:
+            return
         child_comp = self._child_comps[child_id]
         if isinstance(child_comp, mui.FlexBox):
             if child_comp._wrapped_obj is not None:
+                self._current_bind_code_id = child_id
                 await self._bind_code_editor(child_comp._wrapped_obj,
                                              child_comp, child_id)
+            else:
+                obj_is_anylayout = get_reload_manager().query_obj_is_anylayout(
+                    child_comp)
+                if obj_is_anylayout:
+                    self._current_bind_code_id = child_id
+                    await self._bind_code_editor(child_comp, child_comp,
+                                                 child_id)
 
         # print("TAB SELECT", child_id)
 
     async def _on_tab_set_select(self, data):
         child_id = data["id"]
         child_comp = self._child_comps[child_id]
+        if child_id == self._current_bind_code_id:
+            return
         if isinstance(child_comp, mui.FlexBox):
             if child_comp._wrapped_obj is not None:
+                self._current_bind_code_id = child_id
                 await self._bind_code_editor(child_comp._wrapped_obj,
                                              child_comp, child_id)
+            else:
+                obj_is_anylayout = get_reload_manager().query_obj_is_anylayout(
+                    child_comp)
+                if obj_is_anylayout:
+                    self._current_bind_code_id = child_id
+                    await self._bind_code_editor(child_comp, child_comp,
+                                                 child_id)
+
         # print("TAB SET SELECT", child_id)
 
     async def _on_tab_reload(self, name):
         # print("TAB CLOSE", data)
         layout = self._child_comps[name]
-        await self._reload_child(layout, name)
+        await self._reload_child(layout, name, "")

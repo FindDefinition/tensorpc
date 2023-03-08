@@ -5,6 +5,7 @@ import abc
 
 
 class FigureObject(abc.ABC):
+
     @abc.abstractmethod
     def data(self) -> dict:
         raise NotImplementedError
@@ -14,12 +15,14 @@ class FigureObject(abc.ABC):
 
 
 class FigureObject2d(FigureObject):
+
     @abc.abstractmethod
     def move(self, x: float, y: float):
         raise NotImplementedError
 
 
 class FigureObject3d(FigureObject):
+
     @abc.abstractmethod
     def move(self, x: float, y: float, z: float):
         raise NotImplementedError
@@ -98,18 +101,19 @@ class Lines2d(FigureObject2d):
             "need_query": False,
         }
 
+
 class Points2d(FigureObject2d):
     Type = "points"
+
     def __init__(self,
-                points: np.ndarray,
-                color: str,
-                width: float = 1,
-                opacity: float = 0.5):
+                 points: np.ndarray,
+                 color: str,
+                 width: float = 1,
+                 opacity: float = 0.5):
         self.points = points.reshape(-1, 2).astype(np.float32)
         self.color = color
         self.width = width
         self.opacity = opacity
-
 
     def move(self, x: float, y: float):
         self.points[..., 0] += float(x)
@@ -117,11 +121,10 @@ class Points2d(FigureObject2d):
 
     def bound(self):
         if self.points.size == 0:
-            return None 
+            return None
         mins = self.points.reshape(-1, 2).min(axis=0)
         maxs = self.points.reshape(-1, 2).max(axis=0)
         return [mins[0], mins[1], maxs[0], maxs[1]]
-
 
     def data(self) -> dict:
         return {
@@ -158,6 +161,7 @@ class _Plotly(FigureObject2d):
 
 
 class PlotlyPlot(_Plotly):
+
     def __init__(self, width: int, height: int, title: str = ""):
         layout: Dict[str, Any] = {
             "width": width,
@@ -229,7 +233,7 @@ class PlotlyPlot(_Plotly):
              color: Optional[str] = None,
              title: Optional[str] = None,
              width: float = 1,
-                **props):
+             **props):
         line = {"width": width}  # type: Dict[str, Union[str, int, float]]
         if color is not None:
             line["color"] = color
@@ -311,6 +315,7 @@ class Lines3d(FigureObject3d):
 
 
 class Polygon3d(Lines3d):
+
     def __init__(self,
                  polygon: np.ndarray,
                  color: str,

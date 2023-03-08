@@ -10,5 +10,6 @@ from .tree import ObjectTree, TreeDragTarget
 def register_obj_preview_handler(cls):
     return ALL_OBJECT_PREVIEW_HANDLERS.register(cls)
 
+
 def register_obj_layout_handler(cls):
     return ALL_OBJECT_LAYOUT_HANDLERS.register(cls)

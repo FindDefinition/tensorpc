@@ -230,7 +230,6 @@ class SampleDictApp(App):
         self.cnt += 1
 
 
-
 class SamplePlotMetricApp(App):
 
     def __init__(self) -> None:
@@ -882,6 +881,7 @@ class SampleDataControlApp(EditableApp):
 
 
 class AutoComputeApp:
+
     @mark_create_layout
     def create_layout(self):
 
@@ -1011,6 +1011,7 @@ class PointCloudApp:
         lines = np.random.uniform(-3, 3, size=[10, 2, 3])
         await self.canvas.show_lines("key0", lines, limit=10000, color="aqua")
 
+
 class PlotApp:
 
     @mark_create_layout
@@ -1064,7 +1065,10 @@ class CollectionApp:
         self.example_pyplot = PlotApp()
         self.example_auto_complete = AutoComputeApp()
         nodes = [
-            mui.ControlNode("1", "color", mui.ControlNodeType.Color.value, initValue="#ffffff")
+            mui.ControlNode("1",
+                            "color",
+                            mui.ControlNodeType.Color.value,
+                            initValue="#ffffff")
         ]
 
         self.wtf = mui.DynamicControls(init=nodes, callback=lambda x: print(x))

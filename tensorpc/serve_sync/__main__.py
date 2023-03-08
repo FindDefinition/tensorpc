@@ -2,14 +2,15 @@ from pathlib import Path
 from typing import Optional
 
 import fire
-import time 
+import time
 from tensorpc.core.client import RemoteManager
 from tensorpc.core.server import serve, serve_with_http
 from tensorpc.core.defs import Service, ServiceDef, from_yaml_path
 from tensorpc.core import BUILTIN_SERVICES
 
+
 # TODO service prompt
-def serve_in_terminal(*modules: str, 
+def serve_in_terminal(*modules: str,
                       wait_time=-1,
                       port=50051,
                       http_port=None,
@@ -46,10 +47,13 @@ def ping(ip: str):
     with RemoteManager(ip) as robj:
         t = time.time()
         robj.health_check()
-        print("[distflow.ping]{} response time: {:.4f}ms".format(ip, 1000 * (time.time() - t)))
+        print("[distflow.ping]{} response time: {:.4f}ms".format(
+            ip, 1000 * (time.time() - t)))
+
 
 def ping_main():
     fire.Fire(ping)
+
 
 if __name__ == "__main__":
     fire.Fire(serve_in_terminal)

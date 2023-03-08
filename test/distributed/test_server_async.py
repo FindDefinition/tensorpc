@@ -1,11 +1,11 @@
 # Copyright 2022 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -27,6 +27,7 @@ from tensorpc import PACKAGE_ROOT
 from tensorpc.services.for_test import Service2
 import pytest_asyncio
 
+
 @pytest_asyncio.fixture
 async def server_client():
     with get_free_loopback_tcp_port() as port:
@@ -47,6 +48,7 @@ async def server_client():
             await robj.shutdown()
         proc.wait()
 
+
 @contextlib.asynccontextmanager
 async def server_client_local():
     with get_free_loopback_tcp_port() as port:
@@ -66,6 +68,7 @@ async def server_client_local():
                 "localhost:{}".format(port)) as robj:
             await robj.shutdown()
         proc.wait()
+
 
 def local_func(a, b):
     return a + b
@@ -94,6 +97,7 @@ def code():
             "def remote_func(a, b):"
             "  return np.add(a, b)")
 
+
 @pytest.mark.asyncio
 async def test_query_meta(server_client: asyncclient.AsyncRemoteManager):
     robj = server_client
@@ -101,6 +105,7 @@ async def test_query_meta(server_client: asyncclient.AsyncRemoteManager):
     print(meta)
     assert meta["is_gen"] == False
     assert len(meta["args"]) == 2
+
 
 @pytest.mark.asyncio
 async def test_remote_call(server_client: asyncclient.AsyncRemoteManager):
@@ -118,8 +123,8 @@ async def test_remote_call(server_client: asyncclient.AsyncRemoteManager):
     res = await robj.remote_json_call("Test3Async.add", b=datas_b, a=datas_a)
     assert np.allclose(res, expected)
     res = await robj.chunked_remote_call("Test3Async.add",
-                                   b=datas_b,
-                                   a=datas_a)
+                                         b=datas_b,
+                                         a=datas_a)
     assert np.allclose(res, expected)
 
     with pytest.raises(asyncclient.RemoteException):
@@ -133,6 +138,7 @@ async def test_remote_call(server_client: asyncclient.AsyncRemoteManager):
     async for r in robj.stream_remote_call("Test3Async.add", generator()):
         res.append(r)
     assert np.allclose(np.array(res), expected)
+
 
 @pytest.mark.asyncio
 async def test_remote_generator(server_client: asyncclient.AsyncRemoteManager):
@@ -148,11 +154,15 @@ def gen_2():
     for i in range(10):
         yield i
 
+
 @pytest.mark.asyncio
 async def test_stream(server_client: asyncclient.AsyncRemoteManager):
     robj = server_client
     serv = Service2(1)
-    res = await robj.client_stream("Test3Async.client_stream", gen_2(), a=4, b=6)
+    res = await robj.client_stream("Test3Async.client_stream",
+                                   gen_2(),
+                                   a=4,
+                                   b=6)
     expected = serv.client_stream(gen_2(), 4, 6)
     assert np.allclose(res, expected)
     res = []
@@ -161,6 +171,7 @@ async def test_stream(server_client: asyncclient.AsyncRemoteManager):
     expected = list(serv.bi_stream(gen_2(), 4, 6))
     assert np.allclose(res, expected)
 
+
 async def main_async():
     async with server_client_local() as robj:
         await robj.health_check()
@@ -168,6 +179,7 @@ async def main_async():
         await test_remote_call(robj)
         await test_remote_generator(robj)
         await test_stream(robj)
+
 
 if __name__ == "__main__":
     asyncio.run(main_async())

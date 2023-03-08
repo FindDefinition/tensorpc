@@ -1,8 +1,7 @@
 from typing import List
 from tensorpc.utils.wait_tools import get_free_ports
 
-
-import fire 
+import fire
 
 
 def main(count: int):

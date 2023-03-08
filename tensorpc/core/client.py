@@ -23,6 +23,7 @@ LOGGER = get_logger()
 class RemoteException(RuntimeError):
     pass
 
+
 class _PlaceHolder:
     pass
 
@@ -46,6 +47,7 @@ class RemoteObject(object):
     output_shared_mem: np.ndarray
     num_blocks: int
     """
+
     def __init__(self,
                  channel: Optional[grpc.Channel],
                  name="",
@@ -55,7 +57,7 @@ class RemoteObject(object):
         if channel is not None:
             self._stub = remote_object_pb2_grpc.RemoteObjectStub(channel)
         else:
-            self._stub = None 
+            self._stub = None
         self.func_dict = {}
         self.name = name
         self.print_stdout = print_stdout
@@ -63,12 +65,12 @@ class RemoteObject(object):
     def enabled(self):
         return self._channel is not None
 
-    @property 
+    @property
     def channel(self):
         assert self._channel is not None, "you need to provide a channel to enable rpc feature."
         return self._channel
 
-    @property 
+    @property
     def stub(self):
         assert self._stub is not None, "you need to provide a channel to enable rpc feature."
         return self._stub
@@ -116,24 +118,23 @@ class RemoteObject(object):
                            **kwargs) -> grpc.Future:
         data_to_be_send = core_io.data_to_pb((args, kwargs), rpc_flags)
         request = rpc_msg_pb2.RemoteCallRequest(service_key=key,
-                                            arrays=data_to_be_send,
-                                            flags=rpc_flags,
-                                            callback=rpc_callback)
-        return self.stub.RemoteCall.future(request)
-
-    def remote_json_call_future(
-            self,
-            key: str,
-            *args,
-            rpc_callback="",
-            rpc_flags: int = rpc_msg_pb2.JsonArray,
-            **kwargs) -> grpc.Future:
-        arrays, decoupled = core_io.data_to_json((args, kwargs), rpc_flags)
-        request = rpc_msg_pb2.RemoteJsonCallRequest(service_key=key,
-                                                arrays=arrays,
-                                                data=decoupled,
+                                                arrays=data_to_be_send,
                                                 flags=rpc_flags,
                                                 callback=rpc_callback)
+        return self.stub.RemoteCall.future(request)
+
+    def remote_json_call_future(self,
+                                key: str,
+                                *args,
+                                rpc_callback="",
+                                rpc_flags: int = rpc_msg_pb2.JsonArray,
+                                **kwargs) -> grpc.Future:
+        arrays, decoupled = core_io.data_to_json((args, kwargs), rpc_flags)
+        request = rpc_msg_pb2.RemoteJsonCallRequest(service_key=key,
+                                                    arrays=arrays,
+                                                    data=decoupled,
+                                                    flags=rpc_flags,
+                                                    callback=rpc_callback)
         return self.stub.RemoteJsonCall.future(request)
 
     def remote_call(self,
@@ -194,9 +195,9 @@ class RemoteObject(object):
                          **kwargs) -> Any:
         data_to_be_send = core_io.data_to_pb((args, kwargs), rpc_flags)
         request = rpc_msg_pb2.RemoteCallRequest(service_key=key,
-                                            arrays=data_to_be_send,
-                                            flags=rpc_flags,
-                                            callback=rpc_callback)
+                                                arrays=data_to_be_send,
+                                                flags=rpc_flags,
+                                                callback=rpc_callback)
         for response in self.stub.RemoteGenerator(request):
             yield self.parse_remote_response(response)
 
@@ -212,14 +213,14 @@ class RemoteObject(object):
         def wrapped_generator():
             data_to_be_send = core_io.data_to_pb((args, kwargs), flags)
             request = rpc_msg_pb2.RemoteCallRequest(service_key=key,
-                                                arrays=data_to_be_send,
-                                                flags=flags)
+                                                    arrays=data_to_be_send,
+                                                    flags=flags)
             yield request
             for data in stream_iter:
                 data_to_be_send = core_io.data_to_pb(((data, ), {}), flags)
                 request = rpc_msg_pb2.RemoteCallRequest(service_key=key,
-                                                    arrays=data_to_be_send,
-                                                    flags=flags)
+                                                        arrays=data_to_be_send,
+                                                        flags=flags)
                 yield request
 
         response = self.stub.ClientStreamRemoteCall(wrapped_generator())
@@ -237,14 +238,14 @@ class RemoteObject(object):
         def wrapped_generator():
             data_to_be_send = core_io.data_to_pb((args, kwargs), flags)
             request = rpc_msg_pb2.RemoteCallRequest(service_key=key,
-                                                arrays=data_to_be_send,
-                                                flags=flags)
+                                                    arrays=data_to_be_send,
+                                                    flags=flags)
             yield request
             for data in stream_iter:
                 data_to_be_send = core_io.data_to_pb(((data, ), {}), flags)
                 request = rpc_msg_pb2.RemoteCallRequest(service_key=key,
-                                                    arrays=data_to_be_send,
-                                                    flags=flags)
+                                                        arrays=data_to_be_send,
+                                                        flags=flags)
                 yield request
 
         for response in self.stub.BiStreamRemoteCall(wrapped_generator()):
@@ -254,8 +255,7 @@ class RemoteObject(object):
             self,
             key: str,
             stream_iter: Iterator[Any],
-            rpc_flags: int = rpc_msg_pb2.PickleArray
-    ) -> Iterator[Any]:
+            rpc_flags: int = rpc_msg_pb2.PickleArray) -> Iterator[Any]:
         # assert key in self.func_dict
         flags = rpc_flags
 
@@ -264,8 +264,8 @@ class RemoteObject(object):
                 # data must be (args, kwargs)
                 data_to_be_send = core_io.data_to_pb(data, flags)
                 yield rpc_msg_pb2.RemoteCallRequest(service_key=key,
-                                                arrays=data_to_be_send,
-                                                flags=flags)
+                                                    arrays=data_to_be_send,
+                                                    flags=flags)
 
         responses = self.stub.RemoteStreamCall(stream_generator())
         for response in responses:
@@ -288,8 +288,7 @@ class RemoteObject(object):
             self,
             key: str,
             stream_iter,
-            rpc_flags: int = rpc_msg_pb2.PickleArray
-    ) -> Iterator[Any]:
+            rpc_flags: int = rpc_msg_pb2.PickleArray) -> Iterator[Any]:
         # assert key in self.func_dict
         flags = rpc_flags
 
@@ -326,6 +325,7 @@ class RemoteObject(object):
                             *args,
                             rpc_flags: int = rpc_msg_pb2.PickleArray,
                             **kwargs) -> Any:
+
         def stream_generator():
             yield (args, kwargs)
 
@@ -347,7 +347,7 @@ class RemoteObject(object):
             LOGGER.info("server still not ready")
             return False
 
-    def wait_for_remote_ready(self, timeout: float=10, max_retries=20):
+    def wait_for_remote_ready(self, timeout: float = 10, max_retries=20):
         try:
             wait_until(self._wait_func, max_retries, timeout / max_retries)
         except TimeoutError as e:
@@ -359,6 +359,7 @@ class RemoteObject(object):
 
 
 class RemoteManager(RemoteObject):
+
     def __init__(self,
                  url,
                  name="",
@@ -369,8 +370,8 @@ class RemoteManager(RemoteObject):
         if enabled:
             if credentials is not None:
                 channel = grpc.secure_channel(url,
-                                                credentials,
-                                                options=channel_options)
+                                              credentials,
+                                              options=channel_options)
             else:
                 channel = grpc.insecure_channel(url, options=channel_options)
         else:
@@ -385,27 +386,26 @@ class RemoteManager(RemoteObject):
             self.wait_for_channel_ready()
         atexit.register(self.close)
 
-
     def reconnect(self, timeout=10, max_retries=20):
         self.close()
         if self.credentials is not None:
             self._channel = grpc.secure_channel(self.url,
-                                               self.credentials,
-                                               options=self._channel_options)
+                                                self.credentials,
+                                                options=self._channel_options)
         else:
-            self._channel = grpc.insecure_channel(self.url,
-                                                 options=self._channel_options)
+            self._channel = grpc.insecure_channel(
+                self.url, options=self._channel_options)
         self._stub = remote_object_pb2_grpc.RemoteObjectStub(self.channel)
         self.wait_for_remote_ready(timeout, max_retries)
 
-    def wait_for_channel_ready(self, timeout: float=10):
+    def wait_for_channel_ready(self, timeout: float = 10):
         future = grpc.channel_ready_future(self.channel)
         try:
             future.result(timeout=timeout)
         except grpc.FutureTimeoutError as e:
             raise TimeoutError(*e.args)
 
-    def wait_for_remote_ready(self, timeout: float=10, max_retries=20):
+    def wait_for_remote_ready(self, timeout: float = 10, max_retries=20):
         self.wait_for_channel_ready(timeout)
         super().wait_for_remote_ready(timeout, max_retries)
 

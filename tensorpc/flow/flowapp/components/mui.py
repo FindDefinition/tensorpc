@@ -35,13 +35,13 @@ from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass
 from tensorpc.flow.flowapp.components.common import (handle_standard_event)
 
 from .. import colors
-from ..core import (AppComponentCore, AppEvent, AppEventType, BasicProps, Component,
-                    ContainerBase, ContainerBaseProps, EventHandler, EventType, FlowSpecialMethods,
-                    Fragment, FrontendEventType, NumberType, T_base_props,
-                    T_child, T_container_props, TaskLoopEvent, UIEvent,
-                    UIRunStatus, UIType, Undefined, ValueType, undefined,
-                    create_ignore_usr_msg, ALL_POINTER_EVENTS,
-                    _get_obj_def_path, get_special_methods)
+from ..core import (AppComponentCore, AppEvent, AppEventType, BasicProps,
+                    Component, ContainerBase, ContainerBaseProps, EventHandler,
+                    EventType, FlowSpecialMethods, Fragment, FrontendEventType,
+                    NumberType, T_base_props, T_child, T_container_props,
+                    TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
+                    ValueType, undefined, create_ignore_usr_msg,
+                    ALL_POINTER_EVENTS, _get_obj_def_path, get_special_methods)
 from tensorpc.flow.constants import TENSORPC_ANYLAYOUT_FUNC_NAME
 if TYPE_CHECKING:
     from .three import ThreeCanvas
@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 _CORO_NONE = Union[Coroutine[None, None, None], None]
 
 _PIL_FORMAT_TO_SUFFIX = {"JPEG": "jpg", "PNG": "png"}
+
 
 class Position(enum.IntEnum):
     TopLeft = 0
@@ -60,6 +61,7 @@ class Position(enum.IntEnum):
     BottomLeft = 6
     BottomCenter = 7
     BottomRight = 8
+
 
 def _encode_image_bytes(img: np.ndarray, format: str = "JPEG"):
     pil_img = PILImage.fromarray(img)
@@ -174,7 +176,6 @@ class MUIFlexBoxProps(FlexBoxProps, ContainerBaseProps):
     draggable: Union[bool, Undefined] = undefined
     droppable: Union[bool, Undefined] = undefined
     allowed_dnd_types: Union[str, List[str], Undefined] = undefined
-
 
 
 _TypographyVarient: TypeAlias = Literal['body1', 'body2', 'button', 'caption',
@@ -948,7 +949,8 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
         else:
             res = get_special_methods(type(self))
         res.bind(self)
-        return res 
+        return res
+
 
 @dataclasses.dataclass
 class MUIListProps(MUIFlexBoxProps):
@@ -1691,16 +1693,17 @@ class MultipleAutocomplete(MUIComponentBase[MultipleAutocompleteProps]):
 
 @dataclasses.dataclass
 class SliderProps(MUIComponentBaseProps):
-    label: str = ""
+    label: Union[Undefined, str] = undefined
     ranges: Tuple[NumberType, NumberType, NumberType] = (0, 1, 0)
     value: NumberType = 0
+    vertical: Union[Undefined, bool] = undefined
 
 
 class Slider(MUIComponentBase[SliderProps]):
 
     def __init__(
             self,
-            label: str,
+            label: Union[Undefined, str],
             begin: NumberType,
             end: NumberType,
             step: NumberType,
@@ -2447,8 +2450,12 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
             FrontendEventType.ComplexLayoutTabReload,
             FrontendEventType.Drop,
         ]
-        super().__init__(UIType.FlexLayout, FlexLayoutProps, None, children,
-                         False, allowed_events=[x.value for x in events])
+        super().__init__(UIType.FlexLayout,
+                         FlexLayoutProps,
+                         None,
+                         children,
+                         False,
+                         allowed_events=[x.value for x in events])
 
     @property
     def prop(self):
@@ -2462,6 +2469,7 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
 
     async def handle_event(self, ev: EventType):
         return await handle_standard_event(self, ev, sync_first=True)
+
 
 @dataclasses.dataclass
 class CircularProgressProps(MUIFlexBoxProps):
@@ -2594,7 +2602,6 @@ class JsonLikeTreeProps(MUIFlexBoxProps):
     use_fast_tree: Union[Undefined, bool] = undefined
 
 
-
 class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
 
     def __init__(
@@ -2634,8 +2641,8 @@ class ControlNodeType(enum.IntEnum):
     Number = 0
     RangeNumber = 1
     Color = 2
-    Bool = 3 
-    Select = 4 
+    Bool = 3
+    Select = 4
     String = 5
     Folder = 6
 
@@ -2668,7 +2675,10 @@ class DynamicControlsProps(MUIFlexBoxProps):
 
 class DynamicControls(MUIComponentBase[DynamicControlsProps]):
 
-    def __init__(self, callback: Optional[Callable[[Tuple[str, Any]], _CORO_NONE]] = None, init: Optional[List[ControlNode]] = None) -> None:
+    def __init__(self,
+                 callback: Optional[Callable[[Tuple[str, Any]],
+                                             _CORO_NONE]] = None,
+                 init: Optional[List[ControlNode]] = None) -> None:
         super().__init__(UIType.DynamicControls,
                          DynamicControlsProps,
                          allowed_events=[FrontendEventType.Change.value])
@@ -2691,17 +2701,20 @@ class DynamicControls(MUIComponentBase[DynamicControlsProps]):
     async def handle_event(self, ev: EventType):
         return await handle_standard_event(self, ev, sync_first=True)
 
+
 def flex_wrapper(obj: Any):
     """wrap a object which define a layout function "tensorpc_flow_layout"
     enable simple layout creation for arbitrary object without inherit
     """
-    metas = ReloadableDynamicClass.get_metas_of_regular_methods(type(obj), True)
+    metas = ReloadableDynamicClass.get_metas_of_regular_methods(
+        type(obj), True)
     methods = FlowSpecialMethods(metas)
     if methods.create_layout is not None:
         fn = methods.create_layout.bind(obj)
         layout_flex = fn()
-        assert isinstance(layout_flex,
-                            FlexBox), f"create_layout must return a flexbox when use anylayout"
+        assert isinstance(
+            layout_flex, FlexBox
+        ), f"create_layout must return a flexbox when use anylayout, {type(layout_flex)}"
         # set _flow_comp_def_path to this object
         layout_flex._flow_comp_def_path = _get_obj_def_path(obj)
         layout_flex._wrapped_obj = obj

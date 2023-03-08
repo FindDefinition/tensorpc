@@ -35,35 +35,28 @@ import sys
 from typing_extensions import Literal, ParamSpec, Concatenate, Self, TypeAlias, Protocol
 from tensorpc.flow.coretypes import MessageLevel
 from tensorpc.flow.flowapp.reload import AppReloadManager, FlowSpecialMethods
+from tensorpc.flow.flowapp.appcore import EventHandler
+from .appcore import ValueType, NumberType, EventType, Undefined, get_app, undefined
 
 ALL_APP_EVENTS = HashableRegistry()
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
 _CORO_ANY: TypeAlias = Union[Coroutine[Any, None, None], Any]
 
-ValueType: TypeAlias = Union[int, float, str]
-
-NumberType: TypeAlias = Union[int, float]
-
-EventType: TypeAlias = Tuple[ValueType, Any]
-
-
-class Undefined:
-
-    def __repr__(self) -> str:
-        return "undefined"
-
 
 class NoDefault:
     pass
 
+
 class AppComponentCore:
-    def __init__(self, queue: asyncio.Queue, reload_mgr: AppReloadManager) -> None:
+
+    def __init__(self, queue: asyncio.Queue,
+                 reload_mgr: AppReloadManager) -> None:
         self.queue = queue
         self.reload_mgr = reload_mgr
 
+
 # DON'T MODIFY THIS VALUE!!!
-undefined = Undefined()
 nodefault = NoDefault()
 
 
@@ -113,7 +106,6 @@ class UIType(enum.Enum):
     AllotmentPane = 0x29
     FlexLayout = 0x30
     DynamicControls = 0x31
-
 
     # special
     TaskLoop = 0x100
@@ -252,6 +244,7 @@ class FrontendEventType(enum.Enum):
 
     PlotlyClickData = 100
     PlotlyClickAnnotation = 101
+
 
 class AppDraggableType(enum.Enum):
     JsonLikeTreeItem = "JsonLikeTreeItem"
@@ -711,7 +704,7 @@ def camel_to_snake(name: str):
 
 def snake_to_camel(name: str):
     if "_" not in name:
-        return name 
+        return name
     res = ''.join(word.title() for word in name.split('_'))
     res = res[0].lower() + res[1:]
     return res
@@ -875,7 +868,7 @@ class Component(Generic[T_base_props, T_child]):
     def get_special_methods(self):
         res = get_special_methods(type(self))
         res.bind(self)
-        return res 
+        return res
 
     @property
     def props(self) -> T_base_props:
@@ -1036,7 +1029,7 @@ class Component(Generic[T_base_props, T_child]):
     def queue(self):
         assert self._flow_comp_core is not None, f"you must add ui by flexbox.add_xxx"
         return self._flow_comp_core.queue
-    
+
     @property
     def flow_app_comp_core(self):
         assert self._flow_comp_core is not None, f"you must add ui by flexbox.add_xxx"
@@ -1165,6 +1158,9 @@ class Component(Generic[T_base_props, T_child]):
             user_exc = UserMessage.create_error(self._flow_uid, repr(e),
                                                 ss.getvalue())
             await self.put_app_event(self.create_user_msg_event(user_exc))
+            app = get_app()
+            if app._flowapp_enable_exception_inspect:
+                await app._inspect_exception()
         finally:
             if change_status:
                 self.props.status = UIRunStatus.Stop.value
@@ -1239,20 +1235,25 @@ class ContainerBase(Component[T_container_props, T_child]):
             return child_comp._get_comp_by_uid_resursive(parts[1:])
 
     def _foreach_comp_recursive(self, child_ns: str,
-                                handler: Callable[[str, Component], Union[bool, None]]):
+                                handler: Callable[[str, Component],
+                                                  Union[bool, None]]):
+        res_foreach: List[Tuple[str, ContainerBase]] = []
         for k, v in self._child_comps.items():
             child_uid = f"{child_ns}.{k}"
             if isinstance(v, ContainerBase):
                 res = handler(child_uid, v)
                 if res == True:
                     return
-                v._foreach_comp_recursive(child_uid, handler)
+                res_foreach.append((child_uid, v))
             else:
                 res = handler(child_uid, v)
                 if res == True:
                     return
+        for child_uid, v in res_foreach:
+            v._foreach_comp_recursive(child_uid, handler)
 
-    def _foreach_comp(self, handler: Callable[[str, Component], Union[bool, None]]):
+    def _foreach_comp(self, handler: Callable[[str, Component], Union[bool,
+                                                                      None]]):
         assert self._flow_uid != "", "_flow_uid must be set before modify_comp"
         handler(self._flow_uid, self)
         self._foreach_comp_recursive(self._flow_uid, handler)
@@ -1289,13 +1290,13 @@ class ContainerBase(Component[T_container_props, T_child]):
             v = self._child_comps[k]
             atached_uids.update(v._attach(f"{self._flow_uid}.{k}", comp_core))
         return atached_uids
-    
+
     def _attach(self, uid: str, comp_core: AppComponentCore):
         attached: Dict[str, Component] = super()._attach(uid, comp_core)
         for k, v in self._child_comps.items():
             attached.update(v._attach(f"{uid}.{k}", comp_core))
         return attached
-    
+
     def _get_uid_to_comp_dict(self):
         res: Dict[str, Component] = {}
 
@@ -1368,7 +1369,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         state = super().get_props()
         state["childs"] = [self[n]._flow_uid for n in self._child_comps]
         return state
-    
+
     async def __run_special_methods(self, attached: List[Component],
                                     detached: List[Component]):
         for attach in attached:
@@ -1433,7 +1434,8 @@ class ContainerBase(Component[T_container_props, T_child]):
         intersect = set(layout.keys()).intersection(self._child_comps.keys())
         detached = self._detach_child(list(intersect))
         self._child_comps.update(layout)
-        attached = self._attach_child(self.flow_app_comp_core, list(layout.keys()))
+        attached = self._attach_child(self.flow_app_comp_core,
+                                      list(layout.keys()))
         # remove replaced components first.
         comps_frontend = {
             c._flow_uid: c
@@ -1444,9 +1446,10 @@ class ContainerBase(Component[T_container_props, T_child]):
             k: v.to_dict()
             for k, v in comps_frontend.items()
         }
-        return self.create_update_comp_event(
-            comps_frontend_dict, list(detached.keys())), list(
-                attached.values()), list(detached.values())
+        return self.create_update_comp_event(comps_frontend_dict,
+                                             list(detached.keys())), list(
+                                                 attached.values()), list(
+                                                     detached.values())
 
     async def update_childs(self, layout: Dict[str, Component]):
         new_ev, attached, removed = self.update_childs_locally(layout)
@@ -1491,37 +1494,13 @@ class Fragment(ContainerBase[FragmentProps, Component]):
         await self.send_and_wait(self.update_event(disabled=disabled))
 
 
-class EventHandler:
-
-    def __init__(self,
-                 cb: Callable,
-                 stop_propagation: bool = False,
-                 throttle: Optional[NumberType] = None,
-                 debounce: Optional[NumberType] = None,
-                 backend_only: bool = False) -> None:
-        self.cb = cb
-        self.stop_propagation = stop_propagation
-        self.debounce = debounce
-        self.throttle = throttle
-        self.backend_only = backend_only
-
-    def to_dict(self):
-        res: Dict[str, Any] = {
-            "stopPropagation": self.stop_propagation,
-        }
-        if self.debounce is not None:
-            res["debounce"] = self.debounce
-        if self.throttle is not None:
-            res["throttle"] = self.throttle
-        return res
-
-
 def create_ignore_usr_msg(comp: Component):
     msg = comp.create_user_msg_event((UserMessage.create_warning(
         comp._flow_uid, "UI Running",
         f"UI {comp._flow_uid}@{str(type(comp).__name__)} is still running, so ignore your control"
     )))
     return msg
+
 
 if __name__ == "__main__":
     print(snake_to_camel("sizeAttention"))

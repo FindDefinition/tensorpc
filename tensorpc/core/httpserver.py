@@ -163,6 +163,7 @@ async def _cancel(task):
 
 
 class AllWebsocketHandler:
+
     def __init__(self, service_core: ProtobufServiceCore):
         self.service_core = service_core
         self.clients = []
@@ -187,7 +188,6 @@ class AllWebsocketHandler:
 
         self._new_events: Set[str] = set()
         self._delete_events: Set[str] = set()
-        
 
     async def _handle_rpc(self, client: WebsocketClient, service_key: str,
                           data, req_id: int, is_notification: bool):
@@ -237,7 +237,8 @@ class AllWebsocketHandler:
             except Exception as e:
                 await client.send_user_error(e, 0)
         # assert not self.event_to_clients and not self.client_to_events
-        wait_task = asyncio.create_task(self.rpc_awaiter(conn_rpc_queue, conn_st_ev))
+        wait_task = asyncio.create_task(
+            self.rpc_awaiter(conn_rpc_queue, conn_st_ev))
         try:
             # send serv ids first
             await client.send(self._name_to_serv_id,
@@ -337,13 +338,17 @@ class AllWebsocketHandler:
                     elif msg_type == core_io.SocketMsgType.RPC:
                         arg_data = core_io.parse_message_chunks(header, [data])
                         # TODO if full for some time, drop rpc (raise busy error)
-                        await conn_rpc_queue.put(asyncio.create_task(self._handle_rpc(client, serv_key, arg_data,
-                                               req.rpc_id, False)))
+                        await conn_rpc_queue.put(
+                            asyncio.create_task(
+                                self._handle_rpc(client, serv_key, arg_data,
+                                                 req.rpc_id, False)))
                     elif msg_type == core_io.SocketMsgType.Notification:
                         arg_data = core_io.parse_message_chunks(header, [data])
                         # TODO if full for some time, drop rpc (raise busy error)
-                        await conn_rpc_queue.put(asyncio.create_task(self._handle_rpc(client, serv_key, arg_data,
-                                               req.rpc_id, True)))
+                        await conn_rpc_queue.put(
+                            asyncio.create_task(
+                                self._handle_rpc(client, serv_key, arg_data,
+                                                 req.rpc_id, True)))
                     elif msg_type == core_io.SocketMsgType.QueryServiceIds:
                         await client.send(self._name_to_serv_id,
                                           msg_type,
@@ -384,8 +389,9 @@ class AllWebsocketHandler:
                 except:
                     break
         print("CONN", request, "disconnected.")
-    
-    async def rpc_awaiter(self, rpc_queue: "asyncio.Queue[asyncio.Task]", shutdown_ev: asyncio.Event):
+
+    async def rpc_awaiter(self, rpc_queue: "asyncio.Queue[asyncio.Task]",
+                          shutdown_ev: asyncio.Event):
         _shutdown_task = asyncio.create_task(shutdown_ev.wait())
         rpc_q_task = asyncio.create_task(rpc_queue.get())
         wait_tasks: List[asyncio.Task] = [
@@ -517,7 +523,8 @@ class AllWebsocketHandler:
                             # we need to generate a rpc id for event
                             for client in ev_clients:
                                 rpc_id = client.get_event_id()
-                                task = asyncio.create_task(client.send(data_to_send,
+                                task = asyncio.create_task(
+                                    client.send(data_to_send,
                                                 service_key=ev_str,
                                                 msg_type=msg_type,
                                                 request_id=rpc_id,
@@ -542,7 +549,8 @@ class AllWebsocketHandler:
                         # we need to generate a rpc id for event
                         for client in ev_clients:
                             rpc_id = client.get_event_id()
-                            task = asyncio.create_task(client.send(data_to_send,
+                            task = asyncio.create_task(
+                                client.send(data_to_send,
                                             service_key=ev_str,
                                             msg_type=msg_type,
                                             request_id=rpc_id,
@@ -567,23 +575,25 @@ class AllWebsocketHandler:
                     ss = io.StringIO()
                     task.print_stack(file=ss)
                     detail = ss.getvalue()
-                    res = self.service_core._remote_exception_dict(
-                        exc, detail)
+                    res = self.service_core._remote_exception_dict(exc, detail)
                     ev_clients = self.event_to_clients[ev_str]
                     # we need to generate a rpc id for event
                     for client in ev_clients:
                         rpc_id = client.get_event_id()
-                        asyncio.create_task(client.send(res,
-                                    service_key=ev_str,
-                                    msg_type=msg_type,
-                                    request_id=rpc_id,
-                                    is_json=True,
-                                    dynamic_key=""))
+                        asyncio.create_task(
+                            client.send(res,
+                                        service_key=ev_str,
+                                        msg_type=msg_type,
+                                        request_id=rpc_id,
+                                        is_json=True,
+                                        dynamic_key=""))
 
             # print("SEND TIME", cur_ev, time.time() - t)
             task_to_ev = new_task_to_ev
 
+
 class HttpService:
+
     def __init__(self, service_core: ProtobufServiceCore):
         self.service_core = service_core
 
@@ -637,17 +647,15 @@ class HttpService:
 
         # return web.Response(text='{} sized of {} successfully stored'
         #                             ''.format(filename, content), headers=headers)
-        res, is_exc = await self.service_core.execute_async_service(serv_key,
-                                                        [f],
-                                                        {},
-                                                        json_call=False)
+        res, is_exc = await self.service_core.execute_async_service(
+            serv_key, [f], {}, json_call=False)
         # You cannot rely on Content-Length if transfer is chunked.
         if not is_exc:
             return web.Response(text='{} sized of {} successfully stored'
-                                    ''.format(filename, content), headers=headers)
+                                ''.format(filename, content),
+                                headers=headers)
         else:
             return web.Response(status=500, text=res, headers=headers)
-
 
     async def remote_pickle_call_http(self, request: web.Request):
         try:

@@ -1,9 +1,10 @@
 import ast
 from typing import Any, Callable, Deque, Dict, List, Optional, Tuple, Union
 import tokenize
-import io 
+import io
 
 from tensorpc import compat
+
 
 def from_constant(node):
     if isinstance(node, ast.UnaryOp):
@@ -31,10 +32,13 @@ def from_constant(node):
         else:
             raise ValueError("node not a constant")
 
+
 def get_toplevel_func_node(tree: ast.Module):
     from collections import deque
-    res: List[Tuple[Union[ast.FunctionDef, ast.AsyncFunctionDef], List[ast.ClassDef]]] = [] 
-    todo: Deque[Tuple[List[ast.AST], List[ast.ClassDef]]] = deque([([*tree.body], [])])
+    res: List[Tuple[Union[ast.FunctionDef, ast.AsyncFunctionDef],
+                    List[ast.ClassDef]]] = []
+    todo: Deque[Tuple[List[ast.AST],
+                      List[ast.ClassDef]]] = deque([([*tree.body], [])])
     while todo:
         body, cur_parent_ns = todo.popleft()
         for node in body:
@@ -44,10 +48,12 @@ def get_toplevel_func_node(tree: ast.Module):
                 res.append((node, cur_parent_ns))
     return res
 
+
 def get_toplevel_class_node(tree: ast.Module):
     from collections import deque
     res: List[Tuple[ast.ClassDef, List[ast.ClassDef]]] = []
-    todo: Deque[Tuple[List[ast.AST], List[ast.ClassDef]]] = deque([([*tree.body], [])])
+    todo: Deque[Tuple[List[ast.AST],
+                      List[ast.ClassDef]]] = deque([([*tree.body], [])])
     while todo:
         body, cur_parent_ns = todo.popleft()
         for node in body:
@@ -56,10 +62,12 @@ def get_toplevel_class_node(tree: ast.Module):
                 res.append((node, cur_parent_ns))
     return res
 
+
 def find_toplevel_func_node_by_lineno(tree: ast.Module, lineno: int):
     # TODO should we check try block?
     from collections import deque
-    todo: Deque[Tuple[List[ast.AST], List[ast.ClassDef]]] = deque([([*tree.body], [])])
+    todo: Deque[Tuple[List[ast.AST],
+                      List[ast.ClassDef]]] = deque([([*tree.body], [])])
     while todo:
         body, cur_parent_ns = todo.popleft()
         for node in body:
@@ -108,10 +116,10 @@ def get_all_comments(source: str) -> List[Tuple[str, int, int]]:
 
 
 def clean_source_code(lines: List[str],
-                      remove_comment: bool=True,
-                      remove_empty_line: bool=True,
-                      source: Optional[str]=None,
-                      rstrip: bool=True):
+                      remove_comment: bool = True,
+                      remove_empty_line: bool = True,
+                      source: Optional[str] = None,
+                      rstrip: bool = True):
     if source is None:
         source = "\n".join(lines)
     lines = lines.copy()
@@ -122,7 +130,7 @@ def clean_source_code(lines: List[str],
     if rstrip:
         lines = [l.rstrip() for l in lines]
     if remove_empty_line:
-        new_lines = [] # type: List[str]
+        new_lines = []  # type: List[str]
         for line in lines:
             line_test = line.strip(" \t")
             if line_test != "":
@@ -130,6 +138,7 @@ def clean_source_code(lines: List[str],
     else:
         new_lines = lines
     return new_lines
+
 
 def _get_attribute_name(node, parts):
     if isinstance(node, ast.Attribute):
@@ -149,4 +158,3 @@ def get_attribute_name_parts(node):
 
 def get_attribute_name(node):
     return ".".join(get_attribute_name_parts(node))
-

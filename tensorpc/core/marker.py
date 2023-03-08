@@ -2,7 +2,10 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from tensorpc.constants import TENSORPC_FUNC_META_KEY
 from tensorpc.core.serviceunit import FunctionUserMeta, ServiceType
 
-def meta_decorator(func=None, meta: Optional[FunctionUserMeta] = None, name: Optional[str] = None):
+
+def meta_decorator(func=None,
+                   meta: Optional[FunctionUserMeta] = None,
+                   name: Optional[str] = None):
     if meta is None:
         raise ValueError("this shouldn't happen")
 
@@ -20,18 +23,22 @@ def meta_decorator(func=None, meta: Optional[FunctionUserMeta] = None, name: Opt
         setattr(func, TENSORPC_FUNC_META_KEY, meta)
 
         return func
+
     if func is not None:
         return wrapper(func)
     else:
         return wrapper
 
+
 def mark_exit(func=None):
     meta = FunctionUserMeta(ServiceType.Exit)
     return meta_decorator(func, meta)
 
+
 def mark_async_init(func=None):
     meta = FunctionUserMeta(ServiceType.AsyncInit)
     return meta_decorator(func, meta)
+
 
 def mark_client_stream(func=None):
     meta = FunctionUserMeta(ServiceType.ClientStream)
@@ -62,6 +69,8 @@ def mark_websocket_event(func=None, name: Optional[str] = None):
     meta = FunctionUserMeta(ServiceType.WebSocketEventProvider)
     return meta_decorator(func, meta, name)
 
+
 def mark_websocket_dynamic_event(func=None, name: Optional[str] = None):
-    meta = FunctionUserMeta(ServiceType.WebSocketEventProvider, is_dynamic=True)
+    meta = FunctionUserMeta(ServiceType.WebSocketEventProvider,
+                            is_dynamic=True)
     return meta_decorator(func, meta, name)

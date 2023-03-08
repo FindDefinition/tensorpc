@@ -1,24 +1,32 @@
 import asyncio
 import enum
 import inspect
+import sys
+import threading
+import traceback
 import types
 from functools import partial
 from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
-                    Set, Tuple, Type, Union)
+                    Set, Tuple, Type, Union, TypeVar)
 
 import numpy as np
 
 from tensorpc.core.inspecttools import get_members
+from tensorpc.flow.flowapp.appcore import get_app
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.core import FrontendEventType
 from tensorpc.core.moduleid import get_qualname_of_type
 
 from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler
 from .tree import _DEFAULT_OBJ_NAME, ObjectTree
+from typing_extensions import ParamSpec
 
 _DEFAULT_LOCALS_NAME = "locals"
 
 _MAX_STRING_IN_DETAIL = 10000
+P = ParamSpec('P')
+
+T = TypeVar('T')
 
 
 class DefaultHandler(ObjectPreviewHandler):
@@ -78,19 +86,25 @@ class ObjectInspector(mui.FlexBox):
                  cared_types: Optional[Set[Type]] = None,
                  ignored_types: Optional[Set[Type]] = None,
                  with_detail: bool = True,
-                 use_allotment: bool = False) -> None:
-        
+                 use_allotment: bool = False,
+                 enable_exception_inspect: bool = True) -> None:
+
         self.detail_container = mui.FlexBox([]).prop(overflow="auto",
                                                      padding="3px")
         if use_allotment:
             self.detail_container.prop(height="100%")
         else:
             self.detail_container.prop(flex=1)
-
+        self.enable_exception_inspect = enable_exception_inspect
         self.with_detail = with_detail
         self.tree = ObjectTree(init, cared_types, ignored_types)
         if use_allotment:
-            layout: mui.LayoutType = [self.tree.prop(overflow="auto", height="100%",)]
+            layout: mui.LayoutType = [
+                self.tree.prop(
+                    overflow="auto",
+                    height="100%",
+                )
+            ]
         else:
             layout: mui.LayoutType = [self.tree.prop(flex=1)]
 
@@ -102,19 +116,20 @@ class ObjectInspector(mui.FlexBox):
         super().__init__(layout)
         if use_allotment:
             self.prop(overflow="hidden",
-                    default_sizes=[1, 1] if with_detail else [1],
-                    vertical=True)
+                      default_sizes=[1, 1] if with_detail else [1],
+                      vertical=True)
         else:
             self.prop(flex_direction="column",
-                    flex=1,
-                    overflow="hidden",
-                    min_height=0,
-                    min_width=0)
+                      flex=1,
+                      overflow="hidden",
+                      min_height=0,
+                      min_width=0)
 
         if with_detail:
             self.tree.tree.register_event_handler(
                 FrontendEventType.TreeItemSelect.value, self._on_select)
-        self._type_to_handler_object: Dict[Type[Any], ObjectPreviewHandler] = {}
+        self._type_to_handler_object: Dict[Type[Any],
+                                           ObjectPreviewHandler] = {}
 
     async def _on_select(self, uid: str):
         obj, found = self.tree._get_obj_by_uid(uid)
@@ -167,21 +182,97 @@ class ObjectInspector(mui.FlexBox):
         del cur_frame
         await self.tree.set_object(local_vars, key)
 
-    async def update_locals_sync(self, key: str = _DEFAULT_LOCALS_NAME, *,
-                                    _frame_cnt: int = 1):
+    def update_locals_sync(self,
+                           key: str = _DEFAULT_LOCALS_NAME,
+                           *,
+                           _frame_cnt: int = 1):
         """update locals in sync manner, usually used on non-sync code via appctx.
         """
-        fut = asyncio.run_coroutine_threadsafe(self.update_locals(key, _frame_cnt=1 + _frame_cnt), asyncio.get_running_loop())
-        return fut.result()
 
-    async def set_object_sync(self, obj, key: str = _DEFAULT_OBJ_NAME):
+        fut = asyncio.run_coroutine_threadsafe(
+            self.update_locals(key, _frame_cnt=1 + _frame_cnt),
+            asyncio.get_running_loop())
+        if get_app()._flowapp_thread_id == threading.get_ident():
+            # we can't wait fut here
+            return fut
+        else:
+            # we can wait fut here.
+            return fut.result()
+
+    def set_object_sync(self, obj, key: str = _DEFAULT_OBJ_NAME):
         """set object in sync manner, usually used on non-sync code via appctx.
         """
-        fut = asyncio.run_coroutine_threadsafe(self.set_object(obj, key), asyncio.get_running_loop())
-        return fut.result()
+        fut = asyncio.run_coroutine_threadsafe(self.set_object(obj, key),
+                                               asyncio.get_running_loop())
+        if get_app()._flowapp_thread_id == threading.get_ident():
+            # we can't wait fut here
+            return fut
+        else:
+            # we can wait fut here.
+            return fut.result()
 
     async def update_tree(self):
         await self.tree.update_tree()
 
     async def remove_object(self, key: str):
         await self.tree.remove_object(key)
+
+    def run_with_exception_inspect(self, func: Callable[P, T], *args: P.args,
+                                   **kwargs: P.kwargs) -> T:
+        """WARNING: we shouldn't run this function in run_in_executor.
+        """
+        loop = asyncio.get_running_loop()
+        try:
+            return func(*args, **kwargs)
+        except:
+            _, _, exc_traceback = sys.exc_info()
+            target_f = None
+            for tb_frame, tb_lineno in traceback.walk_tb(exc_traceback):
+                target_f = tb_frame
+            if target_f is not None:
+                asyncio.run_coroutine_threadsafe(
+                    self.set_object(target_f.f_locals, "exception"), loop)
+            raise
+
+    async def run_with_exception_inspect_async(self, func: Callable[P, T],
+                                               *args: P.args,
+                                               **kwargs: P.kwargs) -> T:
+        try:
+            res = func(*args, **kwargs)
+            if inspect.iscoroutine(res):
+                return await res
+            else:
+                return res
+        except:
+            _, _, exc_traceback = sys.exc_info()
+            target_f = None
+            for tb_frame, tb_lineno in traceback.walk_tb(exc_traceback):
+                target_f = tb_frame
+            if target_f is not None:
+                await self.set_object(target_f.f_locals, "exception")
+            raise
+
+    async def run_in_executor_with_exception_inspect(self, func: Callable[P,
+                                                                          T],
+                                                     *args: P.args,
+                                                     **kwargs: P.kwargs) -> T:
+        """run a sync function in executor with exception inspect.
+
+        """
+        loop = asyncio.get_running_loop()
+        app = get_app()
+        try:
+            if kwargs:
+                return await loop.run_in_executor(None,
+                                                  partial(func, **kwargs), app,
+                                                  func, *args)
+            else:
+                return await loop.run_in_executor(None, func, app, func, *args)
+        except:
+            _, _, exc_traceback = sys.exc_info()
+            target_f = None
+            for tb_frame, tb_lineno in traceback.walk_tb(exc_traceback):
+                target_f = tb_frame
+            if target_f is not None:
+                await self.set_object(target_f.f_locals, "exception")
+            raise

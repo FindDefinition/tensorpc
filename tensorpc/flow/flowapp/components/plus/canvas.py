@@ -49,6 +49,7 @@ def _try_cast_tensor_dtype(obj: Any):
     except:
         return None
 
+
 def _cast_tensor_to_np(obj: Any) -> Optional[np.ndarray]:
     if isinstance(obj, np.ndarray):
         return obj
@@ -63,10 +64,11 @@ def _cast_tensor_to_np(obj: Any) -> Optional[np.ndarray]:
         return obj.numpy()
     return None
 
+
 def _try_cast_to_point_cloud(obj: Any):
     obj_dtype = _try_cast_tensor_dtype(obj)
     if obj_dtype is None:
-        return None 
+        return None
     ndim = obj.ndim
     if ndim == 2:
         dtype = obj_dtype
@@ -74,34 +76,28 @@ def _try_cast_to_point_cloud(obj: Any):
             num_ft = obj.shape[1]
             if num_ft >= 3 and num_ft <= 4:
                 return _cast_tensor_to_np(obj)
-    return None 
+    return None
+
 
 def _try_cast_to_image(obj: Any):
     obj_dtype = _try_cast_tensor_dtype(obj)
     if obj_dtype is None:
-        return None 
+        return None
     ndim = obj.ndim
     valid = False
     is_rgba = False
     if ndim == 2:
         valid = obj_dtype == np.uint8
     elif ndim == 3:
-        valid = obj_dtype == np.uint8 and (obj.shape[2] == 3 or obj.shape[2] == 4)
+        valid = obj_dtype == np.uint8 and (obj.shape[2] == 3
+                                           or obj.shape[2] == 4)
         is_rgba = obj.shape[2] == 4
     if valid:
         res = _cast_tensor_to_np(obj)
         if is_rgba and res is not None:
             res = res[..., :3]
         return res
-    return None 
-
-def _is_array_image(obj: np.ndarray):
-    ndim = obj.ndim
-    if ndim == 2:
-        return obj.dtype == np.uint8
-    elif ndim == 3:
-        return obj.dtype == np.uint8 and obj.shape[2] == 3
-    return False
+    return None
 
 
 @dataclasses.dataclass
@@ -126,9 +122,11 @@ class CanvasGlobalCfg:
 
 class SimpleCanvas(mui.FlexBox):
 
-    def __init__(self,
-                 camera: Optional[three.PerspectiveCamera] = None,
-                 screenshot_callback: Optional[Callable[[bytes], mui._CORO_NONE]] = None):
+    def __init__(
+        self,
+        camera: Optional[three.PerspectiveCamera] = None,
+        screenshot_callback: Optional[Callable[[bytes],
+                                               mui._CORO_NONE]] = None):
         if camera is None:
             camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         self.camera = camera
@@ -249,7 +247,8 @@ class SimpleCanvas(mui.FlexBox):
 
     async def _on_enable_grid(self, selected):
         if selected:
-            await self._dynamic_grid.set_new_layout([self.infgrid, self.axis_helper])
+            await self._dynamic_grid.set_new_layout(
+                [self.infgrid, self.axis_helper])
         else:
             await self._dynamic_grid.set_new_layout([])
 
@@ -258,15 +257,14 @@ class SimpleCanvas(mui.FlexBox):
             obj = data.obj
             pc_obj = _try_cast_to_point_cloud(obj)
             if pc_obj is not None:
-                await self.show_points(data.tree_id,
-                                        pc_obj.astype(np.float32),
-                                        pc_obj.shape[0])
-                return 
+                await self.show_points(data.tree_id, pc_obj.astype(np.float32),
+                                       pc_obj.shape[0])
+                return
             img_obj = _try_cast_to_image(obj)
             if img_obj is not None:
                 await self.show_image(data.tree_id, img_obj, (0, 0, 0),
-                                        (0, 0, 0), 3)
-                return 
+                                      (0, 0, 0), 3)
+                return
             print(data)
         # print(data)
 

@@ -218,8 +218,7 @@ class RawEvent(Event):
         if not isinstance(r, bytes):
             r = r.encode("utf-8")
         return "{}({}|{}|raw={})".format(self.name, self.is_stderr,
-                                         self.timestamp,
-                                         r)
+                                         self.timestamp, r)
 
     def to_dict(self):
         res = super().to_dict()
@@ -327,6 +326,7 @@ def _warp_exception_to_event(exc: Exception, uid: str):
     ts = time.time_ns()
     return ExceptionEvent(ts, exc, uid=uid, traceback_str=tb_str.getvalue())
 
+
 _ENCODE = "utf-8"
 # _ENCODE = "latin-1"
 
@@ -352,13 +352,13 @@ class PeerSSHClient:
         # create read tasks. they should exists during peer open.
         if encoding is None:
             self.separators = separators
-            self._vsc_re = re.compile(rb"\033\]784;([ABPCEFGD])(?:;(.*?))?\007")
+            self._vsc_re = re.compile(
+                rb"\033\]784;([ABPCEFGD])(?:;(.*?))?\007")
         else:
             self.separators = separators.decode("utf-8")
             self._vsc_re = re.compile(r"\033\]784;([ABPCEFGD])(?:;(.*?))?\007")
 
         self.uid = uid
-
 
     async def send(self, content: str):
         self.stdin.write(content)
@@ -498,6 +498,7 @@ class SSHRequest:
         self.type = type
         self.data = data
 
+
 class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
 
     def __init__(self) -> None:
@@ -521,7 +522,8 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
                 self.callback(RawEvent(ts, res_str, False, self.uid)), loop)
         return res
 
-    async def readuntil(self, separator: object, datatype: asyncssh.DataType) -> AnyStr:
+    async def readuntil(self, separator: object,
+                        datatype: asyncssh.DataType) -> AnyStr:
         """Read data from the channel until a separator is seen"""
 
         if not separator:
@@ -537,7 +539,8 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
         else:
             if separator is asyncsshss._NEWLINE:
                 seplen = 1
-                separators = asyncsshss.cast(AnyStr, '\n' if self._encoding else b'\n')
+                separators = asyncsshss.cast(AnyStr,
+                                             '\n' if self._encoding else b'\n')
             elif isinstance(separator, (bytes, str)):
                 seplen = len(separator)
                 separators = re.escape(asyncsshss.cast(AnyStr, separator))
@@ -571,7 +574,7 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
                     newbuf = asyncsshss.cast(AnyStr, recv_buf[curbuf])
                     buf += newbuf
                     if is_re:
-                        start = 0 
+                        start = 0
                     else:
                         start = max(buflen + 1 - seplen, 0)
                     match = pat.search(buf, start)
@@ -595,9 +598,11 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
                     recv_buf[:curbuf] = []
                     self._recv_buf_len -= buflen
                     self._maybe_resume_reading()
-                    raise asyncio.IncompleteReadError(asyncsshss.cast(bytes, buf), None)
+                    raise asyncio.IncompleteReadError(
+                        asyncsshss.cast(bytes, buf), None)
 
                 await self._block_read(datatype)
+
 
 class SSHClient:
 
@@ -626,12 +631,12 @@ class SSHClient:
     @contextlib.asynccontextmanager
     async def simple_connect(self):
         conn_task = asyncssh.connection.connect(self.url_no_port,
-                                    self.port,
-                                    username=self.username,
-                                    password=self.password,
-                                    keepalive_interval=15,
-                                    login_timeout=10,
-                                    known_hosts=None)
+                                                self.port,
+                                                username=self.username,
+                                                password=self.password,
+                                                keepalive_interval=15,
+                                                login_timeout=10,
+                                                known_hosts=None)
         conn_ctx = await asyncio.wait_for(conn_task, timeout=10)
         async with conn_ctx as conn:
             if not self.bash_file_inited:
@@ -656,7 +661,8 @@ class SSHClient:
             shutdown_task: asyncio.Task,
             env: Optional[Dict[str, str]] = None,
             forward_ports: Optional[List[int]] = None,
-            r_forward_ports: Optional[List[Union[Tuple[int, int], int]]] = None,
+            r_forward_ports: Optional[List[Union[Tuple[int, int],
+                                                 int]]] = None,
             env_port_modifier: Optional[Callable[
                 [List[int], List[int], Dict[str, str]], None]] = None,
             exit_callback: Optional[Callable[[], Awaitable[None]]] = None,
@@ -668,12 +674,12 @@ class SSHClient:
         # TODO better keepalive
         try:
             conn_task = asyncssh.connection.connect(self.url_no_port,
-                                        self.port,
-                                        username=self.username,
-                                        password=self.password,
-                                        keepalive_interval=10,
-                                        login_timeout=10,
-                                        known_hosts=None)
+                                                    self.port,
+                                                    username=self.username,
+                                                    password=self.password,
+                                                    keepalive_interval=10,
+                                                    login_timeout=10,
+                                                    known_hosts=None)
             print("START WAIT2")
             conn_ctx = await asyncio.wait_for(conn_task, timeout=10)
             print("END WAIT")
@@ -681,7 +687,7 @@ class SSHClient:
                 if not self.bash_file_inited:
                     p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
                     await asyncsshscp(str(p),
-                                       (conn, '~/.tensorpc_hooks-bash.sh'))
+                                      (conn, '~/.tensorpc_hooks-bash.sh'))
                     self.bash_file_inited = True
                 if client_ip_callback is not None:
                     # TODO if fail?
@@ -738,7 +744,9 @@ class SSHClient:
                                 '', 0, 'localhost', p)
 
                         rfwd_ports.append(listener.get_port())
-                        print(f'Listening on Remote port {p} <- {listener.get_port()}...')
+                        print(
+                            f'Listening on Remote port {p} <- {listener.get_port()}...'
+                        )
                         wait_tasks.append(
                             asyncio.create_task(listener.wait_closed()))
                 if forward_ports is not None:
@@ -746,7 +754,9 @@ class SSHClient:
                         listener = await conn.forward_local_port(
                             '', 0, 'localhost', p)
                         fwd_ports.append(listener.get_port())
-                        print(f'Listening on Local port {listener.get_port()} -> {p}...')
+                        print(
+                            f'Listening on Local port {listener.get_port()} -> {p}...'
+                        )
                         wait_tasks.append(
                             asyncio.create_task(listener.wait_closed()))
                 # await listener.wait_closed()
@@ -827,9 +837,9 @@ async def main2():
     username = input("username:")
     password = getpass.getpass("password:")
     async with asyncssh.connection.connect('localhost',
-                                username=username,
-                                password=password,
-                                known_hosts=None) as conn:
+                                           username=username,
+                                           password=password,
+                                           known_hosts=None) as conn:
         p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
         await asyncsshscp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
         stdin, stdout, stderr = await conn.open_session(

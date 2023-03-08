@@ -54,7 +54,7 @@ class TensorHandler(ObjectPreviewHandler):
         is_contig = False
         if isinstance(obj, np.ndarray):
             is_contig = obj.flags['C_CONTIGUOUS']
-
+            device = "cpu"
         elif get_qualname_of_type(type(obj)) == CommonQualNames.TorchTensor:
             qualname = "torch.Tensor"
             device = obj.device.type

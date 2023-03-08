@@ -1,9 +1,11 @@
 import asyncio
 from tensorpc.core import marker
 import time
-import numpy as np 
+import numpy as np
+
 
 class Service1:
+
     def add(self, a, b):
         return a + b
 
@@ -18,12 +20,14 @@ class Service1:
         await asyncio.sleep(0.5)
         return time.time()
 
+
 class Service2:
+
     def __init__(self, x) -> None:
         self.x = x
-    
+
     def mul(self, a):
-        return self.x * a 
+        return self.x * a
 
     def increment(self):
         self.x += 1
@@ -31,14 +35,14 @@ class Service2:
     def get_x(self):
         return self.x
 
-    @staticmethod 
+    @staticmethod
     def add(a, b):
         return a + b
-    
+
     def gen_func(self, a):
         for i in range(10):
             yield a + i
-    
+
     @marker.mark_client_stream
     @staticmethod
     def client_stream(stream_iter, a, b):
@@ -54,15 +58,17 @@ class Service2:
             res += data - b
             yield res
 
+
 class Service2Async:
+
     def __init__(self, x) -> None:
         self.x = x
-    
-    @staticmethod 
+
+    @staticmethod
     async def add(a, b):
         return a + b
 
-    @staticmethod 
+    @staticmethod
     async def sum(a):
         print(a.shape)
         return a.sum()
