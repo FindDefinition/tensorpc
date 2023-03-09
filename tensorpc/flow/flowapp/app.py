@@ -11,8 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Flow APP: simple GUI application in devflow"""
+"""Flow APP: simple GUI application in devflow
+Reload System
 
+Layout Instance: App itself and layout objects created on AnyFlexLayout.
+
+
+
+"""
 import ast
 import asyncio
 import base64
@@ -30,10 +36,12 @@ import runpy
 import sys
 import threading
 import time
+import tokenize
 import traceback
 from functools import partial
 from pathlib import Path
 from types import ModuleType
+import types
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
 
@@ -44,6 +52,7 @@ import watchdog.events
 from PIL import Image
 from typing_extensions import ParamSpec
 from watchdog.observers import Observer
+from watchdog.observers.api import ObservedWatch
 
 from tensorpc import simple_chunk_call_async
 from tensorpc.constants import PACKAGE_ROOT, TENSORPC_FLOW_FUNC_META_KEY
@@ -51,11 +60,12 @@ from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.inspecttools import get_all_members_by_type
 from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
                                     is_valid_function)
-from tensorpc.core.serviceunit import ReloadableDynamicClass, ServiceUnit
+from tensorpc.core.serviceunit import ReloadableDynamicClass, ServFunctionMeta, ServiceUnit, SimpleCodeManager
 from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.coretypes import (ScheduleEvent, StorageDataItem,
                                      get_object_type_meta)
-from tensorpc.flow.flowapp.reload import AppReloadManager
+from tensorpc.flow.flowapp.reload import AppReloadManager, reload_object_methods, bind_and_reset_object_methods
+from tensorpc.core.serviceunit import get_qualname_to_code
 from tensorpc.flow.hold.holdctx import HoldContext
 from tensorpc.flow.marker import AppFunctionMeta, AppFuncType
 from tensorpc.flow.serv_names import serv_names
@@ -63,7 +73,7 @@ from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.reload import reload_method
 from tensorpc.utils.uniquename import UniqueNamePool
 
-from .appcore import AppContext, AppSpecialEventType
+from .appcore import _CompReloadMeta, AppContext, AppSpecialEventType
 from .appcore import enter_app_conetxt as _enter_app_conetxt
 from .appcore import get_app, get_app_context, create_reload_metas
 from .components import mui, plus, three
@@ -106,7 +116,7 @@ class AppEditor:
 
         # for object inspector only
         # TODO better way to implement
-        self.is_external: bool = False
+        self.external_path: Optional[str] = None
 
     def set_init_line_number(self, val: int):
         self._init_line_number = val
@@ -159,6 +169,18 @@ class AppEditor:
 
 T = TypeVar("T")
 
+
+@dataclasses.dataclass
+class _LayoutObserveMeta:
+    layout: Union[mui.FlexBox, "App"]
+    qualname_prefix: str
+    metas: List[ServFunctionMeta]
+    callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta], Coroutine]]
+
+@dataclasses.dataclass
+class _WatchDogWatchEntry:
+    obmetas: List[_LayoutObserveMeta]
+    watch: Optional[ObservedWatch]
 
 class App:
     """
@@ -233,6 +255,8 @@ class App:
         self.__flowapp_master_meta = MasterMeta()
         self.__flowapp_storage_cache: Dict[str, StorageDataItem] = {}
         self.__flow_hold_context: Optional[HoldContext] = None
+        # for app and dynamic layout in AnyFlexLayout
+        self._flowapp_change_observers: Dict[str, _WatchDogWatchEntry] = {}
 
     @property
     def hold_context(self):
@@ -744,41 +768,6 @@ class _WatchDogForAppFile(watchdog.events.FileSystemEventHandler):
         return self._on_modified(event)
 
 
-class _SimpleCodeManager:
-
-    def __init__(self, paths: List[str]) -> None:
-        self.file_to_code: Dict[str, str] = {}
-        for path in paths:
-            resolved_path = str(Path(path).resolve())
-            with open(resolved_path, "r") as f:
-                self.file_to_code[path] = f.read()
-
-    def update_code_from_editor(self, path: str, new_data: str):
-        resolved_path = str(Path(path).resolve())
-        if new_data == self.file_to_code[resolved_path]:
-            return False
-        self.file_to_code[resolved_path] = new_data
-        return True
-
-    def update_code(self, change_file: str):
-        resolved_path = str(Path(change_file).resolve())
-        # if resolved_path not in self.file_to_code:
-        #     return False
-        with open(change_file, "r") as f:
-            new_data = f.read()
-        if resolved_path not in self.file_to_code:
-            self.file_to_code[resolved_path] = new_data
-            return True
-        if new_data == self.file_to_code[resolved_path]:
-            return False
-        self.file_to_code[resolved_path] = new_data
-        return True
-
-    def get_code(self, change_file: str):
-        resolved_path = str(Path(change_file).resolve())
-        return self.file_to_code[resolved_path]
-
-
 class EditableApp(App):
 
     def __init__(self,
@@ -812,6 +801,13 @@ class EditableApp(App):
     def app_initialize(self):
         dcls = self._get_app_dynamic_cls()
         path = dcls.file_path
+        user_obj = self._get_user_app_object()
+        metas = self._flow_reload_manager.query_type_method_meta(type(user_obj))
+        qualname_prefix = type(user_obj).__qualname__
+        obentry = _WatchDogWatchEntry([
+            _LayoutObserveMeta(self, qualname_prefix, metas, None)
+        ], None)
+        self._flowapp_change_observers[path] = obentry
         self._watchdog_watcher = None
         self._watchdog_observer = None
         if not self._flow_app_is_headless:
@@ -822,13 +818,12 @@ class EditableApp(App):
                 for p in self._flow_observed_files:
                     assert Path(p).exists(), f"{p} must exist"
                 paths = set(self._flow_observed_files)
-                self._flow_comp_mgr = _SimpleCodeManager(
+                self._flowapp_code_mgr = SimpleCodeManager(
                     self._flow_observed_files)
             else:
-                self._flow_comp_mgr = _SimpleCodeManager(
+                self._flowapp_code_mgr = SimpleCodeManager(
                     list(self.__get_default_observe_paths()))
-                paths = set(self._flow_comp_mgr.file_to_code.keys())
-
+                paths = set(self._flowapp_code_mgr.file_to_entry.keys())
             paths.add(str(Path(path).resolve()))
             # print(paths)
             for p in paths:
@@ -836,10 +831,52 @@ class EditableApp(App):
             observer.start()
             self._watchdog_observer = observer
         else:
-            self._flow_comp_mgr = None
+            self._flowapp_code_mgr = None
         self._watchdog_ignore_next = False
         self._loop = asyncio.get_running_loop()
         self._watch_lock = threading.Lock()
+
+    def _flowapp_observe(self,
+                         obj: mui.FlexBox,
+                         callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta],
+                                                     Coroutine]] = None):
+        # TODO better error msg if app editable not enabled
+        path = obj._flow_comp_def_path
+
+        assert path != "" and self._watchdog_observer is not None
+        path_resolved = str(Path(path).resolve())
+        if path_resolved not in self._flowapp_change_observers:
+            self._flowapp_change_observers[path_resolved] = _WatchDogWatchEntry([], None)
+        obentry = self._flowapp_change_observers[path_resolved]
+        if len(obentry.obmetas) == 0:
+            # no need to schedule watchdog.
+            watch = self._watchdog_observer.schedule(self._watchdog_watcher, path,
+                                                    False)
+            obentry.watch = watch 
+        assert self._flowapp_code_mgr is not None
+        self._flowapp_code_mgr._add_new_code(path)
+        user_obj = obj._get_user_object()
+        metas = self._flow_reload_manager.query_type_method_meta(type(obj._get_user_object()))
+        qualname_prefix = type(user_obj).__qualname__
+        obmeta = _LayoutObserveMeta(obj, qualname_prefix, metas, callback)
+        obentry.obmetas.append(obmeta)
+
+    def _flowapp_remove_observer(self,
+                         obj: mui.FlexBox):
+        path = obj._flow_comp_def_path
+        assert path != "" and self._watchdog_observer is not None
+        path_resolved = str(Path(path).resolve())
+        assert self._flowapp_code_mgr is not None
+        self._flowapp_code_mgr._remove_path(path)
+        if path_resolved in self._flowapp_change_observers:
+            obentry = self._flowapp_change_observers[path_resolved]
+            new_obmetas: List[_LayoutObserveMeta] = []
+            for obmeta in obentry.obmetas:
+                if obj is not obmeta.layout:
+                    new_obmetas.append(obmeta)
+            obentry.obmetas = new_obmetas
+            if len(new_obmetas) == 0 and obentry.watch is not None:
+                self._watchdog_observer.unschedule(obentry.watch)
 
     def __get_default_observe_paths(self):
         uid_to_comp = self.root._get_uid_to_comp_dict()
@@ -858,98 +895,213 @@ class EditableApp(App):
         res.add(self._get_app_dynamic_cls().file_path)
         return res
 
-    def __reload_callback(self, change_file: str, mod_is_reloaded: bool):
-        # TODO find a way to record history callback code and
-        # reload only if code change
-        uid_to_comp = self.root._get_uid_to_comp_dict()
-
-        assert self._flow_comp_mgr is not None
+    def __get_callback_metas_in_file(self, change_file: str, layout: mui.FlexBox):
+        uid_to_comp = layout._get_uid_to_comp_dict()
         resolved_path = str(Path(change_file).resolve())
-        reload_metas = create_reload_metas(uid_to_comp, resolved_path)
-        if reload_metas:
-            if not mod_is_reloaded:
-                # TODO when not mod_is_reloaded, changed file isn't app_file
-                # now module is valid, reload it.
-                try:
-                    res = self._flow_reload_manager.reload_type(
-                        reload_metas[0].handler.cb)
-                    module = res[0].module
-                except:
-                    traceback.print_exc()
-                    return
-                module_dict = module.__dict__
-            else:
-                module_dict = self._get_app_dynamic_cls().module_dict
-            for meta in reload_metas:
-                handler = meta.handler
-                cb = handler.cb
-                new_method, new_code = reload_method(cb, module_dict)
-                # if new_code:
-                #     meta.code = new_code
-                if new_method is not None:
-                    # print(new_method, "new_method")
-                    handler.cb = new_method
+        return create_reload_metas(uid_to_comp, resolved_path)
 
-    def _watchdog_on_modified(self, ev: _WATCHDOG_MODIFY_EVENT_TYPES):
-        if isinstance(ev, watchdog.events.FileModifiedEvent):
-            dcls = self._get_app_dynamic_cls()
-            resolved_path = str(Path(ev.src_path).resolve())
-            resolved_app_path = str(Path(dcls.file_path).resolve())
-            is_app_file_changed = resolved_app_path == resolved_path
-            print("WATCHDOG", ev)
-            with self._watch_lock:
-                if self._flow_comp_mgr is None:
-                    return
-                if not self._flow_comp_mgr.update_code(ev.src_path):
-                    return
-                new_data = self._flow_comp_mgr.get_code(ev.src_path)
-                try:
-                    with _enter_app_conetxt(self):
-                        self._flowapp_special_eemitter.emit(
-                            AppSpecialEventType.WatchDogChange.value,
-                            (new_data, resolved_path))
-                except:
-                    traceback.print_exc()
-                    # return
-                # parse first to show syntax error to users.
-                try:
-                    ast.parse(new_data, filename=ev.src_path)
-                except:
-                    traceback.print_exc()
-                    return
-                try:
-                    # watchdog callback can't fail
-                    code_changed: List[str] = []
-                    if is_app_file_changed:
+
+    # def __reload_callback(self, change_file: str, mod_is_reloaded: bool):
+    #     # TODO find a way to record history callback code and
+    #     # reload only if code change
+    #     uid_to_comp = self.root._get_uid_to_comp_dict()
+
+    #     assert self._flowapp_code_mgr is not None
+    #     resolved_path = str(Path(change_file).resolve())
+    #     reload_metas = create_reload_metas(uid_to_comp, resolved_path)
+    #     if reload_metas:
+    #         if not mod_is_reloaded:
+    #             # TODO when not mod_is_reloaded, changed file isn't app_file
+    #             # now module is valid, reload it.
+    #             try:
+    #                 res = self._flow_reload_manager.reload_type(
+    #                     reload_metas[0].handler.cb)
+    #                 module = res.module_entry.module
+    #             except:
+    #                 traceback.print_exc()
+    #                 return
+    #             module_dict = module.__dict__
+    #         else:
+    #             module_dict = self._get_app_dynamic_cls().module_dict
+    #         for meta in reload_metas:
+    #             handler = meta.handler
+    #             cb = handler.cb
+    #             new_method, new_code = reload_method(cb, module_dict)
+    #             # if new_code:
+    #             #     meta.code = new_code
+    #             if new_method is not None:
+    #                 # print(new_method, "new_method")
+    #                 handler.cb = new_method
+
+    async def _reload_object_with_new_code(self, path: str, new_code: Optional[str] = None):
+        assert self._flowapp_code_mgr is not None
+        resolved_path = str(Path(path).resolve())
+        try:
+            changes = self._flowapp_code_mgr.update_code(resolved_path, new_code)
+        except:
+            # ast parse error
+            traceback.print_exc()
+            return
+        if changes is None:
+            return
+        new, change, _ = changes
+        new_data = self._flowapp_code_mgr.get_code(resolved_path)
+        is_reload = False
+        is_callback_change = False
+        callbacks_of_this_file: Optional[List[_CompReloadMeta]] = None
+        
+        try:
+            if resolved_path in self._flowapp_change_observers:
+                obmetas = self._flowapp_change_observers[resolved_path].obmetas
+                for obmeta in obmetas:
+                    # get changed metas for special methods
+                    changed_metas: List[ServFunctionMeta] = []
+                    for m in obmeta.metas:
+                        if m.qualname in change:
+                            changed_metas.append(m)
+                    new_method_names: List[str] = [x for x in new if x.startswith(obmeta.qualname_prefix) and x != obmeta.qualname_prefix]
+                    layout = obmeta.layout
+                    if not is_callback_change:
+                        if isinstance(layout, App):
+                            callbacks_of_this_file = self.__get_callback_metas_in_file(resolved_path, self.root)
+                        else:
+                            callbacks_of_this_file = self.__get_callback_metas_in_file(resolved_path, layout)
+                        for cb_meta in callbacks_of_this_file:
+                            if cb_meta.cb_qualname in change:
+                                is_callback_change = True 
+                                break
+                    for m in changed_metas:
+                        print(m.qualname)
+                    flow_special_for_check = FlowSpecialMethods(changed_metas)
+                    do_reload = flow_special_for_check.contains_special_method() or bool(new_method_names)
+                    if not do_reload:
+                        continue
+                    layout = obmeta.layout
+                    changed_user_obj = None
+                    if layout is self:
+                        # reload app
                         if self._use_app_editor:
-                            if not self.code_editor.is_external:
-                                fut = asyncio.run_coroutine_threadsafe(
-                                    self.set_editor_value(new_data),
-                                    self._loop)
-                                fut.result()
-                        code_changed_metas = self._reload_app_file()
-                        flow_special = FlowSpecialMethods(code_changed_metas)
-                        with _enter_app_conetxt(self):
-                            if flow_special.auto_run is not None:
-                                asyncio.run_coroutine_threadsafe(
-                                    self._run_autorun(
-                                        flow_special.auto_run.get_binded_fn()),
-                                    self._loop)
-                            # print(code_changed_metas)
-                            if flow_special.create_layout:
-                                fn = flow_special.create_layout.get_binded_fn()
-                                fut = asyncio.run_coroutine_threadsafe(
-                                    self._app_run_layout_function(
+                            if self.code_editor.external_path is None and new_code is None:
+                                await self.set_editor_value(new_data)
+                                # fut = asyncio.run_coroutine_threadsafe(
+                                #     self.set_editor_value(new_data),
+                                #     self._loop)
+                                # # this won't block main UI thread, so it's ok
+                                # fut.result()
+                        if changed_metas:
+                            # reload app servunit and method
+                            changed_user_obj = self._get_user_app_object()
+                            # self._get_app_dynamic_cls(
+                            # ).reload_obj_methods(user_obj, {}, self._flow_reload_manager)
+                            self._get_app_service_unit().reload_metas(self._flow_reload_manager)
+                    else:
+                        assert isinstance(layout, mui.FlexBox)
+                        if self.code_editor.external_path is not None and new_code is None:
+                            if str(Path(self.code_editor.external_path).resolve()) == resolved_path:
+                                await self.set_editor_value(new_data, lineno=0)
+                        # reload dynamic layout
+                        if changed_metas:
+                            changed_user_obj = layout._get_user_object()
+                    if changed_user_obj is not None:
+                        reload_res = self._flow_reload_manager.reload_type(type(changed_user_obj))
+                        is_reload = reload_res.is_reload
+                        updated_type = reload_res.type_meta.get_local_type_from_module_dict(reload_res.module_entry.module_dict)
+                        # recreate metas with new type and new qualname_to_code
+                        # TODO handle special methods in mro
+                        updated_metas = self._flow_reload_manager.query_type_method_meta(updated_type)
+                        obmeta.metas = updated_metas
+                        changed_metas = [m for m in updated_metas if m.qualname in change]
+                        changed_metas += [m for m in updated_metas if m.qualname in new]
+                        for c in changed_metas:
+                            print(f"{c.name}, ------------")
+                            # print(c.code)
+                            # print("-----------")
+                            # print(change[c.qualname])
+                        # we need to update metas of layout with new type.
+                        # meta is binded in bind_and_reset_object_methods
+                        bind_and_reset_object_methods(changed_user_obj, changed_metas)
+                        if layout is self:
+                            self._get_app_dynamic_cls().module_dict = reload_res.module_entry.module_dict
+                            self._get_app_service_unit().reload_metas(self._flow_reload_manager)
+                    # use updated metas to run special methods such as create_layout and auto_run
+                    flow_special = FlowSpecialMethods(changed_metas)
+                    with _enter_app_conetxt(self):
+                                # asyncio.run_coroutine_threadsafe(
+                                #     self._run_autorun(
+                                #         auto_run.get_binded_fn()),
+                                #     self._loop)
+                        # print(code_changed_metas)
+                        if flow_special.create_layout:
+                            fn = flow_special.create_layout.get_binded_fn()
+                            if isinstance(layout, App):
+                                await self._app_run_layout_function(
                                         True,
                                         with_code_editor=False,
                                         reload=True,
-                                        decorator_fn=fn), self._loop)
-                                fut.result()
-                    already_reloaded = is_app_file_changed
-                    self.__reload_callback(resolved_path, already_reloaded)
-                except:
-                    traceback.print_exc()
+                                        decorator_fn=fn)
+
+                                # fut = asyncio.run_coroutine_threadsafe(
+                                #     self._app_run_layout_function(
+                                #         True,
+                                #         with_code_editor=False,
+                                #         reload=True,
+                                #         decorator_fn=fn), self._loop)
+                                # fut.result()
+                            else:
+                                if obmeta.callback is not None:
+                                    # handle layout in callback
+                                    await obmeta.callback(layout, flow_special.create_layout)
+                                    # fut = asyncio.run_coroutine_threadsafe(
+                                    #     obmeta.callback(layout, flow_special.create_layout), self._loop)
+                                    # fut.result()
+
+                                # dynamic layout
+                        for auto_run in flow_special.auto_runs:
+                            if auto_run is not None:
+                                await self._run_autorun(
+                                        auto_run.get_binded_fn())
+                    # handle special methods
+
+            if is_callback_change or is_reload:
+                # reset all callbacks in this file
+                if callbacks_of_this_file is None:
+                    callbacks_of_this_file = self.__get_callback_metas_in_file(resolved_path, self.root)
+                if callbacks_of_this_file:
+                    reload_res = self._flow_reload_manager.reload_type(callbacks_of_this_file[0].cb_real)
+                    for meta in callbacks_of_this_file:
+                        print("RELOAD CB", meta.cb_qualname)
+                        handler = meta.handler
+                        cb = handler.cb
+                        new_method, _ = reload_method(cb, reload_res.module_entry.module_dict)
+                        if new_method is not None:
+                            handler.cb = new_method
+        except:
+            # watchdog thread can't fail
+            traceback.print_exc()
+            return
+
+
+    def _watchdog_on_modified(self, ev: _WATCHDOG_MODIFY_EVENT_TYPES):
+        # which event trigger reload?
+        # 1. special method code change
+        # 2. callback code change (handled outsite)
+        # 3. new methods detected in layout
+        
+        # WARNING: other events WON'T trigger reload.
+
+        # what happened when reload?
+        # 1. all method of object (app or dynamic layout) will be reset
+        # 2. all callback defined in changed file will be reset
+        # 3. if layout function changed, load new layout
+        # 4. if mount/unmount function changed, reset them
+        # 5. if autorun changed, run them
+        if isinstance(ev, watchdog.events.FileModifiedEvent):
+            dcls = self._get_app_dynamic_cls()
+            print("WATCHDOG", ev)
+            with self._watch_lock:
+                if self._flowapp_code_mgr is None:
                     return
+                asyncio.run_coroutine_threadsafe(self._reload_object_with_new_code(ev.src_path), self._loop)
 
     def _reload_app_file(self):
         # comps = self._uid_to_comp
@@ -981,36 +1133,45 @@ class EditableApp(App):
             if event.type == AppEditorFrontendEventType.Save:
                 with self._watch_lock:
                     # self._watchdog_ignore_next = True
-                    if self.code_editor.is_external:
-                        self._flowapp_special_eemitter.emit(
-                            AppSpecialEventType.CodeEditorSave.value,
-                            event.data)
+                    if self.code_editor.external_path is not None:
+                        path = self.code_editor.external_path
                     else:
-                        with open(app_path, "w") as f:
-                            f.write(event.data)
-                        # self._watchdog_prev_content = event.data
+                        path = app_path
+                    # if self.code_editor.external_path is None:
+                    with open(path, "w") as f:
+                        f.write(event.data)
+                    await self._reload_object_with_new_code(path, event.data)
 
-                        if self._flow_comp_mgr is not None:
-                            self._flow_comp_mgr.update_code_from_editor(
-                                app_path, event.data)
-                        try:
-                            code_changed_metas = self._reload_app_file()
-                        except:
-                            traceback.print_exc()
-                            raise
-                        flow_special = FlowSpecialMethods(code_changed_metas)
-                        if flow_special.auto_run is not None:
-                            asyncio.create_task(
-                                self._run_autorun(
-                                    flow_special.auto_run.get_binded_fn()))
-                        if flow_special.create_layout is not None:
-                            await self._app_run_layout_function(
-                                True,
-                                with_code_editor=False,
-                                reload=True,
-                                decorator_fn=flow_special.create_layout.
-                                get_binded_fn())
-                        self.__reload_callback(app_path, True)
+                    # if self.code_editor.is_external:
+                    #     self._flowapp_special_eemitter.emit(
+                    #         AppSpecialEventType.CodeEditorSave.value,
+                    #         event.data)
+                    # else:
+                    #     with open(app_path, "w") as f:
+                    #         f.write(event.data)
+                    #     # self._watchdog_prev_content = event.data
+
+                    #     if self._flowapp_code_mgr is not None:
+                    #         self._flowapp_code_mgr.update_code_from_editor(
+                    #             app_path, event.data)
+                    #     try:
+                    #         code_changed_metas = self._reload_app_file()
+                    #     except:
+                    #         traceback.print_exc()
+                    #         raise
+                    #     flow_special = FlowSpecialMethods(code_changed_metas)
+                    #     if flow_special.auto_run is not None:
+                    #         asyncio.create_task(
+                    #             self._run_autorun(
+                    #                 flow_special.auto_run.get_binded_fn()))
+                    #     if flow_special.create_layout is not None:
+                    #         await self._app_run_layout_function(
+                    #             True,
+                    #             with_code_editor=False,
+                    #             reload=True,
+                    #             decorator_fn=flow_special.create_layout.
+                    #             get_binded_fn())
+                    #     self.__reload_callback(app_path, True)
         return
 
 

@@ -33,6 +33,7 @@ from typing_extensions import Literal, TypeAlias
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass
 from tensorpc.flow.flowapp.components.common import (handle_standard_event)
+from tensorpc.flow.flowapp.reload import AppReloadManager
 
 from .. import colors
 from ..core import (AppComponentCore, AppEvent, AppEventType, BasicProps,
@@ -41,7 +42,7 @@ from ..core import (AppComponentCore, AppEvent, AppEventType, BasicProps,
                     NumberType, T_base_props, T_child, T_container_props,
                     TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
                     ValueType, undefined, create_ignore_usr_msg,
-                    ALL_POINTER_EVENTS, _get_obj_def_path, get_special_methods)
+                    ALL_POINTER_EVENTS, _get_obj_def_path)
 from tensorpc.flow.constants import TENSORPC_ANYLAYOUT_FUNC_NAME
 if TYPE_CHECKING:
     from .three import ThreeCanvas
@@ -943,13 +944,17 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    def get_special_methods(self):
-        if self._wrapped_obj is not None:
-            res = get_special_methods(type(self._wrapped_obj))
-        else:
-            res = get_special_methods(type(self))
+    def get_special_methods(self, reload_mgr: AppReloadManager):
+        user_obj = self._get_user_object()
+        metas = reload_mgr.query_type_method_meta(type(user_obj))
+        res = FlowSpecialMethods(metas)
         res.bind(self)
         return res
+    
+    def _get_user_object(self):
+        if self._wrapped_obj is not None:
+            return self._wrapped_obj
+        return self
 
 
 @dataclasses.dataclass

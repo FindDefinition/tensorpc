@@ -166,6 +166,7 @@ def parse_obj_dict(obj_dict: Dict[str, Any],
                    obj_meta_cache=None):
     res_node: List[mui.JsonLikeNode] = []
     for k, v in obj_dict.items():
+
         node = parse_obj_item(v,
                               k,
                               f"{ns}-{k}",
@@ -421,7 +422,7 @@ class ObjectTree(mui.FlexBox):
             return
         btn = ButtonType(uid_btn[1])
         if btn == ButtonType.Reload:
-            metas = reload_object_methods(obj)
+            metas = reload_object_methods(obj, reload_mgr=self.flow_app_comp_core.reload_mgr)
             if metas is not None:
                 special_methods = FlowSpecialMethods(metas)
             else:

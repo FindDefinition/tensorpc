@@ -47,16 +47,20 @@ def reload_method(method: Callable, module_dict: dict, prev_code: str = ""):
     new_method_unbound = module_dict[qual_parts[0]]
     for p in qual_parts[1:]:
         new_method_unbound = getattr(new_method_unbound, p)
-    new_method_code_lines, _ = inspect.getsourcelines(new_method_unbound)
-    new_method_code = "\n".join(new_method_code_lines)
+    new_method_code = None
     if prev_code != "":
+        new_method_code_lines, _ = inspect.getsourcelines(new_method_unbound)
+        new_method_code = "\n".join(new_method_code_lines)
         if new_method_code == prev_code:
             return None, new_method_code
     # now new_method_unbound should be a unbound method
-    new_method = types.MethodType(new_method_unbound, bound)
-    setattr(bound, method_wrapped.__name__, new_method)
-    if isinstance(method, partial):
-        new_method = partial(new_method, *method.args, **method.keywords)
+    if inspect.ismethod(method_wrapped):
+        new_method = types.MethodType(new_method_unbound, bound)
+        setattr(bound, method_wrapped.__name__, new_method)
+        if isinstance(method, partial):
+            new_method = partial(new_method, *method.args, **method.keywords)
+    else:
+        new_method = new_method_unbound
     return new_method, new_method_code
 
 

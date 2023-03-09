@@ -233,6 +233,7 @@ class SimpleCanvas(mui.FlexBox):
                 self._cfg_panel,
             ]).prop(position="absolute", top=3, left=3, z_index=5),
         ]
+
         self.register_event_handler(FrontendEventType.Drop.value,
                                     self._on_drop)
         self.prop(min_height=0,
@@ -246,6 +247,7 @@ class SimpleCanvas(mui.FlexBox):
         return layout
 
     async def _on_enable_grid(self, selected):
+        print("?")
         if selected:
             await self._dynamic_grid.set_new_layout(
                 [self.infgrid, self.axis_helper])

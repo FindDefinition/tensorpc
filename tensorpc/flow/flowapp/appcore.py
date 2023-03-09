@@ -142,6 +142,9 @@ class AppSpecialEventType(enum.Enum):
 class _CompReloadMeta:
     uid: str
     handler: EventHandler
+    cb_file: str
+    cb_real: Callable
+    cb_qualname: str
 
 
 def create_reload_metas(uid_to_comp: Dict[str, "Component"], path: str):
@@ -168,7 +171,7 @@ def create_reload_metas(uid_to_comp: Dict[str, "Component"], path: str):
                 if cb_file != path_resolve:
                     continue
                 # code, _ = inspect.getsourcelines(cb_real)
-                metas.append(_CompReloadMeta(k, handler))
+                metas.append(_CompReloadMeta(k, handler, cb_file, cb_real, cb_real.__qualname__))
     return metas
 
 

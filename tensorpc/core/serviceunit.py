@@ -15,7 +15,7 @@ from enum import Enum
 from pathlib import Path
 from types import ModuleType
 from typing import (Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple,
-                    Type)
+                    Type, Union)
 
 from tensorpc import compat
 from tensorpc.constants import (TENSORPC_FLOW_FUNC_META_KEY,
@@ -275,8 +275,11 @@ class SourceSegmentGetter:
         return ''.join(lines)
 
 
-def get_qualname_to_code(lines: List[str]):
-    source = "".join(lines)
+def get_qualname_to_code(lines_or_source: Union[List[str], str]):
+    if isinstance(lines_or_source, list):
+        source = "".join(lines_or_source)
+    else:
+        source = lines_or_source
     tree = ast.parse(source)
     nodes = get_toplevel_func_node(tree)
     nodes += get_toplevel_class_node(tree)
@@ -294,6 +297,15 @@ def get_qualname_to_code(lines: List[str]):
         qualname_to_code[qualname] = code
     return qualname_to_code
 
+@dataclass
+class ObjectReloadResult:
+    module_entry: ModuleCacheEntry
+    is_reload: bool 
+    file_entry: FileCacheEntry
+
+@dataclass
+class ObjectReloadResultWithType(ObjectReloadResult):
+    type_meta: TypeMeta
 
 class ObjectReloadManager:
     """to resolve some side effects, users should
@@ -373,16 +385,17 @@ class ObjectReloadManager:
                 pass
 
     def reload_type(self, type):
+        print("PREPARE RELOAD", type)
         meta = self.cached_get_obj_meta(type)
         if meta is None:
             raise ValueError("can't reload this type", type)
         # determine should perform real reload
         path = inspect.getfile(type)
-
         self.check_file_cache(path)
         if path in self.file_cache:
             # no need to reload.
-            return self.module_cache[path], meta
+            return ObjectReloadResultWithType(self.module_cache[path], False, self.file_cache[path], meta)
+            
         # invalid type method cache
         new_type_method_meta_cache = {}
         for t, vv in self.type_method_meta_cache.items():
@@ -394,6 +407,8 @@ class ObjectReloadManager:
                 new_type_method_meta_cache[t] = vv
         self.type_method_meta_cache = new_type_method_meta_cache
         # do reload
+        print("DO RELOAD", type)
+
         res = meta.get_reloaded_module()
         if res is None:
             raise ValueError("can't reload this type", type)
@@ -402,29 +417,116 @@ class ObjectReloadManager:
         # type_cache_entry = TypeCacheEntry(new_type, res[1], res[0])
         # self.type_cache[type] = type_cache_entry
         self._update_file_cache(path)
-        return self.module_cache[path], meta
+        return ObjectReloadResultWithType(self.module_cache[path], True, self.file_cache[path], meta)
 
-    def query_type_method_meta(self, type):
+    def query_type_method_meta(self, type: Type, no_code: bool = False):
         path = inspect.getfile(type)
         if type in self.type_method_meta_cache:
             return self.type_method_meta_cache[type]
+        inspect_type = type
+        if path in self.module_cache:
+            # if obj is reloaded, we must use new type meta instead of old one
+            entry = self.module_cache[path]
+            inspect_type = TypeMeta.get_local_type_from_module_dict_qualname(type.__qualname__, entry.module_dict)
         qualname_to_code = None
         # use qualname_to_code from ast to resolve some problem
         # if we just use inspect, inspect will use newest code
         # qualname_to_code always use code stored in manager.
-        if path in self.file_cache:
-            qualname_to_code = self.file_cache[path].qualname_to_code
+        if not no_code:
+            if path in self.file_cache:
+                qualname_to_code = self.file_cache[path].qualname_to_code
+            else:
+                try:
+                    with tokenize.open(path) as f:
+                        lines = f.readlines()
+                    qualname_to_code = get_qualname_to_code(lines)
+                except:
+                    pass
+            new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
+                inspect_type, include_base=False, qualname_to_code=qualname_to_code)
+            self.type_method_meta_cache[type] = new_metas
         else:
-            try:
-                with tokenize.open(path) as f:
-                    lines = f.readlines()
-                qualname_to_code = get_qualname_to_code(lines)
-            except:
-                pass
-        new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
-            type, include_base=False, qualname_to_code=qualname_to_code)
-        self.type_method_meta_cache[type] = new_metas
+            new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
+                inspect_type, include_base=False, no_code=True)
         return new_metas
+
+@dataclasses.dataclass
+class SimpleCodeEntry:
+    code: str 
+    qualname_to_code: Dict[str, str]
+
+class SimpleCodeManager:
+
+    def __init__(self, paths: List[str]) -> None:
+        self.file_to_entry: Dict[str, SimpleCodeEntry] = {}
+        for path in paths:
+            self._add_new_code(path)
+
+    def _add_new_code(self, path: str):
+        resolved_path = str(Path(path).resolve())
+        with tokenize.open(resolved_path) as f:
+            code = f.read().strip()
+        qualname_to_code = get_qualname_to_code(code)
+        self.file_to_entry[path] = SimpleCodeEntry(code, qualname_to_code)
+
+    def _remove_path(self, path: str):
+        resolved_path = str(Path(path).resolve())
+        if resolved_path in self.file_to_entry:
+            self.file_to_entry.pop(resolved_path)
+
+    def _compare_qualname_to_code(self, prev_qualname_to_code: Dict[str, str], qualname_to_code: Dict[str, str]):
+        new: Dict[str, str] = {}
+        change: Dict[str, str] = {}
+        delete: Dict[str, str] = {}
+        for k, v in qualname_to_code.items():
+            if k in prev_qualname_to_code:
+                if prev_qualname_to_code[k] != v:
+                    change[k] = v
+            else:
+                new[k] = v
+        for k, v in prev_qualname_to_code.items():
+            if k not in prev_qualname_to_code:
+                delete[k] = v
+        return new, change, delete
+
+    def update_code_from_editor(self, path: str, new_data: str):
+        new: Dict[str, str] = {}
+        change: Dict[str, str] = {}
+        delete: Dict[str, str] = {}
+        resolved_path = str(Path(path).resolve())
+        if new_data == self.file_to_entry[resolved_path].code:
+            return new, change, delete
+        prev = self.file_to_entry[resolved_path].qualname_to_code
+        new_meta = get_qualname_to_code(new_data)
+        changes = self._compare_qualname_to_code(prev, new_meta)
+        self.file_to_entry[resolved_path] = SimpleCodeEntry(new_data, new_meta)
+        return changes
+
+    def update_code(self, change_file: str, new_code: Optional[str] = None):
+        resolved_path = str(Path(change_file).resolve())
+        # if resolved_path not in self.file_to_code:
+        #     return False
+        if new_code is None:
+            with tokenize.open(change_file) as f:
+                new_data = f.read().strip()
+        else:
+            new_data = new_code.strip()
+        if resolved_path not in self.file_to_entry:
+            new_meta = get_qualname_to_code(new_data)
+            self.file_to_entry[resolved_path] = SimpleCodeEntry(new_data, new_meta)
+            return self._compare_qualname_to_code({}, new_meta)
+        if new_data == self.file_to_entry[resolved_path]:
+            return None
+        
+        new_meta = get_qualname_to_code(new_data)
+        prev = self.file_to_entry[resolved_path].qualname_to_code
+        changes = self._compare_qualname_to_code(prev, new_meta)
+        self.file_to_entry[resolved_path] = SimpleCodeEntry(new_data, new_meta)
+        return changes
+
+    def get_code(self, change_file: str):
+        resolved_path = str(Path(change_file).resolve())
+        return self.file_to_entry[resolved_path].code
 
 
 class DynamicClass:
@@ -495,7 +597,8 @@ class ReloadableDynamicClass(DynamicClass):
     def get_metas_of_regular_methods(
             type_obj,
             include_base: bool = False,
-            qualname_to_code: Optional[Dict[str, str]] = None):
+            qualname_to_code: Optional[Dict[str, str]] = None,
+            no_code: bool = False):
         serv_metas: List[ServFunctionMeta] = []
         members = inspecttools.get_members_by_type(type_obj, not include_base)
         for k, v in members:
@@ -528,12 +631,15 @@ class ReloadableDynamicClass(DynamicClass):
                                          qualname=v.__qualname__,
                                          user_app_meta=app_meta)
             code = None
-            if qualname_to_code is not None:
-                # TODO check mro
-                if v.__qualname__ in qualname_to_code:
-                    code = [qualname_to_code[v.__qualname__]]
-            if code is None:
-                code, _ = inspect.getsourcelines(v)
+            if no_code:
+                code = ""
+            else:
+                if qualname_to_code is not None:
+                    # TODO check mro
+                    if v.__qualname__ in qualname_to_code:
+                        code = [qualname_to_code[v.__qualname__]]
+                if code is None:
+                    code, _ = inspect.getsourcelines(v)
             serv_meta.code = "".join(code)
             serv_metas.append(serv_meta)
         return serv_metas
@@ -556,7 +662,7 @@ class ReloadableDynamicClass(DynamicClass):
         callback_inv_dict = {v: k for k, v in callback_dict.items()}
         if reload_mgr is not None:
             res = reload_mgr.reload_type(type(obj))
-            self.module_dict = res[0].module_dict
+            self.module_dict = res.module_entry.module_dict
         else:
             if self.is_standard_module and self.standard_module is not None:
                 importlib.reload(self.standard_module)
@@ -678,7 +784,7 @@ class ServiceUnit(DynamicClass):
         new_cb: Dict[str, Any] = {}
         if reload_mgr is not None:
             res = reload_mgr.reload_type(type(self.obj))
-            self.module_dict = res[0].module_dict
+            self.module_dict = res.module_entry.module_dict
         else:
             if self.is_standard_module and self.standard_module is not None:
                 importlib.reload(self.standard_module)

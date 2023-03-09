@@ -34,7 +34,6 @@ def get_qualname_of_type(klass: Type) -> str:
         return klass.__qualname__  # avoid outputs like 'builtins.str'
     return module + '.' + klass.__qualname__
 
-
 def is_lambda(obj: Callable):
     if not inspect.isfunction(obj) and not inspect.ismethod(obj):
         return False
@@ -90,13 +89,20 @@ class TypeMeta:
             return res[0]
         return None
 
+    @staticmethod
+    def get_local_type_from_module_dict_qualname(qualname: str, module_dict: Dict[str, Any]):
+        parts = qualname.split(".")
+        obj = module_dict[parts[0]]
+        for part in parts[1:]:
+            obj = getattr(obj, part)
+        return obj
+
     def get_local_type_from_module_dict(self, module_dict: Dict[str, Any]):
         parts = self.local_key.split("::")
         obj = module_dict[parts[0]]
         for part in parts[1:]:
             obj = getattr(obj, part)
         return obj
-
 
 def get_obj_type_meta(obj_type) -> Optional[TypeMeta]:
     qualname = get_qualname_of_type(obj_type)

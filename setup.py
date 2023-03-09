@@ -17,7 +17,7 @@ DESCRIPTION = 'Backend for distflow-frontend.'
 URL = 'https://github.com/FindDefinition/tensorpc'
 EMAIL = 'yanyan.sub@outlook.com'
 AUTHOR = 'Yan Yan'
-REQUIRES_PYTHON = '>=3.7'
+REQUIRES_PYTHON = '>=3.8'
 VERSION = None
 
 # What packages are required for this module to be executed?

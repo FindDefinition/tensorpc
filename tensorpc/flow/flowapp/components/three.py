@@ -1131,6 +1131,7 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
                             distance: float,
                             fov_angle: float = -1):
         """
+        TODO handle OrthographicCamera
         Args: 
             cam2world: camera to world matrix, 4x4 ndaray or 16 list, R|T, not R/T
             distance: camera orbit target distance.
@@ -1507,6 +1508,7 @@ class HtmlProps(Object3dContainerBaseProps):
 
 class Html(Object3dContainerBase[HtmlProps, MUIComponentType]):
     """we can use MUI components only in Html.
+    TODO reject invalid component
     """
 
     def __init__(self,
@@ -1564,8 +1566,6 @@ class TextProps(Object3dBaseProps):
 
 
 class Text(Object3dWithEventBase[TextProps]):
-    """we can use MUI components only in Html.
-    """
 
     def __init__(self, init: str) -> None:
         super().__init__(UIType.ThreeText, TextProps)
@@ -1606,8 +1606,6 @@ class LineProps(Object3dBaseProps):
 
 
 class Line(Object3dWithEventBase[LineProps]):
-    """we can use MUI components only in Html.
-    """
 
     def __init__(
         self, points: Union[np.ndarray, List[Tuple[NumberType, NumberType,
@@ -2122,6 +2120,9 @@ class Mesh(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         self.geometry = geometry
+        assert isinstance(geometry, ThreeGeometryBase)
+        assert isinstance(material, ThreeMaterialBase)
+
         self.material = material
         children: Dict[str, ThreeComponentType] = {
             "geometry": geometry,

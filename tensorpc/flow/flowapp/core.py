@@ -824,18 +824,6 @@ def _get_obj_def_path(obj):
         _flow_comp_def_path = ""
     return _flow_comp_def_path
 
-
-_TYPE_METHOD_CACHE = {}
-
-
-@cachetools.cached(_TYPE_METHOD_CACHE, lock=threading.Lock())
-def get_special_methods(obj_type):
-    new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
-        obj_type, include_base=True)
-    flow_special = FlowSpecialMethods(new_metas)
-    return flow_special
-
-
 class Component(Generic[T_base_props, T_child]):
 
     def __init__(self,
@@ -865,8 +853,9 @@ class Component(Generic[T_base_props, T_child]):
         self._flow_comp_def_path = _get_obj_def_path(self)
         self._flow_reference_count = 0
 
-    def get_special_methods(self):
-        res = get_special_methods(type(self))
+    def get_special_methods(self, reload_mgr: AppReloadManager):
+        metas = reload_mgr.query_type_method_meta(type(self), no_code=True)
+        res = FlowSpecialMethods(metas)
         res.bind(self)
         return res
 
@@ -1092,6 +1081,9 @@ class Component(Generic[T_base_props, T_child]):
         return AppEvent("", {AppEventType.UIUpdatePropsEvent: ev})
 
     def create_comp_event(self, data: Dict[str, Any]):
+        """create component control event for
+        backend -> frontend direct communication
+        """
         ev = ComponentEvent({self._flow_uid: data})
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.ComponentEvent: ev})
@@ -1373,15 +1365,14 @@ class ContainerBase(Component[T_container_props, T_child]):
     async def __run_special_methods(self, attached: List[Component],
                                     detached: List[Component]):
         for attach in attached:
-            special_methods = attach.get_special_methods()
-
+            special_methods = attach.get_special_methods(self.flow_app_comp_core.reload_mgr)
             if special_methods.did_mount is not None:
                 await self.run_callback(
                     special_methods.did_mount.get_binded_fn(),
                     sync_first=False,
                     change_status=False)
         for deleted in detached:
-            special_methods = deleted.get_special_methods()
+            special_methods = deleted.get_special_methods(self.flow_app_comp_core.reload_mgr)
             if special_methods.will_unmount is not None:
                 await self.run_callback(
                     special_methods.will_unmount.get_binded_fn(),

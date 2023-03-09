@@ -10,7 +10,7 @@ class FlowSpecialMethods:
 
     def __init__(self, metas: List[ServFunctionMeta]) -> None:
         self.create_layout: Optional[ServFunctionMeta] = None
-        self.auto_run: Optional[ServFunctionMeta] = None
+        self.auto_runs: List[ServFunctionMeta] = []
         self.did_mount: Optional[ServFunctionMeta] = None
         self.will_unmount: Optional[ServFunctionMeta] = None
         self.create_object: Optional[ServFunctionMeta] = None
@@ -32,13 +32,39 @@ class FlowSpecialMethods:
                 elif m.user_app_meta.type == AppFuncType.CreateObject:
                     self.create_object = m
                 elif m.user_app_meta.type == AppFuncType.AutoRun:
-                    self.auto_run = m
+                    self.auto_runs.append(m)
+
+    def contains_special_method(self):
+        res =  self.create_layout is not None
+        res |= self.did_mount is not None
+        res |= self.will_unmount is not None
+        res |= self.create_object is not None
+        res |= bool(self.auto_runs)
+        return res 
+    
+    def collect_all_special_meta(self):
+        res: List[ServFunctionMeta] = []
+        if self.create_layout is not None:
+            res.append(self.create_layout)
+        for r in self.auto_runs:
+            res.append(r)
+        if self.did_mount is not None:
+            res.append(self.did_mount)
+        if self.will_unmount is not None:
+            res.append(self.will_unmount)
+        if self.create_object is not None:
+            res.append(self.create_object)
+        return res 
+        
+
+    def contains_autorun(self):
+        return bool(self.auto_runs)
 
     def bind(self, obj):
         if self.create_layout is not None:
             self.create_layout.bind(obj)
-        if self.auto_run is not None:
-            self.auto_run.bind(obj)
+        for r in self.auto_runs:
+            r.bind(obj)
         if self.did_mount is not None:
             self.did_mount.bind(obj)
         if self.will_unmount is not None:
@@ -55,16 +81,19 @@ def reload_object_methods(
     tmeta = get_obj_type_meta(obj_type)
     if tmeta is None:
         return None
+    qualname_to_code: Dict[str, str] = {}
     if reload_mgr is not None:
         res = reload_mgr.reload_type(type(obj))
-        module_dict = res[0].module_dict
+        module_dict = res.module_entry.module_dict
+        if res.file_entry.qualname_to_code is not None:
+            qualname_to_code = res.file_entry.qualname_to_code
     else:
         module_dict = tmeta.get_reloaded_module_dict()
     if module_dict is None:
         return None
     new_obj_type = tmeta.get_local_type_from_module_dict(module_dict)
     new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
-        new_obj_type)
+        new_obj_type, qualname_to_code=qualname_to_code)
     code_changed_metas: List[ServFunctionMeta] = []
     # print(new_metas)
     if previous_metas is not None:
@@ -82,6 +111,14 @@ def reload_object_methods(
             setattr(obj, new_meta.name, new_method)
             code_changed_metas.append(new_meta)
     return code_changed_metas
+
+def bind_and_reset_object_methods(
+        obj: Any,
+        new_metas: List[ServFunctionMeta]):
+    for new_meta in new_metas:
+        new_method = new_meta.bind(obj)
+        setattr(obj, new_meta.name, new_method)
+    return
 
 
 @dataclass
