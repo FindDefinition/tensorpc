@@ -7,7 +7,7 @@ import traceback
 from functools import partial
 from pathlib import Path
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable,
-                    Coroutine, Dict, Iterable, List, Optional, Set, Tuple,
+                    Coroutine, Dict, Generic, Iterable, List, Optional, Set, Tuple,
                     Type, TypeVar, Union)
 
 from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
@@ -28,12 +28,21 @@ ValueType: TypeAlias = Union[int, float, str]
 NumberType: TypeAlias = Union[int, float]
 
 EventType: TypeAlias = Tuple[ValueType, Any]
+T = TypeVar("T")
 
 
 class Undefined:
 
     def __repr__(self) -> str:
         return "undefined"
+
+class BackendOnlyProp(Generic[T]):
+    def __init__(self, data: T) -> None:
+        super().__init__()
+        self.data = data
+
+    def __repr__(self) -> str:
+        return "BackendOnlyProp"
 
 
 class NoDefault:

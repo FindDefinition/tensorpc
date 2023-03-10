@@ -36,7 +36,7 @@ from typing_extensions import Literal, ParamSpec, Concatenate, Self, TypeAlias, 
 from tensorpc.flow.coretypes import MessageLevel
 from tensorpc.flow.flowapp.reload import AppReloadManager, FlowSpecialMethods
 from tensorpc.flow.flowapp.appcore import EventHandler
-from .appcore import ValueType, NumberType, EventType, Undefined, get_app, undefined
+from .appcore import BackendOnlyProp, ValueType, NumberType, EventType, Undefined, get_app, undefined
 
 ALL_APP_EVENTS = HashableRegistry()
 
@@ -714,17 +714,18 @@ def _split_props_to_undefined(props: Dict[str, Any]):
     res = {}
     res_und = []
     for res_camel, val in props.items():
-        if isinstance(val, Undefined):
-            res_und.append(res_camel)
-        else:
-            res[res_camel] = val
+        if not isinstance(val, BackendOnlyProp):
+            if isinstance(val, Undefined):
+                res_und.append(res_camel)
+            else:
+                res[res_camel] = val
     return res, res_und
 
 
 def _undefined_dict_factory(x: List[Tuple[str, Any]]):
     res: Dict[str, Any] = {}
     for k, v in x:
-        if not isinstance(v, Undefined):
+        if not isinstance(v, (Undefined, BackendOnlyProp)):
             res[k] = v
     return res
 
