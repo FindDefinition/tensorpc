@@ -73,6 +73,7 @@ class TypeMeta:
             return module_dict, module
         else:
             mod_name = Path(self.module_key).stem + "_" + uuid.uuid4().hex
+            mod_name = f"<{mod_name}>"
             spec = importlib.util.spec_from_file_location(
                 mod_name, self.module_key)
             assert spec is not None, f"your {self.module_key} not exists"
@@ -109,7 +110,6 @@ def get_obj_type_meta(obj_type) -> Optional[TypeMeta]:
     spec = importlib.util.find_spec(qualname.split(".")[0])
     is_standard_module = True
     module_path = ""
-
     if spec is None or spec.origin is None:
         is_standard_module = False
         try:
@@ -117,6 +117,11 @@ def get_obj_type_meta(obj_type) -> Optional[TypeMeta]:
             module_path = str(module_path_p)
         except:
             return None
+    assert spec is not None 
+    if spec is not None and spec.origin is not None:
+        if "<" in spec.name:
+            is_standard_module = False
+            module_path = spec.origin
     # else:
     #     try:
     #         module_path_p =  Path(inspect.getfile(obj_type)).resolve()

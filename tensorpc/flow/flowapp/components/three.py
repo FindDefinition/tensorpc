@@ -16,6 +16,7 @@ import asyncio
 import base64
 import enum
 import io
+import json
 import time
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Tuple, Type, TypeVar, Union)
@@ -1072,7 +1073,10 @@ class CameraControlProps(ThreeBasicProps):
     truck_speed: Union[NumberType, Undefined] = undefined
     dolly_speed: Union[NumberType, Undefined] = undefined
     vertical_drag_to_forward: Union[bool, Undefined] = undefined
+    keyboard_move_speed: Union[NumberType, Undefined] = undefined
+    keyboard_front: Union[bool, Undefined] = undefined
 
+    infinity_dolly: Union[bool, Undefined] = undefined
 
 class MapControl(ThreeComponentBase[OrbitControlProps]):
 
@@ -1101,6 +1105,8 @@ class CameraUserControlType(enum.Enum):
 
 
 class CameraControl(ThreeComponentBase[CameraControlProps]):
+    """default values: https://github.com/yomotsu/camera-controls#properties
+    """
     EvChange = FrontendEventType.Change.value
 
     def __init__(self) -> None:
@@ -1327,12 +1333,12 @@ class ScreenShotProps(ThreeBasicProps):
 
 class ScreenShot(ThreeComponentBase[ScreenShotProps]):
     """a special ui to get screen shot. steps:
-    1. use trigger_screen_shot
-    2. get image from callback.
+    1. use trigger_screen_shot with userdata
+    2. get image and userdata you provided from callback.
     currently impossible to get image from one function call.
     """
 
-    def __init__(self, callback: Callable[[str], _CORO_NONE]) -> None:
+    def __init__(self, callback: Callable[[Tuple[str, Any]], _CORO_NONE]) -> None:
         super().__init__(UIType.ThreeScreenShot, ScreenShotProps)
         self.register_event_handler(FrontendEventType.Change.value, callback)
 
@@ -1346,9 +1352,16 @@ class ScreenShot(ThreeComponentBase[ScreenShotProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def trigger_screen_shot(self):
+    async def trigger_screen_shot(self, data: Optional[Any] = None):
+        """when you provide a data, we will use image and 
+        this data to call your callback
+        """
+        # check data is can be converted to json
+        x = json.dumps(data)
+        assert len(x) < 1000 * 1000
         await self.send_and_wait(self.create_comp_event({
             "type": 0,
+            "data": data,
         }))
 
     async def handle_event(self, ev: EventType):
@@ -1358,7 +1371,8 @@ class ScreenShot(ThreeComponentBase[ScreenShotProps]):
 @dataclasses.dataclass
 class ThreeCanvasProps(MUIFlexBoxProps):
     three_background_color: Union[str, Undefined] = undefined
-
+    allow_keyboard_event: Union[bool, Undefined] = undefined
+    tab_index: Union[int, Undefined] = undefined
 
 class ThreeCanvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
 

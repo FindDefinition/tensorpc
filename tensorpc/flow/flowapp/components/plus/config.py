@@ -119,7 +119,9 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
         child_node = mui.ControlNode(id=next_name,
                                      name=f.name,
                                      type=mui.ControlNodeType.Folder.value)
-
+        meta: Optional[ConfigMeta] = None
+        if _CONFIG_META_KEY in f.metadata:
+            meta = f.metadata[_CONFIG_META_KEY]
         ty = f.type
         if dataclasses.is_dataclass(ty):
             res = parse_to_control_nodes(origin_obj,
@@ -131,9 +133,6 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
         if not _check_is_basic_type(ty):
             continue  # TODO add support for simple complex type
         # we support int/float/bool/str
-        meta: Optional[ConfigMeta] = None
-        if _CONFIG_META_KEY in f.metadata:
-            meta = f.metadata[_CONFIG_META_KEY]
         getter = partial(getattr_single, obj=current_obj, name=f.name)
         if ty is bool:
             # use switch

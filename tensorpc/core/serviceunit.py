@@ -407,7 +407,7 @@ class ObjectReloadManager:
                 new_type_method_meta_cache[t] = vv
         self.type_method_meta_cache = new_type_method_meta_cache
         # do reload
-        print("DO RELOAD", type)
+        print("DO RELOAD", type, meta)
 
         res = meta.get_reloaded_module()
         if res is None:
@@ -556,6 +556,7 @@ class DynamicClass:
                 # treat module_path as a file path
                 # import sys
                 mod_name = Path(self.module_path).stem + "_" + uuid.uuid4().hex
+                mod_name = f"<{mod_name}>"
                 spec = importlib.util.spec_from_file_location(
                     mod_name, self.module_path)
                 assert spec is not None, f"your {self.module_path} not exists"

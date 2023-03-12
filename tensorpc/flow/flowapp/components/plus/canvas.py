@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import dataclasses
+import enum
+import inspect
 import urllib.request
-from typing import Any, Callable, Dict, Iterable, List, Optional, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -113,11 +115,26 @@ class BoxCfg:
                                               1, 5))
     add_cross: bool = True
 
+@dataclasses.dataclass
+class GlobalCfg:
+    background: str = "rgba(0, 0, 0, 0)"
+
+class CamCtrlKeyboardMode(enum.Enum):
+    Fly = "Fly"
+    Helicopter = "Helicopter"
+
+
+@dataclasses.dataclass
+class CameraCfg:
+    keyboard_mode: CamCtrlKeyboardMode = CamCtrlKeyboardMode.Helicopter
+
 
 @dataclasses.dataclass
 class CanvasGlobalCfg:
     point: PointCfg
     box: BoxCfg
+    canvas: GlobalCfg
+    camera: CameraCfg
 
 
 class SimpleCanvas(mui.FlexBox):
@@ -125,18 +142,17 @@ class SimpleCanvas(mui.FlexBox):
     def __init__(
         self,
         camera: Optional[three.PerspectiveCamera] = None,
-        screenshot_callback: Optional[Callable[[bytes],
+        screenshot_callback: Optional[Callable[[bytes, Any],
                                                mui._CORO_NONE]] = None):
         if camera is None:
             camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         self.camera = camera
         self.ctrl = three.CameraControl()
-
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.axis_helper = three.AxesHelper(20)
         self.infgrid = infgrid
         self._dynamic_grid = three.Group([infgrid, self.axis_helper])
-        self._cfg = CanvasGlobalCfg(PointCfg(), BoxCfg())
+        self._cfg = CanvasGlobalCfg(PointCfg(), BoxCfg(), GlobalCfg(), CameraCfg())
         self._cfg_panel = ConfigPanel(self._cfg, self._on_cfg_change)
         self._cfg_panel.prop(border="1px solid",
                              border_color="gray",
@@ -164,7 +180,8 @@ class SimpleCanvas(mui.FlexBox):
         # if with_grid:
         #     canvas_layout.append(infgrid)
 
-        self.canvas = three.ThreeCanvas(canvas_layout).prop(flex=1)
+        self.canvas = three.ThreeCanvas(canvas_layout).prop(
+            flex=1, allow_keyboard_event=True)
         self._point_dict: Dict[str, three.Points] = {}
         self._image_dict: Dict[str, three.Image] = {}
         self._segment_dict: Dict[str, three.Segments] = {}
@@ -172,15 +189,18 @@ class SimpleCanvas(mui.FlexBox):
         super().__init__()
         self.init_add_layout([*self._layout_func()])
 
-    async def _on_screen_shot_finish(self, img):
+    async def _on_screen_shot_finish(self, img_and_data: Tuple[str, Any]):
         if self._screenshot_callback:
+            img = img_and_data[0]
+            data = img_and_data[1]
             resp = urllib.request.urlopen(img)
-            self.screen_shot = resp.read()
-            self._screenshot_callback(resp.read())
+            res = self._screenshot_callback(resp.read(), data)
+            if inspect.iscoroutine(res):
+                await res
 
-    async def trigger_screen_shot(self):
+    async def trigger_screen_shot(self, data: Optional[Any] = None):
         assert self._screenshot_callback is not None
-        await self._screen_shot.trigger_screen_shot()
+        await self._screen_shot.trigger_screen_shot(data)
 
     async def _on_cfg_change(self, uid: str, value: Any):
         if uid == "point.size":
@@ -200,6 +220,15 @@ class SimpleCanvas(mui.FlexBox):
                 if isinstance(v, three.BoundingBox):
                     ev += v.update_event(add_cross=value)
             await self.send_and_wait(ev)
+        if uid == "canvas.background":
+            await self.canvas.send_and_wait(self.canvas.update_event(three_background_color=value))
+        if uid == "camera.keyboard_mode":
+            if value == CamCtrlKeyboardMode.Helicopter:
+                await self.send_and_wait(
+                    self.ctrl.update_event(keyboard_front=False))
+            elif value == CamCtrlKeyboardMode.Fly:
+                await self.send_and_wait(
+                    self.ctrl.update_event(keyboard_front=True))
 
     @marker.mark_create_layout
     def _layout_func(self):
