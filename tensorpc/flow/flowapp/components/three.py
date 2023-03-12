@@ -1073,8 +1073,9 @@ class CameraControlProps(ThreeBasicProps):
     truck_speed: Union[NumberType, Undefined] = undefined
     dolly_speed: Union[NumberType, Undefined] = undefined
     vertical_drag_to_forward: Union[bool, Undefined] = undefined
-    keyboard_move_speed: Union[NumberType, Undefined] = undefined
     keyboard_front: Union[bool, Undefined] = undefined
+    keyboard_move_speed: Union[NumberType, Undefined] = undefined
+    keyboard_elevate_speed: Union[NumberType, Undefined] = undefined
 
     infinity_dolly: Union[bool, Undefined] = undefined
 
@@ -1113,9 +1114,9 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
         super().__init__(UIType.ThreeCameraControl, CameraControlProps)
 
         # self.props.enable_damping = True
-        self.props.damping_factor = 1
-        # self.props.dragging_smooth_time = 0
-        # self.props.smooth_time = 0
+        # self.props.damping_factor = 1
+        self.props.dragging_smooth_time = 0
+        self.props.smooth_time = 0
         # self.props.min_distance = 1
         # self.props.max_distance = 100
 

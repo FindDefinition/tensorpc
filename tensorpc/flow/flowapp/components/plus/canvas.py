@@ -115,9 +115,11 @@ class BoxCfg:
                                               1, 5))
     add_cross: bool = True
 
+
 @dataclasses.dataclass
 class GlobalCfg:
-    background: str = "rgba(0, 0, 0, 0)"
+    background: mui.ControlColorRGB
+
 
 class CamCtrlKeyboardMode(enum.Enum):
     Fly = "Fly"
@@ -126,7 +128,16 @@ class CamCtrlKeyboardMode(enum.Enum):
 
 @dataclasses.dataclass
 class CameraCfg:
-    keyboard_mode: CamCtrlKeyboardMode = CamCtrlKeyboardMode.Helicopter
+    keyboard_mode: CamCtrlKeyboardMode = dataclasses.field(
+        default=CamCtrlKeyboardMode.Helicopter,
+        metadata=ConfigPanel.base_meta(alias="Keyboard Mode"))
+    move_speed: float = dataclasses.field(
+        default=20,
+        metadata=ConfigPanel.slider_meta(5, 40, alias="Move speed (m/s)"))
+    elevate_speed: float = dataclasses.field(
+        default=5,
+        metadata=ConfigPanel.slider_meta(1, 20, alias="Elevate speed (m/s)"))
+
 
 
 @dataclasses.dataclass
@@ -140,19 +151,22 @@ class CanvasGlobalCfg:
 class SimpleCanvas(mui.FlexBox):
 
     def __init__(
-        self,
-        camera: Optional[three.PerspectiveCamera] = None,
-        screenshot_callback: Optional[Callable[[bytes, Any],
-                                               mui._CORO_NONE]] = None):
+            self,
+            camera: Optional[three.PerspectiveCamera] = None,
+            screenshot_callback: Optional[Callable[[bytes, Any],
+                                                   mui._CORO_NONE]] = None,
+            transparent_canvas: bool = False):
         if camera is None:
             camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         self.camera = camera
-        self.ctrl = three.CameraControl()
+        self._transparent_canvas = transparent_canvas
+        self.ctrl = three.CameraControl().prop()
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.axis_helper = three.AxesHelper(20)
         self.infgrid = infgrid
         self._dynamic_grid = three.Group([infgrid, self.axis_helper])
-        self._cfg = CanvasGlobalCfg(PointCfg(), BoxCfg(), GlobalCfg(), CameraCfg())
+        gcfg = GlobalCfg(mui.ControlColorRGB(255, 255, 255))
+        self._cfg = CanvasGlobalCfg(PointCfg(), BoxCfg(), gcfg, CameraCfg())
         self._cfg_panel = ConfigPanel(self._cfg, self._on_cfg_change)
         self._cfg_panel.prop(border="1px solid",
                              border_color="gray",
@@ -182,6 +196,8 @@ class SimpleCanvas(mui.FlexBox):
 
         self.canvas = three.ThreeCanvas(canvas_layout).prop(
             flex=1, allow_keyboard_event=True)
+        if not transparent_canvas:
+            self.canvas.prop(three_background_color="#ffffff")
         self._point_dict: Dict[str, three.Points] = {}
         self._image_dict: Dict[str, three.Image] = {}
         self._segment_dict: Dict[str, three.Segments] = {}
@@ -208,20 +224,18 @@ class SimpleCanvas(mui.FlexBox):
             for v in self._point_dict.values():
                 ev += v.update_event(size=value)
             await self.send_and_wait(ev)
-        if uid == "box.edge_width":
+        elif uid == "box.edge_width":
             ev = mui.AppEvent("", {})
             for v in self._dynamic_boxes._child_comps.values():
                 if isinstance(v, three.BoundingBox):
                     ev += v.update_event(edge_width=value)
             await self.send_and_wait(ev)
-        if uid == "box.add_cross":
+        elif uid == "box.add_cross":
             ev = mui.AppEvent("", {})
             for v in self._dynamic_boxes._child_comps.values():
                 if isinstance(v, three.BoundingBox):
                     ev += v.update_event(add_cross=value)
             await self.send_and_wait(ev)
-        if uid == "canvas.background":
-            await self.canvas.send_and_wait(self.canvas.update_event(three_background_color=value))
         if uid == "camera.keyboard_mode":
             if value == CamCtrlKeyboardMode.Helicopter:
                 await self.send_and_wait(
@@ -229,6 +243,17 @@ class SimpleCanvas(mui.FlexBox):
             elif value == CamCtrlKeyboardMode.Fly:
                 await self.send_and_wait(
                     self.ctrl.update_event(keyboard_front=True))
+        elif uid == "canvas.background":
+            if not self._transparent_canvas:
+                color_str = f"rgb({value.r}, {value.g}, {value.b})"
+                await self.canvas.send_and_wait(
+                    self.canvas.update_event(three_background_color=color_str))
+        elif uid == "camera.move_speed":
+            await self.canvas.send_and_wait(
+                self.ctrl.update_event(keyboard_move_speed=value / 1000))
+        elif uid == "camera.elevate_speed":
+            await self.canvas.send_and_wait(
+                self.ctrl.update_event(keyboard_elevate_speed=value / 1000))
 
     @marker.mark_create_layout
     def _layout_func(self):
@@ -272,7 +297,12 @@ class SimpleCanvas(mui.FlexBox):
                   droppable=True,
                   width="100%",
                   height="100%",
-                  overflow="hidden")
+                  overflow="hidden",
+                  border="4px solid transparent",
+                  sx_over_drop={
+                    "border": "4px solid green"
+                  },
+                  )
         return layout
 
     async def _on_enable_grid(self, selected):

@@ -67,7 +67,7 @@ def _check_is_basic_type(tp):
 
 @dataclasses.dataclass
 class ConfigMeta:
-    pass
+    alias: Optional[str]
 
 
 @dataclasses.dataclass
@@ -95,6 +95,7 @@ class ControlItemMeta:
     getter: Callable[[], Any]
     setter: Callable[[Any], None]
 
+_BUILTIN_DCLS_TYPE = set([mui.ControlColorRGB, mui.ControlColorRGBA])
 
 def setattr_single(val, obj, name, mapper: Optional[Callable] = None):
     if mapper is not None:
@@ -123,21 +124,24 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
         if _CONFIG_META_KEY in f.metadata:
             meta = f.metadata[_CONFIG_META_KEY]
         ty = f.type
-        if dataclasses.is_dataclass(ty):
+        if dataclasses.is_dataclass(ty) and ty not in _BUILTIN_DCLS_TYPE:
             res = parse_to_control_nodes(origin_obj,
                                          getattr(current_obj, f.name),
                                          next_name, obj_uid_to_meta)
             res_node.children.append(res)
 
             continue
-        if not _check_is_basic_type(ty):
+        if not _check_is_basic_type(ty) and ty not in _BUILTIN_DCLS_TYPE:
             continue  # TODO add support for simple complex type
         # we support int/float/bool/str
         getter = partial(getattr_single, obj=current_obj, name=f.name)
+        if meta is not None and meta.alias is not None:
+            child_node.alias = meta.alias
+
         if ty is bool:
             # use switch
-            if meta is not None:
-                assert isinstance(meta, SwitchMeta)
+            # if meta is not None:
+            #     assert isinstance(meta, SwitchMeta)
             child_node.type = mui.ControlNodeType.Bool.value
             child_node.initValue = getattr(current_obj, f.name)
             setter = partial(setattr_single,
@@ -170,7 +174,6 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
             else:
                 child_node.type = mui.ControlNodeType.Number.value
                 child_node.initValue = getattr(current_obj, f.name)
-
             #     raise NotImplementedError
         elif ty is str:
             # use textfield
@@ -182,9 +185,21 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
             # setter = lambda x: setattr(current_obj, f.name, str(x))
             child_node.type = mui.ControlNodeType.String.value
             child_node.initValue = getattr(current_obj, f.name)
-            if meta is not None:
-                assert isinstance(meta, InputMeta)
+            if meta is not None and isinstance(meta, InputMeta):
                 child_node.rows = meta.multiline
+
+
+        elif ty is mui.ControlColorRGB or ty is mui.ControlColorRGBA:
+            child_node.type = mui.ControlNodeType.Color.value
+            child_node.initValue = getattr(current_obj, f.name)
+            if ty is mui.ControlColorRGB:
+                mapper = lambda x: mui.ControlColorRGB(x["r"], x["g"], x["b"])
+            else:
+                mapper = lambda x: mui.ControlColorRGBA(x["r"], x["g"], x["b"], x["a"])
+            setter = partial(setattr_single,
+                                obj=current_obj,
+                                name=f.name,
+                                mapper=mapper)
         else:
             ty_origin = get_origin(ty)
             # print(ty, ty_origin, type(ty), type(ty_origin))
@@ -210,9 +225,9 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                 # use textfield with json
                 child_node.type = mui.ControlNodeType.String.value
                 child_node.initValue = json.dumps(getattr(current_obj, f.name))
-                if meta is not None:
-                    assert isinstance(meta, InputMeta)
+                if meta is not None and isinstance(meta, InputMeta):
                     child_node.rows = meta.multiline
+
                 setter = partial(setattr_single, obj=current_obj, name=f.name)
         res_node.children.append(child_node)
         obj_uid_to_meta[child_node.id] = ControlItemMeta(getter, setter)
@@ -254,23 +269,24 @@ class ConfigPanelV1(mui.FlexBox):
         return self.__config_obj
 
     @staticmethod
-    def switch_meta():
-        return {_CONFIG_META_KEY: SwitchMeta()}
+    def switch_meta(alias: Optional[str] = None):
+        return {_CONFIG_META_KEY: SwitchMeta(alias)}
 
     @staticmethod
     def input_meta(multiline: bool, rows: int, font_size: mui.ValueType,
-                   font_family: str):
+                   font_family: str, alias: Optional[str] = None):
         return {
             _CONFIG_META_KEY:
-            InputMeta(multiline=multiline,
+            InputMeta(alias=alias,
+                      multiline=multiline,
                       rows=rows,
                       font_size=font_size,
                       font_family=font_family)
         }
 
     @staticmethod
-    def slider_meta(begin: mui.NumberType, end: mui.NumberType):
-        return {_CONFIG_META_KEY: SliderMeta(begin=begin, end=end)}
+    def slider_meta(begin: mui.NumberType, end: mui.NumberType, alias: Optional[str] = None):
+        return {_CONFIG_META_KEY: SliderMeta(begin=begin, end=end, alias=alias)}
 
     def _sync_config_event(self, current_obj: Any, current_name: str):
         uievent = mui.AppEvent("", {})
@@ -516,20 +532,25 @@ class ConfigPanel(mui.DynamicControls):
         return self.__config_obj
 
     @staticmethod
-    def switch_meta():
-        return {_CONFIG_META_KEY: SwitchMeta()}
+    def base_meta(alias: Optional[str] = None):
+        return {_CONFIG_META_KEY: ConfigMeta(alias)}
+
+    @staticmethod
+    def switch_meta(alias: Optional[str] = None):
+        return {_CONFIG_META_KEY: SwitchMeta(alias)}
 
     @staticmethod
     def input_meta(multiline: bool, rows: int, font_size: mui.ValueType,
-                   font_family: str):
+                   font_family: str, alias: Optional[str] = None):
         return {
             _CONFIG_META_KEY:
-            InputMeta(multiline=multiline,
+            InputMeta(alias=alias,
+                      multiline=multiline,
                       rows=rows,
                       font_size=font_size,
                       font_family=font_family)
         }
 
     @staticmethod
-    def slider_meta(begin: mui.NumberType, end: mui.NumberType):
-        return {_CONFIG_META_KEY: SliderMeta(begin=begin, end=end)}
+    def slider_meta(begin: mui.NumberType, end: mui.NumberType, alias: Optional[str] = None):
+        return {_CONFIG_META_KEY: SliderMeta(begin=begin, end=end, alias=alias)}

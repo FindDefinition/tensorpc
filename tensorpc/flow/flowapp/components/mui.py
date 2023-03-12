@@ -42,12 +42,13 @@ from ..core import (AppComponentCore, AppEvent, AppEventType, BasicProps,
                     NumberType, T_base_props, T_child, T_container_props,
                     TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
                     ValueType, undefined, create_ignore_usr_msg,
-                    ALL_POINTER_EVENTS, _get_obj_def_path, BackendOnlyProp)
+                    ALL_POINTER_EVENTS, _get_obj_def_path, BackendOnlyProp,)
 from tensorpc.flow.constants import TENSORPC_ANYLAYOUT_FUNC_NAME
 if TYPE_CHECKING:
     from .three import ThreeCanvas
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
+CORO_NONE = Union[Coroutine[None, None, None], None]
 
 _PIL_FORMAT_TO_SUFFIX = {"JPEG": "jpg", "PNG": "png"}
 
@@ -177,7 +178,7 @@ class MUIFlexBoxProps(FlexBoxProps, ContainerBaseProps):
     draggable: Union[bool, Undefined] = undefined
     droppable: Union[bool, Undefined] = undefined
     allowed_dnd_types: Union[str, List[str], Undefined] = undefined
-
+    sx_over_drop: Union[Dict[str, Any], Undefined] = undefined
 
 _TypographyVarient: TypeAlias = Literal['body1', 'body2', 'button', 'caption',
                                         'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -2735,11 +2736,22 @@ class ControlNodeType(enum.IntEnum):
 
 
 @dataclasses.dataclass
+class ControlColorRGB:
+    r: NumberType
+    g: NumberType
+    b: NumberType
+
+@dataclasses.dataclass
+class ControlColorRGBA(ControlColorRGB):
+    a: float
+
+
+@dataclasses.dataclass
 class ControlNode:
     id: str
     name: str
     type: int
-    initValue: Union[Undefined, NumberType, str] = undefined
+    initValue: Union[Undefined, NumberType, str, ControlColorRGB, ControlColorRGBA] = undefined
     children: "List[ControlNode]" = dataclasses.field(default_factory=list)
     # for range
     min: Union[Undefined, NumberType] = undefined
@@ -2749,6 +2761,7 @@ class ControlNode:
     # for string
     rows: Union[Undefined, bool, int] = undefined
 
+    alias: Union[Undefined, str] = undefined
 
 @dataclasses.dataclass
 class DynamicControlsProps(MUIFlexBoxProps):
