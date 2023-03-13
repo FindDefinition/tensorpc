@@ -25,7 +25,6 @@ import asyncio
 import traceback
 import inspect
 
-import cachetools
 from tensorpc.core.core_io import JsonOnlyData
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.utils.registry import HashableRegistry

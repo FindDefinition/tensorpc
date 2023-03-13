@@ -1,6 +1,7 @@
 import dataclasses
 import enum
 import inspect
+import traceback
 import types
 from functools import partial
 from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
@@ -148,10 +149,15 @@ def parse_obj_item(obj,
             if obj_type in ALL_OBJECT_LAYOUT_HANDLERS:
                 is_layout = True
             else:
-                metas = ReloadableDynamicClass.get_metas_of_regular_methods(
-                    obj_type, True)
-                special_methods = FlowSpecialMethods(metas)
-                is_layout = special_methods.create_layout is not None
+                try:
+                    metas = ReloadableDynamicClass.get_metas_of_regular_methods(
+                        obj_type, False, no_code=True)
+                    special_methods = FlowSpecialMethods(metas)
+                    is_layout = special_methods.create_layout is not None
+                except:
+                    is_layout = False 
+                    traceback.print_exc()
+                    print("ERROR", obj_type)
             obj_meta_cache[obj_type] = is_layout
         is_draggable = is_layout
         if isinstance(obj, mui.Component):

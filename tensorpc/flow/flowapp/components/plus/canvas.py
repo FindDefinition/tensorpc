@@ -320,7 +320,6 @@ class SimpleCanvas(mui.FlexBox):
         return layout
 
     async def _on_enable_grid(self, selected):
-        print("?")
         if selected:
             await self._dynamic_grid.set_new_layout(
                 [self.infgrid, self.axis_helper])
