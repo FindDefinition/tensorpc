@@ -20,8 +20,9 @@ import json
 import time
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Tuple, Type, TypeVar, Union)
-
+import urllib.request
 from tensorpc import compat
+from tensorpc.core.httpserver import JS_MAX_SAFE_INT
 if compat.Python3_8AndLater:
     from typing import Literal
 else:
@@ -1136,7 +1137,8 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
     async def set_cam2world(self,
                             cam2world: Union[List[float], np.ndarray],
                             distance: float,
-                            fov_angle: float = -1):
+                            fov_angle: float = -1,
+                            update_now: bool = False):
         """
         TODO handle OrthographicCamera
         Args: 
@@ -1156,6 +1158,8 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
                 distance,
                 "fov":
                 fov_angle,
+                "updateNow":
+                update_now,
             }))
 
     async def set_lookat(self, origin: List[float], target: List[float]):
@@ -1368,6 +1372,67 @@ class ScreenShot(ThreeComponentBase[ScreenShotProps]):
     async def handle_event(self, ev: EventType):
         return await handle_standard_event(self, ev, sync_first=True)
 
+class _PendingState:
+    def __init__(self, ev: asyncio.Event, result: Optional[Any] = None)  -> None:
+        self.ev = ev
+        self.result = result
+
+class ScreenShotSyncReturn(ThreeComponentBase[ScreenShotProps]):
+    """a special ui to get screen shot. steps:
+    1. use trigger_screen_shot with userdata
+    2. get image and userdata you provided from callback.
+    currently impossible to get image from one function call.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(UIType.ThreeScreenShot, ScreenShotProps)
+        self.register_event_handler(FrontendEventType.Change.value, self._on_callback)
+        self._pending_rpc: Dict[int, _PendingState] = {}
+        self._uid_index = 0
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def _on_callback(self, data: Tuple[str, Any]):
+        img_data = data[0]
+        uid = data[1]
+        if uid in self._pending_rpc:
+            self._pending_rpc[uid].ev.set()
+            self._pending_rpc[uid].result = img_data
+
+    async def trigger_screen_shot(self, timeout=2):
+        """when you provide a data, we will use image and 
+        this data to call your callback
+        """
+        # check data is can be converted to json
+        uid = self._uid_index % JS_MAX_SAFE_INT
+        await self.send_and_wait(self.create_comp_event({
+            "type": 0,
+            "data": uid,
+        }))
+        self._uid_index += 1
+        ev = asyncio.Event()
+        self._pending_rpc[uid] = _PendingState(ev, None) 
+        try:
+            await asyncio.wait_for(ev.wait(), timeout=timeout)
+            res = self._pending_rpc.pop(uid).result
+            assert res is not None 
+            return urllib.request.urlopen(res).read()
+        except:
+            self._pending_rpc.pop(uid)
+            raise
+            
+
+
+    async def handle_event(self, ev: EventType):
+        return await handle_standard_event(self, ev, sync_first=True)
 
 @dataclasses.dataclass
 class ThreeCanvasProps(MUIFlexBoxProps):

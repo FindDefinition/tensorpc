@@ -175,7 +175,7 @@ class _LayoutObserveMeta:
     layout: Union[mui.FlexBox, "App"]
     qualname_prefix: str
     metas: List[ServFunctionMeta]
-    callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta], Coroutine]]
+    callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta], Coroutine[None, None, mui.FlexBox]]]
 
 @dataclasses.dataclass
 class _WatchDogWatchEntry:
@@ -1050,7 +1050,8 @@ class EditableApp(App):
                             else:
                                 if obmeta.callback is not None:
                                     # handle layout in callback
-                                    await obmeta.callback(layout, flow_special.create_layout)
+                                    new_layout = await obmeta.callback(layout, flow_special.create_layout)
+                                    obmeta.layout = new_layout
                                     # fut = asyncio.run_coroutine_threadsafe(
                                     #     obmeta.callback(layout, flow_special.create_layout), self._loop)
                                     # fut.result()

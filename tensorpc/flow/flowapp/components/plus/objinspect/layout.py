@@ -58,9 +58,9 @@ class AnyFlexLayout(mui.FlexLayout):
             layout_flex._wrapped_obj = layout._wrapped_obj
             await self.update_childs({name: layout_flex})
         else:
-            await layout.set_new_layout(
-                create_layout.get_binded_fn()())
-
+            layout_flex = create_layout.get_binded_fn()()
+            await layout.set_new_layout(layout_flex)
+        return layout_flex
 
     async def _bind_code_editor(self, obj, layout, name: str):
         app = get_app()

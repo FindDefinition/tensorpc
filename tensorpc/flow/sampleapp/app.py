@@ -30,6 +30,8 @@ import numpy as np
 from faker import Faker
 from typing_extensions import Literal
 
+import tqdm
+
 import tensorpc
 from tensorpc.core import prim
 from tensorpc.core.asynctools import cancel_task
@@ -957,17 +959,21 @@ class PointCloudApp:
     def my_layout(self):
         cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
 
-        self.canvas = plus.SimpleCanvas(cam)
+        self.canvas = plus.SimpleCanvas(cam, self._on_video_save)
         self.slider = mui.Slider("Slider",
                                  0,
                                  1,
                                  1,
                                  callback=self._on_slider_select)
-
+        
         return mui.VBox([
+
             mui.HBox([
                 mui.Button("Change Slider Range",
                            self._on_slider_range_change),
+                mui.Button("Video",
+                           self._on_save_video),
+
                 self.slider.prop(flex=1),
             ]),
             self.canvas.prop(flex=1),
@@ -979,7 +985,29 @@ class PointCloudApp:
                 overflow="hidden")
 
     async def _on_slider_range_change(self):
+
         await self.slider.update_ranges(0, 10, 1)
+
+    async def _on_save_video(self):
+        c2e_init = np.array([
+            [1, 0, 0, 0],
+            [0, 0, 1, 0],
+            [0, 1, 0, 10],
+            [0, 0, 0, 1],
+        ], np.float32)
+        self.ts = time.time()
+        for i in tqdm.tqdm(range(100), total=100):
+            c2e_init[0, 3] = i * 0.2
+            await self.canvas.set_cam2world(c2e_init.copy(), 1.0, True)
+            # await self.canvas.trigger_screen_shot(i)
+            img_bytes = await self.canvas.trigger_screen_shot()
+            # with open(f"/home/yy/test/{i}.png", "wb") as f:
+            #     f.write(img_bytes)
+
+    async def _on_video_save(self, img_bytes, userdata):
+        print(time.time() - self.ts)
+        with open(f"/home/yy/test/{userdata}.png", "wb") as f:
+            f.write(img_bytes)
 
     async def _on_slider_select(self, value):
         print("select slider!!!", value)

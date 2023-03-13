@@ -180,6 +180,8 @@ class SimpleCanvas(mui.FlexBox):
         self._dynamic_boxes = three.Group({})
         self._dynamic_custom_objs = three.Group({})
         self._screen_shot = three.ScreenShot(self._on_screen_shot_finish)
+        self._screen_shot_v2 = three.ScreenShotSyncReturn()
+
         self._screenshot_callback = screenshot_callback
         canvas_layout = [
             self.ctrl,
@@ -190,7 +192,8 @@ class SimpleCanvas(mui.FlexBox):
             self._dynamic_boxes,
             # three.AxesHelper(20),
             self._dynamic_grid,
-            self._screen_shot,
+            # self._screen_shot,
+            self._screen_shot_v2,
         ]
         # if with_grid:
         #     canvas_layout.append(infgrid)
@@ -215,9 +218,12 @@ class SimpleCanvas(mui.FlexBox):
             if inspect.iscoroutine(res):
                 await res
 
-    async def trigger_screen_shot(self, data: Optional[Any] = None):
-        assert self._screenshot_callback is not None
-        await self._screen_shot.trigger_screen_shot(data)
+    # async def trigger_screen_shot(self, data: Optional[Any] = None):
+    #     assert self._screenshot_callback is not None
+    #     await self._screen_shot.trigger_screen_shot(data)
+
+    async def trigger_screen_shot(self, timeout: int = 2):
+        return await self._screen_shot_v2.trigger_screen_shot(timeout)
 
     async def _on_cfg_change(self, uid: str, value: Any):
         if uid == "point.size":
@@ -361,8 +367,8 @@ class SimpleCanvas(mui.FlexBox):
         await self._dynamic_boxes.set_new_layout({})
 
     async def set_cam2world(self, cam2world: Union[List[float], np.ndarray],
-                            distance: float):
-        return await self.ctrl.set_cam2world(cam2world, distance)
+                            distance: float, update_now: bool = False):
+        return await self.ctrl.set_cam2world(cam2world, distance, update_now=update_now)
 
     async def reset_camera(self):
         return await self.ctrl.reset_camera()

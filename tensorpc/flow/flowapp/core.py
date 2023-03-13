@@ -1105,12 +1105,13 @@ class Component(Generic[T_base_props, T_child]):
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.ComponentEvent: ev})
 
-    async def send_and_wait(self, ev: AppEvent):
+    async def send_and_wait(self, ev: AppEvent, wait: bool = True):
         if ev.sent_event is None:
             ev.sent_event = asyncio.Event()
         await self.put_app_event(ev)
         if self.is_mounted():
-            await ev.sent_event.wait()
+            if wait:
+                await ev.sent_event.wait()
 
     def create_update_comp_event(self, updates: Dict[str, Any],
                                  deleted: Optional[List[str]]):
@@ -1263,7 +1264,7 @@ class ContainerBase(Component[T_container_props, T_child]):
 
     def _foreach_comp(self, handler: Callable[[str, Component], Union[bool,
                                                                       None]]):
-        assert self._flow_uid != "", "_flow_uid must be set before modify_comp"
+        assert self._flow_uid != "", f"_flow_uid must be set before modify_comp, {type(self)}, {self._flow_reference_count}, {id(self)}"
         handler(self._flow_uid, self)
         self._foreach_comp_recursive(self._flow_uid, handler)
 
