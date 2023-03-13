@@ -89,7 +89,8 @@ class WebsocketClient(object):
                 core_io.json_only_encode(data, msg_type, req))
         max_size = self.ws._max_msg_size - 128
         # max_size = 1024 * 1024
-        encoder = core_io.SocketMessageEncoder(data)
+        # TODO reslove "8192"
+        encoder = core_io.SocketMessageEncoder(data, skeleton_size_limit=max_size - 8192)
         tasks = []
         # max_size = TENSORPC_WEBSOCKET_MSG_SIZE
         # t = time.time()

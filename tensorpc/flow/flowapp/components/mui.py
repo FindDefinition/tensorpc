@@ -471,7 +471,7 @@ class IconType(enum.IntEnum):
     SwapVert = 28
     Refresh = 29
     Grid3x3 = 30
-
+    Help = 31
 
 @dataclasses.dataclass
 class IconButtonProps(MUIComponentBaseProps):
@@ -485,7 +485,7 @@ class IconButtonProps(MUIComponentBaseProps):
     icon_size: Union[Literal["small", "medium", "large", "inherit"],
                      Undefined] = undefined
     icon_font_size: Union[NumberType, Undefined] = undefined
-
+    tooltip_multiline: Union[bool, Undefined] = undefined
 
 class IconButton(MUIComponentBase[IconButtonProps]):
 
@@ -2705,7 +2705,8 @@ class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
         ]
         super().__init__(UIType.JsonLikeTreeView,
                          JsonLikeTreeProps,
-                         allowed_events=tview_events)
+                         allowed_events=tview_events,
+                         json_only=True)
         self.props.tree = tree
 
     @property
@@ -2716,7 +2717,7 @@ class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
     @property
     def update_event(self):
         propcls = self.propcls
-        return self._update_props_base(propcls)
+        return self._update_props_base(propcls, json_only=False)
 
     async def update_tree(self, tree: JsonLikeNode):
         await self.send_and_wait(self.update_event(tree=tree))

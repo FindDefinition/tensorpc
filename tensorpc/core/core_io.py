@@ -83,6 +83,7 @@ NPDTYPE_TO_JSONARRAY_MAP = {
 }
 
 BYTES_JSONARRAY_CODE = 100
+BYTES_SKELETON_CODE = 101
 
 INV_NPDTYPE_TO_PB_MAP = _inv_map(NPDTYPE_TO_PB_MAP)
 INV_NPDTYPE_TO_JSONARRAY_MAP = _inv_map(NPDTYPE_TO_JSONARRAY_MAP)
@@ -152,6 +153,9 @@ def data2pb(array_or_bytes: Union[bytes, np.ndarray],
     else:
         raise NotImplementedError("only support ndarray/bytes.")
 
+class JsonOnlyData:
+    def __init__(self, data) -> None:
+        self.data = data
 
 class FromBufferStream(object):
 
@@ -290,6 +294,8 @@ def _extract_arrays_from_data(arrays,
                 data_skeleton[k] = _extract_arrays_from_data(
                     arrays, v, object_classes, json_index)
         return data_skeleton
+    elif isinstance(data, JsonOnlyData):
+        return data.data 
     else:
         data_skeleton = None
         if isinstance(data, object_classes):
@@ -695,12 +701,11 @@ class SocketMessageEncoder:
 
     """
 
-    def __init__(self, data) -> None:
+    def __init__(self, data, skeleton_size_limit: int = int(1024 * 1024 * 3.6)) -> None:
         arrays, data_skeleton = extract_arrays_from_data(data, json_index=True)
         self.arrays: List[Union[np.ndarray, bytes]] = arrays
         self.data_skeleton = data_skeleton
         self._total_size = 0
-
         self._arr_metadata: List[Tuple[int, List[int]]] = []
         for arr in self.arrays:
             if isinstance(arr, np.ndarray):
@@ -711,6 +716,13 @@ class SocketMessageEncoder:
                 self._total_size += len(arr)
                 self._arr_metadata.append((BYTES_JSONARRAY_CODE, [len(arr)]))
         self._ser_skeleton = json.dumps(self.get_skeleton())
+        if len(self._ser_skeleton) > skeleton_size_limit:
+            data_skeleton_pack = msgpack.packb(self.data_skeleton)
+            assert data_skeleton_pack is not None
+            self.arrays.append(data_skeleton_pack)
+            self._arr_metadata.append((BYTES_SKELETON_CODE, [len(data_skeleton_pack)]))
+            self.data_skeleton = {}
+            self._ser_skeleton = json.dumps(self.get_skeleton())
 
     def get_total_array_binary_size(self):
         return self._total_size

@@ -26,6 +26,7 @@ import traceback
 import inspect
 
 import cachetools
+from tensorpc.core.core_io import JsonOnlyData
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.uniquename import UniqueNamePool
@@ -443,12 +444,20 @@ class UIUpdateEvent:
 
     def __init__(
         self, uid_to_data_undefined: Dict[str, Tuple[Dict[str, Any],
-                                                     List[str]]]
+                                                     List[str]]],
+        json_only: bool = False
     ) -> None:
         self.uid_to_data_undefined = uid_to_data_undefined
+        self.json_only = json_only
+
+    def as_json_only(self):
+        return UIUpdateEvent(self.uid_to_data_undefined, True)
 
     def to_dict(self):
-        return self.uid_to_data_undefined
+        if self.json_only:
+            return JsonOnlyData(self.uid_to_data_undefined)
+        else:
+            return self.uid_to_data_undefined
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]):
@@ -831,7 +840,8 @@ class Component(Generic[T_base_props, T_child]):
                  type: UIType,
                  prop_cls: Type[T_base_props],
                  allowed_events: Optional[Iterable[ValueType]] = None,
-                 uid: str = "") -> None:
+                 uid: str = "",
+                 json_only: bool = False) -> None:
         self._flow_comp_core: Optional[AppComponentCore] = None
         self._flow_uid = uid
         self._flow_comp_type = type
@@ -853,6 +863,11 @@ class Component(Generic[T_base_props, T_child]):
         self._flow_user_data: Any = None
         self._flow_comp_def_path = _get_obj_def_path(self)
         self._flow_reference_count = 0
+        # tensorpc will scan your prop dict to find
+        # np.ndarray and bytes by default.
+        # this will cost time, so if you use 
+        # json_only, this scan will be skiped.
+        self._flow_json_only = json_only
 
     def get_special_methods(self, reload_mgr: AppReloadManager):
         metas = reload_mgr.query_type_method_meta(type(self), no_code=True)
@@ -898,12 +913,12 @@ class Component(Generic[T_base_props, T_child]):
 
         return wrapper
 
-    def _update_props_base(self, prop: Callable[P, Any]):
+    def _update_props_base(self, prop: Callable[P, Any], json_only: bool = False):
 
         def wrapper(*args: P.args, **kwargs: P.kwargs):
             for k, v in kwargs.items():
                 setattr(self.__props, k, v)
-            return self.create_update_event(kwargs)
+            return self.create_update_event(kwargs, json_only)
 
         return wrapper
 
@@ -958,6 +973,8 @@ class Component(Generic[T_base_props, T_child]):
             "props": props,
             # "status": self._status.value,
         }
+        if self._flow_json_only:
+            res["props"] = JsonOnlyData(props)
         evs = []
         for k, v in self._flow_event_handlers.items():
             if not isinstance(v, Undefined) and not v.backend_only:
@@ -1055,7 +1072,7 @@ class Component(Generic[T_base_props, T_child]):
                               ):
         pass
 
-    def create_update_event(self, data: Dict[str, Union[Any, Undefined]]):
+    def create_update_event(self, data: Dict[str, Union[Any, Undefined]], json_only: bool = False):
         data_no_und = {}
         data_unds = []
         for k, v in data.items():
@@ -1064,7 +1081,7 @@ class Component(Generic[T_base_props, T_child]):
                 data_unds.append(k)
             else:
                 data_no_und[k] = as_dict_no_undefined(v)
-        ev = UIUpdateEvent({self._flow_uid: (data_no_und, data_unds)})
+        ev = UIUpdateEvent({self._flow_uid: (data_no_und, data_unds)}, json_only)
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UIUpdateEvent: ev})
 

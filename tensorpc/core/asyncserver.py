@@ -43,9 +43,7 @@ class AsyncRemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
     """Main service of codeai.distributed. Arbitrary python code execute service.
     """
 
-    # TODO: try C++ server (still wait for sub-interpreters)
     # TODO when too much stdout in server, logger may crash.
-    # TODO make methods in dymodule pickleable
     # TODO add option to disable dynamic code add
     # TODO support regular load modules
     # TODO when nested RPC, logger crash

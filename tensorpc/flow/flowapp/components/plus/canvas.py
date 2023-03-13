@@ -131,13 +131,14 @@ class CameraCfg:
     keyboard_mode: CamCtrlKeyboardMode = dataclasses.field(
         default=CamCtrlKeyboardMode.Helicopter,
         metadata=ConfigPanel.base_meta(alias="Keyboard Mode"))
-    move_speed: float = dataclasses.field(
-        default=20,
-        metadata=ConfigPanel.slider_meta(5, 40, alias="Move speed (m/s)"))
-    elevate_speed: float = dataclasses.field(
-        default=5,
-        metadata=ConfigPanel.slider_meta(1, 20, alias="Elevate speed (m/s)"))
-
+    move_speed: float = dataclasses.field(default=20,
+                                          metadata=ConfigPanel.slider_meta(
+                                              5, 40, alias="Move speed (m/s)"))
+    elevate_speed: float = dataclasses.field(default=5,
+                                             metadata=ConfigPanel.slider_meta(
+                                                 1,
+                                                 20,
+                                                 alias="Elevate speed (m/s)"))
 
 
 @dataclasses.dataclass
@@ -257,6 +258,13 @@ class SimpleCanvas(mui.FlexBox):
 
     @marker.mark_create_layout
     def _layout_func(self):
+        help_string = (f"Keyboard\n"
+                       f"WSAD: move camera\n"
+                       f"Z: descend camera\n"
+                       f"SpaceBar: ascend camera\n"
+                       f"use dolly (wheel) to\n"
+                       f"simulate first-persion")
+
         layout: mui.LayoutType = [
             self.canvas,
             mui.HBox([
@@ -286,23 +294,29 @@ class SimpleCanvas(mui.FlexBox):
                 ]),
                 self._cfg_panel,
             ]).prop(position="absolute", top=3, left=3, z_index=5),
+            mui.IconButton(mui.IconType.Help,
+                           lambda: None).prop(tooltip=help_string,
+                                              position="absolute",
+                                              tooltip_multiline=True,
+                                              top=3,
+                                              right=3,
+                                              z_index=5),
         ]
 
         self.register_event_handler(FrontendEventType.Drop.value,
                                     self._on_drop)
-        self.prop(min_height=0,
-                  min_width=0,
-                  flex=1,
-                  position="relative",
-                  droppable=True,
-                  width="100%",
-                  height="100%",
-                  overflow="hidden",
-                  border="4px solid transparent",
-                  sx_over_drop={
-                    "border": "4px solid green"
-                  },
-                  )
+        self.prop(
+            min_height=0,
+            min_width=0,
+            flex=1,
+            position="relative",
+            droppable=True,
+            width="100%",
+            height="100%",
+            overflow="hidden",
+            border="4px solid transparent",
+            sx_over_drop={"border": "4px solid green"},
+        )
         return layout
 
     async def _on_enable_grid(self, selected):
