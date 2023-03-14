@@ -33,7 +33,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 LOGGER = df_logging.get_logger()
-JS_MAX_SAFE_INT = 9007199254740991
+JS_MAX_SAFE_INT = 2 ** 53 - 1
 
 
 class WebsocketClient(object):

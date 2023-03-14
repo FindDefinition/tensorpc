@@ -1000,7 +1000,8 @@ class PointCloudApp:
             c2e_init[0, 3] = i * 0.2
             await self.canvas.set_cam2world(c2e_init.copy(), 1.0, True)
             # await self.canvas.trigger_screen_shot(i)
-            img_bytes = await self.canvas.trigger_screen_shot()
+            img_bytes = await self.canvas.get_screen_shot()
+            print(len(img_bytes))
             # with open(f"/home/yy/test/{i}.png", "wb") as f:
             #     f.write(img_bytes)
 
@@ -1098,7 +1099,23 @@ class CollectionApp:
                             mui.ControlNodeType.Color.value,
                             initValue="#ffffff")
         ]
-
+        self.code = f"""
+    @mark_create_layout
+    def my_layout(self):
+        self.anylayout = AnyLayout()
+        self.monitor = plus.ComputeResourceMonitor()
+        self.example_draggable_pc = np.random.uniform(-3, 3, size=[1000, 3])
+        self.example_3d_canvas = PointCloudApp()
+        self.example_object_inspector = ObjectInspectApp()
+        self.example_pyplot = PlotApp()
+        self.example_auto_complete = AutoComputeApp()
+        nodes = [
+            mui.ControlNode("1",
+                            "color",
+                            mui.ControlNodeType.Color.value,
+                            initValue="#ffffff")
+        ]
+        """
         self.wtf = mui.DynamicControls(init=nodes, callback=lambda x: print(x))
         self.cfg = WTF(1, 0.5, WTF1(2), "WTF", [])
         self.wtf2 = plus.ConfigPanel(self.cfg, lambda x, y: print(x, y))

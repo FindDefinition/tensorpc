@@ -218,12 +218,12 @@ class SimpleCanvas(mui.FlexBox):
             if inspect.iscoroutine(res):
                 await res
 
-    # async def trigger_screen_shot(self, data: Optional[Any] = None):
-    #     assert self._screenshot_callback is not None
-    #     await self._screen_shot.trigger_screen_shot(data)
+    async def trigger_screen_shot(self, data: Optional[Any] = None):
+        assert self._screenshot_callback is not None
+        await self._screen_shot.trigger_screen_shot(data)
 
-    async def trigger_screen_shot(self, timeout: int = 2):
-        return await self._screen_shot_v2.trigger_screen_shot(timeout)
+    async def get_screen_shot(self, timeout: int = 2):
+        return await self._screen_shot_v2.get_screen_shot(timeout)
 
     async def _on_cfg_change(self, uid: str, value: Any):
         if uid == "point.size":

@@ -420,9 +420,9 @@ class ObjectReloadManager:
         return ObjectReloadResultWithType(self.module_cache[path], True, self.file_cache[path], meta)
 
     def query_type_method_meta(self, type: Type, no_code: bool = False):
-        path = inspect.getfile(type)
         if type in self.type_method_meta_cache:
             return self.type_method_meta_cache[type]
+        path = inspect.getfile(type)
         inspect_type = type
         if path in self.module_cache:
             # if obj is reloaded, we must use new type meta instead of old one

@@ -2717,7 +2717,7 @@ class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
     @property
     def update_event(self):
         propcls = self.propcls
-        return self._update_props_base(propcls, json_only=False)
+        return self._update_props_base(propcls, json_only=True)
 
     async def update_tree(self, tree: JsonLikeNode):
         await self.send_and_wait(self.update_event(tree=tree))

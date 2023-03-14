@@ -971,7 +971,8 @@ class EditableApp(App):
                                 is_callback_change = True 
                                 break
                     for m in changed_metas:
-                        print(m.qualname)
+                        print(m.qualname, "CHANGED")
+
                     flow_special_for_check = FlowSpecialMethods(changed_metas)
                     do_reload = flow_special_for_check.contains_special_method() or bool(new_method_names)
                     if not do_reload:

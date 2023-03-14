@@ -42,7 +42,7 @@ FOLDER_TYPES = {
     mui.JsonLikeType.ListFolder.value, mui.JsonLikeType.DictFolder.value
 }
 
-STRING_LENGTH_LIMIT = 2000
+STRING_LENGTH_LIMIT = 500
 
 SET_CONTAINER_LIMIT_SIZE = 50
 
@@ -346,6 +346,18 @@ def _get_root_tree(obj,
     return root_node
 
 
+def _get_obj_tree(obj,
+                   checker: Callable[[Type], bool],
+                   key: str,
+                   parent_id: str,
+                   obj_meta_cache=None):
+    obj_dict = _get_obj_dict(obj, checker)
+    obj_id = f"{parent_id}{_GLOBAL_SPLIT}{key}"
+    root_node = parse_obj_item(obj, key, obj_id, checker, obj_meta_cache)
+    root_node.children = parse_obj_dict(obj_dict, obj_id, checker, obj_meta_cache)
+    root_node.cnt = len(obj_dict)
+    return root_node
+
 class ObjectTree(mui.FlexBox):
 
     def __init__(self,
@@ -477,9 +489,18 @@ class ObjectTree(mui.FlexBox):
                 print("reload failed.")
 
     async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):
+        key_in_root = key in self.root
         self.root[key] = obj
-        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
-                                              _ROOT, self._obj_meta_cache)
+        obj_tree = _get_obj_tree(obj, self._checker, key, self.tree.props.tree.id, self._obj_meta_cache)
+        if key_in_root:
+            for i, node in enumerate(self.tree.props.tree.children):
+                if node.name == key:
+                    self.tree.props.tree.children[i] = obj_tree 
+                    break
+        else:
+            self.tree.props.tree.children.append(obj_tree)
+        # self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
+        #                                       _ROOT, self._obj_meta_cache)
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
 

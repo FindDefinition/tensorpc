@@ -78,6 +78,7 @@ class TypeMeta:
                 mod_name, self.module_key)
             assert spec is not None, f"your {self.module_key} not exists"
             standard_module = importlib.util.module_from_spec(spec)
+            standard_module.__file__ = self.module_key
             assert spec.loader is not None, "shouldn't happen"
             spec.loader.exec_module(standard_module)
             # do we need to add this module to sys?

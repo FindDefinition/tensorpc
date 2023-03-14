@@ -19,7 +19,7 @@ class TensorHandler(ObjectPreviewHandler):
         self.title = mui.Typography("np.ndarray shape = []")
         self.data_print = mui.Typography("").prop(font_family="monospace",
                                                   font_size="12px",
-                                                  white_space="pre-line")
+                                                  white_space="pre-wrap")
         self.slice_val = mui.Input("Slice").prop(size="small",
                                                  mui_margin="dense")
         layout = [
@@ -50,7 +50,7 @@ class TensorHandler(ObjectPreviewHandler):
         # bind np object, update all metadata
         qualname = "np.ndarray"
         device = None
-
+        dtype = self.obj.dtype
         is_contig = False
         if isinstance(obj, np.ndarray):
             is_contig = obj.flags['C_CONTIGUOUS']
@@ -61,9 +61,11 @@ class TensorHandler(ObjectPreviewHandler):
             is_contig = obj.is_contiguous()
 
         elif get_qualname_of_type(type(obj)) == CommonQualNames.TVTensor:
+            from cumm.dtypes import get_dtype_from_tvdtype
             qualname = "tv.Tensor"
             device = "cpu" if obj.device == -1 else "cuda"
             is_contig = obj.is_contiguous()
+            dtype = get_dtype_from_tvdtype(obj.dtype)
         else:
             raise NotImplementedError
         self.obj = obj
@@ -72,7 +74,7 @@ class TensorHandler(ObjectPreviewHandler):
             value=f"{qualname} shape = {list(self.obj.shape)}")
         await self.send_and_wait(ev)
         tags = [
-            mui.Chip(str(self.obj.dtype)).prop(size="small", clickable=False),
+            mui.Chip(str(dtype)).prop(size="small", clickable=False),
         ]
         if device is not None:
             tags.append(mui.Chip(device).prop(size="small", clickable=False))
@@ -98,7 +100,7 @@ class StringHandler(ObjectPreviewHandler):
     def __init__(self) -> None:
         self.text = mui.Typography("").prop(font_family="monospace",
                                             font_size="14px",
-                                            white_space="pre-line")
+                                            white_space="pre-wrap")
         super().__init__([self.text])
 
     async def bind(self, obj: str):

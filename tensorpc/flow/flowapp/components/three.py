@@ -1407,11 +1407,7 @@ class ScreenShotSyncReturn(ThreeComponentBase[ScreenShotProps]):
             self._pending_rpc[uid].ev.set()
             self._pending_rpc[uid].result = img_data
 
-    async def trigger_screen_shot(self, timeout=2):
-        """when you provide a data, we will use image and 
-        this data to call your callback
-        """
-        # check data is can be converted to json
+    async def get_screen_shot(self, timeout=2):
         uid = self._uid_index % JS_MAX_SAFE_INT
         await self.send_and_wait(self.create_comp_event({
             "type": 0,
@@ -1424,9 +1420,12 @@ class ScreenShotSyncReturn(ThreeComponentBase[ScreenShotProps]):
             await asyncio.wait_for(ev.wait(), timeout=timeout)
             res = self._pending_rpc.pop(uid).result
             assert res is not None 
+            if isinstance(res, bytes):
+                return res
             return urllib.request.urlopen(res).read()
         except:
-            self._pending_rpc.pop(uid)
+            if uid in self._pending_rpc:
+                self._pending_rpc.pop(uid)
             raise
             
 

@@ -41,7 +41,7 @@ class DefaultHandler(ObjectPreviewHandler):
 
         self.data_print = mui.Typography("").prop(font_family="monospace",
                                                   font_size="12px",
-                                                  white_space="pre-line")
+                                                  white_space="pre-wrap")
         layout = [
             self.title.prop(font_size="14px", font_family="monospace"),
             self.path.prop(font_size="14px", font_family="monospace"),
@@ -220,9 +220,20 @@ class ObjectInspector(mui.FlexBox):
                            _frame_cnt: int = 1):
         """update locals in sync manner, usually used on non-sync code via appctx.
         """
-
+        cur_frame = inspect.currentframe()
+        assert cur_frame is not None
+        frame = cur_frame
+        while _frame_cnt > 0:
+            frame = cur_frame.f_back
+            assert frame is not None
+            cur_frame = frame
+            _frame_cnt -= 1
+        # del frame
+        local_vars = cur_frame.f_locals.copy()
+        del frame
+        del cur_frame
         fut = asyncio.run_coroutine_threadsafe(
-            self.update_locals(key, _frame_cnt=1 + _frame_cnt),
+            self.tree.set_object(local_vars, key),
             asyncio.get_running_loop())
         if get_app()._flowapp_thread_id == threading.get_ident():
             # we can't wait fut here
