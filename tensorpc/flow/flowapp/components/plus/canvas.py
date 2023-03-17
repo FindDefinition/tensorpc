@@ -15,17 +15,19 @@ import dataclasses
 import enum
 import inspect
 import urllib.request
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import numpy as np
 
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.flow import marker
+from tensorpc.flow.flowapp.appcore import find_component_by_uid
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.components.plus.common import CommonQualNames
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from tensorpc.flow.flowapp.core import FrontendEventType
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
+from tensorpc.flow.flowapp import colors
 
 
 def _try_cast_tensor_dtype(obj: Any):
@@ -77,6 +79,33 @@ def _try_cast_to_point_cloud(obj: Any):
         if dtype == np.float32 or dtype == np.float16 or dtype == np.float64:
             num_ft = obj.shape[1]
             if num_ft >= 3 and num_ft <= 4:
+                return _cast_tensor_to_np(obj)
+    return None
+
+
+def _try_cast_to_box3d(obj: Any):
+    obj_dtype = _try_cast_tensor_dtype(obj)
+    if obj_dtype is None:
+        return None
+    ndim = obj.ndim
+    if ndim == 2:
+        dtype = obj_dtype
+        if dtype == np.float32 or dtype == np.float16 or dtype == np.float64:
+            num_ft = obj.shape[1]
+            if num_ft == 7:
+                return _cast_tensor_to_np(obj)
+    return None
+
+
+def _try_cast_to_lines(obj: Any):
+    obj_dtype = _try_cast_tensor_dtype(obj)
+    if obj_dtype is None:
+        return None
+    ndim = obj.ndim
+    if ndim == 3:
+        dtype = obj_dtype
+        if dtype == np.float32 or dtype == np.float16 or dtype == np.float64:
+            if obj.shape[1] == 2 and obj.shape[2] == 3:
                 return _cast_tensor_to_np(obj)
     return None
 
@@ -150,7 +179,6 @@ class CanvasGlobalCfg:
 
 
 class SimpleCanvas(mui.FlexBox):
-
     def __init__(
             self,
             camera: Optional[three.PerspectiveCamera] = None,
@@ -161,7 +189,7 @@ class SimpleCanvas(mui.FlexBox):
             camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         self.camera = camera
         self._transparent_canvas = transparent_canvas
-        self.ctrl = three.CameraControl().prop()
+        self.ctrl = three.CameraControl().prop(make_default=True)
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.axis_helper = three.AxesHelper(20)
         self.infgrid = infgrid
@@ -206,6 +234,11 @@ class SimpleCanvas(mui.FlexBox):
         self._image_dict: Dict[str, three.Image] = {}
         self._segment_dict: Dict[str, three.Segments] = {}
         self._box_dict: Dict[str, three.BoundingBox] = {}
+
+        self._random_colors: Dict[str, str] = {}
+
+        self._dnd_trees: Set[str] = set()
+
         super().__init__()
         self.init_add_layout([*self._layout_func()])
 
@@ -332,21 +365,50 @@ class SimpleCanvas(mui.FlexBox):
         else:
             await self._dynamic_grid.set_new_layout([])
 
+    async def _unknown_visualization(self, tree_id: str, obj: Any):
+        pc_obj = _try_cast_to_point_cloud(obj)
+        if pc_obj is not None:
+            await self.show_points(tree_id, pc_obj.astype(np.float32),
+                                   pc_obj.shape[0])
+            return True
+        img_obj = _try_cast_to_image(obj)
+        if img_obj is not None:
+            await self.show_image(tree_id, img_obj, (0, 0, 0), (0, 0, 0), 3)
+            return True
+        b3d_obj = _try_cast_to_box3d(obj)
+        if b3d_obj is not None:
+            rots = np.array([[0, 0, float(b[-1])] for b in b3d_obj],
+                            np.float32)
+            if tree_id in self._random_colors:
+                pick = self._random_colors[tree_id]
+            else:
+                random_colors = colors.RANDOM_COLORS_FOR_UI
+                pick = random_colors[len(self._dynamic_boxes) %
+                                     len(random_colors)]
+                self._random_colors[tree_id] = pick
+            await self.show_boxes(tree_id,
+                                  b3d_obj[:, 3:6],
+                                  b3d_obj[:, :3],
+                                  rots,
+                                  color=pick)
+            return True
+        line_obj = _try_cast_to_lines(obj)
+        if line_obj is not None:
+            await self.show_lines(tree_id, line_obj, line_obj.shape[0])
+            return True
+        return False
+
     async def _on_drop(self, data):
         if isinstance(data, TreeDragTarget):
             obj = data.obj
-            pc_obj = _try_cast_to_point_cloud(obj)
-            if pc_obj is not None:
-                await self.show_points(data.tree_id, pc_obj.astype(np.float32),
-                                       pc_obj.shape[0])
-                return
-            img_obj = _try_cast_to_image(obj)
-            if img_obj is not None:
-                await self.show_image(data.tree_id, img_obj, (0, 0, 0),
-                                      (0, 0, 0), 3)
-                return
-            print(data)
-        # print(data)
+            success = await self._unknown_visualization(data.tree_id, obj)
+            if success:
+                # register to tree
+                tree = find_component_by_uid(data.source_comp_uid)
+                if tree is not None:
+                    tree._register_dnd_uid(data.tree_id,
+                                           self._unknown_visualization)
+                    self._dnd_trees.add(data.source_comp_uid)
 
     async def _on_pan_to_fwd(self, selected):
         await self.ctrl.send_and_wait(
@@ -366,9 +428,20 @@ class SimpleCanvas(mui.FlexBox):
         await self._dynamic_images.set_new_layout({})
         await self._dynamic_boxes.set_new_layout({})
 
-    async def set_cam2world(self, cam2world: Union[List[float], np.ndarray],
-                            distance: float, update_now: bool = False):
-        return await self.ctrl.set_cam2world(cam2world, distance, update_now=update_now)
+        for uid in self._dnd_trees:
+            tree = find_component_by_uid(uid)
+            if tree is not None:
+                tree._unregister_all_dnd_uid()
+        self._dnd_trees.clear()
+        self._random_colors.clear()
+
+    async def set_cam2world(self,
+                            cam2world: Union[List[float], np.ndarray],
+                            distance: float,
+                            update_now: bool = False):
+        return await self.ctrl.set_cam2world(cam2world,
+                                             distance,
+                                             update_now=update_now)
 
     async def reset_camera(self):
         return await self.ctrl.reset_camera()
@@ -382,8 +455,9 @@ class SimpleCanvas(mui.FlexBox):
                                                 np.ndarray]] = None,
                           size_attenuation: bool = False):
         if key not in self._point_dict:
-            self._point_dict[key] = three.Points(limit)
-            await self._dynamic_pcs.set_new_layout({**self._point_dict})
+            ui = three.Points(limit)
+            self._point_dict[key] = ui
+            await self._dynamic_pcs.update_childs({key: ui})
         point_ui = self._point_dict[key]
         await point_ui.update_points(points,
                                      colors,
@@ -407,6 +481,7 @@ class SimpleCanvas(mui.FlexBox):
         await self.clear_points()
 
     async def show_boxes(self,
+                         key: str,
                          dims: np.ndarray,
                          locs: np.ndarray,
                          rots: np.ndarray,
@@ -426,7 +501,12 @@ class SimpleCanvas(mui.FlexBox):
                 rotation=rots[i].tolist(),
                 edge_width=edge_width,
                 add_cross=self._cfg.box.add_cross)
-        await self._dynamic_boxes.set_new_layout({**box_dict})
+        if key not in self._dynamic_boxes:
+            new_box = three.Group([]).prop()
+            await self._dynamic_boxes.update_childs({key: new_box})
+        new_box = self._dynamic_boxes[key]
+        assert isinstance(new_box, three.Group)
+        await new_box.set_new_layout({**box_dict})
 
     async def clear_all_boxes(self):
         await self._dynamic_boxes.set_new_layout({})
@@ -437,8 +517,9 @@ class SimpleCanvas(mui.FlexBox):
                          limit: int,
                          color: str = "green"):
         if key not in self._segment_dict:
-            self._segment_dict[key] = three.Segments(limit).prop(color=color)
-            await self._dynamic_lines.set_new_layout({**self._segment_dict})
+            ui = three.Segments(limit).prop(color=color)
+            self._segment_dict[key] = ui
+            await self._dynamic_lines.update_childs({key: ui})
         ui = self._segment_dict[key]
 
         await ui.update_lines(lines)
@@ -452,11 +533,11 @@ class SimpleCanvas(mui.FlexBox):
                          position: three.Vector3Type,
                          rotation: three.Vector3Type, scale: float):
         if key not in self._image_dict:
-            self._image_dict[key] = three.Image().prop(position=position,
-                                                       rotation=rotation,
-                                                       scale=(scale, scale,
-                                                              scale))
-            await self._dynamic_images.set_new_layout({**self._image_dict})
+            ui = three.Image().prop(position=position,
+                                    rotation=rotation,
+                                    scale=(scale, scale, scale))
+            self._image_dict[key] = ui
+            await self._dynamic_images.update_childs({key: ui})
         ui = self._image_dict[key]
         await ui.send_and_wait(
             ui.update_event(position=position,

@@ -744,6 +744,14 @@ class App:
 
         self.root._foreach_comp(handler)
         return res[0]
+    
+    def find_all_components(self, type: Type[T]) -> List[T]:
+        res: List[T] = []
+        def handler(name, comp):
+            if isinstance(comp, type):
+                res.append(comp)
+        self.root._foreach_comp(handler)
+        return res
 
     async def _recover_code_editor(self):
         if self._use_app_editor:
@@ -955,6 +963,7 @@ class EditableApp(App):
                 obmetas = self._flowapp_change_observers[resolved_path].obmetas
                 for obmeta in obmetas:
                     # get changed metas for special methods
+                    # print(new, change)
                     changed_metas: List[ServFunctionMeta] = []
                     for m in obmeta.metas:
                         if m.qualname in change:
@@ -975,6 +984,7 @@ class EditableApp(App):
 
                     flow_special_for_check = FlowSpecialMethods(changed_metas)
                     do_reload = flow_special_for_check.contains_special_method() or bool(new_method_names)
+                    # print("do_reload", do_reload)
                     if not do_reload:
                         continue
                     layout = obmeta.layout
@@ -989,7 +999,7 @@ class EditableApp(App):
                                 #     self._loop)
                                 # # this won't block main UI thread, so it's ok
                                 # fut.result()
-                        if changed_metas:
+                        if changed_metas or bool(new_method_names):
                             # reload app servunit and method
                             changed_user_obj = self._get_user_app_object()
                             # self._get_app_dynamic_cls(
@@ -1001,8 +1011,9 @@ class EditableApp(App):
                             if str(Path(self.code_editor.external_path).resolve()) == resolved_path:
                                 await self.set_editor_value(new_data, lineno=0)
                         # reload dynamic layout
-                        if changed_metas:
+                        if changed_metas or bool(new_method_names):
                             changed_user_obj = layout._get_user_object()
+                    # print("RTX", changed_user_obj, new_method_names)
                     if changed_user_obj is not None:
                         reload_res = self._flow_reload_manager.reload_type(type(changed_user_obj))
                         is_reload = reload_res.is_reload

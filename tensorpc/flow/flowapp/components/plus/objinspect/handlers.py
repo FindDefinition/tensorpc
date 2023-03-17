@@ -1,3 +1,4 @@
+from pathlib import PosixPath, WindowsPath
 from typing import Any
 
 import numpy as np
@@ -95,6 +96,8 @@ class TensorHandler(ObjectPreviewHandler):
 @ALL_OBJECT_PREVIEW_HANDLERS.register(int)
 @ALL_OBJECT_PREVIEW_HANDLERS.register(float)
 @ALL_OBJECT_PREVIEW_HANDLERS.register(complex)
+@ALL_OBJECT_PREVIEW_HANDLERS.register(PosixPath)
+@ALL_OBJECT_PREVIEW_HANDLERS.register(WindowsPath)
 class StringHandler(ObjectPreviewHandler):
 
     def __init__(self) -> None:

@@ -93,8 +93,6 @@ async def handle_standard_event(comp: Component,
                     comp.run_callback(ccb(handler.cb),
                                       True,
                                       sync_first=sync_first))
-            else:
-                await comp.sync_status(True)
         elif data[0] in _ONEARG_EVENTS:
             handler = comp.get_event_handler(data[0])
             # other events don't need to sync state

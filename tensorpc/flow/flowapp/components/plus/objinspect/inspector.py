@@ -167,17 +167,18 @@ class ObjectInspector(mui.FlexBox):
         if not found:
             raise ValueError(
                 f"your object {uid} is invalid, may need to reflesh")
-        assert obj is not None 
         obj_type = type(obj)
         if obj_type in self._type_to_handler_object:
             handler = self._type_to_handler_object[obj_type]
         else:
             obj_qualname = get_qualname_of_type(type(obj))
             handler_type: Optional[Type[ObjectPreviewHandler]] = None
-            if obj_type in ALL_OBJECT_PREVIEW_HANDLERS:
-                handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_type]
-            elif obj_qualname in ALL_OBJECT_PREVIEW_HANDLERS:
-                handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_qualname]
+            if obj is not None:
+                obj_type = type(obj)
+                if obj_type in ALL_OBJECT_PREVIEW_HANDLERS:
+                    handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_type]
+                elif obj_qualname in ALL_OBJECT_PREVIEW_HANDLERS:
+                    handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_qualname]
             # else:
             #     handler_type = DefaultHandler
             # TODO use a base handler here.
@@ -210,9 +211,10 @@ class ObjectInspector(mui.FlexBox):
             _frame_cnt -= 1
         # del frame
         local_vars = cur_frame.f_locals.copy()
+        frame_name = cur_frame.f_code.co_name
         del frame
         del cur_frame
-        await self.tree.set_object(local_vars, key)
+        await self.tree.set_object(local_vars, key + f"-{frame_name}")
 
     def update_locals_sync(self,
                            key: str = _DEFAULT_LOCALS_NAME,
@@ -230,10 +232,11 @@ class ObjectInspector(mui.FlexBox):
             _frame_cnt -= 1
         # del frame
         local_vars = cur_frame.f_locals.copy()
+        frame_name = cur_frame.f_code.co_name
         del frame
         del cur_frame
         fut = asyncio.run_coroutine_threadsafe(
-            self.tree.set_object(local_vars, key),
+            self.tree.set_object(local_vars, key + f"-{frame_name}"),
             asyncio.get_running_loop())
         if get_app()._flowapp_thread_id == threading.get_ident():
             # we can't wait fut here

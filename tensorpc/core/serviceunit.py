@@ -287,7 +287,10 @@ def get_qualname_to_code(lines_or_source: Union[List[str], str]):
     ssg = SourceSegmentGetter(source)
     for n, nss in nodes:
         ns = ".".join([nx.name for nx in nss])
-        qualname = ns + "." + n.name
+        if ns != "":
+            qualname = ns + "." + n.name
+        else:
+            qualname = n.name
         # TODO this function won't handle decorator
         # here we can't use ast.get_source_segment
         # because it's very slow. we need to cache

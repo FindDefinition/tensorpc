@@ -1,6 +1,7 @@
 import dataclasses
 import enum
 import inspect
+from pathlib import Path, PurePath
 import traceback
 import types
 from functools import partial
@@ -36,6 +37,8 @@ BASE_OBJ_TO_TYPE = {
 }
 
 _GLOBAL_SPLIT = "::"
+
+_IGNORE_ATTR_NAMES = set(["_abc_impl"])
 
 CONTAINER_TYPES = {mui.JsonLikeType.List.value, mui.JsonLikeType.Dict.value}
 FOLDER_TYPES = {
@@ -115,30 +118,38 @@ def parse_obj_item(obj,
         return mui.JsonLikeNode(id, name, t.value, cnt=len(obj), drag=False)
     elif isinstance(obj, np.ndarray):
         t = mui.JsonLikeType.Tensor
+        shape_short = ",".join(map(str, obj.shape))
         return mui.JsonLikeNode(id,
                                 name,
                                 t.value,
                                 typeStr="np.ndarray",
-                                value=f"{obj.shape}|{obj.dtype}",
+                                value=f"[{shape_short}]{obj.dtype}",
                                 drag=True)
     elif get_qualname_of_type(obj_type) == CommonQualNames.TorchTensor:
         t = mui.JsonLikeType.Tensor
+        shape_short = ",".join(map(str, obj.shape))
         return mui.JsonLikeNode(id,
                                 name,
                                 t.value,
                                 typeStr="torch.Tensor",
-                                value=f"{list(obj.shape)}|{obj.dtype}",
+                                value=f"[{shape_short}]{obj.dtype}",
                                 drag=True)
     elif get_qualname_of_type(obj_type) == CommonQualNames.TVTensor:
         t = mui.JsonLikeType.Tensor
+        shape_short = ",".join(map(str, obj.shape))
         return mui.JsonLikeNode(id,
                                 name,
                                 t.value,
                                 typeStr="tv.Tensor",
-                                value=f"{obj.shape}|{obj.dtype}",
+                                value=f"[{shape_short}]{obj.dtype}",
                                 drag=True)
     else:
         t = mui.JsonLikeType.Object
+        value = mui.undefined
+        count = 1 # make object expandable
+        if isinstance(obj, PurePath):
+            count = 0
+            value = str(obj)
         obj_type = type(obj)
         # obj_dict = _get_obj_dict(obj, checker)
         if obj_meta_cache is None:
@@ -169,8 +180,9 @@ def parse_obj_item(obj,
         return mui.JsonLikeNode(id,
                                 name,
                                 t.value,
+                                value=value,
                                 typeStr=obj_type.__qualname__,
-                                cnt=1,
+                                cnt=count,
                                 drag=is_draggable,
                                 iconBtns=[(ButtonType.Reload.value,
                                            mui.IconType.Refresh.value)])
@@ -228,6 +240,8 @@ def _get_obj_dict(obj,
     # member_keys = set([m[0] for m in members])
     for k in dir(obj):
         if k.startswith("__"):
+            continue
+        if k in _IGNORE_ATTR_NAMES:
             continue
         # if k in member_keys:
         #     continue
@@ -378,6 +392,7 @@ class ObjectTree(mui.FlexBox):
         self._cared_types = cared_types
         self._ignored_types = ignored_types
         self._obj_meta_cache = {}
+        self._cared_dnd_uids: Dict[str, Callable[[str, Any], mui.CORO_NONE]] = {}
         self.limit = limit
         default_builtins = {
             _DEFAULT_BUILTINS_NAME: {
@@ -420,6 +435,33 @@ class ObjectTree(mui.FlexBox):
     def _get_obj_by_uid(self, uid: str):
         return _get_obj_by_uid(self.root, uid, self._valid_checker)
 
+    def _register_dnd_uid(self, uid: str, cb: Callable[[str, Any], mui.CORO_NONE]):
+        self._cared_dnd_uids[uid] = cb
+
+    def _unregister_dnd_uid(self, uid: str):
+        if uid in self._cared_dnd_uids:
+            self._cared_dnd_uids.pop(uid)
+
+    def _unregister_all_dnd_uid(self):
+         self._cared_dnd_uids.clear()
+
+    async def _do_when_tree_updated(self, updated_uid: str):
+        # iterate all cared dnd uids
+        # if updated, launch callback to perform dnd
+        deleted: List[str] = []
+        for k, v in self._cared_dnd_uids.items():
+            if k.startswith(updated_uid):
+                obj, found = self._get_obj_by_uid(k)
+                if not found:
+                    # remove from cared
+                    deleted.append(k)
+                else:
+                    res = v(k, obj)
+                    if inspect.iscoroutine(res):
+                        await res
+        for d in deleted:
+            self._cared_dnd_uids.pop(d)
+
     async def _on_drag_collect(self, data):
         uid = data["id"]
         obj, found = _get_obj_by_uid(self.root, uid, self._valid_checker)
@@ -433,7 +475,7 @@ class ObjectTree(mui.FlexBox):
         #     wrapped_obj = obj
         # else:
         #     wrapped_obj = mui.flex_wrapper(obj)
-        return TreeDragTarget(obj, uid, tab_id)
+        return TreeDragTarget(obj, uid, tab_id, self._flow_uid)
 
     async def _on_expand(self, uid: str):
         node = self._objinspect_root._get_node_by_uid(uid)
@@ -503,12 +545,14 @@ class ObjectTree(mui.FlexBox):
         #                                       _ROOT, self._obj_meta_cache)
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
+        await self._do_when_tree_updated(obj_tree.id)
 
     async def update_tree(self):
         self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
                                               _ROOT, self._obj_meta_cache)
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
+        await self._do_when_tree_updated(self.tree.props.tree.id)
 
     async def remove_object(self, key: str):
         assert key in self.root

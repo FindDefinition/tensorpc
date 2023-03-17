@@ -1034,7 +1034,7 @@ class PointCloudApp:
         rots = np.random.uniform(-1, 1, size=[5, 3])
         rots[:, :2] = 0
         colors = ["red", "yellow", "red", "blue", "yellow"]
-        await self.canvas.show_boxes(dims, locs, rots, colors)
+        await self.canvas.show_boxes("key0", dims, locs, rots, colors)
 
         # lines: [N, 2, 3]
         lines = np.random.uniform(-3, 3, size=[10, 2, 3])

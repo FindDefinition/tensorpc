@@ -169,6 +169,22 @@ CSS_COLORS_TO_HEX = {
     "rebeccapurple": "#663399",
 }
 
+RANDOM_COLORS_FOR_UI = [
+    "red",
+    "blue",
+    "yellow",
+    "black",
+    "grey",
+    "aqua",
+    "pink",
+    "purple",
+    "slateblue",
+    "green",
+    "saddlebrown",
+]
+
+CSS_COLORS = list(CSS_COLORS_TO_HEX.keys())
+
 HEX_COLOR_PATTERN = re.compile(r"#(?:[0-9a-fA-F]{3}){1,2}")
 
 

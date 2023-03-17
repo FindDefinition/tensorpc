@@ -2584,6 +2584,9 @@ class JsonLikeNode:
     realId: Union[Undefined, str] = undefined
     start: Union[Undefined, int] = undefined
     keys: Union[Undefined, BackendOnlyProp[List[str]]] = undefined
+    # name color
+    color: Union[Undefined, str] = undefined
+
 
     def _get_node_by_uid(self, uid: str, split: str = "::"):
         """TODO if dict key contains split word, this function will

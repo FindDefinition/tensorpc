@@ -140,6 +140,7 @@ class UIType(enum.Enum):
     ThreeFirstPersonControl = 0x1013
     ThreeTransformControl = 0x1014
     ThreeCameraControl = 0x1015
+    ThreePivotControl = 0x1016
 
     ThreeBoundingBox = 0x1020
     ThreeAxesHelper = 0x1021
@@ -1181,9 +1182,11 @@ class Component(Generic[T_base_props, T_child]):
                           sync_state: bool = False,
                           sent_event: Optional[asyncio.Event] = None):
         if sync_state:
-            ev = self.create_update_event(self.get_sync_props())
-            ev.sent_event = sent_event
-            await self.put_app_event(ev)
+            sync_props = self.get_sync_props()
+            if sync_props:
+                ev = self.create_update_event(self.get_sync_props())
+                ev.sent_event = sent_event
+                await self.put_app_event(ev)
         else:
             ev = self.create_update_event({"status": self.props.status})
             ev.sent_event = sent_event
@@ -1327,6 +1330,12 @@ class ContainerBase(Component[T_container_props, T_child]):
     def __getitem__(self, key: str):
         assert key in self._child_comps, f"{key}, {self._child_comps.keys()}"
         return self._child_comps[key]
+
+    def __contains__(self, key: str):
+        return key in self._child_comps
+    
+    def __len__(self):
+        return len(self._child_comps)
 
     def _get_all_nested_child_recursive(self, name: str, res: List[Component]):
         comp = self[name]

@@ -126,6 +126,18 @@ def find_component(type: Type[T_comp]) -> Optional[T_comp]:
     assert appctx is not None, "you must use this function in app"
     return appctx.app.find_component(type)
 
+def find_all_components(type: Type[T_comp]) -> List[T_comp]:
+    appctx = get_app_context()
+    assert appctx is not None, "you must use this function in app"
+    return appctx.app.find_all_components(type)
+
+def find_component_by_uid(uid: str) -> Optional["Component"]:
+    appctx = get_app_context()
+    assert appctx is not None, "you must use this function in app"
+    try:
+        return appctx.app.root._get_comp_by_uid(uid)
+    except KeyError:
+        return None 
 
 def get_reload_manager():
     appctx = get_app_context()

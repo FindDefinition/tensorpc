@@ -177,7 +177,6 @@ T_o3d_container_prop = TypeVar("T_o3d_container_prop",
 
 
 class Object3dBase(ThreeComponentBase[T_o3d_prop]):
-
     def __init__(self, base_type: UIType, prop_cls: Type[T_o3d_prop]) -> None:
         super().__init__(base_type, prop_cls)
 
@@ -230,7 +229,6 @@ class Object3dBase(ThreeComponentBase[T_o3d_prop]):
 
 
 class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
-
     def __init__(self, base_type: UIType, prop_cls: Type[T_o3d_prop]) -> None:
         super().__init__(base_type, prop_cls)
 
@@ -297,7 +295,6 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
 
 
 class Object3dContainerBase(ThreeContainerBase[T_o3d_container_prop, T_child]):
-
     def __init__(self,
                  base_type: UIType,
                  prop_cls: Type[T_o3d_container_prop],
@@ -356,7 +353,6 @@ class Object3dContainerBase(ThreeContainerBase[T_o3d_container_prop, T_child]):
 
 class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
                                                       T_child]):
-
     def __init__(self,
                  base_type: UIType,
                  prop_cls: Type[T_o3d_container_prop],
@@ -443,7 +439,6 @@ class PointsControlType(enum.Enum):
 
 
 class Points(ThreeComponentBase[PointProps]):
-
     def __init__(self, limit: int) -> None:
         super().__init__(UIType.ThreePoints, PointProps)
         self.props.points = np.zeros((0, 3), np.float32)
@@ -585,7 +580,6 @@ class SegmentsProps(ThreeBasicProps):
 
 
 class Segments(ThreeComponentBase[SegmentsProps]):
-
     def __init__(self,
                  limit: int,
                  line_width: float = 1.0,
@@ -667,7 +661,6 @@ class Boxes2DProps(Object3dBaseProps):
 
 
 class Boxes2D(Object3dWithEventBase[Boxes2DProps]):
-
     def __init__(self, limit: int) -> None:
         super().__init__(UIType.ThreeBoxes2D, Boxes2DProps)
         self.props.centers = np.zeros((0, 2), np.float32)
@@ -773,7 +766,6 @@ class BoundingBoxProps(Object3dBaseProps):
 
 
 class BoundingBox(Object3dWithEventBase[BoundingBoxProps]):
-
     def __init__(self,
                  dimension: Vector3Type,
                  edge_width: float = 1,
@@ -822,7 +814,6 @@ class AxesHelperProps(Object3dBaseProps):
 
 
 class AxesHelper(ThreeComponentBase[AxesHelperProps]):
-
     def __init__(self, length: float) -> None:
         super().__init__(UIType.ThreeAxesHelper, AxesHelperProps)
         self.props.length = length
@@ -847,7 +838,6 @@ class InfiniteGridHelperProps(Object3dBaseProps):
 
 
 class InfiniteGridHelper(ThreeComponentBase[InfiniteGridHelperProps]):
-
     def __init__(self,
                  size1: float,
                  size2: float,
@@ -901,7 +891,6 @@ class ImageProps(Object3dBaseProps):
 
 
 class Image(Object3dWithEventBase[ImageProps]):
-
     def __init__(self) -> None:
         super().__init__(UIType.ThreeImage, ImageProps)
 
@@ -956,7 +945,6 @@ class PerspectiveCameraProps(Object3dBaseProps):
 
 
 class PerspectiveCamera(Object3dBase[PerspectiveCameraProps]):
-
     def __init__(
         self,
         make_default: bool = True,
@@ -1002,7 +990,6 @@ class OrthographicCameraProps(Object3dBaseProps):
 
 
 class OrthographicCamera(Object3dBase[OrthographicCameraProps]):
-
     def __init__(
         self,
         make_default: bool = True,
@@ -1055,6 +1042,7 @@ class OrbitControlProps(ThreeBasicProps):
     enable_pan: Union[bool, Undefined] = undefined
     pan_speed: Union[NumberType, Undefined] = undefined
     key_pan_speed: Union[NumberType, Undefined] = undefined
+    make_default: Union[bool, Undefined] = undefined
 
 
 @dataclasses.dataclass
@@ -1079,9 +1067,10 @@ class CameraControlProps(ThreeBasicProps):
     keyboard_elevate_speed: Union[NumberType, Undefined] = undefined
 
     infinity_dolly: Union[bool, Undefined] = undefined
+    make_default: Union[bool, Undefined] = undefined
+
 
 class MapControl(ThreeComponentBase[OrbitControlProps]):
-
     def __init__(self) -> None:
         super().__init__(UIType.ThreeMapControl, OrbitControlProps)
         self.props.enable_damping = True
@@ -1207,7 +1196,6 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
 
 
 class OrbitControl(ThreeComponentBase[OrbitControlProps]):
-
     def __init__(self) -> None:
         super().__init__(UIType.ThreeOrbitControl, OrbitControlProps)
         self.props.enable_damping = True
@@ -1234,7 +1222,6 @@ class PointerLockControlProps(Object3dBaseProps):
 
 
 class PointerLockControl(ThreeComponentBase[PointerLockControlProps]):
-
     def __init__(self,
                  enabled: Union[bool, Undefined] = undefined,
                  min_polar_angle: Union[float, Undefined] = undefined,
@@ -1275,7 +1262,6 @@ class FirstPersonControlProps(ThreeBasicProps):
 
 
 class FirstPersonControl(ThreeComponentBase[FirstPersonControlProps]):
-
     def __init__(self) -> None:
         super().__init__(UIType.ThreeFirstPersonControl,
                          FirstPersonControlProps)
@@ -1292,7 +1278,6 @@ class FirstPersonControl(ThreeComponentBase[FirstPersonControlProps]):
 
 
 class FlexAutoReflow(ThreeComponentBase[ThreeBasicProps]):
-
     def __init__(self) -> None:
         super().__init__(UIType.ThreeFlexAutoReflow, ThreeBasicProps)
 
@@ -1313,7 +1298,6 @@ class FlexManualReflowProps(ThreeBasicProps):
 
 
 class FlexManualReflow(ThreeComponentBase[FlexManualReflowProps]):
-
     def __init__(self) -> None:
         super().__init__(UIType.ThreeFlexManualReflow, FlexManualReflowProps)
 
@@ -1342,8 +1326,8 @@ class ScreenShot(ThreeComponentBase[ScreenShotProps]):
     2. get image and userdata you provided from callback.
     currently impossible to get image from one function call.
     """
-
-    def __init__(self, callback: Callable[[Tuple[str, Any]], _CORO_NONE]) -> None:
+    def __init__(self, callback: Callable[[Tuple[str, Any]],
+                                          _CORO_NONE]) -> None:
         super().__init__(UIType.ThreeScreenShot, ScreenShotProps)
         self.register_event_handler(FrontendEventType.Change.value, callback)
 
@@ -1364,18 +1348,23 @@ class ScreenShot(ThreeComponentBase[ScreenShotProps]):
         # check data is can be converted to json
         x = json.dumps(data)
         assert len(x) < 1000 * 1000
-        await self.send_and_wait(self.create_comp_event({
-            "type": 0,
-            "data": data,
-        }))
+        await self.send_and_wait(
+            self.create_comp_event({
+                "type": 0,
+                "data": data,
+            }))
 
     async def handle_event(self, ev: EventType):
         return await handle_standard_event(self, ev, sync_first=True)
 
+
 class _PendingState:
-    def __init__(self, ev: asyncio.Event, result: Optional[Any] = None)  -> None:
+    def __init__(self,
+                 ev: asyncio.Event,
+                 result: Optional[Any] = None) -> None:
         self.ev = ev
         self.result = result
+
 
 class ScreenShotSyncReturn(ThreeComponentBase[ScreenShotProps]):
     """a special ui to get screen shot. steps:
@@ -1383,10 +1372,10 @@ class ScreenShotSyncReturn(ThreeComponentBase[ScreenShotProps]):
     2. get image and userdata you provided from callback.
     currently impossible to get image from one function call.
     """
-
     def __init__(self) -> None:
         super().__init__(UIType.ThreeScreenShot, ScreenShotProps)
-        self.register_event_handler(FrontendEventType.Change.value, self._on_callback)
+        self.register_event_handler(FrontendEventType.Change.value,
+                                    self._on_callback)
         self._pending_rpc: Dict[int, _PendingState] = {}
         self._uid_index = 0
 
@@ -1409,17 +1398,18 @@ class ScreenShotSyncReturn(ThreeComponentBase[ScreenShotProps]):
 
     async def get_screen_shot(self, timeout=2):
         uid = self._uid_index % JS_MAX_SAFE_INT
-        await self.send_and_wait(self.create_comp_event({
-            "type": 0,
-            "data": uid,
-        }))
+        await self.send_and_wait(
+            self.create_comp_event({
+                "type": 0,
+                "data": uid,
+            }))
         self._uid_index += 1
         ev = asyncio.Event()
-        self._pending_rpc[uid] = _PendingState(ev, None) 
+        self._pending_rpc[uid] = _PendingState(ev, None)
         try:
             await asyncio.wait_for(ev.wait(), timeout=timeout)
             res = self._pending_rpc.pop(uid).result
-            assert res is not None 
+            assert res is not None
             if isinstance(res, bytes):
                 return res
             return urllib.request.urlopen(res).read()
@@ -1427,11 +1417,10 @@ class ScreenShotSyncReturn(ThreeComponentBase[ScreenShotProps]):
             if uid in self._pending_rpc:
                 self._pending_rpc.pop(uid)
             raise
-            
-
 
     async def handle_event(self, ev: EventType):
         return await handle_standard_event(self, ev, sync_first=True)
+
 
 @dataclasses.dataclass
 class ThreeCanvasProps(MUIFlexBoxProps):
@@ -1439,8 +1428,8 @@ class ThreeCanvasProps(MUIFlexBoxProps):
     allow_keyboard_event: Union[bool, Undefined] = undefined
     tab_index: Union[int, Undefined] = undefined
 
-class ThreeCanvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
 
+class ThreeCanvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
     def __init__(self,
                  children: Union[List[ThreeComponentType],
                                  Dict[str, ThreeComponentType]],
@@ -1481,7 +1470,6 @@ class TransformControlsProps(ContainerBaseProps):
 
 
 class TransformControls(ThreeComponentBase[TransformControlsProps]):
-
     def __init__(self) -> None:
         super().__init__(UIType.ThreeTransformControl, TransformControlsProps)
 
@@ -1506,7 +1494,6 @@ class ThreeFlexProps(R3FlexPropsBase, ContainerBaseProps):
 
 
 class Flex(ThreeContainerBase[ThreeFlexProps, ThreeComponentType]):
-
     def __init__(self,
                  children: Dict[str, ThreeComponentType],
                  uid_to_comp: Optional[Dict[str, Component]] = None,
@@ -1531,7 +1518,6 @@ class ThreeFlexItemBoxProps(R3FlexPropsBase, ContainerBaseProps):
 
 
 class ItemBox(ThreeContainerBase[ThreeFlexItemBoxProps, ThreeComponentType]):
-
     def __init__(self,
                  children: Dict[str, ThreeComponentType],
                  uid_to_comp: Optional[Dict[str, Component]] = None,
@@ -1589,7 +1575,6 @@ class Html(Object3dContainerBase[HtmlProps, MUIComponentType]):
     """we can use MUI components only in Html.
     TODO reject invalid component
     """
-
     def __init__(self,
                  children: Dict[str, MUIComponentType],
                  uid_to_comp: Optional[Dict[str, Component]] = None,
@@ -1645,7 +1630,6 @@ class TextProps(Object3dBaseProps):
 
 
 class Text(Object3dWithEventBase[TextProps]):
-
     def __init__(self, init: str) -> None:
         super().__init__(UIType.ThreeText, TextProps)
         self.props.value = init
@@ -1685,7 +1669,6 @@ class LineProps(Object3dBaseProps):
 
 
 class Line(Object3dWithEventBase[LineProps]):
-
     def __init__(
         self, points: Union[np.ndarray, List[Tuple[NumberType, NumberType,
                                                    NumberType]]]
@@ -1715,7 +1698,6 @@ class Line(Object3dWithEventBase[LineProps]):
 
 
 class ArrowXYMeasure(Group):
-
     def __init__(self,
                  p1: Tuple[NumberType, NumberType],
                  p2: Tuple[NumberType, NumberType],
@@ -1814,7 +1796,6 @@ class PathShapeProps(ThreeGeometryPropsBase):
 
 
 class Shape:
-
     def __init__(self) -> None:
         self.ops: List[Tuple[int, List[Union[float, bool]]]] = []
 
@@ -1853,7 +1834,6 @@ class Shape:
 
 
 class ShapeGeometry(ThreeGeometryBase[PathShapeProps]):
-
     def __init__(self, shape: Shape) -> None:
         super().__init__(UIType.ThreeShape, PathShapeProps)
         self.props.path_ops = shape.ops
@@ -1895,7 +1875,6 @@ def _rounded_shape_v2(x: float, y: float, w: float, h: float, r: float):
 
 
 class RoundedRectGeometry(ShapeGeometry):
-
     def __init__(self, width: float, height: float, radius: float) -> None:
         shape = _rounded_shape(-width / 2, -height / 2, width, height, radius)
         super().__init__(shape)
@@ -1912,7 +1891,6 @@ class RoundedRectGeometry(ShapeGeometry):
 
 
 class SimpleGeometry(ThreeGeometryBase[SimpleGeometryProps]):
-
     def __init__(self, type: GeometryType, args: List[Union[int, float,
                                                             bool]]) -> None:
         super().__init__(UIType.ThreeSimpleGeometry, SimpleGeometryProps)
@@ -1931,7 +1909,6 @@ class SimpleGeometry(ThreeGeometryBase[SimpleGeometryProps]):
 
 
 class BoxGeometry(SimpleGeometry):
-
     def __init__(self,
                  width: float = 1,
                  height: float = 1,
@@ -1947,7 +1924,6 @@ class BoxGeometry(SimpleGeometry):
 
 
 class CapsuleGeometry(SimpleGeometry):
-
     def __init__(self,
                  radius: float = 1,
                  length: float = 1,
@@ -1960,7 +1936,6 @@ class CapsuleGeometry(SimpleGeometry):
 
 
 class CircleGeometry(SimpleGeometry):
-
     def __init__(self,
                  radius: float = 1,
                  segments: int = 8,
@@ -1973,7 +1948,6 @@ class CircleGeometry(SimpleGeometry):
 
 
 class ConeGeometry(SimpleGeometry):
-
     def __init__(self,
                  radius: float = 1,
                  height: float = 1,
@@ -2044,7 +2018,6 @@ class MeshToonMaterialProps(ThreeMaterialPropsBase):
 
 
 class MeshBasicMaterial(ThreeMaterialBase[MeshBasicMaterialProps]):
-
     def __init__(self) -> None:
         super().__init__(UIType.ThreeMeshMaterial, MeshBasicMaterialProps)
         self.props.material_type = MeshMaterialType.Basic.value
@@ -2061,7 +2034,6 @@ class MeshBasicMaterial(ThreeMaterialBase[MeshBasicMaterialProps]):
 
 
 class MeshStandardMaterial(ThreeMaterialBase[MeshStandardMaterialProps]):
-
     def __init__(self) -> None:
         super().__init__(UIType.ThreeMeshMaterial, MeshStandardMaterialProps)
         self.props.material_type = MeshMaterialType.Standard.value
@@ -2078,7 +2050,6 @@ class MeshStandardMaterial(ThreeMaterialBase[MeshStandardMaterialProps]):
 
 
 class MeshLambertMaterial(ThreeMaterialBase[MeshLambertMaterialProps]):
-
     def __init__(self, ) -> None:
         super().__init__(UIType.ThreeMeshMaterial, MeshLambertMaterialProps)
         self.props.material_type = MeshMaterialType.Lambert.value
@@ -2095,7 +2066,6 @@ class MeshLambertMaterial(ThreeMaterialBase[MeshLambertMaterialProps]):
 
 
 class MeshMatcapMaterial(ThreeMaterialBase[MeshMatcapMaterialProps]):
-
     def __init__(self, ) -> None:
         super().__init__(UIType.ThreeMeshMaterial, MeshMatcapMaterialProps)
         self.props.material_type = MeshMaterialType.Matcap.value
@@ -2112,7 +2082,6 @@ class MeshMatcapMaterial(ThreeMaterialBase[MeshMatcapMaterialProps]):
 
 
 class MeshNormalMaterial(ThreeMaterialBase[MeshNormalMaterialProps]):
-
     def __init__(self, ) -> None:
         super().__init__(UIType.ThreeMeshMaterial, MeshNormalMaterialProps)
         self.props.material_type = MeshMaterialType.Normal.value
@@ -2129,7 +2098,6 @@ class MeshNormalMaterial(ThreeMaterialBase[MeshNormalMaterialProps]):
 
 
 class MeshPhongMaterial(ThreeMaterialBase[MeshPhongMaterialProps]):
-
     def __init__(self, ) -> None:
         super().__init__(UIType.ThreeMeshMaterial, MeshPhongMaterialProps)
         self.props.material_type = MeshMaterialType.Phong.value
@@ -2146,7 +2114,6 @@ class MeshPhongMaterial(ThreeMaterialBase[MeshPhongMaterialProps]):
 
 
 class MeshPhysicalMaterial(ThreeMaterialBase[MeshPhysicalMaterialProps]):
-
     def __init__(self, ) -> None:
         super().__init__(UIType.ThreeMeshMaterial, MeshPhysicalMaterialProps)
         self.props.material_type = MeshMaterialType.Physical.value
@@ -2163,7 +2130,6 @@ class MeshPhysicalMaterial(ThreeMaterialBase[MeshPhysicalMaterialProps]):
 
 
 class MeshToonMaterial(ThreeMaterialBase[MeshToonMaterialProps]):
-
     def __init__(self, ) -> None:
         super().__init__(UIType.ThreeMeshMaterial, MeshToonMaterialProps)
         self.props.material_type = MeshMaterialType.Toon.value
@@ -2192,7 +2158,6 @@ class MeshProps(Object3dContainerBaseProps):
 
 
 class Mesh(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
-
     def __init__(self,
                  geometry: ThreeGeometryBase,
                  material: ThreeMaterialBase,
@@ -2265,7 +2230,6 @@ class Hud(ThreeContainerBase[HudProps, ThreeComponentType]):
 
 
 class ShapeButton(Group):
-
     def __init__(self, name: str, shape: Shape, font_size: NumberType,
                  text_max_width: NumberType,
                  callback: Callable[[Any], _CORO_ANY]) -> None:
@@ -2323,7 +2287,6 @@ class ShapeButton(Group):
 
 
 class Button(Group):
-
     def __init__(self,
                  name: str,
                  width: float,
@@ -2377,7 +2340,6 @@ class Button(Group):
 
 
 class ToggleButton(Group):
-
     def __init__(self,
                  name: str,
                  width: float,
@@ -2435,3 +2397,59 @@ class ToggleButton(Group):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+
+@dataclasses.dataclass
+class PivotControlsProps(ContainerBaseProps):
+    offset: Union[Vector3Type, Undefined] = undefined
+    rotation: Union[Vector3Type, Undefined] = undefined
+
+    scale: Union[NumberType, Undefined] = undefined
+    line_width: Union[NumberType, Undefined] = undefined
+    fixed: Union[bool, Undefined] = undefined
+    matrix: Union[List[float], Undefined] = undefined
+    anchor: Union[Vector3Type, Undefined] = undefined
+    auto_transform: Union[bool, Undefined] = undefined
+    active_axes: Union[Tuple[bool, bool, bool], Undefined] = undefined
+    axis_colors: Union[Tuple[ValueType, ValueType, ValueType],
+                       Undefined] = undefined
+    hovered_color: Union[ValueType, Undefined] = undefined
+    depth_test: Union[bool, Undefined] = undefined
+    opacity: Union[float, Undefined] = undefined
+    visible: Union[bool, Undefined] = undefined
+    annotations: Union[bool, Undefined] = undefined
+
+
+class PivotControls(ThreeContainerBase[PivotControlsProps,
+                                       ThreeComponentType]):
+    def __init__(self,
+                 children: Optional[Union[Dict[str, ThreeComponentType],
+                                          List[ThreeComponentType]]] = None,
+                 callback: Optional[Callable[[bool], _CORO_ANY]] = None,
+                 debounce: float = 100) -> None:
+        if children is None:
+            children = []
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+
+        super().__init__(UIType.ThreePivotControl,
+                         PivotControlsProps,
+                         allowed_events=[FrontendEventType.Change.value],
+                         _children=children)
+        if callback is not None:
+            self.register_event_handler(FrontendEventType.Change.value,
+                                        callback,
+                                        debounce=debounce)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def handle_event(self, ev: EventType):
+        return await handle_standard_event(self, ev, sync_first=True)

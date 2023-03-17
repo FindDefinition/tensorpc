@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 import inspect
 import time
-from tensorpc.flow.flowapp.appcore import get_app_context, get_app, find_component, get_reload_manager, enter_app_conetxt
+from tensorpc.flow.flowapp.appcore import get_app_context, get_app, find_component, get_reload_manager, enter_app_conetxt, find_component_by_uid
 from tensorpc.flow.flowapp.components import plus
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
