@@ -176,11 +176,24 @@ class _LayoutObserveMeta:
     qualname_prefix: str
     metas: List[ServFunctionMeta]
     callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta], Coroutine[None, None, mui.FlexBox]]]
+    
+@dataclasses.dataclass
+class _ObjectObserveMeta:
+    obj: Any
+    qualname_prefix: str
+    metas: List[ServFunctionMeta]
+    autorun_name: str
 
 @dataclasses.dataclass
 class _WatchDogWatchEntry:
     obmetas: List[_LayoutObserveMeta]
     watch: Optional[ObservedWatch]
+
+@dataclasses.dataclass
+class _WatchDogObjWatchEntry:
+    obmetas: List[_ObjectObserveMeta]
+    watch: Optional[ObservedWatch]
+
 
 class App:
     """
@@ -195,7 +208,8 @@ class App:
                  align_items: Union[str, Undefined] = undefined,
                  maxqsize: int = 10,
                  enable_value_cache: bool = False,
-                 external_root: Optional[mui.FlexBox] = None) -> None:
+                 external_root: Optional[mui.FlexBox] = None,
+                 external_wrapped_obj: Optional[Any] = None) -> None:
         # self._uid_to_comp: Dict[str, Component] = {}
         self._queue: "asyncio.Queue[AppEvent]" = asyncio.Queue(
             maxsize=maxqsize)
@@ -208,6 +222,7 @@ class App:
                                                          None]]] = None
         self._is_external_root = False
         self._use_app_editor = False
+        # self.__flowapp_external_wrapped_obj = external_wrapped_obj
         if external_root is not None:
             # TODO better mount
             root = external_root
@@ -219,6 +234,7 @@ class App:
             # layout saved in external_root
             # self._uid_to_comp = root._uid_to_comp
             root._attach(_ROOT, self._flow_app_comp_core)
+            
             self._is_external_root = True
         else:
             root = mui.FlexBox(inited=True,
@@ -227,6 +243,10 @@ class App:
             root.prop(flex_flow=flex_flow,
                       justify_content=justify_content,
                       align_items=align_items)
+            if external_wrapped_obj is not None:
+                root._wrapped_obj = external_wrapped_obj
+                self._is_external_root = True
+
         # self._uid_to_comp[_ROOT] = root
         self.root = root.prop(min_height=0, min_width=0)
         self._enable_editor = False
@@ -257,6 +277,9 @@ class App:
         self.__flow_hold_context: Optional[HoldContext] = None
         # for app and dynamic layout in AnyFlexLayout
         self._flowapp_change_observers: Dict[str, _WatchDogWatchEntry] = {}
+        self._flowapp_obj_change_observers: Dict[str, _WatchDogObjWatchEntry] = {}
+
+        self._flowapp_is_inited: bool = False
 
     @property
     def hold_context(self):
@@ -786,12 +809,14 @@ class EditableApp(App):
                  align_items: Union[str, Undefined] = undefined,
                  maxqsize: int = 10,
                  observed_files: Optional[List[str]] = None,
-                 external_root: Optional[mui.FlexBox] = None) -> None:
+                 external_root: Optional[mui.FlexBox] = None,
+                 external_wrapped_obj: Optional[Any] = None) -> None:
         super().__init__(flex_flow,
                          justify_content,
                          align_items,
                          maxqsize,
-                         external_root=external_root)
+                         external_root=external_root,
+                         external_wrapped_obj=external_wrapped_obj)
         self._use_app_editor = use_app_editor
         if use_app_editor:
             obj = type(self._get_user_app_object())
@@ -806,11 +831,15 @@ class EditableApp(App):
             self._app_force_use_layout_function()
         self._flow_observed_files = observed_files
 
+        self.__flow_obj_observes: List[Tuple[Any, str]] = []
+
     def app_initialize(self):
         dcls = self._get_app_dynamic_cls()
         path = dcls.file_path
         user_obj = self._get_user_app_object()
         metas = self._flow_reload_manager.query_type_method_meta(type(user_obj))
+        for m in metas:
+            m.bind(user_obj)
         qualname_prefix = type(user_obj).__qualname__
         obentry = _WatchDogWatchEntry([
             _LayoutObserveMeta(self, qualname_prefix, metas, None)
@@ -838,6 +867,8 @@ class EditableApp(App):
                 observer.schedule(self._watchdog_watcher, p, recursive=False)
             observer.start()
             self._watchdog_observer = observer
+            for obj, autorun_name in self.__flow_obj_observes:
+                self._flowapp_object_observe_core(obj, autorun_name)
         else:
             self._flowapp_code_mgr = None
         self._watchdog_ignore_next = False
@@ -862,12 +893,56 @@ class EditableApp(App):
                                                     False)
             obentry.watch = watch 
         assert self._flowapp_code_mgr is not None
-        self._flowapp_code_mgr._add_new_code(path)
+        if not self._flowapp_code_mgr._check_path_exists(path):
+            self._flowapp_code_mgr._add_new_code(path)
         user_obj = obj._get_user_object()
         metas = self._flow_reload_manager.query_type_method_meta(type(obj._get_user_object()))
         qualname_prefix = type(user_obj).__qualname__
         obmeta = _LayoutObserveMeta(obj, qualname_prefix, metas, callback)
         obentry.obmetas.append(obmeta)
+
+    def _flowapp_object_observe_core(self,
+                         obj: Any,
+                         autorun_name: str):
+        # TODO better error msg if app editable not enabled
+        try:
+            path = inspect.getfile(type(obj))
+            assert path != "" and self._watchdog_observer is not None
+            path_resolved = str(Path(path).resolve())
+            if path_resolved not in self._flowapp_obj_change_observers:
+                self._flowapp_obj_change_observers[path_resolved] = _WatchDogObjWatchEntry([], None)
+            obentry = self._flowapp_obj_change_observers[path_resolved]
+            if len(obentry.obmetas) == 0:
+                # no need to schedule watchdog.
+                watch = self._watchdog_observer.schedule(self._watchdog_watcher, path,
+                                                        False)
+                obentry.watch = watch 
+            else:
+                for obmeta in obentry.obmetas:
+                    if obmeta.obj is obj:
+                        # already registered.
+                        return 
+            assert self._flowapp_code_mgr is not None
+            if not self._flowapp_code_mgr._check_path_exists(path):
+                self._flowapp_code_mgr._add_new_code(path)
+            user_obj = obj
+            metas = self._flow_reload_manager.query_type_method_meta(type(obj))
+            qualname_prefix = type(user_obj).__qualname__
+            obmeta = _ObjectObserveMeta(obj, qualname_prefix, metas, autorun_name)
+            obentry.obmetas.append(obmeta)
+        except:
+            traceback.print_exc()
+            return
+
+
+    def _flowapp_object_observe(self,
+                         obj: Any,
+                         autorun_name: str):
+        # TODO better error msg if app editable not enabled
+        if not self._flowapp_is_inited:
+            self.__flow_obj_observes.append((obj, autorun_name))
+            return 
+        return self._flowapp_object_observe_core(obj, autorun_name)
 
     def _flowapp_remove_observer(self,
                          obj: mui.FlexBox):
@@ -875,12 +950,29 @@ class EditableApp(App):
         assert path != "" and self._watchdog_observer is not None
         path_resolved = str(Path(path).resolve())
         assert self._flowapp_code_mgr is not None
-        self._flowapp_code_mgr._remove_path(path)
+        # self._flowapp_code_mgr._remove_path(path)
         if path_resolved in self._flowapp_change_observers:
             obentry = self._flowapp_change_observers[path_resolved]
             new_obmetas: List[_LayoutObserveMeta] = []
             for obmeta in obentry.obmetas:
                 if obj is not obmeta.layout:
+                    new_obmetas.append(obmeta)
+            obentry.obmetas = new_obmetas
+            if len(new_obmetas) == 0 and obentry.watch is not None:
+                self._watchdog_observer.unschedule(obentry.watch)
+
+    def _flowapp_remove_obj_observer(self,
+                         obj: Any):
+        path = inspect.getfile(type(obj))
+        assert path != "" and self._watchdog_observer is not None
+        path_resolved = str(Path(path).resolve())
+        assert self._flowapp_code_mgr is not None
+        # self._flowapp_code_mgr._remove_path(path)
+        if path_resolved in self._flowapp_obj_change_observers:
+            obentry = self._flowapp_obj_change_observers[path_resolved]
+            new_obmetas: List[_ObjectObserveMeta] = []
+            for obmeta in obentry.obmetas:
+                if obj is not obmeta.obj:
                     new_obmetas.append(obmeta)
             obentry.obmetas = new_obmetas
             if len(new_obmetas) == 0 and obentry.watch is not None:
@@ -959,6 +1051,25 @@ class EditableApp(App):
         callbacks_of_this_file: Optional[List[_CompReloadMeta]] = None
         
         try:
+            autorun_names_queued: Set[str] = set()
+
+            if resolved_path in self._flowapp_obj_change_observers:
+                obmetas = self._flowapp_obj_change_observers[resolved_path].obmetas
+                for obmeta in obmetas:
+                    # get changed metas for special methods
+                    # print(new, change)
+                    changed_metas: List[ServFunctionMeta] = []
+                    for m in obmeta.metas:
+                        if m.qualname in change:
+                            changed_metas.append(m)
+                    new_method_names: List[str] = [x for x in new if x.startswith(obmeta.qualname_prefix) and x != obmeta.qualname_prefix]
+                    do_reload = changed_metas or new_method_names
+                    if do_reload:
+                        new_metas, is_reload = reload_object_methods(
+                            obmeta.obj, reload_mgr=self._flow_reload_manager)
+                        if new_metas is not None:
+                            autorun_names_queued.add(obmeta.autorun_name)
+                            obmeta.metas = new_metas
             if resolved_path in self._flowapp_change_observers:
                 obmetas = self._flowapp_change_observers[resolved_path].obmetas
                 for obmeta in obmetas:
@@ -1016,12 +1127,16 @@ class EditableApp(App):
                     # print("RTX", changed_user_obj, new_method_names)
                     if changed_user_obj is not None:
                         reload_res = self._flow_reload_manager.reload_type(type(changed_user_obj))
-                        is_reload = reload_res.is_reload
+                        if not is_reload:
+                            is_reload = reload_res.is_reload
                         updated_type = reload_res.type_meta.get_local_type_from_module_dict(reload_res.module_entry.module_dict)
                         # recreate metas with new type and new qualname_to_code
                         # TODO handle special methods in mro
                         updated_metas = self._flow_reload_manager.query_type_method_meta(updated_type)
                         obmeta.metas = updated_metas
+                        print("CHANGED USER OBJ")
+                        for m in updated_metas:
+                            m.bind(changed_user_obj)
                         changed_metas = [m for m in updated_metas if m.qualname in change]
                         changed_metas += [m for m in updated_metas if m.qualname in new]
                         for c in changed_metas:
@@ -1071,10 +1186,28 @@ class EditableApp(App):
                                 # dynamic layout
                         for auto_run in flow_special.auto_runs:
                             if auto_run is not None:
+                                if layout is self and auto_run.name in autorun_names_queued:
+                                    autorun_names_queued.remove(auto_run.name)
                                 await self._run_autorun(
                                         auto_run.get_binded_fn())
                     # handle special methods
 
+            if resolved_path in self._flowapp_obj_change_observers:
+                dcls = self._get_app_dynamic_cls()
+                path = dcls.file_path
+                with _enter_app_conetxt(self):
+                    app_obmetas = self._flowapp_change_observers[path].obmetas
+                    for meta in app_obmetas:
+                        if meta.layout is self:
+                            metas = meta.metas
+                            for m in metas:
+                                assert m.is_binded
+                            flow_special = FlowSpecialMethods(metas)
+                            for auto_run in flow_special.auto_runs:
+                                if auto_run is not None and auto_run.name in autorun_names_queued:
+                                    await self._run_autorun(
+                                            auto_run.get_binded_fn())
+            
             if is_callback_change or is_reload:
                 # reset all callbacks in this file
                 if callbacks_of_this_file is None:
@@ -1088,6 +1221,7 @@ class EditableApp(App):
                         new_method, _ = reload_method(cb, reload_res.module_entry.module_dict)
                         if new_method is not None:
                             handler.cb = new_method
+
         except:
             # watchdog thread can't fail
             traceback.print_exc()

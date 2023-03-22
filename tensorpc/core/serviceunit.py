@@ -158,6 +158,7 @@ class ServFunctionMeta:
             else:
                 new_method = self.fn
             self.binded_fn = new_method
+            self.is_binded = True
             return self.binded_fn
         assert self.binded_fn is not None
         return self.binded_fn
@@ -465,12 +466,16 @@ class SimpleCodeManager:
         for path in paths:
             self._add_new_code(path)
 
+    def _check_path_exists(self, path: str):
+        resolved_path = str(Path(path).resolve())
+        return resolved_path in self.file_to_entry
+
     def _add_new_code(self, path: str):
         resolved_path = str(Path(path).resolve())
         with tokenize.open(resolved_path) as f:
             code = f.read().strip()
         qualname_to_code = get_qualname_to_code(code)
-        self.file_to_entry[path] = SimpleCodeEntry(code, qualname_to_code)
+        self.file_to_entry[resolved_path] = SimpleCodeEntry(code, qualname_to_code)
 
     def _remove_path(self, path: str):
         resolved_path = str(Path(path).resolve())
@@ -770,6 +775,7 @@ class ServiceUnit(DynamicClass):
         self.services: Dict[str, ServFunctionMeta] = {}
         self.exit_fn: Optional[Any] = None
         self._is_exit_fn_async: bool = False
+        self._is_exit_fn_binded = False
         self.ws_onconn_fn: Optional[Callable[[Any], None]] = None
         self.async_init: Optional[Callable[[], Coroutine[None, None,
                                                          None]]] = None
@@ -899,7 +905,9 @@ class ServiceUnit(DynamicClass):
             else:
                 assert self.obj is not None
             if self.exit_fn is not None:
+                # TODO if exit fn is static
                 self.exit_fn = types.MethodType(self.exit_fn, self.obj)
+                self._is_exit_fn_binded = True 
             if self.async_init is not None:
                 self.async_init = types.MethodType(self.async_init, self.obj)
             if self.ws_onconn_fn is not None:
@@ -963,14 +971,14 @@ class ServiceUnit(DynamicClass):
             await self.async_init()
 
     async def run_exit(self):
-        if self.exit_fn is not None:
+        if self.exit_fn is not None and self._is_exit_fn_binded:
             if self._is_exit_fn_async:
                 await self.exit_fn()
             else:
                 self.exit_fn()
 
     def run_exit_sync(self):
-        if self.exit_fn is not None:
+        if self.exit_fn is not None and self._is_exit_fn_binded:
             if self._is_exit_fn_async:
                 return
             else:

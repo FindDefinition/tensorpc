@@ -516,8 +516,13 @@ class Points(ThreeComponentBase[PointProps]):
         assert points.ndim == 2 and points.shape[1] in [
             3, 4
         ], "only support 3 or 4 features for points"
-        assert points.shape[
-            0] <= self.props.limit, f"your points size must smaller than limit {self.props.limit}"
+        if limit is not None:
+            assert points.shape[
+                0] <= limit, f"your points size {points.shape[0]} must smaller than limit {limit}"
+        else:
+            assert points.shape[
+                0] <= self.props.limit, f"your points size {points.shape[0]} must smaller than limit {self.props.limit}"
+
         assert points.dtype == np.float32, "only support fp32 points"
         if points.shape[1] == 4 and colors is None:
             colors = points[:, 3].astype(np.uint8)

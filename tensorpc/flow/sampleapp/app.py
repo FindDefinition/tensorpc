@@ -1019,15 +1019,16 @@ class PointCloudApp:
         # 1. [N, 3] float, value range: [0, 1]
         # 2. [N], int8 (intensity), value range: [0, 255]
         # 3. a color string, e.g. red, green
-        colors = np.random.uniform(0, 1, size=[1000, 3]).astype(np.float32)
+        colors = np.random.uniform(254, 255, size=[1000]).astype(np.uint8)
+        print(colors)
+        # colors = np.random.uniform(254, 255, size=[1000]).astype(np.uint8)
         sizes = np.random.uniform(0.5, 10.5, size=[1000]).astype(
             np.float32) * 1
 
         await self.canvas.show_points("key0",
                                       points,
                                       limit=100000,
-                                      colors=colors,
-                                      sizes=sizes)
+                                      colors=colors)
         # boxes: dims, locs, rots, colors (string list, don't support ndarray currently)
         dims = np.random.uniform(1, 2, size=[5, 3])
         locs = np.random.uniform(-5, 5, size=[5, 3])

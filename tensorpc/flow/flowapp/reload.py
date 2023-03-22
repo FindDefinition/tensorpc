@@ -80,21 +80,27 @@ def reload_object_methods(
     obj_type = type(obj)
     tmeta = get_obj_type_meta(obj_type)
     if tmeta is None:
-        return None
+        return None, False
     qualname_to_code: Dict[str, str] = {}
+    is_reload = False
     if reload_mgr is not None:
         res = reload_mgr.reload_type(type(obj))
+        is_reload = res.is_reload
         module_dict = res.module_entry.module_dict
         if res.file_entry.qualname_to_code is not None:
             qualname_to_code = res.file_entry.qualname_to_code
     else:
         module_dict = tmeta.get_reloaded_module_dict()
+        is_reload = True
     if module_dict is None:
-        return None
+        return None, False
     new_obj_type = tmeta.get_local_type_from_module_dict(module_dict)
-    new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
-        new_obj_type, qualname_to_code=qualname_to_code)
-    code_changed_metas: List[ServFunctionMeta] = []
+    if reload_mgr is not None:
+        new_metas = reload_mgr.query_type_method_meta(new_obj_type)
+    else:
+        new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
+            new_obj_type, qualname_to_code=qualname_to_code)
+    # code_changed_metas: List[ServFunctionMeta] = []
     # print(new_metas)
     if previous_metas is not None:
         name_to_meta = {m.name: m for m in previous_metas}
@@ -105,12 +111,12 @@ def reload_object_methods(
         if new_meta.name in name_to_meta:
             meta = name_to_meta[new_meta.name]
             setattr(obj, new_meta.name, new_method)
-            if new_meta.code != meta.code:
-                code_changed_metas.append(new_meta)
+            # if new_meta.code != meta.code:
+            #     code_changed_metas.append(new_meta)
         else:
             setattr(obj, new_meta.name, new_method)
-            code_changed_metas.append(new_meta)
-    return code_changed_metas
+            # code_changed_metas.append(new_meta)
+    return new_metas, is_reload
 
 def bind_and_reset_object_methods(
         obj: Any,

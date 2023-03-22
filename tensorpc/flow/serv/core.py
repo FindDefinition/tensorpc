@@ -1439,7 +1439,7 @@ async def _get_free_port(count: int,
             print("-----------")
             print(e.stderr)
             stderr = e.stderr
-            raise e
+            raise ValueError(e.stderr)
     return ports
 
 

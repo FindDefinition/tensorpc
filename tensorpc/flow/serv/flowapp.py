@@ -73,8 +73,9 @@ class FlowApp:
             self.app: App = EditableApp(external_root=external_root)
         else:
             # other object, must declare a tensorpc_flow_layout
-            external_root = flex_wrapper(obj)
-            self.app: App = EditableApp(external_root=external_root)
+            # external_root = flex_wrapper(obj)
+            self.app: App = EditableApp(external_wrapped_obj=obj)
+            self.app._app_force_use_layout_function()
         self.app._flow_reload_manager = reload_mgr
         self.app_su = ServiceUnit(module_name, config)
         self.app_su.init_service(obj)
@@ -102,6 +103,7 @@ class FlowApp:
         lay = self.app._get_app_layout()
         self.app.app_initialize()
         await self.app.app_initialize_async()
+        self.app._flowapp_is_inited = True
         await self._send_loop_queue.put(
             AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)}))
         # TODO should we just use grpc client to query init state here?

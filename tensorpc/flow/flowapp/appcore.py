@@ -17,7 +17,7 @@ from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
                                     is_valid_function)
 
 if TYPE_CHECKING:
-    from .app import App
+    from .app import App, EditableApp
     from .core import Component
 
 CORO_NONE = Union[Coroutine[None, None, None], None]
@@ -99,11 +99,15 @@ def get_app_context() -> Optional[AppContext]:
     return APP_CONTEXT_VAR.get()
 
 
+def get_editable_app() -> "EditableApp":
+    ctx = get_app_context()
+    assert ctx is not None and ctx.is_editable_app()
+    return ctx.app # type: ignore
+
 def get_app() -> "App":
     ctx = get_app_context()
     assert ctx is not None
     return ctx.app
-
 
 @contextlib.contextmanager
 def enter_app_conetxt(app: "App"):

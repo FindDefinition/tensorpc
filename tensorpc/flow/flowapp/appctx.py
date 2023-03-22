@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 import inspect
 import time
-from tensorpc.flow.flowapp.appcore import get_app_context, get_app, find_component, get_reload_manager, enter_app_conetxt, find_component_by_uid
+from tensorpc.flow.flowapp.appcore import get_app_context, get_app, get_editable_app, find_component, get_reload_manager, enter_app_conetxt, find_component_by_uid
 from tensorpc.flow.flowapp.components import plus
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
@@ -67,6 +67,15 @@ def get_simple_canvas_may_exist():
     comp = find_component(plus.SimpleCanvas)
     return comp
 
+def register_obj_reload(*objs, autorun_func):
+    app = get_editable_app()
+    name = ""
+    if isinstance(autorun_func, str):
+        name = autorun_func
+    else:
+        name = autorun_func.__name__
+    for obj in objs:
+        app._flowapp_object_observe(obj, name)
 
 def run_with_exception_inspect(func: Callable[P, T], *args: P.args,
                                **kwargs: P.kwargs) -> T:
