@@ -59,6 +59,7 @@ def get_simple_canvas_may_exist():
     comp = find_component(plus.SimpleCanvas)
     return comp
 
+
 def register_obj_reload(*objs, autorun_func):
     app = get_editable_app()
     name = ""
@@ -68,6 +69,7 @@ def register_obj_reload(*objs, autorun_func):
         name = autorun_func.__name__
     for obj in objs:
         app._flowapp_object_observe(obj, name)
+
 
 def run_with_exception_inspect(func: Callable[P, T], *args: P.args,
                                **kwargs: P.kwargs) -> T:
@@ -103,19 +105,26 @@ async def run_in_executor_with_exception_inspect(func: Callable[P, T],
 
 
 async def save_data_storage(key: str,
-                                data: Any,
-                                in_memory_limit: int = 100):
+                            node_id: str,
+                            data: Any,
+                            graph_id: Optional[str] = None,
+                            in_memory_limit: int = 100):
     app = get_app()
-    await app.save_data_storage(key, data, in_memory_limit)
+    await app.save_data_storage(key, node_id, data, graph_id, in_memory_limit)
 
 
-async def read_data_storage(key: str, in_memory_limit: int = 100) -> Any:
+async def read_data_storage(key: str,
+                            node_id: str,
+                            graph_id: Optional[str] = None,
+                            in_memory_limit: int = 100) -> Any:
     app = get_app()
-    return await app.read_data_storage(key, in_memory_limit)
+    return await app.read_data_storage(key, node_id, graph_id, in_memory_limit)
+
 
 async def list_data_storage(node_id: str):
     app = get_app()
     return await app.list_data_storage(node_id)
+
 
 async def list_all_data_storage_nodes() -> List[str]:
     app = get_app()

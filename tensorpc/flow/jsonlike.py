@@ -5,6 +5,11 @@ import dataclasses
 import re 
 import numpy as np 
 from tensorpc.core.moduleid import get_qualname_of_type
+from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
+                               TypeAlias)
+
+ValueType: TypeAlias = Union[int, float, str]
+NumberType: TypeAlias = Union[int, float]
 
 STRING_LENGTH_LIMIT = 500
 T = TypeVar("T")
@@ -139,6 +144,12 @@ def _div_up(x: int, y: int):
 
 
 _FOLDER_TYPES = {JsonLikeType.ListFolder.value, JsonLikeType.DictFolder.value}
+@dataclasses.dataclass
+class ContextMenuData:
+    title: str
+    id: Union[Undefined, ValueType] = undefined
+    icon: Union[Undefined, int] = undefined
+    userdata: Union[Undefined, Any] = undefined
 
 
 @dataclasses.dataclass
@@ -157,6 +168,7 @@ class JsonLikeNode:
     keys: Union[Undefined, BackendOnlyProp[List[str]]] = undefined
     # name color
     color: Union[Undefined, str] = undefined
+    menus: Union[Undefined, List[ContextMenuData]] = undefined
 
 
     def _get_node_by_uid(self, uid: str, split: str = "::"):
@@ -188,7 +200,7 @@ class JsonLikeNode:
         if len(parts) == 1:
             return [self]
         # uid contains root, remove it at first.
-        return self._get_node_by_uid_resursive_trace(parts[1:])
+        return [self] + self._get_node_by_uid_resursive_trace(parts[1:])
 
     def _get_node_by_uid_resursive_trace(
             self, parts: List[str]) -> List["JsonLikeNode"]:
