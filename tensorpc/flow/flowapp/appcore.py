@@ -15,6 +15,7 @@ from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
 
 from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
                                     is_valid_function)
+from tensorpc.flow.jsonlike import Undefined, BackendOnlyProp, undefined
 
 if TYPE_CHECKING:
     from .app import App, EditableApp
@@ -29,29 +30,6 @@ NumberType: TypeAlias = Union[int, float]
 
 EventType: TypeAlias = Tuple[ValueType, Any]
 T = TypeVar("T")
-
-
-class Undefined:
-
-    def __repr__(self) -> str:
-        return "undefined"
-
-class BackendOnlyProp(Generic[T]):
-    def __init__(self, data: T) -> None:
-        super().__init__()
-        self.data = data
-
-    def __repr__(self) -> str:
-        return "BackendOnlyProp"
-
-
-class NoDefault:
-    pass
-
-
-# DON'T MODIFY THIS VALUE!!!
-undefined = Undefined()
-nodefault = NoDefault()
 
 T_comp = TypeVar("T_comp")
 

@@ -1,3 +1,4 @@
+import abc
 import enum
 import inspect
 import types
@@ -86,3 +87,14 @@ class ObjectLayoutHandlerRegistry:
 ALL_OBJECT_PREVIEW_HANDLERS = ObjectPreviewHandlerRegistry()
 
 ALL_OBJECT_LAYOUT_HANDLERS = ObjectLayoutHandlerRegistry()
+
+
+class TreeItem(abc.ABC):
+    @abc.abstractmethod
+    async def get_childs(self) -> Dict[str, Any]:
+        raise NotImplementedError
+    
+
+    @abc.abstractmethod
+    async def get_child(self, key: str) -> Any:
+        raise NotImplementedError

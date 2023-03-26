@@ -181,7 +181,7 @@ class LineEvent(Event):
 
     def __init__(self,
                  timestamp: int,
-                 line: str,
+                 line: bytes,
                  is_stderr=False,
                  uid: str = ""):
         super().__init__(timestamp, is_stderr, uid)
@@ -207,7 +207,7 @@ class RawEvent(Event):
 
     def __init__(self,
                  timestamp: int,
-                 raw: Union[str, bytes],
+                 raw: bytes,
                  is_stderr=False,
                  uid: str = ""):
         super().__init__(timestamp, is_stderr, uid)
@@ -215,8 +215,8 @@ class RawEvent(Event):
 
     def __repr__(self):
         r = self.raw
-        if not isinstance(r, bytes):
-            r = r.encode("utf-8")
+        # if not isinstance(r, bytes):
+        #     r = r.encode("utf-8")
         return "{}({}|{}|raw={})".format(self.name, self.is_stderr,
                                          self.timestamp, r)
 
@@ -262,7 +262,7 @@ class CommandEvent(Event):
     def __init__(self,
                  timestamp: int,
                  type: str,
-                 arg: Optional[Union[str, bytes]],
+                 arg: Optional[bytes],
                  is_stderr=False,
                  uid: str = ""):
         super().__init__(timestamp, is_stderr, uid)
@@ -350,13 +350,9 @@ class PeerSSHClient:
         self.stderr = stderr
         # stdout/err history
         # create read tasks. they should exists during peer open.
-        if encoding is None:
-            self.separators = separators
-            self._vsc_re = re.compile(
-                rb"\033\]784;([ABPCEFGD])(?:;(.*?))?\007")
-        else:
-            self.separators = separators.decode("utf-8")
-            self._vsc_re = re.compile(r"\033\]784;([ABPCEFGD])(?:;(.*?))?\007")
+        self.separators = separators
+        self._vsc_re = re.compile(
+            rb"\033\]784;([ABPCEFGD])(?:;(.*?))?\007")
 
         self.uid = uid
 

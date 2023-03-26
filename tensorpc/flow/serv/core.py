@@ -53,14 +53,15 @@ from tensorpc.flow.constants import (
     TENSORPC_FLOW_NODE_READABLE_ID, TENSORPC_FLOW_NODE_UID,
     TENSORPC_FLOW_USE_REMOTE_FWD)
 from tensorpc.flow.coretypes import (
-    DataStorageItemType, Message, MessageEvent, MessageEventType, MessageLevel,
+    Message, MessageEvent, MessageEventType, MessageLevel,
     ScheduleEvent, SessionStatus, StorageDataItem, UserContentEvent,
-    UserDataUpdateEvent, UserEvent, UserStatusEvent, get_uid, DataItemMeta)
+    UserDataUpdateEvent, UserEvent, UserStatusEvent, get_uid)
 from tensorpc.flow.flowapp.core import (AppEvent, AppEventType, ComponentEvent,
                                         FrontendEventType, NotifyEvent,
                                         NotifyType, ScheduleNextForApp,
                                         UIEvent, UISaveStateEvent,
                                         app_event_from_data)
+from tensorpc.flow.jsonlike import JsonLikeNode
 from tensorpc.flow.serv_names import serv_names
 from tensorpc.utils.address import get_url_port
 from tensorpc.utils.registry import HashableRegistry
@@ -433,17 +434,10 @@ class NodeWithSSHBase(RunnableNodeBase):
         self.task: Optional[asyncio.Task] = None
         self.input_queue = asyncio.Queue()
         self.last_event: CommandEventType = CommandEventType.PROMPT_END
-        if ENCODING is None:
-            self.stdout = b""
-        else:
-            self.stdout = ""
+        self.stdout = b""
 
         self.init_terminal_size: Tuple[int, int] = (34, 16)
-        if ENCODING is None:
-            self._terminal_state = b""
-        else:
-            self._terminal_state = ""
-
+        self._terminal_state = b""
         self.terminal_close_ts: int = -1
         self._raw_event_history: "deque[RawEvent]" = deque()
         self.session_status: SessionStatus = SessionStatus.Stop
@@ -825,7 +819,7 @@ class DataStorageNode(Node):
             root.mkdir(mode=0o755, parents=True)
         return FLOW_FOLDER_DATA_PATH / self.id / f"{key}.json"
 
-    def save_data(self, key: str, data: bytes, meta: DataItemMeta,
+    def save_data(self, key: str, data: bytes, meta: JsonLikeNode,
                   timestamp: int):
         item = StorageDataItem(data, timestamp, meta)
         with self.get_save_path(key).open("wb") as f:
@@ -845,9 +839,6 @@ class DataStorageNode(Node):
         if meta_path.exists():
             with meta_path.open("r") as f:
                 meta_dict = json.load(f)
-            meta = DataItemMeta(meta_dict["name"],
-                                DataStorageItemType(meta_dict["type"]),
-                                meta_dict["meta"])
             return meta_dict
         raise FileNotFoundError(f"{meta_path} not exists")
 
@@ -862,9 +853,7 @@ class DataStorageNode(Node):
         if path.exists() and meta_path.exists():
             with meta_path.open("r") as f:
                 meta_dict = json.load(f)
-            meta = DataItemMeta(meta_dict["name"],
-                                DataStorageItemType(meta_dict["type"]),
-                                meta_dict["meta"])
+            meta = JsonLikeNode(**meta_dict)
             with path.open("rb") as f:
                 data: StorageDataItem = pickle.load(f)
                 if len(data) <= self.in_memory_limit_bytes:
@@ -1840,9 +1829,10 @@ class Flow:
                 node.last_event = event.type
                 if event.type == CommandEventType.CURRENT_COMMAND:
                     if isinstance(node, CommandNode):
-                        current_cmd = event.arg.decode("utf-8")
-                        if node._previous_cmd.strip() == current_cmd.strip():
-                            node._start_record_stdout = True
+                        if event.arg is not None:
+                            current_cmd = event.arg.decode("utf-8")
+                            if node._previous_cmd.strip() == current_cmd.strip():
+                                node._start_record_stdout = True
                 if event.type == CommandEventType.COMMAND_COMPLETE:
                     if isinstance(node, CommandNode):
                         if node._start_record_stdout:
@@ -2285,9 +2275,18 @@ class Flow:
         node = node_desp.node
         assert isinstance(node, DataStorageNode)
         return node.get_items()
+    
+    async def query_all_data_node_ids(self, graph_id: str):
+        assert graph_id in self.flow_dict, f"can't find graph {graph_id}"
+        gh = self.flow_dict[graph_id]
+        res: List[Tuple[str, str]] = []
+        for n in gh.nodes:
+            if isinstance(n, DataStorageNode):
+                res.append((n.id, n.readable_id))
+        return res
 
     async def save_data_to_storage(self, graph_id: str, node_id: str, key: str,
-                                   data: bytes, meta: DataItemMeta,
+                                   data: bytes, meta: JsonLikeNode,
                                    timestamp: int):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node

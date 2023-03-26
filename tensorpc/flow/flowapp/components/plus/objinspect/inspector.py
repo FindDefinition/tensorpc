@@ -148,7 +148,7 @@ class ObjectInspector(mui.FlexBox):
             if folder_node.type in FOLDER_TYPES:
                 assert isinstance(folder_node.realId, str) 
                 assert isinstance(folder_node.start, int) 
-                real_obj, found = self.tree._get_obj_by_uid(folder_node.realId)
+                real_obj, found = await self.tree._get_obj_by_uid(folder_node.realId)
                 obj = None
                 if found:
                     slice_idx = int(node.name)
@@ -161,9 +161,9 @@ class ObjectInspector(mui.FlexBox):
                         assert isinstance(folder_node.keys, mui.BackendOnlyProp) 
                         obj = real_obj[node.name]
             else:
-                obj, found = self.tree._get_obj_by_uid(uid)
+                obj, found = await self.tree._get_obj_by_uid(uid)
         else:
-            obj, found = self.tree._get_obj_by_uid(uid)
+            obj, found = await self.tree._get_obj_by_uid(uid)
         if not found:
             raise ValueError(
                 f"your object {uid} is invalid, may need to reflesh")

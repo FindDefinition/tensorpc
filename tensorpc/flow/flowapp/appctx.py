@@ -12,19 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-from functools import partial
-import inspect
-import time
 from tensorpc.flow.flowapp.appcore import get_app_context, get_app, get_editable_app, find_component, get_reload_manager, enter_app_conetxt, find_component_by_uid
 from tensorpc.flow.flowapp.components import plus
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
 from typing_extensions import ParamSpec
-import sys
-import traceback
-import threading
 
 P = ParamSpec('P')
 
@@ -108,3 +100,23 @@ async def run_in_executor_with_exception_inspect(func: Callable[P, T],
     assert comp is not None, "you must add inspector to your UI to use exception inspect"
     return await comp.run_in_executor_with_exception_inspect(
         _run_func_with_app, get_app(), func, *args, **kwargs)
+
+
+async def save_data_storage(key: str,
+                                data: Any,
+                                in_memory_limit: int = 100):
+    app = get_app()
+    await app.save_data_storage(key, data, in_memory_limit)
+
+
+async def read_data_storage(key: str, in_memory_limit: int = 100) -> Any:
+    app = get_app()
+    return await app.read_data_storage(key, in_memory_limit)
+
+async def list_data_storage(node_id: str):
+    app = get_app()
+    return await app.list_data_storage(node_id)
+
+async def list_all_data_storage_nodes() -> List[str]:
+    app = get_app()
+    return await app.list_all_data_storage_nodes()

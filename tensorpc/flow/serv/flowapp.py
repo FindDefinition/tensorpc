@@ -100,9 +100,10 @@ class FlowApp:
                 await self.app._app_run_layout_function()
         else:
             self.app.root._attach("root", self.app._flow_app_comp_core)
-        lay = self.app._get_app_layout()
+        # print(lay["layout"])
         self.app.app_initialize()
         await self.app.app_initialize_async()
+        lay = self.app._get_app_layout()
         self.app._flowapp_is_inited = True
         await self._send_loop_queue.put(
             AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)}))
@@ -272,6 +273,12 @@ class FlowApp:
     @marker.mark_exit
     async def on_exit(self):
         # save simple state to master
+        try:
+            self.app.app_terminate()
+            await self.app.app_terminate_async()
+        except:
+            traceback.print_exc()
+
         try:
             grpc_url = self.master_meta.grpc_url
             uiev = UISaveStateEvent(self.app._get_simple_app_state())

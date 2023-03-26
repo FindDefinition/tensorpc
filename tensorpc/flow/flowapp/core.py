@@ -36,8 +36,8 @@ from typing_extensions import Literal, ParamSpec, Concatenate, Self, TypeAlias, 
 from tensorpc.flow.coretypes import MessageLevel
 from tensorpc.flow.flowapp.reload import AppReloadManager, FlowSpecialMethods
 from tensorpc.flow.flowapp.appcore import EventHandler
-from .appcore import BackendOnlyProp, ValueType, NumberType, EventType, Undefined, get_app, undefined
-
+from .appcore import ValueType, NumberType, EventType, get_app
+from ..jsonlike import Undefined, undefined, split_props_to_undefined, DataClassWithUndefined, as_dict_no_undefined, snake_to_camel
 ALL_APP_EVENTS = HashableRegistry()
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
@@ -233,6 +233,7 @@ class FrontendEventType(enum.Enum):
     TreeItemToggle = 32
     TreeItemFocus = 33
     TreeItemButton = 34
+    TreeItemContextMenu = 35
 
     ComplexLayoutCloseTab = 40
     ComplexLayoutSelectTab = 41
@@ -704,88 +705,6 @@ class AppEvent:
         return self
 
 
-def camel_to_snake(name: str):
-    name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
-    name = re.sub('__([A-Z])', r'_\1', name)
-    name = re.sub('([a-z0-9])([A-Z])', r'\1_\2', name)
-    return name.lower()
-
-
-def snake_to_camel(name: str):
-    if "_" not in name:
-        return name
-    res = ''.join(word.title() for word in name.split('_'))
-    res = res[0].lower() + res[1:]
-    return res
-
-
-def _split_props_to_undefined(props: Dict[str, Any]):
-    res = {}
-    res_und = []
-    for res_camel, val in props.items():
-        if not isinstance(val, BackendOnlyProp):
-            if isinstance(val, Undefined):
-                res_und.append(res_camel)
-            else:
-                res[res_camel] = val
-    return res, res_und
-
-
-def _undefined_dict_factory(x: List[Tuple[str, Any]]):
-    res: Dict[str, Any] = {}
-    for k, v in x:
-        if not isinstance(v, (Undefined, BackendOnlyProp)):
-            res[k] = v
-    return res
-
-
-@dataclasses.dataclass
-class _DataclassSer:
-    obj: Any
-
-
-def as_dict_no_undefined(obj: Any):
-    return dataclasses.asdict(_DataclassSer(obj),
-                              dict_factory=_undefined_dict_factory)["obj"]
-
-
-@dataclasses.dataclass
-class DataClassWithUndefined:
-
-    def get_dict_and_undefined(self, state: Dict[str, Any]):
-        this_type = type(self)
-        res = {}
-        # we only support update in first-level dict,
-        # so we ignore all undefined in childs.
-        ref_dict = dataclasses.asdict(self,
-                                      dict_factory=_undefined_dict_factory)
-        res_und = []
-        for field in dataclasses.fields(this_type):
-            if field.name in state:
-                continue
-            res_camel = snake_to_camel(field.name)
-            val = ref_dict[field.name]
-            if isinstance(val, Undefined):
-                res_und.append(res_camel)
-            else:
-                res[res_camel] = val
-        return res, res_und
-
-    def get_dict(self):
-        this_type = type(self)
-        res = {}
-        ref_dict = dataclasses.asdict(self,
-                                      dict_factory=_undefined_dict_factory)
-        for field in dataclasses.fields(this_type):
-            res_camel = snake_to_camel(field.name)
-            if field.name not in ref_dict:
-                val = undefined
-            else:
-                val = ref_dict[field.name]
-            res[res_camel] = val
-        return res
-
-
 @dataclasses.dataclass
 class BasicProps(DataClassWithUndefined):
     status: int = UIRunStatus.Stop.value
@@ -959,7 +878,7 @@ class Component(Generic[T_base_props, T_child]):
         camel name, no conversion provided.
         """
         props = self.get_props()
-        props, und = _split_props_to_undefined(props)
+        props, und = split_props_to_undefined(props)
         props.update(self.__sx_props)
         # state = self.get_state()
         # newstate = {}
@@ -987,7 +906,7 @@ class Component(Generic[T_base_props, T_child]):
 
     def _to_dict_with_sync_props(self):
         props = self.get_sync_props()
-        props, und = _split_props_to_undefined(props)
+        props, und = split_props_to_undefined(props)
         res = {
             "uid": self._flow_uid,
             "type": self._flow_comp_type.value,
@@ -1161,6 +1080,9 @@ class Component(Generic[T_base_props, T_child]):
                 res_coro = res_callback(res)
                 if inspect.iscoroutine(res_coro):
                     await res_coro
+            app = get_app()
+            if app._flowapp_enable_exception_inspect:
+                await app._remove_exception()
 
         except Exception as e:
             traceback.print_exc()

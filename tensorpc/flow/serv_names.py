@@ -195,5 +195,16 @@ class _ServiceNames:
         return get_service_key_by_type(Flow,
                                        Flow.read_data_from_storage.__name__)
 
+    @property
+    def FLOW_DATA_LIST_ITEM_METAS(self):
+        from tensorpc.flow.serv.core import Flow
+        return get_service_key_by_type(Flow,
+                                       Flow.query_data_items.__name__)
+
+    @property
+    def FLOW_DATA_QUERY_DATA_NODE_IDS(self):
+        from tensorpc.flow.serv.core import Flow
+        return get_service_key_by_type(Flow,
+                                       Flow.query_all_data_node_ids.__name__)
 
 serv_names = _ServiceNames()

@@ -10,21 +10,23 @@ from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
 
 import numpy as np
 
-from tensorpc.core.inspecttools import get_members
 from tensorpc.core.serviceunit import ReloadableDynamicClass
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType
-from tensorpc.core.moduleid import get_qualname_of_type
+from tensorpc.flow.flowapp import appctx
+from tensorpc.flow.jsonlike import parse_obj_to_jsonlike
 from tensorpc.flow.flowapp.components.plus.monitor import ComputeResourceMonitor
 from tensorpc.flow.flowapp.reload import reload_object_methods
-from tensorpc.flow.flowapp.components.plus.objinspect.core import ALL_OBJECT_PREVIEW_HANDLERS, ALL_OBJECT_LAYOUT_HANDLERS
+from tensorpc.flow.flowapp.components.plus.objinspect.core import ALL_OBJECT_PREVIEW_HANDLERS, ALL_OBJECT_LAYOUT_HANDLERS, TreeItem
 from tensorpc.flow.flowapp.components.plus.canvas import SimpleCanvas
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
-from tensorpc.flow.flowapp.components.plus.common import CommonQualNames
+from tensorpc.flow.jsonlike import CommonQualNames
+from tensorpc.flow.marker import mark_did_mount, mark_will_unmount
 
 _DEFAULT_OBJ_NAME = "default"
 
 _DEFAULT_BUILTINS_NAME = "builtins"
+_DEFAULT_DATA_STORAGE_NAME = "flowStorage"
 
 _ROOT = "root"
 
@@ -60,90 +62,8 @@ def parse_obj_item(obj,
                    checker: Callable[[Type], bool],
                    obj_meta_cache=None):
     obj_type = type(obj)
-    if obj is None or obj is Ellipsis:
-        return mui.JsonLikeNode(id,
-                                name,
-                                mui.JsonLikeType.Constant.value,
-                                value=str(obj))
-    elif isinstance(obj, enum.Enum):
-        return mui.JsonLikeNode(id,
-                                name,
-                                mui.JsonLikeType.Enum.value,
-                                "enum",
-                                value=str(obj))
-    elif isinstance(obj, (bool)):
-        # bool is inherit from int, so we must check bool first.
-        return mui.JsonLikeNode(id,
-                                name,
-                                mui.JsonLikeType.Bool.value,
-                                value=str(obj))
-    elif isinstance(obj, (int)):
-        return mui.JsonLikeNode(id,
-                                name,
-                                mui.JsonLikeType.Int.value,
-                                value=str(obj))
-    elif isinstance(obj, (float)):
-        return mui.JsonLikeNode(id,
-                                name,
-                                mui.JsonLikeType.Float.value,
-                                value=str(obj))
-    elif isinstance(obj, (complex)):
-        return mui.JsonLikeNode(id,
-                                name,
-                                mui.JsonLikeType.Complex.value,
-                                value=str(obj))
-    elif isinstance(obj, str):
-        if len(obj) > STRING_LENGTH_LIMIT:
-            value = obj[:STRING_LENGTH_LIMIT] + "..."
-        else:
-            value = obj
-        return mui.JsonLikeNode(id,
-                                name,
-                                mui.JsonLikeType.String.value,
-                                value=value)
-
-    elif isinstance(obj, (list, dict, tuple, set)):
-        t = mui.JsonLikeType.List
-        if isinstance(obj, list):
-            t = mui.JsonLikeType.List
-        elif isinstance(obj, dict):
-            t = mui.JsonLikeType.Dict
-        elif isinstance(obj, tuple):
-            t = mui.JsonLikeType.Tuple
-        elif isinstance(obj, set):
-            t = mui.JsonLikeType.Set
-        else:
-            raise NotImplementedError
-        # TODO suppert nested view
-        return mui.JsonLikeNode(id, name, t.value, cnt=len(obj), drag=False)
-    elif isinstance(obj, np.ndarray):
-        t = mui.JsonLikeType.Tensor
-        shape_short = ",".join(map(str, obj.shape))
-        return mui.JsonLikeNode(id,
-                                name,
-                                t.value,
-                                typeStr="np.ndarray",
-                                value=f"[{shape_short}]{obj.dtype}",
-                                drag=True)
-    elif get_qualname_of_type(obj_type) == CommonQualNames.TorchTensor:
-        t = mui.JsonLikeType.Tensor
-        shape_short = ",".join(map(str, obj.shape))
-        return mui.JsonLikeNode(id,
-                                name,
-                                t.value,
-                                typeStr="torch.Tensor",
-                                value=f"[{shape_short}]{obj.dtype}",
-                                drag=True)
-    elif get_qualname_of_type(obj_type) == CommonQualNames.TVTensor:
-        t = mui.JsonLikeType.Tensor
-        shape_short = ",".join(map(str, obj.shape))
-        return mui.JsonLikeNode(id,
-                                name,
-                                t.value,
-                                typeStr="tv.Tensor",
-                                value=f"[{shape_short}]{obj.dtype}",
-                                drag=True)
-    else:
+    node = parse_obj_to_jsonlike(obj, name, id)
+    if node.type == mui.JsonLikeType.Object.value:
         t = mui.JsonLikeType.Object
         value = mui.undefined
         count = 1 # make object expandable
@@ -186,7 +106,7 @@ def parse_obj_item(obj,
                                 drag=is_draggable,
                                 iconBtns=[(ButtonType.Reload.value,
                                            mui.IconType.Refresh.value)])
-
+    return node 
 
 def parse_obj_dict(obj_dict: Dict[str, Any],
                    ns: str,
@@ -304,16 +224,16 @@ def _get_obj_single_attr(obj,
     return mui.undefined
 
 
-def _get_obj_by_uid(obj, uid: str,
+async def _get_obj_by_uid(obj, uid: str,
                     checker: Callable[[Type], bool]) -> Tuple[Any, bool]:
     parts = uid.split(_GLOBAL_SPLIT)
     if len(parts) == 1:
         return obj, True
     # uid contains root, remove it at first.
-    return _get_obj_by_uid_resursive(obj, parts[1:], checker)
+    return await _get_obj_by_uid_resursive(obj, parts[1:], checker)
 
 
-def _get_obj_by_uid_resursive(
+async def _get_obj_by_uid_resursive(
         obj, parts: List[str], checker: Callable[[Type],
                                                  bool]) -> Tuple[Any, bool]:
     key = parts[0]
@@ -334,6 +254,8 @@ def _get_obj_by_uid_resursive(
         if key not in obj_dict:
             return obj, False
         child_obj = obj_dict[key]
+    elif isinstance(obj, TreeItem):
+        child_obj = obj.get_child(key)
     else:
         child_obj = _get_obj_single_attr(obj, key, checker)
         if isinstance(obj, mui.Undefined):
@@ -341,7 +263,7 @@ def _get_obj_by_uid_resursive(
     if len(parts) == 1:
         return child_obj, True
     else:
-        return _get_obj_by_uid_resursive(child_obj, parts[1:], checker)
+        return await _get_obj_by_uid_resursive(child_obj, parts[1:], checker)
 
 
 def _get_root_tree(obj,
@@ -372,6 +294,22 @@ def _get_obj_tree(obj,
     root_node.cnt = len(obj_dict)
     return root_node
 
+class DataStorageTreeItem(TreeItem):
+    def __init__(self, node_id: str) -> None:
+        super().__init__()
+        self.node_id = node_id
+
+    async def get_childs(self) -> Dict[str, Any]:
+        metas = await appctx.list_data_storage(self.node_id)
+        return {m.name: m for m in metas}
+    
+    async def get_child(self, key: str) -> Any:
+        res = await appctx.read_data_storage(key)
+        return res 
+
+class ContextMenuType(enum.Enum):
+    DataStorage = 0
+
 class ObjectTree(mui.FlexBox):
 
     def __init__(self,
@@ -394,13 +332,17 @@ class ObjectTree(mui.FlexBox):
         self._obj_meta_cache = {}
         self._cared_dnd_uids: Dict[str, Callable[[str, Any], mui.CORO_NONE]] = {}
         self.limit = limit
+
+        self._default_data_storage_nodes: Dict[str, DataStorageTreeItem] = {}
         default_builtins = {
             _DEFAULT_BUILTINS_NAME: {
                 "monitor": ComputeResourceMonitor(),
                 "appTerminal": mui.AppTerminal(),
                 "simpleCanvas": SimpleCanvas(),
-            }
+            },
+            _DEFAULT_DATA_STORAGE_NAME: self._default_data_storage_nodes
         }
+        self._data_storage_uid = f"{_ROOT}{_GLOBAL_SPLIT}{_DEFAULT_DATA_STORAGE_NAME}"
         if init is None:
             self.root = {}
             # self.tree.props.tree = mui.JsonLikeNode(
@@ -408,6 +350,7 @@ class ObjectTree(mui.FlexBox):
         else:
             self.root = {_DEFAULT_OBJ_NAME: init}
         self.root.update(default_builtins)
+        
         self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
                                               _ROOT, self._obj_meta_cache)
         # print(self.tree.props.tree)
@@ -416,10 +359,26 @@ class ObjectTree(mui.FlexBox):
             FrontendEventType.TreeLazyExpand.value, self._on_expand)
         self.tree.register_event_handler(
             FrontendEventType.TreeItemButton.value, self._on_custom_button)
+        self.tree.register_event_handler(
+            FrontendEventType.TreeItemContextMenu.value, self._on_contextmenu)
 
         self.tree.register_event_handler(FrontendEventType.DragCollect.value,
                                          self._on_drag_collect,
                                          backend_only=True)
+
+    @mark_did_mount
+    async def _on_mount(self):
+        all_data_nodes = await appctx.list_all_data_storage_nodes()
+        context_menus: List[mui.ContextMenuData] = []
+        for n, readable_n in all_data_nodes:
+            userdata = {
+                "type": ContextMenuType.DataStorage.value,
+            }
+            context_menus.append(mui.ContextMenuData(f"Add To {readable_n}", id=n, icon=mui.IconType.DataObject, userdata=userdata))
+            self._default_data_storage_nodes[readable_n] = DataStorageTreeItem(n)
+        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
+                                              _ROOT, self._obj_meta_cache)
+        await self.tree.send_and_wait(self.tree.update_event(context_menus=context_menus))
 
     def _checker(self, obj):
         return _check_is_valid(type(obj), self._cared_types,
@@ -432,8 +391,8 @@ class ObjectTree(mui.FlexBox):
     def _objinspect_root(self):
         return self.tree.props.tree
 
-    def _get_obj_by_uid(self, uid: str):
-        return _get_obj_by_uid(self.root, uid, self._valid_checker)
+    async def _get_obj_by_uid(self, uid: str):
+        return await _get_obj_by_uid(self.root, uid, self._valid_checker)
 
     def _register_dnd_uid(self, uid: str, cb: Callable[[str, Any], mui.CORO_NONE]):
         self._cared_dnd_uids[uid] = cb
@@ -451,7 +410,7 @@ class ObjectTree(mui.FlexBox):
         deleted: List[str] = []
         for k, v in self._cared_dnd_uids.items():
             if k.startswith(updated_uid):
-                obj, found = self._get_obj_by_uid(k)
+                obj, found = await self._get_obj_by_uid(k)
                 if not found:
                     # remove from cared
                     deleted.append(k)
@@ -464,7 +423,7 @@ class ObjectTree(mui.FlexBox):
 
     async def _on_drag_collect(self, data):
         uid = data["id"]
-        obj, found = _get_obj_by_uid(self.root, uid, self._valid_checker)
+        obj, found = await _get_obj_by_uid(self.root, uid, self._valid_checker)
         if not found:
             return None
         tab_id = ""
@@ -487,7 +446,7 @@ class ObjectTree(mui.FlexBox):
                 upd = self.tree.update_event(tree=self._objinspect_root)
                 return await self.tree.send_and_wait(upd)
             # real_node = self._objinspect_root._get_node_by_uid(node.realId)
-            real_obj, found = _get_obj_by_uid(self.root, node.realId,
+            real_obj, found = await _get_obj_by_uid(self.root, node.realId,
                                               self._valid_checker)
             if node.type == mui.JsonLikeType.ListFolder.value:
                 data = real_obj[node.start:node.start + node.cnt]
@@ -500,7 +459,7 @@ class ObjectTree(mui.FlexBox):
             node.children = tree
             upd = self.tree.update_event(tree=self._objinspect_root)
             return await self.tree.send_and_wait(upd)
-        obj, found = _get_obj_by_uid(self.root, uid, self._valid_checker)
+        obj, found = await _get_obj_by_uid(self.root, uid, self._valid_checker)
         if node.type in CONTAINER_TYPES and node._is_divisible(self.limit):
             if node.type == mui.JsonLikeType.Dict.value:
                 node.keys = mui.BackendOnlyProp(list(obj.keys()))
@@ -508,27 +467,46 @@ class ObjectTree(mui.FlexBox):
             upd = self.tree.update_event(tree=self._objinspect_root)
             return await self.tree.send_and_wait(upd)
         # if not found, we expand (update) the deepest valid object.
-
-        obj_dict = _get_obj_dict(obj, self._checker)
+        # if the object is special (extend TreeItem), we use used-defined
+        # function instead of analysis it.
+        if isinstance(obj, TreeItem):
+            obj_dict = await obj.get_childs()
+        else:
+            obj_dict = _get_obj_dict(obj, self._checker)
         tree = parse_obj_dict(obj_dict, node.id, self._checker,
                               self._obj_meta_cache)
         node.children = tree
         upd = self.tree.update_event(tree=self._objinspect_root)
         return await self.tree.send_and_wait(upd)
 
+    async def _sync_data_storage_node(self):
+        await self._on_expand(self._data_storage_uid)
+
     async def _on_custom_button(self, uid_btn: Tuple[str, str]):
         uid = uid_btn[0]
-        obj, found = _get_obj_by_uid(self.root, uid, self._valid_checker)
+        obj, found = await _get_obj_by_uid(self.root, uid, self._valid_checker)
         if not found:
             return
         btn = ButtonType(uid_btn[1])
         if btn == ButtonType.Reload:
-            metas = reload_object_methods(
+            metas, is_reload = reload_object_methods(
                 obj, reload_mgr=self.flow_app_comp_core.reload_mgr)
             if metas is not None:
                 special_methods = FlowSpecialMethods(metas)
             else:
                 print("reload failed.")
+
+    async def _on_contextmenu(self, uid_menuid_data: Tuple[str, str, Optional[Any]]):
+        uid = uid_menuid_data[0]
+        userdata = uid_menuid_data[2]
+        if userdata is not None:
+            menu_type = ContextMenuType(userdata["type"])
+            if menu_type == ContextMenuType.DataStorage:
+                obj, found = await _get_obj_by_uid(self.root, uid, self._valid_checker)
+                if not found:
+                    return
+                await appctx.save_data_storage(uid, obj)
+                await self._sync_data_storage_node()
 
     async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):
         key_in_root = key in self.root
@@ -555,8 +533,14 @@ class ObjectTree(mui.FlexBox):
         await self._do_when_tree_updated(self.tree.props.tree.id)
 
     async def remove_object(self, key: str):
-        assert key in self.root
-        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
-                                              _ROOT, self._obj_meta_cache)
+        key_in_root = key in self.root
+        if not key_in_root:
+            return 
+        new_child = []
+        for i, node in enumerate(self.tree.props.tree.children):
+            if node.name != key:
+                new_child.append(node)
+        self.tree.props.tree.children = new_child
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
+        

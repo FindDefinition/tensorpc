@@ -62,18 +62,18 @@ from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
                                     is_valid_function)
 from tensorpc.core.serviceunit import ReloadableDynamicClass, ServFunctionMeta, ServiceUnit, SimpleCodeManager
 from tensorpc.flow.client import MasterMeta
-from tensorpc.flow.coretypes import (ScheduleEvent, StorageDataItem,
-                                     get_object_type_meta)
+from tensorpc.flow.coretypes import (ScheduleEvent, StorageDataItem)
 from tensorpc.flow.flowapp.reload import AppReloadManager, reload_object_methods, bind_and_reset_object_methods
 from tensorpc.core.serviceunit import get_qualname_to_code
 from tensorpc.flow.hold.holdctx import HoldContext
+from tensorpc.flow.jsonlike import JsonLikeNode, parse_obj_to_jsonlike
 from tensorpc.flow.marker import AppFunctionMeta, AppFuncType
 from tensorpc.flow.serv_names import serv_names
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.reload import reload_method
 from tensorpc.utils.uniquename import UniqueNamePool
 
-from .appcore import _CompReloadMeta, AppContext, AppSpecialEventType
+from .appcore import _CompReloadMeta, AppContext, AppSpecialEventType, enter_app_conetxt
 from .appcore import enter_app_conetxt as _enter_app_conetxt
 from .appcore import get_app, get_app_context, create_reload_metas
 from .components import mui, plus, three
@@ -330,7 +330,8 @@ class App:
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if len(parts) == 2:
             parts.insert(0, self.__flowapp_master_meta.graph_id)
-        meta = get_object_type_meta(data, parts[-1])
+
+        meta = parse_obj_to_jsonlike(data, parts[-1], parts[-1])
         in_memory_limit_bytes = in_memory_limit * 1024 * 1024
         item = StorageDataItem(data, time.time_ns(), meta)
         if len(data_enc) <= in_memory_limit_bytes:
@@ -368,6 +369,23 @@ class App:
             if len(res.data) <= in_memory_limit_bytes:
                 self.__flowapp_storage_cache[key] = res
             return data
+    
+    async def list_data_storage(self, node_id: str):
+        meta = self.__flowapp_master_meta
+        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
+        res: List[dict] = await simple_chunk_call_async(meta.grpc_url,
+                                                       serv_names.FLOW_DATA_LIST_ITEM_METAS,
+                                                       meta.graph_id, node_id)
+        
+        return [JsonLikeNode(**x) for x in res]
+    
+    async def list_all_data_storage_nodes(self):
+        meta = self.__flowapp_master_meta
+        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
+        res: List[str] = await simple_chunk_call_async(meta.grpc_url,
+                                                       serv_names.FLOW_DATA_QUERY_DATA_NODE_IDS,
+                                                       meta.graph_id)
+        return res
 
     def get_persist_storage(self):
         return self.__persist_storage
@@ -550,7 +568,33 @@ class App:
     async def app_initialize_async(self):
         """override this to init app before server start
         """
+        uid_to_comp = self.root._get_uid_to_comp_dict()
+        with enter_app_conetxt(self):
+            for v in uid_to_comp.values():
+                special_methods = v.get_special_methods(self._flow_reload_manager)
+                if special_methods.did_mount is not None:
+                    await v.run_callback(
+                        special_methods.did_mount.get_binded_fn(),
+                        sync_first=False,
+                        change_status=False)
+                    
+    def app_terminate(self):
+        """override this to init app after server stop
+        """
         pass
+
+    async def app_terminate_async(self):
+        """override this to init app after server stop
+        """
+        uid_to_comp = self.root._get_uid_to_comp_dict()
+        with enter_app_conetxt(self):
+            for v in uid_to_comp.values():
+                special_methods = v.get_special_methods(self._flow_reload_manager)
+                if special_methods.will_unmount is not None:
+                    await v.run_callback(
+                        special_methods.will_unmount.get_binded_fn(),
+                        sync_first=False,
+                        change_status=False)
 
     def app_create_layout(self) -> mui.LayoutType:
         """override this in EditableApp to support reloadable layout
@@ -732,10 +776,20 @@ class App:
                 await coro
             self._flowapp_special_eemitter.emit(
                 AppSpecialEventType.AutoRunEnd.value, None)
+            await self._remove_exception()
         except:
             traceback.print_exc()
             if self._flowapp_enable_exception_inspect:
                 await self._inspect_exception()
+
+    async def _remove_exception(self):
+        try:
+            comp = self.find_component(plus.ObjectInspector)
+            if comp is not None and comp.enable_exception_inspect:
+                await comp.remove_object("exception")
+        except:
+            traceback.print_exc()
+
 
     async def _inspect_exception(self):
         try:
@@ -834,6 +888,7 @@ class EditableApp(App):
         self.__flow_obj_observes: List[Tuple[Any, str]] = []
 
     def app_initialize(self):
+        super().app_initialize()
         dcls = self._get_app_dynamic_cls()
         path = dcls.file_path
         user_obj = self._get_user_app_object()
