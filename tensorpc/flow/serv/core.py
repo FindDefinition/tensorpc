@@ -782,6 +782,7 @@ class DataStorageNode(Node):
         res = []
         for item in items:
             data = self.read_meta_dict(item)
+            print(data)
             res.append(data)
         return res
 
@@ -843,16 +844,35 @@ class DataStorageNode(Node):
         raise FileNotFoundError(f"{meta_path} not exists")
     
 
-    def remove_data(self, key: str):
-        if key not in self.stored_data:
+    def remove_data(self, key: Optional[str]):
+        print("DELETE", key)
+        if key is None:
+            items = self.get_items()
+            print(items)
+            for k in items:
+                self.remove_data(k)
             return 
-        self.stored_data.pop(key)
+        if key in self.stored_data:
+            self.stored_data.pop(key)
         meta_path = self.get_meta_path(key)
         if meta_path.exists():
             meta_path.unlink()
         path = self.get_save_path(key)
         if path.exists():
             path.unlink()
+
+    def rename_data(self, key: str, new_name: str):
+        if key not in self.stored_data:
+            return False
+        if new_name in self.stored_data:
+            return False
+        item = self.stored_data[key]
+        self.remove_data(key)
+        item.meta.name = new_name 
+        item.meta.id = new_name
+        print(item.meta)
+        self.save_data(new_name, item.data, item.meta, item.timestamp)
+        return True 
 
     def read_data(self, key: str) -> StorageDataItem:
         if key in self.stored_data:
@@ -2327,12 +2347,24 @@ class Flow:
         assert isinstance(node, DataStorageNode)
         return node.get_data_attrs()
     
-    async def delete_datastorage_data(self, graph_id: str, node_id: str, key: str):
+    async def delete_datastorage_data(self, graph_id: str, node_id: str, key: Optional[str]):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
         assert isinstance(node, DataStorageNode)
-        return node.remove_data(key)
-
+        res = node.remove_data(key)
+        await self._user_ev_q.put(
+            (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
+        return res 
+    
+    async def rename_datastorage_data(self, graph_id: str, node_id: str, key: str, newname: str):
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node
+        assert isinstance(node, DataStorageNode)
+        res = node.rename_data(key, newname)
+        await self._user_ev_q.put(
+            (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
+        return res 
+    
     @marker.mark_exit
     async def _on_exit(self):
         # send exit message to all remote workers

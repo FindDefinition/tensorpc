@@ -120,6 +120,18 @@ async def read_data_storage(key: str,
     app = get_app()
     return await app.read_data_storage(key, node_id, graph_id, in_memory_limit)
 
+async def remove_data_storage(key: Optional[str],
+                            node_id: str,
+                            graph_id: Optional[str] = None) -> Any:
+    app = get_app()
+    return await app.remove_data_storage_item(key, node_id, graph_id)
+
+async def rename_data_storage_item(key: str,
+                            newname: str, 
+                            node_id: str,
+                            graph_id: Optional[str] = None) -> Any:
+    app = get_app()
+    return await app.rename_data_storage_item(key, newname, node_id, graph_id)
 
 async def list_data_storage(node_id: str):
     app = get_app()

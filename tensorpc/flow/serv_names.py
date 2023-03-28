@@ -212,5 +212,12 @@ class _ServiceNames:
         from tensorpc.flow.serv.core import Flow
         return get_service_key_by_type(Flow,
                                        Flow.delete_datastorage_data.__name__)
+    
+    @property
+    def FLOW_DATA_RENAME_ITEM(self):
+        from tensorpc.flow.serv.core import Flow
+        return get_service_key_by_type(Flow,
+                                       Flow.rename_datastorage_data.__name__)
+
 
 serv_names = _ServiceNames()

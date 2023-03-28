@@ -2572,6 +2572,7 @@ class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
             FrontendEventType.TreeItemFocus.value,
             FrontendEventType.TreeItemButton.value,
             FrontendEventType.TreeItemContextMenu.value,
+            FrontendEventType.TreeItemRename.value,
         ]
         super().__init__(UIType.JsonLikeTreeView,
                          JsonLikeTreeProps,

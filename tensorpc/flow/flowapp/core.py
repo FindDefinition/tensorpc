@@ -234,6 +234,7 @@ class FrontendEventType(enum.Enum):
     TreeItemFocus = 33
     TreeItemButton = 34
     TreeItemContextMenu = 35
+    TreeItemRename = 36
 
     ComplexLayoutCloseTab = 40
     ComplexLayoutSelectTab = 41

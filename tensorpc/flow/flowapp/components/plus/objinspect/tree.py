@@ -266,7 +266,7 @@ async def _get_obj_by_uid_trace_resursive(
             return obj, False
         child_obj = obj_dict[key]
     elif isinstance(obj, TreeItem):
-        child_obj = obj.get_child(key)
+        child_obj = await obj.get_child(key)
     else:
         child_obj = _get_obj_single_attr(obj, key, checker)
         if isinstance(obj, mui.Undefined):
@@ -317,44 +317,55 @@ class DataStorageTreeItem(TreeItem):
         for m in metas:
             m.id = f"{parent_ns}{_GLOBAL_SPLIT}{m.id}" 
             userdata = {
-                "type": ContextMenuType.DataStorageItem.value,
+                "type": ContextMenuType.DataStorageItemDelete.value,
             }
             m.menus = [ContextMenuData("Delete", m.id, mui.IconType.Delete.value, userdata=userdata)]
-            m.iconBtns = [(ButtonType.Delete.value,
-                                    mui.IconType.Delete.value)]
+            m.edit = True 
+            # m.iconBtns = [(ButtonType.Delete.value,
+            #                         mui.IconType.Delete.value)]
         return {m.name: m for m in metas}
     
     async def get_child(self, key: str) -> Any:
         res = await appctx.read_data_storage(key, self.node_id)
         return res 
 
-    def get_json_like_node(self, parent_ns: str) -> Optional[mui.JsonLikeNode]:
-        return mui.JsonLikeNode(f"{parent_ns}{_GLOBAL_SPLIT}{self.readable_id}",
+    def get_json_like_node(self, id: str) -> Optional[mui.JsonLikeNode]:
+        btns = [(ButtonType.Delete.value,
+                mui.IconType.Delete.value)]
+        return mui.JsonLikeNode(id,
                         self.readable_id,
                         mui.JsonLikeType.Object.value,
                         typeStr="DataStorageTreeItem",
                         cnt=1,
                         drag=False,
-                        iconBtns=[(ButtonType.Delete.value,
-                                    mui.IconType.Delete.value)])
+                        iconBtns=btns)
 
     async def handle_button(self, button_key: str):
+        print("RTX", button_key)
+        if button_key == ButtonType.Delete.value:
+            # clear 
+            await appctx.remove_data_storage(None, self.node_id)
+            return True 
         return 
     
     async def handle_child_button(self, button_key: str, child_key: str):
+        if button_key == ButtonType.Delete.value:
+            await appctx.remove_data_storage(child_key, self.node_id)
+            return True 
         return 
     
-    async def handle_context_menu(self, type: ContextMenuType, userdata: Optional[Any]):
-        return 
+    async def handle_child_rename(self, child_key: str, newname: str):
+        await appctx.rename_data_storage_item(child_key, newname, self.node_id)
+        return True
     
-    async def handle_child_context_menu(self, type: ContextMenuType, child_key: str, userdata: Optional[Any]):
-        if type == ContextMenuType.DataStorage:
-            assert userdata is not None 
-            node_id = userdata["node_id"]
-            if not found:
-                return
-            await appctx.save_data_storage(uid, node_id, obj)
-            await self._sync_data_storage_node()
+    async def handle_child_context_menu(self, child_key: str, userdata: Dict[str, Any]):
+        type = ContextMenuType(userdata["type"])
+        if type == ContextMenuType.DataStorageItemDelete:
+            await appctx.remove_data_storage(child_key, self.node_id)
+            return True # tell outside update childs
+        
+    async def handle_context_menu(self, userdata: Dict[str, Any]):
+        return 
 
 class ObjectTree(mui.FlexBox):
 
@@ -407,6 +418,8 @@ class ObjectTree(mui.FlexBox):
             FrontendEventType.TreeItemButton.value, self._on_custom_button)
         self.tree.register_event_handler(
             FrontendEventType.TreeItemContextMenu.value, self._on_contextmenu)
+        self.tree.register_event_handler(
+            FrontendEventType.TreeItemRename.value, self._on_rename)
 
         self.tree.register_event_handler(FrontendEventType.DragCollect.value,
                                          self._on_drag_collect,
@@ -418,7 +431,7 @@ class ObjectTree(mui.FlexBox):
         context_menus: List[mui.ContextMenuData] = []
         for n, readable_n in all_data_nodes:
             userdata = {
-                "type": ContextMenuType.DataStorage.value,
+                "type": ContextMenuType.DataStorageStore.value,
                 "node_id": n,
             }
             context_menus.append(mui.ContextMenuData(f"Add To {readable_n}", id=n, icon=mui.IconType.DataObject.value, userdata=userdata))
@@ -529,7 +542,28 @@ class ObjectTree(mui.FlexBox):
     async def _sync_data_storage_node(self):
         await self._on_expand(self._data_storage_uid)
 
+    async def _on_rename(self, uid_newname: Tuple[str, str]):
+        uid = uid_newname[0]
+        uid_parts = uid.split(_GLOBAL_SPLIT)
+
+        obj_trace, found = await _get_obj_by_uid_trace(self.root, uid, self._valid_checker)
+        if not found:
+            return
+        # if object is TreeItem or parent is TreeItem,
+        # the button/contextmenu event will be handled in TreeItem instead of common
+        # handler.
+        if len(obj_trace) >= 2:
+            parent = obj_trace[-2]
+            if isinstance(parent, TreeItem):
+                nodes = self._objinspect_root._get_node_by_uid_trace(uid)
+                parent_node = nodes[-2]
+                res = await parent.handle_child_rename(uid_parts[-1], uid_newname[1])
+                if res == True:
+                    await self._on_expand(parent_node.id)
+                return 
+
     async def _on_custom_button(self, uid_btn: Tuple[str, str]):
+        print(uid_btn)
         uid = uid_btn[0]
         uid_parts = uid.split(_GLOBAL_SPLIT)
 
@@ -537,13 +571,26 @@ class ObjectTree(mui.FlexBox):
         if not found:
             return
         obj = obj_trace[-1]
+        # if object is TreeItem or parent is TreeItem,
+        # the button/contextmenu event will be handled in TreeItem instead of common
+        # handler.
         if isinstance(obj, TreeItem):
-            return await obj.handle_button(uid_btn[1])
+            res = await obj.handle_button(uid_btn[1])
+            if res == True:
+                # update this node 
+                await self._on_expand(uid)
+            return 
         if len(obj_trace) >= 2:
             parent = obj_trace[-2]
             if isinstance(parent, TreeItem):
-                return await parent.handle_child_button(uid_btn[1], uid_parts[-1])
-        
+                nodes = self._objinspect_root._get_node_by_uid_trace(uid)
+                parent_node = nodes[-2]
+                res = await parent.handle_child_button(uid_btn[1], uid_parts[-1])
+                if res == True:
+                    print("EXPAND", parent_node.id)
+                    await self._on_expand(parent_node.id)
+                return 
+
         btn = ButtonType(uid_btn[1])
         if btn == ButtonType.Reload:
             metas, is_reload = reload_object_methods(
@@ -558,23 +605,35 @@ class ObjectTree(mui.FlexBox):
         uid_parts = uid.split(_GLOBAL_SPLIT)
         userdata = uid_menuid_data[2]
         if userdata is not None:
-            menu_type = ContextMenuType(userdata["type"])
             obj_trace, found = await _get_obj_by_uid_trace(self.root, uid, self._valid_checker)
             if found:
                 obj = obj_trace[-1]
                 # handle tree item first
                 if isinstance(obj, TreeItem):
-                    return await obj.handle_context_menu(menu_type, userdata)
+                    res = await obj.handle_context_menu(userdata)
+                    if res == True:
+                        # update this node 
+                        await self._on_expand(uid)
+                    return 
                 if len(obj_trace) >= 2:
                     parent = obj_trace[-2]
+                    nodes = self._objinspect_root._get_node_by_uid_trace(uid)
+                    parent_node = nodes[-2]
+
                     if isinstance(parent, TreeItem):
-                        return await parent.handle_child_context_menu(menu_type, uid_parts[-1], userdata)
+                        res = await parent.handle_child_context_menu(uid_parts[-1], userdata)
+                        if res == True:
+                            # update this node 
+                            await self._on_expand(parent_node.id)
+                        return 
+
                 # handle regular objects
-                if menu_type == ContextMenuType.DataStorage:
+                menu_type = ContextMenuType(userdata["type"])
+                if menu_type == ContextMenuType.DataStorageStore:
                     node_id = userdata["node_id"]
                     if not found:
                         return
-                    await appctx.save_data_storage(uid, node_id, obj)
+                    await appctx.save_data_storage(uid_parts[-1], node_id, obj)
                     await self._sync_data_storage_node()
 
     async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):

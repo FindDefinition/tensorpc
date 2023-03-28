@@ -29,6 +29,7 @@ _ONEARG_TREE_EVENTS = set([
     FrontendEventType.TreeItemFocus.value,
     FrontendEventType.TreeItemButton.value,
     FrontendEventType.TreeItemContextMenu.value,
+    FrontendEventType.TreeItemRename.value,
 
 ])
 

@@ -323,7 +323,7 @@ class App:
                                 node_id: str,
                                 data: Any,
                                 graph_id: Optional[str] = None,
-                                in_memory_limit: int = 100):
+                                in_memory_limit: int = 1000):
         data_enc = pickle.dumps(data)
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
@@ -331,9 +331,11 @@ class App:
 
         meta = parse_obj_to_jsonlike(data, key, key)
         in_memory_limit_bytes = in_memory_limit * 1024 * 1024
-        item = StorageDataItem(data, time.time_ns(), meta)
+        item = StorageDataItem(data_enc, time.time_ns(), meta)
         if len(data_enc) <= in_memory_limit_bytes:
             self.__flowapp_storage_cache[key] = item
+        if len(data_enc) > in_memory_limit_bytes:
+            raise ValueError("you can't store object more than 1GB size", len(data_enc))
         await simple_chunk_call_async(self.__flowapp_master_meta.grpc_url,
                                       serv_names.FLOW_DATA_SAVE, graph_id,
                                       node_id, key, data_enc, meta,
@@ -345,7 +347,6 @@ class App:
                                 graph_id: Optional[str] = None,
                                 in_memory_limit: int = 100):
         meta = self.__flowapp_master_meta
-        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
             graph_id = self.__flowapp_master_meta.graph_id
@@ -368,7 +369,41 @@ class App:
             if len(res.data) <= in_memory_limit_bytes:
                 self.__flowapp_storage_cache[key] = res
             return data
-    
+
+    async def remove_data_storage_item(self, 
+                                key: Optional[str],
+                                node_id: str,
+                                graph_id: Optional[str] = None):
+        meta = self.__flowapp_master_meta
+        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
+        if graph_id is None:
+            graph_id = self.__flowapp_master_meta.graph_id
+        await simple_chunk_call_async(meta.grpc_url,
+                                                serv_names.FLOW_DATA_DELETE_ITEM,
+                                                graph_id, node_id, key)
+        if key is None:
+            self.__flowapp_storage_cache.clear()
+        else:
+            if key in self.__flowapp_storage_cache:
+                self.__flowapp_storage_cache.pop(key)
+
+    async def rename_data_storage_item(self, 
+                                key: str,
+                                newname: str,
+                                node_id: str,
+                                graph_id: Optional[str] = None):
+        meta = self.__flowapp_master_meta
+        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
+        if graph_id is None:
+            graph_id = self.__flowapp_master_meta.graph_id
+        await simple_chunk_call_async(meta.grpc_url,
+                                                serv_names.FLOW_DATA_RENAME_ITEM,
+                                                graph_id, node_id, key, newname)
+        if key in self.__flowapp_storage_cache:
+            if newname not in self.__flowapp_storage_cache:
+                item = self.__flowapp_storage_cache.pop(key)
+                self.__flowapp_storage_cache[newname] = item
+
     async def list_data_storage(self, node_id: str):
         meta = self.__flowapp_master_meta
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."

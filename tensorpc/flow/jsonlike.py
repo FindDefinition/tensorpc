@@ -169,6 +169,7 @@ class JsonLikeNode:
     # name color
     color: Union[Undefined, str] = undefined
     menus: Union[Undefined, List[ContextMenuData]] = undefined
+    edit: Union[Undefined, bool] = undefined
 
 
     def _get_node_by_uid(self, uid: str, split: str = "::"):

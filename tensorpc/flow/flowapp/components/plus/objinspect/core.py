@@ -89,8 +89,8 @@ ALL_OBJECT_PREVIEW_HANDLERS = ObjectPreviewHandlerRegistry()
 ALL_OBJECT_LAYOUT_HANDLERS = ObjectLayoutHandlerRegistry()
 
 class ContextMenuType(enum.Enum):
-    DataStorage = 0
-    DataStorageItem = 1
+    DataStorageStore = 0
+    DataStorageItemDelete = 1
 
 class TreeItem(abc.ABC):
     @abc.abstractmethod
@@ -101,17 +101,20 @@ class TreeItem(abc.ABC):
     async def get_child(self, key: str) -> Any:
         raise NotImplementedError
 
-    def get_json_like_node(self, parent_ns: str) -> Optional[mui.JsonLikeNode]:
+    def get_json_like_node(self, id: str) -> Optional[mui.JsonLikeNode]:
         return None 
     
-    async def handle_button(self, button_key: str):
+    async def handle_button(self, button_key: str) -> Optional[bool]:
         return 
     
-    async def handle_child_button(self, button_key: str, child_key: str):
+    async def handle_child_button(self, button_key: str, child_key: str) -> Optional[bool]:
         return 
     
-    async def handle_context_menu(self, type: ContextMenuType, userdata: Optional[Any]):
+    async def handle_context_menu(self, userdata: Dict[str, Any]) -> Optional[bool]:
         return 
     
-    async def handle_child_context_menu(self, type: ContextMenuType, child_key: str, userdata: Optional[Any]):
+    async def handle_child_context_menu(self, child_key: str, userdata: Dict[str, Any]) -> Optional[bool]:
+        return 
+    
+    async def handle_child_rename(self, child_key: str, newname: str) -> Optional[bool]:
         return 
