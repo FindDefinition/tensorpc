@@ -138,6 +138,7 @@ class ObjectInspector(mui.FlexBox):
             uid = uid_list[0]
         else:
             uid = uid_list
+        print(uid)
         nodes = self.tree._objinspect_root._get_node_by_uid_trace(uid)
         node = nodes[-1]
         if node.type in FOLDER_TYPES:

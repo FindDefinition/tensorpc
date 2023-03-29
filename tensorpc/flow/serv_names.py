@@ -199,12 +199,25 @@ class _ServiceNames:
     def FLOW_DATA_LIST_ITEM_METAS(self):
         from tensorpc.flow.serv.core import Flow
         return get_service_key_by_type(Flow,
-                                       Flow.query_data_items.__name__)
+                                       Flow.query_data_attrs.__name__)
 
     @property
     def FLOW_DATA_QUERY_DATA_NODE_IDS(self):
         from tensorpc.flow.serv.core import Flow
         return get_service_key_by_type(Flow,
                                        Flow.query_all_data_node_ids.__name__)
+    
+    @property
+    def FLOW_DATA_DELETE_ITEM(self):
+        from tensorpc.flow.serv.core import Flow
+        return get_service_key_by_type(Flow,
+                                       Flow.delete_datastorage_data.__name__)
+    
+    @property
+    def FLOW_DATA_RENAME_ITEM(self):
+        from tensorpc.flow.serv.core import Flow
+        return get_service_key_by_type(Flow,
+                                       Flow.rename_datastorage_data.__name__)
+
 
 serv_names = _ServiceNames()

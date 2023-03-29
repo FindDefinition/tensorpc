@@ -34,7 +34,7 @@ from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass
 from tensorpc.flow.flowapp.components.common import (handle_standard_event)
 from tensorpc.flow.flowapp.reload import AppReloadManager
-from ...jsonlike import JsonLikeType, BackendOnlyProp, JsonLikeNode
+from ...jsonlike import JsonLikeType, BackendOnlyProp, ContextMenuData, JsonLikeNode
 from .. import colors
 from ..core import (AppComponentCore, AppEvent, AppEventType, BasicProps,
                     Component, ContainerBase, ContainerBaseProps, EventHandler,
@@ -2553,13 +2553,6 @@ _DEFAULT_JSON_TREE = JsonLikeNode("root", "root", JsonLikeType.Object.value,
 
 
 @dataclasses.dataclass
-class ContextMenuData:
-    title: str
-    id: Union[Undefined, ValueType] = undefined
-    icon: Union[Undefined, int] = undefined
-    userdata: Union[Undefined, Any] = undefined
-
-@dataclasses.dataclass
 class JsonLikeTreeProps(MUIFlexBoxProps):
     tree: JsonLikeNode = _DEFAULT_JSON_TREE
     multi_select: Union[Undefined, bool] = undefined
@@ -2583,6 +2576,7 @@ class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
             FrontendEventType.TreeItemFocus.value,
             FrontendEventType.TreeItemButton.value,
             FrontendEventType.TreeItemContextMenu.value,
+            FrontendEventType.TreeItemRename.value,
         ]
         super().__init__(UIType.JsonLikeTreeView,
                          JsonLikeTreeProps,

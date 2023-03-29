@@ -5,6 +5,11 @@ import dataclasses
 import re 
 import numpy as np 
 from tensorpc.core.moduleid import get_qualname_of_type
+from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
+                               TypeAlias)
+
+ValueType: TypeAlias = Union[int, float, str]
+NumberType: TypeAlias = Union[int, float]
 
 STRING_LENGTH_LIMIT = 500
 T = TypeVar("T")
@@ -139,6 +144,12 @@ def _div_up(x: int, y: int):
 
 
 _FOLDER_TYPES = {JsonLikeType.ListFolder.value, JsonLikeType.DictFolder.value}
+@dataclasses.dataclass
+class ContextMenuData:
+    title: str
+    id: Union[Undefined, ValueType] = undefined
+    icon: Union[Undefined, int] = undefined
+    userdata: Union[Undefined, Any] = undefined
 
 
 @dataclasses.dataclass
@@ -158,6 +169,8 @@ class JsonLikeNode:
     color: Union[Undefined, str] = undefined
     dictKey: Union[Undefined, BackendOnlyProp[Hashable]] = undefined
     keys: Union[Undefined, BackendOnlyProp[List[str]]] = undefined
+    menus: Union[Undefined, List[ContextMenuData]] = undefined
+    edit: Union[Undefined, bool] = undefined
 
     def is_folder(self):
         return self.type in _FOLDER_TYPES
