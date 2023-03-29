@@ -1081,8 +1081,6 @@ class Component(Generic[T_base_props, T_child]):
                 if inspect.iscoroutine(res_coro):
                     await res_coro
             app = get_app()
-            if app._flowapp_enable_exception_inspect:
-                await app._remove_exception()
 
         except Exception as e:
             traceback.print_exc()

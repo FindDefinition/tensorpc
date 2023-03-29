@@ -39,8 +39,12 @@ _ONEARG_COMPLEXL_EVENTS = set([
     FrontendEventType.ComplexLayoutSelectTabSet.value,
 ])
 
+_ONEARG_SPECIAL_EVENTS = set([
+    FrontendEventType.Drop.value,
+])
+
 _ONEARG_EVENTS = set(
-    ALL_POINTER_EVENTS) | _ONEARG_TREE_EVENTS | _ONEARG_COMPLEXL_EVENTS
+    ALL_POINTER_EVENTS) | _ONEARG_TREE_EVENTS | _ONEARG_COMPLEXL_EVENTS | _ONEARG_SPECIAL_EVENTS
 
 _NOARG_EVENTS = set([
     FrontendEventType.Click.value,

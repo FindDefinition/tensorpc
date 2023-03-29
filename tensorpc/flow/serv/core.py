@@ -1112,11 +1112,25 @@ class AppNode(CommandNode):
         self.set_start_status(session_key)
         await self.input_queue.put(
             SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
+        # alias apppython
+        serv_name = f"tensorpc.flow.serv.flowapp{TENSORPC_SPLIT}FlowApp"
+
+        serv_name, cfg_encoded = self._get_cfg_encoded()
+        option = {
+            "module": serv_name,
+            "port": self.grpc_port,
+            "http_port": self.http_port,
+            "serv_config_b64": cfg_encoded,
+        }
+        option = base64.b64encode(
+            json.dumps(option).encode("utf-8")).decode("utf-8")
+
+        alias_cmd = f"alias appscript=\"python -m tensorpc.serve.flowapp_script {option}\""
+        await self.input_queue.put(alias_cmd + "\n")
+
         return True, init_event
 
-    async def run_command(self,
-                          newenvs: Optional[Dict[str, Any]] = None,
-                          cmd_renderer: Optional[Callable[[str], str]] = None):
+    def _get_cfg_encoded(self):
         serv_name = f"tensorpc.flow.serv.flowapp{TENSORPC_SPLIT}FlowApp"
         cfg = {
             serv_name: {
@@ -1126,6 +1140,12 @@ class AppNode(CommandNode):
         }
         cfg_encoded = base64.b64encode(
             json.dumps(cfg).encode("utf-8")).decode("utf-8")
+        return serv_name, cfg_encoded
+
+    async def run_command(self,
+                          newenvs: Optional[Dict[str, Any]] = None,
+                          cmd_renderer: Optional[Callable[[str], str]] = None):
+        serv_name, cfg_encoded = self._get_cfg_encoded()
         # TODO only use http port
         cmd = (f"python -m tensorpc.serve {serv_name} "
                f"--port={self.grpc_port} --http_port={self.http_port} "

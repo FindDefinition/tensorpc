@@ -644,8 +644,6 @@ class HttpService:
         filename = field.filename
         content = await field.read()
         f = defs.File(filename, content, serv_data)
-        # print(serv_data, serv_key, len(content))
-
         # return web.Response(text='{} sized of {} successfully stored'
         #                             ''.format(filename, content), headers=headers)
         res, is_exc = await self.service_core.execute_async_service(

@@ -179,6 +179,7 @@ class MUIFlexBoxProps(FlexBoxProps, ContainerBaseProps):
     droppable: Union[bool, Undefined] = undefined
     allowed_dnd_types: Union[str, List[str], Undefined] = undefined
     sx_over_drop: Union[Dict[str, Any], Undefined] = undefined
+    allow_file: Union[bool, Undefined] = undefined
 
 _TypographyVarient: TypeAlias = Literal['body1', 'body2', 'button', 'caption',
                                         'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -932,7 +933,8 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
                          children,
                          inited,
                          uid=uid,
-                         app_comp_core=app_comp_core)
+                         app_comp_core=app_comp_core,
+                         allowed_events=[FrontendEventType.Drop.value])
         self._wrapped_obj = wrapped_obj
 
     @property
@@ -957,6 +959,8 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
             return self._wrapped_obj
         return self
 
+    async def handle_event(self, ev: EventType):
+        return await handle_standard_event(self, ev, sync_first=False)
 
 @dataclasses.dataclass
 class MUIListProps(MUIFlexBoxProps):

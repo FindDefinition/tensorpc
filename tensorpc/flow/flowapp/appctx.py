@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 from tensorpc.flow.flowapp.appcore import get_app_context, get_app, get_editable_app, find_component, get_reload_manager, enter_app_conetxt, find_component_by_uid
 from tensorpc.flow.flowapp.components import plus
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
@@ -25,26 +26,35 @@ T = TypeVar('T')
 
 async def obj_inspector_update_locals():
     comp = find_component(plus.ObjectInspector)
+    if comp is None:
+        return 
     assert comp is not None, "you must add inspector to your UI"
     await comp.update_locals(_frame_cnt=2)
 
 
 def obj_inspector_update_locals_sync():
     comp = find_component(plus.ObjectInspector)
+    if comp is None:
+        return 
     assert comp is not None, "you must add inspector to your UI"
-    return comp.update_locals_sync(_frame_cnt=2)
+    return comp.update_locals_sync(_frame_cnt=2, loop=get_app()._loop)
 
 
 async def obj_inspector_set_object(obj, key: str):
     comp = find_component(plus.ObjectInspector)
+    if comp is None:
+        return 
     assert comp is not None, "you must add inspector to your UI"
     await comp.set_object(obj, key)
 
 
 def obj_inspector_set_object_sync(obj, key: str):
     comp = find_component(plus.ObjectInspector)
+    if comp is None:
+        return 
+    
     assert comp is not None, "you must add inspector to your UI"
-    return comp.set_object_sync(obj, key)
+    return comp.set_object_sync(obj, key, get_app()._loop)
 
 
 def get_simple_canvas():
@@ -97,6 +107,8 @@ async def run_in_executor_with_exception_inspect(func: Callable[P, T],
     """run a sync function in executor with exception inspect.
     """
     comp = find_component(plus.ObjectInspector)
+    if comp is None:
+        return await asyncio.get_running_loop().run_in_executor(func, *args, **kwargs)
     assert comp is not None, "you must add inspector to your UI to use exception inspect"
     return await comp.run_in_executor_with_exception_inspect(
         _run_func_with_app, get_app(), func, *args, **kwargs)

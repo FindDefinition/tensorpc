@@ -148,7 +148,8 @@ class ObjectInspector(mui.FlexBox):
             if folder_node.type in FOLDER_TYPES:
                 assert isinstance(folder_node.realId, str) 
                 assert isinstance(folder_node.start, int) 
-                real_obj, found = await self.tree._get_obj_by_uid(folder_node.realId)
+                real_nodes = self.tree._objinspect_root._get_node_by_uid_trace(folder_node.realId)
+                real_obj, found = await self.tree._get_obj_by_uid(folder_node.realId, real_nodes)
                 obj = None
                 if found:
                     slice_idx = int(node.name)
@@ -159,11 +160,14 @@ class ObjectInspector(mui.FlexBox):
                     else:
                         # dict folder 
                         assert isinstance(folder_node.keys, mui.BackendOnlyProp) 
-                        obj = real_obj[node.name]
+                        key = node.name 
+                        if not isinstance(node.get_dict_key(), mui.Undefined):
+                            key = node.get_dict_key()
+                        obj = real_obj[key]
             else:
-                obj, found = await self.tree._get_obj_by_uid(uid)
+                obj, found = await self.tree._get_obj_by_uid(uid, nodes)
         else:
-            obj, found = await self.tree._get_obj_by_uid(uid)
+            obj, found = await self.tree._get_obj_by_uid(uid, nodes)
         if not found:
             raise ValueError(
                 f"your object {uid} is invalid, may need to reflesh")
@@ -219,9 +223,12 @@ class ObjectInspector(mui.FlexBox):
     def update_locals_sync(self,
                            key: str = _DEFAULT_LOCALS_NAME,
                            *,
-                           _frame_cnt: int = 1):
+                           _frame_cnt: int = 1,
+                           loop: Optional[asyncio.AbstractEventLoop] = None):
         """update locals in sync manner, usually used on non-sync code via appctx.
         """
+        if loop is None:
+            loop = asyncio.get_running_loop()
         cur_frame = inspect.currentframe()
         assert cur_frame is not None
         frame = cur_frame
@@ -237,7 +244,7 @@ class ObjectInspector(mui.FlexBox):
         del cur_frame
         fut = asyncio.run_coroutine_threadsafe(
             self.tree.set_object(local_vars, key + f"-{frame_name}"),
-            asyncio.get_running_loop())
+            loop)
         if get_app()._flowapp_thread_id == threading.get_ident():
             # we can't wait fut here
             return fut
@@ -245,11 +252,13 @@ class ObjectInspector(mui.FlexBox):
             # we can wait fut here.
             return fut.result()
 
-    def set_object_sync(self, obj, key: str = _DEFAULT_OBJ_NAME):
+    def set_object_sync(self, obj, key: str = _DEFAULT_OBJ_NAME, loop: Optional[asyncio.AbstractEventLoop] = None):
         """set object in sync manner, usually used on non-sync code via appctx.
         """
+        if loop is None:
+            loop = asyncio.get_running_loop()
         fut = asyncio.run_coroutine_threadsafe(self.set_object(obj, key),
-                                               asyncio.get_running_loop())
+                                               loop)
         if get_app()._flowapp_thread_id == threading.get_ident():
             # we can't wait fut here
             return fut

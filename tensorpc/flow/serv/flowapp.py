@@ -12,10 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from functools import partial
 import io
 import pickle
+from runpy import run_path
 from typing import Any, Dict, List, Optional
 from tensorpc.flow.coretypes import ScheduleEvent, get_uid
+from tensorpc.flow.flowapp import appctx
+from tensorpc.flow.flowapp.appcore import enter_app_conetxt
 from tensorpc.flow.flowapp.components.mui import FlexBox, flex_wrapper
 from tensorpc.flow.flowapp.core import AppEditorFrontendEvent, AppEvent, AppEventType, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
 from tensorpc.flow.flowapp.app import App, EditableApp
@@ -30,18 +34,23 @@ from tensorpc import prim
 from tensorpc.flow.serv_names import serv_names
 import traceback
 import time
+import sys 
 
 
 class FlowApp:
     """this service must run inside devflow.
     if headless is enabled, all event sent to frontend will be ignored.
+    if external_argv is enabled, it will be used as sys.argv and launched
+        as a python script after app init
     """
 
     def __init__(self,
                  module_name: str,
                  config: Dict[str, Any],
-                 headless: bool = False) -> None:
+                 headless: bool = False,
+                 external_argv: Optional[List[str]] = None) -> None:
         # print(module_name, config)
+        print("external_argv", external_argv)
         self.module_name = module_name
         self.config = config
         self.shutdown_ev = asyncio.Event()
@@ -86,6 +95,9 @@ class FlowApp:
         self.app._send_callback = self._send_http_event
         self._send_loop_task = asyncio.create_task(self._send_loop())
 
+        self.external_argv = external_argv
+        self._external_argv_task: Optional[asyncio.Future] = None
+
     @marker.mark_async_init
     async def init(self):
         if self.app._force_special_layout_method:
@@ -111,6 +123,19 @@ class FlowApp:
         await self._send_loop_queue.put(
             AppEvent("",
                      {AppEventType.Notify: NotifyEvent(NotifyType.AppStart)}))
+
+        if self.external_argv is not None:
+            with enter_app_conetxt(self.app):
+                self._external_argv_task = asyncio.create_task(appctx.run_in_executor_with_exception_inspect(partial(self._run_app_script, argv=self.external_argv),))
+
+    def _run_app_script(self, argv: List[str]):
+        argv_bkp = sys.argv
+        sys.argv = argv
+        try:
+            run_path(argv[0], run_name="__main__")
+        finally:
+            sys.argv = argv_bkp
+            self._external_argv_task = None
 
     def _get_app(self):
         return self.app

@@ -1,7 +1,7 @@
 import traceback
 import sys
 
-
+from tensorpc.flow.flowapp import appctx
 def a(x):
     b = x + 1
     raise NotImplementedError
@@ -14,8 +14,11 @@ def b(x):
 def c(x):
     return b(x)
 
-
+print("???")
 if __name__ == "__main__":
+
+    ddd = 1 
+    appctx.obj_inspector_set_object_sync(ddd, "ddd")
     try:
         c(1)
     except:

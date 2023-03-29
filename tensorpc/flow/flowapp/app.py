@@ -280,6 +280,7 @@ class App:
         self._flowapp_obj_change_observers: Dict[str, _WatchDogObjWatchEntry] = {}
 
         self._flowapp_is_inited: bool = False
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     @property
     def hold_context(self):
@@ -568,6 +569,7 @@ class App:
     async def app_initialize_async(self):
         """override this to init app before server start
         """
+        self._loop = asyncio.get_running_loop()
         uid_to_comp = self.root._get_uid_to_comp_dict()
         with enter_app_conetxt(self):
             for v in uid_to_comp.values():
@@ -776,20 +778,10 @@ class App:
                 await coro
             self._flowapp_special_eemitter.emit(
                 AppSpecialEventType.AutoRunEnd.value, None)
-            await self._remove_exception()
         except:
             traceback.print_exc()
             if self._flowapp_enable_exception_inspect:
                 await self._inspect_exception()
-
-    async def _remove_exception(self):
-        try:
-            comp = self.find_component(plus.ObjectInspector)
-            if comp is not None and comp.enable_exception_inspect:
-                await comp.remove_object("exception")
-        except:
-            traceback.print_exc()
-
 
     async def _inspect_exception(self):
         try:
@@ -801,6 +793,19 @@ class App:
                     target_f = tb_frame
                 if target_f is not None:
                     await comp.set_object(target_f.f_locals, "exception")
+        except:
+            traceback.print_exc()
+
+    def _inspect_exception_sync(self):
+        try:
+            comp = self.find_component(plus.ObjectInspector)
+            if comp is not None and comp.enable_exception_inspect:
+                _, _, exc_traceback = sys.exc_info()
+                target_f = None
+                for tb_frame, tb_lineno in traceback.walk_tb(exc_traceback):
+                    target_f = tb_frame
+                if target_f is not None:
+                    comp.set_object_sync(target_f.f_locals, "exception")
         except:
             traceback.print_exc()
 

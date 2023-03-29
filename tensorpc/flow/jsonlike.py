@@ -1,6 +1,6 @@
 import enum
 
-from typing import Any, Dict, Generic, List, Optional, TypeVar, Union, Tuple
+from typing import Any, Dict, Generic, Hashable, List, Optional, TypeVar, Union, Tuple
 import dataclasses
 import re 
 import numpy as np 
@@ -154,10 +154,18 @@ class JsonLikeNode:
     iconBtns: Union[Undefined, List[Tuple[str, int]]] = undefined
     realId: Union[Undefined, str] = undefined
     start: Union[Undefined, int] = undefined
-    keys: Union[Undefined, BackendOnlyProp[List[str]]] = undefined
     # name color
     color: Union[Undefined, str] = undefined
+    dictKey: Union[Undefined, BackendOnlyProp[Hashable]] = undefined
+    keys: Union[Undefined, BackendOnlyProp[List[str]]] = undefined
 
+    def is_folder(self):
+        return self.type in _FOLDER_TYPES
+
+    def get_dict_key(self):
+        if not isinstance(self.dictKey, Undefined):
+            return self.dictKey.data
+        return undefined
 
     def _get_node_by_uid(self, uid: str, split: str = "::"):
         """TODO if dict key contains split word, this function will
@@ -188,10 +196,20 @@ class JsonLikeNode:
         if len(parts) == 1:
             return [self]
         # uid contains root, remove it at first.
-        return self._get_node_by_uid_resursive_trace(parts[1:])
+        nodes, found = self._get_node_by_uid_resursive_trace(parts[1:], check_missing=True)
+        assert found 
+        return [self] + nodes
+    
+    def _get_node_by_uid_trace_found(self, uid: str, split: str = "::"):
+        parts = uid.split(split)
+        if len(parts) == 1:
+            return [self], True
+        # uid contains root, remove it at first.
+        res = self._get_node_by_uid_resursive_trace(parts[1:])
+        return [self] + res[0], res[1]
 
     def _get_node_by_uid_resursive_trace(
-            self, parts: List[str]) -> List["JsonLikeNode"]:
+            self, parts: List[str], check_missing: bool = False) -> Tuple[List["JsonLikeNode"], bool]:
         key = parts[0]
         node: Optional[JsonLikeNode] = None
         for c in self.children:
@@ -199,12 +217,16 @@ class JsonLikeNode:
             if c.name == key:
                 node = c
                 break
-        assert node is not None, f"{key} missing"
+        if check_missing:
+            assert node is not None, f"{key} missing"
+        if node is None:
+            return [], False
         if len(parts) == 1:
-            return [node]
+            return [node], True
         else:
-            return [node] + node._get_node_by_uid_resursive_trace(parts[1:])
-
+            res = node._get_node_by_uid_resursive_trace(parts[1:], check_missing)
+            return [node] + res[0], res[1]
+        
     def _is_divisible(self, divisor: int):
         return self.cnt > divisor
 
