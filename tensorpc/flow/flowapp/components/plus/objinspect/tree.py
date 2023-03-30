@@ -243,7 +243,7 @@ async def _get_obj_by_uid(obj, uid: str,
     if real_keys is None:
         real_keys = [mui.undefined for _ in range(len(parts))]
     if len(parts) == 1:
-        return [obj], True
+        return obj, True
     # uid contains root, remove it at first.
     return await _get_obj_by_uid_resursive(obj, parts[1:], real_keys[1:], checker)
 
@@ -279,7 +279,7 @@ async def _get_obj_by_uid_resursive(
         if isinstance(obj, mui.Undefined):
             return obj, False
     if len(parts) == 1:
-        return [child_obj], True
+        return child_obj, True
     else:
         return await _get_obj_by_uid_resursive(child_obj, parts[1:], real_keys[1:], checker)
 
@@ -626,7 +626,6 @@ class ObjectTree(mui.FlexBox):
                 return 
 
     async def _on_custom_button(self, uid_btn: Tuple[str, str]):
-        print(uid_btn)
         uid = uid_btn[0]
         uid_parts = uid.split(_GLOBAL_SPLIT)
 
