@@ -1116,7 +1116,7 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
         # self.props.max_distance = 100
 
     async def handle_event(self, ev: EventType):
-        await handle_standard_event(self, ev)
+        await handle_standard_event(self, ev, sync_state_after_change=False)
 
     @property
     def prop(self):
@@ -1424,7 +1424,7 @@ class ScreenShotSyncReturn(ThreeComponentBase[ScreenShotProps]):
             raise
 
     async def handle_event(self, ev: EventType):
-        return await handle_standard_event(self, ev, sync_first=True)
+        return await handle_standard_event(self, ev, sync_first=True, sync_state_after_change=False)
 
 
 @dataclasses.dataclass
@@ -2457,4 +2457,4 @@ class PivotControls(ThreeContainerBase[PivotControlsProps,
         return self._update_props_base(propcls)
 
     async def handle_event(self, ev: EventType):
-        return await handle_standard_event(self, ev, sync_first=True)
+        return await handle_standard_event(self, ev, sync_first=True, sync_state_after_change=False)

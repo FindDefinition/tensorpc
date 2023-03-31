@@ -81,7 +81,8 @@ async def handle_raw_event(ev: Any, comp: Component, just_run: bool = False):
 
 async def handle_standard_event(comp: Component,
                                 data: EventType,
-                                sync_first: bool = False):
+                                sync_first: bool = False,
+                                sync_state_after_change: bool = True):
     if comp.props.status == UIRunStatus.Running.value:
         # msg = create_ignore_usr_msg(comp)
         # await comp.send_and_wait(msg)
@@ -100,6 +101,10 @@ async def handle_standard_event(comp: Component,
                     comp.run_callback(ccb(handler.cb),
                                       True,
                                       sync_first=sync_first))
+            else:
+                # all controlled component must sync state after state change
+                if sync_state_after_change:
+                    await comp.sync_status(True)
         elif data[0] in _ONEARG_EVENTS:
             handler = comp.get_event_handler(data[0])
             # other events don't need to sync state

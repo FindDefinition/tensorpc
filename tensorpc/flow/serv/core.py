@@ -69,6 +69,7 @@ from tensorpc.utils.wait_tools import get_free_ports
 
 FLOW_FOLDER_DATA_PATH = FLOW_FOLDER_PATH / "data_nodes"
 FLOW_MARKDOWN_DATA_PATH = FLOW_FOLDER_PATH / "markdown_nodes"
+FLOW_APP_DATA_PATH = FLOW_FOLDER_PATH / "app_nodes"
 
 JINJA2_VARIABLE_ENV = Environment(loader=BaseLoader(),
                                   variable_start_string="{{",
@@ -2391,7 +2392,6 @@ class Flow:
         for g in self.flow_dict.values():
             for n in g.nodes:
                 if isinstance(n, RemoteSSHNode):
-                    print("?????")
                     # send close-connection message to remote worker
                     if n.worker_http_port >= 0:
                         await n.shutdown()

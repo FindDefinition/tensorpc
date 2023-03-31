@@ -49,7 +49,6 @@ import numpy as np
 import pyee
 import watchdog
 import watchdog.events
-from PIL import Image
 from typing_extensions import ParamSpec
 from watchdog.observers import Observer
 from watchdog.observers.api import ObservedWatch
@@ -73,7 +72,7 @@ from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.reload import reload_method
 from tensorpc.utils.uniquename import UniqueNamePool
 
-from .appcore import _CompReloadMeta, AppContext, AppSpecialEventType, enter_app_conetxt
+from .appcore import _CompReloadMeta, AppContext, AppSpecialEventType, enter_app_conetxt, _ALL_OBSERVED_FUNCTIONS
 from .appcore import enter_app_conetxt as _enter_app_conetxt
 from .appcore import get_app, get_app_context, create_reload_metas
 from .components import mui, plus, three
@@ -213,7 +212,7 @@ class App:
         # self._uid_to_comp: Dict[str, Component] = {}
         self._queue: "asyncio.Queue[AppEvent]" = asyncio.Queue(
             maxsize=maxqsize)
-        self._flow_reload_manager = AppReloadManager()
+        self._flow_reload_manager = AppReloadManager(_ALL_OBSERVED_FUNCTIONS)
 
         self._flow_app_comp_core = AppComponentCore(self._queue,
                                                     self._flow_reload_manager)
@@ -949,14 +948,16 @@ class EditableApp(App):
                 for p in self._flow_observed_files:
                     assert Path(p).exists(), f"{p} must exist"
                 paths = set(self._flow_observed_files)
-                self._flowapp_code_mgr = SimpleCodeManager(
-                    self._flow_observed_files)
             else:
-                self._flowapp_code_mgr = SimpleCodeManager(
-                    list(self.__get_default_observe_paths()))
-                paths = set(self._flowapp_code_mgr.file_to_entry.keys())
+                paths = set(self.__get_default_observe_paths())
             paths.add(str(Path(path).resolve()))
+            for p in _ALL_OBSERVED_FUNCTIONS.path_to_qname.keys():
+                paths.add(str(Path(p).resolve()))
+            self._flowapp_code_mgr = SimpleCodeManager(
+                list(paths))
+            paths = set(self._flowapp_code_mgr.file_to_entry.keys())
             # print(paths)
+            # add all observed function paths
             for p in paths:
                 observer.schedule(self._watchdog_watcher, p, recursive=False)
             observer.start()
@@ -1093,39 +1094,6 @@ class EditableApp(App):
         uid_to_comp = layout._get_uid_to_comp_dict()
         resolved_path = str(Path(change_file).resolve())
         return create_reload_metas(uid_to_comp, resolved_path)
-
-
-    # def __reload_callback(self, change_file: str, mod_is_reloaded: bool):
-    #     # TODO find a way to record history callback code and
-    #     # reload only if code change
-    #     uid_to_comp = self.root._get_uid_to_comp_dict()
-
-    #     assert self._flowapp_code_mgr is not None
-    #     resolved_path = str(Path(change_file).resolve())
-    #     reload_metas = create_reload_metas(uid_to_comp, resolved_path)
-    #     if reload_metas:
-    #         if not mod_is_reloaded:
-    #             # TODO when not mod_is_reloaded, changed file isn't app_file
-    #             # now module is valid, reload it.
-    #             try:
-    #                 res = self._flow_reload_manager.reload_type(
-    #                     reload_metas[0].handler.cb)
-    #                 module = res.module_entry.module
-    #             except:
-    #                 traceback.print_exc()
-    #                 return
-    #             module_dict = module.__dict__
-    #         else:
-    #             module_dict = self._get_app_dynamic_cls().module_dict
-    #         for meta in reload_metas:
-    #             handler = meta.handler
-    #             cb = handler.cb
-    #             new_method, new_code = reload_method(cb, module_dict)
-    #             # if new_code:
-    #             #     meta.code = new_code
-    #             if new_method is not None:
-    #                 # print(new_method, "new_method")
-    #                 handler.cb = new_method
 
     async def _reload_object_with_new_code(self, path: str, new_code: Optional[str] = None):
         assert self._flowapp_code_mgr is not None
@@ -1307,21 +1275,26 @@ class EditableApp(App):
                 if callbacks_of_this_file is None:
                     callbacks_of_this_file = self.__get_callback_metas_in_file(resolved_path, self.root)
                 if callbacks_of_this_file:
-                    reload_res = self._flow_reload_manager.reload_type(callbacks_of_this_file[0].cb_real)
+                    cb_real = callbacks_of_this_file[0].cb_real
+                    reload_res = self._flow_reload_manager.reload_type(inspect.unwrap(cb_real))
                     for meta in callbacks_of_this_file:
                         print("RELOAD CB", meta.cb_qualname)
                         handler = meta.handler
-                        cb = handler.cb
+                        cb = inspect.unwrap(handler.cb)
                         new_method, _ = reload_method(cb, reload_res.module_entry.module_dict)
                         if new_method is not None:
                             handler.cb = new_method
+            if _ALL_OBSERVED_FUNCTIONS.observed_func_changed(resolved_path, change):
+                first_func_qname_pair = _ALL_OBSERVED_FUNCTIONS.path_to_qname[resolved_path][0]
+                entry = _ALL_OBSERVED_FUNCTIONS.global_dict[first_func_qname_pair[0]]
+                self._flow_reload_manager.reload_type(inspect.unwrap(entry.current_func))
 
         except:
             # watchdog thread can't fail
             traceback.print_exc()
             return
 
-
+ 
     def _watchdog_on_modified(self, ev: _WATCHDOG_MODIFY_EVENT_TYPES):
         # which event trigger reload?
         # 1. special method code change

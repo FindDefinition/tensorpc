@@ -46,7 +46,7 @@ from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
                                                   MUIComponentType, VBox,
                                                   VList)
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
-
+from tensorpc.flow.sampleapp.sample_reload_fn import func_support_reload 
 
 class SampleApp(App):
 
@@ -612,7 +612,42 @@ class SampleThreeHudApp(EditableApp):
         self.html2 = three.Html(
             {"btn2": mui.Button("RTX2", lambda: print("RTX2"))})
         res = self.html2.prop(transform=True, center=False, inside_flex=True)
-
+        self.flex_container = three.Flex({
+            "mesh1":
+            three.ItemBox({
+                "mesh03":
+                three.Button("RTX", 2, 1, lambda x: print("HELLO")),
+            }).prop(center_anchor=True),
+        })
+        self.hud = three.Hud({
+                "mesh":
+                three.ItemBox({
+                    "mesh0":
+                    three.Button("RTX", 2, 1, lambda x: print("HELLO")),
+                }).prop(center_anchor=True),
+                "mesh1":
+                three.ItemBox({
+                    "mesh0":
+                    three.ToggleButton("RTX2", 2, 1,
+                                       lambda x: print("HELLO2", x)),
+                }).prop(center_anchor=True),
+                "text":
+                three.ItemBox({
+                    "text0": self.html,
+                }).prop(center_anchor=True),
+                "text4":
+                three.ItemBox({
+                    "text0": self.html2,
+                }).prop(center_anchor=True),
+                "text3":
+                three.ItemBox({
+                    "text0": three.BoundingBox((2, 5, 2)),
+                }).prop(center_anchor=True),
+                "autoreflow":
+                three.FlexAutoReflow(),
+            }).prop(render_priority=1,
+                    flex_direction="row",
+                    justify_content="flex-start")
         self.canvas = three.ThreeCanvas({
             "cam":
             cam,
@@ -652,35 +687,7 @@ class SampleThreeHudApp(EditableApp):
             #
             # "text0": self.html,
             "hud":
-            three.Hud({
-                "mesh":
-                three.ItemBox({
-                    "mesh0":
-                    three.Button("RTX", 2, 1, lambda x: print("HELLO")),
-                }).prop(center_anchor=True),
-                "mesh1":
-                three.ItemBox({
-                    "mesh0":
-                    three.ToggleButton("RTX2", 2, 1,
-                                       lambda x: print("HELLO2", x)),
-                }).prop(center_anchor=True),
-                "text":
-                three.ItemBox({
-                    "text0": self.html,
-                }).prop(center_anchor=True),
-                "text4":
-                three.ItemBox({
-                    "text0": self.html2,
-                }).prop(center_anchor=True),
-                "text3":
-                three.ItemBox({
-                    "text0": three.BoundingBox((2, 5, 2)),
-                }).prop(center_anchor=True),
-                "autoreflow":
-                three.FlexAutoReflow(),
-            }).prop(render_priority=1,
-                    flex_direction="row",
-                    justify_content="flex-start")
+            self.flex_container,
         })
         return {
             "d3v":
@@ -691,6 +698,8 @@ class SampleThreeHudApp(EditableApp):
                 mui.VBox({
                     "inp": self.img_path,
                     "btn1": mui.Button("Read Image", self.on_read_img),
+                    "btn2": mui.Button("Debug", self.on_debug),
+
                     "btn3": mui.Typography("Inp", )
                 }).prop(position="absolute",
                         top=0,
@@ -707,6 +716,14 @@ class SampleThreeHudApp(EditableApp):
         await self.img.show_raw(img_str, "jpg")
         await self.text2.update_value("WTF1")
 
+    async def on_debug(self):
+        await self.flex_container.set_new_layout({
+                "mesh2":
+                three.ItemBox({
+                    "mesh0":
+                    three.Button("RTX2", 2, 1, lambda x: print("HELLO")),
+                }).prop(center_anchor=True),
+        })
 
 class SampleThree2DApp(EditableApp):
 
@@ -1131,6 +1148,13 @@ class CollectionApp:
                 ]).prop(width="100%", height="100%", overflow="hidden")
             ]).prop(default_sizes=[1, 3], width="100%", height="100%")
         ]).prop(flex_flow="row nowrap")
+    
+    @mark_autorun 
+    def _autorun_dev(self):
+        
+        
+
+        func_support_reload(1, 2)
 
 
 if __name__ == "__main__":

@@ -1,10 +1,13 @@
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Type
-from tensorpc.core.moduleid import get_obj_type_meta, TypeMeta
-from tensorpc.core.serviceunit import ObjectReloadManager, ReloadableDynamicClass, ServFunctionMeta
+from typing import Any, Dict, List, Optional, Type, Callable, Hashable, Optional, Generic, TypeVar
+
+from tensorpc.core.moduleid import get_obj_type_meta, TypeMeta, get_qualname_of_type
+from tensorpc.core.serviceunit import ObjectReloadManager, ObservedFunctionRegistry, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.flow.constants import TENSORPC_ANYLAYOUT_FUNC_NAME, TENSORPC_LEGACY_LAYOUT_FUNC_NAME
 from tensorpc.core.serviceunit import AppFuncType
+from tensorpc.flow.client import is_inside_app
 
+T = TypeVar("T")
 
 class FlowSpecialMethods:
 
@@ -55,7 +58,6 @@ class FlowSpecialMethods:
         if self.create_object is not None:
             res.append(self.create_object)
         return res 
-        
 
     def contains_autorun(self):
         return bool(self.auto_runs)
@@ -137,8 +139,8 @@ class AppReloadManager(ObjectReloadManager):
     always use reload manager defined in app.
     """
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, observed_registry: Optional[ObservedFunctionRegistry] = None) -> None:
+        super().__init__(observed_registry)
         self.obj_layout_meta_cache: Dict[Any, AppObjectMeta] = {}
 
     def query_obj_is_anylayout(self, obj):

@@ -16,6 +16,8 @@ from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
 from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
                                     is_valid_function)
 from tensorpc.flow.jsonlike import Undefined, BackendOnlyProp, undefined
+from tensorpc.core.serviceunit import ObservedFunctionRegistry
+from tensorpc.flow.client import is_inside_app
 
 if TYPE_CHECKING:
     from .app import App, EditableApp
@@ -185,3 +187,17 @@ async def _run_zeroarg_func(cb: Callable):
             await coro
     except:
         traceback.print_exc()
+
+
+class AppObservedFunctionRegistry(ObservedFunctionRegistry):
+    def handle_record(self, sig: inspect.Signature, args, kwargs):
+        bargs = sig.bind(*args, **kwargs)
+        return 
+    
+    def is_enabled(self):
+        return not self.is_frozen and is_inside_app()
+
+_ALL_OBSERVED_FUNCTIONS = AppObservedFunctionRegistry()
+
+def observe_function(func: Callable):
+    return _ALL_OBSERVED_FUNCTIONS.register(func)

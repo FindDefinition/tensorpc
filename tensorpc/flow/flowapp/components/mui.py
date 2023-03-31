@@ -2524,6 +2524,7 @@ class LinearProgressProps(MUIFlexBoxProps):
                                       "query"]] = undefined
 
 
+
 class LinearProgress(MUIComponentBase[LinearProgressProps]):
 
     def __init__(

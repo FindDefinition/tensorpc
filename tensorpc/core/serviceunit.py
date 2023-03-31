@@ -23,8 +23,8 @@ from tensorpc.constants import (TENSORPC_FLOW_FUNC_META_KEY,
 from tensorpc.core import inspecttools
 from tensorpc.core.funcid import (get_toplevel_class_node,
                                   get_toplevel_func_node)
-from tensorpc.core.moduleid import TypeMeta, get_obj_type_meta
-
+from tensorpc.core.moduleid import TypeMeta, get_obj_type_meta, get_qualname_of_type
+from functools import wraps
 
 class ParamType(Enum):
     PosOnly = "PosOnly"
@@ -166,6 +166,94 @@ class ServFunctionMeta:
     def get_binded_fn(self):
         assert self.binded_fn is not None
         return self.binded_fn
+
+@dataclass
+class ObservedFunction:
+    name: str
+    qualname: str
+    origin_func: Callable 
+    current_func: Callable
+    current_sig: inspect.Signature
+    path: str
+    enable_args_record: bool = False
+
+
+class ObservedFunctionRegistry:
+
+    def __init__(self):
+        self.global_dict: Dict[str, ObservedFunction] = {} 
+        self.path_to_qname: Dict[str, List[Tuple[str, str]]] = {} 
+
+        self.is_frozen: bool = False
+
+    def is_enabled(self):
+        return not self.is_frozen
+
+    def register(self, func = None):
+
+        def wrapper(func):
+            if not self.is_enabled():
+                return func 
+            try:
+                path = inspect.getfile(inspect.unwrap(func))
+                path = str(Path(path).resolve())
+            except:
+                raise ValueError(f"can't get file path of function, {func}")
+
+            # TODO check func is a function
+            qname = get_qualname_of_type(func)
+            func_sig = inspect.signature(func)
+            if qname in self.global_dict:
+                self.global_dict[qname].current_func = func
+                self.global_dict[qname].current_sig = func_sig
+            else:
+                if path not in self.path_to_qname:
+                    self.path_to_qname[path] = []
+                self.path_to_qname[path].append((qname, func.__qualname__))
+                self.global_dict[qname] = ObservedFunction(func.__name__, qname, func, func, func_sig, path) 
+            @wraps(func)
+            def wrapped_func(*args, **kwargs):
+                if qname in self.global_dict:
+                    entry = self.global_dict[qname]
+                    if entry.enable_args_record:
+                        self.handle_record(entry.current_sig, args, kwargs)
+                    return entry.current_func(*args, **kwargs)
+                else:
+                    return func(*args, **kwargs)
+            return wrapped_func
+
+        if func is None:
+            return wrapper
+        else:
+            return wrapper(func)
+
+    def __contains__(self, key: str):
+        return key in self.global_dict
+
+    def __getitem__(self, key: str):
+        return self.global_dict[key]
+
+    def items(self):
+        yield from self.global_dict.items()
+
+    def reload_func(self, qualname: str, new_func: Callable):
+        if qualname in self.global_dict:
+            self.global_dict[qualname].current_func = new_func
+
+    def frozen(self):
+        self.is_frozen = True
+
+    def handle_record(self, sig: inspect.Signature, args, kwargs):
+        return 
+    
+    def observed_func_changed(self, resolved_path: str, changes: Dict[str, str]):
+        if resolved_path not in self.path_to_qname:
+            return False 
+        qnames = self.path_to_qname[resolved_path]
+        for qname_pair in qnames:
+            if qname_pair[1] in changes:
+                return True 
+        return False 
 
 
 @dataclass
@@ -316,12 +404,14 @@ class ObjectReloadManager:
     always use reload manager defined in app.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, observed_registry: Optional[ObservedFunctionRegistry] = None) -> None:
         self.file_cache: Dict[str, FileCacheEntry] = {}
         self.type_cache: Dict[str, TypeCacheEntry] = {}
         self.type_meta_cache: Dict[str, TypeMeta] = {}
         self.type_method_meta_cache: Dict[Type, List[ServFunctionMeta]] = {}
         self.module_cache: Dict[str, ModuleCacheEntry] = {}
+
+        self.observed_registry = observed_registry
 
     def check_file_cache(self, path: str):
         if path not in self.file_cache:
@@ -388,13 +478,20 @@ class ObjectReloadManager:
             except:
                 pass
 
+    def _inspect_get_file_resolved(self, type):
+        return str(Path(inspect.getfile(type)).resolve())
+    
     def reload_type(self, type):
+        """we provide reload_type instead of reload_path
+        because we want to use importlib.import_module
+        if possible instead of reload from raw path.
+        """
         print("PREPARE RELOAD", type)
         meta = self.cached_get_obj_meta(type)
         if meta is None:
             raise ValueError("can't reload this type", type)
         # determine should perform real reload
-        path = inspect.getfile(type)
+        path = self._inspect_get_file_resolved(type)
         self.check_file_cache(path)
         if path in self.file_cache:
             # no need to reload.
@@ -404,7 +501,7 @@ class ObjectReloadManager:
         new_type_method_meta_cache = {}
         for t, vv in self.type_method_meta_cache.items():
             try:
-                patht = inspect.getfile(t)
+                patht = self._inspect_get_file_resolved(t)
             except:
                 continue
             if patht != path:
@@ -421,12 +518,19 @@ class ObjectReloadManager:
         # type_cache_entry = TypeCacheEntry(new_type, res[1], res[0])
         # self.type_cache[type] = type_cache_entry
         self._update_file_cache(path)
+        if self.observed_registry is not None:
+            resolved_path = path
+            if resolved_path in self.observed_registry.path_to_qname:
+                qnames = self.observed_registry.path_to_qname
+                for qname in qnames:
+                    new_func = TypeMeta.get_local_type_from_module_dict_qualname(qname, res[0])
+                    self.observed_registry.reload_func(qname, new_func)
         return ObjectReloadResultWithType(self.module_cache[path], True, self.file_cache[path], meta)
 
     def query_type_method_meta(self, type: Type, no_code: bool = False):
         if type in self.type_method_meta_cache:
             return self.type_method_meta_cache[type]
-        path = inspect.getfile(type)
+        path = self._inspect_get_file_resolved(type)
         inspect_type = type
         if path in self.module_cache:
             # if obj is reloaded, we must use new type meta instead of old one

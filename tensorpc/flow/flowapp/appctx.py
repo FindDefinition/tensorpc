@@ -13,12 +13,12 @@
 # limitations under the License.
 
 import asyncio
-from tensorpc.flow.flowapp.appcore import get_app_context, get_app, get_editable_app, find_component, get_reload_manager, enter_app_conetxt, find_component_by_uid
+import inspect
+from tensorpc.flow.flowapp.appcore import get_app_context, get_app, get_editable_app, find_component, get_reload_manager, enter_app_conetxt, find_component_by_uid, observe_function
 from tensorpc.flow.flowapp.components import plus
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
 from typing_extensions import ParamSpec
-
 P = ParamSpec('P')
 
 T = TypeVar('T')
@@ -153,3 +153,5 @@ async def list_data_storage(node_id: str):
 async def list_all_data_storage_nodes() -> List[str]:
     app = get_app()
     return await app.list_all_data_storage_nodes()
+
+
