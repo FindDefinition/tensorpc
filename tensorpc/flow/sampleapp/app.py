@@ -46,7 +46,7 @@ from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
                                                   MUIComponentType, VBox,
                                                   VList)
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
-from tensorpc.flow.sampleapp.sample_reload_fn import func_support_reload 
+from tensorpc.flow.sampleapp.sample_reload_fn import func_support_reload, Dev
 
 class SampleApp(App):
 
@@ -1137,7 +1137,7 @@ class CollectionApp:
         self.wtf = mui.DynamicControls(init=nodes, callback=lambda x: print(x))
         self.cfg = WTF(1, 0.5, WTF1(2), "WTF", [])
         self.wtf2 = plus.ConfigPanel(self.cfg, lambda x, y: print(x, y))
-
+        # self.dev_0 = Dev()
         return mui.HBox([
             mui.Allotment([
                 plus.ObjectInspector(self).prop(width="100%",
@@ -1151,10 +1151,8 @@ class CollectionApp:
     
     @mark_autorun 
     def _autorun_dev(self):
-        
-        
-
         func_support_reload(1, 2)
+        # self.dev_0.dev()
 
 
 if __name__ == "__main__":

@@ -246,14 +246,15 @@ class ObservedFunctionRegistry:
     def handle_record(self, sig: inspect.Signature, args, kwargs):
         return 
     
-    def observed_func_changed(self, resolved_path: str, changes: Dict[str, str]):
+    def observed_func_changed(self, resolved_path: str, changes: Dict[str, str]) -> List[str]:
         if resolved_path not in self.path_to_qname:
-            return False 
+            return [] 
         qnames = self.path_to_qname[resolved_path]
+        res: List[str] = []
         for qname_pair in qnames:
             if qname_pair[1] in changes:
-                return True 
-        return False 
+                res.append(qname_pair[0]) 
+        return res 
 
 
 @dataclass

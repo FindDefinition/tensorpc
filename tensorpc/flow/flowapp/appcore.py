@@ -142,6 +142,7 @@ class AppSpecialEventType(enum.Enum):
     CodeEditorSave = "CodeEditorSave"
     WatchDogChange = "WatchDogChange"
 
+    ObservedFunctionChange = "ObservedFunctionChange"
 
 @dataclasses.dataclass
 class _CompReloadMeta:

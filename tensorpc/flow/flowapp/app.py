@@ -1269,7 +1269,16 @@ class EditableApp(App):
                                 if auto_run is not None and auto_run.name in autorun_names_queued:
                                     await self._run_autorun(
                                             auto_run.get_binded_fn())
-            
+            observed_func_changed = _ALL_OBSERVED_FUNCTIONS.observed_func_changed(resolved_path, change)
+            if observed_func_changed:
+                first_func_qname_pair = _ALL_OBSERVED_FUNCTIONS.path_to_qname[resolved_path][0]
+                entry = _ALL_OBSERVED_FUNCTIONS.global_dict[first_func_qname_pair[0]]
+                reload_res = self._flow_reload_manager.reload_type(inspect.unwrap(entry.current_func))
+                if not is_reload:
+                    is_reload = reload_res.is_reload
+                for qname in observed_func_changed:
+                    self._flowapp_special_eemitter.emit(AppSpecialEventType.ObservedFunctionChange.value, qname)
+
             if is_callback_change or is_reload:
                 # reset all callbacks in this file
                 if callbacks_of_this_file is None:
@@ -1284,16 +1293,11 @@ class EditableApp(App):
                         new_method, _ = reload_method(cb, reload_res.module_entry.module_dict)
                         if new_method is not None:
                             handler.cb = new_method
-            if _ALL_OBSERVED_FUNCTIONS.observed_func_changed(resolved_path, change):
-                first_func_qname_pair = _ALL_OBSERVED_FUNCTIONS.path_to_qname[resolved_path][0]
-                entry = _ALL_OBSERVED_FUNCTIONS.global_dict[first_func_qname_pair[0]]
-                self._flow_reload_manager.reload_type(inspect.unwrap(entry.current_func))
 
         except:
             # watchdog thread can't fail
             traceback.print_exc()
             return
-
  
     def _watchdog_on_modified(self, ev: _WATCHDOG_MODIFY_EVENT_TYPES):
         # which event trigger reload?
