@@ -2,8 +2,8 @@ import enum
 
 from typing import Any, Dict, Generic, Hashable, List, Optional, TypeVar, Union, Tuple
 import dataclasses
-import re 
-import numpy as np 
+import re
+import numpy as np
 from tensorpc.core.moduleid import get_qualname_of_type
 from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
                                TypeAlias)
@@ -20,9 +20,11 @@ class Undefined:
     def __repr__(self) -> str:
         return "undefined"
 
+
 class BackendOnlyProp(Generic[T]):
     """when wrap a property with this class, it will be ignored when serializing to frontend
     """
+
     def __init__(self, data: T) -> None:
         super().__init__()
         self.data = data
@@ -121,6 +123,7 @@ class CommonQualNames:
     TorchTensor = "torch.Tensor"
     TVTensor = "cumm.core_cc.tensorview_bind.Tensor"
 
+
 class JsonLikeType(enum.Enum):
     Int = 0
     Float = 1
@@ -138,12 +141,21 @@ class JsonLikeType(enum.Enum):
     Layout = 13
     ListFolder = 14
     DictFolder = 15
+    Function = 16
+
 
 def _div_up(x: int, y: int):
     return (x + y - 1) // y
 
 
 _FOLDER_TYPES = {JsonLikeType.ListFolder.value, JsonLikeType.DictFolder.value}
+
+@dataclasses.dataclass
+class IconButtonData:
+    id: ValueType
+    icon: int
+    tooltip: Union[Undefined, str] = undefined
+
 @dataclasses.dataclass
 class ContextMenuData:
     title: str
@@ -162,7 +174,7 @@ class JsonLikeNode:
     cnt: int = 0
     children: "List[JsonLikeNode]" = dataclasses.field(default_factory=list)
     drag: Union[Undefined, bool] = undefined
-    iconBtns: Union[Undefined, List[Tuple[str, int]]] = undefined
+    iconBtns: Union[Undefined, List[IconButtonData]] = undefined
     realId: Union[Undefined, str] = undefined
     start: Union[Undefined, int] = undefined
     # name color
@@ -171,6 +183,9 @@ class JsonLikeNode:
     keys: Union[Undefined, BackendOnlyProp[List[str]]] = undefined
     menus: Union[Undefined, List[ContextMenuData]] = undefined
     edit: Union[Undefined, bool] = undefined
+
+    def last_part(self, split: str = "::"):
+        return self.id[self.id.rfind(split) + len(split):]
 
     def is_folder(self):
         return self.type in _FOLDER_TYPES
@@ -195,7 +210,7 @@ class JsonLikeNode:
         node: Optional[JsonLikeNode] = None
         for c in self.children:
             # TODO should we use id.split[-1] instead of name?
-            if c.name == key:
+            if c.last_part() == key:
                 node = c
                 break
         assert node is not None, f"{key} missing"
@@ -209,10 +224,11 @@ class JsonLikeNode:
         if len(parts) == 1:
             return [self]
         # uid contains root, remove it at first.
-        nodes, found = self._get_node_by_uid_resursive_trace(parts[1:], check_missing=True)
-        assert found 
+        nodes, found = self._get_node_by_uid_resursive_trace(
+            parts[1:], check_missing=True)
+        assert found
         return [self] + nodes
-    
+
     def _get_node_by_uid_trace_found(self, uid: str, split: str = "::"):
         parts = uid.split(split)
         if len(parts) == 1:
@@ -222,12 +238,14 @@ class JsonLikeNode:
         return [self] + res[0], res[1]
 
     def _get_node_by_uid_resursive_trace(
-            self, parts: List[str], check_missing: bool = False) -> Tuple[List["JsonLikeNode"], bool]:
+            self,
+            parts: List[str],
+            check_missing: bool = False) -> Tuple[List["JsonLikeNode"], bool]:
         key = parts[0]
         node: Optional[JsonLikeNode] = None
         for c in self.children:
             # TODO should we use id.split[-1] instead of name?
-            if c.name == key:
+            if c.last_part() == key:
                 node = c
                 break
         if check_missing:
@@ -237,9 +255,10 @@ class JsonLikeNode:
         if len(parts) == 1:
             return [node], True
         else:
-            res = node._get_node_by_uid_resursive_trace(parts[1:], check_missing)
+            res = node._get_node_by_uid_resursive_trace(
+                parts[1:], check_missing)
             return [node] + res[0], res[1]
-        
+
     def _is_divisible(self, divisor: int):
         return self.cnt > divisor
 
@@ -284,53 +303,41 @@ class JsonLikeNode:
                 count += this_cnt
         return res
 
-def parse_obj_to_jsonlike(obj, name: str,
-                   id: str):
+
+def parse_obj_to_jsonlike(obj, name: str, id: str):
     obj_type = type(obj)
     if obj is None or obj is Ellipsis:
         return JsonLikeNode(id,
-                                name,
-                                JsonLikeType.Constant.value,
-                                value=str(obj))
+                            name,
+                            JsonLikeType.Constant.value,
+                            value=str(obj))
     elif isinstance(obj, JsonLikeNode):
         # TODO should we check obj name/id?
         return obj
     elif isinstance(obj, enum.Enum):
         return JsonLikeNode(id,
-                                name,
-                                JsonLikeType.Enum.value,
-                                "enum",
-                                value=str(obj))
+                            name,
+                            JsonLikeType.Enum.value,
+                            "enum",
+                            value=str(obj))
     elif isinstance(obj, (bool)):
         # bool is inherit from int, so we must check bool first.
-        return JsonLikeNode(id,
-                                name,
-                                JsonLikeType.Bool.value,
-                                value=str(obj))
+        return JsonLikeNode(id, name, JsonLikeType.Bool.value, value=str(obj))
     elif isinstance(obj, (int)):
-        return JsonLikeNode(id,
-                                name,
-                                JsonLikeType.Int.value,
-                                value=str(obj))
+        return JsonLikeNode(id, name, JsonLikeType.Int.value, value=str(obj))
     elif isinstance(obj, (float)):
-        return JsonLikeNode(id,
-                                name,
-                                JsonLikeType.Float.value,
-                                value=str(obj))
+        return JsonLikeNode(id, name, JsonLikeType.Float.value, value=str(obj))
     elif isinstance(obj, (complex)):
         return JsonLikeNode(id,
-                                name,
-                                JsonLikeType.Complex.value,
-                                value=str(obj))
+                            name,
+                            JsonLikeType.Complex.value,
+                            value=str(obj))
     elif isinstance(obj, str):
         if len(obj) > STRING_LENGTH_LIMIT:
             value = obj[:STRING_LENGTH_LIMIT] + "..."
         else:
             value = obj
-        return JsonLikeNode(id,
-                                name,
-                                JsonLikeType.String.value,
-                                value=value)
+        return JsonLikeNode(id, name, JsonLikeType.String.value, value=value)
 
     elif isinstance(obj, (list, dict, tuple, set)):
         t = JsonLikeType.List
@@ -350,29 +357,29 @@ def parse_obj_to_jsonlike(obj, name: str,
         t = JsonLikeType.Tensor
         shape_short = ",".join(map(str, obj.shape))
         return JsonLikeNode(id,
-                                name,
-                                t.value,
-                                typeStr="np.ndarray",
-                                value=f"[{shape_short}]{obj.dtype}",
-                                drag=True)
+                            name,
+                            t.value,
+                            typeStr="np.ndarray",
+                            value=f"[{shape_short}]{obj.dtype}",
+                            drag=True)
     elif get_qualname_of_type(obj_type) == CommonQualNames.TorchTensor:
         t = JsonLikeType.Tensor
         shape_short = ",".join(map(str, obj.shape))
         return JsonLikeNode(id,
-                                name,
-                                t.value,
-                                typeStr="torch.Tensor",
-                                value=f"[{shape_short}]{obj.dtype}",
-                                drag=True)
+                            name,
+                            t.value,
+                            typeStr="torch.Tensor",
+                            value=f"[{shape_short}]{obj.dtype}",
+                            drag=True)
     elif get_qualname_of_type(obj_type) == CommonQualNames.TVTensor:
         t = JsonLikeType.Tensor
         shape_short = ",".join(map(str, obj.shape))
         return JsonLikeNode(id,
-                                name,
-                                t.value,
-                                typeStr="tv.Tensor",
-                                value=f"[{shape_short}]{obj.dtype}",
-                                drag=True)
+                            name,
+                            t.value,
+                            typeStr="tv.Tensor",
+                            value=f"[{shape_short}]{obj.dtype}",
+                            drag=True)
     else:
         t = JsonLikeType.Object
         value = undefined
@@ -381,4 +388,3 @@ def parse_obj_to_jsonlike(obj, name: str,
                             t.value,
                             value=value,
                             typeStr=obj_type.__qualname__)
-

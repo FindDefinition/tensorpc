@@ -181,9 +181,9 @@ def create_reload_metas(uid_to_comp: Dict[str, "Component"], path: str):
     return metas
 
 
-async def _run_zeroarg_func(cb: Callable):
+async def _run_zeroarg_func(cb: Callable, *args, **kwargs):
     try:
-        coro = cb()
+        coro = cb(*args, **kwargs)
         if inspect.iscoroutine(coro):
             await coro
     except:
@@ -191,14 +191,10 @@ async def _run_zeroarg_func(cb: Callable):
 
 
 class AppObservedFunctionRegistry(ObservedFunctionRegistry):
-    def handle_record(self, sig: inspect.Signature, args, kwargs):
-        bargs = sig.bind(*args, **kwargs)
-        return 
-    
     def is_enabled(self):
         return not self.is_frozen and is_inside_app()
 
-_ALL_OBSERVED_FUNCTIONS = AppObservedFunctionRegistry()
+ALL_OBSERVED_FUNCTIONS = AppObservedFunctionRegistry()
 
 def observe_function(func: Callable):
-    return _ALL_OBSERVED_FUNCTIONS.register(func)
+    return ALL_OBSERVED_FUNCTIONS.register(func)

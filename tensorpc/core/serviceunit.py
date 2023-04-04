@@ -176,7 +176,12 @@ class ObservedFunction:
     current_sig: inspect.Signature
     path: str
     enable_args_record: bool = False
+    recorded_data: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None
 
+
+    def run_function_with_record(self):
+        assert self.recorded_data is not None 
+        return self.current_func(*self.recorded_data[0], **self.recorded_data[1])
 
 class ObservedFunctionRegistry:
 
@@ -216,7 +221,8 @@ class ObservedFunctionRegistry:
                 if qname in self.global_dict:
                     entry = self.global_dict[qname]
                     if entry.enable_args_record:
-                        self.handle_record(entry.current_sig, args, kwargs)
+                        entry.recorded_data = (args, kwargs)
+                        # self.handle_record(entry, args, kwargs)
                     return entry.current_func(*args, **kwargs)
                 else:
                     return func(*args, **kwargs)
@@ -233,6 +239,9 @@ class ObservedFunctionRegistry:
     def __getitem__(self, key: str):
         return self.global_dict[key]
 
+    def __len__(self):
+        return len(self.global_dict)
+
     def items(self):
         yield from self.global_dict.items()
 
@@ -243,8 +252,16 @@ class ObservedFunctionRegistry:
     def frozen(self):
         self.is_frozen = True
 
-    def handle_record(self, sig: inspect.Signature, args, kwargs):
+    def handle_record(self, entry: ObservedFunction, args, kwargs):
         return 
+
+    def invalid_record(self, entry: ObservedFunction):
+        if entry.recorded_data is None:
+            return 
+        try:
+            entry.current_sig.bind(entry.recorded_data)
+        except TypeError:
+            entry.recorded_data = None 
     
     def observed_func_changed(self, resolved_path: str, changes: Dict[str, str]) -> List[str]:
         if resolved_path not in self.path_to_qname:

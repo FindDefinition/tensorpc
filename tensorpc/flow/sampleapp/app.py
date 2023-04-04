@@ -46,7 +46,7 @@ from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
                                                   MUIComponentType, VBox,
                                                   VList)
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
-from tensorpc.flow.sampleapp.sample_reload_fn import func_support_reload, Dev
+from tensorpc.flow.sampleapp.sample_reload_fn import func_support_reload
 
 class SampleApp(App):
 

@@ -72,7 +72,7 @@ from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.reload import reload_method
 from tensorpc.utils.uniquename import UniqueNamePool
 
-from .appcore import _CompReloadMeta, AppContext, AppSpecialEventType, enter_app_conetxt, _ALL_OBSERVED_FUNCTIONS
+from .appcore import _CompReloadMeta, AppContext, AppSpecialEventType, enter_app_conetxt, ALL_OBSERVED_FUNCTIONS
 from .appcore import enter_app_conetxt as _enter_app_conetxt
 from .appcore import get_app, get_app_context, create_reload_metas
 from .components import mui, plus, three
@@ -212,7 +212,7 @@ class App:
         # self._uid_to_comp: Dict[str, Component] = {}
         self._queue: "asyncio.Queue[AppEvent]" = asyncio.Queue(
             maxsize=maxqsize)
-        self._flow_reload_manager = AppReloadManager(_ALL_OBSERVED_FUNCTIONS)
+        self._flow_reload_manager = AppReloadManager(ALL_OBSERVED_FUNCTIONS)
 
         self._flow_app_comp_core = AppComponentCore(self._queue,
                                                     self._flow_reload_manager)
@@ -951,7 +951,7 @@ class EditableApp(App):
             else:
                 paths = set(self.__get_default_observe_paths())
             paths.add(str(Path(path).resolve()))
-            for p in _ALL_OBSERVED_FUNCTIONS.path_to_qname.keys():
+            for p in ALL_OBSERVED_FUNCTIONS.path_to_qname.keys():
                 paths.add(str(Path(p).resolve()))
             self._flowapp_code_mgr = SimpleCodeManager(
                 list(paths))
@@ -1269,15 +1269,15 @@ class EditableApp(App):
                                 if auto_run is not None and auto_run.name in autorun_names_queued:
                                     await self._run_autorun(
                                             auto_run.get_binded_fn())
-            observed_func_changed = _ALL_OBSERVED_FUNCTIONS.observed_func_changed(resolved_path, change)
+            observed_func_changed = ALL_OBSERVED_FUNCTIONS.observed_func_changed(resolved_path, change)
             if observed_func_changed:
-                first_func_qname_pair = _ALL_OBSERVED_FUNCTIONS.path_to_qname[resolved_path][0]
-                entry = _ALL_OBSERVED_FUNCTIONS.global_dict[first_func_qname_pair[0]]
+                first_func_qname_pair = ALL_OBSERVED_FUNCTIONS.path_to_qname[resolved_path][0]
+                entry = ALL_OBSERVED_FUNCTIONS.global_dict[first_func_qname_pair[0]]
                 reload_res = self._flow_reload_manager.reload_type(inspect.unwrap(entry.current_func))
                 if not is_reload:
                     is_reload = reload_res.is_reload
-                for qname in observed_func_changed:
-                    self._flowapp_special_eemitter.emit(AppSpecialEventType.ObservedFunctionChange.value, qname)
+                # for qname in observed_func_changed:
+                self._flowapp_special_eemitter.emit(AppSpecialEventType.ObservedFunctionChange.value, observed_func_changed)
 
             if is_callback_change or is_reload:
                 # reset all callbacks in this file

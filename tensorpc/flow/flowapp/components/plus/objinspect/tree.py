@@ -14,7 +14,7 @@ from tensorpc.core.serviceunit import ReloadableDynamicClass
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType
 from tensorpc.flow.flowapp import appctx
-from tensorpc.flow.jsonlike import ContextMenuData, parse_obj_to_jsonlike
+from tensorpc.flow.jsonlike import ContextMenuData, IconButtonData, parse_obj_to_jsonlike
 from tensorpc.flow.flowapp.components.plus.monitor import ComputeResourceMonitor
 from tensorpc.flow.flowapp.reload import reload_object_methods
 from tensorpc.flow.flowapp.components.plus.objinspect.core import ALL_OBJECT_PREVIEW_HANDLERS, ALL_OBJECT_LAYOUT_HANDLERS, TreeItem, ContextMenuType
@@ -23,11 +23,12 @@ from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 from tensorpc.flow.jsonlike import CommonQualNames
 from tensorpc.flow.marker import mark_did_mount, mark_will_unmount
 from tensorpc.flow.flowapp.components.plus.collection import SimpleFileReader
-
+from tensorpc.flow.flowapp.appcore import ALL_OBSERVED_FUNCTIONS, AppSpecialEventType
 _DEFAULT_OBJ_NAME = "default"
 
 _DEFAULT_BUILTINS_NAME = "builtins"
 _DEFAULT_DATA_STORAGE_NAME = "flowStorage"
+_DEFAULT_OBSERVED_FUNC_NAME = "observedFuncs"
 
 _ROOT = "root"
 
@@ -56,6 +57,8 @@ SET_CONTAINER_LIMIT_SIZE = 50
 class ButtonType(enum.Enum):
     Reload = "reload"
     Delete = "delete"
+    Watch = "watch"
+    Record = "record"
 
 
 def parse_obj_item(obj,
@@ -111,7 +114,7 @@ def parse_obj_item(obj,
                                 typeStr=obj_type.__qualname__,
                                 cnt=count,
                                 drag=is_draggable,
-                                iconBtns=[(ButtonType.Reload.value,
+                                iconBtns=[IconButtonData(ButtonType.Reload.value,
                                            mui.IconType.Refresh.value)])
     return node 
 
@@ -347,6 +350,25 @@ def _get_root_tree(obj,
     root_node.cnt = len(obj_dict)
     return root_node
 
+async def _get_root_tree_async(obj,
+                   checker: Callable[[Type], bool],
+                   key: str,
+                   obj_meta_cache=None):
+    obj_dict = _get_obj_dict(obj, checker)
+    root_node = parse_obj_item(obj, key, key, checker, obj_meta_cache)
+    root_node.children = parse_obj_dict(obj_dict, key, checker, obj_meta_cache)
+    for (k, o), c in zip(obj_dict.items(), root_node.children):
+        if isinstance(o, TreeItem):
+            obj_child_dict = await o.get_child_desps(c.id) # type: ignore
+        else:
+            obj_child_dict = _get_obj_dict(o, checker)
+        # obj_child_dict = _get_obj_dict(o, checker)
+        c.drag = False
+        c.children = parse_obj_dict(obj_child_dict, c.id, checker,
+                                    obj_meta_cache)
+    root_node.cnt = len(obj_dict)
+    return root_node
+
 
 def _get_obj_tree(obj,
                    checker: Callable[[Type], bool],
@@ -379,14 +401,14 @@ class DataStorageTreeItem(TreeItem):
             m.edit = True 
             # m.iconBtns = [(ButtonType.Delete.value,
             #                         mui.IconType.Delete.value)]
-        return {m.name: m for m in metas}
+        return {m.last_part(): m for m in metas}
     
     async def get_child(self, key: str) -> Any:
         res = await appctx.read_data_storage(key, self.node_id)
         return res 
 
     def get_json_like_node(self, id: str) -> Optional[mui.JsonLikeNode]:
-        btns = [(ButtonType.Delete.value,
+        btns = [IconButtonData(ButtonType.Delete.value,
                 mui.IconType.Delete.value)]
         return mui.JsonLikeNode(id,
                         self.readable_id,
@@ -397,7 +419,6 @@ class DataStorageTreeItem(TreeItem):
                         iconBtns=btns)
 
     async def handle_button(self, button_key: str):
-        print("RTX", button_key)
         if button_key == ButtonType.Delete.value:
             # clear 
             await appctx.remove_data_storage(None, self.node_id)
@@ -423,6 +444,55 @@ class DataStorageTreeItem(TreeItem):
     async def handle_context_menu(self, userdata: Dict[str, Any]):
         return 
 
+class ObservedFunctionTree(TreeItem):
+    def __init__(self) -> None:
+        super().__init__()
+        self._watched_funcs: Set[str] = set()
+
+    async def get_child_desps(self, parent_ns: str) -> Dict[str, mui.JsonLikeNode]:
+        metas: Dict[str, mui.JsonLikeNode] = {}
+        for k, v in ALL_OBSERVED_FUNCTIONS.global_dict.items():
+            node = mui.JsonLikeNode(f"{parent_ns}{_GLOBAL_SPLIT}{k}",
+                                    v.name, mui.JsonLikeType.Function.value)
+            node.iconBtns = [IconButtonData(ButtonType.Watch.value, mui.IconType.Visibility.value, "Watch"),
+                             IconButtonData(ButtonType.Record.value, mui.IconType.Mic.value, "Record")]
+            value = ""
+            if k in self._watched_funcs:
+                value += f"👀"
+            if v.enable_args_record:
+                value += f"🎙️"
+            if v.recorded_data is not None:
+                value += f"💾"
+            node.value = value
+            metas[k] = node
+        return metas
+    
+    async def get_child(self, key: str) -> Any:
+        return ALL_OBSERVED_FUNCTIONS.global_dict[key] 
+
+    def get_json_like_node(self, id: str) -> Optional[mui.JsonLikeNode]:
+        return mui.JsonLikeNode(id,
+                        "observedFunc",
+                        mui.JsonLikeType.Object.value,
+                        typeStr="ObservedFunctions",
+                        cnt=1,
+                        drag=False)
+
+    async def handle_child_button(self, button_key: str, child_key: str):
+        if button_key == ButtonType.Watch.value:
+            if child_key in self._watched_funcs:
+                self._watched_funcs.remove(child_key)
+            else:
+                self._watched_funcs.add(child_key)
+            return True 
+        if button_key == ButtonType.Record.value:
+            if child_key in ALL_OBSERVED_FUNCTIONS:
+                entry = ALL_OBSERVED_FUNCTIONS[child_key]
+                entry.enable_args_record = True 
+            return True 
+        return 
+    
+
 class ObjectTree(mui.FlexBox):
 
     def __init__(self,
@@ -447,7 +517,7 @@ class ObjectTree(mui.FlexBox):
         self.limit = limit
 
         self._default_data_storage_nodes: Dict[str, DataStorageTreeItem] = {}
-        # large_dict = {k: k for k in range(1000)}
+        self._default_obs_funcs = ObservedFunctionTree()
         default_builtins = {
             _DEFAULT_BUILTINS_NAME: {
                 "monitor": ComputeResourceMonitor(),
@@ -455,7 +525,8 @@ class ObjectTree(mui.FlexBox):
                 "simpleCanvas": SimpleCanvas(),
                 "fileReader": SimpleFileReader(),
             },
-            _DEFAULT_DATA_STORAGE_NAME: self._default_data_storage_nodes
+            _DEFAULT_DATA_STORAGE_NAME: self._default_data_storage_nodes,
+            _DEFAULT_OBSERVED_FUNC_NAME: self._default_obs_funcs,
         }
         self._data_storage_uid = f"{_ROOT}{_GLOBAL_SPLIT}{_DEFAULT_DATA_STORAGE_NAME}"
         if init is None:
@@ -466,8 +537,8 @@ class ObjectTree(mui.FlexBox):
             self.root = {_DEFAULT_OBJ_NAME: init}
         self.root.update(default_builtins)
         
-        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
-                                              _ROOT, self._obj_meta_cache)
+        # self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
+        #                                       _ROOT, self._obj_meta_cache)
         # print(self.tree.props.tree)
         # inspect.isbuiltin()
         self.tree.register_event_handler(
@@ -494,9 +565,23 @@ class ObjectTree(mui.FlexBox):
             }
             context_menus.append(mui.ContextMenuData(f"Add To {readable_n}", id=n, icon=mui.IconType.DataObject.value, userdata=userdata))
             self._default_data_storage_nodes[readable_n] = DataStorageTreeItem(n, readable_n)
-        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
+        self.tree.props.tree = await _get_root_tree_async(self.root, self._valid_checker,
                                               _ROOT, self._obj_meta_cache)
         await self.tree.send_and_wait(self.tree.update_event(context_menus=context_menus))
+
+        appctx.get_app().register_app_special_event_handler(AppSpecialEventType.ObservedFunctionChange, self._on_obs_func_change)
+    
+    @mark_will_unmount
+    def _on_unmount(self):
+        appctx.get_app().unregister_app_special_event_handler(AppSpecialEventType.ObservedFunctionChange, self._on_obs_func_change)
+
+    async def _on_obs_func_change(self, changed_qualnames: List[str]):
+        for qualname in changed_qualnames:
+            entry = ALL_OBSERVED_FUNCTIONS[qualname]
+            ALL_OBSERVED_FUNCTIONS.invalid_record(entry)
+            if qualname in ALL_OBSERVED_FUNCTIONS and qualname in self._default_obs_funcs._watched_funcs:
+                if entry.recorded_data is not None:
+                    await self.run_callback(entry.run_function_with_record, sync_first=False, change_status=False)
 
     def _checker(self, obj):
         return _check_is_valid(type(obj), self._cared_types,
@@ -649,7 +734,6 @@ class ObjectTree(mui.FlexBox):
                 parent_node = nodes[-2]
                 res = await parent.handle_child_button(uid_btn[1], uid_parts[-1])
                 if res == True:
-                    print("EXPAND", parent_node.id)
                     await self._on_expand(parent_node.id)
                 return 
 

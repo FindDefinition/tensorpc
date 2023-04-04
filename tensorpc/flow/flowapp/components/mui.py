@@ -473,6 +473,8 @@ class IconType(enum.IntEnum):
     Refresh = 29
     Grid3x3 = 30
     Help = 31
+    Visibility = 32
+    Mic = 33
 
 @dataclasses.dataclass
 class IconButtonProps(MUIComponentBaseProps):

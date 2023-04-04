@@ -803,6 +803,12 @@ class Component(Generic[T_base_props, T_child]):
     def propcls(self) -> Type[T_base_props]:
         return self.__prop_cls
 
+    def merge_prop(self, prop: T_base_props):
+        assert type(prop) == type(self.__props)
+        prop_dict = prop.get_dict()
+        for k, v in prop_dict.items():
+            setattr(self.__props, k, v)
+
     def _attach(self, uid: str, comp_core: AppComponentCore) -> dict:
         if self._flow_reference_count == 0:
             self._flow_uid = uid
