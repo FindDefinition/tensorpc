@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Type, Callable, Hashable, Optional, Generic, TypeVar
 
 from tensorpc.core.moduleid import get_obj_type_meta, TypeMeta, get_qualname_of_type
-from tensorpc.core.serviceunit import ObjectReloadManager, ObservedFunctionRegistry, ReloadableDynamicClass, ServFunctionMeta
+from tensorpc.core.serviceunit import ObjectReloadManager, ObservedFunctionRegistry, ObservedFunctionRegistryProtocol, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.flow.constants import TENSORPC_ANYLAYOUT_FUNC_NAME, TENSORPC_LEGACY_LAYOUT_FUNC_NAME
 from tensorpc.core.serviceunit import AppFuncType
 from tensorpc.flow.client import is_inside_app
@@ -139,7 +139,7 @@ class AppReloadManager(ObjectReloadManager):
     always use reload manager defined in app.
     """
 
-    def __init__(self, observed_registry: Optional[ObservedFunctionRegistry] = None) -> None:
+    def __init__(self, observed_registry: Optional[ObservedFunctionRegistryProtocol] = None) -> None:
         super().__init__(observed_registry)
         self.obj_layout_meta_cache: Dict[Any, AppObjectMeta] = {}
 

@@ -16,7 +16,7 @@ from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
 from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
                                     is_valid_function)
 from tensorpc.flow.jsonlike import Undefined, BackendOnlyProp, undefined
-from tensorpc.core.serviceunit import ObservedFunctionRegistry
+from tensorpc.core.serviceunit import ObservedFunction, ObservedFunctionRegistry, ObservedFunctionRegistryProtocol
 from tensorpc.flow.client import is_inside_app
 
 if TYPE_CHECKING:
@@ -181,20 +181,20 @@ def create_reload_metas(uid_to_comp: Dict[str, "Component"], path: str):
     return metas
 
 
-async def _run_zeroarg_func(cb: Callable, *args, **kwargs):
+async def _run_zeroarg_func(cb: Callable):
     try:
-        coro = cb(*args, **kwargs)
+        coro = cb()
         if inspect.iscoroutine(coro):
             await coro
     except:
         traceback.print_exc()
 
 
-class AppObservedFunctionRegistry(ObservedFunctionRegistry):
+class AppObservedFunctionRegistry(ObservedFunctionRegistry):    
     def is_enabled(self):
         return not self.is_frozen and is_inside_app()
-
-ALL_OBSERVED_FUNCTIONS = AppObservedFunctionRegistry()
+    
+ALL_OBSERVED_FUNCTIONS: ObservedFunctionRegistryProtocol = AppObservedFunctionRegistry()
 
 def observe_function(func: Callable):
     return ALL_OBSERVED_FUNCTIONS.register(func)

@@ -17,13 +17,13 @@ from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.jsonlike import ContextMenuData, IconButtonData, parse_obj_to_jsonlike
 from tensorpc.flow.flowapp.components.plus.monitor import ComputeResourceMonitor
 from tensorpc.flow.flowapp.reload import reload_object_methods
-from tensorpc.flow.flowapp.components.plus.objinspect.core import ALL_OBJECT_PREVIEW_HANDLERS, ALL_OBJECT_LAYOUT_HANDLERS, TreeItem, ContextMenuType
+from tensorpc.flow.flowapp.components.plus.objinspect.core import ALL_OBJECT_PREVIEW_HANDLERS, ALL_OBJECT_LAYOUT_HANDLERS, ObjectLayoutCreator, ObjectLayoutHandler, TreeItem, ContextMenuType
 from tensorpc.flow.flowapp.components.plus.canvas import SimpleCanvas
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 from tensorpc.flow.jsonlike import CommonQualNames
 from tensorpc.flow.marker import mark_did_mount, mark_will_unmount
 from tensorpc.flow.flowapp.components.plus.collection import SimpleFileReader
-from tensorpc.flow.flowapp.appcore import ALL_OBSERVED_FUNCTIONS, AppSpecialEventType
+from tensorpc.flow.flowapp.appcore import AppSpecialEventType
 _DEFAULT_OBJ_NAME = "default"
 
 _DEFAULT_BUILTINS_NAME = "builtins"
@@ -104,6 +104,9 @@ def parse_obj_item(obj,
         if isinstance(obj, mui.Component):
             is_layout = True
             is_draggable = obj._flow_reference_count == 0
+        if isinstance(obj, ObjectLayoutCreator):
+            is_draggable = True 
+            is_layout = True
         is_draggable = True
         if is_layout:
             t = mui.JsonLikeType.Layout
@@ -451,7 +454,7 @@ class ObservedFunctionTree(TreeItem):
 
     async def get_child_desps(self, parent_ns: str) -> Dict[str, mui.JsonLikeNode]:
         metas: Dict[str, mui.JsonLikeNode] = {}
-        for k, v in ALL_OBSERVED_FUNCTIONS.global_dict.items():
+        for k, v in appctx.get_app().get_observed_func_registry().items():
             node = mui.JsonLikeNode(f"{parent_ns}{_GLOBAL_SPLIT}{k}",
                                     v.name, mui.JsonLikeType.Function.value)
             node.iconBtns = [IconButtonData(ButtonType.Watch.value, mui.IconType.Visibility.value, "Watch"),
@@ -468,7 +471,7 @@ class ObservedFunctionTree(TreeItem):
         return metas
     
     async def get_child(self, key: str) -> Any:
-        return ALL_OBSERVED_FUNCTIONS.global_dict[key] 
+        return appctx.get_app().get_observed_func_registry()[key] 
 
     def get_json_like_node(self, id: str) -> Optional[mui.JsonLikeNode]:
         return mui.JsonLikeNode(id,
@@ -485,16 +488,20 @@ class ObservedFunctionTree(TreeItem):
             else:
                 self._watched_funcs.add(child_key)
             return True 
+        rg = appctx.get_app().get_observed_func_registry()
         if button_key == ButtonType.Record.value:
-            if child_key in ALL_OBSERVED_FUNCTIONS:
-                entry = ALL_OBSERVED_FUNCTIONS[child_key]
+            if child_key in rg:
+                entry = rg[child_key]
                 if entry.enable_args_record:
                     entry.enable_args_record = False
                 else:
                     entry.enable_args_record = True 
             return True 
         return 
-    
+
+class SimpleCanvasCreator(ObjectLayoutCreator):
+    def create(self):
+        return SimpleCanvas()
 
 class ObjectTree(mui.FlexBox):
 
@@ -525,7 +532,7 @@ class ObjectTree(mui.FlexBox):
             _DEFAULT_BUILTINS_NAME: {
                 "monitor": ComputeResourceMonitor(),
                 "appTerminal": mui.AppTerminal(),
-                "simpleCanvas": SimpleCanvas(),
+                "simpleCanvas": SimpleCanvasCreator(),
                 "fileReader": SimpleFileReader(),
             },
             _DEFAULT_DATA_STORAGE_NAME: self._default_data_storage_nodes,
@@ -570,8 +577,8 @@ class ObjectTree(mui.FlexBox):
             self._default_data_storage_nodes[readable_n] = DataStorageTreeItem(n, readable_n)
         self.tree.props.tree = await _get_root_tree_async(self.root, self._valid_checker,
                                               _ROOT, self._obj_meta_cache)
-        await self.tree.send_and_wait(self.tree.update_event(context_menus=context_menus))
-
+        if context_menus:
+            await self.tree.send_and_wait(self.tree.update_event(context_menus=context_menus))
         appctx.get_app().register_app_special_event_handler(AppSpecialEventType.ObservedFunctionChange, self._on_obs_func_change)
     
     @mark_will_unmount
@@ -579,10 +586,11 @@ class ObjectTree(mui.FlexBox):
         appctx.get_app().unregister_app_special_event_handler(AppSpecialEventType.ObservedFunctionChange, self._on_obs_func_change)
 
     async def _on_obs_func_change(self, changed_qualnames: List[str]):
+        rg = appctx.get_app().get_observed_func_registry()
         for qualname in changed_qualnames:
-            entry = ALL_OBSERVED_FUNCTIONS[qualname]
-            ALL_OBSERVED_FUNCTIONS.invalid_record(entry)
-            if qualname in ALL_OBSERVED_FUNCTIONS and qualname in self._default_obs_funcs._watched_funcs:
+            entry = rg[qualname]
+            rg.invalid_record(entry)
+            if qualname in rg and qualname in self._default_obs_funcs._watched_funcs:
                 if entry.recorded_data is not None:
                     await self.run_callback(entry.run_function_with_record, sync_first=False, change_status=False)
 

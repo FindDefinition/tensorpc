@@ -17,7 +17,7 @@ from tensorpc.flow.flowapp.appcore import (AppSpecialEventType,
                                            get_reload_manager)
 from tensorpc.flow.flowapp.components import mui, plus, three
 from tensorpc.flow.flowapp.components.plus.objinspect.core import \
-    ALL_OBJECT_LAYOUT_HANDLERS
+    ALL_OBJECT_LAYOUT_HANDLERS, ObjectLayoutCreator
 from tensorpc.flow.flowapp.core import (AppEditorFrontendEvent,
                                         FlowSpecialMethods, FrontendEventType,
                                         _get_obj_def_path)
@@ -78,6 +78,10 @@ class AnyFlexLayout(mui.FlexLayout):
             uid = target.tab_id if target.tab_id else target.tree_id
             obj_is_anylayout = get_reload_manager().query_obj_is_anylayout(obj)
             if isinstance(obj, mui.FlexBox):
+                wrapped_obj = obj
+            elif isinstance(obj, ObjectLayoutCreator):
+                obj_is_anylayout = False 
+                obj = obj.create()
                 wrapped_obj = obj
             else:
                 if not isinstance(obj, mui.Component):
