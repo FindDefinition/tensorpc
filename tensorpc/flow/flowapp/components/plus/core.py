@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Callable, Optional, List, Dict, TypeVar, Generic
+from typing import Callable, Optional, List, Dict, TypeVar, Generic, Union
 from tensorpc.flow.flowapp.components import mui, three, plus
 import inspect
 
@@ -24,9 +24,9 @@ class ListSlider(mui.Slider, Generic[T]):
     """
 
     def __init__(self,
-                 label: str,
                  callback: Callable[[T], mui._CORO_NONE],
-                 init: Optional[List[T]] = None) -> None:
+                 init: Optional[List[T]] = None,
+                 label: Union[str, mui.Undefined] = mui.undefined) -> None:
         if init is None:
             init = []
         super().__init__(label, 0, max(1, len(init)), 1, self._callback)

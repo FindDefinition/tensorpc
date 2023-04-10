@@ -259,7 +259,7 @@ class ObservedFunctionRegistry:
         if entry.recorded_data is None:
             return 
         try:
-            entry.current_sig.bind(entry.recorded_data)
+            entry.current_sig.bind(*entry.recorded_data[0], **entry.recorded_data[1])
         except TypeError:
             entry.recorded_data = None 
     

@@ -1277,7 +1277,8 @@ class EditableApp(App):
                 if not is_reload:
                     is_reload = reload_res.is_reload
                 # for qname in observed_func_changed:
-                self._flowapp_special_eemitter.emit(AppSpecialEventType.ObservedFunctionChange.value, observed_func_changed)
+                with _enter_app_conetxt(self):
+                    self._flowapp_special_eemitter.emit(AppSpecialEventType.ObservedFunctionChange.value, observed_func_changed)
 
             if is_callback_change or is_reload:
                 # reset all callbacks in this file

@@ -4,7 +4,10 @@ from tensorpc.flow import appctx
 
 @appctx.observe_function
 def func_support_reload(a, b):
-    print("hi2", a, b)
+    print("hi6", a, b)
+
+
+
     return a + b
 
 # from cumm.common import TensorViewNVRTC

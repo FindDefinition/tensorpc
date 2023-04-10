@@ -488,7 +488,10 @@ class ObservedFunctionTree(TreeItem):
         if button_key == ButtonType.Record.value:
             if child_key in ALL_OBSERVED_FUNCTIONS:
                 entry = ALL_OBSERVED_FUNCTIONS[child_key]
-                entry.enable_args_record = True 
+                if entry.enable_args_record:
+                    entry.enable_args_record = False
+                else:
+                    entry.enable_args_record = True 
             return True 
         return 
     

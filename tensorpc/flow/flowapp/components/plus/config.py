@@ -228,7 +228,7 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                 if meta is not None and isinstance(meta, InputMeta):
                     child_node.rows = meta.multiline
 
-                setter = partial(setattr_single, obj=current_obj, name=f.name)
+                setter = partial(setattr_single, obj=current_obj, name=f.name, mapper=json.loads)
         res_node.children.append(child_node)
         obj_uid_to_meta[child_node.id] = ControlItemMeta(getter, setter)
     return res_node
