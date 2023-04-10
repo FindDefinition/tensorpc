@@ -14,13 +14,14 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from types import ModuleType
-from typing import (Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple,
+from typing import (Any, Callable, ClassVar, Coroutine, Dict, Generator, List, Optional, Set, Tuple,
                     Type, Union)
 
 from tensorpc import compat
 from tensorpc.constants import (TENSORPC_FLOW_FUNC_META_KEY,
                                 TENSORPC_FUNC_META_KEY, TENSORPC_SPLIT)
 from tensorpc.core import inspecttools
+from typing import Protocol
 from tensorpc.core.funcid import (get_toplevel_class_node,
                                   get_toplevel_func_node)
 from tensorpc.core.moduleid import TypeMeta, get_obj_type_meta, get_qualname_of_type
@@ -167,6 +168,21 @@ class ServFunctionMeta:
         assert self.binded_fn is not None
         return self.binded_fn
 
+
+class ObservedFunctionProtocol(Protocol):
+    name: str
+    qualname: str
+    origin_func: Callable 
+    current_func: Callable
+    current_sig: inspect.Signature
+    path: str
+    enable_args_record: bool = False
+    recorded_data: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None
+
+
+    def run_function_with_record(self) -> Any:
+        ...
+
 @dataclass
 class ObservedFunction:
     name: str
@@ -183,16 +199,54 @@ class ObservedFunction:
         assert self.recorded_data is not None 
         return self.current_func(*self.recorded_data[0], **self.recorded_data[1])
 
+class ObservedFunctionRegistryProtocol(Protocol):
+    def is_enabled(self) -> bool:
+        ...
+
+    def register(self, func = None) -> Any:
+        ...
+
+    def __contains__(self, key: str) -> bool:
+        ...
+
+    def __getitem__(self, key: str) -> ObservedFunctionProtocol:
+        ...
+
+    def __len__(self) -> int:
+        ...
+
+    def items(self) -> Generator[Tuple[str, ObservedFunctionProtocol], None, None]:
+        ...
+
+    def get_path_to_qname(self) -> Dict[str, List[Tuple[str, str]]]:
+        ...
+
+    def reload_func(self, qualname: str, new_func: Callable) -> None:
+        ...
+
+    def frozen(self) -> None:
+        ...
+
+    def invalid_record(self, entry: ObservedFunctionProtocol) -> None:
+        ...
+    
+    def observed_func_changed(self, resolved_path: str, changes: Dict[str, str]) -> List[str]:
+        ...
+
+
 class ObservedFunctionRegistry:
 
     def __init__(self):
-        self.global_dict: Dict[str, ObservedFunction] = {} 
+        self.global_dict: Dict[str, ObservedFunctionProtocol] = {} 
         self.path_to_qname: Dict[str, List[Tuple[str, str]]] = {} 
 
         self.is_frozen: bool = False
 
-    def is_enabled(self):
+    def is_enabled(self) -> bool:
         return not self.is_frozen
+
+    def get_path_to_qname(self):
+        return self.path_to_qname
 
     def register(self, func = None):
 
@@ -252,10 +306,10 @@ class ObservedFunctionRegistry:
     def frozen(self):
         self.is_frozen = True
 
-    def handle_record(self, entry: ObservedFunction, args, kwargs):
+    def handle_record(self, entry: ObservedFunctionProtocol, args, kwargs):
         return 
 
-    def invalid_record(self, entry: ObservedFunction):
+    def invalid_record(self, entry: ObservedFunctionProtocol):
         if entry.recorded_data is None:
             return 
         try:
@@ -422,7 +476,7 @@ class ObjectReloadManager:
     always use reload manager defined in app.
     """
 
-    def __init__(self, observed_registry: Optional[ObservedFunctionRegistry] = None) -> None:
+    def __init__(self, observed_registry: Optional[ObservedFunctionRegistryProtocol] = None) -> None:
         self.file_cache: Dict[str, FileCacheEntry] = {}
         self.type_cache: Dict[str, TypeCacheEntry] = {}
         self.type_meta_cache: Dict[str, TypeMeta] = {}
@@ -538,8 +592,8 @@ class ObjectReloadManager:
         self._update_file_cache(path)
         if self.observed_registry is not None:
             resolved_path = path
-            if resolved_path in self.observed_registry.path_to_qname:
-                qnames = self.observed_registry.path_to_qname
+            if resolved_path in self.observed_registry.get_path_to_qname():
+                qnames = self.observed_registry.get_path_to_qname()
                 for qname in qnames:
                     new_func = TypeMeta.get_local_type_from_module_dict_qualname(qname, res[0])
                     self.observed_registry.reload_func(qname, new_func)

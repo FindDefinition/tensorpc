@@ -14,11 +14,19 @@
 
 import asyncio
 import inspect
-from tensorpc.flow.flowapp.appcore import get_app_context, get_app, get_editable_app, find_component, get_reload_manager, enter_app_conetxt, find_component_by_uid, observe_function
-from tensorpc.flow.flowapp.components import plus
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
+
 from typing_extensions import ParamSpec
+
+from tensorpc.core.serviceunit import ObservedFunctionRegistryProtocol
+from tensorpc.flow.flowapp.appcore import (enter_app_conetxt, find_component,
+                                           find_component_by_uid, get_app,
+                                           get_app_context, get_editable_app,
+                                           get_reload_manager, is_inside_app,
+                                           observe_function)
+from tensorpc.flow.flowapp.components import plus
+
 P = ParamSpec('P')
 
 T = TypeVar('T')
@@ -155,3 +163,6 @@ async def list_all_data_storage_nodes() -> List[str]:
     return await app.list_all_data_storage_nodes()
 
 
+def set_observed_func_registry(registry: ObservedFunctionRegistryProtocol):
+    app = get_app()
+    return app.set_observed_func_registry(registry)

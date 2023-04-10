@@ -59,7 +59,7 @@ from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.inspecttools import get_all_members_by_type
 from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
                                     is_valid_function)
-from tensorpc.core.serviceunit import ReloadableDynamicClass, ServFunctionMeta, ServiceUnit, SimpleCodeManager
+from tensorpc.core.serviceunit import ObservedFunctionRegistryProtocol, ReloadableDynamicClass, ServFunctionMeta, ServiceUnit, SimpleCodeManager
 from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.coretypes import (ScheduleEvent, StorageDataItem)
 from tensorpc.flow.flowapp.reload import AppReloadManager, reload_object_methods, bind_and_reset_object_methods
@@ -281,9 +281,14 @@ class App:
         self._flowapp_is_inited: bool = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
+        self._flowapp_observed_func_registry: Optional[ObservedFunctionRegistryProtocol] = None
+
     @property
     def hold_context(self):
         return self.__flow_hold_context
+
+    def set_observed_func_registry(self, registry: ObservedFunctionRegistryProtocol):
+        self._flowapp_observed_func_registry = registry
 
     @hold_context.setter
     def hold_context(self, val: Optional[HoldContext]):
@@ -423,6 +428,12 @@ class App:
 
     def get_persist_storage(self):
         return self.__persist_storage
+
+    def get_observed_func_registry(self):
+        registry = self._flowapp_observed_func_registry
+        if registry is None:
+            registry = ALL_OBSERVED_FUNCTIONS
+        return registry
 
     def _get_simple_app_state(self):
         """get state of Input/Switch/Radio/Slider/Select
@@ -940,6 +951,7 @@ class EditableApp(App):
         self._flowapp_change_observers[path] = obentry
         self._watchdog_watcher = None
         self._watchdog_observer = None
+        registry = self.get_observed_func_registry()
         if not self._flow_app_is_headless:
             observer = Observer()
             self._watchdog_watcher = _WatchDogForAppFile(
@@ -951,7 +963,7 @@ class EditableApp(App):
             else:
                 paths = set(self.__get_default_observe_paths())
             paths.add(str(Path(path).resolve()))
-            for p in ALL_OBSERVED_FUNCTIONS.path_to_qname.keys():
+            for p in registry.get_path_to_qname().keys():
                 paths.add(str(Path(p).resolve()))
             self._flowapp_code_mgr = SimpleCodeManager(
                 list(paths))
@@ -1269,10 +1281,11 @@ class EditableApp(App):
                                 if auto_run is not None and auto_run.name in autorun_names_queued:
                                     await self._run_autorun(
                                             auto_run.get_binded_fn())
-            observed_func_changed = ALL_OBSERVED_FUNCTIONS.observed_func_changed(resolved_path, change)
+            ob_registry = self.get_observed_func_registry()
+            observed_func_changed = ob_registry.observed_func_changed(resolved_path, change)
             if observed_func_changed:
-                first_func_qname_pair = ALL_OBSERVED_FUNCTIONS.path_to_qname[resolved_path][0]
-                entry = ALL_OBSERVED_FUNCTIONS.global_dict[first_func_qname_pair[0]]
+                first_func_qname_pair = ob_registry.get_path_to_qname()[resolved_path][0]
+                entry = ob_registry[first_func_qname_pair[0]]
                 reload_res = self._flow_reload_manager.reload_type(inspect.unwrap(entry.current_func))
                 if not is_reload:
                     is_reload = reload_res.is_reload
