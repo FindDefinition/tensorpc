@@ -524,12 +524,18 @@ class App:
                         "type": c._flow_comp_type.value,
                         "state": user_state,
                     }
+        if reload:
+            detached = self.root._detach()
+            await self.root._run_special_methods([], list(detached.values()), self._flow_reload_manager)
+            del detached
+
         await self.root._clear()
         # self._uid_to_comp.clear()
         self.root._flow_uid = _ROOT
         new_is_flex = False
         res: mui.LayoutType = {}
         wrapped_obj = self.root._wrapped_obj
+        attached: Dict[str, Component] = {}
         try:
             with _enter_app_conetxt(self):
                 if decorator_fn is not None:
@@ -540,7 +546,7 @@ class App:
                         #     temp_res.add_layout(temp_res._children)
                         #     temp_res._children = None
                         # temp_res._flow_uid = _ROOT
-                        temp_res._attach(_ROOT, self._flow_app_comp_core)
+                        attached = temp_res._attach(_ROOT, self._flow_app_comp_core)
                         # self._uid_to_comp = temp_res._uid_to_comp
                         new_is_flex = True
                         self.root = temp_res
@@ -577,7 +583,7 @@ class App:
                 res = {str(i): v for i, v in enumerate(res)}
             res_anno: Dict[str, Component] = {**res}
             self.root.add_layout(res_anno)
-            self.root._attach(_ROOT, self._flow_app_comp_core)
+            attached = self.root._attach(_ROOT, self._flow_app_comp_core)
         uid_to_comp = self.root._get_uid_to_comp_dict()
         # self._uid_to_comp[_ROOT] = self.root
         self.root._prevent_add_layout = True
@@ -604,6 +610,8 @@ class App:
                     LayoutEvent(self._get_app_layout(with_code_editor))
                 })
             await self._queue.put(ev)
+            if reload:
+                await self.root._run_special_methods(list(attached.values()), [], self._flow_reload_manager)
 
     def app_initialize(self):
         """override this to init app before server start

@@ -1111,6 +1111,7 @@ class CollectionApp:
         self.example_object_inspector = ObjectInspectApp()
         self.example_pyplot = PlotApp()
         self.example_auto_complete = AutoComputeApp()
+
         nodes = [
             mui.ControlNode("1",
                             "color",
@@ -1138,6 +1139,7 @@ class CollectionApp:
         self.cfg = WTF(1, 0.5, WTF1(2), "WTF", [])
         self.wtf2 = plus.ConfigPanel(self.cfg, lambda x, y: print(x, y))
         # self.dev_0 = Dev()
+
         return mui.HBox([
             mui.Allotment([
                 plus.ObjectInspector(self).prop(width="100%",

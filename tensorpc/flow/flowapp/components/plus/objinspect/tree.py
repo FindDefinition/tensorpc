@@ -578,7 +578,9 @@ class ObjectTree(mui.FlexBox):
         self.tree.props.tree = await _get_root_tree_async(self.root, self._valid_checker,
                                               _ROOT, self._obj_meta_cache)
         if context_menus:
-            await self.tree.send_and_wait(self.tree.update_event(context_menus=context_menus))
+            await self.tree.send_and_wait(self.tree.update_event(tree=self.tree.props.tree, context_menus=context_menus))
+        else:
+            await self.tree.send_and_wait(self.tree.update_event(tree=self.tree.props.tree))
         appctx.get_app().register_app_special_event_handler(AppSpecialEventType.ObservedFunctionChange, self._on_obs_func_change)
     
     @mark_will_unmount

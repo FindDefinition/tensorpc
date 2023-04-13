@@ -153,6 +153,11 @@ class ServFunctionMeta:
         }
 
     def bind(self, obj):
+        if not self.is_static:
+            if self.is_binded and self.binded_fn is not None:
+                if self.binded_fn.__self__ is not obj:
+                    self.is_binded = False
+
         if not self.is_binded:
             if not self.is_static:
                 new_method = types.MethodType(self.fn, obj)
@@ -163,7 +168,7 @@ class ServFunctionMeta:
             return self.binded_fn
         assert self.binded_fn is not None
         return self.binded_fn
-
+    
     def get_binded_fn(self):
         assert self.binded_fn is not None
         return self.binded_fn

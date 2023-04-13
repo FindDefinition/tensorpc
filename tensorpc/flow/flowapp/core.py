@@ -104,8 +104,9 @@ class UIType(enum.Enum):
     JsonLikeTreeView = 0x27
     Allotment = 0x28
     AllotmentPane = 0x29
-    FlexLayout = 0x30
-    DynamicControls = 0x31
+    FlexLayout = 0x2a
+    DynamicControls = 0x2b
+    MonacoEditor = 0x2c
 
     # special
     TaskLoop = 0x100
@@ -1316,17 +1317,20 @@ class ContainerBase(Component[T_container_props, T_child]):
         state["childs"] = [self[n]._flow_uid for n in self._child_comps]
         return state
 
-    async def __run_special_methods(self, attached: List[Component],
-                                    detached: List[Component]):
+    async def _run_special_methods(self, attached: List[Component],
+                                    detached: List[Component],
+                                    reload_mgr: Optional[AppReloadManager] = None):
+        if reload_mgr is None:
+            reload_mgr = self.flow_app_comp_core.reload_mgr
         for attach in attached:
-            special_methods = attach.get_special_methods(self.flow_app_comp_core.reload_mgr)
+            special_methods = attach.get_special_methods(reload_mgr)
             if special_methods.did_mount is not None:
                 await self.run_callback(
                     special_methods.did_mount.get_binded_fn(),
                     sync_first=False,
                     change_status=False)
         for deleted in detached:
-            special_methods = deleted.get_special_methods(self.flow_app_comp_core.reload_mgr)
+            special_methods = deleted.get_special_methods(reload_mgr)
             if special_methods.will_unmount is not None:
                 await self.run_callback(
                     special_methods.will_unmount.get_binded_fn(),
@@ -1358,7 +1362,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         new_ev, attached, removed = self.set_new_layout_locally(layout)
         for deleted in removed:
             await deleted._cancel_task()
-        await self.__run_special_methods(attached, removed)
+        await self._run_special_methods(attached, removed)
         await self.put_app_event(new_ev)
 
     async def remove_childs_by_keys(self, keys: List[str]):
@@ -1367,7 +1371,7 @@ class ContainerBase(Component[T_container_props, T_child]):
             await comp._cancel_task()
         if not detached_uid_to_comp:
             return
-        await self.__run_special_methods([],
+        await self._run_special_methods([],
                                          list(detached_uid_to_comp.values()))
         await self.put_app_event(
             self.create_delete_comp_event(list(detached_uid_to_comp.keys())))
@@ -1400,7 +1404,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         new_ev, attached, removed = self.update_childs_locally(layout)
         for deleted in removed:
             await deleted._cancel_task()
-        await self.__run_special_methods(attached, removed)
+        await self._run_special_methods(attached, removed)
         await self.put_app_event(new_ev)
 
     async def replace_childs(self, layout: Dict[str, Component]):
