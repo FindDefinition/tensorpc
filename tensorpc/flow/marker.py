@@ -59,6 +59,10 @@ def mark_create_layout(func=None):
     meta = AppFunctionMeta(AppFuncType.CreateLayout)
     return meta_decorator(func, meta)
 
+def mark_create_preview_layout(func=None):
+    meta = AppFunctionMeta(AppFuncType.CreatePreviewLayout)
+    return meta_decorator(func, meta)
+
 
 def mark_create_object(func=None):
     meta = AppFunctionMeta(AppFuncType.CreateObject)

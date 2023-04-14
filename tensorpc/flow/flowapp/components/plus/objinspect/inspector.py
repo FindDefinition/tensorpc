@@ -14,10 +14,12 @@ import numpy as np
 from tensorpc.core.inspecttools import get_members
 from tensorpc.flow.flowapp.appcore import get_app
 from tensorpc.flow.flowapp.components import mui, three
-from tensorpc.flow.flowapp.core import FrontendEventType
+from tensorpc.flow.flowapp.core import FrontendEventType, FlowSpecialMethods
 from tensorpc.core.moduleid import get_qualname_of_type
-
-from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler
+from tensorpc.core.serviceunit import ReloadableDynamicClass
+from tensorpc.core.serviceunit import ReloadableDynamicClass
+from tensorpc.flow.flowapp.objtree import UserObjTreeProtocol
+from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler, USER_OBJ_TREE_TYPES
 from .tree import _DEFAULT_OBJ_NAME, FOLDER_TYPES, ObjectTree
 from typing_extensions import ParamSpec
 
@@ -172,6 +174,7 @@ class ObjectInspector(mui.FlexBox):
             raise ValueError(
                 f"your object {uid} is invalid, may need to reflesh")
         obj_type = type(obj)
+        preview_layout: Optional[mui.FlexBox] = None
         if obj_type in self._type_to_handler_object:
             handler = self._type_to_handler_object[obj_type]
         else:
@@ -191,12 +194,33 @@ class ObjectInspector(mui.FlexBox):
             if handler_type is not None:
                 handler = handler_type()
             else:
+                # check obj have create_preview_layout
+                metas = ReloadableDynamicClass.get_metas_of_regular_methods(
+                    obj_type, False, no_code=True)
+                special_methods = FlowSpecialMethods(metas)
+                if special_methods.create_preview_layout is not None:
+                    preview_layout = mui.flex_preview_wrapper(obj, metas)
+
                 handler = self.default_handler
-            self._type_to_handler_object[obj_type] = handler
-        childs = list(self.detail_container._child_comps.values())
-        if not childs or childs[0] is not handler:
-            await self.detail_container.set_new_layout([handler])
-        await handler.bind(obj)
+            if preview_layout is None:
+                self._type_to_handler_object[obj_type] = handler
+        if preview_layout is not None:
+            objs, found = await self.tree._get_obj_by_uid_trace(uid, nodes)
+            # determine objtree root
+            assert found, "shouldn't happen"
+            root: Optional[UserObjTreeProtocol] = None
+            for obj in objs:
+                if isinstance(obj, tuple(USER_OBJ_TREE_TYPES)):
+                    root = obj
+                    break 
+            if root is not None:
+                preview_layout.set_flow_event_context_creator(lambda: root.enter_context(root))
+            await self.detail_container.set_new_layout([preview_layout])
+        else:
+            childs = list(self.detail_container._child_comps.values())
+            if not childs or childs[0] is not handler:
+                await self.detail_container.set_new_layout([handler])
+            await handler.bind(obj)
 
     async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):
         await self.tree.set_object(obj, key)

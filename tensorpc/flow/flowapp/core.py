@@ -37,6 +37,7 @@ from tensorpc.flow.coretypes import MessageLevel
 from tensorpc.flow.flowapp.reload import AppReloadManager, FlowSpecialMethods
 from tensorpc.flow.flowapp.appcore import EventHandler
 from .appcore import ValueType, NumberType, EventType, get_app
+from typing_extensions import ContextManager
 from ..jsonlike import Undefined, undefined, split_props_to_undefined, DataClassWithUndefined, as_dict_no_undefined, snake_to_camel
 ALL_APP_EVENTS = HashableRegistry()
 
@@ -790,11 +791,18 @@ class Component(Generic[T_base_props, T_child]):
         # json_only, this scan will be skiped.
         self._flow_json_only = json_only
 
+        self._flow_event_context_creator: Optional[Callable[[], ContextManager]] = None
+
     def get_special_methods(self, reload_mgr: AppReloadManager):
         metas = reload_mgr.query_type_method_meta(type(self), no_code=True)
         res = FlowSpecialMethods(metas)
         res.bind(self)
         return res
+
+    def set_flow_event_context_creator(self, context_creator: Optional[Callable[[], ContextManager]]):
+        """set a context which will be entered before event handler is called
+        """
+        self._flow_event_context_creator = context_creator
 
     @property
     def props(self) -> T_base_props:
@@ -1174,6 +1182,22 @@ class ContainerBase(Component[T_container_props, T_child]):
         else:
             assert isinstance(child_comp, ContainerBase)
             return child_comp._get_comp_by_uid_resursive(parts[1:])
+        
+    def _get_comps_by_uid(self, uid: str):
+        parts = uid.split(".")
+        # uid contains root, remove it at first.
+        return [self] + self._get_comps_by_uid_resursive(parts[1:])
+
+    def _get_comps_by_uid_resursive(self, parts: List[str]) -> List[Component]:
+        key = parts[0]
+        assert key in self._child_comps
+        child_comp = self._child_comps[key]
+        if len(parts) == 1:
+            return [child_comp]
+        else:
+            assert isinstance(child_comp, ContainerBase)
+            return [child_comp] + child_comp._get_comps_by_uid_resursive(parts[1:])
+
 
     def _foreach_comp_recursive(self, child_ns: str,
                                 handler: Callable[[str, Component],

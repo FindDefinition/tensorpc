@@ -64,7 +64,6 @@ from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.coretypes import (ScheduleEvent, StorageDataItem)
 from tensorpc.flow.flowapp.reload import AppReloadManager, reload_object_methods, bind_and_reset_object_methods
 from tensorpc.core.serviceunit import get_qualname_to_code
-from tensorpc.flow.hold.holdctx import HoldContext
 from tensorpc.flow.jsonlike import JsonLikeNode, parse_obj_to_jsonlike
 from tensorpc.flow.marker import AppFunctionMeta, AppFuncType
 from tensorpc.flow.serv_names import serv_names
@@ -273,7 +272,6 @@ class App:
 
         self.__flowapp_master_meta = MasterMeta()
         self.__flowapp_storage_cache: Dict[str, StorageDataItem] = {}
-        self.__flow_hold_context: Optional[HoldContext] = None
         # for app and dynamic layout in AnyFlexLayout
         self._flowapp_change_observers: Dict[str, _WatchDogWatchEntry] = {}
         self._flowapp_obj_change_observers: Dict[str, _WatchDogObjWatchEntry] = {}
@@ -283,18 +281,9 @@ class App:
 
         self._flowapp_observed_func_registry: Optional[ObservedFunctionRegistryProtocol] = None
 
-    @property
-    def hold_context(self):
-        return self.__flow_hold_context
 
     def set_observed_func_registry(self, registry: ObservedFunctionRegistryProtocol):
         self._flowapp_observed_func_registry = registry
-
-    @hold_context.setter
-    def hold_context(self, val: Optional[HoldContext]):
-        if val is not None:
-            assert self.__flow_hold_context is None, "you can't nest hold context"
-        self.__flow_hold_context = val
 
     def register_app_special_event_handler(self, type: AppSpecialEventType,
                                            handler: Callable[[Any],
@@ -793,6 +782,7 @@ class App:
         for uid, data in ev.uid_to_data.items():
             ev_type = data[0]
             if ev_type == FrontendEventType.Drop.value:
+                # TODO add event context stack here.
                 src_data = data[1]
                 src_uid = src_data["uid"]
                 src_comp = self.root._get_comp_by_uid(src_uid)
@@ -811,12 +801,20 @@ class App:
             elif ev_type == FrontendEventType.FileDrop.value:
                 # for file drop, we can't use regular drop above, so
                 # just convert it to drop event, no drag collect needed.
-                comp = self.root._get_comp_by_uid(uid)
-                await comp.handle_event(
-                    (FrontendEventType.Drop.value, data[1]))
+                comps = self.root._get_comps_by_uid(uid)
+                ctxes = [c._flow_event_context_creator() for c in comps if c._flow_event_context_creator is not None]
+                with contextlib.ExitStack() as stack:
+                    for ctx in ctxes:
+                        stack.enter_context(ctx)
+                    await comps[-1].handle_event(
+                        (FrontendEventType.Drop.value, data[1]))
             else:
-                comp = self.root._get_comp_by_uid(uid)
-                await comp.handle_event(data)
+                comps = self.root._get_comps_by_uid(uid)
+                ctxes = [c._flow_event_context_creator() for c in comps if c._flow_event_context_creator is not None]
+                with contextlib.ExitStack() as stack:
+                    for ctx in ctxes:
+                        stack.enter_context(ctx)
+                    await comps[-1].handle_event(data)
 
     async def _handle_event_with_ctx(self, ev: UIEvent):
         # TODO run control from other component
@@ -1381,37 +1379,6 @@ class EditableApp(App):
                     with open(path, "w") as f:
                         f.write(event.data)
                     await self._reload_object_with_new_code(path, event.data)
-
-                    # if self.code_editor.is_external:
-                    #     self._flowapp_special_eemitter.emit(
-                    #         AppSpecialEventType.CodeEditorSave.value,
-                    #         event.data)
-                    # else:
-                    #     with open(app_path, "w") as f:
-                    #         f.write(event.data)
-                    #     # self._watchdog_prev_content = event.data
-
-                    #     if self._flowapp_code_mgr is not None:
-                    #         self._flowapp_code_mgr.update_code_from_editor(
-                    #             app_path, event.data)
-                    #     try:
-                    #         code_changed_metas = self._reload_app_file()
-                    #     except:
-                    #         traceback.print_exc()
-                    #         raise
-                    #     flow_special = FlowSpecialMethods(code_changed_metas)
-                    #     if flow_special.auto_run is not None:
-                    #         asyncio.create_task(
-                    #             self._run_autorun(
-                    #                 flow_special.auto_run.get_binded_fn()))
-                    #     if flow_special.create_layout is not None:
-                    #         await self._app_run_layout_function(
-                    #             True,
-                    #             with_code_editor=False,
-                    #             reload=True,
-                    #             decorator_fn=flow_special.create_layout.
-                    #             get_binded_fn())
-                    #     self.__reload_callback(app_path, True)
         return
 
 
@@ -1442,3 +1409,4 @@ async def _run_zeroarg_func(cb: Callable):
             await coro
     except:
         traceback.print_exc()
+

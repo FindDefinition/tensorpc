@@ -1,29 +1,36 @@
 import dataclasses
 import enum
 import inspect
-from pathlib import Path, PurePath
 import traceback
 import types
 from functools import partial
+from pathlib import Path, PurePath
 from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
                     Set, Tuple, Type, Union)
 
 import numpy as np
 
 from tensorpc.core.serviceunit import ReloadableDynamicClass
-from tensorpc.flow.flowapp.components import mui, three
-from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType
 from tensorpc.flow.flowapp import appctx
-from tensorpc.flow.jsonlike import ContextMenuData, IconButtonData, parse_obj_to_jsonlike
-from tensorpc.flow.flowapp.components.plus.monitor import ComputeResourceMonitor
-from tensorpc.flow.flowapp.reload import reload_object_methods
-from tensorpc.flow.flowapp.components.plus.objinspect.core import ALL_OBJECT_PREVIEW_HANDLERS, ALL_OBJECT_LAYOUT_HANDLERS, ObjectLayoutCreator, ObjectLayoutHandler, TreeItem, ContextMenuType
-from tensorpc.flow.flowapp.components.plus.canvas import SimpleCanvas
-from tensorpc.flow.flowapp.coretypes import TreeDragTarget
-from tensorpc.flow.jsonlike import CommonQualNames
-from tensorpc.flow.marker import mark_did_mount, mark_will_unmount
-from tensorpc.flow.flowapp.components.plus.collection import SimpleFileReader
 from tensorpc.flow.flowapp.appcore import AppSpecialEventType
+from tensorpc.flow.flowapp.components import mui, three
+from tensorpc.flow.flowapp.components.plus.canvas import SimpleCanvas
+from tensorpc.flow.flowapp.components.plus.collection import SimpleFileReader
+from tensorpc.flow.flowapp.components.plus.monitor import \
+    ComputeResourceMonitor
+from tensorpc.flow.flowapp.components.plus.objinspect.core import (
+    ALL_OBJECT_LAYOUT_HANDLERS, ALL_OBJECT_PREVIEW_HANDLERS,
+    USER_OBJ_TREE_TYPES, ContextMenuType, ObjectLayoutCreator,
+    ObjectLayoutHandler, TreeItem)
+from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType
+from tensorpc.flow.flowapp.coretypes import TreeDragTarget
+from tensorpc.flow.flowapp.objtree import ObjTree
+from tensorpc.flow.flowapp.reload import reload_object_methods
+from tensorpc.flow.jsonlike import (CommonQualNames, ContextMenuData,
+                                    IconButtonData, parse_obj_to_jsonlike)
+from tensorpc.flow.marker import mark_did_mount, mark_will_unmount
+from tensorpc.flow.flowapp.objtree import UserObjTreeProtocol
+
 _DEFAULT_OBJ_NAME = "default"
 
 _DEFAULT_BUILTINS_NAME = "builtins"
@@ -172,6 +179,8 @@ def _get_obj_dict(obj,
         return {}
     if isinstance(obj, types.ModuleType):
         return {}
+    if isinstance(obj, tuple(USER_OBJ_TREE_TYPES)):
+        return obj.get_childs()
     # if isinstance(obj, mui.Component):
     #     return {}
     # members = get_members(obj, no_parent=False)
@@ -610,6 +619,10 @@ class ObjectTree(mui.FlexBox):
     async def _get_obj_by_uid(self, uid: str, tree_node_trace: List[mui.JsonLikeNode]):
         real_keys = [n.get_dict_key() for n in tree_node_trace if not n.is_folder()]
         return await _get_obj_by_uid(self.root, uid, self._valid_checker, real_keys=real_keys)
+    
+    async def _get_obj_by_uid_trace(self, uid: str, tree_node_trace: List[mui.JsonLikeNode]):
+        real_keys = [n.get_dict_key() for n in tree_node_trace if not n.is_folder()]
+        return await _get_obj_by_uid_trace(self.root, uid, self._valid_checker, real_keys=real_keys)
 
     def _register_dnd_uid(self, uid: str, cb: Callable[[str, Any], mui.CORO_NONE]):
         self._cared_dnd_uids[uid] = cb
@@ -641,18 +654,21 @@ class ObjectTree(mui.FlexBox):
 
     async def _on_drag_collect(self, data):
         uid = data["id"]
-        obj, found = await _get_obj_by_uid(self.root, uid, self._valid_checker)
+        objs, found = await _get_obj_by_uid_trace(self.root, uid, self._valid_checker)
         if not found:
             return None
         tab_id = ""
         if "complexLayoutTabNodeId" in data:
             # for complex layout UI: FlexLayout
             tab_id = data["complexLayoutTabNodeId"]
-        # if isinstance(obj, mui.FlexBox):
-        #     wrapped_obj = obj
-        # else:
-        #     wrapped_obj = mui.flex_wrapper(obj)
-        return TreeDragTarget(obj, uid, tab_id, self._flow_uid)
+        root: Optional[UserObjTreeProtocol] = None
+        for obj in objs:
+            if isinstance(obj, tuple(USER_OBJ_TREE_TYPES)):
+                root = obj
+                break 
+        if root is not None:
+            return TreeDragTarget(objs[-1], uid, tab_id, self._flow_uid, lambda: root.enter_context(root))
+        return TreeDragTarget(objs[-1], uid, tab_id, self._flow_uid)
 
     async def _on_expand(self, uid: str):
         node = self._objinspect_root._get_node_by_uid(uid)

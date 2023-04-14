@@ -97,6 +97,7 @@ class AnyFlexLayout(mui.FlexLayout):
                             raise ValueError("this shouldn't happen")
                 else:
                     wrapped_obj = obj
+            wrapped_obj.set_flow_event_context_creator(target.context_creator)
             if obj_is_anylayout:
                 await self._bind_code_editor(obj, wrapped_obj, uid)
             await self.update_childs({uid: wrapped_obj})

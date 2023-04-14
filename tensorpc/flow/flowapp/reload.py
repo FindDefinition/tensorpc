@@ -1,11 +1,18 @@
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Type, Callable, Hashable, Optional, Generic, TypeVar
+from typing import (Any, Callable, Dict, Generic, Hashable, List, Optional,
+                    Type, TypeVar)
 
-from tensorpc.core.moduleid import get_obj_type_meta, TypeMeta, get_qualname_of_type
-from tensorpc.core.serviceunit import ObjectReloadManager, ObservedFunctionRegistry, ObservedFunctionRegistryProtocol, ReloadableDynamicClass, ServFunctionMeta
-from tensorpc.flow.constants import TENSORPC_ANYLAYOUT_FUNC_NAME, TENSORPC_LEGACY_LAYOUT_FUNC_NAME
-from tensorpc.core.serviceunit import AppFuncType
+from tensorpc.core.moduleid import (TypeMeta, get_obj_type_meta,
+                                    get_qualname_of_type)
+from tensorpc.core.serviceunit import (AppFuncType, ObjectReloadManager,
+                                       ObservedFunctionRegistry,
+                                       ObservedFunctionRegistryProtocol,
+                                       ReloadableDynamicClass,
+                                       ServFunctionMeta)
 from tensorpc.flow.client import is_inside_app
+from tensorpc.flow.constants import (TENSORPC_ANYLAYOUT_FUNC_NAME,
+                                     TENSORPC_ANYLAYOUT_PREVIEW_FUNC_NAME,
+                                     TENSORPC_LEGACY_LAYOUT_FUNC_NAME)
 
 T = TypeVar("T")
 
@@ -17,6 +24,7 @@ class FlowSpecialMethods:
         self.did_mount: Optional[ServFunctionMeta] = None
         self.will_unmount: Optional[ServFunctionMeta] = None
         self.create_object: Optional[ServFunctionMeta] = None
+        self.create_preview_layout: Optional[ServFunctionMeta] = None
 
         self.metas = metas
         for m in self.metas:
@@ -25,6 +33,9 @@ class FlowSpecialMethods:
                 self.create_layout = m
             elif m.name == TENSORPC_LEGACY_LAYOUT_FUNC_NAME:
                 self.create_layout = m
+            elif m.name == TENSORPC_ANYLAYOUT_PREVIEW_FUNC_NAME:
+                self.create_preview_layout = m
+
             elif m.user_app_meta is not None:
                 if m.user_app_meta.type == AppFuncType.CreateLayout:
                     self.create_layout = m
@@ -34,6 +45,8 @@ class FlowSpecialMethods:
                     self.will_unmount = m
                 elif m.user_app_meta.type == AppFuncType.CreateObject:
                     self.create_object = m
+                elif m.user_app_meta.type == AppFuncType.CreatePreviewLayout:
+                    self.create_preview_layout = m
                 elif m.user_app_meta.type == AppFuncType.AutoRun:
                     self.auto_runs.append(m)
 
@@ -42,6 +55,7 @@ class FlowSpecialMethods:
         res |= self.did_mount is not None
         res |= self.will_unmount is not None
         res |= self.create_object is not None
+        res |= self.create_preview_layout is not None
         res |= bool(self.auto_runs)
         return res 
     
@@ -57,6 +71,8 @@ class FlowSpecialMethods:
             res.append(self.will_unmount)
         if self.create_object is not None:
             res.append(self.create_object)
+        if self.create_preview_layout is not None:
+            res.append(self.create_preview_layout)
         return res 
 
     def contains_autorun(self):
@@ -73,6 +89,8 @@ class FlowSpecialMethods:
             self.will_unmount.bind(obj)
         if self.create_object is not None:
             self.create_object.bind(obj)
+        if self.create_preview_layout is not None:
+            self.create_preview_layout.bind(obj)
 
 
 def reload_object_methods(

@@ -38,7 +38,7 @@ from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.inspecttools import get_all_members_by_type
 from tensorpc.flow import (App, EditableApp, EditableLayoutApp, leaflet,
                            mark_autorun, mark_create_layout, marker, mui,
-                           plotly, plus, three)
+                           plotly, plus, three, ObjTree)
 from tensorpc.flow.client import AppClient, AsyncAppClient, add_message
 from tensorpc.flow.coretypes import MessageLevel, ScheduleEvent
 from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
@@ -47,7 +47,7 @@ from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
                                                   VList)
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from tensorpc.flow.sampleapp.sample_reload_fn import func_support_reload
-
+from tensorpc.flow.flowapp.objtree import get_objtree_context
 class SampleApp(App):
 
     def __init__(self) -> None:
@@ -975,6 +975,7 @@ class PointCloudApp:
     @mark_create_layout
     def my_layout(self):
         cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
+        self.wtfobj = ObjTree()
 
         self.canvas = plus.SimpleCanvas(cam, self._on_video_save)
         self.slider = mui.Slider("Slider",
@@ -983,7 +984,7 @@ class PointCloudApp:
                                  1,
                                  callback=self._on_slider_select)
         
-        return mui.VBox([
+        res = mui.VBox([
 
             mui.HBox([
                 mui.Button("Change Slider Range",
@@ -1000,6 +1001,11 @@ class PointCloudApp:
                 width="100%",
                 height="100%",
                 overflow="hidden")
+        res.set_flow_event_context_creator(lambda: self.wtfobj.enter_context(self.wtfobj))
+        ctx = self.wtfobj.enter_context(self.wtfobj)
+        with ctx:
+            print("???")
+        return res 
 
     async def _on_slider_range_change(self):
 
@@ -1028,6 +1034,8 @@ class PointCloudApp:
             f.write(img_bytes)
 
     async def _on_slider_select(self, value):
+        print(get_objtree_context())
+
         print("select slider!!!", value)
         # you need to specify a key for a group of point
         # you also need to specify number limit of current point
@@ -1037,7 +1045,7 @@ class PointCloudApp:
         # 2. [N], int8 (intensity), value range: [0, 255]
         # 3. a color string, e.g. red, green
         colors = np.random.uniform(254, 255, size=[1000]).astype(np.uint8)
-        print(colors)
+        # print(colors)
         # colors = np.random.uniform(254, 255, size=[1000]).astype(np.uint8)
         sizes = np.random.uniform(0.5, 10.5, size=[1000]).astype(
             np.float32) * 1
@@ -1140,7 +1148,7 @@ class CollectionApp:
         self.wtf2 = plus.ConfigPanel(self.cfg, lambda x, y: print(x, y))
         # self.dev_0 = Dev()
 
-        return mui.HBox([
+        res = mui.HBox([
             mui.Allotment([
                 plus.ObjectInspector(self).prop(width="100%",
                                                 height="100%",
@@ -1150,6 +1158,8 @@ class CollectionApp:
                 ]).prop(width="100%", height="100%", overflow="hidden")
             ]).prop(default_sizes=[1, 3], width="100%", height="100%")
         ]).prop(flex_flow="row nowrap")
+
+        return res 
     
     @mark_autorun 
     def _autorun_dev(self):

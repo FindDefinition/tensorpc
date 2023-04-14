@@ -43,3 +43,5 @@ TENSORPC_READUNTIL = "__tensorpc_readuntil_string"
 TENSORPC_ANYLAYOUT_FUNC_NAME = "tensorpc_flow_layout"
 
 TENSORPC_LEGACY_LAYOUT_FUNC_NAME = "app_create_layout"
+
+TENSORPC_ANYLAYOUT_PREVIEW_FUNC_NAME = "tensorpc_flow_preview_layout"

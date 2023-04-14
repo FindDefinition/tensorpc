@@ -31,7 +31,7 @@ from PIL import Image as PILImage
 from typing_extensions import Literal, TypeAlias
 
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass
+from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.flow.flowapp.components.common import (handle_standard_event)
 from tensorpc.flow.flowapp.reload import AppReloadManager
 from ...jsonlike import JsonLikeType, BackendOnlyProp, ContextMenuData, JsonLikeNode
@@ -2686,7 +2686,7 @@ def flex_wrapper(obj: Any):
     enable simple layout creation for arbitrary object without inherit
     """
     metas = ReloadableDynamicClass.get_metas_of_regular_methods(
-        type(obj), True)
+        type(obj), True, no_code=True)
     methods = FlowSpecialMethods(metas)
     if methods.create_layout is not None:
         fn = methods.create_layout.bind(obj)
@@ -2700,4 +2700,27 @@ def flex_wrapper(obj: Any):
         return layout_flex
     raise ValueError(
         f"wrapped object must define a zero-arg function with @marker.mark_create_layout and return a flexbox"
+    )
+
+
+def flex_preview_wrapper(obj: Any, metas: Optional[List[ServFunctionMeta]] = None):
+    """wrap a object which define a layout function "tensorpc_flow_preview_layout"
+    enable simple layout creation for arbitrary object without inherit
+    """
+    if metas is None:
+        metas = ReloadableDynamicClass.get_metas_of_regular_methods(
+            type(obj), True, no_code=True)
+    methods = FlowSpecialMethods(metas)
+    if methods.create_preview_layout is not None:
+        fn = methods.create_preview_layout.bind(obj)
+        layout_flex = fn()
+        assert isinstance(
+            layout_flex, FlexBox
+        ), f"create_preview_layout must return a flexbox when use anylayout, {type(layout_flex)}"
+        # set _flow_comp_def_path to this object
+        layout_flex._flow_comp_def_path = _get_obj_def_path(obj)
+        layout_flex._wrapped_obj = obj
+        return layout_flex
+    raise ValueError(
+        f"wrapped object must define a zero-arg function with @marker.mark_create_preview_layout and return a flexbox"
     )

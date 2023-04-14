@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from . import constants, marker
-from .app_hold import app_hold_ctx, app_hold_ctx_async
 from .flowapp import App, EditableApp, EditableLayoutApp, appctx
+from .flowapp.objtree import ObjTree
 from .flowapp.components import leaflet, mui, plotly, plus, three
 from .marker import mark_autorun, mark_create_layout, mark_create_object

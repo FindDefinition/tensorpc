@@ -4,14 +4,16 @@ import inspect
 import types
 from functools import partial
 from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
-                    Set, Tuple, Type, Union)
+                    Set, Tuple, Type)
 
 import numpy as np
 
 from tensorpc.core.inspecttools import get_members
 from tensorpc.flow.flowapp.components import mui
 from tensorpc.core.moduleid import get_qualname_of_type
+from tensorpc.flow.flowapp.objtree import ObjTree, UserObjTreeProtocol
 
+USER_OBJ_TREE_TYPES: Set[Any] = {ObjTree}
 
 class ObjectPreviewHandler(mui.FlexBox):
 
