@@ -38,7 +38,7 @@ from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.inspecttools import get_all_members_by_type
 from tensorpc.flow import (App, EditableApp, EditableLayoutApp, leaflet,
                            mark_autorun, mark_create_layout, marker, mui,
-                           plotly, plus, three, ObjTree)
+                           plotly, plus, three, UserObjTree)
 from tensorpc.flow.client import AppClient, AsyncAppClient, add_message
 from tensorpc.flow.coretypes import MessageLevel, ScheduleEvent
 from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
@@ -975,7 +975,7 @@ class PointCloudApp:
     @mark_create_layout
     def my_layout(self):
         cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
-        self.wtfobj = ObjTree()
+        self.wtfobj = UserObjTree()
 
         self.canvas = plus.SimpleCanvas(cam, self._on_video_save)
         self.slider = mui.Slider("Slider",

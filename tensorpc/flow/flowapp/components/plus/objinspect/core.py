@@ -11,9 +11,9 @@ import numpy as np
 from tensorpc.core.inspecttools import get_members
 from tensorpc.flow.flowapp.components import mui
 from tensorpc.core.moduleid import get_qualname_of_type
-from tensorpc.flow.flowapp.objtree import ObjTree, UserObjTreeProtocol
+from tensorpc.flow.flowapp.objtree import UserObjTree, UserObjTreeProtocol
 
-USER_OBJ_TREE_TYPES: Set[Any] = {ObjTree}
+USER_OBJ_TREE_TYPES: Set[Any] = {UserObjTree}
 
 class ObjectPreviewHandler(mui.FlexBox):
 

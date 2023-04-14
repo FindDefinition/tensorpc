@@ -6,7 +6,7 @@ objects in a tree structure, and can be used to find objects by type.
 It's used to provide loose coupling between objects, and can be easily
 intergrated into GUI TreeView.
 
-Object Inspector in tensorpc supports ObjTree natively. if you want to
+Object Inspector in tensorpc supports UserObjTree natively. if you want to
 add new object type to Object Inspector, you need to register it.
 
 
@@ -66,7 +66,7 @@ def get_objtree_context() -> Optional[ObjTreeContextProtocol]:
     return OBJ_TREE_CONTEXT_VAR.get()
 
 
-class ObjTree:
+class UserObjTree:
 
     def __init__(self) -> None:
         self.childs: Dict[str, Union[Any, "UserObjTreeProtocol"]] = {}
@@ -150,7 +150,7 @@ def find(obj_type: Type[T]) -> T:
     """
     ctx = get_objtree_context()
     assert ctx is not None
-    return find_tree_child_item(ctx.node, obj_type, ObjTree)
+    return find_tree_child_item(ctx.node, obj_type, UserObjTree)
 
 
 def find_may_exist(obj_type: Type[T]) -> Optional[T]:
@@ -159,4 +159,4 @@ def find_may_exist(obj_type: Type[T]) -> Optional[T]:
     """
     ctx = get_objtree_context()
     assert ctx is not None
-    return find_tree_child_item_may_exist(ctx.node, obj_type, ObjTree)
+    return find_tree_child_item_may_exist(ctx.node, obj_type, UserObjTree)

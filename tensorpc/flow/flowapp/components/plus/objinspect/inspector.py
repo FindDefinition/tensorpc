@@ -186,11 +186,6 @@ class ObjectInspector(mui.FlexBox):
                     handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_type]
                 elif obj_qualname in ALL_OBJECT_PREVIEW_HANDLERS:
                     handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_qualname]
-            # else:
-            #     handler_type = DefaultHandler
-            # TODO use a base handler here.
-            # await self.detail_container.set_new_layout([])
-            # return
             if handler_type is not None:
                 handler = handler_type()
             else:
@@ -209,9 +204,9 @@ class ObjectInspector(mui.FlexBox):
             # determine objtree root
             assert found, "shouldn't happen"
             root: Optional[UserObjTreeProtocol] = None
-            for obj in objs:
-                if isinstance(obj, tuple(USER_OBJ_TREE_TYPES)):
-                    root = obj
+            for obj_iter_val in objs:
+                if isinstance(obj_iter_val, tuple(USER_OBJ_TREE_TYPES)):
+                    root = obj_iter_val
                     break 
             if root is not None:
                 preview_layout.set_flow_event_context_creator(lambda: root.enter_context(root))

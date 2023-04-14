@@ -14,6 +14,6 @@
 
 from . import constants, marker
 from .flowapp import App, EditableApp, EditableLayoutApp, appctx
-from .flowapp.objtree import ObjTree
+from .flowapp.objtree import UserObjTree
 from .flowapp.components import leaflet, mui, plotly, plus, three
 from .marker import mark_autorun, mark_create_layout, mark_create_object

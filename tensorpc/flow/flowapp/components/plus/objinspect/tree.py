@@ -24,7 +24,7 @@ from tensorpc.flow.flowapp.components.plus.objinspect.core import (
     ObjectLayoutHandler, TreeItem)
 from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
-from tensorpc.flow.flowapp.objtree import ObjTree
+from tensorpc.flow.flowapp.objtree import UserObjTree
 from tensorpc.flow.flowapp.reload import reload_object_methods
 from tensorpc.flow.jsonlike import (CommonQualNames, ContextMenuData,
                                     IconButtonData, parse_obj_to_jsonlike)
@@ -289,6 +289,9 @@ async def _get_obj_by_uid_resursive(
         child_obj = obj_dict[key]
     elif isinstance(obj, TreeItem):
         child_obj = await obj.get_child(key)
+    elif isinstance(obj, tuple(USER_OBJ_TREE_TYPES)):
+        childs = obj.get_childs()
+        child_obj = childs[key]
     else:
         child_obj = _get_obj_single_attr(obj, key, checker)
         if isinstance(obj, mui.Undefined):
