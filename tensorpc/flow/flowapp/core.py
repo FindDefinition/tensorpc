@@ -13,32 +13,38 @@
 # limitations under the License.
 
 import abc
-import enum
-import io
-import builtins
-from pathlib import Path
-import threading
-from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
-                    Generic, Iterable, List, Optional, Tuple, Type, TypeVar,
-                    Union, Set)
 import asyncio
-import traceback
-import inspect
-
-from tensorpc.core.core_io import JsonOnlyData
-from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServFunctionMeta
-from tensorpc.utils.registry import HashableRegistry
-from tensorpc.utils.uniquename import UniqueNamePool
+import builtins
 import dataclasses
+import enum
+import inspect
+import io
 import re
 import sys
-from typing_extensions import Literal, ParamSpec, Concatenate, Self, TypeAlias, Protocol
+import threading
+import traceback
+from pathlib import Path
+from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
+                    Generic, Iterable, List, Optional, Set, Tuple, Type,
+                    TypeVar, Union)
+
+from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec,
+                               Protocol, Self, TypeAlias)
+
+from tensorpc.core.core_io import JsonOnlyData
+from tensorpc.core.serviceunit import (AppFuncType, ReloadableDynamicClass,
+                                       ServFunctionMeta)
 from tensorpc.flow.coretypes import MessageLevel
-from tensorpc.flow.flowapp.reload import AppReloadManager, FlowSpecialMethods
 from tensorpc.flow.flowapp.appcore import EventHandler
-from .appcore import ValueType, NumberType, EventType, get_app
-from typing_extensions import ContextManager
-from ..jsonlike import Undefined, undefined, split_props_to_undefined, DataClassWithUndefined, as_dict_no_undefined, snake_to_camel
+from tensorpc.flow.flowapp.reload import AppReloadManager, FlowSpecialMethods
+from tensorpc.utils.registry import HashableRegistry
+from tensorpc.utils.uniquename import UniqueNamePool
+
+from ..jsonlike import (DataClassWithUndefined, Undefined,
+                        as_dict_no_undefined, snake_to_camel,
+                        split_props_to_undefined, undefined)
+from .appcore import EventType, NumberType, ValueType, get_app
+
 ALL_APP_EVENTS = HashableRegistry()
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
@@ -446,11 +452,10 @@ class UISaveStateEvent:
 @ALL_APP_EVENTS.register(key=AppEventType.UIUpdateEvent.value)
 class UIUpdateEvent:
 
-    def __init__(
-        self, uid_to_data_undefined: Dict[str, Tuple[Dict[str, Any],
-                                                     List[str]]],
-        json_only: bool = False
-    ) -> None:
+    def __init__(self,
+                 uid_to_data_undefined: Dict[str, Tuple[Dict[str, Any],
+                                                        List[str]]],
+                 json_only: bool = False) -> None:
         self.uid_to_data_undefined = uid_to_data_undefined
         self.json_only = json_only
 
@@ -756,6 +761,7 @@ def _get_obj_def_path(obj):
         _flow_comp_def_path = ""
     return _flow_comp_def_path
 
+
 class Component(Generic[T_base_props, T_child]):
 
     def __init__(self,
@@ -787,11 +793,12 @@ class Component(Generic[T_base_props, T_child]):
         self._flow_reference_count = 0
         # tensorpc will scan your prop dict to find
         # np.ndarray and bytes by default.
-        # this will cost time, so if you use 
+        # this will cost time, so if you use
         # json_only, this scan will be skiped.
         self._flow_json_only = json_only
 
-        self._flow_event_context_creator: Optional[Callable[[], ContextManager]] = None
+        self._flow_event_context_creator: Optional[Callable[
+            [], ContextManager]] = None
 
     def get_special_methods(self, reload_mgr: AppReloadManager):
         metas = reload_mgr.query_type_method_meta(type(self), no_code=True)
@@ -799,7 +806,8 @@ class Component(Generic[T_base_props, T_child]):
         res.bind(self)
         return res
 
-    def set_flow_event_context_creator(self, context_creator: Optional[Callable[[], ContextManager]]):
+    def set_flow_event_context_creator(
+            self, context_creator: Optional[Callable[[], ContextManager]]):
         """set a context which will be entered before event handler is called
         """
         self._flow_event_context_creator = context_creator
@@ -848,7 +856,9 @@ class Component(Generic[T_base_props, T_child]):
 
         return wrapper
 
-    def _update_props_base(self, prop: Callable[P, Any], json_only: bool = False):
+    def _update_props_base(self,
+                           prop: Callable[P, Any],
+                           json_only: bool = False):
 
         def wrapper(*args: P.args, **kwargs: P.kwargs):
             for k, v in kwargs.items():
@@ -1007,7 +1017,9 @@ class Component(Generic[T_base_props, T_child]):
                               ):
         pass
 
-    def create_update_event(self, data: Dict[str, Union[Any, Undefined]], json_only: bool = False):
+    def create_update_event(self,
+                            data: Dict[str, Union[Any, Undefined]],
+                            json_only: bool = False):
         data_no_und = {}
         data_unds = []
         for k, v in data.items():
@@ -1016,7 +1028,8 @@ class Component(Generic[T_base_props, T_child]):
                 data_unds.append(k)
             else:
                 data_no_und[k] = as_dict_no_undefined(v)
-        ev = UIUpdateEvent({self._flow_uid: (data_no_und, data_unds)}, json_only)
+        ev = UIUpdateEvent({self._flow_uid: (data_no_und, data_unds)},
+                           json_only)
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UIUpdateEvent: ev})
 
@@ -1182,7 +1195,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         else:
             assert isinstance(child_comp, ContainerBase)
             return child_comp._get_comp_by_uid_resursive(parts[1:])
-        
+
     def _get_comps_by_uid(self, uid: str):
         parts = uid.split(".")
         # uid contains root, remove it at first.
@@ -1196,8 +1209,8 @@ class ContainerBase(Component[T_container_props, T_child]):
             return [child_comp]
         else:
             assert isinstance(child_comp, ContainerBase)
-            return [child_comp] + child_comp._get_comps_by_uid_resursive(parts[1:])
-
+            return [child_comp] + child_comp._get_comps_by_uid_resursive(
+                parts[1:])
 
     def _foreach_comp_recursive(self, child_ns: str,
                                 handler: Callable[[str, Component],
@@ -1285,7 +1298,7 @@ class ContainerBase(Component[T_container_props, T_child]):
 
     def __contains__(self, key: str):
         return key in self._child_comps
-    
+
     def __len__(self):
         return len(self._child_comps)
 
@@ -1341,9 +1354,11 @@ class ContainerBase(Component[T_container_props, T_child]):
         state["childs"] = [self[n]._flow_uid for n in self._child_comps]
         return state
 
-    async def _run_special_methods(self, attached: List[Component],
-                                    detached: List[Component],
-                                    reload_mgr: Optional[AppReloadManager] = None):
+    async def _run_special_methods(
+            self,
+            attached: List[Component],
+            detached: List[Component],
+            reload_mgr: Optional[AppReloadManager] = None):
         if reload_mgr is None:
             reload_mgr = self.flow_app_comp_core.reload_mgr
         for attach in attached:
@@ -1396,7 +1411,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         if not detached_uid_to_comp:
             return
         await self._run_special_methods([],
-                                         list(detached_uid_to_comp.values()))
+                                        list(detached_uid_to_comp.values()))
         await self.put_app_event(
             self.create_delete_comp_event(list(detached_uid_to_comp.keys())))
         child_uids = [self[c]._flow_uid for c in self._child_comps]

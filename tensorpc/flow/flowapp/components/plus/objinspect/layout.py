@@ -9,21 +9,22 @@ from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
                     Set, Tuple, Type, Union)
 
 import watchdog
-from tensorpc.core.serviceunit import ServFunctionMeta
 
+from tensorpc.core.serviceunit import ServFunctionMeta
 from tensorpc.flow.flowapp.appcore import (AppSpecialEventType,
                                            _run_zeroarg_func,
                                            create_reload_metas, get_app,
                                            get_reload_manager)
 from tensorpc.flow.flowapp.components import mui, plus, three
-from tensorpc.flow.flowapp.components.plus.objinspect.core import \
-    ALL_OBJECT_LAYOUT_HANDLERS, ObjectLayoutCreator
+from tensorpc.flow.flowapp.components.plus.objinspect.core import (
+    ALL_OBJECT_LAYOUT_HANDLERS, ObjectLayoutCreator)
 from tensorpc.flow.flowapp.core import (AppEditorFrontendEvent,
                                         FlowSpecialMethods, FrontendEventType,
                                         _get_obj_def_path)
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 from tensorpc.flow.flowapp.reload import reload_object_methods
 from tensorpc.utils.reload import reload_method
+
 
 class AnyFlexLayout(mui.FlexLayout):
 

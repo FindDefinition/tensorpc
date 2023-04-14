@@ -3,14 +3,15 @@ from typing import Any
 
 import numpy as np
 
-from tensorpc.flow.flowapp.components import mui
 from tensorpc.core.moduleid import get_qualname_of_type
-
-from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler
-from ..common import CommonQualNames
 from tensorpc.core.serviceunit import ObservedFunction
+from tensorpc.flow.flowapp.components import mui
+
+from ..common import CommonQualNames
+from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler
 
 monospace_14px = dict(font_family="monospace", font_size="14px")
+
 
 @ALL_OBJECT_PREVIEW_HANDLERS.register(np.ndarray)
 @ALL_OBJECT_PREVIEW_HANDLERS.register(CommonQualNames.TorchTensor)
@@ -121,13 +122,16 @@ class StringHandler(ObjectPreviewHandler):
 class ObservedFunctionHandler(ObjectPreviewHandler):
 
     def __init__(self) -> None:
-        self.qualname = mui.Typography("").prop(word_break="break-word", **monospace_14px)
-        self.path = mui.Typography("").prop(word_break="break-word", **monospace_14px)
+        self.qualname = mui.Typography("").prop(word_break="break-word",
+                                                **monospace_14px)
+        self.path = mui.Typography("").prop(word_break="break-word",
+                                            **monospace_14px)
 
-        super().__init__([self.qualname, mui.Divider().prop(padding="3px"), self.path])
+        super().__init__(
+            [self.qualname,
+             mui.Divider().prop(padding="3px"), self.path])
         self.prop(flex_direction="column")
 
     async def bind(self, obj: ObservedFunction):
         await self.qualname.write(obj.qualname)
         await self.path.write(obj.path)
-

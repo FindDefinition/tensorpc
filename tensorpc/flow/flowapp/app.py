@@ -38,10 +38,10 @@ import threading
 import time
 import tokenize
 import traceback
+import types
 from functools import partial
 from pathlib import Path
 from types import ModuleType
-import types
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
 
@@ -59,11 +59,15 @@ from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.inspecttools import get_all_members_by_type
 from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
                                     is_valid_function)
-from tensorpc.core.serviceunit import ObservedFunctionRegistryProtocol, ReloadableDynamicClass, ServFunctionMeta, ServiceUnit, SimpleCodeManager
+from tensorpc.core.serviceunit import (ObservedFunctionRegistryProtocol,
+                                       ReloadableDynamicClass,
+                                       ServFunctionMeta, ServiceUnit,
+                                       SimpleCodeManager, get_qualname_to_code)
 from tensorpc.flow.client import MasterMeta
-from tensorpc.flow.coretypes import (ScheduleEvent, StorageDataItem)
-from tensorpc.flow.flowapp.reload import AppReloadManager, reload_object_methods, bind_and_reset_object_methods
-from tensorpc.core.serviceunit import get_qualname_to_code
+from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem
+from tensorpc.flow.flowapp.reload import (AppReloadManager,
+                                          bind_and_reset_object_methods,
+                                          reload_object_methods)
 from tensorpc.flow.jsonlike import JsonLikeNode, parse_obj_to_jsonlike
 from tensorpc.flow.marker import AppFunctionMeta, AppFuncType
 from tensorpc.flow.serv_names import serv_names
@@ -71,9 +75,11 @@ from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.reload import reload_method
 from tensorpc.utils.uniquename import UniqueNamePool
 
-from .appcore import _CompReloadMeta, AppContext, AppSpecialEventType, enter_app_conetxt, ALL_OBSERVED_FUNCTIONS
+from .appcore import (ALL_OBSERVED_FUNCTIONS, AppContext, AppSpecialEventType,
+                      _CompReloadMeta, create_reload_metas)
+from .appcore import enter_app_conetxt
 from .appcore import enter_app_conetxt as _enter_app_conetxt
-from .appcore import get_app, get_app_context, create_reload_metas
+from .appcore import get_app, get_app_context
 from .components import mui, plus, three
 from .core import (AppComponentCore, AppEditorEvent, AppEditorEventType,
                    AppEditorFrontendEvent, AppEditorFrontendEventType,
@@ -173,8 +179,10 @@ class _LayoutObserveMeta:
     layout: Union[mui.FlexBox, "App"]
     qualname_prefix: str
     metas: List[ServFunctionMeta]
-    callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta], Coroutine[None, None, mui.FlexBox]]]
-    
+    callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta],
+                                Coroutine[None, None, mui.FlexBox]]]
+
+
 @dataclasses.dataclass
 class _ObjectObserveMeta:
     obj: Any
@@ -182,10 +190,12 @@ class _ObjectObserveMeta:
     metas: List[ServFunctionMeta]
     autorun_name: str
 
+
 @dataclasses.dataclass
 class _WatchDogWatchEntry:
     obmetas: List[_LayoutObserveMeta]
     watch: Optional[ObservedWatch]
+
 
 @dataclasses.dataclass
 class _WatchDogObjWatchEntry:
@@ -232,7 +242,7 @@ class App:
             # layout saved in external_root
             # self._uid_to_comp = root._uid_to_comp
             root._attach(_ROOT, self._flow_app_comp_core)
-            
+
             self._is_external_root = True
         else:
             root = mui.FlexBox(inited=True,
@@ -274,15 +284,17 @@ class App:
         self.__flowapp_storage_cache: Dict[str, StorageDataItem] = {}
         # for app and dynamic layout in AnyFlexLayout
         self._flowapp_change_observers: Dict[str, _WatchDogWatchEntry] = {}
-        self._flowapp_obj_change_observers: Dict[str, _WatchDogObjWatchEntry] = {}
+        self._flowapp_obj_change_observers: Dict[str,
+                                                 _WatchDogObjWatchEntry] = {}
 
         self._flowapp_is_inited: bool = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
-        self._flowapp_observed_func_registry: Optional[ObservedFunctionRegistryProtocol] = None
+        self._flowapp_observed_func_registry: Optional[
+            ObservedFunctionRegistryProtocol] = None
 
-
-    def set_observed_func_registry(self, registry: ObservedFunctionRegistryProtocol):
+    def set_observed_func_registry(self,
+                                   registry: ObservedFunctionRegistryProtocol):
         self._flowapp_observed_func_registry = registry
 
     def register_app_special_event_handler(self, type: AppSpecialEventType,
@@ -329,13 +341,14 @@ class App:
         if len(data_enc) <= in_memory_limit_bytes:
             self.__flowapp_storage_cache[key] = item
         if len(data_enc) > in_memory_limit_bytes:
-            raise ValueError("you can't store object more than 1GB size", len(data_enc))
+            raise ValueError("you can't store object more than 1GB size",
+                             len(data_enc))
         await simple_chunk_call_async(self.__flowapp_master_meta.grpc_url,
                                       serv_names.FLOW_DATA_SAVE, graph_id,
                                       node_id, key, data_enc, meta,
                                       item.timestamp)
 
-    async def read_data_storage(self, 
+    async def read_data_storage(self,
                                 key: str,
                                 node_id: str,
                                 graph_id: Optional[str] = None,
@@ -364,35 +377,35 @@ class App:
                 self.__flowapp_storage_cache[key] = res
             return data
 
-    async def remove_data_storage_item(self, 
-                                key: Optional[str],
-                                node_id: str,
-                                graph_id: Optional[str] = None):
+    async def remove_data_storage_item(self,
+                                       key: Optional[str],
+                                       node_id: str,
+                                       graph_id: Optional[str] = None):
         meta = self.__flowapp_master_meta
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
             graph_id = self.__flowapp_master_meta.graph_id
         await simple_chunk_call_async(meta.grpc_url,
-                                                serv_names.FLOW_DATA_DELETE_ITEM,
-                                                graph_id, node_id, key)
+                                      serv_names.FLOW_DATA_DELETE_ITEM,
+                                      graph_id, node_id, key)
         if key is None:
             self.__flowapp_storage_cache.clear()
         else:
             if key in self.__flowapp_storage_cache:
                 self.__flowapp_storage_cache.pop(key)
 
-    async def rename_data_storage_item(self, 
-                                key: str,
-                                newname: str,
-                                node_id: str,
-                                graph_id: Optional[str] = None):
+    async def rename_data_storage_item(self,
+                                       key: str,
+                                       newname: str,
+                                       node_id: str,
+                                       graph_id: Optional[str] = None):
         meta = self.__flowapp_master_meta
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
             graph_id = self.__flowapp_master_meta.graph_id
         await simple_chunk_call_async(meta.grpc_url,
-                                                serv_names.FLOW_DATA_RENAME_ITEM,
-                                                graph_id, node_id, key, newname)
+                                      serv_names.FLOW_DATA_RENAME_ITEM,
+                                      graph_id, node_id, key, newname)
         if key in self.__flowapp_storage_cache:
             if newname not in self.__flowapp_storage_cache:
                 item = self.__flowapp_storage_cache.pop(key)
@@ -401,18 +414,18 @@ class App:
     async def list_data_storage(self, node_id: str):
         meta = self.__flowapp_master_meta
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
-        res: List[dict] = await simple_chunk_call_async(meta.grpc_url,
-                                                       serv_names.FLOW_DATA_LIST_ITEM_METAS,
-                                                       meta.graph_id, node_id)
-        
+        res: List[dict] = await simple_chunk_call_async(
+            meta.grpc_url, serv_names.FLOW_DATA_LIST_ITEM_METAS, meta.graph_id,
+            node_id)
+
         return [JsonLikeNode(**x) for x in res]
-    
+
     async def list_all_data_storage_nodes(self):
         meta = self.__flowapp_master_meta
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
-        res: List[str] = await simple_chunk_call_async(meta.grpc_url,
-                                                       serv_names.FLOW_DATA_QUERY_DATA_NODE_IDS,
-                                                       meta.graph_id)
+        res: List[str] = await simple_chunk_call_async(
+            meta.grpc_url, serv_names.FLOW_DATA_QUERY_DATA_NODE_IDS,
+            meta.graph_id)
         return res
 
     def get_persist_storage(self):
@@ -515,7 +528,8 @@ class App:
                     }
         if reload:
             detached = self.root._detach()
-            await self.root._run_special_methods([], list(detached.values()), self._flow_reload_manager)
+            await self.root._run_special_methods([], list(detached.values()),
+                                                 self._flow_reload_manager)
             del detached
 
         await self.root._clear()
@@ -535,7 +549,8 @@ class App:
                         #     temp_res.add_layout(temp_res._children)
                         #     temp_res._children = None
                         # temp_res._flow_uid = _ROOT
-                        attached = temp_res._attach(_ROOT, self._flow_app_comp_core)
+                        attached = temp_res._attach(_ROOT,
+                                                    self._flow_app_comp_core)
                         # self._uid_to_comp = temp_res._uid_to_comp
                         new_is_flex = True
                         self.root = temp_res
@@ -600,7 +615,9 @@ class App:
                 })
             await self._queue.put(ev)
             if reload:
-                await self.root._run_special_methods(list(attached.values()), [], self._flow_reload_manager)
+                await self.root._run_special_methods(list(attached.values()),
+                                                     [],
+                                                     self._flow_reload_manager)
 
     def app_initialize(self):
         """override this to init app before server start
@@ -614,13 +631,14 @@ class App:
         uid_to_comp = self.root._get_uid_to_comp_dict()
         with enter_app_conetxt(self):
             for v in uid_to_comp.values():
-                special_methods = v.get_special_methods(self._flow_reload_manager)
+                special_methods = v.get_special_methods(
+                    self._flow_reload_manager)
                 if special_methods.did_mount is not None:
                     await v.run_callback(
                         special_methods.did_mount.get_binded_fn(),
                         sync_first=False,
                         change_status=False)
-                    
+
     def app_terminate(self):
         """override this to init app after server stop
         """
@@ -632,7 +650,8 @@ class App:
         uid_to_comp = self.root._get_uid_to_comp_dict()
         with enter_app_conetxt(self):
             for v in uid_to_comp.values():
-                special_methods = v.get_special_methods(self._flow_reload_manager)
+                special_methods = v.get_special_methods(
+                    self._flow_reload_manager)
                 if special_methods.will_unmount is not None:
                     await v.run_callback(
                         special_methods.will_unmount.get_binded_fn(),
@@ -802,7 +821,10 @@ class App:
                 # for file drop, we can't use regular drop above, so
                 # just convert it to drop event, no drag collect needed.
                 comps = self.root._get_comps_by_uid(uid)
-                ctxes = [c._flow_event_context_creator() for c in comps if c._flow_event_context_creator is not None]
+                ctxes = [
+                    c._flow_event_context_creator() for c in comps
+                    if c._flow_event_context_creator is not None
+                ]
                 with contextlib.ExitStack() as stack:
                     for ctx in ctxes:
                         stack.enter_context(ctx)
@@ -810,7 +832,10 @@ class App:
                         (FrontendEventType.Drop.value, data[1]))
             else:
                 comps = self.root._get_comps_by_uid(uid)
-                ctxes = [c._flow_event_context_creator() for c in comps if c._flow_event_context_creator is not None]
+                ctxes = [
+                    c._flow_event_context_creator() for c in comps
+                    if c._flow_event_context_creator is not None
+                ]
                 with contextlib.ExitStack() as stack:
                     for ctx in ctxes:
                         stack.enter_context(ctx)
@@ -876,12 +901,14 @@ class App:
 
         self.root._foreach_comp(handler)
         return res[0]
-    
+
     def find_all_components(self, type: Type[T]) -> List[T]:
         res: List[T] = []
+
         def handler(name, comp):
             if isinstance(comp, type):
                 res.append(comp)
+
         self.root._foreach_comp(handler)
         return res
 
@@ -947,13 +974,13 @@ class EditableApp(App):
         dcls = self._get_app_dynamic_cls()
         path = dcls.file_path
         user_obj = self._get_user_app_object()
-        metas = self._flow_reload_manager.query_type_method_meta(type(user_obj))
+        metas = self._flow_reload_manager.query_type_method_meta(
+            type(user_obj))
         for m in metas:
             m.bind(user_obj)
         qualname_prefix = type(user_obj).__qualname__
-        obentry = _WatchDogWatchEntry([
-            _LayoutObserveMeta(self, qualname_prefix, metas, None)
-        ], None)
+        obentry = _WatchDogWatchEntry(
+            [_LayoutObserveMeta(self, qualname_prefix, metas, None)], None)
         self._flowapp_change_observers[path] = obentry
         self._watchdog_watcher = None
         self._watchdog_observer = None
@@ -971,8 +998,7 @@ class EditableApp(App):
             paths.add(str(Path(path).resolve()))
             for p in registry.get_path_to_qname().keys():
                 paths.add(str(Path(p).resolve()))
-            self._flowapp_code_mgr = SimpleCodeManager(
-                list(paths))
+            self._flowapp_code_mgr = SimpleCodeManager(list(paths))
             paths = set(self._flowapp_code_mgr.file_to_entry.keys())
             # print(paths)
             # add all observed function paths
@@ -988,77 +1014,76 @@ class EditableApp(App):
         self._loop = asyncio.get_running_loop()
         self._watch_lock = threading.Lock()
 
-    def _flowapp_observe(self,
-                         obj: mui.FlexBox,
-                         callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta],
-                                                     Coroutine]] = None):
+    def _flowapp_observe(
+        self,
+        obj: mui.FlexBox,
+        callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta],
+                                    Coroutine]] = None):
         # TODO better error msg if app editable not enabled
         path = obj._flow_comp_def_path
 
         assert path != "" and self._watchdog_observer is not None
         path_resolved = str(Path(path).resolve())
         if path_resolved not in self._flowapp_change_observers:
-            self._flowapp_change_observers[path_resolved] = _WatchDogWatchEntry([], None)
+            self._flowapp_change_observers[
+                path_resolved] = _WatchDogWatchEntry([], None)
         obentry = self._flowapp_change_observers[path_resolved]
         if len(obentry.obmetas) == 0:
             # no need to schedule watchdog.
-            watch = self._watchdog_observer.schedule(self._watchdog_watcher, path,
-                                                    False)
-            obentry.watch = watch 
+            watch = self._watchdog_observer.schedule(self._watchdog_watcher,
+                                                     path, False)
+            obentry.watch = watch
         assert self._flowapp_code_mgr is not None
         if not self._flowapp_code_mgr._check_path_exists(path):
             self._flowapp_code_mgr._add_new_code(path)
         user_obj = obj._get_user_object()
-        metas = self._flow_reload_manager.query_type_method_meta(type(obj._get_user_object()))
+        metas = self._flow_reload_manager.query_type_method_meta(
+            type(obj._get_user_object()))
         qualname_prefix = type(user_obj).__qualname__
         obmeta = _LayoutObserveMeta(obj, qualname_prefix, metas, callback)
         obentry.obmetas.append(obmeta)
 
-    def _flowapp_object_observe_core(self,
-                         obj: Any,
-                         autorun_name: str):
+    def _flowapp_object_observe_core(self, obj: Any, autorun_name: str):
         # TODO better error msg if app editable not enabled
         try:
             path = inspect.getfile(type(obj))
             assert path != "" and self._watchdog_observer is not None
             path_resolved = str(Path(path).resolve())
             if path_resolved not in self._flowapp_obj_change_observers:
-                self._flowapp_obj_change_observers[path_resolved] = _WatchDogObjWatchEntry([], None)
+                self._flowapp_obj_change_observers[
+                    path_resolved] = _WatchDogObjWatchEntry([], None)
             obentry = self._flowapp_obj_change_observers[path_resolved]
             if len(obentry.obmetas) == 0:
                 # no need to schedule watchdog.
-                watch = self._watchdog_observer.schedule(self._watchdog_watcher, path,
-                                                        False)
-                obentry.watch = watch 
+                watch = self._watchdog_observer.schedule(
+                    self._watchdog_watcher, path, False)
+                obentry.watch = watch
             else:
                 for obmeta in obentry.obmetas:
                     if obmeta.obj is obj:
                         # already registered.
-                        return 
+                        return
             assert self._flowapp_code_mgr is not None
             if not self._flowapp_code_mgr._check_path_exists(path):
                 self._flowapp_code_mgr._add_new_code(path)
             user_obj = obj
             metas = self._flow_reload_manager.query_type_method_meta(type(obj))
             qualname_prefix = type(user_obj).__qualname__
-            obmeta = _ObjectObserveMeta(obj, qualname_prefix, metas, autorun_name)
+            obmeta = _ObjectObserveMeta(obj, qualname_prefix, metas,
+                                        autorun_name)
             obentry.obmetas.append(obmeta)
         except:
             traceback.print_exc()
             return
 
-
-    def _flowapp_object_observe(self,
-                         obj: Any,
-                         autorun_name: str):
+    def _flowapp_object_observe(self, obj: Any, autorun_name: str):
         # TODO better error msg if app editable not enabled
         if not self._flowapp_is_inited:
             self.__flow_obj_observes.append((obj, autorun_name))
-            return 
+            return
         return self._flowapp_object_observe_core(obj, autorun_name)
 
-    def _flowapp_remove_observer(self,
-                         obj: mui.FlexBox):
+    def _flowapp_remove_observer(self, obj: mui.FlexBox):
         path = obj._flow_comp_def_path
         assert path != "" and self._watchdog_observer is not None
         path_resolved = str(Path(path).resolve())
@@ -1074,8 +1099,7 @@ class EditableApp(App):
             if len(new_obmetas) == 0 and obentry.watch is not None:
                 self._watchdog_observer.unschedule(obentry.watch)
 
-    def _flowapp_remove_obj_observer(self,
-                         obj: Any):
+    def _flowapp_remove_obj_observer(self, obj: Any):
         path = inspect.getfile(type(obj))
         assert path != "" and self._watchdog_observer is not None
         path_resolved = str(Path(path).resolve())
@@ -1108,16 +1132,20 @@ class EditableApp(App):
         res.add(self._get_app_dynamic_cls().file_path)
         return res
 
-    def __get_callback_metas_in_file(self, change_file: str, layout: mui.FlexBox):
+    def __get_callback_metas_in_file(self, change_file: str,
+                                     layout: mui.FlexBox):
         uid_to_comp = layout._get_uid_to_comp_dict()
         resolved_path = str(Path(change_file).resolve())
         return create_reload_metas(uid_to_comp, resolved_path)
 
-    async def _reload_object_with_new_code(self, path: str, new_code: Optional[str] = None):
+    async def _reload_object_with_new_code(self,
+                                           path: str,
+                                           new_code: Optional[str] = None):
         assert self._flowapp_code_mgr is not None
         resolved_path = str(Path(path).resolve())
         try:
-            changes = self._flowapp_code_mgr.update_code(resolved_path, new_code)
+            changes = self._flowapp_code_mgr.update_code(
+                resolved_path, new_code)
         except:
             # ast parse error
             traceback.print_exc()
@@ -1129,12 +1157,13 @@ class EditableApp(App):
         is_reload = False
         is_callback_change = False
         callbacks_of_this_file: Optional[List[_CompReloadMeta]] = None
-        
+
         try:
             autorun_names_queued: Set[str] = set()
 
             if resolved_path in self._flowapp_obj_change_observers:
-                obmetas = self._flowapp_obj_change_observers[resolved_path].obmetas
+                obmetas = self._flowapp_obj_change_observers[
+                    resolved_path].obmetas
                 for obmeta in obmetas:
                     # get changed metas for special methods
                     # print(new, change)
@@ -1142,7 +1171,10 @@ class EditableApp(App):
                     for m in obmeta.metas:
                         if m.qualname in change:
                             changed_metas.append(m)
-                    new_method_names: List[str] = [x for x in new if x.startswith(obmeta.qualname_prefix) and x != obmeta.qualname_prefix]
+                    new_method_names: List[str] = [
+                        x for x in new if x.startswith(obmeta.qualname_prefix)
+                        and x != obmeta.qualname_prefix
+                    ]
                     do_reload = changed_metas or new_method_names
                     if do_reload:
                         new_metas, is_reload = reload_object_methods(
@@ -1159,22 +1191,28 @@ class EditableApp(App):
                     for m in obmeta.metas:
                         if m.qualname in change:
                             changed_metas.append(m)
-                    new_method_names: List[str] = [x for x in new if x.startswith(obmeta.qualname_prefix) and x != obmeta.qualname_prefix]
+                    new_method_names: List[str] = [
+                        x for x in new if x.startswith(obmeta.qualname_prefix)
+                        and x != obmeta.qualname_prefix
+                    ]
                     layout = obmeta.layout
                     if not is_callback_change:
                         if isinstance(layout, App):
-                            callbacks_of_this_file = self.__get_callback_metas_in_file(resolved_path, self.root)
+                            callbacks_of_this_file = self.__get_callback_metas_in_file(
+                                resolved_path, self.root)
                         else:
-                            callbacks_of_this_file = self.__get_callback_metas_in_file(resolved_path, layout)
+                            callbacks_of_this_file = self.__get_callback_metas_in_file(
+                                resolved_path, layout)
                         for cb_meta in callbacks_of_this_file:
                             if cb_meta.cb_qualname in change:
-                                is_callback_change = True 
+                                is_callback_change = True
                                 break
                     for m in changed_metas:
                         print(m.qualname, "CHANGED")
 
                     flow_special_for_check = FlowSpecialMethods(changed_metas)
-                    do_reload = flow_special_for_check.contains_special_method() or bool(new_method_names)
+                    do_reload = flow_special_for_check.contains_special_method(
+                    ) or bool(new_method_names)
                     # print("do_reload", do_reload)
                     if not do_reload:
                         continue
@@ -1195,30 +1233,40 @@ class EditableApp(App):
                             changed_user_obj = self._get_user_app_object()
                             # self._get_app_dynamic_cls(
                             # ).reload_obj_methods(user_obj, {}, self._flow_reload_manager)
-                            self._get_app_service_unit().reload_metas(self._flow_reload_manager)
+                            self._get_app_service_unit().reload_metas(
+                                self._flow_reload_manager)
                     else:
                         assert isinstance(layout, mui.FlexBox)
                         if self.code_editor.external_path is not None and new_code is None:
-                            if str(Path(self.code_editor.external_path).resolve()) == resolved_path:
+                            if str(
+                                    Path(self.code_editor.external_path).
+                                    resolve()) == resolved_path:
                                 await self.set_editor_value(new_data, lineno=0)
                         # reload dynamic layout
                         if changed_metas or bool(new_method_names):
                             changed_user_obj = layout._get_user_object()
                     # print("RTX", changed_user_obj, new_method_names)
                     if changed_user_obj is not None:
-                        reload_res = self._flow_reload_manager.reload_type(type(changed_user_obj))
+                        reload_res = self._flow_reload_manager.reload_type(
+                            type(changed_user_obj))
                         if not is_reload:
                             is_reload = reload_res.is_reload
-                        updated_type = reload_res.type_meta.get_local_type_from_module_dict(reload_res.module_entry.module_dict)
+                        updated_type = reload_res.type_meta.get_local_type_from_module_dict(
+                            reload_res.module_entry.module_dict)
                         # recreate metas with new type and new qualname_to_code
                         # TODO handle special methods in mro
-                        updated_metas = self._flow_reload_manager.query_type_method_meta(updated_type)
+                        updated_metas = self._flow_reload_manager.query_type_method_meta(
+                            updated_type)
                         obmeta.metas = updated_metas
                         print("CHANGED USER OBJ")
                         for m in updated_metas:
                             m.bind(changed_user_obj)
-                        changed_metas = [m for m in updated_metas if m.qualname in change]
-                        changed_metas += [m for m in updated_metas if m.qualname in new]
+                        changed_metas = [
+                            m for m in updated_metas if m.qualname in change
+                        ]
+                        changed_metas += [
+                            m for m in updated_metas if m.qualname in new
+                        ]
                         for c in changed_metas:
                             print(f"{c.name}, ------------")
                             # print(c.code)
@@ -1226,26 +1274,29 @@ class EditableApp(App):
                             # print(change[c.qualname])
                         # we need to update metas of layout with new type.
                         # meta is binded in bind_and_reset_object_methods
-                        bind_and_reset_object_methods(changed_user_obj, changed_metas)
+                        bind_and_reset_object_methods(changed_user_obj,
+                                                      changed_metas)
                         if layout is self:
-                            self._get_app_dynamic_cls().module_dict = reload_res.module_entry.module_dict
-                            self._get_app_service_unit().reload_metas(self._flow_reload_manager)
+                            self._get_app_dynamic_cls(
+                            ).module_dict = reload_res.module_entry.module_dict
+                            self._get_app_service_unit().reload_metas(
+                                self._flow_reload_manager)
                     # use updated metas to run special methods such as create_layout and auto_run
                     flow_special = FlowSpecialMethods(changed_metas)
                     with _enter_app_conetxt(self):
-                                # asyncio.run_coroutine_threadsafe(
-                                #     self._run_autorun(
-                                #         auto_run.get_binded_fn()),
-                                #     self._loop)
+                        # asyncio.run_coroutine_threadsafe(
+                        #     self._run_autorun(
+                        #         auto_run.get_binded_fn()),
+                        #     self._loop)
                         # print(code_changed_metas)
                         if flow_special.create_layout:
                             fn = flow_special.create_layout.get_binded_fn()
                             if isinstance(layout, App):
                                 await self._app_run_layout_function(
-                                        True,
-                                        with_code_editor=False,
-                                        reload=True,
-                                        decorator_fn=fn)
+                                    True,
+                                    with_code_editor=False,
+                                    reload=True,
+                                    decorator_fn=fn)
 
                                 # fut = asyncio.run_coroutine_threadsafe(
                                 #     self._app_run_layout_function(
@@ -1257,7 +1308,8 @@ class EditableApp(App):
                             else:
                                 if obmeta.callback is not None:
                                     # handle layout in callback
-                                    new_layout = await obmeta.callback(layout, flow_special.create_layout)
+                                    new_layout = await obmeta.callback(
+                                        layout, flow_special.create_layout)
                                     obmeta.layout = new_layout
                                     # fut = asyncio.run_coroutine_threadsafe(
                                     #     obmeta.callback(layout, flow_special.create_layout), self._loop)
@@ -1269,7 +1321,7 @@ class EditableApp(App):
                                 if layout is self and auto_run.name in autorun_names_queued:
                                     autorun_names_queued.remove(auto_run.name)
                                 await self._run_autorun(
-                                        auto_run.get_binded_fn())
+                                    auto_run.get_binded_fn())
                     # handle special methods
 
             if resolved_path in self._flowapp_obj_change_observers:
@@ -1286,31 +1338,39 @@ class EditableApp(App):
                             for auto_run in flow_special.auto_runs:
                                 if auto_run is not None and auto_run.name in autorun_names_queued:
                                     await self._run_autorun(
-                                            auto_run.get_binded_fn())
+                                        auto_run.get_binded_fn())
             ob_registry = self.get_observed_func_registry()
-            observed_func_changed = ob_registry.observed_func_changed(resolved_path, change)
+            observed_func_changed = ob_registry.observed_func_changed(
+                resolved_path, change)
             if observed_func_changed:
-                first_func_qname_pair = ob_registry.get_path_to_qname()[resolved_path][0]
+                first_func_qname_pair = ob_registry.get_path_to_qname(
+                )[resolved_path][0]
                 entry = ob_registry[first_func_qname_pair[0]]
-                reload_res = self._flow_reload_manager.reload_type(inspect.unwrap(entry.current_func))
+                reload_res = self._flow_reload_manager.reload_type(
+                    inspect.unwrap(entry.current_func))
                 if not is_reload:
                     is_reload = reload_res.is_reload
                 # for qname in observed_func_changed:
                 with _enter_app_conetxt(self):
-                    self._flowapp_special_eemitter.emit(AppSpecialEventType.ObservedFunctionChange.value, observed_func_changed)
+                    self._flowapp_special_eemitter.emit(
+                        AppSpecialEventType.ObservedFunctionChange.value,
+                        observed_func_changed)
 
             if is_callback_change or is_reload:
                 # reset all callbacks in this file
                 if callbacks_of_this_file is None:
-                    callbacks_of_this_file = self.__get_callback_metas_in_file(resolved_path, self.root)
+                    callbacks_of_this_file = self.__get_callback_metas_in_file(
+                        resolved_path, self.root)
                 if callbacks_of_this_file:
                     cb_real = callbacks_of_this_file[0].cb_real
-                    reload_res = self._flow_reload_manager.reload_type(inspect.unwrap(cb_real))
+                    reload_res = self._flow_reload_manager.reload_type(
+                        inspect.unwrap(cb_real))
                     for meta in callbacks_of_this_file:
                         print("RELOAD CB", meta.cb_qualname)
                         handler = meta.handler
                         cb = inspect.unwrap(handler.cb)
-                        new_method, _ = reload_method(cb, reload_res.module_entry.module_dict)
+                        new_method, _ = reload_method(
+                            cb, reload_res.module_entry.module_dict)
                         if new_method is not None:
                             handler.cb = new_method
 
@@ -1318,13 +1378,13 @@ class EditableApp(App):
             # watchdog thread can't fail
             traceback.print_exc()
             return
- 
+
     def _watchdog_on_modified(self, ev: _WATCHDOG_MODIFY_EVENT_TYPES):
         # which event trigger reload?
         # 1. special method code change
         # 2. callback code change (handled outsite)
         # 3. new methods detected in layout
-        
+
         # WARNING: other events WON'T trigger reload.
 
         # what happened when reload?
@@ -1339,7 +1399,8 @@ class EditableApp(App):
             with self._watch_lock:
                 if self._flowapp_code_mgr is None:
                     return
-                asyncio.run_coroutine_threadsafe(self._reload_object_with_new_code(ev.src_path), self._loop)
+                asyncio.run_coroutine_threadsafe(
+                    self._reload_object_with_new_code(ev.src_path), self._loop)
 
     def _reload_app_file(self):
         # comps = self._uid_to_comp
@@ -1409,4 +1470,3 @@ async def _run_zeroarg_func(cb: Callable):
             await coro
     except:
         traceback.print_exc()
-

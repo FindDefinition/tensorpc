@@ -7,21 +7,22 @@ import traceback
 import types
 from functools import partial
 from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
-                    Set, Tuple, Type, Union, TypeVar)
+                    Set, Tuple, Type, TypeVar, Union)
 
 import numpy as np
+from typing_extensions import ParamSpec
 
 from tensorpc.core.inspecttools import get_members
-from tensorpc.flow.flowapp.appcore import get_app
-from tensorpc.flow.flowapp.components import mui, three
-from tensorpc.flow.flowapp.core import FrontendEventType, FlowSpecialMethods
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import ReloadableDynamicClass
-from tensorpc.core.serviceunit import ReloadableDynamicClass
+from tensorpc.flow.flowapp.appcore import get_app
+from tensorpc.flow.flowapp.components import mui, three
+from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType
 from tensorpc.flow.flowapp.objtree import UserObjTreeProtocol
-from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler, USER_OBJ_TREE_TYPES
+
+from .core import (ALL_OBJECT_PREVIEW_HANDLERS, USER_OBJ_TREE_TYPES,
+                   ObjectPreviewHandler)
 from .tree import _DEFAULT_OBJ_NAME, FOLDER_TYPES, ObjectTree
-from typing_extensions import ParamSpec
 
 _DEFAULT_LOCALS_NAME = "locals"
 
