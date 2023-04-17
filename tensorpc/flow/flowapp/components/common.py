@@ -40,12 +40,18 @@ _ONEARG_COMPLEXL_EVENTS = set([
     FrontendEventType.ComplexLayoutSelectTabSet.value,
 ])
 
+_ONEARG_EDITOR_EVENTS = set([
+    FrontendEventType.EditorQueryState.value,
+    FrontendEventType.EditorSave.value,
+    FrontendEventType.EditorSaveState.value,
+])
+
 _ONEARG_SPECIAL_EVENTS = set([
     FrontendEventType.Drop.value,
 ])
 
 _ONEARG_EVENTS = set(
-    ALL_POINTER_EVENTS) | _ONEARG_TREE_EVENTS | _ONEARG_COMPLEXL_EVENTS | _ONEARG_SPECIAL_EVENTS
+    ALL_POINTER_EVENTS) | _ONEARG_TREE_EVENTS | _ONEARG_COMPLEXL_EVENTS | _ONEARG_SPECIAL_EVENTS | _ONEARG_EDITOR_EVENTS
 
 _NOARG_EVENTS = set([
     FrontendEventType.Click.value,
@@ -76,13 +82,16 @@ async def handle_raw_event(ev: Any, comp: Component, just_run: bool = False):
             comp._task = asyncio.create_task(
                 comp.run_callback(ccb(handler.cb), True))
         else:
-            await comp.run_callback(ccb(handler.cb), True)
+            return await comp.run_callback(ccb(handler.cb), True)
 
 
 async def handle_standard_event(comp: Component,
                                 data: EventType,
                                 sync_first: bool = False,
-                                sync_state_after_change: bool = True):
+                                sync_state_after_change: bool = True,
+                                is_sync: bool = False):
+    """ common event handler
+    """
     if comp.props.status == UIRunStatus.Running.value:
         # msg = create_ignore_usr_msg(comp)
         # await comp.send_and_wait(msg)
@@ -97,10 +106,15 @@ async def handle_standard_event(comp: Component,
                     return lambda: cb(data[1])
 
                 # state change events must sync state after callback
-                comp._task = asyncio.create_task(
-                    comp.run_callback(ccb(handler.cb),
-                                      True,
-                                      sync_first=sync_first))
+                if is_sync:
+                    return await comp.run_callback(ccb(handler.cb),
+                                      True, 
+                                      sync_first=False)
+                else:
+                    comp._task = asyncio.create_task(
+                        comp.run_callback(ccb(handler.cb),
+                                        True,
+                                        sync_first=sync_first))
             else:
                 # all controlled component must sync state after state change
                 if sync_state_after_change:
@@ -112,15 +126,20 @@ async def handle_standard_event(comp: Component,
 
                 def ccb(cb):
                     return lambda: cb(data[1])
-
-                comp._task = asyncio.create_task(
-                    comp.run_callback(ccb(handler.cb), sync_first=sync_first))
+                if is_sync:
+                    return await comp.run_callback(ccb(handler.cb), sync_first=False)
+                else:
+                    comp._task = asyncio.create_task(
+                        comp.run_callback(ccb(handler.cb), sync_first=sync_first))
         elif data[0] in _NOARG_EVENTS:
             handler = comp.get_event_handler(data[0])
             # other events don't need to sync state
             if handler is not None:
-                comp._task = asyncio.create_task(
-                    comp.run_callback(handler.cb, sync_first=sync_first))
+                if is_sync:
+                    return await comp.run_callback(handler.cb, sync_first=False)
+                else:
+                    comp._task = asyncio.create_task(
+                        comp.run_callback(handler.cb, sync_first=sync_first))
 
         else:
             raise NotImplementedError

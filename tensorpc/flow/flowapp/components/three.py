@@ -273,7 +273,7 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
             if v is not None:
                 self._flow_event_handlers[k.value] = v
 
-    async def handle_event(self, ev: EventType):
+    async def handle_event(self, ev: EventType, is_sync: bool = False):
         # ev: [type, data]
         type, data = ev
         # ev_type = FrontendEventType(type)
@@ -289,7 +289,7 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
 
             def ccb(cb):
                 return lambda: cb(data)
-
+            
             self._task = asyncio.create_task(
                 self.run_callback(ccb(handler.cb), True))
 
@@ -400,7 +400,7 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
             if v is not None:
                 self._flow_event_handlers[k.value] = v
 
-    async def handle_event(self, ev: EventType):
+    async def handle_event(self, ev: EventType, is_sync: bool = False):
         # ev: [type, data]
         type, data = ev
         ev_type = FrontendEventType(type)
@@ -417,9 +417,11 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
 
             def ccb(cb):
                 return lambda: cb(data)
-
-            self._task = asyncio.create_task(
-                self.run_callback(ccb(handler.cb), True, sync_first=False))
+            if is_sync:
+                return await self.run_callback(ccb(handler.cb), True, sync_first=False)
+            else:
+                self._task = asyncio.create_task(
+                    self.run_callback(ccb(handler.cb), True, sync_first=False))
 
 
 @dataclasses.dataclass
@@ -803,8 +805,8 @@ class BoundingBox(Object3dWithEventBase[BoundingBoxProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def handle_event(self, ev: EventType):
-        await handle_standard_event(self, ev)
+    async def handle_event(self, ev: EventType, is_sync: bool = False):
+        await handle_standard_event(self, ev, is_sync=is_sync)
 
     def state_change_callback(
             self,
@@ -1115,8 +1117,8 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
         # self.props.min_distance = 1
         # self.props.max_distance = 100
 
-    async def handle_event(self, ev: EventType):
-        await handle_standard_event(self, ev, sync_state_after_change=False)
+    async def handle_event(self, ev: EventType, is_sync: bool = False):
+        await handle_standard_event(self, ev, sync_state_after_change=False, is_sync=is_sync)
 
     @property
     def prop(self):
@@ -1359,8 +1361,8 @@ class ScreenShot(ThreeComponentBase[ScreenShotProps]):
                 "data": data,
             }))
 
-    async def handle_event(self, ev: EventType):
-        return await handle_standard_event(self, ev, sync_first=True)
+    async def handle_event(self, ev: EventType, is_sync: bool = False):
+        return await handle_standard_event(self, ev, sync_first=True, is_sync=is_sync)
 
 
 class _PendingState:
@@ -1423,8 +1425,8 @@ class ScreenShotSyncReturn(ThreeComponentBase[ScreenShotProps]):
                 self._pending_rpc.pop(uid)
             raise
 
-    async def handle_event(self, ev: EventType):
-        return await handle_standard_event(self, ev, sync_first=True, sync_state_after_change=False)
+    async def handle_event(self, ev: EventType, is_sync: bool = False):
+        return await handle_standard_event(self, ev, sync_first=True, sync_state_after_change=False, is_sync=is_sync)
 
 
 @dataclasses.dataclass
@@ -2268,7 +2270,7 @@ class ShapeButton(Group):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    async def handle_event(self, ev: EventType):
+    async def handle_event(self, ev: EventType, is_sync: bool = False):
         data = ev[1]
         if self.props.status == UIRunStatus.Running.value:
             # TODO send exception if ignored click
@@ -2277,8 +2279,11 @@ class ShapeButton(Group):
         elif self.props.status == UIRunStatus.Stop.value:
             handler = self.get_event_handler(ev[0])
             if handler is not None:
-                self._task = asyncio.create_task(
-                    self.run_callback(lambda: handler.cb(data)))
+                if is_sync:
+                    return await self.run_callback(lambda: handler.cb(data), sync_first=False)
+                else:
+                    self._task = asyncio.create_task(
+                        self.run_callback(lambda: handler.cb(data)))
 
     @property
     def prop(self):
@@ -2456,5 +2461,5 @@ class PivotControls(ThreeContainerBase[PivotControlsProps,
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def handle_event(self, ev: EventType):
-        return await handle_standard_event(self, ev, sync_first=True, sync_state_after_change=False)
+    async def handle_event(self, ev: EventType, is_sync: bool = False):
+        return await handle_standard_event(self, ev, sync_first=True, sync_state_after_change=False, is_sync=is_sync)

@@ -1119,6 +1119,7 @@ class CollectionApp:
         self.example_object_inspector = ObjectInspectApp()
         self.example_pyplot = PlotApp()
         self.example_auto_complete = AutoComputeApp()
+        self.editor = mui.MonacoEditor("RTX = 0", "python", "default_path").prop(height="100%", width="100%", overflow="hidden")
 
         nodes = [
             mui.ControlNode("1",

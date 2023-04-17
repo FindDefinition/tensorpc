@@ -249,6 +249,11 @@ class FrontendEventType(enum.Enum):
     ComplexLayoutTabReload = 42
     ComplexLayoutSelectTabSet = 43
 
+    EditorSave = 50
+    EditorChange = 51
+    EditorQueryState = 52
+    EditorSaveState = 53
+
     # leaflet events
     MapZoom = 60
     MapMove = 61
@@ -867,7 +872,7 @@ class Component(Generic[T_base_props, T_child]):
 
         return wrapper
 
-    async def handle_event(self, ev: EventType):
+    async def handle_event(self, ev: EventType, is_sync: bool = False):
         pass
 
     async def _clear(self):

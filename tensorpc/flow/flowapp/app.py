@@ -797,7 +797,8 @@ class App:
         assert isinstance(self, EditableApp)
         return self
 
-    async def handle_event(self, ev: UIEvent):
+    async def handle_event(self, ev: UIEvent, is_sync: bool = False):
+        res: Dict[str, Any] = {}
         for uid, data in ev.uid_to_data.items():
             ev_type = data[0]
             if ev_type == FrontendEventType.Drop.value:
@@ -828,8 +829,8 @@ class App:
                 with contextlib.ExitStack() as stack:
                     for ctx in ctxes:
                         stack.enter_context(ctx)
-                    await comps[-1].handle_event(
-                        (FrontendEventType.Drop.value, data[1]))
+                    res[uid] = await comps[-1].handle_event(
+                        (FrontendEventType.Drop.value, data[1]), is_sync=is_sync)
             else:
                 comps = self.root._get_comps_by_uid(uid)
                 ctxes = [
@@ -839,12 +840,15 @@ class App:
                 with contextlib.ExitStack() as stack:
                     for ctx in ctxes:
                         stack.enter_context(ctx)
-                    await comps[-1].handle_event(data)
+                    res[uid] = await comps[-1].handle_event(data, is_sync=is_sync)
+        if is_sync:
+            return res
+            
 
-    async def _handle_event_with_ctx(self, ev: UIEvent):
+    async def _handle_event_with_ctx(self, ev: UIEvent, is_sync: bool = False):
         # TODO run control from other component
         with _enter_app_conetxt(self):
-            await self.handle_event(ev)
+            return await self.handle_event(ev, is_sync)
 
     async def _run_autorun(self, cb: Callable):
         try:

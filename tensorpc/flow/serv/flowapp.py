@@ -140,7 +140,9 @@ class FlowApp:
     def _get_app(self):
         return self.app
 
-    async def run_single_event(self, type, data):
+    async def run_single_event(self, type, data, is_sync: bool = False):
+        """is_sync: only used for ui event.
+        """
         if type == AppEventType.AppEditor.value:
             ev = AppEditorFrontendEvent.from_dict(data)
             return await self.app._handle_code_editor_event_system(ev)

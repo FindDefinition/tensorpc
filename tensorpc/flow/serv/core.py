@@ -1677,7 +1677,8 @@ class Flow:
                                node_id: str,
                                type: int,
                                ui_ev_dict: Dict[str, Any],
-                               use_grpc: bool = False):
+                               use_grpc: bool = False,
+                               is_sync: bool = False):
         worker_key = serv_names.FLOWWORKER_RUN_APP_SINGLE_EVENT
         app_key = serv_names.APP_RUN_SINGLE_EVENT
 
@@ -1686,10 +1687,10 @@ class Flow:
         if isinstance(driver, RemoteSSHNode):
             if use_grpc:
                 return await driver.simple_grpc_remote_call(
-                    worker_key, graph_id, node_id, type, ui_ev_dict)
+                    worker_key, graph_id, node_id, type, ui_ev_dict, is_sync)
             else:
                 return await driver.http_remote_call(worker_key, graph_id,
-                                                     node_id, type, ui_ev_dict)
+                                                     node_id, type, ui_ev_dict, is_sync)
         else:
             if use_grpc:
                 sess = prim.get_http_client_session()
@@ -1700,7 +1701,7 @@ class Flow:
                 else:
                     app_url = get_grpc_url(durl, grpc_port)
                 return await tensorpc.simple_chunk_call_async(
-                    app_url, app_key, type, ui_ev_dict)
+                    app_url, app_key, type, ui_ev_dict, is_sync)
             else:
                 sess = prim.get_http_client_session()
                 http_port = node.http_port
@@ -1710,13 +1711,13 @@ class Flow:
                 else:
                     app_url = get_http_url(durl, http_port)
                 return await http_remote_call(sess, app_url, app_key, type,
-                                              ui_ev_dict)
+                                              ui_ev_dict, is_sync)
 
     async def run_ui_event(self, graph_id: str, node_id: str,
-                           ui_ev_dict: Dict[str, Any]):
+                           ui_ev_dict: Dict[str, Any], is_sync: bool = False):
         return await self.run_single_event(graph_id, node_id,
                                            AppEventType.UIEvent.value,
-                                           ui_ev_dict)
+                                           ui_ev_dict, is_sync=is_sync)
 
     async def run_app_editor_event(self, graph_id: str, node_id: str,
                                    ui_ev_dict: Dict[str, Any]):
