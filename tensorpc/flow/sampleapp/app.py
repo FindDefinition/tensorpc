@@ -1107,7 +1107,6 @@ class PlotApp:
         )
         await self.plot.show_raw(data, layout)
 
-
 class CollectionApp:
 
     @mark_create_layout
@@ -1155,7 +1154,11 @@ class CollectionApp:
                                                 height="100%",
                                                 overflow="hidden"),
                 mui.HBox([
-                    plus.AnyFlexLayout(),
+                    plus.AnyFlexLayout(
+            mui.FlexLayout.TabSet([
+                        mui.FlexLayout.Tab(self.sm),
+                    ])
+                    ),
                 ]).prop(width="100%", height="100%", overflow="hidden")
             ]).prop(default_sizes=[1, 3], width="100%", height="100%")
         ]).prop(flex_flow="row nowrap")

@@ -337,7 +337,10 @@ class App:
 
         meta = parse_obj_to_jsonlike(data, key, key)
         in_memory_limit_bytes = in_memory_limit * 1024 * 1024
-        item = StorageDataItem(data_enc, time.time_ns(), meta)
+        meta.userdata = {
+            "timestamp": time.time_ns(),
+        }
+        item = StorageDataItem(data_enc, meta)
         if len(data_enc) <= in_memory_limit_bytes:
             self.__flowapp_storage_cache[key] = item
         if len(data_enc) > in_memory_limit_bytes:

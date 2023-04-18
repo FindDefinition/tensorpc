@@ -41,7 +41,6 @@ _ONEARG_COMPLEXL_EVENTS = set([
 ])
 
 _ONEARG_EDITOR_EVENTS = set([
-    FrontendEventType.EditorQueryState.value,
     FrontendEventType.EditorSave.value,
     FrontendEventType.EditorSaveState.value,
 ])
@@ -57,7 +56,9 @@ _ONEARG_EVENTS = set(
 
 _NOARG_EVENTS = set([
     FrontendEventType.Click.value,
+    FrontendEventType.EditorReady.value,
     FrontendEventType.DoubleClick.value,
+    FrontendEventType.EditorQueryState.value,
 ])
 
 

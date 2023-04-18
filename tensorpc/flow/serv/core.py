@@ -783,7 +783,6 @@ class DataStorageNode(Node):
         res = []
         for item in items:
             data = self.read_meta_dict(item)
-            print(data)
             res.append(data)
         return res
 
@@ -823,7 +822,10 @@ class DataStorageNode(Node):
 
     def save_data(self, key: str, data: bytes, meta: JsonLikeNode,
                   timestamp: int):
-        item = StorageDataItem(data, timestamp, meta)
+        meta.userdata = {
+            "timestamp": timestamp,
+        }
+        item = StorageDataItem(data, meta)
         with self.get_save_path(key).open("wb") as f:
             pickle.dump(item, f)
         with self.get_meta_path(key).open("w") as f:
@@ -831,7 +833,7 @@ class DataStorageNode(Node):
         if len(data) <= self.in_memory_limit_bytes:
             self.stored_data[key] = item
         else:
-            self.stored_data[key] = StorageDataItem(bytes(), timestamp, meta)
+            self.stored_data[key] = StorageDataItem(bytes(), meta)
 
     def read_meta_dict(self, key: str) -> dict:
         if key in self.stored_data:
@@ -893,7 +895,7 @@ class DataStorageNode(Node):
                     self.stored_data[key] = data
                 else:
                     self.stored_data[key] = StorageDataItem(
-                        bytes(), data.timestamp, meta)
+                        bytes(), meta)
                 return data
         raise FileNotFoundError(f"{path} not exists")
 

@@ -183,6 +183,7 @@ class JsonLikeNode:
     keys: Union[Undefined, BackendOnlyProp[List[str]]] = undefined
     menus: Union[Undefined, List[ContextMenuData]] = undefined
     edit: Union[Undefined, bool] = undefined
+    userdata: Union[Undefined, Any] = undefined
 
     def last_part(self, split: str = "::"):
         return self.id[self.id.rfind(split) + len(split):]

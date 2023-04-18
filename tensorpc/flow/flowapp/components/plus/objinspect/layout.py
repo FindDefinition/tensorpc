@@ -28,8 +28,15 @@ from tensorpc.utils.reload import reload_method
 
 class AnyFlexLayout(mui.FlexLayout):
 
-    def __init__(self, use_app_editor: bool = True) -> None:
-        super().__init__([])
+    def __init__(self,
+                 children: Optional[Union[List[Union[mui.FlexLayout.Row,
+                                                     mui.FlexLayout.TabSet]],
+                                          mui.FlexLayout.Row,
+                                          mui.FlexLayout.TabSet]] = None,
+                 use_app_editor: bool = True) -> None:
+        if children is None:
+            children = []
+        super().__init__(children)
         self.register_event_handler(FrontendEventType.Drop.value,
                                     self._on_drop)
         self.register_event_handler(
@@ -47,10 +54,11 @@ class AnyFlexLayout(mui.FlexLayout):
         # self._layout_to_watchdog: Dict[str, Tuple[]]
         self._current_bind_code_id = None
 
-    async def _handle_reload_layout(self, layout: mui.FlexBox, create_layout: ServFunctionMeta, name: str):
+    async def _handle_reload_layout(self, layout: mui.FlexBox,
+                                    create_layout: ServFunctionMeta,
+                                    name: str):
         if layout._wrapped_obj is not None:
-            layout_flex = create_layout.get_binded_fn(
-            )()
+            layout_flex = create_layout.get_binded_fn()()
             assert isinstance(
                 layout_flex, mui.FlexBox
             ), f"create_layout must return a flexbox when use anylayout"
@@ -71,7 +79,8 @@ class AnyFlexLayout(mui.FlexLayout):
         await app.set_editor_value(value="".join(lines), lineno=lineno)
         if app._is_editable_app():
             eapp = app._get_self_as_editable_app()
-            eapp._flowapp_observe(layout, partial(self._handle_reload_layout, name=name))
+            eapp._flowapp_observe(
+                layout, partial(self._handle_reload_layout, name=name))
 
     async def _on_drop(self, target: Optional[TreeDragTarget]):
         if target is not None:
@@ -81,7 +90,7 @@ class AnyFlexLayout(mui.FlexLayout):
             if isinstance(obj, mui.FlexBox):
                 wrapped_obj = obj
             elif isinstance(obj, ObjectLayoutCreator):
-                obj_is_anylayout = False 
+                obj_is_anylayout = False
                 obj = obj.create()
                 wrapped_obj = obj
             else:

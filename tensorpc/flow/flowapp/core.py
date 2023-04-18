@@ -254,6 +254,7 @@ class FrontendEventType(enum.Enum):
     EditorChange = 51
     EditorQueryState = 52
     EditorSaveState = 53
+    EditorReady = 54
 
     # leaflet events
     MapZoom = 60
@@ -1064,7 +1065,6 @@ class Component(Generic[T_base_props, T_child]):
         if ev.sent_event is None:
             ev.sent_event = asyncio.Event()
         await self.put_app_event(ev)
-        print(type(self), self.is_mounted())
         if self.is_mounted():
             if wait:
                 await ev.sent_event.wait()
@@ -1116,7 +1116,6 @@ class Component(Generic[T_base_props, T_child]):
                 res_coro = res_callback(res)
                 if inspect.iscoroutine(res_coro):
                     await res_coro
-            app = get_app()
 
         except Exception as e:
             traceback.print_exc()
@@ -1408,8 +1407,8 @@ class ContainerBase(Component[T_container_props, T_child]):
         new_ev, attached, removed = self.set_new_layout_locally(layout)
         for deleted in removed:
             await deleted._cancel_task()
-        await self._run_special_methods(attached, removed)
         await self.put_app_event(new_ev)
+        await self._run_special_methods(attached, removed)
 
     async def remove_childs_by_keys(self, keys: List[str]):
         detached_uid_to_comp = self._detach_child(keys)
@@ -1417,13 +1416,13 @@ class ContainerBase(Component[T_container_props, T_child]):
             await comp._cancel_task()
         if not detached_uid_to_comp:
             return
-        await self._run_special_methods([],
-                                        list(detached_uid_to_comp.values()))
         await self.put_app_event(
             self.create_delete_comp_event(list(detached_uid_to_comp.keys())))
         child_uids = [self[c]._flow_uid for c in self._child_comps]
         await self.put_app_event(
             self.create_update_event({"childs": child_uids}))
+        await self._run_special_methods([],
+                                        list(detached_uid_to_comp.values()))
 
     def update_childs_locally(self, layout: Dict[str, Component]):
         intersect = set(layout.keys()).intersection(self._child_comps.keys())
@@ -1450,8 +1449,8 @@ class ContainerBase(Component[T_container_props, T_child]):
         new_ev, attached, removed = self.update_childs_locally(layout)
         for deleted in removed:
             await deleted._cancel_task()
-        await self._run_special_methods(attached, removed)
         await self.put_app_event(new_ev)
+        await self._run_special_methods(attached, removed)
 
     async def replace_childs(self, layout: Dict[str, Component]):
         for k in layout.keys():

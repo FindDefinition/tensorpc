@@ -6,7 +6,7 @@ from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable,
 import dataclasses
 from tensorpc.autossh.core import Event, event_from_dict
 from tensorpc.core.moduleid import get_qualname_of_type
-from .jsonlike import JsonLikeNode, as_dict_no_undefined
+from .jsonlike import JsonLikeNode, as_dict_no_undefined, Undefined
 import numpy as np
 
 def get_uid(graph_id: str, node_id: str):
@@ -15,14 +15,20 @@ def get_uid(graph_id: str, node_id: str):
 
 class StorageDataItem:
 
-    def __init__(self, data: bytes, timestamp: int,
+    def __init__(self, data: bytes, 
                  meta: JsonLikeNode) -> None:
         self.data = data
-        self.timestamp = timestamp
         self.meta = meta
+        assert not isinstance(self.meta.userdata, Undefined) 
+
 
     def empty(self):
         return len(self.data) > 0
+
+    @property 
+    def timestamp(self):
+        assert not isinstance(self.meta.userdata, Undefined) 
+        return self.meta.userdata["timestamp"]
 
     def __len__(self):
         return len(self.data)

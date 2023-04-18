@@ -559,7 +559,7 @@ class ObjectTree(mui.FlexBox):
                  limit: int = 50) -> None:
         self.tree = mui.JsonLikeTree()
         super().__init__([
-            self.tree.prop(ignore_root=True, use_fast_tree=True),
+            self.tree.prop(ignore_root=True, use_fast_tree=False),
         ])
         self.prop(overflow="auto")
         self._uid_to_node: Dict[str, mui.JsonLikeNode] = {}
