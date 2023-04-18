@@ -697,6 +697,7 @@ class ToggleButtonGroupProps(MUIFlexBoxProps):
     icon_size: Union[Literal["small", "medium", "large"],
                      Undefined] = undefined
     icon_font_size: Union[NumberType, Undefined] = undefined
+    enforce_value_set: Union[bool, Undefined] = undefined
 
 
 class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
@@ -1523,7 +1524,7 @@ class AutocompletePropsBase(MUIComponentBaseProps):
     # input_value: str = ""
     options: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
     size: Union[Undefined, Literal["small", "medium"]] = undefined
-    mui_margin: Union[Undefined, Literal["dense", "none",
+    input_margin: Union[Undefined, Literal["dense", "none",
                                          "normal"]] = undefined
     input_variant: Union[Undefined, Literal["filled", "outlined",
                                             "standard"]] = undefined
@@ -1544,9 +1545,10 @@ class AutocompletePropsBase(MUIComponentBaseProps):
     select_on_focus: Union[Undefined, bool] = undefined
     read_only: Union[Undefined, bool] = undefined
     free_solo: Union[Undefined, bool] = undefined
-
+    handle_home_end_keys: Union[Undefined, bool] = undefined
     group_by_key: Union[Undefined, str] = undefined
     limit_tags: Union[Undefined, int] = undefined
+    add_option: Union[Undefined, bool] = undefined
 
 
 @dataclasses.dataclass
@@ -1563,7 +1565,7 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
         callback: Optional[Callable[[Dict[str, Any]],
                                     _CORO_NONE]] = None) -> None:
         super().__init__(UIType.AutoComplete, AutocompleteProps,
-                         [FrontendEventType.Change.value])
+                         [FrontendEventType.Change.value, FrontendEventType.SelectNewItem.value])
         self.props.label = label
         self.callback = callback
         # assert len(items) > 0
@@ -1590,11 +1592,14 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
 
     async def update_options(self, options: List[Dict[str, Any]],
                              selected: int):
-        await self.put_app_event(
-            self.create_update_event({
-                "options": options,
-                "value": options[selected]
-            }))
+        # await self.send_and_wait(
+        #     self.create_update_event({
+        #         "options": options,
+        #         "value": options[selected]
+        #     }))
+        await self.send_and_wait(
+            self.update_event(options=options, value=options[selected]))
+
         self.props.options = options
         self.props.value = options[selected]
 
@@ -1614,6 +1619,7 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
             if value is not None:
                 assert isinstance(value, dict)
             self.props.value = value
+            # add new option
         # else:
         #     assert isinstance(value, str)
         #     print("self.props.input_value", value, type)

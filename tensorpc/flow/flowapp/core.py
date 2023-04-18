@@ -235,6 +235,7 @@ class FrontendEventType(enum.Enum):
     DialogClose = 23
     Drag = 24
     Drop = 25
+    SelectNewItem = 26
 
     TreeLazyExpand = 30
     TreeItemSelect = 31
@@ -1063,6 +1064,7 @@ class Component(Generic[T_base_props, T_child]):
         if ev.sent_event is None:
             ev.sent_event = asyncio.Event()
         await self.put_app_event(ev)
+        print(type(self), self.is_mounted())
         if self.is_mounted():
             if wait:
                 await ev.sent_event.wait()

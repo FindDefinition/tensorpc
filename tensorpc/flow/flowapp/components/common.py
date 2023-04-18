@@ -48,6 +48,8 @@ _ONEARG_EDITOR_EVENTS = set([
 
 _ONEARG_SPECIAL_EVENTS = set([
     FrontendEventType.Drop.value,
+    FrontendEventType.SelectNewItem.value,
+
 ])
 
 _ONEARG_EVENTS = set(
