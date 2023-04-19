@@ -422,14 +422,8 @@ class Button(MUIComponentBase[ButtonProps]):
         self.register_event_handler(FrontendEventType.Click.value, callback)
 
     async def headless_click(self):
-        return await self.put_app_event(
-            AppEvent(
-                "", {
-                    AppEventType.UIEvent:
-                    UIEvent({
-                        self._flow_uid: (FrontendEventType.Click.value, None)
-                    })
-                }))
+        return await self.put_loopback_ui_event(
+            (FrontendEventType.Click.value, None))
 
     async def handle_event(self, ev: EventType, is_sync: bool = False):
         return await handle_standard_event(self,
@@ -512,14 +506,8 @@ class IconButton(MUIComponentBase[IconButtonProps]):
         self.register_event_handler(FrontendEventType.Click.value, callback)
 
     async def headless_click(self):
-        return await self.put_app_event(
-            AppEvent(
-                "", {
-                    AppEventType.UIEvent:
-                    UIEvent({
-                        self._flow_uid: (FrontendEventType.Click.value, None)
-                    })
-                }))
+        return await self.put_loopback_ui_event(
+            (FrontendEventType.Click.value, None))
 
     async def handle_event(self, ev: EventType, is_sync: bool = False):
         return await handle_standard_event(self,
@@ -687,7 +675,7 @@ class ToggleButton(MUIComponentBase[ToggleButtonProps]):
 
     @property
     def checked(self):
-        return self.props.selected
+        return self.props.selected is True
 
     @property
     def prop(self):
@@ -917,10 +905,8 @@ class ListItemButton(MUIComponentBase[ButtonProps]):
         self.register_event_handler(FrontendEventType.Click.value, callback)
 
     async def headless_click(self):
-        uiev = UIEvent(
-            {self._flow_uid: (FrontendEventType.Click.value, self.props.name)})
-        return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+        return await self.put_loopback_ui_event(
+            (FrontendEventType.Click.value, None))
 
     async def handle_event(self, ev: EventType, is_sync: bool = False):
         return await handle_standard_event(self,
@@ -1089,12 +1075,7 @@ class RadioGroup(MUIComponentBase[RadioGroupProps]):
         self.props.value = value
 
     async def headless_click(self, index: int):
-        uiev = UIEvent({
-            self._flow_uid:
-            (FrontendEventType.Change.value, self.props.names[index])
-        })
-        return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+        return await self.put_loopback_ui_event((FrontendEventType.Change.value, self.props.names[index]))
 
     async def handle_event(self, ev: EventType, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -2242,9 +2223,8 @@ class Chip(MUIComponentBase[ChipProps]):
         return res
 
     async def headless_click(self):
-        uiev = UIEvent({self._flow_uid: (FrontendEventType.Click.value, None)})
-        return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
+        return await self.put_loopback_ui_event(
+            (FrontendEventType.Click.value, None))
 
     async def handle_event(self, ev: EventType, is_sync: bool = False):
         # TODO add delete support

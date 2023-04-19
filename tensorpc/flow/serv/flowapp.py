@@ -148,7 +148,7 @@ class FlowApp:
             return await self.app._handle_code_editor_event_system(ev)
         elif type == AppEventType.UIEvent.value:
             ev = UIEvent.from_dict(data)
-            return await self.app._handle_event_with_ctx(ev)
+            return await self.app._handle_event_with_ctx(ev, is_sync)
         elif type == AppEventType.ScheduleNext.value:
             asyncio.create_task(self._run_schedule_event_task(data))
         elif type == AppEventType.UISaveStateEvent.value:
@@ -249,11 +249,13 @@ class FlowApp:
                 if shut_task in done:
                     break
                 ev: AppEvent = send_task.result()
-                if self.headless:
+                if ev.is_loopback:
                     for k, v in ev.type_to_event.items():
                         if k == AppEventType.UIEvent:
                             assert isinstance(v, UIEvent)
                             await self.app._handle_event_with_ctx(v)
+                    send_task = asyncio.create_task(self._send_loop_queue.get())
+                    wait_tasks: List[asyncio.Task] = [shut_task, send_task]
                     continue
                 ts = time.time()
                 # assign uid here.

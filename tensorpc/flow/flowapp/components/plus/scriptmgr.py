@@ -69,12 +69,17 @@ class ScriptManager(mui.FlexBox):
             mui.ToggleButton("cuda", name="CUDA"),
         ], True, self._on_lang_select).prop(value="python",
                                             enforce_value_set=True)
+        self._enable_save_watch = mui.ToggleButton(
+                    "value",
+                    mui.IconType.Visibility).prop(mui_color="secondary", size="small")
+        self._run_button = mui.IconButton(
+                    mui.IconType.PlayArrow,
+                    self._on_run_script).prop(progress_color="primary")
         self.init_add_layout([
             mui.HBox([
                 self.scripts.prop(flex=1),
-                mui.IconButton(
-                    mui.IconType.PlayArrow,
-                    self._on_run_script).prop(progress_color="primary"),
+                self._run_button,
+                self._enable_save_watch,
                 self.langs,
             ]).prop(align_items="center"),
             self.code_editor,
@@ -143,6 +148,8 @@ class ScriptManager(mui.FlexBox):
             assert isinstance(item, Script)
             item.code = value
             await appctx.save_data_storage(label, self._storage_node_rid, item)
+            if self._enable_save_watch.checked:
+                await self._run_button.headless_click()
 
     async def _on_new_script(self, value):
 

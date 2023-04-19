@@ -209,6 +209,7 @@ class SimpleCanvas(mui.FlexBox):
         self._dynamic_custom_objs = three.Group({})
         self._screen_shot = three.ScreenShot(self._on_screen_shot_finish)
         self._screen_shot_v2 = three.ScreenShotSyncReturn()
+        self.background_img = mui.Image()
 
         self._screenshot_callback = screenshot_callback
         canvas_layout = [
@@ -340,6 +341,11 @@ class SimpleCanvas(mui.FlexBox):
                                               top=3,
                                               right=3,
                                               z_index=5),
+            self.background_img.prop(position="absolute",
+                                top=0,
+                                left=0,
+                                width="100%", height="100%")
+
         ]
 
         self.register_event_handler(FrontendEventType.Drop.value,

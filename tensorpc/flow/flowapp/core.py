@@ -668,20 +668,21 @@ def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":
 #     def from_dict(cls, data: Dict[str, Any]):
 #         return cls(data["uid"], data["data"])
 
-
 class AppEvent:
 
     def __init__(self,
                  uid: str,
                  type_to_event: Dict[AppEventType, APP_EVENT_TYPES],
                  sent_event: Optional[asyncio.Event] = None,
-                 event_id: str = "") -> None:
+                 event_id: str = "", 
+                 is_loopback: bool = False) -> None:
         self.uid = uid
         self.type_to_event = type_to_event
         # event that indicate this app event is sent
         # used for callback
         self.sent_event = sent_event
         self.event_id = event_id
+        self.is_loopback = is_loopback
 
     def to_dict(self):
         # here we don't use dict for typeToEvents because key in js must be string.
@@ -980,6 +981,16 @@ class Component(Generic[T_base_props, T_child]):
                 if name in name_to_fields:
                     setattr(self.__props, name, value)
 
+    async def put_loopback_ui_event(self, ev: EventType):
+        if self.is_mounted():
+            return await self.queue.put(AppEvent(
+                "", {
+                    AppEventType.UIEvent:
+                    UIEvent({
+                        self._flow_uid: ev
+                    })
+                }, is_loopback=True))
+        
     async def put_app_event(self, ev: AppEvent):
         if self.is_mounted():
             return await self.queue.put(ev)
