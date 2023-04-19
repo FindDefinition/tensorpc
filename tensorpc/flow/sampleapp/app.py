@@ -1044,7 +1044,7 @@ class PointCloudApp:
         # 1. [N, 3] float, value range: [0, 1]
         # 2. [N], int8 (intensity), value range: [0, 255]
         # 3. a color string, e.g. red, green
-        colors = np.random.uniform(254, 255, size=[1000]).astype(np.uint8)
+        colors = np.random.uniform(0, 255, size=[1000]).astype(np.uint8)
         # print(colors)
         # colors = np.random.uniform(254, 255, size=[1000]).astype(np.uint8)
         sizes = np.random.uniform(0.5, 10.5, size=[1000]).astype(
