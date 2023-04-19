@@ -32,7 +32,7 @@ from PIL import Image as PILImage
 from typing_extensions import Literal, TypeAlias
 
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServFunctionMeta
+from tensorpc.core.serviceunit import AppFuncType, ObjectReloadManager, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.flow.flowapp.components.common import (handle_standard_event)
 from tensorpc.flow.flowapp.reload import AppReloadManager
 from ...jsonlike import JsonLikeType, BackendOnlyProp, ContextMenuData, JsonLikeNode
@@ -724,7 +724,7 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
                          uid_to_comp, children, inited,
                          [FrontendEventType.Change.value])
         for v in children.values():
-            assert isinstance(v, ToggleButton), "all childs must be button"
+            assert isinstance(v, ToggleButton), "all childs must be toggle button"
             if not isinstance(v.props.icon, Undefined):
                 self.props.name_or_icons.append(v.props.icon)
             else:
@@ -1075,7 +1075,8 @@ class RadioGroup(MUIComponentBase[RadioGroupProps]):
         self.props.value = value
 
     async def headless_click(self, index: int):
-        return await self.put_loopback_ui_event((FrontendEventType.Change.value, self.props.names[index]))
+        return await self.put_loopback_ui_event(
+            (FrontendEventType.Change.value, self.props.names[index]))
 
     async def handle_event(self, ev: EventType, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -2509,6 +2510,7 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
 
     TODO support add new tab to a tabset.
     """
+
     class Row:
 
         def __init__(self,
@@ -2576,7 +2578,7 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
     def __init__(
         self, children: Union[List[Union["FlexLayout.Row",
                                          "FlexLayout.TabSet"]],
-                              "FlexLayout.Row", "FlexLayout.TabSet"]
+                              "FlexLayout.Row", "FlexLayout.TabSet", "FlexLayout.Tab"]
     ) -> None:
         events = [
             FrontendEventType.ComplexLayoutCloseTab,
@@ -2589,6 +2591,8 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
             self._init_children_row = children
         elif isinstance(children, FlexLayout.TabSet):
             self._init_children_row = FlexLayout.Row([children])
+        elif isinstance(children, FlexLayout.Tab):
+            self._init_children_row = FlexLayout.Row([FlexLayout.TabSet([children])])
         else:
             self._init_children_row = self.Row(children)
         comp_children = self._init_children_row.get_components()
@@ -2639,7 +2643,6 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
         res = super().get_sync_props()
         res["initial_model"] = self.props.initial_model
         return res
-
 
 @dataclasses.dataclass
 class CircularProgressProps(MUIFlexBoxProps):
@@ -2847,13 +2850,18 @@ class DynamicControls(MUIComponentBase[DynamicControlsProps]):
                                            is_sync=is_sync)
 
 
-def flex_wrapper(obj: Any):
+def flex_wrapper(obj: Any,
+                 metas: Optional[List[ServFunctionMeta]] = None,
+                 reload_mgr: Optional[ObjectReloadManager] = None):
     """wrap a object which define a layout function "tensorpc_flow_layout"
     enable simple layout creation for arbitrary object without inherit
     """
-    metas = ReloadableDynamicClass.get_metas_of_regular_methods(type(obj),
-                                                                True,
-                                                                no_code=True)
+    if metas is None:
+        if reload_mgr is not None:
+            metas = reload_mgr.query_type_method_meta(type(obj), no_code=True)
+        else:
+            metas = ReloadableDynamicClass.get_metas_of_regular_methods(
+                type(obj), True, no_code=True)
     methods = FlowSpecialMethods(metas)
     if methods.create_layout is not None:
         fn = methods.create_layout.bind(obj)
@@ -2871,13 +2879,17 @@ def flex_wrapper(obj: Any):
 
 
 def flex_preview_wrapper(obj: Any,
-                         metas: Optional[List[ServFunctionMeta]] = None):
+                         metas: Optional[List[ServFunctionMeta]] = None,
+                         reload_mgr: Optional[ObjectReloadManager] = None):
     """wrap a object which define a layout function "tensorpc_flow_preview_layout"
     enable simple layout creation for arbitrary object without inherit
     """
     if metas is None:
-        metas = ReloadableDynamicClass.get_metas_of_regular_methods(
-            type(obj), True, no_code=True)
+        if reload_mgr is not None:
+            metas = reload_mgr.query_type_method_meta(type(obj), no_code=True)
+        else:
+            metas = ReloadableDynamicClass.get_metas_of_regular_methods(
+                type(obj), True, no_code=True)
     methods = FlowSpecialMethods(metas)
     if methods.create_preview_layout is not None:
         fn = methods.create_preview_layout.bind(obj)

@@ -351,6 +351,9 @@ async def _get_obj_by_uid_trace_resursive(
         child_obj = obj_dict[key]
     elif isinstance(obj, TreeItem):
         child_obj = await obj.get_child(key)
+    elif isinstance(obj, tuple(USER_OBJ_TREE_TYPES)):
+        childs = obj.get_childs()
+        child_obj = childs[key]
     else:
         child_obj = _get_obj_single_attr(obj, key, checker)
         if isinstance(obj, mui.Undefined):
@@ -549,14 +552,16 @@ class SimpleCanvasCreator(ObjectLayoutCreator):
     def create(self):
         return SimpleCanvas()
 
-
-class ObjectTree(mui.FlexBox):
-
+class BasicObjectTree(mui.FlexBox):
+    """basic object tree, contains enough features
+    to analysis python object.
+    """
     def __init__(self,
                  init: Optional[Any] = None,
                  cared_types: Optional[Set[Type]] = None,
                  ignored_types: Optional[Set[Type]] = None,
-                 limit: int = 50) -> None:
+                 limit: int = 50,
+                 auto_lazy_expand: bool = False) -> None:
         self.tree = mui.JsonLikeTree()
         super().__init__([
             self.tree.prop(ignore_root=True, use_fast_tree=False),
@@ -573,27 +578,12 @@ class ObjectTree(mui.FlexBox):
         self._cared_dnd_uids: Dict[str, Callable[[str, Any],
                                                  mui.CORO_NONE]] = {}
         self.limit = limit
-
-        self._default_data_storage_nodes: Dict[str, DataStorageTreeItem] = {}
-        self._default_obs_funcs = ObservedFunctionTree()
-        default_builtins = {
-            _DEFAULT_BUILTINS_NAME: {
-                "monitor": ComputeResourceMonitor(),
-                "appTerminal": mui.AppTerminal(),
-                "simpleCanvas": SimpleCanvasCreator(),
-                "fileReader": SimpleFileReader(),
-            },
-            _DEFAULT_DATA_STORAGE_NAME: self._default_data_storage_nodes,
-            _DEFAULT_OBSERVED_FUNC_NAME: self._default_obs_funcs,
-        }
-        self._data_storage_uid = f"{_ROOT}{_GLOBAL_SPLIT}{_DEFAULT_DATA_STORAGE_NAME}"
         if init is None:
             self.root = {}
             # self.tree.props.tree = mui.JsonLikeNode(
             #     _ROOT, _ROOT, mui.JsonLikeType.Dict.value)
         else:
             self.root = {_DEFAULT_OBJ_NAME: init}
-        self.root.update(default_builtins)
 
         # self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
         #                                       _ROOT, self._obj_meta_cache)
@@ -614,49 +604,10 @@ class ObjectTree(mui.FlexBox):
 
     @mark_did_mount
     async def _on_mount(self):
-        all_data_nodes = await appctx.list_all_data_storage_nodes()
-        context_menus: List[mui.ContextMenuData] = []
-        for n, readable_n in all_data_nodes:
-            userdata = {
-                "type": ContextMenuType.DataStorageStore.value,
-                "node_id": n,
-            }
-            context_menus.append(
-                mui.ContextMenuData(f"Add To {readable_n}",
-                                    id=n,
-                                    icon=mui.IconType.DataObject.value,
-                                    userdata=userdata))
-            self._default_data_storage_nodes[readable_n] = DataStorageTreeItem(
-                n, readable_n)
         self.tree.props.tree = await _get_root_tree_async(
             self.root, self._valid_checker, _ROOT, self._obj_meta_cache)
-        if context_menus:
-            await self.tree.send_and_wait(
-                self.tree.update_event(tree=self.tree.props.tree,
-                                       context_menus=context_menus))
-        else:
-            await self.tree.send_and_wait(
-                self.tree.update_event(tree=self.tree.props.tree))
-        appctx.get_app().register_app_special_event_handler(
-            AppSpecialEventType.ObservedFunctionChange,
-            self._on_obs_func_change)
-
-    @mark_will_unmount
-    def _on_unmount(self):
-        appctx.get_app().unregister_app_special_event_handler(
-            AppSpecialEventType.ObservedFunctionChange,
-            self._on_obs_func_change)
-
-    async def _on_obs_func_change(self, changed_qualnames: List[str]):
-        rg = appctx.get_app().get_observed_func_registry()
-        for qualname in changed_qualnames:
-            entry = rg[qualname]
-            rg.invalid_record(entry)
-            if qualname in rg and qualname in self._default_obs_funcs._watched_funcs:
-                if entry.recorded_data is not None:
-                    await self.run_callback(entry.run_function_with_record,
-                                            sync_first=False,
-                                            change_status=False)
+        await self.tree.send_and_wait(
+            self.tree.update_event(tree=self.tree.props.tree))
 
     def _checker(self, obj):
         return _check_is_valid(type(obj), self._cared_types,
@@ -786,9 +737,6 @@ class ObjectTree(mui.FlexBox):
         upd = self.tree.update_event(tree=self._objinspect_root)
         return await self.tree.send_and_wait(upd)
 
-    async def _sync_data_storage_node(self):
-        await self._on_expand(self._data_storage_uid)
-
     async def _on_rename(self, uid_newname: Tuple[str, str]):
         uid = uid_newname[0]
         uid_parts = uid.split(_GLOBAL_SPLIT)
@@ -879,14 +827,6 @@ class ObjectTree(mui.FlexBox):
                             await self._on_expand(parent_node.id)
                         return
 
-                # handle regular objects
-                menu_type = ContextMenuType(userdata["type"])
-                if menu_type == ContextMenuType.DataStorageStore:
-                    node_id = userdata["node_id"]
-                    if not found:
-                        return
-                    await appctx.save_data_storage(uid_parts[-1], node_id, obj)
-                    await self._sync_data_storage_node()
 
     async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):
         key_in_root = key in self.root
@@ -924,3 +864,116 @@ class ObjectTree(mui.FlexBox):
         self.tree.props.tree.children = new_child
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
+
+class ObjectTree(BasicObjectTree):
+    """object tree for object inspector.
+    """
+    def __init__(self,
+                 init: Optional[Any] = None,
+                 cared_types: Optional[Set[Type]] = None,
+                 ignored_types: Optional[Set[Type]] = None,
+                 limit: int = 50) -> None:
+        self._default_data_storage_nodes: Dict[str, DataStorageTreeItem] = {}
+        self._default_obs_funcs = ObservedFunctionTree()
+        default_builtins = {
+            _DEFAULT_BUILTINS_NAME: {
+                "monitor": ComputeResourceMonitor(),
+                "appTerminal": mui.AppTerminal(),
+                "simpleCanvas": SimpleCanvasCreator(),
+                "fileReader": SimpleFileReader(),
+            },
+            _DEFAULT_DATA_STORAGE_NAME: self._default_data_storage_nodes,
+            _DEFAULT_OBSERVED_FUNC_NAME: self._default_obs_funcs,
+        }
+        self._data_storage_uid = f"{_ROOT}{_GLOBAL_SPLIT}{_DEFAULT_DATA_STORAGE_NAME}"
+        super().__init__(init, cared_types, ignored_types, limit)
+        self.root.update(default_builtins)
+
+    @mark_did_mount
+    async def _on_mount(self):
+        all_data_nodes = await appctx.list_all_data_storage_nodes()
+        context_menus: List[mui.ContextMenuData] = []
+        for n, readable_n in all_data_nodes:
+            userdata = {
+                "type": ContextMenuType.DataStorageStore.value,
+                "node_id": n,
+            }
+            context_menus.append(
+                mui.ContextMenuData(f"Add To {readable_n}",
+                                    id=n,
+                                    icon=mui.IconType.DataObject.value,
+                                    userdata=userdata))
+            self._default_data_storage_nodes[readable_n] = DataStorageTreeItem(
+                n, readable_n)
+        self.tree.props.tree = await _get_root_tree_async(
+            self.root, self._valid_checker, _ROOT, self._obj_meta_cache)
+        if context_menus:
+            await self.tree.send_and_wait(
+                self.tree.update_event(tree=self.tree.props.tree,
+                                       context_menus=context_menus))
+        else:
+            await self.tree.send_and_wait(
+                self.tree.update_event(tree=self.tree.props.tree))
+        appctx.get_app().register_app_special_event_handler(
+            AppSpecialEventType.ObservedFunctionChange,
+            self._on_obs_func_change)
+
+    @mark_will_unmount
+    def _on_unmount(self):
+        appctx.get_app().unregister_app_special_event_handler(
+            AppSpecialEventType.ObservedFunctionChange,
+            self._on_obs_func_change)
+
+    async def _on_obs_func_change(self, changed_qualnames: List[str]):
+        rg = appctx.get_app().get_observed_func_registry()
+        for qualname in changed_qualnames:
+            entry = rg[qualname]
+            rg.invalid_record(entry)
+            if qualname in rg and qualname in self._default_obs_funcs._watched_funcs:
+                if entry.recorded_data is not None:
+                    await self.run_callback(entry.run_function_with_record,
+                                            sync_first=False,
+                                            change_status=False)
+
+
+    async def _sync_data_storage_node(self):
+        await self._on_expand(self._data_storage_uid)
+
+    async def _on_contextmenu(self, uid_menuid_data: Tuple[str, str,
+                                                           Optional[Any]]):
+        uid = uid_menuid_data[0]
+        uid_parts = uid.split(_GLOBAL_SPLIT)
+        userdata = uid_menuid_data[2]
+        if userdata is not None:
+            obj_trace, found = await _get_obj_by_uid_trace(
+                self.root, uid, self._valid_checker)
+            if found:
+                obj = obj_trace[-1]
+                # handle tree item first
+                if isinstance(obj, TreeItem):
+                    res = await obj.handle_context_menu(userdata)
+                    if res == True:
+                        # update this node
+                        await self._on_expand(uid)
+                    return
+                if len(obj_trace) >= 2:
+                    parent = obj_trace[-2]
+                    nodes = self._objinspect_root._get_node_by_uid_trace(uid)
+                    parent_node = nodes[-2]
+
+                    if isinstance(parent, TreeItem):
+                        res = await parent.handle_child_context_menu(
+                            uid_parts[-1], userdata)
+                        if res == True:
+                            # update this node
+                            await self._on_expand(parent_node.id)
+                        return
+
+                # handle regular objects
+                menu_type = ContextMenuType(userdata["type"])
+                if menu_type == ContextMenuType.DataStorageStore:
+                    node_id = userdata["node_id"]
+                    if not found:
+                        return
+                    await appctx.save_data_storage(uid_parts[-1], node_id, obj)
+                    await self._sync_data_storage_node()

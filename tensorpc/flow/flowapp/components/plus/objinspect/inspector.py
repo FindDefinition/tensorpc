@@ -191,11 +191,10 @@ class ObjectInspector(mui.FlexBox):
                 handler = handler_type()
             else:
                 # check obj have create_preview_layout
-                metas = ReloadableDynamicClass.get_metas_of_regular_methods(
-                    obj_type, False, no_code=True)
+                metas = self.flow_app_comp_core.reload_mgr.query_type_method_meta(obj_type, True)
                 special_methods = FlowSpecialMethods(metas)
                 if special_methods.create_preview_layout is not None:
-                    preview_layout = mui.flex_preview_wrapper(obj, metas)
+                    preview_layout = mui.flex_preview_wrapper(obj, metas, self.flow_app_comp_core.reload_mgr)
 
                 handler = self.default_handler
             if preview_layout is None:
@@ -203,7 +202,7 @@ class ObjectInspector(mui.FlexBox):
         if preview_layout is not None:
             objs, found = await self.tree._get_obj_by_uid_trace(uid, nodes)
             # determine objtree root
-            assert found, "shouldn't happen"
+            assert found, f"shouldn't happen, {uid}"
             root: Optional[UserObjTreeProtocol] = None
             for obj_iter_val in objs:
                 if isinstance(obj_iter_val, tuple(USER_OBJ_TREE_TYPES)):

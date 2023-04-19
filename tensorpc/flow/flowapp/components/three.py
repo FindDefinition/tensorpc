@@ -1143,6 +1143,7 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
         """
         cam2world = np.array(cam2world, np.float32).reshape(4, 4)
         cam2world = cam2world.T  # R|T to R/T
+        
         return await self.send_and_wait(
             self.create_comp_event({
                 "type":

@@ -158,5 +158,7 @@ def find_may_exist(obj_type: Type[T]) -> Optional[T]:
     if not exist, return None.
     """
     ctx = get_objtree_context()
-    assert ctx is not None
+    if ctx is None:
+        return None 
+    # assert ctx is not None
     return find_tree_child_item_may_exist(ctx.node, obj_type, UserObjTree)

@@ -20,6 +20,6 @@ from .monitor import ComputeResourceMonitor
 from .objinspect import (AnyFlexLayout, InspectPanel, ObjectInspector,
                          ObjectLayoutHandler, ObjectPreviewHandler,
                          TreeDragTarget, register_obj_layout_handler,
-                         register_obj_preview_handler)
+                         register_obj_preview_handler, BasicObjectTree)
 from .scriptmgr import ScriptManager
 from .options import CommonOptions

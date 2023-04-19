@@ -607,10 +607,14 @@ class ObjectReloadManager:
                     self.observed_registry.reload_func(qname, new_func)
         return ObjectReloadResultWithType(self.module_cache[path], True, self.file_cache[path], meta)
 
-    def query_type_method_meta(self, type: Type, no_code: bool = False):
+    def query_type_method_meta(self, type: Type, no_code: bool = False) -> List[ServFunctionMeta]:
         if type in self.type_method_meta_cache:
             return self.type_method_meta_cache[type]
-        path = self._inspect_get_file_resolved(type)
+        try:
+            path = self._inspect_get_file_resolved(type)
+        except TypeError:
+            return []
+
         inspect_type = type
         if path in self.module_cache:
             # if obj is reloaded, we must use new type meta instead of old one

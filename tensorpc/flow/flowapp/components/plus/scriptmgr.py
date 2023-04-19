@@ -40,8 +40,20 @@ _LANG_TO_VSCODE_MAPPING = {
     "python": "python",
     "cpp": "cpp",
     "cuda": "cpp",
+    "bash": "shell",
 }
 
+async def _read_stream(stream, cb):  
+    while True:
+        line = await stream.readline()
+        if line:
+            try:
+                line_print = line.decode().rstrip()
+            except UnicodeDecodeError:
+                line_print = line
+            cb(line_print)
+        else:
+            break
 
 class ScriptManager(mui.FlexBox):
 
@@ -67,6 +79,8 @@ class ScriptManager(mui.FlexBox):
             mui.ToggleButton("cpp", name="CPP"),
             mui.ToggleButton("python", name="PY"),
             mui.ToggleButton("cuda", name="CUDA"),
+            mui.ToggleButton("bash", name="BASH"),
+
         ], True, self._on_lang_select).prop(value="python",
                                             enforce_value_set=True)
         self._enable_save_watch = mui.ToggleButton(
@@ -127,6 +141,21 @@ class ScriptManager(mui.FlexBox):
                 res = __tensorpc_script_res[0]
                 assert res is not None
                 await res
+            elif item.lang == "bash":
+                proc = await asyncio.create_subprocess_shell(
+                    item.code,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE)
+                await asyncio.wait([
+                    _read_stream(proc.stdout, print),
+                    _read_stream(proc.stderr, print)
+                ])
+                await proc.wait()
+                print(f'[cmd exited with {proc.returncode}]')
+                # if stdout:
+                #     print(f'[stdout]\n{stdout.decode()}')
+                # if stderr:
+                #     print(f'[stderr]\n{stderr.decode()}')
 
     async def _on_lang_select(self, value):
         await self.send_and_wait(
@@ -175,6 +204,7 @@ class ScriptManager(mui.FlexBox):
         label = value["label"]
         item = await appctx.read_data_storage(label, self._storage_node_rid)
         assert isinstance(item, Script)
+        await self.langs.set_value(item.lang)
         await self.send_and_wait(
             self.code_editor.update_event(
                 language=_LANG_TO_VSCODE_MAPPING[item.lang],

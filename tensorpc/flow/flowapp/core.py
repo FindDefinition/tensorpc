@@ -31,6 +31,8 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
 from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec,
                                Protocol, Self, TypeAlias)
 
+import pyee
+
 from tensorpc.core.core_io import JsonOnlyData
 from tensorpc.core.serviceunit import (AppFuncType, ReloadableDynamicClass,
                                        ServFunctionMeta)
@@ -122,6 +124,7 @@ class UIType(enum.Enum):
     Divider = 0x103
     AppTerminal = 0x104
     ThemeProvider = 0x105
+    Handle = 0x106
 
     # react fragment
     Fragment = 0x200
@@ -201,6 +204,7 @@ class AppEventType(enum.Enum):
     UIUpdatePropsEvent = 14
     UIException = 15
     FrontendUIEvent = 16
+    UIUpdateUsedEvents = 17
     # clipboard
     CopyToClipboard = 20
     # schedule event, won't be sent to frontend.
@@ -213,11 +217,21 @@ class AppEventType(enum.Enum):
 
 
 class FrontendEventType(enum.Enum):
+    """type for all component events.
+    
+    event handled in handle_event use FrontendEventType.EventName.value,
+    
+    event handled in event_emitter use FrontendEventType.EventName.name,
+    """
     # only used on backend
     # if user don't define DragCollect handler, Drop won't be scheduled.
     DragCollect = -1
     # file drop use special path to handle
     FileDrop = -2
+    # emitted by event_emitter
+    AfterMount = -3
+    # emitted by event_emitter
+    AfterUnmount = -4
 
     Click = 0
     DoubleClick = 1
@@ -358,6 +372,22 @@ class AppEditorFrontendEvent:
 class UIEvent:
 
     def __init__(self, uid_to_data: Dict[str, EventType]) -> None:
+        self.uid_to_data = uid_to_data
+
+    def to_dict(self):
+        return self.uid_to_data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        return cls(data)
+
+    def merge_new(self, new):
+        return new
+
+@ALL_APP_EVENTS.register(key=AppEventType.UIUpdateUsedEvents.value)
+class UpdateUsedEventsEvent:
+
+    def __init__(self, uid_to_data: Dict[str, Any]) -> None:
         self.uid_to_data = uid_to_data
 
     def to_dict(self):
@@ -642,7 +672,7 @@ APP_EVENT_TYPES = Union[UIEvent, LayoutEvent, CopyToClipboardEvent,
                         UpdateComponentsEvent, DeleteComponentsEvent,
                         ScheduleNextForApp, AppEditorEvent, UIUpdateEvent,
                         UISaveStateEvent, NotifyEvent, UIExceptionEvent,
-                        ComponentEvent, FrontendUIEvent]
+                        ComponentEvent, FrontendUIEvent, UpdateUsedEventsEvent]
 
 
 def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":
@@ -807,6 +837,12 @@ class Component(Generic[T_base_props, T_child]):
 
         self._flow_event_context_creator: Optional[Callable[
             [], ContextManager]] = None
+        
+        self._flow_event_emitter = pyee.AsyncIOEventEmitter()
+
+    @property 
+    def event_emitter(self):
+        return self._flow_event_emitter
 
     def get_special_methods(self, reload_mgr: AppReloadManager):
         metas = reload_mgr.query_type_method_meta(type(self), no_code=True)
@@ -839,6 +875,7 @@ class Component(Generic[T_base_props, T_child]):
             self._flow_uid = uid
             self._flow_comp_core = comp_core
             self._flow_reference_count += 1
+            self.event_emitter.emit(FrontendEventType.AfterMount.name)
             return {uid: self}
         self._flow_reference_count += 1
         return {}
@@ -849,6 +886,7 @@ class Component(Generic[T_base_props, T_child]):
             res_uid = self._flow_uid
             self._flow_uid = ""
             self._flow_comp_core = None
+            self.event_emitter.emit(FrontendEventType.AfterUnmount.name)
             return {res_uid: self}
         return {}
 
@@ -914,29 +952,26 @@ class Component(Generic[T_base_props, T_child]):
         props = self.get_props()
         props, und = split_props_to_undefined(props)
         props.update(self.__sx_props)
-        # state = self.get_state()
-        # newstate = {}
-        # for k, v in state.items():
-        #     if not isinstance(v, Undefined):
-        #         newstate[snake_to_camel(k)] = v
-        # static, _ = self.__props.get_dict_and_undefined(state)  # type: ignore
         res = {
             "uid": self._flow_uid,
             "type": self._flow_comp_type.value,
             "props": props,
-            # "status": self._status.value,
         }
         if self._flow_json_only:
             res["props"] = JsonOnlyData(props)
+        evs = self._get_used_events_dict()
+        if evs:
+            props["usedEvents"] = evs
+        return res
+
+    def _get_used_events_dict(self):
         evs = []
         for k, v in self._flow_event_handlers.items():
             if not isinstance(v, Undefined) and not v.backend_only:
                 d = v.to_dict()
                 d["type"] = k
                 evs.append(d)
-        if evs:
-            res["usedEvents"] = evs
-        return res
+        return evs
 
     def _to_dict_with_sync_props(self):
         props = self.get_sync_props()
@@ -1019,6 +1054,13 @@ class Component(Generic[T_base_props, T_child]):
                            backend_only)
         self._flow_event_handlers[type] = evh
         return evh
+    
+    def remove_event_handler(self,
+                               type: ValueType):
+        if type in self._flow_event_handlers:
+            del self._flow_event_handlers[type]
+            return True 
+        return False 
 
     def clear_event_handlers(self):
         self._flow_event_handlers.clear()
@@ -1050,6 +1092,15 @@ class Component(Generic[T_base_props, T_child]):
                            json_only)
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UIUpdateEvent: ev})
+    
+    def create_update_used_events_event(self):
+        used_events = self._get_used_events_dict()
+        ev = UpdateUsedEventsEvent({self._flow_uid: used_events})
+        # uid is set in flowapp service later.
+        return AppEvent("", {AppEventType.UIUpdateUsedEvents: ev})
+
+    async def sync_used_events(self):
+        return await self.put_app_event(self.create_update_used_events_event())
 
     def create_update_prop_event(self, data: Dict[str, Union[Any, Undefined]]):
         data_no_und = {}

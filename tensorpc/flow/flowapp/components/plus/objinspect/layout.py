@@ -3,6 +3,7 @@ import enum
 import inspect
 import traceback
 import types
+from typing_extensions import TypeAlias
 from functools import partial
 from pathlib import Path
 from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
@@ -25,14 +26,15 @@ from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 from tensorpc.flow.flowapp.reload import reload_object_methods
 from tensorpc.utils.reload import reload_method
 
-
+FlexLayoutInitType: TypeAlias = Union[List[Union[mui.FlexLayout.Row,
+                                                     mui.FlexLayout.TabSet]],
+                                          mui.FlexLayout.Row,
+                                          mui.FlexLayout.TabSet,
+                                          mui.FlexLayout.Tab]
 class AnyFlexLayout(mui.FlexLayout):
 
     def __init__(self,
-                 children: Optional[Union[List[Union[mui.FlexLayout.Row,
-                                                     mui.FlexLayout.TabSet]],
-                                          mui.FlexLayout.Row,
-                                          mui.FlexLayout.TabSet]] = None,
+                 children: Optional[FlexLayoutInitType] = None,
                  use_app_editor: bool = True) -> None:
         if children is None:
             children = []
@@ -96,7 +98,7 @@ class AnyFlexLayout(mui.FlexLayout):
             else:
                 if not isinstance(obj, mui.Component):
                     if obj_is_anylayout:
-                        wrapped_obj = mui.flex_wrapper(obj)
+                        wrapped_obj = mui.flex_wrapper(obj, reload_mgr=self.flow_app_comp_core.reload_mgr)
                     else:
                         if type(obj) in ALL_OBJECT_LAYOUT_HANDLERS:
                             handler_cls = ALL_OBJECT_LAYOUT_HANDLERS[type(obj)]

@@ -179,6 +179,7 @@ class CanvasGlobalCfg:
 
 
 class SimpleCanvas(mui.FlexBox):
+
     def __init__(
             self,
             camera: Optional[three.PerspectiveCamera] = None,
@@ -188,13 +189,14 @@ class SimpleCanvas(mui.FlexBox):
         if camera is None:
             camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         self.camera = camera
-        self._transparent_canvas = transparent_canvas
         self.ctrl = three.CameraControl().prop(make_default=True)
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.axis_helper = three.AxesHelper(20)
         self.infgrid = infgrid
+        self._is_transparent = transparent_canvas
         self._dynamic_grid = three.Group([infgrid, self.axis_helper])
         gcfg = GlobalCfg(mui.ControlColorRGB(255, 255, 255))
+        self.gcfg = gcfg
         self._cfg = CanvasGlobalCfg(PointCfg(), BoxCfg(), gcfg, CameraCfg())
         self._cfg_panel = ConfigPanel(self._cfg, self._on_cfg_change)
         self._cfg_panel.prop(border="1px solid",
@@ -229,7 +231,7 @@ class SimpleCanvas(mui.FlexBox):
 
         self.canvas = three.ThreeCanvas(canvas_layout).prop(
             flex=1, allow_keyboard_event=True)
-        if not transparent_canvas:
+        if not self._is_transparent:
             self.canvas.prop(three_background_color="#ffffff")
         self._point_dict: Dict[str, three.Points] = {}
         self._image_dict: Dict[str, three.Image] = {}
@@ -285,7 +287,7 @@ class SimpleCanvas(mui.FlexBox):
                 await self.send_and_wait(
                     self.ctrl.update_event(keyboard_front=True))
         elif uid == "canvas.background":
-            if not self._transparent_canvas:
+            if not self._is_transparent:
                 color_str = f"rgb({value.r}, {value.g}, {value.b})"
                 await self.canvas.send_and_wait(
                     self.canvas.update_event(three_background_color=color_str))
@@ -306,7 +308,7 @@ class SimpleCanvas(mui.FlexBox):
                        f"simulate first-persion")
 
         layout: mui.LayoutType = [
-            self.canvas,
+            self.canvas.prop(z_index=1),
             mui.HBox([
                 mui.VBox([
                     mui.ToggleButton("switch",
@@ -342,10 +344,10 @@ class SimpleCanvas(mui.FlexBox):
                                               right=3,
                                               z_index=5),
             self.background_img.prop(position="absolute",
-                                top=0,
-                                left=0,
-                                width="100%", height="100%")
-
+                                     top=0,
+                                     left=0,
+                                     width="100%",
+                                     height="100%")
         ]
 
         self.register_event_handler(FrontendEventType.Drop.value,
@@ -363,6 +365,30 @@ class SimpleCanvas(mui.FlexBox):
             sx_over_drop={"border": "4px solid green"},
         )
         return layout
+    
+    async def set_transparent(self, is_transparent: bool):
+        if is_transparent:
+            await self.canvas.send_and_wait(
+                self.canvas.update_event(three_background_color=mui.undefined))
+        else:
+            await self.canvas.send_and_wait(
+                self.canvas.update_event(three_background_color="#ffffff"))
+
+
+    async def register_cam_control_event_handler(self,
+                                           handler: Callable[[Any],
+                                                             mui.CORO_NONE],
+                                           throttle: int = 100,
+                                           debounce: Optional[int] = None):
+        self.ctrl.register_event_handler(self.ctrl.EvChange,
+                                         handler,
+                                         throttle=throttle,
+                                         debounce=debounce)
+        await self.ctrl.sync_used_events()
+
+    async def clear_cam_control_event_handler(self):
+        self.ctrl.remove_event_handler(self.ctrl.EvChange)
+        await self.ctrl.sync_used_events()
 
     async def _on_enable_grid(self, selected):
         if selected:
@@ -560,3 +586,6 @@ class SimpleCanvas(mui.FlexBox):
 
     async def remove_objects(self, keys: Iterable[str]):
         await self._dynamic_custom_objs.remove_childs_by_keys(list(keys))
+
+    async def set_background_image(self, image: np.ndarray):
+        await self.background_img.show(image)

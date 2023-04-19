@@ -1169,7 +1169,7 @@ class CollectionApp:
     def _autorun_dev(self):
         func_support_reload(1, 2)
         # self.dev_0.dev()
-
+    
 
 if __name__ == "__main__":
     import time
