@@ -51,3 +51,4 @@ class ListSlider(mui.Slider, Generic[T]):
             coro = handler.cb(obj)
             if inspect.iscoroutine(coro):
                 await coro
+

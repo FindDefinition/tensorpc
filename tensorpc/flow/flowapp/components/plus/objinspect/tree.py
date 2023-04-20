@@ -29,6 +29,7 @@ from tensorpc.flow.flowapp.reload import reload_object_methods
 from tensorpc.flow.jsonlike import (CommonQualNames, ContextMenuData,
                                     IconButtonData, parse_obj_to_jsonlike)
 from tensorpc.flow.marker import mark_did_mount, mark_will_unmount
+from .controllers import CallbackSlider
 
 _DEFAULT_OBJ_NAME = "default"
 
@@ -159,6 +160,40 @@ def _check_is_valid(obj_type, cared_types: Set[Type],
     return valid
 
 
+def _chehck_obj_is_pybind(obj):
+    # TODO better way to check a type is a pybind11 type
+    obj_type = type(obj)
+    obj_type_dir = dir(obj_type)
+
+    return "__dict__" not in obj_type_dir and "__weakref__" not in obj_type_dir
+
+
+def _get_obj_userdefined_properties(obj):
+    res: Set[str] = set()
+    is_pybind = _chehck_obj_is_pybind(obj)
+    if is_pybind:
+        # all properties in pybind object is property object
+        # so we must check setter.
+        # pybind object attrs defined by def_readwrite or def_readonly
+        # will have setter with type "instancemethod"
+        # otherwise is "builtin_function_or_method"
+        # for common case.
+        obj_type = type(obj)
+        for key in dir(obj_type):
+            class_attr = getattr(obj_type, key)
+            if isinstance(class_attr, property):
+                if class_attr.fget is not None and type(
+                        class_attr.fget).__name__ != "instancemethod":
+                    res.add(key)
+    else:
+        obj_type = type(obj)
+        for key in dir(obj_type):
+            class_attr = getattr(obj_type, key)
+            if isinstance(class_attr, property):
+                res.add(key)
+    return res
+
+
 def _get_obj_dict(obj,
                   checker: Callable[[Type], bool],
                   check_obj: bool = True) -> Dict[Hashable, Any]:
@@ -186,6 +221,8 @@ def _get_obj_dict(obj,
     #     return {}
     # members = get_members(obj, no_parent=False)
     # member_keys = set([m[0] for m in members])
+    user_defined_prop_keys = _get_obj_userdefined_properties(obj)
+    # print(_chehck_obj_is_pybind(obj), user_defined_prop_keys)
     for k in dir(obj):
         if k.startswith("__"):
             continue
@@ -193,6 +230,9 @@ def _get_obj_dict(obj,
             continue
         # if k in member_keys:
         #     continue
+        # TODO here we ignore all properies, we should add a lazy evaluation
+        if k in user_defined_prop_keys:
+            continue
         try:
             v = getattr(obj, k)
         except:
@@ -402,19 +442,45 @@ async def _get_root_tree_async(obj,
     return root_node
 
 
+def _parse_obj_to_node(obj,
+                       node: mui.JsonLikeNode,
+                       checker: Callable[[Type], bool],
+                       cached_lazy_expand_ids: Set[str],
+                       obj_meta_cache=None):
+    obj_dict = _get_obj_dict(obj, checker)
+    node.children = parse_obj_dict(obj_dict, node.id, checker, obj_meta_cache)
+    node.cnt = len(obj_dict)
+    for (k, v), child_node in zip(obj_dict.items(), node.children):
+        if child_node.id in cached_lazy_expand_ids:
+            _parse_obj_to_node(v, child_node, checker, cached_lazy_expand_ids,
+                               obj_meta_cache)
+
+
 def _get_obj_tree(obj,
                   checker: Callable[[Type], bool],
                   key: str,
                   parent_id: str,
-                  obj_meta_cache=None):
+                  obj_meta_cache=None,
+                  cached_lazy_expand_ids: Optional[List[str]] = None):
     obj_id = f"{parent_id}{_GLOBAL_SPLIT}{key}"
     root_node = parse_obj_item(obj, key, obj_id, checker, obj_meta_cache)
+    if cached_lazy_expand_ids is None:
+        cached_lazy_expand_ids = []
+    cached_lazy_expand_ids_set = set(cached_lazy_expand_ids)
     # TODO determine auto-expand limits
     if root_node.type == mui.JsonLikeType.Object.value:
-        obj_dict = _get_obj_dict(obj, checker)
-        root_node.children = parse_obj_dict(obj_dict, obj_id, checker,
-                                            obj_meta_cache)
-        root_node.cnt = len(obj_dict)
+
+        _parse_obj_to_node(obj, root_node, checker, cached_lazy_expand_ids_set,
+                           obj_meta_cache)
+        # obj_dict = _get_obj_dict(obj, checker)
+        # root_node.children = parse_obj_dict(obj_dict, obj_id, checker,
+        #                                     obj_meta_cache)
+        # root_node.cnt = len(obj_dict)
+    else:
+        if obj_id in cached_lazy_expand_ids_set:
+            _parse_obj_to_node(obj, root_node, checker,
+                               cached_lazy_expand_ids_set, obj_meta_cache)
+
     return root_node
 
 
@@ -433,11 +499,18 @@ class DataStorageTreeItem(TreeItem):
             userdata = {
                 "type": ContextMenuType.DataStorageItemDelete.value,
             }
+            userdata_cpycmd = {
+                "type": ContextMenuType.DataStorageItemCommand.value,
+            }
+
             m.menus = [
                 ContextMenuData("Delete",
                                 m.id,
                                 mui.IconType.Delete.value,
-                                userdata=userdata)
+                                userdata=userdata),
+                ContextMenuData("Copy Command",
+                                m.id,
+                                userdata=userdata_cpycmd),
             ]
             m.edit = True
             # m.iconBtns = [(ButtonType.Delete.value,
@@ -483,6 +556,8 @@ class DataStorageTreeItem(TreeItem):
         if type == ContextMenuType.DataStorageItemDelete:
             await appctx.remove_data_storage(child_key, self.node_id)
             return True  # tell outside update childs
+        if type == ContextMenuType.DataStorageItemCommand:
+            await appctx.get_app().copy_text_to_clipboard(f"await appctx.read_data_storage('{child_key}', '{self.node_id}')")
 
     async def handle_context_menu(self, userdata: Dict[str, Any]):
         return
@@ -552,19 +627,22 @@ class SimpleCanvasCreator(ObjectLayoutCreator):
     def create(self):
         return SimpleCanvas()
 
+
 class BasicObjectTree(mui.FlexBox):
     """basic object tree, contains enough features
     to analysis python object.
     """
+
     def __init__(self,
                  init: Optional[Any] = None,
                  cared_types: Optional[Set[Type]] = None,
                  ignored_types: Optional[Set[Type]] = None,
                  limit: int = 50,
-                 auto_lazy_expand: bool = False) -> None:
+                 use_fast_tree: bool = False,
+                 auto_lazy_expand: bool = True) -> None:
         self.tree = mui.JsonLikeTree()
         super().__init__([
-            self.tree.prop(ignore_root=True, use_fast_tree=False),
+            self.tree.prop(ignore_root=True, use_fast_tree=use_fast_tree),
         ])
         self.prop(overflow="auto")
         self._uid_to_node: Dict[str, mui.JsonLikeNode] = {}
@@ -575,6 +653,8 @@ class BasicObjectTree(mui.FlexBox):
         self._cared_types = cared_types
         self._ignored_types = ignored_types
         self._obj_meta_cache = {}
+        self._auto_lazy_expand = auto_lazy_expand
+        self._cached_lazy_expand_uids: List[str] = []
         self._cared_dnd_uids: Dict[str, Callable[[str, Any],
                                                  mui.CORO_NONE]] = {}
         self.limit = limit
@@ -622,21 +702,31 @@ class BasicObjectTree(mui.FlexBox):
 
     async def _get_obj_by_uid(self, uid: str,
                               tree_node_trace: List[mui.JsonLikeNode]):
-        real_keys = [
-            n.get_dict_key() for n in tree_node_trace if not n.is_folder()
-        ]
+        uids = uid.split(_GLOBAL_SPLIT)
+        real_uids: List[str] = []
+        real_keys: List[Union[Hashable, mui.Undefined]] = []
+        for i in range(len(tree_node_trace)):
+            k = tree_node_trace[i].get_dict_key()
+            if not tree_node_trace[i].is_folder():
+                real_keys.append(k)
+                real_uids.append(uids[i])
         return await _get_obj_by_uid(self.root,
-                                     uid,
+                                     _GLOBAL_SPLIT.join(real_uids),
                                      self._valid_checker,
                                      real_keys=real_keys)
 
     async def _get_obj_by_uid_trace(self, uid: str,
                                     tree_node_trace: List[mui.JsonLikeNode]):
-        real_keys = [
-            n.get_dict_key() for n in tree_node_trace if not n.is_folder()
-        ]
+        uids = uid.split(_GLOBAL_SPLIT)
+        real_uids: List[str] = []
+        real_keys: List[Union[Hashable, mui.Undefined]] = []
+        for i in range(len(tree_node_trace)):
+            k = tree_node_trace[i].get_dict_key()
+            if not tree_node_trace[i].is_folder():
+                real_keys.append(k)
+                real_uids.append(uids[i])
         return await _get_obj_by_uid_trace(self.root,
-                                           uid,
+                                           _GLOBAL_SPLIT.join(real_uids),
                                            self._valid_checker,
                                            real_keys=real_keys)
 
@@ -697,6 +787,12 @@ class BasicObjectTree(mui.FlexBox):
         assert node_found, "can't find your node via uid"
         node = nodes[-1]
         obj_dict: Dict[Hashable, Any] = {}
+        if self._auto_lazy_expand:
+            new_lazy_expand_uids: List[str] = list(
+                filter(lambda n: not n.startswith(uid),
+                       self._cached_lazy_expand_uids))
+            new_lazy_expand_uids.append(uid)
+            self._cached_lazy_expand_uids = new_lazy_expand_uids
         if node.type in FOLDER_TYPES:
             assert not isinstance(node.start, mui.Undefined)
             assert not isinstance(node.realId, mui.Undefined)
@@ -827,12 +923,12 @@ class BasicObjectTree(mui.FlexBox):
                             await self._on_expand(parent_node.id)
                         return
 
-
     async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):
         key_in_root = key in self.root
         self.root[key] = obj
         obj_tree = _get_obj_tree(obj, self._checker, key,
-                                 self.tree.props.tree.id, self._obj_meta_cache)
+                                 self.tree.props.tree.id, self._obj_meta_cache,
+                                 self._cached_lazy_expand_uids)
         if key_in_root:
             for i, node in enumerate(self.tree.props.tree.children):
                 if node.name == key:
@@ -865,13 +961,16 @@ class BasicObjectTree(mui.FlexBox):
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
 
+
 class ObjectTree(BasicObjectTree):
     """object tree for object inspector.
     """
+
     def __init__(self,
                  init: Optional[Any] = None,
                  cared_types: Optional[Set[Type]] = None,
                  ignored_types: Optional[Set[Type]] = None,
+                 use_fast_tree: bool = False,
                  limit: int = 50) -> None:
         self._default_data_storage_nodes: Dict[str, DataStorageTreeItem] = {}
         self._default_obs_funcs = ObservedFunctionTree()
@@ -881,12 +980,13 @@ class ObjectTree(BasicObjectTree):
                 "appTerminal": mui.AppTerminal(),
                 "simpleCanvas": SimpleCanvasCreator(),
                 "fileReader": SimpleFileReader(),
+                "callbackSlider": CallbackSlider(),
             },
             _DEFAULT_DATA_STORAGE_NAME: self._default_data_storage_nodes,
             _DEFAULT_OBSERVED_FUNC_NAME: self._default_obs_funcs,
         }
         self._data_storage_uid = f"{_ROOT}{_GLOBAL_SPLIT}{_DEFAULT_DATA_STORAGE_NAME}"
-        super().__init__(init, cared_types, ignored_types, limit)
+        super().__init__(init, cared_types, ignored_types, limit, use_fast_tree)
         self.root.update(default_builtins)
 
     @mark_did_mount
@@ -934,7 +1034,6 @@ class ObjectTree(BasicObjectTree):
                     await self.run_callback(entry.run_function_with_record,
                                             sync_first=False,
                                             change_status=False)
-
 
     async def _sync_data_storage_node(self):
         await self._on_expand(self._data_storage_uid)

@@ -5,6 +5,7 @@ from .inspector import ObjectInspector
 from .inspectpanel import InspectPanel
 from .layout import AnyFlexLayout
 from .tree import ObjectTree, TreeDragTarget, BasicObjectTree
+from .controllers import CallbackSlider
 
 
 def register_obj_preview_handler(cls):

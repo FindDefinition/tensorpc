@@ -2515,9 +2515,16 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
 
         def __init__(self,
                      children: List[Union["FlexLayout.Row",
-                                          "FlexLayout.TabSet"]],
-                     weight: NumberType = 1) -> None:
-            self.children = children
+                                          "FlexLayout.TabSet",
+                                          "FlexLayout.Tab"]],
+                     weight: NumberType = 100) -> None:
+            new_children: List[Union["FlexLayout.Row", "FlexLayout.TabSet"]] = []
+            for c in children:
+                if isinstance(c, FlexLayout.Tab):
+                    new_children.append(FlexLayout.TabSet([c]))
+                else:
+                    new_children.append(c)
+            self.children = new_children
             self.weight = weight
 
         def get_components(self):
@@ -2537,7 +2544,7 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
 
         def __init__(self,
                      children: List["FlexLayout.Tab"],
-                     weight: NumberType = 1) -> None:
+                     weight: NumberType = 100) -> None:
             self.children = children
             self.weight = weight
 
@@ -2585,6 +2592,7 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
             FrontendEventType.ComplexLayoutSelectTab,
             FrontendEventType.ComplexLayoutSelectTabSet,
             FrontendEventType.ComplexLayoutTabReload,
+            FrontendEventType.ComplexLayoutStoreModel,
             FrontendEventType.Drop,
         ]
         if isinstance(children, FlexLayout.Row):
@@ -2606,15 +2614,24 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
                          False,
                          allowed_events=[x.value for x in events])
 
+        self.register_event_handler(FrontendEventType.ComplexLayoutStoreModel.value, self._on_save_model)
+
+    def _on_save_model(self, model):
+        self.props.initial_model = model
+
     def get_props(self):
         res = super().get_props()
-        res["initialModel"] = {
-            "global": {
-                "tabEnableClose": True
-            },
-            "borders": [],
-            "layout": self._init_children_row.get_model_dict()
-        }
+        # we delay init model here because we need 
+        # to wait for all components to be initialized
+        # to get uid of child components.
+        if isinstance(self.props.initial_model, Undefined):
+            res["initialModel"] = {
+                "global": {
+                    "tabEnableClose": True
+                },
+                "borders": [],
+                "layout": self._init_children_row.get_model_dict()
+            }
         return res
 
     @property
@@ -2631,18 +2648,9 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
         return await handle_standard_event(self,
                                            ev,
                                            sync_first=True,
-                                           is_sync=is_sync)
-
-    def state_change_callback(
-            self,
-            value: Any,
-            type: ValueType = FrontendEventType.Change.value):
-        self.props.initial_model = value
-
-    def get_sync_props(self) -> Dict[str, Any]:
-        res = super().get_sync_props()
-        res["initial_model"] = self.props.initial_model
-        return res
+                                           is_sync=is_sync,
+                                           sync_state_after_change=False,
+                                           change_status=False)
 
 @dataclasses.dataclass
 class CircularProgressProps(MUIFlexBoxProps):
@@ -2711,13 +2719,13 @@ class LinearProgress(MUIComponentBase[LinearProgressProps]):
         await self.send_and_wait(self.update_event(value=value))
 
 
-_DEFAULT_JSON_TREE = JsonLikeNode("root", "root", JsonLikeType.Object.value,
+def _default_json_node():
+    return JsonLikeNode("root", "root", JsonLikeType.Object.value,
                                   "Object", undefined, 0, [])
-
 
 @dataclasses.dataclass
 class JsonLikeTreeProps(MUIFlexBoxProps):
-    tree: JsonLikeNode = _DEFAULT_JSON_TREE
+    tree: JsonLikeNode = dataclasses.field(default_factory=_default_json_node)
     multi_select: Union[Undefined, bool] = undefined
     disabled_items_focusable: Union[Undefined, bool] = undefined
     disable_selection: Union[Undefined, bool] = undefined
@@ -2730,8 +2738,10 @@ class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
 
     def __init__(
         self,
-        tree: JsonLikeNode = _DEFAULT_JSON_TREE,
+        tree: Optional[JsonLikeNode] = None,
     ) -> None:
+        if tree is None:
+            tree = _default_json_node()
         tview_events = [
             FrontendEventType.TreeItemSelect.value,
             FrontendEventType.TreeItemToggle.value,

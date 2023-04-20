@@ -129,6 +129,7 @@ ALL_OBJECT_LAYOUT_CREATORS = ObjectLayoutCreatorRegistry()
 class ContextMenuType(enum.Enum):
     DataStorageStore = 0
     DataStorageItemDelete = 1
+    DataStorageItemCommand = 2
 
 class TreeItem(abc.ABC):
     @abc.abstractmethod

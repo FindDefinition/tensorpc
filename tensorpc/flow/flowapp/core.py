@@ -263,6 +263,7 @@ class FrontendEventType(enum.Enum):
     ComplexLayoutSelectTab = 41
     ComplexLayoutTabReload = 42
     ComplexLayoutSelectTabSet = 43
+    ComplexLayoutStoreModel = 44
 
     EditorSave = 50
     EditorChange = 51
@@ -1497,16 +1498,21 @@ class ContainerBase(Component[T_container_props, T_child]):
             c._flow_uid: c
             for c in self._get_all_nested_childs()
         }
-        comps_frontend[self._flow_uid] = self
+        # comps_frontend[self._flow_uid] = self
         comps_frontend_dict = {
             k: v.to_dict()
             for k, v in comps_frontend.items()
         }
-        return self.create_update_comp_event(comps_frontend_dict,
+        child_uids = [self[c]._flow_uid for c in self._child_comps]
+        update_ev = self.create_update_event({
+            "childs": child_uids
+        })
+        update_ev = update_ev + self.create_update_comp_event(comps_frontend_dict,
                                              list(detached.keys())), list(
                                                  attached.values()), list(
                                                      detached.values())
-
+        return update_ev
+    
     async def update_childs(self, layout: Dict[str, Component]):
         new_ev, attached, removed = self.update_childs_locally(layout)
         for deleted in removed:

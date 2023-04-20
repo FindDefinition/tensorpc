@@ -90,7 +90,8 @@ class ObjectInspector(mui.FlexBox):
                  ignored_types: Optional[Set[Type]] = None,
                  with_detail: bool = True,
                  use_allotment: bool = False,
-                 enable_exception_inspect: bool = True) -> None:
+                 enable_exception_inspect: bool = True,
+                 use_fast_tree: bool = False) -> None:
         self.detail_container = mui.FlexBox([]).prop(overflow="auto",
                                                      padding="3px")
         if use_allotment:
@@ -99,7 +100,7 @@ class ObjectInspector(mui.FlexBox):
             self.detail_container.prop(flex=1)
         self.enable_exception_inspect = enable_exception_inspect
         self.with_detail = with_detail
-        self.tree = ObjectTree(init, cared_types, ignored_types)
+        self.tree = ObjectTree(init, cared_types, ignored_types, use_fast_tree=use_fast_tree)
         if use_allotment:
             layout: mui.LayoutType = [
                 self.tree.prop(
