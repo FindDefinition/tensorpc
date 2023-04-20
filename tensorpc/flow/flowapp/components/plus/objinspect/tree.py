@@ -631,6 +631,7 @@ class SimpleCanvasCreator(ObjectLayoutCreator):
 class BasicObjectTree(mui.FlexBox):
     """basic object tree, contains enough features
     to analysis python object.
+    TODO auto expand child when you expand a node.
     """
 
     def __init__(self,

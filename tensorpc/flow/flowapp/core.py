@@ -229,9 +229,9 @@ class FrontendEventType(enum.Enum):
     # file drop use special path to handle
     FileDrop = -2
     # emitted by event_emitter
-    AfterMount = -3
+    BeforeMount = -3
     # emitted by event_emitter
-    AfterUnmount = -4
+    BeforeUnmount = -4
 
     Click = 0
     DoubleClick = 1
@@ -384,6 +384,7 @@ class UIEvent:
 
     def merge_new(self, new):
         return new
+
 
 @ALL_APP_EVENTS.register(key=AppEventType.UIUpdateUsedEvents.value)
 class UpdateUsedEventsEvent:
@@ -699,13 +700,14 @@ def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":
 #     def from_dict(cls, data: Dict[str, Any]):
 #         return cls(data["uid"], data["data"])
 
+
 class AppEvent:
 
     def __init__(self,
                  uid: str,
                  type_to_event: Dict[AppEventType, APP_EVENT_TYPES],
                  sent_event: Optional[asyncio.Event] = None,
-                 event_id: str = "", 
+                 event_id: str = "",
                  is_loopback: bool = False) -> None:
         self.uid = uid
         self.type_to_event = type_to_event
@@ -838,10 +840,10 @@ class Component(Generic[T_base_props, T_child]):
 
         self._flow_event_context_creator: Optional[Callable[
             [], ContextManager]] = None
-        
+
         self._flow_event_emitter = pyee.AsyncIOEventEmitter()
 
-    @property 
+    @property
     def event_emitter(self):
         return self._flow_event_emitter
 
@@ -876,7 +878,7 @@ class Component(Generic[T_base_props, T_child]):
             self._flow_uid = uid
             self._flow_comp_core = comp_core
             self._flow_reference_count += 1
-            self.event_emitter.emit(FrontendEventType.AfterMount.name)
+            self.event_emitter.emit(FrontendEventType.BeforeMount.name)
             return {uid: self}
         self._flow_reference_count += 1
         return {}
@@ -887,7 +889,7 @@ class Component(Generic[T_base_props, T_child]):
             res_uid = self._flow_uid
             self._flow_uid = ""
             self._flow_comp_core = None
-            self.event_emitter.emit(FrontendEventType.AfterUnmount.name)
+            self.event_emitter.emit(FrontendEventType.BeforeUnmount.name)
             return {res_uid: self}
         return {}
 
@@ -1019,14 +1021,11 @@ class Component(Generic[T_base_props, T_child]):
 
     async def put_loopback_ui_event(self, ev: EventType):
         if self.is_mounted():
-            return await self.queue.put(AppEvent(
-                "", {
-                    AppEventType.UIEvent:
-                    UIEvent({
-                        self._flow_uid: ev
-                    })
-                }, is_loopback=True))
-        
+            return await self.queue.put(
+                AppEvent("",
+                         {AppEventType.UIEvent: UIEvent({self._flow_uid: ev})},
+                         is_loopback=True))
+
     async def put_app_event(self, ev: AppEvent):
         if self.is_mounted():
             return await self.queue.put(ev)
@@ -1055,13 +1054,12 @@ class Component(Generic[T_base_props, T_child]):
                            backend_only)
         self._flow_event_handlers[type] = evh
         return evh
-    
-    def remove_event_handler(self,
-                               type: ValueType):
+
+    def remove_event_handler(self, type: ValueType):
         if type in self._flow_event_handlers:
             del self._flow_event_handlers[type]
-            return True 
-        return False 
+            return True
+        return False
 
     def clear_event_handlers(self):
         self._flow_event_handlers.clear()
@@ -1093,7 +1091,7 @@ class Component(Generic[T_base_props, T_child]):
                            json_only)
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UIUpdateEvent: ev})
-    
+
     def create_update_used_events_event(self):
         used_events = self._get_used_events_dict()
         ev = UpdateUsedEventsEvent({self._flow_uid: used_events})
@@ -1454,12 +1452,13 @@ class ContainerBase(Component[T_container_props, T_child]):
             c._flow_uid: c
             for c in self._get_all_nested_childs()
         }
-        comps_frontend[self._flow_uid] = self
         comps_frontend_dict = {
             k: v.to_dict()
             for k, v in comps_frontend.items()
         }
-        return self.create_update_comp_event(
+        child_uids = [self[c]._flow_uid for c in self._child_comps]
+        update_ev = self.create_update_event({"childs": child_uids})
+        return update_ev + self.create_update_comp_event(
             comps_frontend_dict, list(detached_uid_to_comp.keys())), list(
                 attached.values()), list(detached_uid_to_comp.values())
 
@@ -1498,21 +1497,16 @@ class ContainerBase(Component[T_container_props, T_child]):
             c._flow_uid: c
             for c in self._get_all_nested_childs()
         }
-        # comps_frontend[self._flow_uid] = self
         comps_frontend_dict = {
             k: v.to_dict()
             for k, v in comps_frontend.items()
         }
         child_uids = [self[c]._flow_uid for c in self._child_comps]
-        update_ev = self.create_update_event({
-            "childs": child_uids
-        })
-        update_ev = update_ev + self.create_update_comp_event(comps_frontend_dict,
-                                             list(detached.keys())), list(
-                                                 attached.values()), list(
-                                                     detached.values())
-        return update_ev
-    
+        update_ev = self.create_update_event({"childs": child_uids})
+        return update_ev + self.create_update_comp_event(
+            comps_frontend_dict, list(detached.keys())), list(
+                attached.values()), list(detached.values())
+
     async def update_childs(self, layout: Dict[str, Component]):
         new_ev, attached, removed = self.update_childs_locally(layout)
         for deleted in removed:

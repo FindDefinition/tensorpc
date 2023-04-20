@@ -2500,8 +2500,9 @@ class AllotmentPane(MUIContainerBase[AllotmentPaneProps, MUIComponentType]):
 
 @dataclasses.dataclass
 class FlexLayoutProps(ContainerBaseProps):
-    initial_model: Union[Any, Undefined] = undefined
-
+    model_json: Union[Any, Undefined] = undefined
+    # model change save debounce.
+    debounce: Union[NumberType, Undefined] = undefined
 
 class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
     """TODO currently we can't programatically configure FlexLayout
@@ -2617,15 +2618,15 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
         self.register_event_handler(FrontendEventType.ComplexLayoutStoreModel.value, self._on_save_model)
 
     def _on_save_model(self, model):
-        self.props.initial_model = model
+        self.props.model_json = model
 
     def get_props(self):
         res = super().get_props()
         # we delay init model here because we need 
         # to wait for all components to be initialized
         # to get uid of child components.
-        if isinstance(self.props.initial_model, Undefined):
-            res["initialModel"] = {
+        if isinstance(self.props.model_json, Undefined):
+            res["modelJson"] = {
                 "global": {
                     "tabEnableClose": True
                 },
