@@ -487,7 +487,8 @@ class SimpleCanvas(mui.FlexBox):
                           colors: Optional[Union[np.ndarray, str]] = None,
                           sizes: Optional[Union[mui.Undefined,
                                                 np.ndarray]] = None,
-                          size_attenuation: bool = False):
+                          size_attenuation: bool = False,
+                          size: Optional[float] = None):
         if key not in self._point_dict:
             ui = three.Points(limit)
             self._point_dict[key] = ui
@@ -496,7 +497,7 @@ class SimpleCanvas(mui.FlexBox):
         await point_ui.update_points(points,
                                      colors,
                                      limit=limit,
-                                     size=self._cfg.point.size,
+                                     size=self._cfg.point.size if size is None else size,
                                      sizes=sizes,
                                      size_attenuation=size_attenuation)
 

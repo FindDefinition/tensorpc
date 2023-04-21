@@ -1495,7 +1495,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         # remove replaced components first.
         comps_frontend = {
             c._flow_uid: c
-            for c in self._get_all_nested_childs()
+            for c in self._get_all_nested_childs(list(layout.keys()))
         }
         comps_frontend_dict = {
             k: v.to_dict()
