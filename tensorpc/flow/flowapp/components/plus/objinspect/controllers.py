@@ -15,7 +15,7 @@
 from typing import Any, Callable, Optional, List, Dict, TypeVar, Generic, Union
 from tensorpc.flow.flowapp.components import mui
 
-from tensorpc.flow.marker import mark_create_preview_layout 
+from tensorpc.flow.marker import mark_autorun, mark_create_preview_layout 
 import inspect
 
 T = TypeVar("T")

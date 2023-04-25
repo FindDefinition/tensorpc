@@ -224,7 +224,7 @@ class ObjectInspector(mui.FlexBox):
                 )._flowapp_remove_observer(preview_layout))
             preview_layout.event_emitter.on(
                 FrontendEventType.BeforeMount.name, lambda: get_app().
-                _get_self_as_editable_app()._flowapp_observe(preview_layout))
+                _get_self_as_editable_app()._flowapp_observe(preview_layout, self._on_preview_layout_reload))
 
             await self.detail_container.set_new_layout([preview_layout])
         else:
@@ -235,7 +235,6 @@ class ObjectInspector(mui.FlexBox):
 
     async def _on_preview_layout_reload(self, layout: mui.FlexBox,
                                         create_layout: ServFunctionMeta):
-
         if create_layout.user_app_meta is not None and create_layout.user_app_meta.type == AppFuncType.CreatePreviewLayout:
             if layout._wrapped_obj is not None:
                 layout_flex = create_layout.get_binded_fn()()
