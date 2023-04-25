@@ -28,7 +28,7 @@ from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from tensorpc.flow.flowapp.core import FrontendEventType
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 from tensorpc.flow.flowapp import colors
-
+from tensorpc.flow.jsonlike import TreeItem
 
 def _try_cast_tensor_dtype(obj: Any):
     try:
@@ -130,6 +130,8 @@ def _try_cast_to_image(obj: Any):
         return res
     return None
 
+class CanvasTreeItem(TreeItem):
+    pass 
 
 @dataclasses.dataclass
 class PointCfg:
@@ -402,8 +404,18 @@ class SimpleCanvas(mui.FlexBox):
     async def _unknown_visualization(self, tree_id: str, obj: Any):
         pc_obj = _try_cast_to_point_cloud(obj)
         if pc_obj is not None:
+            if tree_id in self._random_colors:
+                pick = self._random_colors[tree_id]
+            else:
+                random_colors = colors.RANDOM_COLORS_FOR_UI
+                pick = random_colors[len(self._dynamic_pcs) %
+                                     len(random_colors)]
+                self._random_colors[tree_id] = pick
+            colors_pc: Optional[str] = None
+            if pc_obj.shape[1] == 3:
+                colors_pc = pick
             await self.show_points(tree_id, pc_obj.astype(np.float32),
-                                   pc_obj.shape[0])
+                                   pc_obj.shape[0], colors=colors_pc)
             return True
         img_obj = _try_cast_to_image(obj)
         if img_obj is not None:

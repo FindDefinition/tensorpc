@@ -7,6 +7,7 @@ import numpy as np
 from tensorpc.core.moduleid import get_qualname_of_type
 from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
                                TypeAlias)
+import abc
 
 ValueType: TypeAlias = Union[int, float, str]
 NumberType: TypeAlias = Union[int, float]
@@ -389,3 +390,30 @@ def parse_obj_to_jsonlike(obj, name: str, id: str):
                             t.value,
                             value=value,
                             typeStr=obj_type.__qualname__)
+
+class TreeItem(abc.ABC):
+    @abc.abstractmethod
+    async def get_child_desps(self, parent_ns: str) -> Dict[str, JsonLikeNode]:
+        raise NotImplementedError
+    
+    @abc.abstractmethod
+    async def get_child(self, key: str) -> Any:
+        raise NotImplementedError
+
+    def get_json_like_node(self, id: str) -> Optional[JsonLikeNode]:
+        return None 
+    
+    async def handle_button(self, button_key: str) -> Optional[bool]:
+        return 
+    
+    async def handle_child_button(self, button_key: str, child_key: str) -> Optional[bool]:
+        return 
+    
+    async def handle_context_menu(self, userdata: Dict[str, Any]) -> Optional[bool]:
+        return 
+    
+    async def handle_child_context_menu(self, child_key: str, userdata: Dict[str, Any]) -> Optional[bool]:
+        return 
+    
+    async def handle_child_rename(self, child_key: str, newname: str) -> Optional[bool]:
+        return 

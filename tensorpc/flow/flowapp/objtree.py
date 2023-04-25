@@ -24,6 +24,12 @@ from typing_extensions import ContextManager
 
 T = TypeVar("T")
 
+def get_qualname_of_type(klass: Type) -> str:
+    module = klass.__module__
+    if module == 'builtins':
+        return klass.__qualname__  # avoid outputs like 'builtins.str'
+    return module + '.' + klass.__qualname__
+
 
 class ObjTreeContextProtocol(Protocol):
     node: "UserObjTreeProtocol"
@@ -115,9 +121,11 @@ class UserObjTree:
 def find_tree_child_item_may_exist(root: UserObjTreeProtocol, obj_type: Type[T],
                                    node_type: Type[T_treeitem]) -> Optional[T]:
     childs_dict = root.get_childs()
+    obj_type_qname = get_qualname_of_type(obj_type)
     for k, v in childs_dict.items():
-        if isinstance(v, obj_type):
-            return v
+        v_type_qname = get_qualname_of_type(type(v))
+        if v_type_qname == obj_type_qname:
+            return v # type: ignore
         if isinstance(v, node_type):
             res = find_tree_child_item_may_exist(v, obj_type, node_type)
             if res is not None:
@@ -129,9 +137,13 @@ def get_tree_child_items(root: UserObjTreeProtocol, obj_type: Type[T],
                          node_type: Type[T_treeitem]) -> List[T]:
     childs_dict = root.get_childs()
     res: List[T] = []
+    # we use qualname to compare type, because type may be different
+    # when we reload module which is quite often in GUI.
+    obj_type_qname = get_qualname_of_type(obj_type)
     for k, v in childs_dict.items():
-        if isinstance(v, obj_type):
-            res.append(v)
+        v_type_qname = get_qualname_of_type(type(v))
+        if v_type_qname == obj_type_qname:
+            res.append(v) # type: ignore
         elif isinstance(v, node_type):
             res.extend(get_tree_child_items(v, obj_type, node_type))
     return res

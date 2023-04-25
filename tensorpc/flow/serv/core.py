@@ -260,8 +260,11 @@ class Node:
     @property
     def raw_data(self) -> Dict[str, Any]:
         return self._flow_data
+    
+    def update_data(self, update_data: Dict[str, Any]):
+        self._flow_data["data"].update(update_data)
 
-    def update_data(self, graph_id: str, flow_data: Dict[str, Any]):
+    def set_data(self, graph_id: str, flow_data: Dict[str, Any]):
         self._flow_data = flow_data
         # graph id may change due to rename
         self.inputs: Dict[str, List[Handle]] = {}
@@ -397,6 +400,7 @@ class MarkdownNode(Node):
                 save_path = self.get_save_path(current_key)
                 with save_path.open("w") as f:
                     f.write(page)
+                break
 
     def set_current_key(self, current_key):
         self.node_data["currentKey"] = current_key
@@ -1215,7 +1219,7 @@ class Edge:
     def get_uid(self):
         return _get_uid(self.graph_id, self.id)
 
-    def update_data(self, graph_id: str, flow_data: Dict[str, Any]):
+    def set_data(self, graph_id: str, flow_data: Dict[str, Any]):
         self._flow_data = flow_data
         self.graph_id = graph_id
 
@@ -1395,7 +1399,7 @@ class FlowGraph:
         # update unchanged node data
         for node in nodes:
             if node.id in self._node_id_to_node:
-                self._node_id_to_node[node.id].update_data(
+                self._node_id_to_node[node.id].set_data(
                     graph_id, node.raw_data)
                 new_node_id_to_node[node.id] = self._node_id_to_node[node.id]
                 prev_node = self._node_id_to_node[node.id]
@@ -2036,6 +2040,14 @@ class Flow:
                         serv_names.FLOWWORKER_SYNC_GRAPH, graph_id,
                         node.to_dict(), [n.to_dict() for n in driv_nodes],
                         graph.variable_dict)
+                    
+    async def update_node_data_and_save_graph(self, graph_id: str, node_id: str, update_node_data: Dict[str, Any]):
+        graph = self.flow_dict[graph_id]
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node
+        node.update_data(update_node_data)
+        self._save_graph_content_only(graph_id, graph.get_save_data())
+
 
     async def load_default_graph(self):
         final_res = [

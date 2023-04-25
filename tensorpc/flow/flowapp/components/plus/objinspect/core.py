@@ -131,29 +131,3 @@ class ContextMenuType(enum.Enum):
     DataStorageItemDelete = 1
     DataStorageItemCommand = 2
 
-class TreeItem(abc.ABC):
-    @abc.abstractmethod
-    async def get_child_desps(self, parent_ns: str) -> Dict[str, mui.JsonLikeNode]:
-        raise NotImplementedError
-    
-    @abc.abstractmethod
-    async def get_child(self, key: str) -> Any:
-        raise NotImplementedError
-
-    def get_json_like_node(self, id: str) -> Optional[mui.JsonLikeNode]:
-        return None 
-    
-    async def handle_button(self, button_key: str) -> Optional[bool]:
-        return 
-    
-    async def handle_child_button(self, button_key: str, child_key: str) -> Optional[bool]:
-        return 
-    
-    async def handle_context_menu(self, userdata: Dict[str, Any]) -> Optional[bool]:
-        return 
-    
-    async def handle_child_context_menu(self, child_key: str, userdata: Dict[str, Any]) -> Optional[bool]:
-        return 
-    
-    async def handle_child_rename(self, child_key: str, newname: str) -> Optional[bool]:
-        return 

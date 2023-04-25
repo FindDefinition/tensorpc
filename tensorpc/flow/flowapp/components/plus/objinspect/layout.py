@@ -11,7 +11,7 @@ from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
 
 import watchdog
 
-from tensorpc.core.serviceunit import ServFunctionMeta
+from tensorpc.core.serviceunit import AppFuncType, ServFunctionMeta
 from tensorpc.flow.flowapp.appcore import (AppSpecialEventType,
                                            _run_zeroarg_func,
                                            create_reload_metas, get_app,
@@ -59,19 +59,20 @@ class AnyFlexLayout(mui.FlexLayout):
     async def _handle_reload_layout(self, layout: mui.FlexBox,
                                     create_layout: ServFunctionMeta,
                                     name: str):
-        if layout._wrapped_obj is not None:
-            layout_flex = create_layout.get_binded_fn()()
-            assert isinstance(
-                layout_flex, mui.FlexBox
-            ), f"create_layout must return a flexbox when use anylayout"
-            layout_flex._flow_comp_def_path = _get_obj_def_path(
-                layout._wrapped_obj)
-            layout_flex._wrapped_obj = layout._wrapped_obj
-            await self.update_childs({name: layout_flex})
-        else:
-            layout_flex = create_layout.get_binded_fn()()
-            await layout.set_new_layout(layout_flex)
-        return layout_flex
+        if create_layout.user_app_meta is not None and create_layout.user_app_meta.type == AppFuncType.CreateLayout:
+            if layout._wrapped_obj is not None:
+                layout_flex = create_layout.get_binded_fn()()
+                assert isinstance(
+                    layout_flex, mui.FlexBox
+                ), f"create_layout must return a flexbox when use anylayout"
+                layout_flex._flow_comp_def_path = _get_obj_def_path(
+                    layout._wrapped_obj)
+                layout_flex._wrapped_obj = layout._wrapped_obj
+                await self.update_childs({name: layout_flex})
+            else:
+                layout_flex = create_layout.get_binded_fn()()
+                await layout.set_new_layout(layout_flex)
+            return layout_flex
 
     async def _bind_code_editor(self, obj, layout, name: str):
         app = get_app()

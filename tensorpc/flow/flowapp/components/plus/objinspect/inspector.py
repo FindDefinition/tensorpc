@@ -14,10 +14,10 @@ from typing_extensions import ParamSpec
 
 from tensorpc.core.inspecttools import get_members
 from tensorpc.core.moduleid import get_qualname_of_type
-from tensorpc.core.serviceunit import ReloadableDynamicClass
+from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.flow.flowapp.appcore import get_app
 from tensorpc.flow.flowapp.components import mui, three
-from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType
+from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType, _get_obj_def_path
 from tensorpc.flow.flowapp.objtree import UserObjTreeProtocol
 
 from .core import (ALL_OBJECT_PREVIEW_HANDLERS, USER_OBJ_TREE_TYPES,
@@ -36,7 +36,6 @@ class DefaultHandler(ObjectPreviewHandler):
     """
     TODO if the object support any-layout, add a button to enable it.
     """
-
     def __init__(self) -> None:
         self.tags = mui.FlexBox().prop(flex_flow="row wrap")
         self.title = mui.Typography("").prop(word_break="break-word")
@@ -83,7 +82,6 @@ class DefaultHandler(ObjectPreviewHandler):
 
 
 class ObjectInspector(mui.FlexBox):
-
     def __init__(self,
                  init: Optional[Any] = None,
                  cared_types: Optional[Set[Type]] = None,
@@ -100,7 +98,10 @@ class ObjectInspector(mui.FlexBox):
             self.detail_container.prop(flex=1)
         self.enable_exception_inspect = enable_exception_inspect
         self.with_detail = with_detail
-        self.tree = ObjectTree(init, cared_types, ignored_types, use_fast_tree=use_fast_tree)
+        self.tree = ObjectTree(init,
+                               cared_types,
+                               ignored_types,
+                               use_fast_tree=use_fast_tree)
         if use_allotment:
             layout: mui.LayoutType = [
                 self.tree.prop(
@@ -138,7 +139,7 @@ class ObjectInspector(mui.FlexBox):
         if isinstance(uid_list, list):
             # node id list may empty (TODO don't send event in frontend?)
             if not uid_list:
-                return 
+                return
             uid = uid_list[0]
         else:
             uid = uid_list
@@ -150,10 +151,12 @@ class ObjectInspector(mui.FlexBox):
         if len(nodes) > 1:
             folder_node = nodes[-2]
             if folder_node.type in FOLDER_TYPES:
-                assert isinstance(folder_node.realId, str) 
-                assert isinstance(folder_node.start, int) 
-                real_nodes = self.tree._objinspect_root._get_node_by_uid_trace(folder_node.realId)
-                real_obj, found = await self.tree._get_obj_by_uid(folder_node.realId, real_nodes)
+                assert isinstance(folder_node.realId, str)
+                assert isinstance(folder_node.start, int)
+                real_nodes = self.tree._objinspect_root._get_node_by_uid_trace(
+                    folder_node.realId)
+                real_obj, found = await self.tree._get_obj_by_uid(
+                    folder_node.realId, real_nodes)
                 obj = None
                 if found:
                     slice_idx = int(node.name)
@@ -162,9 +165,10 @@ class ObjectInspector(mui.FlexBox):
                     if nodes[-2].type == mui.JsonLikeType.ListFolder.value:
                         obj = real_obj[real_slice]
                     else:
-                        # dict folder 
-                        assert isinstance(folder_node.keys, mui.BackendOnlyProp) 
-                        key = node.name 
+                        # dict folder
+                        assert isinstance(folder_node.keys,
+                                          mui.BackendOnlyProp)
+                        key = node.name
                         if not isinstance(node.get_dict_key(), mui.Undefined):
                             key = node.get_dict_key()
                         obj = real_obj[key]
@@ -192,10 +196,12 @@ class ObjectInspector(mui.FlexBox):
                 handler = handler_type()
             else:
                 # check obj have create_preview_layout
-                metas = self.flow_app_comp_core.reload_mgr.query_type_method_meta(obj_type, True)
+                metas = self.flow_app_comp_core.reload_mgr.query_type_method_meta(
+                    obj_type, True)
                 special_methods = FlowSpecialMethods(metas)
                 if special_methods.create_preview_layout is not None:
-                    preview_layout = mui.flex_preview_wrapper(obj, metas, self.flow_app_comp_core.reload_mgr)
+                    preview_layout = mui.flex_preview_wrapper(
+                        obj, metas, self.flow_app_comp_core.reload_mgr)
 
                 handler = self.default_handler
             if preview_layout is None:
@@ -208,15 +214,42 @@ class ObjectInspector(mui.FlexBox):
             for obj_iter_val in objs:
                 if isinstance(obj_iter_val, tuple(USER_OBJ_TREE_TYPES)):
                     root = obj_iter_val
-                    break 
+                    break
             if root is not None:
-                preview_layout.set_flow_event_context_creator(lambda: root.enter_context(root))
+                preview_layout.set_flow_event_context_creator(
+                    lambda: root.enter_context(root))
+            preview_layout.event_emitter.on(
+                FrontendEventType.BeforeUnmount.name,
+                lambda: get_app()._get_self_as_editable_app(
+                )._flowapp_remove_observer(preview_layout))
+            preview_layout.event_emitter.on(
+                FrontendEventType.BeforeMount.name, lambda: get_app().
+                _get_self_as_editable_app()._flowapp_observe(preview_layout))
+
             await self.detail_container.set_new_layout([preview_layout])
         else:
             childs = list(self.detail_container._child_comps.values())
             if not childs or childs[0] is not handler:
                 await self.detail_container.set_new_layout([handler])
             await handler.bind(obj)
+
+    async def _on_preview_layout_reload(self, layout: mui.FlexBox,
+                                        create_layout: ServFunctionMeta):
+
+        if create_layout.user_app_meta is not None and create_layout.user_app_meta.type == AppFuncType.CreatePreviewLayout:
+            if layout._wrapped_obj is not None:
+                layout_flex = create_layout.get_binded_fn()()
+                assert isinstance(
+                    layout_flex, mui.FlexBox
+                ), f"create_layout must return a flexbox when use anylayout"
+                layout_flex._flow_comp_def_path = _get_obj_def_path(
+                    layout._wrapped_obj)
+                layout_flex._wrapped_obj = layout._wrapped_obj
+                await self.detail_container.set_new_layout([layout_flex])
+            else:
+                layout_flex = create_layout.get_binded_fn()()
+                await layout.set_new_layout(layout_flex)
+            return layout_flex
 
     async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):
         await self.tree.set_object(obj, key)
@@ -263,8 +296,7 @@ class ObjectInspector(mui.FlexBox):
         del frame
         del cur_frame
         fut = asyncio.run_coroutine_threadsafe(
-            self.tree.set_object(local_vars, key + f"-{frame_name}"),
-            loop)
+            self.tree.set_object(local_vars, key + f"-{frame_name}"), loop)
         if get_app()._flowapp_thread_id == threading.get_ident():
             # we can't wait fut here
             return fut
@@ -272,13 +304,15 @@ class ObjectInspector(mui.FlexBox):
             # we can wait fut here.
             return fut.result()
 
-    def set_object_sync(self, obj, key: str = _DEFAULT_OBJ_NAME, loop: Optional[asyncio.AbstractEventLoop] = None):
+    def set_object_sync(self,
+                        obj,
+                        key: str = _DEFAULT_OBJ_NAME,
+                        loop: Optional[asyncio.AbstractEventLoop] = None):
         """set object in sync manner, usually used on non-sync code via appctx.
         """
         if loop is None:
             loop = asyncio.get_running_loop()
-        fut = asyncio.run_coroutine_threadsafe(self.set_object(obj, key),
-                                               loop)
+        fut = asyncio.run_coroutine_threadsafe(self.set_object(obj, key), loop)
         if get_app()._flowapp_thread_id == threading.get_ident():
             # we can't wait fut here
             return fut

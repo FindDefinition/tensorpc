@@ -21,13 +21,13 @@ from tensorpc.flow.flowapp.components.plus.monitor import \
 from tensorpc.flow.flowapp.components.plus.objinspect.core import (
     ALL_OBJECT_LAYOUT_HANDLERS, ALL_OBJECT_PREVIEW_HANDLERS,
     USER_OBJ_TREE_TYPES, ContextMenuType, ObjectLayoutCreator,
-    ObjectLayoutHandler, TreeItem)
+    ObjectLayoutHandler)
 from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 from tensorpc.flow.flowapp.objtree import UserObjTree, UserObjTreeProtocol
 from tensorpc.flow.flowapp.reload import reload_object_methods
 from tensorpc.flow.jsonlike import (CommonQualNames, ContextMenuData,
-                                    IconButtonData, parse_obj_to_jsonlike)
+                                    IconButtonData, parse_obj_to_jsonlike, TreeItem)
 from tensorpc.flow.marker import mark_did_mount, mark_will_unmount
 from .controllers import CallbackSlider
 

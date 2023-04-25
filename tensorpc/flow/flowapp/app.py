@@ -180,7 +180,7 @@ class _LayoutObserveMeta:
     qualname_prefix: str
     metas: List[ServFunctionMeta]
     callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta],
-                                Coroutine[None, None, mui.FlexBox]]]
+                                Coroutine[None, None, Optional[mui.FlexBox]]]]
 
 
 @dataclasses.dataclass
@@ -1317,12 +1317,21 @@ class EditableApp(App):
                                     # handle layout in callback
                                     new_layout = await obmeta.callback(
                                         layout, flow_special.create_layout)
-                                    obmeta.layout = new_layout
+                                    if new_layout is not None:
+                                        obmeta.layout = new_layout
                                     # fut = asyncio.run_coroutine_threadsafe(
                                     #     obmeta.callback(layout, flow_special.create_layout), self._loop)
                                     # fut.result()
 
                                 # dynamic layout
+                        if flow_special.create_preview_layout:
+                            if not isinstance(layout, App):
+                                if obmeta.callback is not None:
+                                    # handle layout in callback
+                                    new_layout = await obmeta.callback(
+                                        layout, flow_special.create_preview_layout)
+                                    if new_layout is not None:
+                                        obmeta.layout = new_layout
                         for auto_run in flow_special.auto_runs:
                             if auto_run is not None:
                                 if layout is self and auto_run.name in autorun_names_queued:
