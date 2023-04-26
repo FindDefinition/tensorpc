@@ -90,8 +90,8 @@ class ObjectInspector(mui.FlexBox):
                  use_allotment: bool = False,
                  enable_exception_inspect: bool = True,
                  use_fast_tree: bool = False) -> None:
-        self.detail_container = mui.FlexBox([]).prop(overflow="auto",
-                                                     padding="3px")
+        self.detail_container = mui.HBox([]).prop(overflow="auto",
+                                                  padding="3px")
         if use_allotment:
             self.detail_container.prop(height="100%")
         else:

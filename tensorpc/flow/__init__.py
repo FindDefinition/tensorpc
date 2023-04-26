@@ -19,3 +19,4 @@ from .flowapp.appcore import observe_function
 from .flowapp.objtree import UserObjTree
 from .flowapp.components import leaflet, mui, plotly, plus, three
 from .marker import mark_autorun, mark_create_layout, mark_create_object, mark_create_preview_layout
+from tensorpc.core.moduleid import loose_isinstance

@@ -21,6 +21,7 @@ from .objinspect import (AnyFlexLayout, BasicObjectTree, CallbackSlider,
                          InspectPanel, ObjectInspector, ObjectLayoutHandler,
                          ObjectPreviewHandler, TreeDragTarget,
                          register_obj_layout_handler,
-                         register_obj_preview_handler)
+                         register_obj_preview_handler,
+                         register_user_obj_tree_type)
 from .options import CommonOptions
 from .scriptmgr import ScriptManager

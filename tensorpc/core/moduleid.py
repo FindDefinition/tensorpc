@@ -11,21 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import traceback
-from typing import Type
-import inspect
-from typing import Callable
 import dataclasses
 import importlib
-from pathlib import Path
-from typing import Any, List, Optional
-import uuid
-
+import importlib.util
 import inspect
+import sys
+import traceback
+import uuid
+from pathlib import Path
 from typing import (Any, Callable, Deque, Dict, List, Optional, Set, Tuple,
                     Type, Union)
-import importlib.util
-import sys
+
+from typing_extensions import TypeAlias
 
 
 def get_qualname_of_type(klass: Type) -> str:
@@ -47,6 +44,20 @@ def is_valid_function(obj: Callable):
 def get_function_qualname(obj: Callable):
     return obj.__qualname__
 
+
+_ClassInfo: TypeAlias = Union[Tuple["_ClassInfo", ...], type]
+
+def loose_isinstance(obj, _class_or_tuple: _ClassInfo):
+    """for reloaded code, the type of obj may be different from the type of the class in the current module.
+    """
+    obj_qname = get_qualname_of_type(type(obj))
+    if not isinstance(_class_or_tuple, (list, tuple)):
+        _class_or_tuple = (_class_or_tuple,)
+
+    for c in _class_or_tuple:
+        if get_qualname_of_type(c) == obj_qname:
+            return True 
+    return False 
 
 @dataclasses.dataclass
 class TypeMeta:

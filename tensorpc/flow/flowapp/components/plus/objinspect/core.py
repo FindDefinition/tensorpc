@@ -15,6 +15,9 @@ from tensorpc.flow.flowapp.objtree import UserObjTree, UserObjTreeProtocol
 
 USER_OBJ_TREE_TYPES: Set[Any] = {UserObjTree}
 
+def register_user_obj_tree_type(type):
+    USER_OBJ_TREE_TYPES.add(type)
+
 class ObjectPreviewHandler(mui.FlexBox):
 
     async def bind(self, obj):
