@@ -134,3 +134,4 @@ class ContextMenuType(enum.Enum):
     DataStorageItemDelete = 1
     DataStorageItemCommand = 2
 
+    CopyReadItemCode = 3

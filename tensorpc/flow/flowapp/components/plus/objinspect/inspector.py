@@ -135,6 +135,51 @@ class ObjectInspector(mui.FlexBox):
         self._type_to_handler_object: Dict[Type[Any],
                                            ObjectPreviewHandler] = {}
 
+    async def get_object_by_uid(self, uid_list: Union[List[str], str]):
+        if isinstance(uid_list, list):
+            # node id list may empty (TODO don't send event in frontend?)
+            if not uid_list:
+                return None
+            uid = uid_list[0]
+        else:
+            uid = uid_list
+        nodes = self.tree._objinspect_root._get_node_by_uid_trace(uid)
+        node = nodes[-1]
+        if node.type in FOLDER_TYPES:
+            return None
+        if len(nodes) > 1:
+            folder_node = nodes[-2]
+            if folder_node.type in FOLDER_TYPES:
+                assert isinstance(folder_node.realId, str)
+                assert isinstance(folder_node.start, int)
+                real_nodes = self.tree._objinspect_root._get_node_by_uid_trace(
+                    folder_node.realId)
+                real_obj, found = await self.tree._get_obj_by_uid(
+                    folder_node.realId, real_nodes)
+                obj = None
+                if found:
+                    slice_idx = int(node.name)
+                    real_slice = folder_node.start + slice_idx
+                    found = True
+                    if nodes[-2].type == mui.JsonLikeType.ListFolder.value:
+                        obj = real_obj[real_slice]
+                    else:
+                        # dict folder
+                        assert isinstance(folder_node.keys,
+                                          mui.BackendOnlyProp)
+                        key = node.name
+                        if not isinstance(node.get_dict_key(), mui.Undefined):
+                            key = node.get_dict_key()
+                        obj = real_obj[key]
+            else:
+                obj, found = await self.tree._get_obj_by_uid(uid, nodes)
+        else:
+            obj, found = await self.tree._get_obj_by_uid(uid, nodes)
+        if not found:
+            raise ValueError(
+                f"your object {uid} is invalid, may need to reflesh")
+        return obj
+
     async def _on_select(self, uid_list: Union[List[str], str]):
         if isinstance(uid_list, list):
             # node id list may empty (TODO don't send event in frontend?)

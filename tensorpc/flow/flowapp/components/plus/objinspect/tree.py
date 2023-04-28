@@ -993,7 +993,15 @@ class ObjectTree(BasicObjectTree):
     @mark_did_mount
     async def _on_mount(self):
         all_data_nodes = await appctx.list_all_data_storage_nodes()
-        context_menus: List[mui.ContextMenuData] = []
+        userdata = {
+            "type": ContextMenuType.CopyReadItemCode.value,
+        }
+
+        context_menus: List[mui.ContextMenuData] = [
+            mui.ContextMenuData(f"Copy Load Code",
+                                id="Copy Load Code",
+                                userdata=userdata)
+        ]
         for n, readable_n in all_data_nodes:
             userdata = {
                 "type": ContextMenuType.DataStorageStore.value,
@@ -1077,3 +1085,6 @@ class ObjectTree(BasicObjectTree):
                         return
                     await appctx.save_data_storage(uid_parts[-1], node_id, obj)
                     await self._sync_data_storage_node()
+                if menu_type == ContextMenuType.CopyReadItemCode:
+                    await appctx.get_app().copy_text_to_clipboard(f"await appctx.read_inspector_item('{uid}')")
+

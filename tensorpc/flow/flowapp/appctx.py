@@ -166,3 +166,9 @@ async def list_all_data_storage_nodes() -> List[str]:
 def set_observed_func_registry(registry: ObservedFunctionRegistryProtocol):
     app = get_app()
     return app.set_observed_func_registry(registry)
+
+async def read_inspector_item(uid: str):
+    app = get_app()
+    comp = app.find_component(plus.ObjectInspector)
+    assert comp is not None, "you must add inspector to your UI to use exception inspect"
+    return await comp.get_object_by_uid(uid)
