@@ -85,7 +85,7 @@ from .core import (AppComponentCore, AppEditorEvent, AppEditorEventType,
                    AppEditorFrontendEvent, AppEditorFrontendEventType,
                    AppEvent, AppEventType, BasicProps, Component,
                    ContainerBase, CopyToClipboardEvent, EventHandler,
-                   FlowSpecialMethods, FrontendEventType, LayoutEvent,
+                   FlowSpecialMethods, ForEachResult, FrontendEventType, LayoutEvent,
                    TaskLoopEvent, UIEvent, UIExceptionEvent, UIRunStatus,
                    UIType, UIUpdateEvent, Undefined, UserMessage, ValueType,
                    undefined)
@@ -904,18 +904,21 @@ class App:
         def handler(name, comp):
             if isinstance(comp, type):
                 res[0] = comp
-                return True
+                return ForEachResult.Return
 
         self.root._foreach_comp(handler)
         return res[0]
 
-    def find_all_components(self, type: Type[T]) -> List[T]:
+    def find_all_components(self, type: Type[T], check_nested: bool = False) -> List[T]:
         res: List[T] = []
 
         def handler(name, comp):
             if isinstance(comp, type):
                 res.append(comp)
-
+                # tell foreach to continue instead of search children
+                if not check_nested:
+                    return ForEachResult.Continue
+                
         self.root._foreach_comp(handler)
         return res
 

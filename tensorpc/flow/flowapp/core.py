@@ -1217,6 +1217,10 @@ class Component(Generic[T_base_props, T_child]):
         else:
             return self.create_update_event({"status": self.props.status})
 
+class ForEachResult(enum.Enum):
+    Continue = 0
+    Return = 1
+
 
 class ContainerBase(Component[T_container_props, T_child]):
 
@@ -1281,23 +1285,28 @@ class ContainerBase(Component[T_container_props, T_child]):
 
     def _foreach_comp_recursive(self, child_ns: str,
                                 handler: Callable[[str, Component],
-                                                  Union[bool, None]]):
+                                                  Union[ForEachResult, None]]):
         res_foreach: List[Tuple[str, ContainerBase]] = []
         for k, v in self._child_comps.items():
             child_uid = f"{child_ns}.{k}"
             if isinstance(v, ContainerBase):
                 res = handler(child_uid, v)
-                if res == True:
-                    return
-                res_foreach.append((child_uid, v))
+                if res is None:
+                    res_foreach.append((child_uid, v))
+                elif res == ForEachResult.Continue:
+                    continue 
+                elif res == ForEachResult.Return:
+                    return 
             else:
                 res = handler(child_uid, v)
-                if res == True:
-                    return
+                if res == ForEachResult.Continue:
+                    continue 
+                elif res == ForEachResult.Return:
+                    return 
         for child_uid, v in res_foreach:
             v._foreach_comp_recursive(child_uid, handler)
 
-    def _foreach_comp(self, handler: Callable[[str, Component], Union[bool,
+    def _foreach_comp(self, handler: Callable[[str, Component], Union[ForEachResult,
                                                                       None]]):
         assert self._flow_uid != "", f"_flow_uid must be set before modify_comp, {type(self)}, {self._flow_reference_count}, {id(self)}"
         handler(self._flow_uid, self)

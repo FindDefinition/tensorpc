@@ -440,7 +440,15 @@ class SimpleCanvas(mui.FlexBox):
             return True
         line_obj = _try_cast_to_lines(obj)
         if line_obj is not None:
-            await self.show_lines(tree_id, line_obj, line_obj.shape[0])
+            if tree_id in self._random_colors:
+                pick = self._random_colors[tree_id]
+            else:
+                random_colors = colors.RANDOM_COLORS_FOR_UI
+                pick = random_colors[len(self._dynamic_lines) %
+                                     len(random_colors)]
+                self._random_colors[tree_id] = pick
+
+            await self.show_lines(tree_id, line_obj, line_obj.shape[0], color=pick)
             return True
         return False
 
