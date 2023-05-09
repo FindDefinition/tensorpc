@@ -46,7 +46,7 @@ async def test_basic_with_client_with_cancel():
     await client.async_init()
     task = Task(TaskType.FunctionId, "tensorpc.autossh.scheduler.test_data::simple_task_with_client", [{}])
     task.id = "test"
-    # task.keep_tmux_session = False
+    task.keep_tmux_session = False
     await client.submit_task(task)
     for i in range(10):
         await asyncio.sleep(1)
@@ -77,7 +77,7 @@ async def test_parallel_task():
         await client.update_tasks()
         print("------")
         for task in client.tasks.values():
-            print(task.id, task.state.status, task.state.progress)
+            print(task.id, task.state.status, task.state.progress, task.state.pid)
     await client.shutdown_scheduler()
 
 async def test_gpu_resources():
@@ -103,7 +103,7 @@ async def test_gpu_resources():
         await client.update_tasks()
         print("------")
         for task in client.tasks.values():
-            print(task.id, task.state.status, task.state.progress)
+            print(task.id, task.state.status, task.state.progress, task.state.pid)
     await client.shutdown_scheduler()
 
 async def test_shell_with_client():
@@ -124,7 +124,7 @@ async def test_shell_with_client():
     await client.shutdown_scheduler()
 
 def main():
-    asyncio.run(test_shell_with_client()) 
+    asyncio.run(test_parallel_task()) 
 
 if __name__ == "__main__":
     main()

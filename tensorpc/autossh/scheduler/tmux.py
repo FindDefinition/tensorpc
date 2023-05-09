@@ -60,16 +60,24 @@ def launch_tmux_task(uuid_str: str, window_command: str, one_shot: bool, sched_p
             [str(gpu_id) for gpu_id in all_gpu_ids])
     env_export_str = " && ".join([f"export {k}={v}" for k, v in envs.items()])
     if s.has_session(sess_name):
-        assert not one_shot, f"one shot task already exists, {sess_name}"
+        # assert not one_shot, f"one shot task already exists, {sess_name}"
         sess = s.sessions.get(session_name=sess_name)
         assert isinstance(sess, libtmux.Session)
         pane: libtmux.Pane = sess.windows[0].panes[0]
         pane.send_keys(env_export_str)
+
         pane.send_keys(window_command)
     else:
         if one_shot:
+            # TODO currently use window_command may create zombie process
+            # so we use manually exit instead
+            # sess = s.new_session(
+            #     f"{constants.TMUX_SESSION_TASK_PREFIX}{_SPLIT}{uuid_str}", window_command=f"{env_export_str} && {window_command}")
             sess = s.new_session(
-                f"{constants.TMUX_SESSION_TASK_PREFIX}{_SPLIT}{uuid_str}", window_command=f"{env_export_str} && {window_command}")
+                f"{constants.TMUX_SESSION_TASK_PREFIX}{_SPLIT}{uuid_str}")
+            pane: libtmux.Pane = sess.windows[0].panes[0]
+            pane.send_keys(env_export_str)
+            pane.send_keys(f"{window_command}; exit")
         else:
             sess = s.new_session(
                 f"{constants.TMUX_SESSION_TASK_PREFIX}{_SPLIT}{uuid_str}")

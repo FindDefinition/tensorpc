@@ -54,6 +54,7 @@ from watchdog.observers import Observer
 from watchdog.observers.api import ObservedWatch
 
 from tensorpc import simple_chunk_call_async
+from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.constants import PACKAGE_ROOT, TENSORPC_FLOW_FUNC_META_KEY
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.inspecttools import get_all_members_by_type
@@ -429,6 +430,14 @@ class App:
         res: List[str] = await simple_chunk_call_async(
             meta.grpc_url, serv_names.FLOW_DATA_QUERY_DATA_NODE_IDS,
             meta.graph_id)
+        return res
+    
+    async def get_ssh_node_data(self, node_id: str):
+        meta = self.__flowapp_master_meta
+        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
+        res: SSHTarget = await simple_chunk_call_async(
+            meta.grpc_url, serv_names.FLOW_GET_SSH_NODE_DATA, meta.graph_id,
+            node_id)
         return res
 
     def get_persist_storage(self):

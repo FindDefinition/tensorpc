@@ -3,6 +3,7 @@ import dataclasses
 import enum
 from typing import Dict, Any, List, Optional, Tuple
 from tensorpc.autossh.coretypes import SSHTarget
+from .constants import TMUX_SESSION_TASK_PREFIX, TMUX_SESSION_NAME_SPLIT
 class TaskStatus(enum.Enum):
     Unknown = 0
     Pending = 1 
@@ -83,4 +84,7 @@ class Task:
             self.params = []
         self.params.append(kwargs)
         return self 
+    
+    def get_tmux_session_name(self):
+        return f"{TMUX_SESSION_TASK_PREFIX}{TMUX_SESSION_NAME_SPLIT}{self.id}"
     

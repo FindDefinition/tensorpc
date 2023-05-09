@@ -29,6 +29,7 @@ from functools import partial
 from pathlib import Path
 from typing import (Any, Awaitable, Callable, Coroutine, Dict, Iterable, List,
                     Optional, Set, Tuple, Type, Union)
+from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.core.defs import File
 from tensorpc.core.moduleid import get_qualname_of_type
 import aiohttp
@@ -2400,7 +2401,14 @@ class Flow:
         await self._user_ev_q.put(
             (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
         return res 
-    
+
+    async def get_ssh_node_data(self, graph_id: str, node_id: str):
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node
+        assert isinstance(node, DirectSSHNode)
+        host, port = node.url.split(":")
+        return SSHTarget(host, int(port), node.username, node.password)
+
     @marker.mark_exit
     async def _on_exit(self):
         # send exit message to all remote workers

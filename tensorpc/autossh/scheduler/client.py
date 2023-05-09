@@ -1,11 +1,11 @@
 import dataclasses
 import time
-from typing import Dict, List
+from typing import Dict, List, Set, Tuple 
 import libtmux
 import asyncio
 from tensorpc.autossh.serv_names import serv_names 
 from tensorpc.autossh.scheduler.constants import TMUX_SESSION_PREFIX, TMUX_SESSION_NAME_SPLIT
-from tensorpc.autossh.scheduler.core import SSHTarget, Task, TaskStatus, TaskType
+from tensorpc.autossh.scheduler.core import ResourceType, SSHTarget, Task, TaskStatus, TaskType
 from tensorpc.core.asyncclient import shutdown_server_async, simple_remote_call_async
 from tensorpc.utils.wait_tools import get_free_ports
 from tensorpc.autossh.core import SSHClient
@@ -18,6 +18,7 @@ from tensorpc import AsyncRemoteManager, simple_chunk_call_async
 
 class SchedulerClient:
     def __init__(self, ssh_target: SSHTarget) -> None:
+        assert isinstance(ssh_target, SSHTarget)
         self.ssh_target = dataclasses.replace(ssh_target)
         self.tunnel_tasks: List[asyncio.Task] = []
         self.port = -1
@@ -38,7 +39,7 @@ class SchedulerClient:
         client = SSHClient.from_ssh_target(target)
         # fetch scheduler port
         if is_local:
-            port = get_tmux_scheduler_info_may_create()[0]
+            port, schr_uid = get_tmux_scheduler_info_may_create()
             target.forward_port_pairs.append((port, port))
             self.port = port
         else:
@@ -48,13 +49,15 @@ class SchedulerClient:
                 assert stdout is not None 
                 if isinstance(stdout, bytes):
                     stdout = stdout.decode("utf-8")
-                port_str = stdout.strip()
+                port_str, schr_uid = stdout.strip().split(",")
                 port = int(port_str)
             local_free_port = get_free_ports(1)[0]
             self.tunnel_tasks.append(asyncio.create_task(client.create_local_tunnel([(local_free_port, port)], self.shutdown_task)))
             target.forward_port_pairs.append((local_free_port, port))
             self.port = local_free_port
         self.local_url = f"localhost:{self.port}"
+        self.schr_uid = schr_uid
+        self.schr_session_name = f"{TMUX_SESSION_PREFIX}{TMUX_SESSION_NAME_SPLIT}{port}{TMUX_SESSION_NAME_SPLIT}{schr_uid}"
 
         # fetch init task state 
         async with AsyncRemoteManager(self.local_url) as robj:
@@ -70,6 +73,12 @@ class SchedulerClient:
         for uid in deleted_uids:
             self.tasks.pop(uid, None)
         return updated, deleted_uids
+
+    async def get_resource_usage(self):
+        idle_resources, occupied_resources = await simple_chunk_call_async(self.local_url, serv_names.SCHED_TASK_RESOURCE_USAGE)
+        idle_resources: Dict[ResourceType, Set[Tuple[ResourceType, int]]]
+        occupied_resources: Dict[ResourceType, Set[Tuple[ResourceType, int]]]
+        return idle_resources, occupied_resources
 
     async def submit_task(self, task: Task):
         await simple_remote_call_async(self.local_url, serv_names.SCHED_TASK_SUBMIT_TASK, task)

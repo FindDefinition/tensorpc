@@ -2198,7 +2198,7 @@ class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
 
 @dataclasses.dataclass
 class ChipProps(MUIComponentBaseProps):
-    color: Union[_StdColor, str, Undefined] = undefined
+    mui_color: Union[_StdColor, str, Undefined] = undefined
     clickable: Union[bool, Undefined] = undefined
     size: Union[Literal["small", "medium"], Undefined] = undefined
     variant: Union[Literal["filled", "outlined"], Undefined] = undefined
@@ -2215,7 +2215,7 @@ class Chip(MUIComponentBase[ChipProps]):
     ) -> None:
         super().__init__(
             UIType.Chip, ChipProps,
-            [FrontendEventType.Change.value, FrontendEventType.Delete.value])
+            [FrontendEventType.Click.value, FrontendEventType.Delete.value])
         self.props.label = label
         self.callback = callback
         self.delete_callback = delete_callback

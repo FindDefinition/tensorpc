@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from .core import Component
 
 CORO_NONE = Union[Coroutine[None, None, None], None]
-CORO_ANY: TypeAlias = Union[Coroutine[Any, None, None], Any]
+CORO_ANY: TypeAlias = Union[Coroutine[None, None, Any], Any]
 
 ValueType: TypeAlias = Union[int, float, str]
 

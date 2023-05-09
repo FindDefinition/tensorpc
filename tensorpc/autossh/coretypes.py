@@ -22,4 +22,6 @@ class SSHTarget:
     def url(self):
         return f"{self.hostname}:{self.port}"
 
-
+    @staticmethod
+    def create_fake_target():
+        return SSHTarget("localhost", 22, "root", "root")

@@ -19,7 +19,7 @@ class ResourceManager:
     def __init__(self, num_cpu: int, num_gpu: int) -> None:
         self.idle_resources: Dict[ResourceType, Set[Tuple[ResourceType, int]]] = {}
         self.occupied_resources: Dict[ResourceType, Set[Tuple[ResourceType, int]]] = {}
-
+        self.num_gpu = num_gpu
         for item in ResourceType:
             self.idle_resources[item] = set()
             self.occupied_resources[item] = set()
@@ -28,6 +28,10 @@ class ResourceManager:
             self.idle_resources[ResourceType.CPU].add((ResourceType.CPU, i))
         for i in range(num_gpu):
             self.idle_resources[ResourceType.GPU].add((ResourceType.GPU, i))
+
+    def __repr__(self):
+        num_gpu_idle = len(self.idle_resources[ResourceType.GPU])
+        return f"ResourceManager(GPU={num_gpu_idle}/{self.num_gpu})"
 
     def request_idle_cpus(self, num_cpu: int) -> List[Tuple[ResourceType, int]]:
         return self._request_idle_resources(ResourceType.CPU, num_cpu)
@@ -58,7 +62,7 @@ class Scheduler:
         self.tasks: Dict[str, Task] = {}
         self.uid = uid
         self.grpc_port = -1
-        self.period_check_duration = 2.0
+        self.period_check_duration = 1.0
         max_number_of_task = min(psutil.cpu_count(False), max_number_of_task)
         self.resource_manager = ResourceManager(max_number_of_task, len(get_nvidia_gpu_measures()))
 
@@ -90,28 +94,38 @@ class Scheduler:
         for task in self.tasks.values():
             if task.state.status == TaskStatus.Running:
                 pid_exists = psutil.pid_exists(task.state.pid)
+                # print(task.id, task.state.pid, pid_exists, "Running")
                 if not pid_exists:
                     # the process is dead.
                     task.state.status = TaskStatus.Failed
+                    # print("RELEASE TASK", task.id)
                     self._release_task_resources(task)
                     self._update_task_timestamp(task)
                     # task_changed = True
             elif task.state.status == TaskStatus.AlmostFinished or task.state.status == TaskStatus.AlmostCanceled:
                 pid_exists = psutil.pid_exists(task.state.pid)
+                # print(task.id, task.state.pid, pid_exists)
+
                 is_almost_finish = task.state.status == TaskStatus.AlmostFinished
                 if not pid_exists:
                     # ensure the process is end instead of hang.
                     task.state.status = TaskStatus.Finished if is_almost_finish else TaskStatus.Canceled
                     self._update_task_timestamp(task)
+                    # print("RELEASE TASK", task.id)
+
                     self._release_task_resources(task)
                     # task_changed = True 
         # if task_changed:
         self._do_schedule()
+        # print("num idle", len(self.resource_manager.idle_resources[ResourceType.GPU]), "num occ", len(self.resource_manager.occupied_resources[ResourceType.GPU]))
 
         self._period_task = asyncio.create_task(self._period_check_task_status())
 
     def get_all_task_state(self):
         return list(self.tasks.values()) 
+    
+    def get_resource_usage(self):
+        return self.resource_manager.idle_resources, self.resource_manager.occupied_resources
 
     def query_task_updates(self, ts_uids: List[Tuple[int, str]]):
         """compare query timestamp, return updated + new and deleted tasks
@@ -172,7 +186,6 @@ class Scheduler:
         if task.state.status != TaskStatus.Running:
             cmd = f"python -m tensorpc.autossh.scheduler.runtask {task.type.value}"
             tmux.launch_tmux_task(task_id, cmd, not task.keep_tmux_session, self.grpc_port, task.state.resources)
-            task.state.status = TaskStatus.Running
             self._update_task_timestamp(task)
             return True 
         return False 
@@ -217,10 +230,13 @@ class Scheduler:
             if len(resources) == 0:
                 break 
             if num_gpu_used > 0:
+                # print("BEFORE REQUEST GPU", self.resource_manager)
+
                 gpu_resources = self.resource_manager.request_idle_gpus(num_gpu_used)
+                # print(task.id, num_gpu_used, gpu_resources, self.resource_manager)
                 if len(gpu_resources) == 0:
                     self.resource_manager.release_resources(resources)
-                    break 
+                    continue 
                 resources.extend(gpu_resources)
             task.state.resources = resources
             self.run_task(task.id)

@@ -14,6 +14,7 @@ from tensorpc.autossh.serv_names import serv_names
 import subprocess
 import importlib
 import inspect 
+import psutil
 
 def run_func_in_module(module_func_id: str, *args, **kwargs):
     # module_func_id: tensorpc.xxx.yyy::zzz
@@ -64,7 +65,7 @@ def main(type_int: int):
                     ss = io.StringIO()
                     traceback.print_exc(file=ss)
                     robj.remote_call(serv_names.SCHED_TASK_SET_EXCEPTION, env_vars.uid, ss.getvalue())
-    
+    print("EXIT!!!")
 
 if __name__ == "__main__":
     fire.Fire(main)

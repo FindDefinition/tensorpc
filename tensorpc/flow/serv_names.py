@@ -219,5 +219,10 @@ class _ServiceNames:
         return get_service_key_by_type(Flow,
                                        Flow.rename_datastorage_data.__name__)
 
+    @property
+    def FLOW_GET_SSH_NODE_DATA(self):
+        from tensorpc.flow.serv.core import Flow
+        return get_service_key_by_type(Flow,
+                                       Flow.get_ssh_node_data.__name__)
 
 serv_names = _ServiceNames()

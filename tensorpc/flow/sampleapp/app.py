@@ -33,12 +33,13 @@ from typing_extensions import Literal
 import tqdm
 
 import tensorpc
+from tensorpc.autossh.scheduler.core import TaskType
 from tensorpc.core import prim
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.inspecttools import get_all_members_by_type
 from tensorpc.flow import (App, EditableApp, EditableLayoutApp, leaflet,
                            mark_autorun, mark_create_layout, marker, mui,
-                           plotly, plus, three, UserObjTree)
+                           plotly, plus, three, UserObjTree, appctx)
 from tensorpc.flow.client import AppClient, AsyncAppClient, add_message
 from tensorpc.flow.coretypes import MessageLevel, ScheduleEvent
 from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
@@ -1169,7 +1170,43 @@ class CollectionApp:
     def _autorun_dev(self):
         func_support_reload(1, 2)
         # self.dev_0.dev()
-    
+
+class SchedulerTest:
+
+    @mark_create_layout
+    def my_layout(self):
+        
+        return mui.VBox([
+            Button("Show", self._submit_simple_task),
+        ])
+
+    async def _submit_simple_task(self):
+        schr = appctx.find_component(plus.TmuxScheduler)
+        assert schr is not None 
+        task1 = plus.Task(TaskType.FunctionId, "tensorpc.autossh.scheduler.test_data::simple_task_with_client", [{}])
+        task1.id = "test1"
+        task1.num_gpu_used = 3
+        task2 = plus.Task(TaskType.FunctionId, "tensorpc.autossh.scheduler.test_data::simple_task_with_client", [{}])
+        task2.id = "test2"
+        task2.num_gpu_used = 4
+
+        task3 = plus.Task(TaskType.FunctionId, "tensorpc.autossh.scheduler.test_data::simple_task_with_client", [{}])
+        task3.id = "test3"
+        task3.num_gpu_used = 1
+
+        # task1.keep_tmux_session = False
+        await schr.submit_task(task1)
+        await schr.submit_task(task2)
+        await schr.submit_task(task3)
+
+class SchedulerApp:
+
+    @mark_create_layout
+    def my_layout(self):
+        self.scheduler = plus.TmuxScheduler(lambda: appctx.get_app().get_ssh_node_data("local"))
+        self.scheduler_test = SchedulerTest()
+        res = plus.InspectPanel(self, mui.FlexLayout.Tab(self.scheduler))
+        return res 
 
 if __name__ == "__main__":
     import time
