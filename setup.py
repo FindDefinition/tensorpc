@@ -46,6 +46,8 @@ REQUIRED = [
     # to avoid a serious problem
     "pyOpenSSL>=23.0.0",
     "cryptography>=39.0.0",
+    "psutil",
+    "libtmux",
 ]
 
 # What packages are optional?

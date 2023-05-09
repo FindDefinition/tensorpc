@@ -116,6 +116,7 @@ class UIType(enum.Enum):
     FlexLayout = 0x2a
     DynamicControls = 0x2b
     MonacoEditor = 0x2c
+    ListItem = 0x2d
 
     # special
     TaskLoop = 0x100
@@ -897,7 +898,9 @@ class Component(Generic[T_base_props, T_child]):
         return self._flow_comp_core is not None
 
     def _prop_base(self, prop: Callable[P, Any], this: T3) -> Callable[P, T3]:
-
+        """set prop by keyword arguments
+        this function is used to provide intellisense result for all props.
+        """
         def wrapper(*args: P.args, **kwargs: P.kwargs):
             for k, v in kwargs.items():
                 setattr(self.__props, k, v)
@@ -908,7 +911,9 @@ class Component(Generic[T_base_props, T_child]):
     def _update_props_base(self,
                            prop: Callable[P, Any],
                            json_only: bool = False):
-
+        """create prop update event by keyword arguments
+        this function is used to provide intellisense result for all props.
+        """
         def wrapper(*args: P.args, **kwargs: P.kwargs):
             for k, v in kwargs.items():
                 setattr(self.__props, k, v)

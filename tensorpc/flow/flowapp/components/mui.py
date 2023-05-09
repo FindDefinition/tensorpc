@@ -477,6 +477,9 @@ class IconType(enum.IntEnum):
     Help = 31
     Visibility = 32
     Mic = 33
+    PlayCircleOutline = 34
+    DragIndicator = 35
+    Cancel = 36
 
 
 @dataclasses.dataclass
@@ -494,6 +497,8 @@ class IconButtonProps(MUIComponentBaseProps):
     tooltip_multiline: Union[bool, Undefined] = undefined
     progress_color: Union[_BtnGroupColor, Undefined] = undefined
     progress_size: Union[NumberType, Undefined] = undefined
+    # if defined, will show a confirm dialog before executing the callback
+    confirm_message: Union[str, Undefined] = undefined
 
 
 class IconButton(MUIComponentBase[IconButtonProps]):
@@ -2053,6 +2058,7 @@ class TypographyProps(MUIComponentBaseProps):
     no_wrap: Union[bool, Undefined] = undefined
     variant: Union[_TypographyVarient, Undefined] = undefined
     paragraph: Union[bool, Undefined] = undefined
+    mui_color: Union[_StdColorNoDefault, Undefined] = undefined
     value: str = ""
 
 
@@ -2094,9 +2100,11 @@ class PaperProps(MUIFlexBoxProps):
 class Paper(MUIContainerBase[PaperProps, MUIComponentType]):
 
     def __init__(self,
-                 children: Dict[str, MUIComponentType],
+                 children: Optional[LayoutType] = None,
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
+        if children is not None and isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.Paper, PaperProps, uid_to_comp, children,
                          inited)
 

@@ -115,6 +115,10 @@ async def _await_thread_ev(ev, loop, timeout=None):
     waiter = partial(ev.wait, timeout=timeout)
     return await loop.run_in_executor(None, waiter)
 
+# https://github.com/grpc/grpc/blob/master/examples/python/helloworld/async_greeter_server_with_graceful_shutdown.py
+# Coroutines to be invoked when the event loop is shutting down.
+_cleanup_coroutines = []
+
 
 async def serve_service(service: AsyncRemoteObjectService,
                         wait_time=-1,
@@ -158,6 +162,13 @@ async def serve_service(service: AsyncRemoteObjectService,
     await server.start()
     loop = asyncio.get_running_loop()
     server_core = service.server_core
+
+    async def server_graceful_shutdown():
+        # Shuts down the server with 5 seconds of grace period. During the
+        # grace period, the server won't accept new connections and allow
+        # existing RPCs to continue within the grace period.
+        await server.stop(5)
+    _cleanup_coroutines.append(server_graceful_shutdown())
     await server_core.async_shutdown_event.wait()
 
     # while True:
@@ -271,6 +282,7 @@ async def serve_async(sc: ProtobufServiceCore,
         grpc_task = serve_service(service, wait_time, port, length, is_local,
                                   max_threads, process_id, ssl_key_path,
                                   ssl_crt_path)
+                                  
         return await grpc_task
 
 
@@ -288,6 +300,8 @@ def serve(service_def: ServiceDef,
     url = '[::]:{}'.format(port)
     smeta = ServerMeta(port=port, http_port=-1)
     server_core = ProtobufServiceCore(url, service_def, False, smeta)
+    loop = asyncio.get_event_loop()
+
     try:
         asyncio.run(
             serve_async(server_core,

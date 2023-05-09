@@ -19,9 +19,10 @@ from typing import Any, AnyStr, Awaitable, Callable, Deque, Dict, List, Optional
 from contextlib import suppress
 import asyncssh
 import tensorpc
-from tensorpc.flow.constants import TENSORPC_READUNTIL
+from tensorpc.constants import TENSORPC_READUNTIL
 from tensorpc.constants import PACKAGE_ROOT
 import getpass
+from tensorpc.autossh.coretypes import SSHTarget
 from asyncssh.scp import scp as asyncsshscp
 # 7-bit C1 ANSI sequences
 ANSI_ESCAPE_REGEX = re.compile(
@@ -624,8 +625,14 @@ class SSHClient:
         self.bash_file_inited: bool = False
         self.encoding = encoding
 
+    @classmethod
+    def from_ssh_target(cls, target: SSHTarget):
+        url = f"{target.hostname}:{target.port}"
+        return cls(url, target.username, target.password,
+                   target.known_hosts, uid=target.uid)
+
     @contextlib.asynccontextmanager
-    async def simple_connect(self):
+    async def simple_connect(self, init_bash: bool = True):
         conn_task = asyncssh.connection.connect(self.url_no_port,
                                                 self.port,
                                                 username=self.username,
@@ -635,20 +642,42 @@ class SSHClient:
                                                 known_hosts=None)
         conn_ctx = await asyncio.wait_for(conn_task, timeout=10)
         async with conn_ctx as conn:
-            if not self.bash_file_inited:
+            if (not self.bash_file_inited) and init_bash:
                 p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
                 await asyncsshscp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
                 self.bash_file_inited = True
             yield conn
 
-    async def simple_run_command(self, cmd: str):
-        async with self.simple_connect() as conn:
-            stdin, stdout, stderr = await conn.open_session(
-                "bash --init-file ~/.tensorpc_hooks-bash.sh",
-                request_pty="force")
-            stdin.write(cmd + "\n")
-            line = await stdout.readuntil(TENSORPC_READUNTIL)
-            return line
+    # async def simple_run_command(self, cmd: str):
+    #     async with self.simple_connect() as conn:
+    #         stdin, stdout, stderr = await conn.open_session(
+    #             "bash --init-file ~/.tensorpc_hooks-bash.sh",
+    #             request_pty="force")
+    #         stdin.write(cmd + "\n")
+    #         line = await stdout.readuntil(TENSORPC_READUNTIL)
+    #         return line
+
+    async def create_local_tunnel(self, port_pairs: List[Tuple[int, int]], shutdown_task: asyncio.Task):
+        conn_task = asyncssh.connection.connect(self.url_no_port,
+                                                self.port,
+                                                username=self.username,
+                                                password=self.password,
+                                                keepalive_interval=10,
+                                                login_timeout=10,
+                                                known_hosts=None)
+        conn_ctx = await asyncio.wait_for(conn_task, timeout=10)
+        async with conn_ctx as conn:
+            wait_tasks = [
+                shutdown_task,
+            ]
+            for p_local, p_remote in port_pairs:
+                listener = await conn.forward_local_port(
+                    '', p_local, 'localhost', p_remote)
+                wait_tasks.append(
+                    asyncio.create_task(listener.wait_closed()))
+            done, pending = await asyncio.wait(
+                wait_tasks, return_when=asyncio.FIRST_COMPLETED)
+            return 
 
     async def connect_queue(
             self,
@@ -676,9 +705,7 @@ class SSHClient:
                                                     keepalive_interval=10,
                                                     login_timeout=10,
                                                     known_hosts=None)
-            print("START WAIT2")
             conn_ctx = await asyncio.wait_for(conn_task, timeout=10)
-            print("END WAIT")
             async with conn_ctx as conn:
                 if not self.bash_file_inited:
                     p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
@@ -694,7 +721,7 @@ class SSHClient:
                         if isinstance(stdout_content, bytes):
                             stdout_content = stdout_content.decode(_ENCODE)
                         client_ip_callback(stdout_content)
-                assert self.encoding is None
+                # assert self.encoding is None
                 chan, session = await conn.create_session(
                     MySSHClientStreamSession,
                     "bash --init-file ~/.tensorpc_hooks-bash.sh",
@@ -706,7 +733,6 @@ class SSHClient:
                 session: MySSHClientStreamSession
                 session.uid = self.uid
                 session.callback = callback
-                session._tensorpc_encoding = self.encoding
                 # stdin, stdout, stderr = await conn.open_session(
                 #     "bash --init-file ~/.tensorpc_hooks-bash.sh",
                 #     request_pty="force")
@@ -719,8 +745,7 @@ class SSHClient:
                 peer_client = PeerSSHClient(stdin,
                                             stdout,
                                             stderr,
-                                            uid=self.uid,
-                                            encoding=self.encoding)
+                                            uid=self.uid)
                 loop_task = asyncio.create_task(
                     peer_client.wait_loop_queue(callback, shutdown_task))
                 wait_tasks = [
@@ -799,7 +824,6 @@ class SSHClient:
                     ]
                 await loop_task
         except Exception as exc:
-            print("FUCKJ")
             await callback(_warp_exception_to_event(exc, self.uid))
         finally:
             if init_event:

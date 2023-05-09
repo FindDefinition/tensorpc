@@ -21,55 +21,16 @@ import subprocess
 import fire
 import io
 import asyncio
-
-
-@dataclass
-class GPUMeasure:
-    name: str
-    gpuusage: int
-    memusage: int
-    temperature: int
-    memused: int
-    memtotal: int
-
-    def to_string(self):
-        msg = f"gpu={self.gpuusage}%,mem={self.memused}/{self.memtotal}MB,"
-        msg += f"{self.temperature}\u2103,io={self.memusage}%"
-        return msg
+from tensorpc.utils.gpuusage import get_nvidia_gpu_measures
 
 
 async def main_async(duration: float = 2):
     while True:
         await asyncio.sleep(duration)
-        querys = [
-            "gpu_name",
-            "utilization.gpu",
-            "utilization.memory",
-            "temperature.gpu",
-            "memory.used",
-            "memory.total",
-        ]
-        output = subprocess.check_output(
-            ["nvidia-smi", f"--query-gpu={','.join(querys)}", "--format=csv"])
-        output_str = output.decode("utf-8")
-        output_str_file = io.StringIO(output_str)
-        csv_data = csv.reader(output_str_file, delimiter=',', quotechar=',')
-        rows = list(csv_data)[1:]
-        rows = [[r.strip() for r in row] for row in rows]
-        gpumeasures: List[GPUMeasure] = []
-        for r in rows:
-            query = dict(zip(querys, r))
-            gpuusage = int(query["utilization.gpu"].split(" ")[0])
-            memusage = int(query["utilization.memory"].split(" ")[0])
-            memused = int(query["memory.used"].split(" ")[0])
-            memtotal = int(query["memory.total"].split(" ")[0])
-            temp = int(query["temperature.gpu"])
-            gpumeasure = GPUMeasure(query["gpu_name"], gpuusage, memusage,
-                                    temp, memused, memtotal)
-            gpumeasures.append(gpumeasure)
-        gpu_names = ",".join(set([r[0] for r in rows]))
+        gpu_measures = get_nvidia_gpu_measures()
+        gpu_names = ",".join(set([r.name for r in gpu_measures]))
         measures = [
-            f"{i}: {gm.to_string()}" for i, gm in enumerate(gpumeasures)
+            f"{i}: {gm.to_string()}" for i, gm in enumerate(gpu_measures)
         ]
         measure = "\n".join(measures)
         content = f"{gpu_names}\n{measure}"

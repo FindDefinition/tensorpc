@@ -21,6 +21,7 @@ import multiprocessing
 import pickle
 import time
 from functools import wraps
+import traceback
 from typing import (Any, AsyncIterator, Dict, Generator, Iterator, List,
                     Optional, Tuple, Union, AsyncGenerator)
 
@@ -382,15 +383,17 @@ class AsyncRemoteManager(AsyncRemoteObject):
     async def wait_for_channel_ready(self,
                                      timeout: float = 10,
                                      max_retries=20):
+        # https://github.com/grpc/grpc/blob/master/examples/python/wait_for_ready/asyncio_wait_for_ready_example.py
         assert self._channel is not None
+        wait_for_ready = True
         try:
-            await wait_blocking_async(self._channel.channel_ready, max_retries,
-                                      timeout / max_retries)
-        except TimeoutError as e:
-
-            LOGGER.error("server timeout.")
-            raise e
-        # await self.health_check(wait_for_ready=True, timeout=timeout)
+            await self.health_check(wait_for_ready)
+        except grpc.aio.AioRpcError as rpc_error:
+            traceback.print_exc()
+            assert rpc_error.code() == grpc.StatusCode.UNAVAILABLE
+            assert not wait_for_ready
+        else:
+            assert wait_for_ready
 
     async def wait_for_remote_ready(self, timeout: float = 10, max_retries=20):
         # await self.wait_for_channel_ready(timeout)
@@ -419,8 +422,8 @@ class AsyncRemoteManager(AsyncRemoteObject):
         return self
 
     async def __aexit__(self, exc_type, exc_value, exc_traceback):
-        if self.channel is not None:
-            await self.channel.__aexit__(exc_type, exc_value, exc_traceback)
+        if self._channel is not None:
+            await self._channel.__aexit__(exc_type, exc_value, exc_traceback)
         return self.close()
 
 
@@ -432,3 +435,7 @@ async def simple_remote_call_async(addr, key, *args, timeout=None, **kwargs):
 async def simple_chunk_call_async(addr, key, *args, **kwargs):
     async with AsyncRemoteManager(addr) as robj:
         return await robj.chunked_remote_call(key, *args, **kwargs)
+
+async def shutdown_server_async(addr):
+    async with AsyncRemoteManager(addr) as robj:
+        return await robj.shutdown()
