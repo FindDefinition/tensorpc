@@ -168,7 +168,7 @@ async def serve_service(service: AsyncRemoteObjectService,
         # grace period, the server won't accept new connections and allow
         # existing RPCs to continue within the grace period.
         await server.stop(5)
-    _cleanup_coroutines.append(server_graceful_shutdown())
+    # _cleanup_coroutines.append(server_graceful_shutdown())
     await server_core.async_shutdown_event.wait()
 
     # while True:

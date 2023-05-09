@@ -25,3 +25,4 @@ from .objinspect import (AnyFlexLayout, BasicObjectTree, CallbackSlider,
                          register_user_obj_tree_type)
 from .options import CommonOptions
 from .scriptmgr import ScriptManager
+from .scheduler import TmuxScheduler, Task, SSHTarget

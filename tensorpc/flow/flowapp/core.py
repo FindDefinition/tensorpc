@@ -758,6 +758,7 @@ class AppEvent:
 @dataclasses.dataclass
 class BasicProps(DataClassWithUndefined):
     status: int = UIRunStatus.Stop.value
+    tensorpc_dynamic_eval: Union[Undefined, Dict[str, Any]] = undefined
 
 
 @dataclasses.dataclass

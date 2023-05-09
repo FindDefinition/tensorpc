@@ -1047,14 +1047,88 @@ class ObjectTree(BasicObjectTree):
     async def _sync_data_storage_node(self):
         await self._on_expand(self._data_storage_uid)
 
+    async def _get_obj_by_uid_with_folder(self, uid: str, nodes: List[mui.JsonLikeNode]):
+        node = nodes[-1]
+        if len(nodes) > 1:
+            folder_node = nodes[-2]
+            # print(folder_node)
+
+            if folder_node.type in FOLDER_TYPES:
+                assert isinstance(folder_node.realId, str)
+                assert isinstance(folder_node.start, int)
+                real_nodes = self._objinspect_root._get_node_by_uid_trace(
+                    folder_node.realId)
+                real_obj, found = await self._get_obj_by_uid(
+                    folder_node.realId, real_nodes)
+                obj = None
+                if found:
+                    found = True
+                    if nodes[-2].type == mui.JsonLikeType.ListFolder.value:
+                        slice_idx = int(node.name)
+                        real_slice = folder_node.start + slice_idx
+                        obj = real_obj[real_slice]
+                    else:
+                        # dict folder
+                        assert isinstance(folder_node.keys,
+                                          mui.BackendOnlyProp)
+                        key = node.name
+                        if not isinstance(node.get_dict_key(), mui.Undefined):
+                            key = node.get_dict_key()
+                        obj = real_obj[key]
+            else:
+                obj, found = await self._get_obj_by_uid(uid, nodes)
+        else:
+            obj, found = await self._get_obj_by_uid(uid, nodes)
+        return obj, found
+
+    async def _get_obj_by_uid_with_folder_trace(self, uid: str, nodes: List[mui.JsonLikeNode]):
+        # TODO merge this with _get_obj_by_uid_with_folder
+        node = nodes[-1]
+        if len(nodes) > 1:
+            folder_node = nodes[-2]
+            # print(folder_node)
+
+            if folder_node.type in FOLDER_TYPES:
+                assert isinstance(folder_node.realId, str)
+                assert isinstance(folder_node.start, int)
+                real_nodes = self._objinspect_root._get_node_by_uid_trace(
+                    folder_node.realId)
+                real_objs, found = await self._get_obj_by_uid_trace(
+                    folder_node.realId, real_nodes)
+                real_obj = real_objs[-1]
+                obj = None
+                obj_trace = []
+                if found:
+                    obj_trace = real_objs.copy()
+                    found = True
+                    if nodes[-2].type == mui.JsonLikeType.ListFolder.value:
+                        slice_idx = int(node.name)
+                        real_slice = folder_node.start + slice_idx
+                        obj = real_obj[real_slice]
+                    else:
+                        # dict folder
+                        assert isinstance(folder_node.keys,
+                                          mui.BackendOnlyProp)
+                        key = node.name
+                        if not isinstance(node.get_dict_key(), mui.Undefined):
+                            key = node.get_dict_key()
+                        obj = real_obj[key]
+                    obj_trace.append(obj)
+            else:
+                obj_trace, found = await self._get_obj_by_uid_trace(uid, nodes)
+        else:
+            obj_trace, found = await self._get_obj_by_uid(uid, nodes)
+        return obj_trace, found
+
     async def _on_contextmenu(self, uid_menuid_data: Tuple[str, str,
                                                            Optional[Any]]):
         uid = uid_menuid_data[0]
         uid_parts = uid.split(_GLOBAL_SPLIT)
         userdata = uid_menuid_data[2]
         if userdata is not None:
-            obj_trace, found = await _get_obj_by_uid_trace(
-                self.root, uid, self._valid_checker)
+            nodes = self._objinspect_root._get_node_by_uid_trace(uid)
+            obj_trace, found = await self._get_obj_by_uid_with_folder_trace(
+                uid, nodes)
             if found:
                 obj = obj_trace[-1]
                 # handle tree item first
@@ -1076,7 +1150,6 @@ class ObjectTree(BasicObjectTree):
                             # update this node
                             await self._on_expand(parent_node.id)
                         return
-
                 # handle regular objects
                 menu_type = ContextMenuType(userdata["type"])
                 if menu_type == ContextMenuType.DataStorageStore:

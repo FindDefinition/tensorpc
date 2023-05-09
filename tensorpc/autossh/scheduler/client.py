@@ -69,6 +69,7 @@ class SchedulerClient:
             self.tasks[t.id] = t
         for uid in deleted_uids:
             self.tasks.pop(uid, None)
+        return updated, deleted_uids
 
     async def submit_task(self, task: Task):
         await simple_remote_call_async(self.local_url, serv_names.SCHED_TASK_SUBMIT_TASK, task)

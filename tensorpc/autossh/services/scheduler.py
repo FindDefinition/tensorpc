@@ -54,7 +54,7 @@ class ResourceManager:
                     self.idle_resources[item].add(r)
 
 class Scheduler:
-    def __init__(self, uid: str, max_number_of_task = 32) -> None:
+    def __init__(self, uid: str = "scheduler", max_number_of_task = 32) -> None:
         self.tasks: Dict[str, Task] = {}
         self.uid = uid
         self.grpc_port = -1

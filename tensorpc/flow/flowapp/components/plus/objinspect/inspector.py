@@ -193,34 +193,7 @@ class ObjectInspector(mui.FlexBox):
         if node.type in FOLDER_TYPES:
             await self.detail_container.set_new_layout([])
             return
-        if len(nodes) > 1:
-            folder_node = nodes[-2]
-            if folder_node.type in FOLDER_TYPES:
-                assert isinstance(folder_node.realId, str)
-                assert isinstance(folder_node.start, int)
-                real_nodes = self.tree._objinspect_root._get_node_by_uid_trace(
-                    folder_node.realId)
-                real_obj, found = await self.tree._get_obj_by_uid(
-                    folder_node.realId, real_nodes)
-                obj = None
-                if found:
-                    slice_idx = int(node.name)
-                    real_slice = folder_node.start + slice_idx
-                    found = True
-                    if nodes[-2].type == mui.JsonLikeType.ListFolder.value:
-                        obj = real_obj[real_slice]
-                    else:
-                        # dict folder
-                        assert isinstance(folder_node.keys,
-                                          mui.BackendOnlyProp)
-                        key = node.name
-                        if not isinstance(node.get_dict_key(), mui.Undefined):
-                            key = node.get_dict_key()
-                        obj = real_obj[key]
-            else:
-                obj, found = await self.tree._get_obj_by_uid(uid, nodes)
-        else:
-            obj, found = await self.tree._get_obj_by_uid(uid, nodes)
+        obj, found = await self.tree._get_obj_by_uid_with_folder(uid, nodes)
         if not found:
             raise ValueError(
                 f"your object {uid} is invalid, may need to reflesh")
