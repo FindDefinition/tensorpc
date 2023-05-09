@@ -70,17 +70,33 @@ class TaskCard(mui.Paper):
         progress_0 = task.state.progress == 0
         self.progress = mui.CircularProgress(task.state.progress * 100).prop(
             variant="indeterminate" if progress_0 else "determinate")
+        self.collapse_btn = mui.IconButton(mui.IconType.ExpandMore,
+                                           self._on_expand_more).prop(
+                                               tooltip="Show Detail",
+                                               size="small")
+        self.command = mui.Typography(task.command).prop(
+            font_size="14px", font_family="monospace")
+
+        self.detail = mui.Collapse([
+            self.command,
+        ]).prop(timeout="auto", unmount_on_exit=True)
+        self._expanded = False
         layout = [
             mui.VBox([
-                self.name,
-                mui.Divider("horizontal"),
                 mui.HBox([
-                    self.status,
-                    mui.Chip("tmux",
-                             self._on_tmux_chip).prop(color="green",
+                    self.name,
+                    mui.Chip("copy tmux cmd",
+                             self._on_tmux_chip).prop(color="blue",
                                                       size="small",
                                                       margin="0 3px 0 3px"),
+                    mui.Chip(f"{task.num_gpu_used} gpus",
+                             self._on_tmux_chip).prop(color="green",
+                                                      size="small",
+                                                      margin="0 3px 0 3px",
+                                                      clickable=False),
                 ]),
+                mui.Divider("horizontal").prop(margin="5px 0 5px 0"),
+                self.status,
             ]).prop(flex=1),
             mui.HBox([
                 self.progress,
@@ -92,22 +108,35 @@ class TaskCard(mui.Paper):
                                    tooltip="Soft Cancel Task", size="small"),
                 mui.IconButton(mui.IconType.Cancel, self._on_cancel_task).prop(
                     tooltip="Cancel Task ⌃C", size="small"),
-                mui.IconButton(mui.IconType.Delete,
-                               self._on_kill_task).prop(tooltip="Kill Task",
-                                                        size="small")
+                mui.IconButton(mui.IconType.Delete, self._on_kill_task).prop(
+                    tooltip="Kill Task",
+                    size="small",
+                    confirm_message="Are You Sure to Kill This Task?"),
+                self.collapse_btn,
             ]).prop(margin="0 5px 0 5px", flex=0),
         ]
-        super().__init__([*layout])
+        super().__init__([
+            mui.VBox([
+                *layout,
+            ]).prop(
+                flex_flow="row wrap",
+                align_items="center",
+            ),
+            self.detail,
+        ])
         self.prop(
-            flex_flow="row wrap",
+            flex_flow="column",
             padding="5px",
             margin="5px",
-            align_items="center",
+            elevation=4,
         )
 
-    # @marker.mark_did_mount
-    # async def _on_mount(self):
-    #     await self.update_task_data(self.task)
+    async def _on_expand_more(self):
+        self._expanded = not self._expanded
+        icon = mui.IconType.ExpandLess if self._expanded else mui.IconType.ExpandMore
+        await self.send_and_wait(
+            self.collapse_btn.update_event(icon=icon.value) +
+            self.detail.update_event(triggered=self._expanded))
 
     async def _on_schedule_task(self):
         await self.client.submit_task(self.task)
@@ -147,24 +176,30 @@ class TaskCard(mui.Paper):
 
 
 class TmuxScheduler(mui.FlexBox):
-    def __init__(self, ssh_target: Union[SSHTarget, Callable[[], Coroutine[None, None, SSHTarget]]]) -> None:
-        ssh_target_creator: Optional[Callable[[], Coroutine[None, None, SSHTarget]]] = None
+    def __init__(
+        self, ssh_target: Union[SSHTarget, Callable[[], Coroutine[None, None,
+                                                                  SSHTarget]]]
+    ) -> None:
+        ssh_target_creator: Optional[Callable[[], Coroutine[None, None,
+                                                            SSHTarget]]] = None
         if isinstance(ssh_target, SSHTarget):
-            self.info = mui.Typography(f"SSH: {ssh_target.username}@{ssh_target.hostname}:{ssh_target.port}").prop(
-                margin="5px", font_size="14px", font_family="monospace")
+            self.info = mui.Typography(
+                f"SSH: {ssh_target.username}@{ssh_target.hostname}:{ssh_target.port}"
+            ).prop(margin="5px", font_size="14px", font_family="monospace")
         else:
             ssh_target_creator = ssh_target
             ssh_target = SSHTarget.create_fake_target()
 
-            self.info = mui.Typography(f"SSH: ").prop(
-                margin="5px", font_size="14px", font_family="monospace")
+            self.info = mui.Typography(f"SSH: ").prop(margin="5px",
+                                                      font_size="14px",
+                                                      font_family="monospace")
         self._ssh_target_creator = ssh_target_creator
         self.tasks = mui.VBox([]).prop(flex=1)
         super().__init__([
             mui.HBox([
                 self.info.prop(flex=1),
                 mui.Chip("copy tmux cmd",
-                         self._on_tmux_chip).prop(color="green", size="small")
+                         self._on_tmux_chip).prop(color="blue", size="small")
             ]).prop(align_items="center"),
             self.tasks,
         ])
@@ -230,13 +265,15 @@ class TmuxScheduler(mui.FlexBox):
                     # await self.task_cards[updated_task.id].update_task_data(updated_task)
                     ev += self.task_cards[
                         updated_task.id].update_task_data_event(updated_task)
-            await self.send_and_wait(ev)
-            await self.tasks.update_childs(new_task_cards)
-            self.task_cards.update(new_task_cards)
-            await self.tasks.remove_childs_by_keys(deleted)
-            for delete in deleted:
-                if delete in self.task_cards:
-                    self.task_cards.pop(delete)
+            if updated:
+                await self.send_and_wait(ev)
+                await self.tasks.update_childs(new_task_cards)
+                self.task_cards.update(new_task_cards)
+            if deleted:
+                await self.tasks.remove_childs_by_keys(deleted)
+                for delete in deleted:
+                    if delete in self.task_cards:
+                        self.task_cards.pop(delete)
         except:
             traceback.print_exc()
             raise
