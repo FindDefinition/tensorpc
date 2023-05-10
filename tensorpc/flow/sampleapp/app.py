@@ -49,8 +49,9 @@ from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from tensorpc.flow.sampleapp.sample_reload_fn import func_support_reload
 from tensorpc.flow.flowapp.objtree import get_objtree_context
-class SampleApp(App):
 
+
+class SampleApp(App):
     def __init__(self) -> None:
         super().__init__()
         self.img_ui = mui.Images()
@@ -196,7 +197,6 @@ class SampleApp(App):
 
 
 class SampleDictApp(App):
-
     def __init__(self) -> None:
         super().__init__()
         self.vlist = VList({
@@ -234,7 +234,6 @@ class SampleDictApp(App):
 
 
 class SamplePlotMetricApp(App):
-
     def __init__(self) -> None:
         super().__init__()
         self.plots = plus.HomogeneousMetricFigure(300, 300)
@@ -276,7 +275,6 @@ class SamplePlotMetricApp(App):
 
 
 class SampleFlowApp(App):
-
     def __init__(self) -> None:
         super().__init__()
         self.text = mui.Typography("")
@@ -291,7 +289,6 @@ class SampleFlowApp(App):
 
 
 class SampleEditorApp(EditableApp):
-
     def __init__(self) -> None:
         super().__init__()
         self.text = mui.Typography("WTF")
@@ -317,7 +314,6 @@ class SampleEditorApp(EditableApp):
 
 
 class SampleEditorAppV2(EditableApp):
-
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         self.text = mui.Typography("WTF")
@@ -350,7 +346,6 @@ class SampleEditorAppV2(EditableApp):
 
 
 class SampleThreeApp(EditableApp):
-
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
@@ -490,7 +485,6 @@ class SampleThreeApp(EditableApp):
 
 
 class SampleThreePointsApp(EditableApp):
-
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
@@ -545,7 +539,6 @@ class SampleThreePointsApp(EditableApp):
 
 
 class SampleTestApp(App):
-
     def __init__(self) -> None:
         super().__init__()
         self.root.add_layout({
@@ -560,7 +553,6 @@ class SampleTestApp(App):
 
 
 class SampleThreeHudApp(EditableApp):
-
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
@@ -621,34 +613,33 @@ class SampleThreeHudApp(EditableApp):
             }).prop(center_anchor=True),
         })
         self.hud = three.Hud({
-                "mesh":
-                three.ItemBox({
-                    "mesh0":
-                    three.Button("RTX", 2, 1, lambda x: print("HELLO")),
-                }).prop(center_anchor=True),
-                "mesh1":
-                three.ItemBox({
-                    "mesh0":
-                    three.ToggleButton("RTX2", 2, 1,
-                                       lambda x: print("HELLO2", x)),
-                }).prop(center_anchor=True),
-                "text":
-                three.ItemBox({
-                    "text0": self.html,
-                }).prop(center_anchor=True),
-                "text4":
-                three.ItemBox({
-                    "text0": self.html2,
-                }).prop(center_anchor=True),
-                "text3":
-                three.ItemBox({
-                    "text0": three.BoundingBox((2, 5, 2)),
-                }).prop(center_anchor=True),
-                "autoreflow":
-                three.FlexAutoReflow(),
-            }).prop(render_priority=1,
-                    flex_direction="row",
-                    justify_content="flex-start")
+            "mesh":
+            three.ItemBox({
+                "mesh0":
+                three.Button("RTX", 2, 1, lambda x: print("HELLO")),
+            }).prop(center_anchor=True),
+            "mesh1":
+            three.ItemBox({
+                "mesh0":
+                three.ToggleButton("RTX2", 2, 1, lambda x: print("HELLO2", x)),
+            }).prop(center_anchor=True),
+            "text":
+            three.ItemBox({
+                "text0": self.html,
+            }).prop(center_anchor=True),
+            "text4":
+            three.ItemBox({
+                "text0": self.html2,
+            }).prop(center_anchor=True),
+            "text3":
+            three.ItemBox({
+                "text0": three.BoundingBox((2, 5, 2)),
+            }).prop(center_anchor=True),
+            "autoreflow":
+            three.FlexAutoReflow(),
+        }).prop(render_priority=1,
+                flex_direction="row",
+                justify_content="flex-start")
         self.canvas = three.ThreeCanvas({
             "cam":
             cam,
@@ -700,7 +691,6 @@ class SampleThreeHudApp(EditableApp):
                     "inp": self.img_path,
                     "btn1": mui.Button("Read Image", self.on_read_img),
                     "btn2": mui.Button("Debug", self.on_debug),
-
                     "btn3": mui.Typography("Inp", )
                 }).prop(position="absolute",
                         top=0,
@@ -719,15 +709,15 @@ class SampleThreeHudApp(EditableApp):
 
     async def on_debug(self):
         await self.flex_container.set_new_layout({
-                "mesh2":
-                three.ItemBox({
-                    "mesh0":
-                    three.Button("RTX2", 2, 1, lambda x: print("HELLO")),
-                }).prop(center_anchor=True),
+            "mesh2":
+            three.ItemBox({
+                "mesh0":
+                three.Button("RTX2", 2, 1, lambda x: print("HELLO")),
+            }).prop(center_anchor=True),
         })
 
-class SampleThree2DApp(EditableApp):
 
+class SampleThree2DApp(EditableApp):
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
@@ -797,7 +787,6 @@ class SampleThree2DApp(EditableApp):
 
 
 class SampleMapApp(EditableApp):
-
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
@@ -858,7 +847,6 @@ class WTF:
 
 
 class SampleConfigApp(EditableApp):
-
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
@@ -877,7 +865,6 @@ class SampleConfigApp(EditableApp):
 
 
 class SampleDataControlApp(EditableApp):
-
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         # makesure three canvas size fit parent.
@@ -901,7 +888,6 @@ class SampleDataControlApp(EditableApp):
 
 
 class AutoComputeApp:
-
     @mark_create_layout
     def create_layout(self):
 
@@ -935,7 +921,6 @@ class AutoComputeApp:
 
 
 class AnyLayout:
-
     def __init__(self) -> None:
         super().__init__()
 
@@ -952,7 +937,6 @@ class AnyLayout:
 
 
 class ObjectInspectApp:
-
     @marker.mark_create_layout
     def my_latout(self):
         self.array = np.random.uniform(-1, 1, size=[500])
@@ -972,7 +956,6 @@ class ObjectInspectApp:
 
 
 class PointCloudApp:
-
     @mark_create_layout
     def my_layout(self):
         cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
@@ -984,15 +967,12 @@ class PointCloudApp:
                                  1,
                                  1,
                                  callback=self._on_slider_select)
-        
-        res = mui.VBox([
 
+        res = mui.VBox([
             mui.HBox([
                 mui.Button("Change Slider Range",
                            self._on_slider_range_change),
-                mui.Button("Video",
-                           self._on_save_video),
-
+                mui.Button("Video", self._on_save_video),
                 self.slider.prop(flex=1),
             ]),
             self.canvas.prop(flex=1),
@@ -1002,11 +982,12 @@ class PointCloudApp:
                 width="100%",
                 height="100%",
                 overflow="hidden")
-        res.set_flow_event_context_creator(lambda: self.wtfobj.enter_context(self.wtfobj))
+        res.set_flow_event_context_creator(
+            lambda: self.wtfobj.enter_context(self.wtfobj))
         ctx = self.wtfobj.enter_context(self.wtfobj)
         with ctx:
             print("???")
-        return res 
+        return res
 
     async def _on_slider_range_change(self):
 
@@ -1069,7 +1050,6 @@ class PointCloudApp:
 
 
 class PlotApp:
-
     @mark_create_layout
     def my_layout(self):
         self.plot = plotly.Plotly().prop(
@@ -1108,8 +1088,8 @@ class PlotApp:
         )
         await self.plot.show_raw(data, layout)
 
-class CollectionApp:
 
+class CollectionApp:
     @mark_create_layout
     def my_layout(self):
         self.anylayout = AnyLayout()
@@ -1119,7 +1099,10 @@ class CollectionApp:
         self.example_object_inspector = ObjectInspectApp()
         self.example_pyplot = PlotApp()
         self.example_auto_complete = AutoComputeApp()
-        self.editor = mui.MonacoEditor("RTX = 0", "python", "default_path").prop(height="100%", width="100%", overflow="hidden")
+        self.editor = mui.MonacoEditor("RTX = 0", "python",
+                                       "default_path").prop(height="100%",
+                                                            width="100%",
+                                                            overflow="hidden")
         self.sm = plus.ScriptManager("CodeStorage")
         nodes = [
             mui.ControlNode("1",
@@ -1156,41 +1139,49 @@ class CollectionApp:
                                                 overflow="hidden"),
                 mui.HBox([
                     plus.AnyFlexLayout(
-            mui.FlexLayout.TabSet([
-                        mui.FlexLayout.Tab(self.sm),
-                    ])
-                    ),
+                        mui.FlexLayout.TabSet([
+                            mui.FlexLayout.Tab(self.sm),
+                        ])),
                 ]).prop(width="100%", height="100%", overflow="hidden")
             ]).prop(default_sizes=[1, 3], width="100%", height="100%")
         ]).prop(flex_flow="row nowrap")
 
-        return res 
-    
-    @mark_autorun 
+        return res
+
+    @mark_autorun
     def _autorun_dev(self):
         func_support_reload(1, 2)
         # self.dev_0.dev()
 
-class SchedulerTest:
 
+class SchedulerTest:
     @mark_create_layout
     def my_layout(self):
-        
+
         return mui.VBox([
             Button("Show", self._submit_simple_task),
         ])
 
     async def _submit_simple_task(self):
         schr = appctx.find_component(plus.TmuxScheduler)
-        assert schr is not None 
-        task1 = plus.Task(TaskType.FunctionId, "tensorpc.autossh.scheduler.test_data::simple_task_with_client", [{}])
+        assert schr is not None
+        task1 = plus.Task(
+            TaskType.FunctionId,
+            "tensorpc.autossh.scheduler.test_data::simple_task_with_client",
+            [{}])
         task1.id = "test1"
         task1.num_gpu_used = 3
-        task2 = plus.Task(TaskType.FunctionId, "tensorpc.autossh.scheduler.test_data::simple_task_with_client", [{}])
+        task2 = plus.Task(
+            TaskType.FunctionId,
+            "tensorpc.autossh.scheduler.test_data::simple_task_with_client",
+            [{}])
         task2.id = "test2"
         task2.num_gpu_used = 4
 
-        task3 = plus.Task(TaskType.FunctionId, "tensorpc.autossh.scheduler.test_data::simple_task_with_client", [{}])
+        task3 = plus.Task(
+            TaskType.FunctionId,
+            "tensorpc.autossh.scheduler.test_data::simple_task_with_client",
+            [{}])
         task3.id = "test3"
         task3.num_gpu_used = 1
 
@@ -1199,14 +1190,23 @@ class SchedulerTest:
         await schr.submit_task(task2)
         await schr.submit_task(task3)
 
-class SchedulerApp:
 
+class SchedulerApp:
     @mark_create_layout
     def my_layout(self):
-        self.scheduler = plus.TmuxScheduler(lambda: appctx.get_app().get_ssh_node_data("local"))
-        self.scheduler_test = SchedulerTest()
-        res = plus.InspectPanel(self, mui.FlexLayout.Tab(self.scheduler))
-        return res 
+
+        # use a function to protect your password (only stored in master disk).
+        self.scheduler = plus.TmuxScheduler(
+            lambda: appctx.get_app().get_ssh_node_data("Local"))
+        self.scheduler_test = mui.flex_wrapper(SchedulerTest())
+        res = plus.InspectPanel(
+            self,
+            mui.FlexLayout.Row([
+                mui.FlexLayout.Tab(self.scheduler),
+                mui.FlexLayout.Tab(self.scheduler_test),
+            ]))
+        return res
+
 
 if __name__ == "__main__":
     import time

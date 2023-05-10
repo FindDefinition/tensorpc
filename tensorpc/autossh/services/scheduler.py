@@ -195,6 +195,10 @@ class Scheduler:
         if task.state.status == TaskStatus.Running:
             tmux.cancel_task(task_id)
             return True 
+        elif task.state.status == TaskStatus.Pending:
+            task.state.status = TaskStatus.Canceled
+            self._update_task_timestamp(task)
+            return True
         return False 
     
     def kill_task(self, task_id: str):
@@ -202,6 +206,10 @@ class Scheduler:
         if task.state.status == TaskStatus.Running:
             tmux.kill_task(task_id, task.state.pid)
             return True 
+        elif task.state.status == TaskStatus.Pending:
+            task.state.status = TaskStatus.Canceled
+            self._update_task_timestamp(task)
+            return True
         return False 
     
     def delete_task(self, task_id: str):

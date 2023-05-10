@@ -97,6 +97,7 @@ class FlexComponentBaseProps(BasicProps):
     """all props must have a default value, 
     manage state by your self.
     """
+    display: Union[Literal["flex", "none", "block", "inline", "grid", "table"], Undefined] = undefined
     position: Union[Literal["absolute", "relative"], Undefined] = undefined
     top: Union[ValueType, Undefined] = undefined
     bottom: Union[ValueType, Undefined] = undefined
@@ -2150,17 +2151,18 @@ class FormControl(MUIContainerBase[FormControlProps, MUIComponentType]):
 class CollapseProps(MUIFlexBoxProps):
     orientation: Union[Literal["horizontal", "vertical"],
                        Undefined] = undefined
-    timeout: Union[NumberType, Undefined] = undefined
-
+    timeout: Union[NumberType, Undefined, Literal["auto"]] = undefined
+    triggered: Union[bool, Undefined] = undefined
+    collapsed_size: Union[NumberType, Undefined] = undefined
+    unmount_on_exit: Union[bool, Undefined] = undefined
 
 class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
 
     def __init__(self,
-                 children: Dict[str, MUIComponentType],
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
-                 inited: bool = False) -> None:
-        super().__init__(UIType.Collapse, CollapseProps, uid_to_comp, children,
-                         inited)
+                 children: Optional[LayoutType] = None) -> None:
+        if children is not None and isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+        super().__init__(UIType.Collapse, CollapseProps, None, children)
 
     @property
     def prop(self):
