@@ -2406,8 +2406,14 @@ class Flow:
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
         assert isinstance(node, DirectSSHNode)
-        host, port = node.url.split(":")
-        return SSHTarget(host, int(port), node.username, node.password)
+        url_parts = node.url.split(":")
+        if len(url_parts) == 1:
+            url_no_port = node.url
+            port = 22
+        else:
+            url_no_port = url_parts[0]
+            port = int(url_parts[1])
+        return SSHTarget(url_no_port, port, node.username, node.password)
 
     @marker.mark_exit
     async def _on_exit(self):
