@@ -153,8 +153,8 @@ class Scheduler:
             task.params = [{}]
         if task.id in self.tasks:
             prev_task = self.tasks[task.id]
-            if prev_task.state.status == TaskStatus.Running:
-                raise RuntimeError(f"task {task.id} is already running")
+            if prev_task.state.status == TaskStatus.Running or prev_task.state.status == TaskStatus.Pending:
+                raise RuntimeError(f"task {task.id} is already running or pending")
             else:
                 # replace old task with new one
                 self.tasks[task.id] = task

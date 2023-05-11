@@ -56,7 +56,7 @@ _TASK_STATUS_TO_UI_TEXT_AND_COLOR: Dict[TaskStatus,
                                         }
 
 
-class TaskCard(mui.Paper):
+class TaskCard(mui.FlexBox):
     def __init__(self, client: SchedulerClient, task: Task) -> None:
         self.task_id = task.id
         self.task = task
@@ -75,15 +75,18 @@ class TaskCard(mui.Paper):
                                                tooltip="Show Detail",
                                                size="small")
         self.command = mui.Typography(task.command).prop(
-            font_size="14px", font_family="monospace")
+            font_size="14px", font_family="monospace", word_break="break-word")
 
         self.detail = mui.Collapse([
-            self.command,
+            mui.VBox([self.command]),
         ]).prop(timeout="auto", unmount_on_exit=True)
         self._expanded = False
         layout = [
             mui.VBox([
                 mui.HBox([
+                    mui.FlexBox([
+                        mui.Icon(mui.IconType.DragIndicator).prop(),
+                    ]).prop(take_drag_ref=True, cursor="move"),
                     self.name,
                     mui.Chip("copy tmux cmd",
                              self._on_tmux_chip).prop(color="blue",
@@ -116,20 +119,26 @@ class TaskCard(mui.Paper):
             ]).prop(margin="0 5px 0 5px", flex=0),
         ]
         super().__init__([
-            mui.VBox([
-                *layout,
-            ]).prop(
-                flex_flow="row wrap",
-                align_items="center",
-            ),
-            self.detail,
+            mui.Paper([
+                mui.VBox([
+                    *layout,
+                ]).prop(
+                    flex_flow="row wrap",
+                    align_items="center",
+                ),
+                self.detail,
+            ]).prop(flex_flow="column",
+                    padding="5px",
+                    margin="5px",
+                    elevation=4,
+                    flex=1)
         ])
-        self.prop(
-            flex_flow="column",
-            padding="5px",
-            margin="5px",
-            elevation=4,
-        )
+        self.prop(draggable=True,
+                  drag_type="TaskCard",
+                  drag_in_child=True,
+                  sx_over_drop={
+                      "opacity": "0.5",
+                  })
 
     async def _on_expand_more(self):
         self._expanded = not self._expanded

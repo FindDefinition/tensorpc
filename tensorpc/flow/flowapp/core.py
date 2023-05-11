@@ -116,7 +116,7 @@ class UIType(enum.Enum):
     FlexLayout = 0x2a
     DynamicControls = 0x2b
     MonacoEditor = 0x2c
-    ListItem = 0x2d
+    Icon = 0x2d
 
     # special
     TaskLoop = 0x100

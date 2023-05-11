@@ -1220,6 +1220,7 @@ class EditableApp(App):
                             callbacks_of_this_file = self.__get_callback_metas_in_file(
                                 resolved_path, self.root)
                         else:
+                            print(type(layout), layout._flow_uid)
                             callbacks_of_this_file = self.__get_callback_metas_in_file(
                                 resolved_path, layout)
                         for cb_meta in callbacks_of_this_file:
@@ -1309,6 +1310,7 @@ class EditableApp(App):
                         #     self._loop)
                         # print(code_changed_metas)
                         if flow_special.create_layout:
+                            print("CREATE LAYOUT")
                             fn = flow_special.create_layout.get_binded_fn()
                             if isinstance(layout, App):
                                 await self._app_run_layout_function(
@@ -1383,7 +1385,6 @@ class EditableApp(App):
                     self._flowapp_special_eemitter.emit(
                         AppSpecialEventType.ObservedFunctionChange.value,
                         observed_func_changed)
-
             if is_callback_change or is_reload:
                 # reset all callbacks in this file
                 if callbacks_of_this_file is None:
