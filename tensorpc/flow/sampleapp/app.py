@@ -395,16 +395,14 @@ class SampleThreeApp(EditableApp):
                 }).prop(flex=1, min_height=0, min_width=0),
                 "btn":
                 btn_random_pc,
-                "btn2":
-                Button("rpcTest", self.rpc_test),
+                # "btn2":
+                # Button("rpcTest", self.rpc_test),
                 "btn3":
                 Button("Reset Camera", self.reset_camera),
             }).prop(flex=1, min_height=0),
         }
 
     async def show_Random_pc(self):
-        # data = np.load(
-        #     "/home/tusimple/tusimple/spconv/test/data/benchmark-pc.npz")
         data = np.load(
             "/home/yy/Projects/spconv-release/spconv/test/data/benchmark-pc.npz"
         )
@@ -466,22 +464,6 @@ class SampleThreeApp(EditableApp):
                                         attrs=attrs[is_not_nan_mask],
                                         attr_fields=attr_fields)
 
-    async def rpc_test(self):
-        print(self._get_app_dynamic_cls().module_key)
-        print("???")
-        data = np.load(
-            "/home/tusimple/tusimple/spconv/test/data/benchmark-pc.npz")
-        pc = np.ascontiguousarray(data["pc"])
-        print(pc.shape)
-        # tmp = pc[:, 0].copy()
-        # pc[:, 0] = pc[:, 1]
-        # pc[:, 1] = tmp
-        addr = "localhost:43727"
-        master_addr = "10.130.51.54:51051"
-        # we can't use sync code here which will cause deadlock
-        async with AsyncAppClient(master_addr, "default_flow",
-                                  "D3VisApp") as client:
-            await client.app_remote_call("show_pc", pc)
 
 
 class SampleThreePointsApp(EditableApp):

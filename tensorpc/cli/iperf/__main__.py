@@ -16,7 +16,7 @@ async def main_async(addr: str, size: int, is_send: bool):
             await simple_chunk_call_async(addr, "tensorpc.services.collection::SpeedTestServer.send_data", size)
         end_time = time.time() 
         speed = size / (end_time - start)
-        print("speed: {:.2f} MB/s".format(speed))
+        print("usetime: {}, speed: {:.2f} MB/s".format(end_time - start, speed))
     except:
         traceback.print_exc()
         raise

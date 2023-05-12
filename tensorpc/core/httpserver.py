@@ -103,16 +103,16 @@ class WebsocketClient(object):
         # if len(chunks) > 1:
         #     print("BEFORE SEND")
         try:
-            if encoder.get_total_array_binary_size() > max_size:
-                print("WS PREPARE SEND", encoder.get_total_array_binary_size())
-            t = time.time()
+            # if encoder.get_total_array_binary_size() > max_size:
+            #     print("WS PREPARE SEND", encoder.get_total_array_binary_size())
+            # t = time.time()
             for chunk in encoder.get_message_chunks(msg_type, req, max_size):
                 assert len(chunk) <= max_size
                 # tasks.append(self.ws.send_bytes(chunk))
                 await self.ws.send_bytes(chunk)
-            if encoder.get_total_array_binary_size() > max_size:
+            # if encoder.get_total_array_binary_size() > max_size:
 
-                print("WS SEND TIME", time.time() - t)
+                # print("WS SEND TIME", time.time() - t)
         except ConnectionResetError:
             print("CLIENT SEND ERROR, RETURN")
             return
@@ -523,8 +523,6 @@ class AllWebsocketHandler:
                         msg_type = core_io.SocketMsgType.Event
                         res = task.result()
                     if isinstance(res, defs.DynamicEvents):
-                        print("NEW EVENTS", [x[0] for x in res.name_and_datas])
-
                         # exc is None
                         for dykey, data in res.name_and_datas:
                             data_to_send = [data]
@@ -543,7 +541,6 @@ class AllWebsocketHandler:
                     else:
 
                         if isinstance(res, defs.DynamicEvent):
-                            print("NEW EVENT", res.name)
                             data = res.data
                             dynamic_key = res.name
                         else:
