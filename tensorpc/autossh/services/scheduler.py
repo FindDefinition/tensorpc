@@ -173,8 +173,6 @@ class Scheduler:
         self._do_schedule()
         # print("submit_task END", task.id)
 
-        return list(self.tasks.values())
-
     def check_task_status(self, task_id: str):
         if task_id in self.tasks:
             task = self.tasks[task_id]

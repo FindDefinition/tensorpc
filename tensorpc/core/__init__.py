@@ -16,8 +16,8 @@ from tensorpc.core.defs import Service, ServiceDef, from_yaml_path
 from tensorpc.constants import TENSORPC_SPLIT
 
 BUILTIN_SERVICES = [
-    Service(f"tensorpc.services.vis{TENSORPC_SPLIT}VisService", {}),
     Service(f"tensorpc.services.collection{TENSORPC_SPLIT}FileOps", {}),
+    Service(f"tensorpc.services.collection{TENSORPC_SPLIT}SpeedTestServer", {}),
     Service(f"tensorpc.flow.serv.core{TENSORPC_SPLIT}Flow", {}),
     Service(f"tensorpc.flow.serv.worker{TENSORPC_SPLIT}FlowWorker", {}),
     Service(f"tensorpc.services.collection{TENSORPC_SPLIT}Simple", {}),

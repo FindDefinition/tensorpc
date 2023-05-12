@@ -16,12 +16,19 @@ from pathlib import Path
 
 from tensorpc import marker, prim
 
-
+import numpy as np 
 class Simple:
 
     def echo(self, x):
         return x
+    
+class SpeedTestServer:
 
+    def recv_data(self, x):
+        return 
+    
+    def send_data(self, size_mb: int):
+        return np.zeros([size_mb * 1024 * 1024], dtype=np.uint8)
 
 class FileOps:
 

@@ -531,6 +531,7 @@ class IconButtonProps(MUIComponentBaseProps):
     progress_size: Union[NumberType, Undefined] = undefined
     # if defined, will show a confirm dialog before executing the callback
     confirm_message: Union[str, Undefined] = undefined
+    confirm_title: Union[str, Undefined] = undefined
 
 
 class IconButton(MUIComponentBase[IconButtonProps]):

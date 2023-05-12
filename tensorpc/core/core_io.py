@@ -110,7 +110,8 @@ def bytes2pb(data: bytes, send_data=True) -> arraybuf_pb2.ndarray:
 
 def array2pb(array: np.ndarray, send_data=True) -> arraybuf_pb2.ndarray:
     if array.ndim > 0 and send_data:
-        array = np.ascontiguousarray(array)
+        if not array.flags['C_CONTIGUOUS']:
+            array = np.ascontiguousarray(array)
     dtype = NPDTYPE_TO_PB_MAP[array.dtype]
     order = NPBYTEORDER_TO_PB_MAP[array.dtype.byteorder]
     pb_dtype = arraybuf_pb2.dtype(
@@ -225,30 +226,61 @@ def to_protobuf_stream(data_list: List[Any],
     num_args = len(data_list)
     for arg_idx, arg in enumerate(data_list):
         if isinstance(arg, np.ndarray):
-            ref_buf = array2pb(arg)
+            if not arg.flags['C_CONTIGUOUS']:
+                data_bytes = arg.tobytes()
+            else:
+                data_bytes = None 
+            order = NPBYTEORDER_TO_PB_MAP[arg.dtype.byteorder]
+            data_dtype = arraybuf_pb2.dtype(
+                type=NPDTYPE_TO_PB_MAP[arg.dtype],
+                byte_order=order,
+            )
+            # ref_buf = array2pb(arg)
             shape = arg.shape
+            length = arg.nbytes
         elif isinstance(arg, bytes):
-            ref_buf = bytes2pb(arg)
+            data_dtype = arraybuf_pb2.dtype(type=arraybuf_pb2.dtype.CustomBytes)
+            # ref_buf = bytes2pb(arg)
+            data_bytes = arg
             shape = []
+            length = len(data_bytes)
+
         else:
             raise NotImplementedError
-        data = ref_buf.data
-        num_chunk = _div_up(len(data), chunk_size)
+
+        # data = ref_buf.data
+        num_chunk = _div_up(length, chunk_size)
         if num_chunk == 0:
             num_chunk = 1  # avoid empty string raise error
         bufs = []
         for i in range(num_chunk):
-            buf = rpc_message_pb2.RemoteCallStream(
-                num_chunk=num_chunk,
-                chunk_id=i,
-                num_args=num_args,
-                arg_id=arg_idx,
-                dtype=ref_buf.dtype,
-                func_key=func_key,
-                chunked_data=data[i * chunk_size:(i + 1) * chunk_size],
-                shape=[],
-                flags=flags,
-            )
+            if isinstance(arg, np.ndarray) and data_bytes is None:
+                arg_view = arg.view(np.uint8)
+                buf = rpc_message_pb2.RemoteCallStream(
+                    num_chunk=num_chunk,
+                    chunk_id=i,
+                    num_args=num_args,
+                    arg_id=arg_idx,
+                    dtype=data_dtype,
+                    func_key=func_key,
+                    chunked_data=arg_view[i * chunk_size:(i + 1) * chunk_size].tobytes(),
+                    shape=[],
+                    flags=flags,
+                )
+            else:
+                assert data_bytes is not None 
+                buf = rpc_message_pb2.RemoteCallStream(
+                    num_chunk=num_chunk,
+                    chunk_id=i,
+                    num_args=num_args,
+                    arg_id=arg_idx,
+                    dtype=data_dtype,
+                    func_key=func_key,
+                    chunked_data=data_bytes[i * chunk_size:(i + 1) * chunk_size],
+                    shape=[],
+                    flags=flags,
+                )
+
             bufs.append(buf)
         assert len(bufs) > 0
         bufs[0].shape[:] = shape
@@ -473,7 +505,8 @@ def data_to_pb_shmem(data, shared_mem, multi_thread=False, align_nbit=0):
             sum_array_nbytes += len(arrays[i])
             array_buffers.append((arrays[i], len(arrays[i])))
         else:
-            arrays[i] = np.ascontiguousarray(arrays[i])
+            if not arrays[i].flags['C_CONTIGUOUS']:
+                arrays[i] = np.ascontiguousarray(arrays[i])
             sum_array_nbytes += arrays[i].nbytes
             array_buffers.append((arrays[i].view(np.uint8), arrays[i].nbytes))
     if sum_array_nbytes + len(data_skeleton_bytes) > shared_mem.nbytes:
@@ -549,7 +582,9 @@ def dumps(obj, multi_thread=False, buffer=None, use_bytearray=False):
             array_buffers.append((arrays[i], len(arrays[i])))
         else:
             # ascontiguous will convert scalar to 1-D array. be careful.
-            arrays[i] = np.ascontiguousarray(arrays[i])
+            if not arrays[i].flags['C_CONTIGUOUS']:
+                arrays[i] = np.ascontiguousarray(arrays[i])
+
             sum_array_nbytes += arrays[i].nbytes
             array_buffers.append((arrays[i].view(np.uint8), arrays[i].nbytes))
 

@@ -84,6 +84,8 @@ class Task:
 
     name: Optional[str] = None 
 
+    desp: str = ""
+
     def empty_state(self):
         self.state = TaskState(TaskStatus.Pending, 0.0, [], -1, "")
         return self 

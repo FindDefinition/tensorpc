@@ -118,6 +118,11 @@ class TaskCard(mui.FlexBox):
                     tooltip="Kill Task",
                     size="small",
                     confirm_message="Are You Sure to Kill This Task?"),
+                mui.IconButton(mui.IconType.Delete, self._on_kill_task).prop(
+                    tooltip="Kill Session",
+                    size="small",
+                    confirm_message="Are You Sure to Kill This Session?",
+                    mui_color="error"),
                 self.collapse_btn,
             ]).prop(margin="0 5px 0 5px", flex=0),
         ]
@@ -259,7 +264,7 @@ class TmuxScheduler(mui.FlexBox):
 
     @marker.mark_will_unmount
     async def _on_unmount(self):
-        await self.client.shutdown_scheduler()
+        # await self.client.shutdown_scheduler()
         # self.period_check_task.cancel()
         pass
 
