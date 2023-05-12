@@ -48,6 +48,7 @@ REQUIRED = [
     "cryptography>=39.0.0",
     "psutil",
     "libtmux",
+    "humanize",
 ]
 
 # What packages are optional?

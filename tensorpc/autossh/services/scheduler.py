@@ -1,7 +1,7 @@
 import asyncio
 import enum
 from typing import Dict, List, Optional, Set, Tuple
-from tensorpc.autossh.scheduler.core import Task, TaskOutput, TaskStatus, TaskType, ResourceType
+from tensorpc.autossh.scheduler.core import ALL_CTRL_C_CANCELABLE_STATUS, ALL_KILLABLE_STATUS, ALL_RUNNING_STATUS, Task, TaskOutput, TaskStatus, TaskType, ResourceType
 from tensorpc.autossh.scheduler import tmux
 from tensorpc.core import marker, prim
 import uuid
@@ -116,6 +116,8 @@ class Scheduler:
                     self._release_task_resources(task)
                     # task_changed = True 
         # if task_changed:
+        # print("PERIOD SCHEDULE")
+
         self._do_schedule()
         # print("num idle", len(self.resource_manager.idle_resources[ResourceType.GPU]), "num occ", len(self.resource_manager.occupied_resources[ResourceType.GPU]))
 
@@ -146,6 +148,8 @@ class Scheduler:
         return update_tasks, deleted_uids
 
     def submit_task(self, task: Task):
+        # print("submit_task START", task.id)
+
         if task.id == "":
             task.id = str(uuid.uuid4())
         if task.type == TaskType.FunctionId and task.params is None:
@@ -153,7 +157,9 @@ class Scheduler:
             task.params = [{}]
         if task.id in self.tasks:
             prev_task = self.tasks[task.id]
-            if prev_task.state.status == TaskStatus.Running or prev_task.state.status == TaskStatus.Pending:
+            # print("submit_task PREV", prev_task.id, prev_task.state.status)
+
+            if prev_task.state.status in ALL_RUNNING_STATUS:
                 raise RuntimeError(f"task {task.id} is already running or pending")
             else:
                 # replace old task with new one
@@ -163,7 +169,11 @@ class Scheduler:
         task.empty_state()
         task.state.timestamp = time.time_ns()
         task.create_timestamp = task.state.timestamp
+        task.state.status = TaskStatus.Pending
         self._do_schedule()
+        # print("submit_task END", task.id)
+
+        return list(self.tasks.values())
 
     def check_task_status(self, task_id: str):
         if task_id in self.tasks:
@@ -176,6 +186,9 @@ class Scheduler:
         assert status in _SUPPORTED_SET_STATUS, f"only support set to {list(_SUPPORTED_SET_STATUS)}"
         if task_id in self.tasks:
             task = self.tasks[task_id]
+            if status == TaskStatus.NeedToCancel:
+                if task.state.status not in ALL_RUNNING_STATUS:
+                    return False 
             task.state.status = status 
             self._update_task_timestamp(task)
             return True
@@ -183,8 +196,10 @@ class Scheduler:
 
     def run_task(self, task_id: str):
         task = self.tasks[task_id]
-        if task.state.status != TaskStatus.Running:
+        if task.state.status not in ALL_RUNNING_STATUS:
+            # print("RUNTASK", task_id)
             cmd = f"python -m tensorpc.autossh.scheduler.runtask {task.type.value}"
+            task.state.status = TaskStatus.Booting
             tmux.launch_tmux_task(task_id, cmd, not task.keep_tmux_session, self.grpc_port, task.state.resources)
             self._update_task_timestamp(task)
             return True 
@@ -192,7 +207,7 @@ class Scheduler:
     
     def cancel_task(self, task_id: str):
         task = self.tasks[task_id]
-        if task.state.status == TaskStatus.Running:
+        if task.state.status in ALL_CTRL_C_CANCELABLE_STATUS:
             tmux.cancel_task(task_id)
             return True 
         elif task.state.status == TaskStatus.Pending:
@@ -203,7 +218,7 @@ class Scheduler:
     
     def kill_task(self, task_id: str):
         task = self.tasks[task_id]
-        if task.state.status == TaskStatus.Running:
+        if task.state.status in ALL_KILLABLE_STATUS:
             tmux.kill_task(task_id, task.state.pid)
             return True 
         elif task.state.status == TaskStatus.Pending:
@@ -215,7 +230,7 @@ class Scheduler:
     def delete_task(self, task_id: str):
         if task_id in self.tasks:
             task = self.tasks[task_id]
-            assert task.state.status != TaskStatus.Running, "you can't delete a running task"
+            assert task.state.status not in ALL_RUNNING_STATUS, "you can't delete a running task"
             self.tasks.pop(task_id)
             return True 
         return False 

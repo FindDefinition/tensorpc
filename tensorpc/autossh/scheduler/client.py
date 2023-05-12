@@ -81,34 +81,34 @@ class SchedulerClient:
         return idle_resources, occupied_resources
 
     async def submit_task(self, task: Task):
-        await simple_remote_call_async(self.local_url, serv_names.SCHED_TASK_SUBMIT_TASK, task)
+        return await simple_remote_call_async(self.local_url, serv_names.SCHED_TASK_SUBMIT_TASK, task)
     
     async def cancel_task(self, task_id: str):
         """use Ctrl-C to cancel task
         """
-        await simple_remote_call_async(self.local_url, serv_names.SCHED_TASK_CANCEL_TASK, task_id)
+        return await simple_remote_call_async(self.local_url, serv_names.SCHED_TASK_CANCEL_TASK, task_id)
     
     async def delete_task(self, task_id: str):
         """delete task from task list
         """
-        await simple_remote_call_async(self.local_url, serv_names.SCHED_TASK_DELETE, task_id)
+        return await simple_remote_call_async(self.local_url, serv_names.SCHED_TASK_DELETE, task_id)
 
     async def kill_task(self, task_id: str):
-        await simple_remote_call_async(self.local_url, serv_names.SCHED_TASK_KILL_TASK, task_id)
+        return await simple_remote_call_async(self.local_url, serv_names.SCHED_TASK_KILL_TASK, task_id)
 
     async def shutdown_scheduler(self):
-        await shutdown_server_async(self.local_url)
+        return await shutdown_server_async(self.local_url)
 
     async def set_task_status(self, task_id: str, status: TaskStatus):
         """set task to some specific status (i.e. tell task to do something)
         """
-        await simple_remote_call_async(self.local_url, serv_names.SCHED_TASK_SET_STATUS, task_id, status)
+        return await simple_remote_call_async(self.local_url, serv_names.SCHED_TASK_SET_STATUS, task_id, status)
 
     async def soft_cancel_task(self, task_id: str):
         """use status to cancel task, task need to check status by
         TaskClient and cancel itself
         """
-        await self.set_task_status(task_id, TaskStatus.NeedToCancel)
+        return await self.set_task_status(task_id, TaskStatus.NeedToCancel)
 
 def main():
     s = libtmux.Server()

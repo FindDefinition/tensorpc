@@ -14,6 +14,7 @@
 
 import enum
 import inspect
+import time
 import types
 from functools import partial
 from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
@@ -26,7 +27,7 @@ import psutil
 import io
 import csv
 from dataclasses import dataclass
-
+import humanize
 
 @dataclass
 class GPUMeasure:
@@ -42,6 +43,14 @@ class GPUMeasure:
         msg += f"{self.temperature}\u2103,io={self.memusage}%"
         return msg
 
+@dataclass 
+class NetworkMeasure:
+    name: str 
+    bytes_recv: int
+    bytes_sent: int
+    recv_speed: float 
+    send_speed: float
+    timestamp_second: float
 
 @dataclass
 class GPUMonitor:
@@ -67,12 +76,18 @@ class ComputeResourceMonitor(mui.FlexBox):
                                               variant="determinate")
             self.gpus.append(GPUMonitor(util, mem))
             gpu_uis.extend([mui.Divider("vertical"), util, mem])
+        self.net_info_str = mui.Typography("").prop(white_space="pre-wrap", font_size="14px", font_family="monospace")
         super().__init__([
-            self.cpu,
-            self.mem,
-            *gpu_uis,
+            mui.HBox([
+                self.cpu,
+                self.mem,
+                *gpu_uis,
+            ]),
+            self.net_info_str,
         ])
-        self.prop(flex_flow="row wrap")
+        self.prop(flex_flow="column")
+        self.prev_net_measures: Dict[str, NetworkMeasure] = {}
+        self.period = 2.0
 
         self.shutdown_ev = asyncio.Event()
 
@@ -85,7 +100,31 @@ class ComputeResourceMonitor(mui.FlexBox):
     def _on_unmount(self):
         self.shutdown_ev.set()
 
+    def _get_network_measure(self) -> List[NetworkMeasure]:
+        all_stats = psutil.net_if_stats()
+        all_io_counters = psutil.net_io_counters(pernic=True)
+        network_measures: List[NetworkMeasure] = []
+        prev_measures = self.prev_net_measures
+        for nic, stats in all_stats.items():
+            if stats.isup:
+                io_counters = all_io_counters[nic]
+                ts = time.time()
+                if nic in self.prev_net_measures:
+                    prev_measure = prev_measures[nic]
+                    recv_speed = (io_counters.bytes_recv -
+                                  prev_measure.bytes_recv) / (ts - prev_measure.timestamp_second)
+                    send_speed = (io_counters.bytes_sent -
+                                  prev_measure.bytes_sent) / (ts - prev_measure.timestamp_second)
+                else:
+                    recv_speed = 0
+                    send_speed = 0
+                measure = NetworkMeasure(nic, io_counters.bytes_recv, io_counters.bytes_sent, recv_speed, send_speed, ts)
+                self.prev_net_measures[nic] = measure
+                network_measures.append(measure)
+        return network_measures
+        
     def _get_gpu_measures(self) -> List[GPUMeasure]:
+        
         querys = [
             "gpu_name",
             "utilization.gpu",
@@ -123,9 +162,13 @@ class ComputeResourceMonitor(mui.FlexBox):
     async def get_resource(self):
         while True:
             cpu_percent = psutil.cpu_percent()
+            
             vm_percent = psutil.virtual_memory().percent
+            net_measures = self._get_network_measure()
+            net_info_strs = [f"{m.name}: recv={humanize.naturalsize(m.recv_speed)}/s, send={humanize.naturalsize(m.send_speed)}/s" for m in net_measures]
             ev = self.cpu.update_event(value=cpu_percent)
             ev += self.mem.update_event(value=vm_percent)
+            ev += self.net_info_str.update_event(value="\n".join(net_info_strs))
             if len(self.gpus) > 0:
                 gpumeasures: List[GPUMeasure] = self._get_gpu_measures()
                 for g, m in zip(gpumeasures, self.gpus):
@@ -133,6 +176,6 @@ class ComputeResourceMonitor(mui.FlexBox):
                     ev += m.mem.update_event(value=g.memused / g.memtotal *
                                              100)
             await self.send_and_wait(ev)
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(self.period)
             if self.shutdown_ev.is_set():
                 break

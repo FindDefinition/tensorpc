@@ -53,6 +53,9 @@ _TASK_STATUS_TO_UI_TEXT_AND_COLOR: Dict[TaskStatus,
                                                                 "error"),
                                             TaskStatus.Finished: ("Finished",
                                                                   "success"),
+                                            TaskStatus.Booting: ("Finished",
+                                                                  "secondary"),
+
                                         }
 
 
@@ -148,7 +151,10 @@ class TaskCard(mui.FlexBox):
             self.detail.update_event(triggered=self._expanded))
 
     async def _on_schedule_task(self):
-        await self.client.submit_task(self.task)
+        res = await self.client.submit_task(self.task)
+        print("------")
+        for x in res:
+            print(x.id, x.state.status)
 
     async def _on_tmux_chip(self):
         await appctx.get_app().copy_text_to_clipboard(
@@ -306,4 +312,4 @@ class TmuxScheduler(mui.FlexBox):
                     func_id, [kwargs],
                     id=task_id,
                     keep_tmux_session=keep_tmux_session)
-        await self.client.submit_task(task)
+        await self.submit_task(task)

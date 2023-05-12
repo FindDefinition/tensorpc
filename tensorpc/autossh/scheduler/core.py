@@ -17,6 +17,15 @@ class TaskStatus(enum.Enum):
     AlmostCanceled = 7
     Canceled = 8
 
+    Booting = 9
+
+
+ALL_RUNNING_STATUS = set([TaskStatus.Running, TaskStatus.AlmostFinished, TaskStatus.AlmostCanceled, TaskStatus.Booting, TaskStatus.NeedToCancel])
+
+ALL_CTRL_C_CANCELABLE_STATUS = set([TaskStatus.Running, TaskStatus.Booting, TaskStatus.NeedToCancel])
+
+ALL_KILLABLE_STATUS = ALL_RUNNING_STATUS
+
 class TaskType(enum.Enum):
     # shell command
     Command = 0
