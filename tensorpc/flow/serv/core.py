@@ -67,6 +67,7 @@ from tensorpc.flow.serv_names import serv_names
 from tensorpc.utils.address import get_url_port
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.wait_tools import get_free_ports
+from tensorpc.flow.langserv import close_tmux_lang_server, get_tmux_lang_server_info_may_create
 
 FLOW_FOLDER_DATA_PATH = FLOW_FOLDER_PATH / "data_nodes"
 FLOW_MARKDOWN_DATA_PATH = FLOW_FOLDER_PATH / "markdown_nodes"
@@ -1080,6 +1081,7 @@ class AppNode(CommandNode):
         if fports:
             self.fwd_grpc_port = fports[0]
             self.fwd_http_port = fports[1]
+            print(self.lang_server_port)
             if self.lang_server_port != -1:
                 self.fwd_lang_server_port = fports[2]
                 env[flowconstants.TENSORPC_FLOW_APP_LANG_SERVER_PORT] = str(
@@ -1108,10 +1110,13 @@ class AppNode(CommandNode):
         client = SSHClient(url, username, password, None, self.get_uid(),
                            ENCODING)
         # query language server port first.
-        try:
-            langserv_port = await _query_lang_serv_port(url, username, password, init_cmds)
-        except:
-            langserv_port = -1
+        if enable_port_forward:
+            try:
+                langserv_port = await _query_lang_serv_port_and_init(self.id, url, username, password, init_cmds)
+            except:
+                langserv_port = -1
+        else:
+            langserv_port = get_tmux_lang_server_info_may_create("jedi", self.id)
         # print("APP", url, client.url_no_port, client.port)
         num_port = 2
         if not is_worker:
@@ -1120,10 +1125,11 @@ class AppNode(CommandNode):
         else:
             # query two local ports in flow remote worker, then use them as app ports
             ports = get_free_ports(num_port)
-        if langserv_port != -1:
-            ports.append(langserv_port)
         if len(ports) != num_port:
             raise ValueError("get free port failed. exit.")
+        if langserv_port != -1:
+            ports.append(langserv_port)
+
         self.grpc_port = ports[0]
         self.http_port = ports[1]
         self.lang_server_port = langserv_port
@@ -1141,7 +1147,10 @@ class AppNode(CommandNode):
             self.last_event = CommandEventType.PROMPT_END
             self.set_stop_status()
             self.running_driver_id = ""
-
+            if enable_port_forward:
+                await _close_lang_serv(self.id, url, username, password, init_cmds)
+            else:
+                close_tmux_lang_server(self.id)
         envs.update({
             flowconstants.TENSORPC_FLOW_APP_GRPC_PORT:
             str(self.grpc_port),
@@ -1150,6 +1159,10 @@ class AppNode(CommandNode):
             flowconstants.TENSORPC_FLOW_APP_MODULE_NAME:
             f"\"{self.module_name}\"",
         })
+        if not enable_port_forward:
+            envs[flowconstants.TENSORPC_FLOW_APP_LANG_SERVER_PORT] = str(
+                self.lang_server_port)
+
         if self.module_name.startswith("!"):
             envs[flowconstants.
                  TENSORPC_FLOW_APP_MODULE_NAME] = f"\"\\{self.module_name}\""
@@ -1507,7 +1520,7 @@ async def _get_free_port(count: int,
             raise ValueError(e.stderr)
     return ports
 
-async def _query_lang_serv_port(url: str,
+async def _query_lang_serv_port_and_init(uid: str, url: str,
                          username: str,
                          password: str,
                          init_cmds: str = ""):
@@ -1521,18 +1534,19 @@ async def _query_lang_serv_port(url: str,
             if init_cmds:
                 cmd = (
                     f"bash -i -c "
-                    f'"{init_cmds} && python -m tensorpc.flow.init_langserv jedi"'
+                    f'"{init_cmds} && python -m tensorpc.flow.init_langserv jedi {uid}"'
                 )
             else:
                 cmd = (f"bash -i -c "
-                       f'"python -m tensorpc.flow.init_langserv jedi"')
+                       f'"python -m tensorpc.flow.init_langserv jedi {uid}"')
             result = await conn.run(cmd, check=True)
             stdout = result.stdout
             if stdout is not None:
                 if isinstance(stdout, bytes):
                     stdout = stdout.decode("utf-8")
-                port_strs = stdout.strip()
+                port_strs = stdout.strip().split("\n")[-1]
                 port = int(port_strs)
+
         except asyncssh.process.ProcessError as e:
             traceback.print_exc()
             print(e.stdout)
@@ -1541,6 +1555,36 @@ async def _query_lang_serv_port(url: str,
             stderr = e.stderr
             raise ValueError(e.stderr)
     return port
+
+async def _close_lang_serv(uid: str, url: str,
+                         username: str,
+                         password: str,
+                         init_cmds: str = ""):
+    client = SSHClient(url, username, password, None, "", "utf-8")
+    port = -1
+    # res = await client.simple_run_command(f"python -m tensorpc.cli.free_port {count}")
+    # print(res)
+    stderr = ""
+    async with client.simple_connect() as conn:
+        try:
+            if init_cmds:
+                cmd = (
+                    f"bash -i -c "
+                    f'"{init_cmds} && python -m tensorpc.flow.close_langserv {uid}"'
+                )
+            else:
+                cmd = (f"bash -i -c "
+                       f'"python -m tensorpc.flow.close_langserv {uid}"')
+            result = await conn.run(cmd, check=True)
+        except asyncssh.process.ProcessError as e:
+            traceback.print_exc()
+            print(e.stdout)
+            print("-----------")
+            print(e.stderr)
+            stderr = e.stderr
+            raise ValueError(e.stderr)
+    return port
+
 
 class NodeDesp:
 

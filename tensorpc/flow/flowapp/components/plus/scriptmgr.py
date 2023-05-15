@@ -16,11 +16,13 @@ import asyncio
 import dataclasses
 import enum
 import inspect
+import os
 import time
 from typing import Any, Callable, Coroutine, Dict, Iterable, List, Optional, Set, Tuple, Union
 from typing_extensions import Literal
 
 import numpy as np
+from tensorpc.flow.constants import TENSORPC_FLOW_APP_LANG_SERVER_PORT
 from tensorpc.flow.flowapp import appctx
 
 from tensorpc.flow import marker
@@ -64,9 +66,10 @@ class ScriptManager(mui.FlexBox):
         super().__init__()
 
         self._storage_node_rid = storage_node_rid
-
+        lsp_port = os.getenv(TENSORPC_FLOW_APP_LANG_SERVER_PORT, mui.undefined) 
+        print(lsp_port, "lsp_port")
         self.code_editor = mui.MonacoEditor("", "python",
-                                            "default").prop(flex=1)
+                                            "default").prop(flex=1, lsp_port=lsp_port)
         self.scripts = mui.Autocomplete(
             "Scripts",
             [],

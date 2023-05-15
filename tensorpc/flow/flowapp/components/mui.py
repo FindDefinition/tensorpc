@@ -1257,6 +1257,7 @@ class MonacoEditorProps(MUIComponentBaseProps):
     language: Union[str, Undefined] = undefined
     path: Union[str, Undefined] = undefined
     debounce: Union[NumberType, Undefined] = undefined
+    lsp_port: Union[int, Undefined] = undefined
 
 
 class MonacoEditor(MUIComponentBase[MonacoEditorProps]):

@@ -208,6 +208,7 @@ class AppEventType(enum.Enum):
     UIUpdateUsedEvents = 17
     # clipboard
     CopyToClipboard = 20
+    InitLSPClient = 21
     # schedule event, won't be sent to frontend.
     ScheduleNext = 100
     # special UI event
@@ -652,6 +653,24 @@ class CopyToClipboardEvent:
         assert isinstance(new, CopyToClipboardEvent)
         return new
 
+@ALL_APP_EVENTS.register(key=AppEventType.InitLSPClient.value)
+class InitLSPClientEvent:
+
+    def __init__(self, port: int) -> None:
+        self.port = port
+
+    def to_dict(self):
+        return {
+            "port": self.port,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        return cls(data["port"])
+
+    def merge_new(self, new):
+        assert isinstance(new, InitLSPClientEvent)
+        return new
 
 @ALL_APP_EVENTS.register(key=AppEventType.ScheduleNext.value)
 class ScheduleNextForApp:
@@ -675,7 +694,8 @@ APP_EVENT_TYPES = Union[UIEvent, LayoutEvent, CopyToClipboardEvent,
                         UpdateComponentsEvent, DeleteComponentsEvent,
                         ScheduleNextForApp, AppEditorEvent, UIUpdateEvent,
                         UISaveStateEvent, NotifyEvent, UIExceptionEvent,
-                        ComponentEvent, FrontendUIEvent, UpdateUsedEventsEvent]
+                        ComponentEvent, FrontendUIEvent, UpdateUsedEventsEvent,
+                        InitLSPClientEvent]
 
 
 def app_event_from_data(data: Dict[str, Any]) -> "AppEvent":

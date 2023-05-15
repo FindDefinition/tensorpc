@@ -21,7 +21,7 @@ from tensorpc.flow.coretypes import ScheduleEvent, get_uid
 from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.appcore import enter_app_conetxt
 from tensorpc.flow.flowapp.components.mui import FlexBox, flex_wrapper
-from tensorpc.flow.flowapp.core import AppEditorFrontendEvent, AppEvent, AppEventType, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
+from tensorpc.flow.flowapp.core import AppEditorFrontendEvent, AppEvent, AppEventType, InitLSPClientEvent, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
 from tensorpc.flow.flowapp.app import App, EditableApp
 import asyncio
 from tensorpc.core import marker
@@ -94,6 +94,7 @@ class FlowApp:
         self._send_loop_queue: "asyncio.Queue[AppEvent]" = self.app._queue
         # self.app._send_callback = self._send_http_event
         self._send_loop_task = asyncio.create_task(self._send_loop())
+        self.lsp_port = self.master_meta.lsp_port
 
         self.external_argv = external_argv
         self._external_argv_task: Optional[asyncio.Future] = None
@@ -120,10 +121,11 @@ class FlowApp:
         await self._send_loop_queue.put(
             AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)}))
         # TODO should we just use grpc client to query init state here?
+        init_event: Dict[AppEventType, Any] = {AppEventType.Notify: NotifyEvent(NotifyType.AppStart)}
+        if self.lsp_port is not None:
+            init_event[AppEventType.InitLSPClient] = InitLSPClientEvent(self.lsp_port)
         await self._send_loop_queue.put(
-            AppEvent("",
-                     {AppEventType.Notify: NotifyEvent(NotifyType.AppStart)}))
-
+            AppEvent("", init_event))
         if self.external_argv is not None:
             with enter_app_conetxt(self.app):
                 self._external_argv_task = asyncio.create_task(appctx.run_in_executor_with_exception_inspect(partial(self._run_app_script, argv=self.external_argv),))
