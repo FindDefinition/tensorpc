@@ -26,7 +26,7 @@ def reload_method(method: Callable, module_dict: dict, prev_code: str = ""):
         method_wrapped = method.func
     else:
         method_wrapped = method
-    if not inspect.ismethod(method):
+    if not inspect.ismethod(method_wrapped):
         return None, ""
     bound = method_wrapped.__self__
     method_qualname = method_wrapped.__qualname__

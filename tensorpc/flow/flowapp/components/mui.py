@@ -98,6 +98,7 @@ class FlexComponentBaseProps(BasicProps):
     manage state by your self.
     """
     display: Union[Literal["flex", "none", "block", "inline", "grid", "table"], Undefined] = undefined
+    cursor: Union[str, Undefined] = undefined
     position: Union[Literal["absolute", "relative"], Undefined] = undefined
     top: Union[ValueType, Undefined] = undefined
     bottom: Union[ValueType, Undefined] = undefined
@@ -177,12 +178,19 @@ class FlexBoxProps(FlexComponentBaseProps):
 # we can't let mui use three component.
 @dataclasses.dataclass
 class MUIFlexBoxProps(FlexBoxProps, ContainerBaseProps):
+    pass 
+
+@dataclasses.dataclass
+class MUIFlexBoxWithDndProps(MUIFlexBoxProps):
     draggable: Union[bool, Undefined] = undefined
     droppable: Union[bool, Undefined] = undefined
     allowed_dnd_types: Union[str, List[str], Undefined] = undefined
     sx_over_drop: Union[Dict[str, Any], Undefined] = undefined
     allow_file: Union[bool, Undefined] = undefined
-
+    drag_type: Union[str, Undefined] = undefined
+    drag_data: Union[Dict[str, Any], Undefined] = undefined
+    drag_in_child: Union[bool, Undefined] = undefined
+    take_drag_ref: Union[bool, Undefined] = undefined
 
 _TypographyVarient: TypeAlias = Literal['body1', 'body2', 'button', 'caption',
                                         'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -482,6 +490,29 @@ class IconType(enum.IntEnum):
     DragIndicator = 35
     Cancel = 36
 
+@dataclasses.dataclass
+class IconProps(BasicProps):
+    icon: int = 0
+    icon_size: Union[Literal["small", "medium", "large", "inherit"],
+                     Undefined] = undefined
+    icon_font_size: Union[NumberType, Undefined] = undefined
+    take_drag_ref: Union[Undefined, bool] = undefined
+
+class Icon(MUIComponentBase[IconProps]):
+
+    def __init__(self, icon: IconType) -> None:
+        super().__init__(UIType.Icon, IconProps)
+        self.props.icon = icon.value
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 @dataclasses.dataclass
 class IconButtonProps(MUIComponentBaseProps):
@@ -500,6 +531,7 @@ class IconButtonProps(MUIComponentBaseProps):
     progress_size: Union[NumberType, Undefined] = undefined
     # if defined, will show a confirm dialog before executing the callback
     confirm_message: Union[str, Undefined] = undefined
+    confirm_title: Union[str, Undefined] = undefined
 
 
 class IconButton(MUIComponentBase[IconButtonProps]):
@@ -930,8 +962,7 @@ class ListItemButton(MUIComponentBase[ButtonProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-
-class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
+class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
 
     def __init__(self,
                  children: Optional[LayoutType] = None,
@@ -944,7 +975,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
         if children is not None and isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(base_type,
-                         MUIFlexBoxProps,
+                         MUIFlexBoxWithDndProps,
                          uid_to_comp,
                          children,
                          inited,
@@ -952,6 +983,10 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
                          app_comp_core=app_comp_core,
                          allowed_events=[FrontendEventType.Drop.value])
         self._wrapped_obj = wrapped_obj
+
+    def as_drag_handle(self):
+        self.props.take_drag_ref = True
+        return self
 
     @property
     def prop(self):
@@ -980,6 +1015,15 @@ class FlexBox(MUIContainerBase[MUIFlexBoxProps, MUIComponentType]):
                                            ev,
                                            sync_first=False,
                                            is_sync=is_sync)
+
+class DragHandleFlexBox(FlexBox):
+    def __init__(self,
+                 children: Optional[LayoutType] = None,
+                 ) -> None:
+        if children is not None and isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+        super().__init__(children)
+
 
 
 @dataclasses.dataclass

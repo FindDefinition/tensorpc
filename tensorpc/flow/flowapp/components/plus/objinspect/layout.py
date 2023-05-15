@@ -76,10 +76,10 @@ class AnyFlexLayout(mui.FlexLayout):
 
     async def _bind_code_editor(self, obj, layout, name: str):
         app = get_app()
-        app.code_editor.external_path = inspect.getfile(type(obj))
-        lines, lineno = inspect.findsource(type(obj))
+        # app.code_editor.external_path = inspect.getfile(type(obj))
+        # lines, lineno = inspect.findsource(type(obj))
         # obj_path = inspect.getfile(type(obj))
-        await app.set_editor_value(value="".join(lines), lineno=lineno)
+        # await app.set_editor_value(value="".join(lines), lineno=lineno)
         if app._is_editable_app():
             eapp = app._get_self_as_editable_app()
             eapp._flowapp_observe(
@@ -127,7 +127,7 @@ class AnyFlexLayout(mui.FlexLayout):
                 eapp._flowapp_remove_observer(comp)
             if app.code_editor.external_path is not None:
                 app.code_editor.external_path = None
-                await app._recover_code_editor()
+                # await app._recover_code_editor()
                 self._current_bind_code_id = None
 
     async def _on_tab_select(self, data):
@@ -135,18 +135,18 @@ class AnyFlexLayout(mui.FlexLayout):
         if child_id == self._current_bind_code_id:
             return
         child_comp = self._child_comps[child_id]
-        if isinstance(child_comp, mui.FlexBox):
-            if child_comp._wrapped_obj is not None:
-                self._current_bind_code_id = child_id
-                await self._bind_code_editor(child_comp._wrapped_obj,
-                                             child_comp, child_id)
-            else:
-                obj_is_anylayout = get_reload_manager().query_obj_is_anylayout(
-                    child_comp)
-                if obj_is_anylayout:
-                    self._current_bind_code_id = child_id
-                    await self._bind_code_editor(child_comp, child_comp,
-                                                 child_id)
+        # if isinstance(child_comp, mui.FlexBox):
+        #     if child_comp._wrapped_obj is not None:
+        #         self._current_bind_code_id = child_id
+        #         await self._bind_code_editor(child_comp._wrapped_obj,
+        #                                      child_comp, child_id)
+        #     else:
+        #         obj_is_anylayout = get_reload_manager().query_obj_is_anylayout(
+        #             child_comp)
+        #         if obj_is_anylayout:
+        #             self._current_bind_code_id = child_id
+        #             await self._bind_code_editor(child_comp, child_comp,
+        #                                          child_id)
 
         # print("TAB SELECT", child_id)
 
@@ -155,18 +155,18 @@ class AnyFlexLayout(mui.FlexLayout):
         child_comp = self._child_comps[child_id]
         if child_id == self._current_bind_code_id:
             return
-        if isinstance(child_comp, mui.FlexBox):
-            if child_comp._wrapped_obj is not None:
-                self._current_bind_code_id = child_id
-                await self._bind_code_editor(child_comp._wrapped_obj,
-                                             child_comp, child_id)
-            else:
-                obj_is_anylayout = get_reload_manager().query_obj_is_anylayout(
-                    child_comp)
-                if obj_is_anylayout:
-                    self._current_bind_code_id = child_id
-                    await self._bind_code_editor(child_comp, child_comp,
-                                                 child_id)
+        # if isinstance(child_comp, mui.FlexBox):
+        #     if child_comp._wrapped_obj is not None:
+        #         self._current_bind_code_id = child_id
+        #         await self._bind_code_editor(child_comp._wrapped_obj,
+        #                                      child_comp, child_id)
+        #     else:
+        #         obj_is_anylayout = get_reload_manager().query_obj_is_anylayout(
+        #             child_comp)
+        #         if obj_is_anylayout:
+        #             self._current_bind_code_id = child_id
+        #             await self._bind_code_editor(child_comp, child_comp,
+        #                                          child_id)
 
         # print("TAB SET SELECT", child_id)
 

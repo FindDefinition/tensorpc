@@ -17,6 +17,15 @@ class TaskStatus(enum.Enum):
     AlmostCanceled = 7
     Canceled = 8
 
+    Booting = 9
+
+
+ALL_RUNNING_STATUS = set([TaskStatus.Running, TaskStatus.AlmostFinished, TaskStatus.AlmostCanceled, TaskStatus.Booting, TaskStatus.NeedToCancel])
+
+ALL_CTRL_C_CANCELABLE_STATUS = set([TaskStatus.Running, TaskStatus.Booting, TaskStatus.NeedToCancel])
+
+ALL_KILLABLE_STATUS = ALL_RUNNING_STATUS
+
 class TaskType(enum.Enum):
     # shell command
     Command = 0
@@ -74,6 +83,8 @@ class Task:
     keep_tmux_session: bool = True
 
     name: Optional[str] = None 
+
+    desp: str = ""
 
     def empty_state(self):
         self.state = TaskState(TaskStatus.Pending, 0.0, [], -1, "")

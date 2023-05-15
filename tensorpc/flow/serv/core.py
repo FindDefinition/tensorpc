@@ -1640,7 +1640,6 @@ class Flow:
         return ev.to_dict()
 
     async def put_app_event(self, ev_dict: Dict[str, Any]):
-        # print("APP EVENT RECEIVED")
         ev = app_event_from_data(ev_dict)
         new_t2e = {}
         gid, nid = _extract_graph_node_id(ev.uid)

@@ -103,10 +103,16 @@ class WebsocketClient(object):
         # if len(chunks) > 1:
         #     print("BEFORE SEND")
         try:
+            # if encoder.get_total_array_binary_size() > max_size:
+            #     print("WS PREPARE SEND", encoder.get_total_array_binary_size())
+            # t = time.time()
             for chunk in encoder.get_message_chunks(msg_type, req, max_size):
                 assert len(chunk) <= max_size
                 # tasks.append(self.ws.send_bytes(chunk))
                 await self.ws.send_bytes(chunk)
+            # if encoder.get_total_array_binary_size() > max_size:
+
+                # print("WS SEND TIME", time.time() - t)
         except ConnectionResetError:
             print("CLIENT SEND ERROR, RETURN")
             return

@@ -53,10 +53,13 @@ _TASK_STATUS_TO_UI_TEXT_AND_COLOR: Dict[TaskStatus,
                                                                 "error"),
                                             TaskStatus.Finished: ("Finished",
                                                                   "success"),
+                                            TaskStatus.Booting: ("Finished",
+                                                                  "secondary"),
+
                                         }
 
 
-class TaskCard(mui.Paper):
+class TaskCard(mui.FlexBox):
     def __init__(self, client: SchedulerClient, task: Task) -> None:
         self.task_id = task.id
         self.task = task
@@ -75,15 +78,18 @@ class TaskCard(mui.Paper):
                                                tooltip="Show Detail",
                                                size="small")
         self.command = mui.Typography(task.command).prop(
-            font_size="14px", font_family="monospace")
+            font_size="14px", font_family="monospace", word_break="break-word")
 
         self.detail = mui.Collapse([
-            self.command,
+            mui.VBox([self.command]),
         ]).prop(timeout="auto", unmount_on_exit=True)
         self._expanded = False
         layout = [
             mui.VBox([
                 mui.HBox([
+                    mui.FlexBox([
+                        mui.Icon(mui.IconType.DragIndicator).prop(),
+                    ]).prop(take_drag_ref=True, cursor="move"),
                     self.name,
                     mui.Chip("copy tmux cmd",
                              self._on_tmux_chip).prop(color="blue",
@@ -112,24 +118,35 @@ class TaskCard(mui.Paper):
                     tooltip="Kill Task",
                     size="small",
                     confirm_message="Are You Sure to Kill This Task?"),
+                mui.IconButton(mui.IconType.Delete, self._on_kill_task).prop(
+                    tooltip="Kill Session",
+                    size="small",
+                    confirm_message="Are You Sure to Kill This Session?",
+                    mui_color="error"),
                 self.collapse_btn,
             ]).prop(margin="0 5px 0 5px", flex=0),
         ]
         super().__init__([
-            mui.VBox([
-                *layout,
-            ]).prop(
-                flex_flow="row wrap",
-                align_items="center",
-            ),
-            self.detail,
+            mui.Paper([
+                mui.VBox([
+                    *layout,
+                ]).prop(
+                    flex_flow="row wrap",
+                    align_items="center",
+                ),
+                self.detail,
+            ]).prop(flex_flow="column",
+                    padding="5px",
+                    margin="5px",
+                    elevation=4,
+                    flex=1)
         ])
-        self.prop(
-            flex_flow="column",
-            padding="5px",
-            margin="5px",
-            elevation=4,
-        )
+        self.prop(draggable=True,
+                  drag_type="TaskCard",
+                  drag_in_child=True,
+                  sx_over_drop={
+                      "opacity": "0.5",
+                  })
 
     async def _on_expand_more(self):
         self._expanded = not self._expanded
@@ -139,7 +156,10 @@ class TaskCard(mui.Paper):
             self.detail.update_event(triggered=self._expanded))
 
     async def _on_schedule_task(self):
-        await self.client.submit_task(self.task)
+        res = await self.client.submit_task(self.task)
+        print("------")
+        for x in res:
+            print(x.id, x.state.status)
 
     async def _on_tmux_chip(self):
         await appctx.get_app().copy_text_to_clipboard(
@@ -244,7 +264,7 @@ class TmuxScheduler(mui.FlexBox):
 
     @marker.mark_will_unmount
     async def _on_unmount(self):
-        await self.client.shutdown_scheduler()
+        # await self.client.shutdown_scheduler()
         # self.period_check_task.cancel()
         pass
 
@@ -297,4 +317,4 @@ class TmuxScheduler(mui.FlexBox):
                     func_id, [kwargs],
                     id=task_id,
                     keep_tmux_session=keep_tmux_session)
-        await self.client.submit_task(task)
+        await self.submit_task(task)
