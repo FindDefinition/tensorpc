@@ -105,7 +105,8 @@ class NodeStatus:
 
 ENCODING = "utf-8"
 ENCODING = None
-
+USE_APP_HTTP_PORT = True
+USE_LANG_SERVER_PORT = True 
 
 def _extract_graph_node_id(uid: str):
     parts = uid.split("@")
@@ -1059,6 +1060,8 @@ class AppNode(CommandNode):
         self.http_port = -1
         self.fwd_grpc_port = -1
         self.fwd_http_port = -1
+        self.lang_server_port = -1
+        self.fwd_lang_server_port = -1
 
         self.state: Optional[dict] = None
 
@@ -1077,6 +1080,11 @@ class AppNode(CommandNode):
         if fports:
             self.fwd_grpc_port = fports[0]
             self.fwd_http_port = fports[1]
+            if self.lang_server_port != -1:
+                self.fwd_lang_server_port = fports[2]
+                env[flowconstants.TENSORPC_FLOW_APP_LANG_SERVER_PORT] = str(
+                    self.fwd_lang_server_port)
+
         super()._env_port_modifier(fports, rfports, env)
 
     async def start_session(self,
@@ -1099,18 +1107,26 @@ class AppNode(CommandNode):
         self.exit_event.clear()
         client = SSHClient(url, username, password, None, self.get_uid(),
                            ENCODING)
+        # query language server port first.
+        try:
+            langserv_port = await _query_lang_serv_port(url, username, password, init_cmds)
+        except:
+            langserv_port = -1
         # print("APP", url, client.url_no_port, client.port)
+        num_port = 2
         if not is_worker:
             # query two free port in target via ssh, then use them as app ports
-            ports = await _get_free_port(2, url, username, password, init_cmds)
+            ports = await _get_free_port(num_port, url, username, password, init_cmds)
         else:
             # query two local ports in flow remote worker, then use them as app ports
-            ports = get_free_ports(2)
-        if len(ports) != 2:
+            ports = get_free_ports(num_port)
+        if langserv_port != -1:
+            ports.append(langserv_port)
+        if len(ports) != num_port:
             raise ValueError("get free port failed. exit.")
-
         self.grpc_port = ports[0]
         self.http_port = ports[1]
+        self.lang_server_port = langserv_port
         fwd_ports = []
         self.fwd_grpc_port = self.grpc_port
         self.fwd_http_port = self.http_port
@@ -1491,6 +1507,40 @@ async def _get_free_port(count: int,
             raise ValueError(e.stderr)
     return ports
 
+async def _query_lang_serv_port(url: str,
+                         username: str,
+                         password: str,
+                         init_cmds: str = ""):
+    client = SSHClient(url, username, password, None, "", "utf-8")
+    port = -1
+    # res = await client.simple_run_command(f"python -m tensorpc.cli.free_port {count}")
+    # print(res)
+    stderr = ""
+    async with client.simple_connect() as conn:
+        try:
+            if init_cmds:
+                cmd = (
+                    f"bash -i -c "
+                    f'"{init_cmds} && python -m tensorpc.flow.init_langserv jedi"'
+                )
+            else:
+                cmd = (f"bash -i -c "
+                       f'"python -m tensorpc.flow.init_langserv jedi"')
+            result = await conn.run(cmd, check=True)
+            stdout = result.stdout
+            if stdout is not None:
+                if isinstance(stdout, bytes):
+                    stdout = stdout.decode("utf-8")
+                port_strs = stdout.strip()
+                port = int(port_strs)
+        except asyncssh.process.ProcessError as e:
+            traceback.print_exc()
+            print(e.stdout)
+            print("-----------")
+            print(e.stderr)
+            stderr = e.stderr
+            raise ValueError(e.stderr)
+    return port
 
 class NodeDesp:
 
