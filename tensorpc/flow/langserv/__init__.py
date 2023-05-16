@@ -10,7 +10,7 @@ from tensorpc.flow.constants import TENSORPC_FLOW_LANG_SERVER_NAME_SPLIT, TENSOR
 
 _SPLIT = TENSORPC_FLOW_LANG_SERVER_NAME_SPLIT
 
-def get_tmux_lang_server_info_may_create(ls_type: str, uid: str):
+def get_tmux_lang_server_info_may_create(ls_type: str, uid: str, port: int):
     # TODO pyright support
     assert ls_type in ["jedi"]
     if ls_type == "pyright":
@@ -33,24 +33,25 @@ def get_tmux_lang_server_info_may_create(ls_type: str, uid: str):
     sess_names = [sess.name for sess in sessions]
     scheduler_sess_names = [
         sess_name for sess_name in sess_names if sess_name.startswith(TENSORPC_FLOW_LANG_SERVER_PREFIX)]
-    port = -1
+    found = False
     for sess_name in scheduler_sess_names:
         sess_parts = sess_name.split(_SPLIT)
-        port = int(sess_parts[1])
+        port_candidate = int(sess_parts[1])
         uid_candidate = sess_parts[2]
         if uid != uid_candidate:
             continue 
+        found = True
+        assert port_candidate == port
         scheduler_sess_name = scheduler_sess_names[0]
-        sess_parts = scheduler_sess_name.split(_SPLIT)
-        port = int(sess_parts[1])
         sess = s.sessions.get(session_name=scheduler_sess_name)
         assert isinstance(sess, libtmux.Session)
-    if port == -1:
-        port = get_free_ports(1)[0]
+    # if port == -1:
+    #     port = get_free_ports(1)[0]
+    if not found:
         window_command = window_command_fmt.format(port)
         scheduler_sess_name = f"{TENSORPC_FLOW_LANG_SERVER_PREFIX}{_SPLIT}{port}{_SPLIT}{uid}"
         sess = s.new_session(scheduler_sess_name,
-                             window_command=window_command)
+                                window_command=window_command)
     return port
 
 def close_tmux_lang_server(uid: str):

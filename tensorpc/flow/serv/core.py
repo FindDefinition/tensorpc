@@ -1089,6 +1089,14 @@ class AppNode(CommandNode):
 
         super()._env_port_modifier(fports, rfports, env)
 
+    async def stop_language_server(self, enable_port_forward: bool, url: str,
+                            username: str,
+                            password: str, init_cmds: str = ""):
+        if enable_port_forward:
+            await _close_lang_serv(self.id, url, username, password, init_cmds)
+        else:
+            close_tmux_lang_server(self.id)
+
     async def start_session(self,
                             callback: Callable[[Event], Awaitable[None]],
                             url: str,
@@ -1110,15 +1118,15 @@ class AppNode(CommandNode):
         client = SSHClient(url, username, password, None, self.get_uid(),
                            ENCODING)
         # query language server port first.
-        if enable_port_forward:
-            try:
-                langserv_port = await _query_lang_serv_port_and_init(self.id, url, username, password, init_cmds)
-            except:
-                langserv_port = -1
-        else:
-            langserv_port = get_tmux_lang_server_info_may_create("jedi", self.id)
+        # if enable_port_forward:
+        #     try:
+        #         langserv_port = await _query_lang_serv_port_and_init(self.id, url, username, password, init_cmds)
+        #     except:
+        #         langserv_port = -1
+        # else:
+        #     langserv_port = get_tmux_lang_server_info_may_create("jedi", self.id)
         # print("APP", url, client.url_no_port, client.port)
-        num_port = 2
+        num_port = 3
         if not is_worker:
             # query two free port in target via ssh, then use them as app ports
             ports = await _get_free_port(num_port, url, username, password, init_cmds)
@@ -1127,12 +1135,11 @@ class AppNode(CommandNode):
             ports = get_free_ports(num_port)
         if len(ports) != num_port:
             raise ValueError("get free port failed. exit.")
-        if langserv_port != -1:
-            ports.append(langserv_port)
-
+        # if langserv_port != -1:
+        #     ports.append(langserv_port)
         self.grpc_port = ports[0]
         self.http_port = ports[1]
-        self.lang_server_port = langserv_port
+        self.lang_server_port = ports[2]
         fwd_ports = []
         self.fwd_grpc_port = self.grpc_port
         self.fwd_http_port = self.http_port
@@ -1147,10 +1154,6 @@ class AppNode(CommandNode):
             self.last_event = CommandEventType.PROMPT_END
             self.set_stop_status()
             self.running_driver_id = ""
-            if enable_port_forward:
-                await _close_lang_serv(self.id, url, username, password, init_cmds)
-            else:
-                close_tmux_lang_server(self.id)
         envs.update({
             flowconstants.TENSORPC_FLOW_APP_GRPC_PORT:
             str(self.grpc_port),
@@ -1861,6 +1864,17 @@ class Flow:
             return await http_remote_call(sess, app_url,
                                           serv_names.APP_GET_LAYOUT,
                                           editor_only)
+
+    async def stop_app_node(self,
+                              graph_id: str,
+                              node_id: str):
+        node, driver = self._get_app_node_and_driver(graph_id, node_id)
+        if not node.is_session_started():
+            return None
+        if node.last_event != CommandEventType.CURRENT_COMMAND:
+            return None
+        if isinstance(driver, DirectSSHNode):
+            await node.stop_language_server(driver.enable_port_forward, driver.url, driver.username, driver.password, driver.init_commands)
 
     def query_app_node_urls(self, graph_id: str, node_id: str):
         node, driver = self._get_app_node_and_driver(graph_id, node_id)

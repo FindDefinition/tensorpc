@@ -29,6 +29,7 @@ from tensorpc.core.httpclient import http_remote_call
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServiceUnit
 import tensorpc
 from tensorpc.flow.flowapp.reload import AppReloadManager
+from tensorpc.flow.langserv import close_tmux_lang_server, get_tmux_lang_server_info_may_create
 from ..client import MasterMeta
 from tensorpc import prim
 from tensorpc.flow.serv_names import serv_names
@@ -116,6 +117,8 @@ class FlowApp:
         # print(lay["layout"])
         self.app.app_initialize()
         await self.app.app_initialize_async()
+        if self.master_meta.lsp_port != -1:
+            get_tmux_lang_server_info_may_create("jedi", self.master_meta.node_id, self.master_meta.lsp_port)
         lay = self.app._get_app_layout()
         self.app._flowapp_is_inited = True
         await self._send_loop_queue.put(
@@ -310,7 +313,7 @@ class FlowApp:
             await self.app.app_terminate_async()
         except:
             traceback.print_exc()
-
+        close_tmux_lang_server(self.master_meta.node_id)
         try:
             grpc_url = self.master_meta.grpc_url
             uiev = UISaveStateEvent(self.app._get_simple_app_state())
