@@ -96,7 +96,11 @@ class FlowApp:
         # self.app._send_callback = self._send_http_event
         self._send_loop_task = asyncio.create_task(self._send_loop())
         self.lsp_port = self.master_meta.lsp_port
-
+        if self.lsp_port is not None:
+            assert self.master_meta.lsp_fwd_port is not None 
+            self.lsp_fwd_port = self.master_meta.lsp_fwd_port
+        else:
+            self.lsp_fwd_port = None 
         self.external_argv = external_argv
         self._external_argv_task: Optional[asyncio.Future] = None
 
@@ -117,16 +121,18 @@ class FlowApp:
         # print(lay["layout"])
         self.app.app_initialize()
         await self.app.app_initialize_async()
-        if self.master_meta.lsp_port != -1:
-            get_tmux_lang_server_info_may_create("jedi", self.master_meta.node_id, self.master_meta.lsp_port)
+        enable_lsp = self.lsp_port is not None and self.app._flowapp_enable_lsp
+        if enable_lsp:
+            assert self.lsp_port is not None
+            get_tmux_lang_server_info_may_create("jedi", self.master_meta.node_id, self.lsp_port)
         lay = self.app._get_app_layout()
         self.app._flowapp_is_inited = True
         await self._send_loop_queue.put(
             AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)}))
         # TODO should we just use grpc client to query init state here?
         init_event: Dict[AppEventType, Any] = {AppEventType.Notify: NotifyEvent(NotifyType.AppStart)}
-        if self.lsp_port is not None:
-            init_event[AppEventType.InitLSPClient] = InitLSPClientEvent(self.lsp_port)
+        if self.lsp_fwd_port is not None and enable_lsp:
+            init_event[AppEventType.InitLSPClient] = InitLSPClientEvent(self.lsp_fwd_port)
         await self._send_loop_queue.put(
             AppEvent("", init_event))
         if self.external_argv is not None:
@@ -187,8 +193,12 @@ class FlowApp:
 
     def get_layout(self, editor_only: bool = False):
         if editor_only:
-            return self.app._get_app_editor_state()
-        return self.app._get_app_layout()
+            res = self.app._get_app_editor_state()
+        else:
+            res = self.app._get_app_layout()
+        if self.app._flowapp_enable_lsp:
+            res["lspPort"] = self.lsp_port
+        return res 
 
     async def _http_remote_call(self, key: str, *args, **kwargs):
         return await http_remote_call(prim.get_http_client_session(),

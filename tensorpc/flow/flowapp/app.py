@@ -290,9 +290,12 @@ class App:
 
         self._flowapp_is_inited: bool = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
-
+        self._flowapp_enable_lsp: bool = False
         self._flowapp_observed_func_registry: Optional[
             ObservedFunctionRegistryProtocol] = None
+
+    def set_enable_language_server(self, enable: bool):
+        self._flowapp_enable_lsp = enable 
 
     def set_observed_func_registry(self,
                                    registry: ObservedFunctionRegistryProtocol):

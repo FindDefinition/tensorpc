@@ -40,7 +40,6 @@ class MasterMeta:
 
         use_rf = os.getenv(constants.TENSORPC_FLOW_USE_REMOTE_FWD)
         is_worker_env = os.getenv(constants.TENSORPC_FLOW_IS_WORKER)
-        lsp_port = os.getenv(constants.TENSORPC_FLOW_APP_LANG_SERVER_PORT, None)
         is_worker = is_worker_env is not None and is_worker_env == "1"
         url = ""
         grpc_url = ""
@@ -66,7 +65,10 @@ class MasterMeta:
         self.grpc_url = grpc_url
         self.http_url = url
         self.is_worker = is_worker
+        lsp_port = os.getenv(constants.TENSORPC_FLOW_APP_LANG_SERVER_PORT, None)
         self.lsp_port = int(lsp_port) if lsp_port is not None else None 
+        lsp_fwd_port = os.getenv(constants.TENSORPC_FLOW_APP_LANG_SERVER_FWD_PORT, None)
+        self.lsp_fwd_port = int(lsp_fwd_port) if lsp_fwd_port is not None else None 
 
         self.is_grpc_valid = grpc_url != ""
         self.is_http_valid = self.http_url != ""

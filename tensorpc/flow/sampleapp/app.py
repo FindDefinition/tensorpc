@@ -50,7 +50,6 @@ from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from tensorpc.flow.sampleapp.sample_reload_fn import func_support_reload
 from tensorpc.flow.flowapp.objtree import get_objtree_context
 
-
 class SampleApp(App):
     def __init__(self) -> None:
         super().__init__()
@@ -1113,6 +1112,7 @@ class CollectionApp:
         self.cfg = WTF(1, 0.5, WTF1(2), "WTF", [])
         self.wtf2 = plus.ConfigPanel(self.cfg, lambda x, y: print(x, y))
         # self.dev_0 = Dev()
+        appctx.get_app().set_enable_language_server(True)
 
         res = mui.HBox([
             mui.Allotment([

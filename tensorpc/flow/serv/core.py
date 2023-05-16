@@ -1081,10 +1081,10 @@ class AppNode(CommandNode):
         if fports:
             self.fwd_grpc_port = fports[0]
             self.fwd_http_port = fports[1]
-            print(self.lang_server_port)
+            print(self.lang_server_port, fports[2])
             if self.lang_server_port != -1:
                 self.fwd_lang_server_port = fports[2]
-                env[flowconstants.TENSORPC_FLOW_APP_LANG_SERVER_PORT] = str(
+                env[flowconstants.TENSORPC_FLOW_APP_LANG_SERVER_FWD_PORT] = str(
                     self.fwd_lang_server_port)
 
         super()._env_port_modifier(fports, rfports, env)
@@ -1162,9 +1162,12 @@ class AppNode(CommandNode):
             flowconstants.TENSORPC_FLOW_APP_MODULE_NAME:
             f"\"{self.module_name}\"",
         })
-        if not enable_port_forward:
-            envs[flowconstants.TENSORPC_FLOW_APP_LANG_SERVER_PORT] = str(
-                self.lang_server_port)
+        # this port is used to create lang server
+        envs[flowconstants.TENSORPC_FLOW_APP_LANG_SERVER_PORT] = str(
+            self.lang_server_port)
+        # this port is used to forward lang server
+        envs[flowconstants.TENSORPC_FLOW_APP_LANG_SERVER_FWD_PORT] = str(
+            self.lang_server_port)
 
         if self.module_name.startswith("!"):
             envs[flowconstants.
