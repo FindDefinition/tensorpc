@@ -1124,7 +1124,7 @@ class AppNode(CommandNode):
         #     except:
         #         langserv_port = -1
         # else:
-        #     langserv_port = get_tmux_lang_server_info_may_create("jedi", self.id)
+        #     langserv_port = get_tmux_lang_server_info_may_create("pyright", self.id)
         # print("APP", url, client.url_no_port, client.port)
         num_port = 3
         if not is_worker:
@@ -1540,11 +1540,11 @@ async def _query_lang_serv_port_and_init(uid: str, url: str,
             if init_cmds:
                 cmd = (
                     f"bash -i -c "
-                    f'"{init_cmds} && python -m tensorpc.flow.init_langserv jedi {uid}"'
+                    f'"{init_cmds} && python -m tensorpc.flow.init_langserv pyright {uid}"'
                 )
             else:
                 cmd = (f"bash -i -c "
-                       f'"python -m tensorpc.flow.init_langserv jedi {uid}"')
+                       f'"python -m tensorpc.flow.init_langserv pyright {uid}"')
             result = await conn.run(cmd, check=True)
             stdout = result.stdout
             if stdout is not None:

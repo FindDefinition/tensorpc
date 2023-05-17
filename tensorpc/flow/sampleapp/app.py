@@ -17,6 +17,7 @@ import base64
 import dataclasses
 import enum
 import io
+import sys
 import time
 import traceback
 from datetime import datetime
@@ -31,7 +32,6 @@ from faker import Faker
 from typing_extensions import Literal
 
 import tqdm
-
 import tensorpc
 from tensorpc.autossh.scheduler.core import TaskType
 from tensorpc.core import prim
@@ -1113,6 +1113,26 @@ class CollectionApp:
         self.wtf2 = plus.ConfigPanel(self.cfg, lambda x, y: print(x, y))
         # self.dev_0 = Dev()
         appctx.get_app().set_enable_language_server(True)
+        pyright_setting = appctx.get_app().get_language_server_settings()
+        pyright_setting.python.analysis.pythonPath = sys.executable
+        pyright_setting.python.analysis.extraPaths = [
+            "/root/tusimple/nerf/tsnerf",
+            "/root/tusimple/d3ops",
+            "/root/tusimple/tstools_core",
+            "/root/tusimple/cumm",
+            "/root/tusimple/PCCM",
+            "/root/tusimple/utils/distflow",
+            "/home/tusimple/tusimple/nerf/tsnerf",
+            "/home/tusimple/tusimple/d3ops",
+            "/home/tusimple/tusimple/tstools_core",
+            "/home/tusimple/tusimple/cumm",
+            "/home/tusimple/tusimple/PCCM",
+            "/home/tusimple/tusimple/utils/distflow",
+            "/root/tusimple/ccimport",
+            "/root/tusimple/mapops",
+            "/root/tusimple/spconv"
+        ]
+
         res = mui.HBox([
             mui.Allotment([
                 plus.ObjectInspector(self).prop(width="100%",

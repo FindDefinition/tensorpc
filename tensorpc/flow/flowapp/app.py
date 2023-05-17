@@ -70,6 +70,7 @@ from tensorpc.flow.flowapp.reload import (AppReloadManager,
                                           bind_and_reset_object_methods,
                                           reload_object_methods)
 from tensorpc.flow.jsonlike import JsonLikeNode, parse_obj_to_jsonlike
+from tensorpc.flow.langserv.pyrightcfg import LanguageServerConfig
 from tensorpc.flow.marker import AppFunctionMeta, AppFuncType
 from tensorpc.flow.serv_names import serv_names
 from tensorpc.utils.registry import HashableRegistry
@@ -204,6 +205,7 @@ class _WatchDogObjWatchEntry:
     watch: Optional[ObservedWatch]
 
 
+
 class App:
     """
     App Init Callbacks:
@@ -291,11 +293,21 @@ class App:
         self._flowapp_is_inited: bool = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._flowapp_enable_lsp: bool = False
+        self._flowapp_internal_lsp_config: LanguageServerConfig = LanguageServerConfig()
         self._flowapp_observed_func_registry: Optional[
             ObservedFunctionRegistryProtocol] = None
 
     def set_enable_language_server(self, enable: bool):
+        """must be setted before app init (in layout function), only valid
+        in app init. layout reload won't change this setting
+        """
         self._flowapp_enable_lsp = enable 
+
+    def get_language_server_settings(self):
+        """must be setted before app init (in layout function), only valid
+        in app init. layout reload won't change this setting
+        """
+        return self._flowapp_internal_lsp_config
 
     def set_observed_func_registry(self,
                                    registry: ObservedFunctionRegistryProtocol):

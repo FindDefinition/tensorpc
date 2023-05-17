@@ -656,17 +656,19 @@ class CopyToClipboardEvent:
 @ALL_APP_EVENTS.register(key=AppEventType.InitLSPClient.value)
 class InitLSPClientEvent:
 
-    def __init__(self, port: int) -> None:
+    def __init__(self, port: int, init_cfg: dict) -> None:
         self.port = port
+        self.init_cfg = init_cfg
 
     def to_dict(self):
         return {
             "port": self.port,
+            "initConfig": self.init_cfg
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]):
-        return cls(data["port"])
+        return cls(data["port"], data["initConfig"])
 
     def merge_new(self, new):
         assert isinstance(new, InitLSPClientEvent)

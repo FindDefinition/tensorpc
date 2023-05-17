@@ -34,9 +34,9 @@ class AsyncJsonRpcStreamReader:
                 line = await self._rfile.readline()
             if line == b"" or content_length is None:
                 break
-            request_str = await self._rfile.read(content_length)
+            request_str = await self._rfile.readexactly(content_length)
             try:
-                message_consumer(json.loads(request_str.decode('utf-8')))
+                await message_consumer(json.loads(request_str.decode('utf-8')))
             except ValueError:
                 log.exception("Failed to parse JSON message %s", request_str)
                 continue
@@ -93,7 +93,7 @@ async def handle_ls_open(request):
     print("NEW CONN", request)
     ws = web.WebSocketResponse()
     await ws.prepare(request)
-    aproc = await asyncio.create_subprocess_exec("python", "-m", "tensorpc.cli.pyright_launch", "--stdio", env=os.environ,
+    aproc = await asyncio.create_subprocess_exec("python", "-m", "tensorpc.cli.pyright_launch", env=os.environ,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE)
     assert aproc.stdout is not None 
@@ -105,18 +105,20 @@ async def handle_ls_open(request):
     # Create a writer that formats json messages with the correct LSP headers
     writer = AsyncJsonRpcStreamWriter(aproc.stdin)
     reader = AsyncJsonRpcStreamReader(aproc.stdout)
-    task = asyncio.create_task(reader.listen(ws.send_json))
+    async def cosumer(msg):
+        print("OUTPUT", type(msg), msg)
+        await ws.send_json(msg)
+    task = asyncio.create_task(reader.listen(cosumer))
     # Create a reader for consuming stdout of the language server. We need to
     # consume this in another thread
     async for ws_msg in ws:
         if ws_msg.type == aiohttp.WSMsgType.TEXT:
-
+            print("INPUT", ws_msg.json())  
             await writer.write(ws_msg.json())
     
         elif ws_msg.type == aiohttp.WSMsgType.ERROR:
             print("ERROR", ws_msg)
             print("ERROR", ws_msg.data)
-
         else:
             raise NotImplementedError
     return ws

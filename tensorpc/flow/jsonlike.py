@@ -1,6 +1,6 @@
 import enum
 
-from typing import Any, Dict, Generic, Hashable, List, Optional, TypeVar, Union, Tuple
+from typing import Any, Callable, Dict, Generic, Hashable, List, Optional, TypeVar, Union, Tuple
 import dataclasses
 import re
 import numpy as np
@@ -8,6 +8,8 @@ from tensorpc.core.moduleid import get_qualname_of_type
 from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
                                TypeAlias)
 import abc
+from collections.abc import MutableMapping
+import copy 
 
 ValueType: TypeAlias = Union[int, float, str]
 NumberType: TypeAlias = Union[int, float]
@@ -15,6 +17,16 @@ NumberType: TypeAlias = Union[int, float]
 STRING_LENGTH_LIMIT = 500
 T = TypeVar("T")
 
+
+def flatten_dict(d: MutableMapping, parent_key: str = '', sep: str ='.') -> MutableMapping:
+    items = []
+    for k, v in d.items():
+        new_key = parent_key + sep + k if parent_key else k
+        if isinstance(v, MutableMapping):
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
 
 class Undefined:
 
@@ -82,6 +94,45 @@ def as_dict_no_undefined(obj: Any):
     return dataclasses.asdict(_DataclassSer(obj),
                               dict_factory=_undefined_dict_factory)["obj"]
 
+def asdict_field_only(obj, *, dict_factory: Callable[[List[Tuple[str, Any]]], Dict[str, Any]]=dict):
+    "(list[tuple[str, Any]]) -> dict[str, Any]"
+    
+    """same as dataclasses.asdict except that this function
+    won't recurse into nested container.
+    """
+    if not dataclasses.is_dataclass(obj):
+        raise TypeError("asdict() should be called on dataclass instances")
+    return _asdict_field_only_inner(obj, dict_factory)
+
+def _asdict_field_only_inner(obj, dict_factory):
+    if dataclasses.is_dataclass(obj):
+        result = []
+        for f in dataclasses.fields(obj):
+            value = _asdict_field_only_inner(getattr(obj, f.name), dict_factory)
+            result.append((f.name, value))
+        return dict_factory(result)
+    else:
+        return copy.deepcopy(obj)
+    
+def asdict_flatten_field_only(obj, *, dict_factory: Callable[[List[Tuple[str, Any]]], Dict[str, Any]]=dict):
+    """same as dataclasses.asdict except that this function
+    won't recurse into nested container.
+    """
+    if not dataclasses.is_dataclass(obj):
+        raise TypeError("asdict() should be called on dataclass instances")
+    return _asdict_flatten_field_only(obj, dict_factory)
+
+def _asdict_flatten_field_only(obj, dict_factory, parent_key: str = '', sep: str ='.'):
+    result = []
+    for f in dataclasses.fields(obj):
+        obj_child = getattr(obj, f.name)
+        new_key = parent_key + sep + f.name if parent_key else f.name
+        if dataclasses.is_dataclass(obj_child):
+            result.extend(_asdict_flatten_field_only(obj_child, dict_factory, new_key, sep=sep).items())
+        else:
+            result.append((new_key, obj_child))
+    return dict_factory(result)
+
 
 @dataclasses.dataclass
 class DataClassWithUndefined:
@@ -105,13 +156,16 @@ class DataClassWithUndefined:
                 res[res_camel] = val
         return res, res_und
 
-    def get_dict(self):
+    def get_dict(self, to_camel: bool = True):
         this_type = type(self)
         res = {}
         ref_dict = dataclasses.asdict(self,
                                       dict_factory=_undefined_dict_factory)
         for field in dataclasses.fields(this_type):
-            res_camel = snake_to_camel(field.name)
+            if to_camel:
+                res_camel = snake_to_camel(field.name)
+            else:
+                res_camel = field.name
             if field.name not in ref_dict:
                 val = undefined
             else:
@@ -119,6 +173,19 @@ class DataClassWithUndefined:
             res[res_camel] = val
         return res
 
+    def get_flatten_dict(self):
+        this_type = type(self)
+        res = {}
+        ref_dict = asdict_flatten_field_only(self,
+                                      dict_factory=_undefined_dict_factory)
+        for field in dataclasses.fields(this_type):
+            res_camel = field.name
+            if field.name not in ref_dict:
+                val = undefined
+            else:
+                val = ref_dict[field.name]
+            res[res_camel] = val
+        return res
 
 class CommonQualNames:
     TorchTensor = "torch.Tensor"

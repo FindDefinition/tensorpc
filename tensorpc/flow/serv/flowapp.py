@@ -124,7 +124,7 @@ class FlowApp:
         enable_lsp = self.lsp_port is not None and self.app._flowapp_enable_lsp
         if enable_lsp:
             assert self.lsp_port is not None
-            get_tmux_lang_server_info_may_create("jedi", self.master_meta.node_id, self.lsp_port)
+            get_tmux_lang_server_info_may_create("pyright", self.master_meta.node_id, self.lsp_port)
         lay = self.app._get_app_layout()
         self.app._flowapp_is_inited = True
         await self._send_loop_queue.put(
@@ -132,7 +132,7 @@ class FlowApp:
         # TODO should we just use grpc client to query init state here?
         init_event: Dict[AppEventType, Any] = {AppEventType.Notify: NotifyEvent(NotifyType.AppStart)}
         if self.lsp_fwd_port is not None and enable_lsp:
-            init_event[AppEventType.InitLSPClient] = InitLSPClientEvent(self.lsp_fwd_port)
+            init_event[AppEventType.InitLSPClient] = InitLSPClientEvent(self.lsp_fwd_port, self.app._flowapp_internal_lsp_config.get_dict())
         await self._send_loop_queue.put(
             AppEvent("", init_event))
         if self.external_argv is not None:

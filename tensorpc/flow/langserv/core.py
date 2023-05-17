@@ -11,17 +11,16 @@ from tensorpc.flow.constants import TENSORPC_FLOW_LANG_SERVER_NAME_SPLIT, TENSOR
 _SPLIT = TENSORPC_FLOW_LANG_SERVER_NAME_SPLIT
 
 def get_tmux_lang_server_info_may_create(ls_type: str, uid: str, port: int):
-    # TODO pyright support
-    assert ls_type in ["jedi"]
+    # TODO jedi support
+    assert ls_type in ["pyright", "pylsp"]
     if ls_type == "pyright":
-        window_command_fmt = ""
+        window_command_fmt = "python -m tensorpc.cli.pyls --port={}"
         try:
             subprocess.check_call(["pyright", "--version"])
         except Exception:
             raise Exception("pyright not installed, you can install by pip install pyright")
     else:
         window_command_fmt = "pylsp --ws --port {}"
-
         try:
             subprocess.check_call(["pylsp", "--version"])
         except Exception:
