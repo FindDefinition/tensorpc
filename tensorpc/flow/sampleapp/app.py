@@ -1113,7 +1113,6 @@ class CollectionApp:
         self.wtf2 = plus.ConfigPanel(self.cfg, lambda x, y: print(x, y))
         # self.dev_0 = Dev()
         appctx.get_app().set_enable_language_server(True)
-
         res = mui.HBox([
             mui.Allotment([
                 plus.ObjectInspector(self).prop(width="100%",

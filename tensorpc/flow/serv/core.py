@@ -1874,8 +1874,6 @@ class Flow:
         node, driver = self._get_app_node_and_driver(graph_id, node_id)
         if not node.is_session_started():
             return None
-        if node.last_event != CommandEventType.CURRENT_COMMAND:
-            return None
         if isinstance(driver, DirectSSHNode):
             await node.stop_language_server(driver.enable_port_forward, driver.url, driver.username, driver.password, driver.init_commands)
 

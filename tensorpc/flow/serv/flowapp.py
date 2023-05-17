@@ -21,7 +21,7 @@ from tensorpc.flow.coretypes import ScheduleEvent, get_uid
 from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.appcore import enter_app_conetxt
 from tensorpc.flow.flowapp.components.mui import FlexBox, flex_wrapper
-from tensorpc.flow.flowapp.core import AppEditorFrontendEvent, AppEvent, AppEventType, InitLSPClientEvent, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
+from tensorpc.flow.flowapp.core import AppEditorEvent, AppEditorFrontendEvent, AppEvent, AppEventType, InitLSPClientEvent, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
 from tensorpc.flow.flowapp.app import App, EditableApp
 import asyncio
 from tensorpc.core import marker
@@ -323,11 +323,14 @@ class FlowApp:
             await self.app.app_terminate_async()
         except:
             traceback.print_exc()
-        close_tmux_lang_server(self.master_meta.node_id)
+        # we can't close language server here
+        # because we must wait for frontend shutdown client.
+        # close_tmux_lang_server(self.master_meta.node_id)
         try:
             grpc_url = self.master_meta.grpc_url
             uiev = UISaveStateEvent(self.app._get_simple_app_state())
-            ev = AppEvent(self._uid, {AppEventType.UISaveStateEvent: uiev})
+            editorev = self.app.set_editor_value_event("")
+            ev = AppEvent(self._uid, {AppEventType.UISaveStateEvent: uiev, AppEventType.AppEditor: editorev})
             # TODO remove this dump
             # check user error, user can't store invalid
             # object that exists after reload module.

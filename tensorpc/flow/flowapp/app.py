@@ -781,12 +781,9 @@ class App:
     async def _send_editor_event(self, event: AppEditorEvent):
         await self._queue.put(AppEvent("", {AppEventType.AppEditor: event}))
 
-    async def set_editor_value(self,
-                               value: str,
+    def set_editor_value_event(self, value: str,
                                language: str = "",
                                lineno: Optional[int] = None):
-        """use this method to set editor value and language.
-        """
         self.code_editor.value = value
         if language:
             self.code_editor.language = language
@@ -797,7 +794,15 @@ class App:
         if lineno is not None:
             res["lineno"] = lineno
         app_ev = AppEditorEvent(AppEditorEventType.SetValue, res)
-        await self._send_editor_event(app_ev)
+        return app_ev
+
+    async def set_editor_value(self,
+                               value: str,
+                               language: str = "",
+                               lineno: Optional[int] = None):
+        """use this method to set editor value and language.
+        """
+        await self._send_editor_event(self.set_editor_value_event(value, language, lineno))
 
     @staticmethod
     async def __handle_dnd_event(handler: EventHandler,
