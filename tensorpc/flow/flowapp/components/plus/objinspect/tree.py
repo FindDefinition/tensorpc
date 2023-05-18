@@ -80,6 +80,8 @@ def parse_obj_item(obj,
             return node_candidate
 
     node = parse_obj_to_jsonlike(obj, name, id)
+    if isinstance(obj, mui.JsonLikeNode):
+        return node
     if node.type == mui.JsonLikeType.Object.value:
         t = mui.JsonLikeType.Object
         value = mui.undefined
@@ -828,6 +830,7 @@ class BasicObjectTree(mui.FlexBox):
             obj_dict = await obj.get_child_desps(uid)  # type: ignore
         else:
             obj_dict = _get_obj_dict(obj, self._checker)
+
         tree = parse_obj_dict(obj_dict, node.id, self._checker,
                               self._obj_meta_cache)
         node.children = tree

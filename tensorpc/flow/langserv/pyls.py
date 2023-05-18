@@ -1,11 +1,19 @@
+"""
+use subprocess to check language server stdio.
+references:
+https://github.com/windmill-labs/windmill/blob/v1.101.1/lsp/pyls_launcher.py
+https://github.com/python-lsp/python-lsp-jsonrpc/blob/v1.0.0/pylsp_jsonrpc/streams.py
+"""
+
+
 import asyncio
 import json
-from pylsp_jsonrpc import streams
 
 import logging
 import subprocess
 import threading
 import os
+from typing import List
 
 import aiohttp
 from aiohttp import web
@@ -74,54 +82,54 @@ class AsyncJsonRpcStreamWriter:
 
                 # Ensure we get the byte length, not the character length
                 content_length = len(body) if isinstance(body, bytes) else len(body.encode('utf-8'))
-
                 response = (
                     "Content-Length: {}\r\n"
                     "Content-Type: application/vscode-jsonrpc; charset=utf8\r\n\r\n"
                     "{}".format(content_length, body)
                 )
-
                 self._wfile.write(response.encode('utf-8'))
                 await self._wfile.drain()
-
-                # self._wfile.flush()
             except Exception:  # pylint: disable=broad-except
                 log.exception("Failed to write message to output file %s", message)
 
 
-async def handle_ls_open(request):
-    print("NEW CONN", request)
-    ws = web.WebSocketResponse()
-    await ws.prepare(request)
-    aproc = await asyncio.create_subprocess_exec("python", "-m", "tensorpc.cli.pyright_launch", env=os.environ,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE)
-    assert aproc.stdout is not None 
-    assert aproc.stdin is not None 
+class LanguageServerHandler:
+    def __init__(self, ls_cmd: List[str]) -> None:
+        self.ls_cmd = ls_cmd
 
-    # proc = subprocess.Popen(["python", "-m", "tensorpc.cli.pyright_launch", "--stdio"], env=os.environ,
-    #     stdin=subprocess.PIPE,
-    #     stdout=subprocess.PIPE)
-    # Create a writer that formats json messages with the correct LSP headers
-    writer = AsyncJsonRpcStreamWriter(aproc.stdin)
-    reader = AsyncJsonRpcStreamReader(aproc.stdout)
-    async def cosumer(msg):
-        print("OUTPUT", type(msg), msg)
-        await ws.send_json(msg)
-    task = asyncio.create_task(reader.listen(cosumer))
-    # Create a reader for consuming stdout of the language server. We need to
-    # consume this in another thread
-    async for ws_msg in ws:
-        if ws_msg.type == aiohttp.WSMsgType.TEXT:
-            print("INPUT", ws_msg.json())  
-            await writer.write(ws_msg.json())
-    
-        elif ws_msg.type == aiohttp.WSMsgType.ERROR:
-            print("ERROR", ws_msg)
-            print("ERROR", ws_msg.data)
-        else:
-            raise NotImplementedError
-    return ws
+    async def handle_ls_open(self, request):
+        print("NEW CONN", request)
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        aproc = await asyncio.create_subprocess_exec(*self.ls_cmd, env=os.environ,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE)
+        assert aproc.stdout is not None 
+        assert aproc.stdin is not None 
+
+        # proc = subprocess.Popen(["python", "-m", "tensorpc.cli.pyright_launch", "--stdio"], env=os.environ,
+        #     stdin=subprocess.PIPE,
+        #     stdout=subprocess.PIPE)
+        # Create a writer that formats json messages with the correct LSP headers
+        writer = AsyncJsonRpcStreamWriter(aproc.stdin)
+        reader = AsyncJsonRpcStreamReader(aproc.stdout)
+        async def cosumer(msg):
+            # print("OUTPUT", type(msg), msg)
+            await ws.send_json(msg)
+        task = asyncio.create_task(reader.listen(cosumer))
+        # Create a reader for consuming stdout of the language server. We need to
+        # consume this in another thread
+        async for ws_msg in ws:
+            if ws_msg.type == aiohttp.WSMsgType.TEXT:
+                # print("INPUT", ws_msg.json())  
+                await writer.write(ws_msg.json())
+        
+            elif ws_msg.type == aiohttp.WSMsgType.ERROR:
+                print("ERROR", ws_msg)
+                print("ERROR", ws_msg.data)
+            else:
+                raise NotImplementedError
+        return ws
 
 async def serve_app(app,
                     port,
@@ -136,11 +144,13 @@ async def serve_app(app,
     await runner.cleanup()
 
 async def serve_ls(port: int,
+                   ls_cmd: List[str],
                     ssl_key_path: str = "",
                     ssl_crt_path: str = ""):
     async_shutdown_ev = asyncio.Event()
     app = web.Application()
-    app.router.add_get("", handle_ls_open)
+    handler = LanguageServerHandler(ls_cmd)
+    app.router.add_get("", handler.handle_ls_open)
     ssl_context = None
     if ssl_key_path != "" and ssl_key_path != "":
         ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)

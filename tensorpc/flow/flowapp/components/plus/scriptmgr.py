@@ -193,8 +193,13 @@ class ScriptManager(mui.FlexBox):
         code_lines: List[str] = []
         if lang == "python":
             code_lines.append("from tensorpc.flow import appctx")
-
-        script = Script(new_item_name, "".join(code_lines), lang)
+            code_lines.append("import asyncio")
+            code_lines.append("async def main():")
+            code_lines.append("    pass")
+            code_lines.append("")
+            code_lines.append("asyncio.get_running_loop().create_task(main())")
+            code_lines.append("")
+        script = Script(new_item_name, "\n".join(code_lines), lang)
         await appctx.save_data_storage(new_item_name, self._storage_node_rid,
                                        script)
         await self.send_and_wait(

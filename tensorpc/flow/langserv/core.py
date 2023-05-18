@@ -12,20 +12,26 @@ _SPLIT = TENSORPC_FLOW_LANG_SERVER_NAME_SPLIT
 
 def get_tmux_lang_server_info_may_create(ls_type: str, uid: str, port: int):
     # TODO jedi support
-    assert ls_type in ["pyright", "pylsp"]
+    assert ls_type in ["pyright", "pylsp", "clangd"]
     if ls_type == "pyright":
         window_command_fmt = "python -m tensorpc.cli.pyls --port={}"
         try:
             subprocess.check_call(["pyright", "--version"])
         except Exception:
             raise Exception("pyright not installed, you can install by pip install pyright")
-    else:
+    elif ls_type == "pylsp":
         window_command_fmt = "pylsp --ws --port {}"
         try:
             subprocess.check_call(["pylsp", "--version"])
         except Exception:
             raise Exception("pylsp not installed, you can install by pip install python-lsp-server[websockets] yapf")
-    
+    else:
+        window_command_fmt = "python -m tensorpc.cli.cppls --port={}"
+        try:
+            subprocess.check_call(["clangd", "--version"])
+        except Exception:
+            raise Exception("clangd not installed, you can install by sudo apt install clangd")
+
     
     s = libtmux.Server()
     sessions = s.sessions
