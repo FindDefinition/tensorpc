@@ -294,6 +294,7 @@ class App:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._flowapp_enable_lsp: bool = False
         self._flowapp_internal_lsp_config: LanguageServerConfig = LanguageServerConfig()
+        self._flowapp_internal_lsp_config.python.analysis.pythonPath = sys.executable
         self._flowapp_observed_func_registry: Optional[
             ObservedFunctionRegistryProtocol] = None
 
@@ -430,21 +431,25 @@ class App:
                 item = self.__flowapp_storage_cache.pop(key)
                 self.__flowapp_storage_cache[newname] = item
 
-    async def list_data_storage(self, node_id: str):
+    async def list_data_storage(self, node_id: str, graph_id: Optional[str] = None):
         meta = self.__flowapp_master_meta
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
+        if graph_id is None:
+            graph_id = self.__flowapp_master_meta.graph_id
         res: List[dict] = await simple_chunk_call_async(
-            meta.grpc_url, serv_names.FLOW_DATA_LIST_ITEM_METAS, meta.graph_id,
+            meta.grpc_url, serv_names.FLOW_DATA_LIST_ITEM_METAS, graph_id,
             node_id)
 
         return [JsonLikeNode(**x) for x in res]
 
-    async def list_all_data_storage_nodes(self):
+    async def list_all_data_storage_nodes(self, graph_id: Optional[str] = None):
         meta = self.__flowapp_master_meta
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
+        if graph_id is None:
+            graph_id = self.__flowapp_master_meta.graph_id
         res: List[str] = await simple_chunk_call_async(
             meta.grpc_url, serv_names.FLOW_DATA_QUERY_DATA_NODE_IDS,
-            meta.graph_id)
+            graph_id)
         return res
     
     async def get_ssh_node_data(self, node_id: str):

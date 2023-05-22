@@ -2878,3 +2878,46 @@ class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
                 "updates": updates_dict,
                 "updateBound": update_bound,
             }))
+
+@dataclasses.dataclass
+class VoxelMeshProps(Object3dContainerBaseProps):
+    size: Union[NumberType, Undefined] = undefined
+    centers: Union[np.ndarray, Undefined] = undefined
+    colors: Union[np.ndarray, Undefined] = undefined
+    limit: Union[int, Undefined] = undefined
+
+
+class VoxelMesh(O3dContainerWithEventBase[VoxelMeshProps,
+                                              ThreeComponentType]):
+
+    def __init__(self, centers: np.ndarray, size: float,
+                 limit: int,
+                 children: ThreeLayoutType,
+                 colors: Union[np.ndarray, Undefined] = undefined) -> None:
+        if not isinstance(colors, Undefined):
+            assert centers.shape[0] == colors.shape[0], "centers and colors must have same length"
+        assert centers.shape[0] <= limit
+        if centers.dtype != np.float32:
+            centers = centers.astype(np.float32)
+        # TODO children must be material or Edges
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+
+        super().__init__(UIType.ThreeVoxelMesh, VoxelMeshProps,
+                         children)
+        self.props.limit = limit
+        self.props.colors = colors
+        self.props.size = size
+        self.props.centers = centers
+
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+

@@ -153,14 +153,14 @@ async def rename_data_storage_item(key: str,
     app = get_app()
     return await app.rename_data_storage_item(key, newname, node_id, graph_id)
 
-async def list_data_storage(node_id: str):
+async def list_data_storage(node_id: str, graph_id: Optional[str] = None):
     app = get_app()
-    return await app.list_data_storage(node_id)
+    return await app.list_data_storage(node_id, graph_id)
 
 
-async def list_all_data_storage_nodes() -> List[str]:
+async def list_all_data_storage_nodes(graph_id: Optional[str] = None) -> List[str]:
     app = get_app()
-    return await app.list_all_data_storage_nodes()
+    return await app.list_all_data_storage_nodes(graph_id)
 
 
 def set_observed_func_registry(registry: ObservedFunctionRegistryProtocol):

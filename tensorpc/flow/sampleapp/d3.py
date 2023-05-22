@@ -23,7 +23,7 @@ class BufferMeshApp:
     @mark_create_layout
     def my_layout(self):
         cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
-        mesh = o3d.io.read_triangle_mesh("/home/yy/Downloads/val_00800000_0.0001.ply")
+        mesh = o3d.io.read_triangle_mesh("/root/tusimple/val_00800000_0.0001.ply")
         mesh.compute_vertex_normals()
 
         vert = np.asarray(mesh.vertices)
@@ -32,7 +32,7 @@ class BufferMeshApp:
         normals = np.asarray(mesh.triangle_normals).reshape(-1, 1, 3)
         normals = np.tile(normals, (1, 3, 1)).reshape(-1, 3)
         colors = np.zeros_like(mesh_points).astype(np.uint8)
-        print(mesh_points)
+        print(mesh_points.shape)
         mesh_points = np.ascontiguousarray(mesh_points)
         buffers = {
             "position": mesh_points.astype(np.float32),
@@ -46,6 +46,14 @@ class BufferMeshApp:
 
             # three.Edges(threshold=10, scale=1.1, color="black"),
         ]).prop(cast_shadow=True, receive_shadow=True)
+        mesh_points = mesh_points[:500000]
+        random_pcs = np.random.randint(-10, 10, size=[100, 3])
+        random_pc_colors = np.random.uniform(0, 255, size=[mesh_points.shape[0], 3]).astype(np.uint8)
+        voxel_size = 0.1
+        voxel_mesh = three.VoxelMesh(mesh_points.astype(np.float32), voxel_size, mesh_points.shape[0], [
+            # three.MeshPhongMaterial().prop(vertex_colors=True, color="aqua", specular="#ffffff", shininess=250, transparent=True),
+            three.MeshBasicMaterial().prop(vertex_colors=True),
+        ], colors=random_pc_colors).prop(cast_shadow=True, receive_shadow=True)
         for k, v in buffers.items():
             print(k, v.shape)
         print(vert.shape, indices.shape)
@@ -77,7 +85,8 @@ class BufferMeshApp:
             # dirlight.prop(helper_color=0x0f0f2a, helper_size=1.0),
             three.AmbientLight(),
             three.PointLight(color=0xffffff, intensity=5).prop(position=(13, 3, 5), cast_shadow=True),
-            buffer_mesh,
+            # buffer_mesh,
+            voxel_mesh,
         ])
         self.canvas.canvas.prop(shadows=True)
         res = mui.VBox([

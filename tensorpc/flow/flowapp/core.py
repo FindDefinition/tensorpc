@@ -180,6 +180,7 @@ class UIType(enum.Enum):
     ThreePrimitiveMesh = 0x1035
     ThreeEdges = 0x1036
     ThreeBufferMesh = 0x1037
+    ThreeVoxelMesh = 0x1038
 
     ThreeMeshBasicMaterial = 0x1050
     ThreeMeshStandardMaterial = 0x1051

@@ -62,14 +62,14 @@ class ScriptManager(mui.FlexBox):
     def __init__(
         self,
         storage_node_rid: str,
+        graph_id: Optional[str] = None,
     ):
         super().__init__()
 
         self._storage_node_rid = storage_node_rid
-        lsp_port = os.getenv(TENSORPC_FLOW_APP_LANG_SERVER_PORT, mui.undefined) 
-        print(lsp_port, "lsp_port")
+        self._graph_id = graph_id
         self.code_editor = mui.MonacoEditor("", "python",
-                                            "default").prop(flex=1, lsp_port=lsp_port)
+                                            "default").prop(flex=1)
         self.scripts = mui.Autocomplete(
             "Scripts",
             [],
@@ -114,7 +114,7 @@ class ScriptManager(mui.FlexBox):
             FrontendEventType.EditorReady.value, self._on_editor_ready)
 
     async def _on_editor_ready(self):
-        items = await appctx.list_data_storage(self._storage_node_rid)
+        items = await appctx.list_data_storage(self._storage_node_rid, self._graph_id)
         items.sort(key=lambda x: x.userdata["timestamp"]
                    if not isinstance(x.userdata, mui.Undefined) else 0,
                    reverse=True)
@@ -130,7 +130,7 @@ class ScriptManager(mui.FlexBox):
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
             item = await appctx.read_data_storage(label,
-                                                  self._storage_node_rid)
+                                                  self._storage_node_rid, self._graph_id)
             assert isinstance(item, Script)
             if item.lang == "python":
                 __tensorpc_script_res: List[Optional[Coroutine]] = [None]
@@ -167,19 +167,19 @@ class ScriptManager(mui.FlexBox):
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
             item = await appctx.read_data_storage(label,
-                                                  self._storage_node_rid)
+                                                  self._storage_node_rid, self._graph_id)
             assert isinstance(item, Script)
             item.lang = value
-            await appctx.save_data_storage(label, self._storage_node_rid, item)
+            await appctx.save_data_storage(label, self._storage_node_rid, item, self._graph_id)
 
     async def _on_editor_save(self, value: str):
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
             item = await appctx.read_data_storage(label,
-                                                  self._storage_node_rid)
+                                                  self._storage_node_rid, self._graph_id)
             assert isinstance(item, Script)
             item.code = value
-            await appctx.save_data_storage(label, self._storage_node_rid, item)
+            await appctx.save_data_storage(label, self._storage_node_rid, item, self._graph_id)
             if self._enable_save_watch.checked:
                 await self._run_button.headless_click()
 
@@ -201,7 +201,7 @@ class ScriptManager(mui.FlexBox):
             code_lines.append("")
         script = Script(new_item_name, "\n".join(code_lines), lang)
         await appctx.save_data_storage(new_item_name, self._storage_node_rid,
-                                       script)
+                                       script, self._graph_id)
         await self.send_and_wait(
             self.code_editor.update_event(
                 language=_LANG_TO_VSCODE_MAPPING[lang],
@@ -210,7 +210,7 @@ class ScriptManager(mui.FlexBox):
 
     async def _on_script_select(self, value):
         label = value["label"]
-        item = await appctx.read_data_storage(label, self._storage_node_rid)
+        item = await appctx.read_data_storage(label, self._storage_node_rid, self._graph_id)
         assert isinstance(item, Script)
         await self.langs.set_value(item.lang)
         await self.send_and_wait(
