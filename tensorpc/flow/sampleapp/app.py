@@ -1025,10 +1025,16 @@ class PointCloudApp:
         rots[:, :2] = 0
         colors = ["red", "yellow", "red", "blue", "yellow"]
         await self.canvas.show_boxes("key0", dims, locs, rots, colors)
+        
+        voxel_size = 0.1
+        size = np.random.randint(100, 300)
+        pcs = np.random.randint(-10, 10, size=[size, 3]) * voxel_size
+        pcs[:, 0] += 3
+        pcs = pcs.astype(np.float32)
+        pc_colors = np.random.uniform(0, 255, size=[pcs.shape[0],
+                                                    3]).astype(np.uint8)
 
-        # lines: [N, 2, 3]
-        lines = np.random.uniform(-3, 3, size=[10, 2, 3])
-        await self.canvas.show_lines("key0", lines, limit=10000, color="aqua")
+        await self.canvas.show_voxels("vox0", pcs, pc_colors, voxel_size, 1000)
 
 
 class PlotApp:

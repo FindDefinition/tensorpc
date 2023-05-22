@@ -1843,18 +1843,19 @@ class GeometryType(enum.Enum):
     Cone = 2
     Sphere = 3
     Plane = 4
-    Tube = 5
+    # Tube = 5
     Torus = 6
     TorusKnot = 7
     Tetrahedron = 8
     Ring = 9
-    Polyhedron = 10
+    # Polyhedron = 10
     Icosahedron = 11
     Octahedron = 12
     Dodecahedron = 13
     Extrude = 14
-    Lathe = 15
+    # Lathe = 15
     Capsule = 16
+    Cylinder = 17
 
 
 class PathOpType(enum.Enum):
@@ -2058,7 +2059,7 @@ class ConeGeometry(SimpleGeometry):
     def __init__(self,
                  radius: float = 1,
                  height: float = 1,
-                 radial_segments: int = 8,
+                 radial_segments: int = 32,
                  height_segments: int = 1,
                  open_ended: bool = False,
                  theta_start: float = 0,
@@ -2069,6 +2070,124 @@ class ConeGeometry(SimpleGeometry):
         ]
         super().__init__(GeometryType.Cone, args)
 
+class CylinderGeometry(SimpleGeometry):
+
+    def __init__(self,
+                 radius_top: float = 1,
+                 radius_bottom: float = 1,
+                 height: float = 1,
+                 radial_segments: int = 32,
+                 height_segments: int = 1,
+                 open_ended: bool = False,
+                 theta_start: float = 0,
+                 theta_length: float = np.pi * 2) -> None:
+        args: List[Union[int, float, bool]] = [
+            radius_top, radius_bottom, 
+            height, radial_segments, height_segments, 
+            open_ended,
+            theta_start, theta_length
+        ]
+        super().__init__(GeometryType.Cylinder, args)
+
+class DodecahedronGeometry(SimpleGeometry):
+
+    def __init__(self,
+                 radius : float = 1, detail : int = 0) -> None:
+        args: List[Union[int, float, bool]] = [
+            radius, detail
+        ]
+        super().__init__(GeometryType.Dodecahedron, args)
+
+class IcosahedronGeometry(SimpleGeometry):
+
+    def __init__(self,
+                 radius : float = 1, detail : int = 0) -> None:
+        args: List[Union[int, float, bool]] = [
+            radius, detail
+        ]
+        super().__init__(GeometryType.Icosahedron, args)
+
+class OctahedronGeometry(SimpleGeometry):
+
+    def __init__(self,
+                 radius : float = 1, detail : int = 0) -> None:
+        args: List[Union[int, float, bool]] = [
+            radius, detail
+        ]
+        super().__init__(GeometryType.Octahedron, args)
+
+class TetrahedronGeometry(SimpleGeometry):
+
+    def __init__(self,
+                 radius : float = 1, detail : int = 0) -> None:
+        args: List[Union[int, float, bool]] = [
+            radius, detail
+        ]
+        super().__init__(GeometryType.Tetrahedron, args)
+
+class RingGeometry(SimpleGeometry):
+
+    def __init__(self,
+                 inner_radius: float = 0.5,
+                 outer_radius: float = 1,
+                 theta_segments: int = 32,
+                 phi_segments: int = 1,
+                 theta_start: float = 0,
+                 theta_length: float = np.pi * 2) -> None:
+        args: List[Union[int, float, bool]] = [
+            inner_radius, outer_radius, 
+            theta_segments,
+            phi_segments, 
+            theta_start, theta_length
+        ]
+        super().__init__(GeometryType.Ring, args)
+
+class SphereGeometry(SimpleGeometry):
+
+    def __init__(self,
+                 radius: float = 1,
+                 widthSegments: int = 32,
+                 heightSegments: int = 16,
+                 phi_start: float = 0,
+                 phi_length: float = np.pi * 2,
+                 theta_start: float = 0,
+                 theta_length: float = np.pi) -> None:
+        args: List[Union[int, float, bool]] = [
+            radius, widthSegments, 
+            heightSegments,
+            phi_start, phi_length,
+            theta_start, theta_length
+        ]
+        super().__init__(GeometryType.Sphere, args)
+
+class TorusGeometry(SimpleGeometry):
+
+    def __init__(self,
+                 radius: float = 1,
+                 tube: float = 0.4,
+                 radial_segments: int = 12,
+                 tubular_segments: int = 48,
+                 arc : float = np.pi * 2) -> None:
+        args: List[Union[int, float, bool]] = [
+            radius, tube, radial_segments, tubular_segments,
+            arc
+        ]
+        super().__init__(GeometryType.Torus, args)
+
+class TorusKnotGeometry(SimpleGeometry):
+
+    def __init__(self,
+                 radius: float = 1,
+                 tube: float = 0.4,
+                 tubular_segments: int = 64,
+                 radial_segments: int = 8,
+                 p : int = 2,
+                 q : int = 3) -> None:
+        args: List[Union[int, float, bool]] = [
+            radius, tube, tubular_segments, radial_segments,
+            p, q
+        ]
+        super().__init__(GeometryType.TorusKnot, args)
 
 @dataclasses.dataclass
 class MeshBasicMaterialProps(ThreeMaterialPropsBase):
@@ -2909,6 +3028,47 @@ class VoxelMesh(O3dContainerWithEventBase[VoxelMeshProps,
         self.props.colors = colors
         self.props.size = size
         self.props.centers = centers
+
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class InstancedMeshProps(Object3dContainerBaseProps):
+    transforms: Union[np.ndarray, Undefined] = undefined
+    scales: Union[np.ndarray, Undefined] = undefined
+    colors: Union[np.ndarray, Undefined] = undefined
+    limit: Union[int, Undefined] = undefined
+
+
+class InstancedMesh(O3dContainerWithEventBase[InstancedMeshProps,
+                                              ThreeComponentType]):
+
+    def __init__(self, transforms: np.ndarray,
+                 limit: int,
+                 children: ThreeLayoutType,
+                 colors: Union[np.ndarray, Undefined] = undefined) -> None:
+        if not isinstance(colors, Undefined):
+            assert transforms.shape[0] == colors.shape[0], "centers and colors must have same length"
+        assert transforms.shape[0] <= limit
+        if transforms.dtype != np.float32:
+            transforms = transforms.astype(np.float32)
+        # TODO children must be material or Edges
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+
+        super().__init__(UIType.ThreeInstancedMesh, InstancedMeshProps,
+                         children)
+        self.props.limit = limit
+        self.props.colors = colors
+        self.props.transforms = transforms
 
 
     @property

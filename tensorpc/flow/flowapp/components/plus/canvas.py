@@ -212,6 +212,8 @@ class SimpleCanvas(mui.FlexBox):
         self._dynamic_images = three.Group({})
         self._dynamic_boxes = three.Group({})
         self._dynamic_custom_objs = three.Group({})
+        self._dynamic_voxels = three.Group({})
+
         self._screen_shot = three.ScreenShot(self._on_screen_shot_finish)
         self._screen_shot_v2 = three.ScreenShotSyncReturn()
         self.background_img = mui.Image()
@@ -230,6 +232,7 @@ class SimpleCanvas(mui.FlexBox):
             self._dynamic_grid,
             # self._screen_shot,
             self._screen_shot_v2,
+            self._dynamic_voxels,
             *init_canvas_childs
         ]
         # if with_grid:
@@ -243,6 +246,7 @@ class SimpleCanvas(mui.FlexBox):
         self._image_dict: Dict[str, three.Image] = {}
         self._segment_dict: Dict[str, three.Segments] = {}
         self._box_dict: Dict[str, three.BoundingBox] = {}
+        self._voxels_dict: Dict[str, three.VoxelMesh] = {}
 
         self._random_colors: Dict[str, str] = {}
 
@@ -587,6 +591,32 @@ class SimpleCanvas(mui.FlexBox):
         # TODO currently no way to clear lines without unmount
         self._segment_dict.clear()
         await self._dynamic_lines.set_new_layout({})
+
+    async def show_voxels(self,
+                         key: str,
+                         centers: np.ndarray,
+                         colors: np.ndarray,
+                         size: float,
+                         limit: int):
+        if key not in self._voxels_dict:
+            ui = three.VoxelMesh(centers, size, limit, [
+                three.MeshBasicMaterial().prop(vertex_colors=True),
+            ], colors=colors)
+            self._voxels_dict[key] = ui
+            await self._dynamic_voxels.update_childs({key: ui})
+            return 
+        ui = self._voxels_dict[key]
+        limit_prev = ui.props.limit
+        assert not isinstance(limit_prev, mui.Undefined)
+        if limit <= limit_prev:
+            await ui.send_and_wait(ui.update_event(size=size, colors=colors, centers=centers))
+        else:
+            await ui.send_and_wait(ui.update_event(size=size, colors=colors, centers=centers, limit=limit))
+
+    async def clear_all_voxels(self):
+        # TODO currently no way to clear lines without unmount
+        self._voxels_dict.clear()
+        await self._dynamic_voxels.set_new_layout({})
 
     async def show_image(self, key: str, image: np.ndarray,
                          position: three.Vector3Type,
