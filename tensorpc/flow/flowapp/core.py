@@ -170,6 +170,27 @@ class UIType(enum.Enum):
     ThreeFlexManualReflow = 0x102d
 
     ThreeScreenShot = 0x102f
+    ThreePointLight = 0x1030
+    ThreeDirectionalLight = 0x1031
+    ThreeSpotLight = 0x1032
+
+    ThreeAmbientLight = 0x1033
+    ThreeHemisphereLight = 0x1034
+
+    ThreePrimitiveMesh = 0x1035
+    ThreeEdges = 0x1036
+    ThreeBufferMesh = 0x1037
+
+    ThreeMeshBasicMaterial = 0x1050
+    ThreeMeshStandardMaterial = 0x1051
+    ThreeMeshLambertMaterial = 0x1052
+    ThreeMeshMatcapMaterial = 0x1053
+    ThreeMeshNormalMaterial = 0x1054
+    ThreeMeshPhongMaterial = 0x1055
+    ThreeMeshPhysicalMaterial = 0x1056
+    ThreeMeshToonMaterial = 0x1057
+    ThreeMeshDepthMaterial = 0x1058
+    ThreeRawShaderMaterial = 0x1059
 
     ThreeSimpleGeometry = 0x1101
     ThreeShape = 0x1102

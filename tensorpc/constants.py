@@ -1,8 +1,8 @@
 from pathlib import Path
 import google.protobuf
 
-_proto_ver = list(map(int, google.protobuf.__version__.split(".")))
-PROTOBUF_VERSION = (_proto_ver[0], _proto_ver[1])
+# _proto_ver = list(map(int, google.protobuf.__version__.split(".")))
+# PROTOBUF_VERSION = (_proto_ver[0], _proto_ver[1])
 
 PACKAGE_ROOT = Path(__file__).parent.resolve()
 

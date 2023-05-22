@@ -187,7 +187,8 @@ class SimpleCanvas(mui.FlexBox):
             camera: Optional[three.PerspectiveCamera] = None,
             screenshot_callback: Optional[Callable[[bytes, Any],
                                                    mui._CORO_NONE]] = None,
-            transparent_canvas: bool = False):
+            transparent_canvas: bool = False,
+            init_canvas_childs: Optional[List[three.ThreeComponentType]] = None):
         if camera is None:
             camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         self.camera = camera
@@ -216,6 +217,8 @@ class SimpleCanvas(mui.FlexBox):
         self.background_img = mui.Image()
 
         self._screenshot_callback = screenshot_callback
+        if init_canvas_childs is None:
+            init_canvas_childs = []
         canvas_layout = [
             self.ctrl,
             self.camera,
@@ -227,6 +230,7 @@ class SimpleCanvas(mui.FlexBox):
             self._dynamic_grid,
             # self._screen_shot,
             self._screen_shot_v2,
+            *init_canvas_childs
         ]
         # if with_grid:
         #     canvas_layout.append(infgrid)

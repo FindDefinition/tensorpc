@@ -24,6 +24,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union
+from tensorpc import PACKAGE_ROOT
 
 import cv2
 import imageio
@@ -1116,21 +1117,7 @@ class CollectionApp:
         pyright_setting = appctx.get_app().get_language_server_settings()
         pyright_setting.python.analysis.pythonPath = sys.executable
         pyright_setting.python.analysis.extraPaths = [
-            "/root/tusimple/nerf/tsnerf",
-            "/root/tusimple/d3ops",
-            "/root/tusimple/tstools_core",
-            "/root/tusimple/cumm",
-            "/root/tusimple/PCCM",
-            "/root/tusimple/utils/distflow",
-            "/home/tusimple/tusimple/nerf/tsnerf",
-            "/home/tusimple/tusimple/d3ops",
-            "/home/tusimple/tusimple/tstools_core",
-            "/home/tusimple/tusimple/cumm",
-            "/home/tusimple/tusimple/PCCM",
-            "/home/tusimple/tusimple/utils/distflow",
-            "/root/tusimple/ccimport",
-            "/root/tusimple/mapops",
-            "/root/tusimple/spconv"
+            str(PACKAGE_ROOT.parent),
         ]
 
         res = mui.HBox([
