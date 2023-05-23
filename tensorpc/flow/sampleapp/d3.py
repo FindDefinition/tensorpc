@@ -19,6 +19,8 @@ import numpy as np
 import scipy.spatial
 import open3d as o3d
 
+from tensorpc.flow.marker import mark_did_mount
+
 
 class BufferMeshApp:
 
@@ -179,9 +181,9 @@ class BufferMeshDevApp:
             init_canvas_childs=[
                 # three.Environment().prop(preset="forest"),
                 # three.PerformanceMonitor(),
-                three.Sky().prop(sun_position=(0, 1, 0), distance=450000, inclination=0, azimuth=0.25),
+                three.Sky().prop(sun_position=(1, 1, 1), distance=450000, inclination=0, azimuth=0.25),
                 three.AmbientLight(),
-                three.SpotLight((10, 10, 5)).prop(angle=0.25, penumbra=0.5, cast_shadow=True),
+                three.SpotLight((10, 10, 10)).prop(angle=0.25, penumbra=0.5, cast_shadow=True),
                 # three.HemisphereLight(color=0xffffff, ground_color=0xb9b9b9, intensity=0.85).prop(position=(-7, 25, 13)),
                 # three.PointLight(intensity=0.8).prop(position=(100, 100, 100),
                 #                                    cast_shadow=True),
@@ -237,6 +239,80 @@ class BufferMeshDevApp:
                                          self.voxel_size,
                                          colors=pc_colors))
 
+class BufferIndexedMeshApp:
+
+    @mark_create_layout
+    def my_layout(self):
+        self.limit = 5000000
+        cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
+        mesh = o3d.io.read_triangle_mesh(
+            "/home/yy/Downloads/val_00800000_0.0001.ply")
+        mesh.compute_vertex_normals()
+        normals = np.asarray(mesh.vertex_normals).reshape(-1, 3).astype(np.float32)
+
+        vertices = np.asarray(mesh.vertices).astype(np.float32)
+        indices = np.asarray(mesh.triangles).reshape(-1).astype(np.int32)
+        print(vertices.shape, indices.shape, normals.shape)
+        
+        # vertices = np.array([
+        #     -1.0, -1.0,  1.0, 
+        #     1.0, -1.0,  1.0, 
+        #     1.0,  1.0,  1.0, 
+        #     -1.0,  1.0,  1.0, 
+        # ], np.float32).reshape(-1, 3)
+        # indices = np.array([
+        #     0, 1, 2,
+        #     2, 3, 0,
+        # ], np.int32)
+
+        # vertices = np.array([
+        #     -1.0, -1.0,  1.0, 
+        #     1.0, -1.0,  1.0, 
+        #     1.0,  1.0,  1.0, 
+
+        #     1.0,  1.0,  1.0, 
+        #     -1.0,  1.0,  1.0, 
+        #     -1.0, -1.0,  1.0  
+        # ], np.float32).reshape(-1, 3)
+        buffer_mesh = three.BufferMesh({
+                    "position": vertices,
+                    # "normal": normals,
+                }, self.limit, [
+                    three.MeshPhongMaterial().prop(color="#f0f0f0"),
+                ], initial_index=indices).prop(initial_calc_vertex_normals=True)
+        self.buffer_mesh = buffer_mesh
+        self.canvas = plus.SimpleCanvas(
+            cam,
+            init_canvas_childs=[
+                three.Sky().prop(sun_position=(0, 1, 0), distance=450000, inclination=0, azimuth=0.25),
+                three.AmbientLight(),
+                three.SpotLight((10, 10, 5)).prop(angle=0.25, penumbra=0.5, cast_shadow=True),
+                buffer_mesh,
+            ])
+        self.canvas.canvas.prop(shadows=True)
+        res = mui.VBox([
+            mui.Button("750 Points", self._on_btn_750),
+            mui.Button("250 Points", self._on_btn_250),
+            self.canvas.prop(flex=1),
+        ]).prop(min_height=0,
+                min_width=0,
+                flex=1,
+                width="100%",
+                height="100%",
+                overflow="hidden")
+        return res
+    
+    async def _on_btn_750(self):
+        await self.buffer_mesh.calc_vertex_normals_in_frontend()
+
+    async def _on_btn_250(self):
+        pcs = np.random.randint(-10, 10, size=[25, 3])
+        pc_colors = np.random.uniform(0, 255, size=[pcs.shape[0],
+                                                    3]).astype(np.uint8)
+        await self.canvas.send_and_wait(
+            self.voxel_mesh.update_event(centers=pcs.astype(np.float32) *
+                                         self.voxel_size,
+                                         colors=pc_colors))
 
 class MeshApp:
 

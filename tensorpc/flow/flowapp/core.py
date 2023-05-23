@@ -184,7 +184,6 @@ class UIType(enum.Enum):
     ThreeInstancedMesh = 0x1039
     ThreeSky = 0x103a
     ThreeEnvironment = 0x103b
-    ThreePerformanceMonitor = 0x103c
 
     ThreeMeshBasicMaterial = 0x1050
     ThreeMeshStandardMaterial = 0x1051

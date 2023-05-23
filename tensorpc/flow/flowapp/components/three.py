@@ -3002,11 +3002,14 @@ class SpotLight(Object3dBase[SpotLightProps]):
 
 class BufferMeshControlType(enum.Enum):
     UpdateBuffers = 0
+    CalculateVertexNormals = 1
 
 @dataclasses.dataclass
 class BufferMeshProps(Object3dContainerBaseProps):
     initial_buffers: Union[Dict[str, np.ndarray], Undefined] = undefined
+    initial_index: Union[np.ndarray, Undefined] = undefined
     limit: Union[int, Undefined] = undefined
+    initial_calc_vertex_normals: Union[bool, Undefined] = undefined
 
 @dataclasses.dataclass
 class BufferMeshUpdate(DataClassWithUndefined):
@@ -3019,14 +3022,25 @@ class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
 
     def __init__(self, initial_buffers: Dict[str, np.ndarray], 
                  limit: int,
-                 children: ThreeLayoutType) -> None:
+                 children: ThreeLayoutType,
+                 initial_index: Union[np.ndarray, Undefined] = undefined) -> None:
+        """initial_index and initial_buffers must be specified in init,
+        they can't be setted in update_event.
+        Args:
+            initial_index: if undefined, user can't setted in update_buffers.
+            initial_buffers: dict of threejs buffer attributes.
+                if unsupported data format (for float, only f32 supported),
+                will be casted to f32 implicitly.
+        """
         first_dim = -1
-        for v in initial_buffers.values():
+        for k, v in initial_buffers.items():
             assert v.shape[0] <= limit, "initial buffer size exceeds limit"
             if first_dim == -1:
                 first_dim = v.shape[0]
             else:
                 assert first_dim == v.shape[0], "buffer size mismatch"
+            if v.dtype == np.float16 or v.dtype == np.float64:
+                initial_buffers[k] = v.astype(np.float32)
         # TODO children must be material or Edges
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
@@ -3035,9 +3049,9 @@ class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
                          children)
         self.props.initial_buffers = initial_buffers
         self.props.limit = limit
-
+        self.props.initial_index = initial_index
         self.initial_buffers = initial_buffers
-
+        self.initial_index = initial_index
 
     @property
     def prop(self):
@@ -3049,17 +3063,39 @@ class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def update_buffers(self, updates: Dict[str, BufferMeshUpdate], update_bound: bool = False):
+    async def calc_vertex_normals_in_frontend(self):
+        res = {
+            "type": BufferMeshControlType.CalculateVertexNormals.value,
+        }
+        return await self.send_and_wait(
+            self.create_comp_event(res))
+
+
+    async def update_buffers(self, updates: Dict[str, BufferMeshUpdate], update_bound: bool = False, new_index: Optional[np.ndarray] = None):
+        """
+        Args: 
+            updates: contains the updates for each buffer, the key must be in initial_buffers.
+            update_bound: if true, the bound will be updated. user should update this when they 
+                change the position.
+            new_index: if not None, the index will be updated.
+        """
+        if isinstance(self.initial_index, Undefined):
+            assert new_index is None, "new_index must be None"            
         updates_dict = {}
         for k, v in updates.items():
             assert k in self.initial_buffers, "key not found"
+            if v.data.dtype == np.float16 or v.data == np.float64:
+                v.data = v.data.astype(np.float32)
             updates_dict[k] = v.get_dict()
+        res = {
+            "type": BufferMeshControlType.UpdateBuffers.value,
+            "updates": updates_dict,
+            "updateBound": update_bound,
+        }
+        if new_index is not None:
+            res["newIndex"] = new_index
         return await self.send_and_wait(
-            self.create_comp_event({
-                "type": BufferMeshControlType.UpdateBuffers.value,
-                "updates": updates_dict,
-                "updateBound": update_bound,
-            }))
+            self.create_comp_event(res))
 
 @dataclasses.dataclass
 class VoxelMeshProps(Object3dContainerBaseProps):
@@ -3208,32 +3244,3 @@ class Environment(ThreeContainerBase[EnvironmentProps, ThreeComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-@dataclasses.dataclass
-class PerformanceMonitorProps(ContainerBaseProps):  
-    ms: Union[int, Undefined] = undefined
-    iterations: Union[int, Undefined] = undefined
-    threshold: Union[NumberType, Undefined] = undefined
-    flipflops: Union[int, Undefined] = undefined
-    factor: Union[NumberType, Undefined] = undefined
-    step: Union[NumberType, Undefined] = undefined
-
-
-class PerformanceMonitor(ThreeContainerBase[PerformanceMonitorProps, ThreeComponentType]):
-
-    def __init__(self, children: Optional[ThreeLayoutType] = None) -> None:
-        if children is None:
-            children = {}
-        if isinstance(children, list):
-            children = {str(i): v for i, v in enumerate(children)}
-
-        super().__init__(UIType.ThreePerformanceMonitor, PerformanceMonitorProps, {**children})
-
-    @property
-    def prop(self):
-        propcls = self.propcls
-        return self._prop_base(propcls, self)
-
-    @property
-    def update_event(self):
-        propcls = self.propcls
-        return self._update_props_base(propcls)
