@@ -369,7 +369,7 @@ class SampleThreeApp(EditableApp):
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.lines.prop(line_width=1, color="green")
         self.b2d = three.Boxes2D(1000).prop(color="red", alpha=0.5)
-        mesh = three.Mesh(three.BoxGeometry(), three.MeshBasicMaterial())
+        mesh = three.MeshV1(three.BoxGeometry(), three.MeshBasicMaterial())
         mesh.set_pointer_callback(
             on_click=three.EventHandler(lambda x: print(x)))
         self.canvas = three.ThreeCanvas({
@@ -557,7 +557,7 @@ class SampleThreeHudApp(EditableApp):
         # ctrl = three.OrbitControl()
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.b2d = three.Boxes2D(1000)
-        mesh = three.Mesh(three.RoundedRectGeometry(2, 1.5, 0.5),
+        mesh = three.MeshV1(three.RoundedRectGeometry(2, 1.5, 0.5),
                           three.MeshBasicMaterial().prop(color="#393939"))
         mesh.set_pointer_callback(
             on_click=three.EventHandler(lambda x: print(1), True))
@@ -573,7 +573,7 @@ class SampleThreeHudApp(EditableApp):
             on_click=three.EventHandler(lambda x: print(3)))
         material = three.MeshBasicMaterial()
         material.prop(wireframe=True, color="hotpink")
-        mesh2 = three.Mesh(three.BoxGeometry(), material)
+        mesh2 = three.MeshV1(three.BoxGeometry(), material)
         mesh2.set_pointer_callback(
             on_click=three.EventHandler(lambda x: print(4)))
         self.img_path = mui.Input("Image Path")

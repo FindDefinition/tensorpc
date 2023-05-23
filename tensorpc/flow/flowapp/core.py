@@ -182,6 +182,9 @@ class UIType(enum.Enum):
     ThreeBufferMesh = 0x1037
     ThreeVoxelMesh = 0x1038
     ThreeInstancedMesh = 0x1039
+    ThreeSky = 0x103a
+    ThreeEnvironment = 0x103b
+    ThreePerformanceMonitor = 0x103c
 
     ThreeMeshBasicMaterial = 0x1050
     ThreeMeshStandardMaterial = 0x1051
@@ -193,6 +196,8 @@ class UIType(enum.Enum):
     ThreeMeshToonMaterial = 0x1057
     ThreeMeshDepthMaterial = 0x1058
     ThreeRawShaderMaterial = 0x1059
+    ThreeMeshTransmissionMaterial = 0x105a
+    ThreeMeshDiscardMaterial = 0x105b
 
     ThreeSimpleGeometry = 0x1101
     ThreeShape = 0x1102

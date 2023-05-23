@@ -150,6 +150,7 @@ class BoxCfg:
 @dataclasses.dataclass
 class GlobalCfg:
     background: mui.ControlColorRGB
+    enable_perf: bool = False
 
 
 class CamCtrlKeyboardMode(enum.Enum):
@@ -291,7 +292,7 @@ class SimpleCanvas(mui.FlexBox):
                 if isinstance(v, three.BoundingBox):
                     ev += v.update_event(add_cross=value)
             await self.send_and_wait(ev)
-        if uid == "camera.keyboard_mode":
+        elif uid == "camera.keyboard_mode":
             if value == CamCtrlKeyboardMode.Helicopter:
                 await self.send_and_wait(
                     self.ctrl.update_event(keyboard_front=False))
@@ -303,6 +304,9 @@ class SimpleCanvas(mui.FlexBox):
                 color_str = f"rgb({value.r}, {value.g}, {value.b})"
                 await self.canvas.send_and_wait(
                     self.canvas.update_event(three_background_color=color_str))
+        elif uid == "canvas.enable_perf":
+            await self.canvas.send_and_wait(
+                self.canvas.update_event(enable_perf=value))
         elif uid == "camera.move_speed":
             await self.canvas.send_and_wait(
                 self.ctrl.update_event(keyboard_move_speed=value / 1000))

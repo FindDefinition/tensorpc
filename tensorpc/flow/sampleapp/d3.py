@@ -26,7 +26,7 @@ class BufferMeshApp:
     def my_layout(self):
         cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         mesh = o3d.io.read_triangle_mesh(
-            "/home/yy/Downloads/val_00800000_0.0001.ply")
+            "/root/tusimple/val_00800000_0.0001.ply")
         mesh.compute_vertex_normals()
 
         vert = np.asarray(mesh.vertices)
@@ -102,12 +102,12 @@ class BufferMeshApp:
         self.canvas = plus.SimpleCanvas(
             cam,
             init_canvas_childs=[
-                # three.PrimitiveMesh([
+                # three.Mesh([
                 #     three.BoxGeometry(),
                 #     three.MeshStandardMaterial().prop(color="red"),
                 #     # three.Edges(threshold=20, scale=1.1, color="black"),
                 # ]).prop(position=(0, 0, 1), cast_shadow=True),
-                # three.PrimitiveMesh([
+                # three.Mesh([
                 #     three.PlaneGeometry(50, 50),
                 #     three.MeshStandardMaterial().prop(color="#f0f0f0"),
                 # ]).prop(receive_shadow=True, position=(0, 0, -0.1)),
@@ -121,7 +121,7 @@ class BufferMeshApp:
                                                    cast_shadow=True),
                 # buffer_mesh,
                 # voxel_mesh,
-                voxel_mesh,
+                instanced_voxel_mesh,
             ])
         self.canvas.canvas.prop(shadows=True)
         res = mui.VBox([
@@ -143,10 +143,10 @@ class BufferMeshDevApp:
 
     @mark_create_layout
     def my_layout(self):
-        self.limit = 100
-        initial_num_pts = 50
+        self.limit = 1000
+        initial_num_pts = 500
         cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
-        random_pcs = np.random.randint(-10, 10, size=[initial_num_pts, 3])
+        random_pcs = np.random.randint(1, 20, size=[initial_num_pts, 3])
         random_pc_colors = np.random.uniform(0,
                                              255,
                                              size=[random_pcs.shape[0],
@@ -158,32 +158,53 @@ class BufferMeshDevApp:
             voxel_size,
             self.limit,
             [
-                # three.MeshPhongMaterial().prop(vertex_colors=True, color="aqua", specular="#ffffff", shininess=250, transparent=True),
-                three.MeshBasicMaterial().prop(vertex_colors=True),
+                # three.MeshPhongMaterial().prop(vertex_colors=True, color="aqua", specular="#ffffff", shininess=250, transparent=False),
+                three.MeshStandardMaterial().prop(vertex_colors=True)
+                # three.MeshBasicMaterial().prop(vertex_colors=True),
                 # three.Edges(),
             ],
-            colors=random_pc_colors).prop()
+            colors=random_pc_colors).prop(receive_shadow=True, cast_shadow=True)
         instanced_voxel_mesh = three.InstancedMesh(
             random_pcs.astype(np.float32) * voxel_size,
             random_pcs.shape[0],
             [
                 # three.MeshPhongMaterial().prop(vertex_colors=True, color="aqua", specular="#ffffff", shininess=250, transparent=True),
                 three.BoxGeometry(voxel_size, voxel_size, voxel_size),
-                three.MeshBasicMaterial().prop(),
+                three.MeshStandardMaterial().prop(),
             ],
             colors=random_pc_colors).prop()
         self.voxel_mesh = voxel_mesh
         self.canvas = plus.SimpleCanvas(
             cam,
             init_canvas_childs=[
+                # three.Environment().prop(preset="forest"),
+                # three.PerformanceMonitor(),
+                three.Sky().prop(sun_position=(0, 1, 0), distance=450000, inclination=0, azimuth=0.25),
                 three.AmbientLight(),
-                three.PointLight(color=0xffffff,
-                                 intensity=5).prop(position=(13, 3, 5),
-                                                   cast_shadow=True),
+                three.SpotLight((10, 10, 5)).prop(angle=0.25, penumbra=0.5, cast_shadow=True),
+                # three.HemisphereLight(color=0xffffff, ground_color=0xb9b9b9, intensity=0.85).prop(position=(-7, 25, 13)),
+                # three.PointLight(intensity=0.8).prop(position=(100, 100, 100),
+                #                                    cast_shadow=True),
                 # buffer_mesh,
                 # voxel_mesh,
                 voxel_mesh,
+                three.Mesh([
+                    three.PlaneGeometry(1000, 1000),
+                    three.MeshStandardMaterial().prop(color="#f0f0f0"),
+                ]).prop(receive_shadow=True, position=(0.0, 0.0, -0.1)),
+                # three.Mesh([
+                #     three.BoxGeometry(),
+                #     three.MeshStandardMaterial().prop(color="orange"),
+                # ]).prop(cast_shadow=True, position=(0, 5, 2)),
+                # three.Mesh([
+                #     three.BoxGeometry(),
+                #     three.MeshStandardMaterial().prop(color="orange"),
+                # ]).prop(cast_shadow=True, position=(0.45, 7, 1.25)),
+
             ])
+        # <pointLight position={[100, 100, 100]} intensity={0.8} />
+        # <hemisphereLight color="#ffffff" groundColor="#b9b9b9" position={[-7, 25, 13]} intensity={0.85} />
+
         self.canvas.canvas.prop(shadows=True)
         res = mui.VBox([
             mui.Button("750 Points", self._on_btn_750),
@@ -226,12 +247,12 @@ class MeshApp:
         self.canvas = plus.SimpleCanvas(
             cam,
             init_canvas_childs=[
-                three.PrimitiveMesh([
+                three.Mesh([
                     three.BoxGeometry(),
                     three.MeshStandardMaterial().prop(color="red"),
                     three.Edges(threshold=20, scale=1.1, color="black"),
                 ]).prop(position=(0, 0, 1), cast_shadow=True),
-                three.PrimitiveMesh([
+                three.Mesh([
                     three.PlaneGeometry(50, 50),
                     three.MeshStandardMaterial().prop(color="#f0f0f0"),
                 ]).prop(receive_shadow=True, position=(0, 0, -0.1)),

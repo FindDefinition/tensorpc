@@ -1504,6 +1504,9 @@ class ThreeCanvasProps(MUIFlexBoxProps):
     allow_keyboard_event: Union[bool, Undefined] = undefined
     tab_index: Union[int, Undefined] = undefined
     shadows: Union[bool, Undefined] = undefined 
+    enable_perf: Union[bool, Undefined] = undefined
+    perf_position: Union[Literal[ 'top-right', 'top-left', 'bottom-right', 'bottom-left'], Undefined] = undefined
+
 
 class ThreeCanvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
 
@@ -2242,11 +2245,41 @@ class MeshPhysicalMaterialProps(MeshStandardMaterialProps):
     clearcoat_roughness: Union[NumberType, Undefined] = undefined
     metalness: Union[NumberType, Undefined] = undefined
     roughness: Union[NumberType, Undefined] = undefined
-
+    sheen: Union[NumberType, Undefined] = undefined
+    transmission: Union[NumberType, Undefined] = undefined
+    ior: Union[NumberType, Undefined] = undefined
+    attenuation_color: Union[str, NumberType, Undefined] = undefined
+    attenuation_distance: Union[NumberType, Undefined] = undefined
+    specular_intensity: Union[NumberType, Undefined] = undefined
+    specular_color: Union[str, NumberType, Undefined] = undefined
+    sheen_roughness: Union[NumberType, Undefined] = undefined
+    sheen_color: Union[str, NumberType, Undefined] = undefined
 
 @dataclasses.dataclass
 class MeshToonMaterialProps(ThreeMaterialPropsBase):
     color: Union[str, Undefined] = undefined
+
+@dataclasses.dataclass
+class MeshTransmissionMaterialProps(MeshPhysicalMaterialProps):
+    transmission: Union[NumberType, Undefined] = undefined
+    thickness: Union[NumberType, Undefined] = undefined
+    backside_thickness: Union[NumberType, Undefined] = undefined
+    roughness: Union[NumberType, Undefined] = undefined
+    chromatic_aberration: Union[NumberType, Undefined] = undefined
+    anisotropy: Union[NumberType, Undefined] = undefined
+    distortion: Union[NumberType, Undefined] = undefined
+    distortion_scale: Union[NumberType, Undefined] = undefined
+    temporal_distortion: Union[NumberType, Undefined] = undefined
+    transmission_sampler: Union[bool, Undefined] = undefined
+    backside: Union[bool, Undefined] = undefined
+    resolution: Union[NumberType, Undefined] = undefined
+    backside_resolution: Union[NumberType, Undefined] = undefined
+    samples: Union[NumberType, Undefined] = undefined
+
+
+@dataclasses.dataclass
+class MeshDiscardMaterialProps(ThreeBasicProps):
+    pass
 
 
 class MeshBasicMaterialV1(ThreeMaterialBase[MeshBasicMaterialProps]):
@@ -2424,6 +2457,36 @@ class MeshToonMaterial(ThreeMaterialBase[MeshToonMaterialProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+class MeshTransmissionMaterial(ThreeMaterialBase[MeshTransmissionMaterialProps]):
+
+    def __init__(self, ) -> None:
+        super().__init__(UIType.ThreeMeshTransmissionMaterial, MeshTransmissionMaterialProps)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+class MeshDiscardMaterial(ThreeMaterialBase[MeshDiscardMaterialProps]):
+
+    def __init__(self, ) -> None:
+        super().__init__(UIType.ThreeMeshDiscardMaterial, MeshDiscardMaterialProps)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
 
 MeshChildType: TypeAlias = Union[ThreeMaterialBase, ThreeMaterialPropsBase,
                                  ThreeGeometryPropsBase, ThreeGeometryBase]
@@ -2442,7 +2505,7 @@ class MeshProps(PrimitiveMeshProps):
     toggled: Union[bool, Undefined] = undefined
 
 
-class PrimitiveMesh(O3dContainerWithEventBase[PrimitiveMeshProps,
+class Mesh(O3dContainerWithEventBase[PrimitiveMeshProps,
                                               ThreeComponentType]):
 
     def __init__(self, children: ThreeLayoutType) -> None:
@@ -2463,7 +2526,7 @@ class PrimitiveMesh(O3dContainerWithEventBase[PrimitiveMeshProps,
         return self._update_props_base(propcls)
 
 
-class Mesh(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
+class MeshV1(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
 
     def __init__(self,
                  geometry: ThreeGeometryBase,
@@ -2543,7 +2606,7 @@ class ShapeButton(Group):
                  callback: Callable[[Any], _CORO_ANY]) -> None:
         material = MeshBasicMaterialV1()
         material.prop(color="#393939")
-        mesh = Mesh(ShapeGeometry(shape), material)
+        mesh = MeshV1(ShapeGeometry(shape), material)
         mesh.set_pointer_callback(on_click=EventHandler(callback, True))
         mesh.prop(hover_color="#222222", click_color="#009A63")
         self.mesh = mesh
@@ -2613,7 +2676,7 @@ class Button(Group):
             font_size = min(width, height) * 0.5
         material = MeshBasicMaterialV1()
         material.prop(color="#393939")
-        mesh = Mesh(RoundedRectGeometry(width, height, radius), material)
+        mesh = MeshV1(RoundedRectGeometry(width, height, radius), material)
         mesh.set_pointer_callback(on_click=EventHandler(callback, True))
         mesh.prop(hover_color="#222222", click_color="#009A63")
         self.mesh = mesh
@@ -2667,7 +2730,7 @@ class ToggleButton(Group):
             font_size = min(width, height) * 0.5
         material = MeshBasicMaterialV1()
         material.prop(color="#393939")
-        mesh = Mesh(RoundedRectGeometry(width, height, radius), material)
+        mesh = MeshV1(RoundedRectGeometry(width, height, radius), material)
         mesh.set_pointer_callback(on_change=EventHandler(callback, True))
 
         mesh.prop(hover_color="#222222",
@@ -2776,7 +2839,7 @@ class PivotControls(ThreeContainerBase[PivotControlsProps,
 
 @dataclasses.dataclass
 class PointLightProps(Object3dBaseProps):
-    color: Union[NumberType, Undefined] = undefined
+    color: Union[NumberType, str, Undefined] = undefined
     intensity: Union[NumberType, Undefined] = undefined
     distance: Union[NumberType, Undefined] = undefined
     decay: Union[NumberType, Undefined] = undefined
@@ -2788,7 +2851,7 @@ class PointLight(Object3dBase[PointLightProps]):
 
     def __init__(self,
                  position: Union[Vector3Type, Undefined] = undefined,
-                 color: Union[NumberType, Undefined] = undefined,
+                 color: Union[NumberType, str, Undefined] = undefined,
                  intensity: Union[NumberType, Undefined] = undefined) -> None:
         super().__init__(UIType.ThreePointLight, PointLightProps)
         self.props.color = color
@@ -2808,14 +2871,14 @@ class PointLight(Object3dBase[PointLightProps]):
 
 @dataclasses.dataclass
 class AmbientLightProps(Object3dBaseProps):
-    color: Union[NumberType, Undefined] = undefined
+    color: Union[NumberType, str, Undefined] = undefined
     intensity: Union[NumberType, Undefined] = undefined
 
 
 class AmbientLight(Object3dBase[AmbientLightProps]):
 
     def __init__(self,
-                 color: Union[NumberType, Undefined] = undefined,
+                 color: Union[NumberType, str, Undefined] = undefined,
                  intensity: Union[NumberType, Undefined] = undefined) -> None:
         super().__init__(UIType.ThreeAmbientLight, AmbientLightProps)
         self.props.color = color
@@ -2834,18 +2897,18 @@ class AmbientLight(Object3dBase[AmbientLightProps]):
 
 @dataclasses.dataclass
 class HemisphereLightProps(Object3dBaseProps):
-    color: Union[NumberType, Undefined] = undefined
+    color: Union[NumberType, str, Undefined] = undefined
     intensity: Union[NumberType, Undefined] = undefined
-    ground_color: Union[NumberType, Undefined] = undefined
+    ground_color: Union[NumberType, str, Undefined] = undefined
 
 
 class HemisphereLight(Object3dBase[HemisphereLightProps]):
 
     def __init__(
             self,
-            color: Union[NumberType, Undefined] = undefined,
+            color: Union[NumberType, str, Undefined] = undefined,
             intensity: Union[NumberType, Undefined] = undefined,
-            ground_color: Union[NumberType, Undefined] = undefined) -> None:
+            ground_color: Union[NumberType, str, Undefined] = undefined) -> None:
         super().__init__(UIType.ThreeHemisphereLight, HemisphereLightProps)
         self.props.color = color
         self.props.intensity = intensity
@@ -2864,7 +2927,7 @@ class HemisphereLight(Object3dBase[HemisphereLightProps]):
 
 @dataclasses.dataclass
 class DirectionalLightProps(Object3dBaseProps):
-    color: Union[NumberType, Undefined] = undefined
+    color: Union[NumberType, str, Undefined] = undefined
     intensity: Union[NumberType, Undefined] = undefined
     cast_shadow: Union[bool, Undefined] = undefined
     target_position: Union[Vector3Type, Undefined] = undefined
@@ -2876,7 +2939,7 @@ class DirectionalLight(Object3dBase[DirectionalLightProps]):
     def __init__(
             self,
             position: Union[Vector3Type, Undefined] = undefined,
-            color: Union[NumberType, Undefined] = undefined,
+            color: Union[NumberType, str, Undefined] = undefined,
             intensity: Union[NumberType, Undefined] = undefined,
             target_position: Union[Vector3Type,
                                    Undefined] = undefined) -> None:
@@ -2899,7 +2962,7 @@ class DirectionalLight(Object3dBase[DirectionalLightProps]):
 
 @dataclasses.dataclass
 class SpotLightProps(Object3dBaseProps):
-    color: Union[NumberType, Undefined] = undefined
+    color: Union[NumberType, str, Undefined] = undefined
     intensity: Union[NumberType, Undefined] = undefined
     distance: Union[NumberType, Undefined] = undefined
     decay: Union[NumberType, Undefined] = undefined
@@ -2916,7 +2979,7 @@ class SpotLight(Object3dBase[SpotLightProps]):
     def __init__(
             self,
             position: Union[Vector3Type, Undefined] = undefined,
-            color: Union[NumberType, Undefined] = undefined,
+            color: Union[NumberType, str, Undefined] = undefined,
             intensity: Union[NumberType, Undefined] = undefined,
             target_position: Union[Vector3Type,
                                    Undefined] = undefined) -> None:
@@ -3081,3 +3144,96 @@ class InstancedMesh(O3dContainerWithEventBase[InstancedMeshProps,
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
+@dataclasses.dataclass
+class SkyProps(ThreeBasicProps):  
+    distance: Union[NumberType, Undefined] = undefined
+    sun_position: Union[Vector3Type, Undefined] = undefined
+    inclination: Union[NumberType, Undefined] = undefined
+    azimuth: Union[NumberType, Undefined] = undefined
+    mie_coefficient: Union[NumberType, Undefined] = undefined
+    mie_directional_g: Union[NumberType, Undefined] = undefined
+    rayleigh: Union[NumberType, Undefined] = undefined
+    turbidity: Union[NumberType, Undefined] = undefined
+
+
+
+class Sky(ThreeComponentBase[SkyProps]):
+
+    def __init__(self) -> None:
+        super().__init__(UIType.ThreeSky, SkyProps)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass 
+class EnvGround:
+    radius: Union[NumberType, Undefined] = undefined
+    height: Union[NumberType, Undefined] = undefined
+    scale: Union[Vector3Type, Undefined] = undefined
+
+
+@dataclasses.dataclass
+class EnvironmentProps(ContainerBaseProps):  
+    resolution: Union[int, Undefined] = undefined
+    background: Union[bool, Literal["only"], Undefined] = undefined
+    blur: Union[int, Undefined] = undefined
+    preset: Union[Literal["sunset", "dawn", "night", "warehouse", "forest", "apartment", "studio", "city", "park", "lobby"], Undefined] = undefined
+    ground: Union[EnvGround, bool, Undefined] = undefined
+
+class Environment(ThreeContainerBase[EnvironmentProps, ThreeComponentType]):
+
+    def __init__(self, children: Optional[ThreeLayoutType] = None) -> None:
+        if children is None:
+            children = {}
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+
+        super().__init__(UIType.ThreeEnvironment, EnvironmentProps, {**children})
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class PerformanceMonitorProps(ContainerBaseProps):  
+    ms: Union[int, Undefined] = undefined
+    iterations: Union[int, Undefined] = undefined
+    threshold: Union[NumberType, Undefined] = undefined
+    flipflops: Union[int, Undefined] = undefined
+    factor: Union[NumberType, Undefined] = undefined
+    step: Union[NumberType, Undefined] = undefined
+
+
+class PerformanceMonitor(ThreeContainerBase[PerformanceMonitorProps, ThreeComponentType]):
+
+    def __init__(self, children: Optional[ThreeLayoutType] = None) -> None:
+        if children is None:
+            children = {}
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+
+        super().__init__(UIType.ThreePerformanceMonitor, PerformanceMonitorProps, {**children})
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
