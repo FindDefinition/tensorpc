@@ -44,7 +44,7 @@ def get_tmux_scheduler_info_may_create():
     return port, uuid_str
 
 
-def launch_tmux_task(uuid_str: str, window_command: str, one_shot: bool, sched_port: int, resources: List[Tuple[ResourceType, int]]):
+def launch_tmux_task(uuid_str: str, window_command: str, one_shot: bool, sched_port: int, resources: List[Tuple[ResourceType, int]], cwd: str = ""):
     s = libtmux.Server()
     sess_name = f"{constants.TMUX_SESSION_TASK_PREFIX}{_SPLIT}{uuid_str}"
     envs = {
@@ -65,7 +65,8 @@ def launch_tmux_task(uuid_str: str, window_command: str, one_shot: bool, sched_p
         assert isinstance(sess, libtmux.Session)
         pane: libtmux.Pane = sess.windows[0].panes[0]
         pane.send_keys(env_export_str)
-
+        if cwd:
+            pane.send_keys(f"cd {cwd}")
         pane.send_keys(window_command)
     else:
         if one_shot:
@@ -77,12 +78,16 @@ def launch_tmux_task(uuid_str: str, window_command: str, one_shot: bool, sched_p
                 f"{constants.TMUX_SESSION_TASK_PREFIX}{_SPLIT}{uuid_str}")
             pane: libtmux.Pane = sess.windows[0].panes[0]
             pane.send_keys(env_export_str)
+            if cwd:
+                pane.send_keys(f"cd {cwd}")
             pane.send_keys(f"{window_command}; exit")
         else:
             sess = s.new_session(
                 f"{constants.TMUX_SESSION_TASK_PREFIX}{_SPLIT}{uuid_str}")
             pane: libtmux.Pane = sess.windows[0].panes[0]
             pane.send_keys(env_export_str)
+            if cwd:
+                pane.send_keys(f"cd {cwd}")
             pane.send_keys(window_command)
 
 def kill_task(uuid_str: str, pid: int):

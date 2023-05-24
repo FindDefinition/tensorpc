@@ -214,7 +214,7 @@ class Scheduler:
             # print("RUNTASK", task_id)
             cmd = f"python -m tensorpc.autossh.scheduler.runtask {task.type.value}"
             task.state.status = TaskStatus.Booting
-            tmux.launch_tmux_task(task_id, cmd, not task.keep_tmux_session, self.grpc_port, task.state.resources)
+            tmux.launch_tmux_task(task_id, cmd, not task.keep_tmux_session, self.grpc_port, task.state.resources, task.cwd)
             self._update_task_timestamp(task)
             return True 
         return False 

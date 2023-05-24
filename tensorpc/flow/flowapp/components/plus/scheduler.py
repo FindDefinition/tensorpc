@@ -86,6 +86,10 @@ class TaskCard(mui.FlexBox):
             mui.VBox([self.command, self.tmux_pane]).prop(max_height="300px", overflow="auto"),
         ]).prop(timeout="auto", unmount_on_exit=True)
         self._expanded = False
+        self.gpu_tag = mui.Chip(f"{task.num_gpu_used} gpus").prop(color="green",
+                                    size="small",
+                                    margin="0 3px 0 3px",
+                                    clickable=False)
         layout = [
             mui.VBox([
                 mui.HBox([
@@ -97,11 +101,7 @@ class TaskCard(mui.FlexBox):
                              self._on_tmux_chip).prop(color="blue",
                                                       size="small",
                                                       margin="0 3px 0 3px"),
-                    mui.Chip(f"{task.num_gpu_used} gpus",
-                             self._on_tmux_chip).prop(color="green",
-                                                      size="small",
-                                                      margin="0 3px 0 3px",
-                                                      clickable=False),
+                    self.gpu_tag,
                 ]),
                 mui.Divider("horizontal").prop(margin="5px 0 5px 0"),
                 self.status,
@@ -150,6 +150,7 @@ class TaskCard(mui.FlexBox):
                       "opacity": "0.5",
                   })
 
+
     async def _on_expand_more(self):
         self._expanded = not self._expanded
         icon = mui.IconType.ExpandLess if self._expanded else mui.IconType.ExpandMore
@@ -180,12 +181,15 @@ class TaskCard(mui.FlexBox):
         await self.client.delete_task(self.task_id)
 
     def update_task_data_event(self, task: Task):
-        self.task = task
         is_running = task.state.status == TaskStatus.Running
         status_name_color = _TASK_STATUS_TO_UI_TEXT_AND_COLOR[
             task.state.status]
         ev = self.status.update_event(mui_color=status_name_color[1],
                                       value=status_name_color[0])
+        if self.command.props.value != task.command:
+            ev += self.command.update_event(value=task.command)
+        if task.num_gpu_used != self.task.num_gpu_used:
+            ev += self.gpu_tag.update_event(label=f"{task.num_gpu_used} gpus")
         if is_running:
             progress_0 = task.state.progress == 0
             ev += self.progress.update_event(
@@ -196,6 +200,8 @@ class TaskCard(mui.FlexBox):
                                              variant="determinate")
         if task.state.tmux_pane_last_lines:
             ev += self.tmux_pane.update_event(value=task.state.tmux_pane_last_lines)
+        self.task = task
+
         return ev
 
     async def update_task_data(self, task: Task):
@@ -335,11 +341,13 @@ class TmuxScheduler(mui.FlexBox):
                                   func_id: str,
                                   task_id: str = "",
                                   kwargs: Optional[dict] = None,
-                                  keep_tmux_session: bool = True):
+                                  keep_tmux_session: bool = True,
+                                  cwd: str = ""):
         if kwargs is None:
             kwargs = {}
         task = Task(TaskType.FunctionId,
                     func_id, [kwargs],
                     id=task_id,
-                    keep_tmux_session=keep_tmux_session)
+                    keep_tmux_session=keep_tmux_session,
+                    cwd=cwd)
         await self.submit_task(task)
