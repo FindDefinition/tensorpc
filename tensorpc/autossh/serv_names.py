@@ -80,5 +80,10 @@ class _ServiceNames:
     def SCHED_TASK_RESOURCE_USAGE(self):
         from tensorpc.autossh.services.scheduler import Scheduler
         return get_service_key_by_type(Scheduler, Scheduler.get_resource_usage.__name__)
+    
+    @property
+    def SCHED_TASK_QUERY_TMUX_PANES(self):
+        from tensorpc.autossh.services.scheduler import Scheduler
+        return get_service_key_by_type(Scheduler, Scheduler.query_task_tmux_lines.__name__)
 
 serv_names = _ServiceNames()

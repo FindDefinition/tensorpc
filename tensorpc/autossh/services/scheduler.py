@@ -129,7 +129,7 @@ class Scheduler:
     def get_resource_usage(self):
         return self.resource_manager.idle_resources, self.resource_manager.occupied_resources
 
-    def query_task_updates(self, ts_uids: List[Tuple[int, str]]):
+    def query_task_updates(self, ts_uids: List[Tuple[int, str]], tmux_pane_lines: int = 0):
         """compare query timestamp, return updated + new and deleted tasks
         """
         deleted_uids: List[str] = []
@@ -145,7 +145,23 @@ class Scheduler:
         for k in self.tasks.keys():
             if k not in all_query_uids:
                 update_tasks.append(self.tasks[k])
+        # for each update task, get their tmux pane last lines
+        if tmux_pane_lines > 0:
+            for task in update_tasks:
+                res = tmux.capture_pane_last_lines(task.id, tmux_pane_lines)
+                if isinstance(res, list):
+                    res = "\n".join(res)
+                task.state.tmux_pane_last_lines = res
         return update_tasks, deleted_uids
+
+    def query_task_tmux_lines(self, task_uids: List[str], tmux_pane_lines: int = 0):
+        returns: Dict[str, str] = {}
+        for task_id in task_uids:
+            res = tmux.capture_pane_last_lines(task_id, tmux_pane_lines)
+            if isinstance(res, list):
+                res = "\n".join(res)
+            returns[task_id] = res 
+        return returns
 
     def submit_task(self, task: Task):
         # print("submit_task START", task.id)
@@ -230,6 +246,7 @@ class Scheduler:
             task = self.tasks[task_id]
             assert task.state.status not in ALL_RUNNING_STATUS, "you can't delete a running task"
             self.tasks.pop(task_id)
+            tmux.delete_task(task_id)
             return True 
         return False 
     

@@ -55,7 +55,7 @@ class TaskState:
     timestamp: int = -1
     # resources used by this task such as GPUs.
     resources: List[Tuple[ResourceType, int]] = dataclasses.field(default_factory=list)
-
+    tmux_pane_last_lines: str = ""
 
 @dataclasses.dataclass 
 class Task:

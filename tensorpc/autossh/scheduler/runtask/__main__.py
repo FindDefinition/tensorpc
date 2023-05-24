@@ -27,6 +27,7 @@ def run_func_in_module(module_func_id: str, *args, **kwargs):
     for part in local_parts[1:]:
         func_obj = getattr(func_obj, part)
     assert inspect.isfunction(func_obj) or inspect.isbuiltin(func_obj)
+    print(func_obj)
     return func_obj(*args, **kwargs)
 
 def main(type_int: int):
@@ -44,7 +45,7 @@ def main(type_int: int):
     command, func_id_params = res
     if type == TaskType.Command:
         try:
-            print(command)
+            # print(command)
             subprocess.run(command, shell=True, check=True)
             simple_remote_call(scheduler_url, serv_names.SCHED_TASK_SET_FINISHED, env_vars.uid)
 
@@ -59,13 +60,15 @@ def main(type_int: int):
         with RemoteManager(scheduler_url) as robj:
             with enter_task_conetxt(robj):
                 try:
+                    # print(command)
                     run_func_in_module(command, **kwargs)
                     robj.remote_call(serv_names.SCHED_TASK_SET_FINISHED, env_vars.uid)
                 except:
+                    traceback.print_exc()
                     ss = io.StringIO()
                     traceback.print_exc(file=ss)
                     robj.remote_call(serv_names.SCHED_TASK_SET_EXCEPTION, env_vars.uid, ss.getvalue())
-    print("EXIT!!!")
+    # print("EXIT!!!")
 
 if __name__ == "__main__":
     fire.Fire(main)

@@ -107,3 +107,26 @@ def cancel_task(uuid_str: str):
     sess = s.sessions.get(session_name=sess_name)
     pane: libtmux.Pane = sess.windows[0].panes[0]
     pane.send_keys("\x03")
+
+def delete_task(uuid_str: str):
+    s = libtmux.Server()
+    sess_name = f"{constants.TMUX_SESSION_TASK_PREFIX}{_SPLIT}{uuid_str}"
+    assert s.has_session(sess_name)
+    sess = s.sessions.get(session_name=sess_name)
+    assert isinstance(sess, libtmux.Session)
+    pane: libtmux.Pane = sess.windows[0].panes[0]
+    pane.send_keys("exit")
+
+def capture_pane_last_lines(uuid_str: str, num_lines: int):
+    s = libtmux.Server()
+    sess_name = f"{constants.TMUX_SESSION_TASK_PREFIX}{_SPLIT}{uuid_str}"
+    if not s.has_session(sess_name):
+        return "" 
+    sess = s.sessions.get(session_name=sess_name)
+    assert isinstance(sess, libtmux.Session)
+    pane: libtmux.Pane = sess.windows[0].panes[0]
+    return pane.capture_pane(0)[-num_lines:]
+
+
+if __name__ == "__main__":
+    print(capture_pane_last_lines("junyi", 3))

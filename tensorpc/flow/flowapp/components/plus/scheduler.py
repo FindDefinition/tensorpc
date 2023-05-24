@@ -70,7 +70,7 @@ class TaskCard(mui.FlexBox):
             task.state.status]
         self.status.prop(mui_color=status_name_color[1],
                          value=status_name_color[0])
-        progress_0 = task.state.progress == 0
+        progress_0 = task.state.progress == 0 and task.state.status == TaskStatus.Running
         self.progress = mui.CircularProgress(task.state.progress * 100).prop(
             variant="indeterminate" if progress_0 else "determinate")
         self.collapse_btn = mui.IconButton(mui.IconType.ExpandMore,
@@ -79,9 +79,11 @@ class TaskCard(mui.FlexBox):
                                                size="small")
         self.command = mui.Typography(task.command).prop(
             font_size="14px", font_family="monospace", word_break="break-word")
+        self.tmux_pane = mui.Typography("").prop(
+            font_size="12px", font_family="monospace", white_space="pre-line", border="1px solid #ccc", padding="5px")
 
         self.detail = mui.Collapse([
-            mui.VBox([self.command]),
+            mui.VBox([self.command, self.tmux_pane]).prop(max_height="300px", overflow="auto"),
         ]).prop(timeout="auto", unmount_on_exit=True)
         self._expanded = False
         layout = [
@@ -118,10 +120,10 @@ class TaskCard(mui.FlexBox):
                     tooltip="Kill Task",
                     size="small",
                     confirm_message="Are You Sure to Kill This Task?"),
-                mui.IconButton(mui.IconType.Delete, self._on_kill_task).prop(
-                    tooltip="Kill Session",
+                mui.IconButton(mui.IconType.Delete, self._on_delete_task).prop(
+                    tooltip="Delete Task",
                     size="small",
-                    confirm_message="Are You Sure to Kill This Session?",
+                    confirm_message="Are You Sure to Delete This Task?",
                     mui_color="error"),
                 self.collapse_btn,
             ]).prop(margin="0 5px 0 5px", flex=0),
@@ -157,9 +159,9 @@ class TaskCard(mui.FlexBox):
 
     async def _on_schedule_task(self):
         res = await self.client.submit_task(self.task)
-        print("------")
-        for x in res:
-            print(x.id, x.state.status)
+        # print("------")
+        # for x in res:
+        #     print(x.id, x.state.status)
 
     async def _on_tmux_chip(self):
         await appctx.get_app().copy_text_to_clipboard(
@@ -173,6 +175,9 @@ class TaskCard(mui.FlexBox):
 
     async def _on_kill_task(self):
         await self.client.kill_task(self.task_id)
+
+    async def _on_delete_task(self):
+        await self.client.delete_task(self.task_id)
 
     def update_task_data_event(self, task: Task):
         self.task = task
@@ -189,23 +194,30 @@ class TaskCard(mui.FlexBox):
         else:
             ev += self.progress.update_event(value=task.state.progress * 100,
                                              variant="determinate")
+        if task.state.tmux_pane_last_lines:
+            ev += self.tmux_pane.update_event(value=task.state.tmux_pane_last_lines)
         return ev
 
     async def update_task_data(self, task: Task):
         await self.send_and_wait(self.update_task_data_event(task))
 
+    def update_tmux_pane_event(self, data: str):
+        return self.tmux_pane.update_event(value=data)
 
 class TmuxScheduler(mui.FlexBox):
     def __init__(
-        self, ssh_target: Union[SSHTarget, Callable[[], Coroutine[None, None,
-                                                                  SSHTarget]]]
+        self, ssh_target: Optional[Union[SSHTarget, Callable[[], Coroutine[None, None,
+                                                                  SSHTarget]]]] = None
     ) -> None:
         ssh_target_creator: Optional[Callable[[], Coroutine[None, None,
                                                             SSHTarget]]] = None
+        if ssh_target is None:
+            ssh_target = SSHTarget.create_fake_target()
         if isinstance(ssh_target, SSHTarget):
-            self.info = mui.Typography(
-                f"SSH: {ssh_target.username}@{ssh_target.hostname}:{ssh_target.port}"
-            ).prop(margin="5px", font_size="14px", font_family="monospace")
+            ssh_desp = f"SSH: {ssh_target.username}@{ssh_target.hostname}:{ssh_target.port}"
+            if ssh_target.is_localhost():
+                ssh_desp = f"SSH: localhost"
+            self.info = mui.Typography(ssh_desp).prop(margin="5px", font_size="14px", font_family="monospace")
         else:
             ssh_target_creator = ssh_target
             ssh_target = SSHTarget.create_fake_target()
@@ -269,9 +281,10 @@ class TmuxScheduler(mui.FlexBox):
         pass
 
     async def _period_check_task(self):
+        num_tmux_pane_capture_lines = 5
         try:
             await asyncio.sleep(1)
-            updated, deleted = await self.client.update_tasks()
+            updated, deleted = await self.client.update_tasks(num_tmux_pane_capture_lines)
             await self.info.write(
                 self._get_info(await self._get_resource_info()))
             ev = mui.AppEvent("", {})
@@ -285,6 +298,15 @@ class TmuxScheduler(mui.FlexBox):
                     # await self.task_cards[updated_task.id].update_task_data(updated_task)
                     ev += self.task_cards[
                         updated_task.id].update_task_data_event(updated_task)
+            task_card_detail_expand: List[TaskCard] = []
+            for task_card in self.task_cards.values():
+                if task_card._expanded:
+                    task_card_detail_expand.append(task_card)
+            tmux_pane_captures = await self.client.query_tmux_panes([x.task.id for x in task_card_detail_expand], num_tmux_pane_capture_lines)
+
+            for task_card in task_card_detail_expand:
+                if task_card.task.id in tmux_pane_captures:
+                    ev += task_card.update_tmux_pane_event(tmux_pane_captures[task_card.task.id])
             if updated:
                 await self.send_and_wait(ev)
                 await self.tasks.update_childs(new_task_cards)
@@ -294,6 +316,9 @@ class TmuxScheduler(mui.FlexBox):
                 for delete in deleted:
                     if delete in self.task_cards:
                         self.task_cards.pop(delete)
+            if task_card_detail_expand:
+                await self.send_and_wait(ev)
+
         except:
             traceback.print_exc()
             raise

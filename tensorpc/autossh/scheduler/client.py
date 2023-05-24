@@ -43,8 +43,17 @@ class SchedulerClient:
             target.forward_port_pairs.append((port, port))
             self.port = port
         else:
+            # print(target)
             async with client.simple_connect(False) as conn:
-                result = await conn.run("python -m tensorpc.autossh.scheduler.init_scheduler", check=True)
+                # try:
+                if target.init_commands:
+                    result = await conn.run(f"bash -i -c \"{target.init_commands} && python -m tensorpc.autossh.scheduler.init_scheduler\"", check=True)
+                else:
+                    result = await conn.run("bash -i -c \"python -m tensorpc.autossh.scheduler.init_scheduler\"", check=True)
+                # except Exception as e:
+                #     print(e)
+                #     raise e 
+                # print(result.stdout, result.stderr)
                 stdout = result.stdout
                 assert stdout is not None 
                 if isinstance(stdout, bytes):
@@ -65,14 +74,17 @@ class SchedulerClient:
             all_tasks: List[Task] = await robj.chunked_remote_call(serv_names.SCHED_TASK_GET_ALL_TASK)
         self.tasks = {t.id: t for t in all_tasks}
 
-    async def update_tasks(self):
+    async def update_tasks(self, tmux_pane_lines: int = 0):
         ts_uids = [(t.state.timestamp, t.id) for t in self.tasks.values()]
-        updated, deleted_uids = await simple_chunk_call_async(self.local_url, serv_names.SCHED_TASK_QUERY_UPDATES, ts_uids)
+        updated, deleted_uids = await simple_chunk_call_async(self.local_url, serv_names.SCHED_TASK_QUERY_UPDATES, ts_uids, tmux_pane_lines)
         for t in updated:
             self.tasks[t.id] = t
         for uid in deleted_uids:
             self.tasks.pop(uid, None)
         return updated, deleted_uids
+    
+    async def query_tmux_panes(self, task_ids: List[str], tmux_pane_lines: int):
+        return await simple_chunk_call_async(self.local_url, serv_names.SCHED_TASK_QUERY_TMUX_PANES, task_ids, tmux_pane_lines)
 
     async def get_resource_usage(self):
         idle_resources, occupied_resources = await simple_chunk_call_async(self.local_url, serv_names.SCHED_TASK_RESOURCE_USAGE)

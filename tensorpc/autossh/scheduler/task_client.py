@@ -53,8 +53,25 @@ class TaskClient:
                 robj.remote_call(serv_names.SCHED_TASK_UPDATE_TASK, self.uid, progress, output)
 
     def check_need_cancel(self):
+        if self.port is None:
+            return False 
         with self._scheduler_robj() as robj:
             status = robj.remote_call(serv_names.SCHED_TASK_CHECK_STATUS, self.uid)
         if status == TaskStatus.NeedToCancel:
             return True 
         return False 
+
+    def check_need_cancel_torch_dist(self):
+        if self.port is None:
+            return False 
+        import torch.distributed as dist
+        if not dist.is_initialized():
+            return self.check_need_cancel()
+        with self._scheduler_robj() as robj:
+            status = robj.remote_call(serv_names.SCHED_TASK_CHECK_STATUS, self.uid)
+        world_size = dist.get_world_size()
+        res_list = [status] * world_size
+        dist.all_gather_object(res_list, status)
+        if any([x == TaskStatus.NeedToCancel for x in res_list]):
+            return True 
+        return False  

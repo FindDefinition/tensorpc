@@ -2521,7 +2521,7 @@ class Flow:
         else:
             url_no_port = url_parts[0]
             port = int(url_parts[1])
-        return SSHTarget(url_no_port, port, node.username, node.password)
+        return SSHTarget(url_no_port, port, node.username, node.password, init_commands=node.init_commands)
 
     @marker.mark_exit
     async def _on_exit(self):
