@@ -150,7 +150,9 @@ class BoxCfg:
 @dataclasses.dataclass
 class GlobalCfg:
     background: mui.ControlColorRGB
-    enable_perf: bool = False
+    enable_perf: bool = dataclasses.field(
+        default=False,
+        metadata=ConfigPanel.base_meta(alias="Enable Perf"))
 
 
 class CamCtrlKeyboardMode(enum.Enum):

@@ -161,9 +161,10 @@ class BufferMeshDevApp:
             self.limit,
             [
                 # three.MeshPhongMaterial().prop(vertex_colors=True, color="aqua", specular="#ffffff", shininess=250, transparent=False),
-                three.MeshStandardMaterial().prop(vertex_colors=True)
+                three.MeshStandardMaterial().prop(vertex_colors=True),
                 # three.MeshBasicMaterial().prop(vertex_colors=True),
                 # three.Edges(),
+                # three.Wireframe(),
             ],
             colors=random_pc_colors).prop(receive_shadow=True, cast_shadow=True)
         instanced_voxel_mesh = three.InstancedMesh(

@@ -184,6 +184,10 @@ class UIType(enum.Enum):
     ThreeInstancedMesh = 0x1039
     ThreeSky = 0x103a
     ThreeEnvironment = 0x103b
+    ThreeWireframe = 0x103c
+    ThreeLightFormer = 0x103d
+    ThreeAccumulativeShadows = 0x103e
+    ThreeRandomizedLight = 0x103f
 
     ThreeMeshBasicMaterial = 0x1050
     ThreeMeshStandardMaterial = 0x1051
