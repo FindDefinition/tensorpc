@@ -9,7 +9,8 @@ def compile_proto(cwd,
                   proto_dir,
                   js_out=True,
                   cpp_out=False,
-                  grpc_web: bool = False):
+                  grpc_web: bool = False,
+                  with_pyi: bool = True):
     proto_dir_p = Path(proto_dir)
     proto_files = list(Path(proto_dir).glob("*.proto"))
     grpc_files = ["remote_object.proto"]
@@ -22,7 +23,7 @@ def compile_proto(cwd,
         "grpc_tools.protoc",
         "-I{}".format(proto_dir),
         "--python_out={}".format(proto_dir),
-        # "--pyi_out={}".format(proto_dir),
+        "--pyi_out={}".format(proto_dir) if with_pyi else "",
         "--grpc_python_out={}".format(proto_dir),
         *[str(p) for p in grpc_paths],  # windows have problem with wildcard
     ]
@@ -32,7 +33,7 @@ def compile_proto(cwd,
         "grpc_tools.protoc",
         "-I{}".format(proto_dir),
         "--python_out={}".format(proto_dir),
-        "--pyi_out={}".format(proto_dir),
+        "--pyi_out={}".format(proto_dir) if with_pyi else "",
         *[str(p) for p in no_grpc_path],  # windows have problem with wildcard
     ]
     cpp_proto_dir = str(Path(proto_dir) / "cpp")
@@ -100,8 +101,19 @@ def compile_proto(cwd,
             with path.open("w") as f:
                 f.writelines(lines)
 
+def main_legacy():
+    compile_proto(
+        Path(__file__).parent / "protos_legacy",
+        Path(__file__).parent.resolve() / "protos_legacy",
+        js_out=False,
+        with_pyi=False)
 
-if __name__ == "__main__":
+def main():
     compile_proto(
         Path(__file__).parent / "protos",
-        Path(__file__).parent.resolve() / "protos")
+        Path(__file__).parent.resolve() / "protos",
+        js_out=False)
+
+
+if __name__ == "__main__":
+    main()

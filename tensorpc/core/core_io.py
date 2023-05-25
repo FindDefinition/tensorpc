@@ -7,7 +7,7 @@ from typing import Any, Dict, Hashable, List, Tuple, Union
 
 import msgpack
 import numpy as np
-from tensorpc.protos import arraybuf_pb2, rpc_message_pb2, wsdef_pb2
+from tensorpc.protos_export import arraybuf_pb2, rpc_message_pb2, wsdef_pb2
 import traceback
 
 JSON_INDEX_KEY = "__jsonarray_index"
