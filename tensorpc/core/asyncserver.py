@@ -168,7 +168,7 @@ async def serve_service(service: AsyncRemoteObjectService,
         # grace period, the server won't accept new connections and allow
         # existing RPCs to continue within the grace period.
         await server.stop(5)
-    # _cleanup_coroutines.append(server_graceful_shutdown())
+    _cleanup_coroutines.append(server_graceful_shutdown())
     await server_core.async_shutdown_event.wait()
 
     # while True:
@@ -303,7 +303,7 @@ def serve(service_def: ServiceDef,
     loop = asyncio.get_event_loop()
 
     try:
-        asyncio.run(
+        loop.run_until_complete(
             serve_async(server_core,
                         port=port,
                         length=length,
@@ -313,7 +313,8 @@ def serve(service_def: ServiceDef,
                         ssl_key_path=ssl_key_path,
                         ssl_crt_path=ssl_crt_path))
     except KeyboardInterrupt:
-        asyncio.run(run_exit_async(server_core))
+        loop.run_until_complete(run_exit_async(server_core))
+        loop.run_until_complete(*_cleanup_coroutines)
         print("shutdown by keyboard interrupt")
 
 
@@ -333,10 +334,11 @@ def serve_with_http(service_def: ServiceDef,
     url = '[::]:{}'.format(port)
     smeta = ServerMeta(port=port, http_port=http_port)
     server_core = ProtobufServiceCore(url, service_def, False, smeta)
+    loop = asyncio.get_event_loop()
     try:
         # uvloop.install()
         # print("UVLOOP")
-        asyncio.run(
+        loop.run_until_complete(
             serve_with_http_async(server_core,
                                   url,
                                   wait_time=wait_time,
@@ -349,5 +351,6 @@ def serve_with_http(service_def: ServiceDef,
                                   ssl_key_path=ssl_key_path,
                                   ssl_crt_path=ssl_crt_path))
     except KeyboardInterrupt:
-        asyncio.run(run_exit_async(server_core))
+        loop.run_until_complete(run_exit_async(server_core))
+        loop.run_until_complete(*_cleanup_coroutines)
         print("shutdown by keyboard interrupt")

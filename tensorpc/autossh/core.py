@@ -63,6 +63,8 @@ ANSI_ESCAPE_REGEX_8BIT = re.compile(
 ''', re.VERBOSE)
 
 
+BASH_HOOKS_FILE_NAME = "hooks-bash-legacy.sh"
+
 class CommandEventType(enum.Enum):
     PROMPT_START = "A"
     PROMPT_END = "B"
@@ -314,11 +316,13 @@ class ReadResult:
                  data: Any,
                  is_eof: bool,
                  is_exc: bool,
-                 traceback_str: str = "") -> None:
+                 traceback_str: str = "",
+                 should_exit: bool = True) -> None:
         self.data = data
         self.is_eof = is_eof
         self.is_exc = is_exc
         self.traceback_str = traceback_str
+        self.should_exit = should_exit
 
 
 def _warp_exception_to_event(exc: Exception, uid: str):
@@ -377,9 +381,10 @@ class PeerSSHClient:
             is_eof = reader.at_eof()
             print("IncompleteReadError")
             if is_eof:
-                return ReadResult(exc.partial, True, False)
+                return ReadResult(exc.partial, True, False, should_exit=True)
             else:
-                return ReadResult(exc.partial, False, True, tb_str.getvalue())
+                print(tb_str.getvalue())
+                return ReadResult(exc.partial, False, False, tb_str.getvalue(), should_exit=False)
             # return ReadResult(exc.partial, True, False)
         except Exception as exc:
             tb_str = io.StringIO()
@@ -404,7 +409,7 @@ class PeerSSHClient:
                                uid=self.uid,
                                traceback_str=res.traceback_str))
             # if exception, exit loop
-            return True
+            return res.should_exit
         else:
             match = self._vsc_re.search(res.data)
             data = res.data
@@ -651,7 +656,7 @@ class SSHClient:
         conn_ctx = await asyncio.wait_for(conn_task, timeout=10)
         async with conn_ctx as conn:
             if (not self.bash_file_inited) and init_bash:
-                p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
+                p = PACKAGE_ROOT / "autossh" / "media" / BASH_HOOKS_FILE_NAME
                 await asyncsshscp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
                 self.bash_file_inited = True
             yield conn
@@ -716,7 +721,7 @@ class SSHClient:
             conn_ctx = await asyncio.wait_for(conn_task, timeout=10)
             async with conn_ctx as conn:
                 if not self.bash_file_inited:
-                    p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
+                    p = PACKAGE_ROOT / "autossh" / "media" / BASH_HOOKS_FILE_NAME
                     await asyncsshscp(str(p),
                                       (conn, '~/.tensorpc_hooks-bash.sh'))
                     self.bash_file_inited = True
@@ -868,7 +873,7 @@ async def main2():
                                            username=username,
                                            password=password,
                                            known_hosts=None) as conn:
-        p = PACKAGE_ROOT / "autossh" / "media" / "hooks-bash.sh"
+        p = PACKAGE_ROOT / "autossh" / "media" / BASH_HOOKS_FILE_NAME
         await asyncsshscp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
         stdin, stdout, stderr = await conn.open_session(
             "bash --init-file ~/.tensorpc_hooks-bash.sh", request_pty="force")

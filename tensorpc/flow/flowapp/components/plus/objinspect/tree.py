@@ -195,6 +195,13 @@ def _get_obj_userdefined_properties(obj):
                 res.add(key)
     return res
 
+def _is_obj_builtin_or_module(v):
+    if isinstance(v, types.ModuleType):
+        return True 
+    if inspect.isfunction(v) or inspect.ismethod(v) or inspect.isbuiltin(
+            v):
+        return True 
+    return False 
 
 def _get_obj_dict(obj,
                   checker: Callable[[Type], bool],
@@ -209,13 +216,13 @@ def _get_obj_dict(obj,
             obj_list = obj
         return {str(i): obj_list[i] for i in range(len(obj))}
     elif isinstance(obj, dict):
-        # return {k: v for k, v in obj.items()}
+        # return {k: v for k, v in obj.items() if not _is_obj_builtin_or_module(v)}
         return obj
-    if inspect.isbuiltin(obj):
-        return {}
     if not checker(obj) and check_obj:
         return {}
-    if isinstance(obj, types.ModuleType):
+    # if isinstance(obj, types.ModuleType):
+    #     return {}
+    if _is_obj_builtin_or_module(obj):
         return {}
     if isinstance(obj, tuple(USER_OBJ_TREE_TYPES)):
         return obj.get_childs()
@@ -241,10 +248,7 @@ def _get_obj_dict(obj,
             continue
         if not (checker(v)):
             continue
-        if isinstance(v, types.ModuleType):
-            continue
-        if inspect.isfunction(v) or inspect.ismethod(v) or inspect.isbuiltin(
-                v):
+        if _is_obj_builtin_or_module(v):
             continue
         res[k] = v
     return res
@@ -830,7 +834,6 @@ class BasicObjectTree(mui.FlexBox):
             obj_dict = await obj.get_child_desps(uid)  # type: ignore
         else:
             obj_dict = _get_obj_dict(obj, self._checker)
-
         tree = parse_obj_dict(obj_dict, node.id, self._checker,
                               self._obj_meta_cache)
         node.children = tree
