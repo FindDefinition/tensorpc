@@ -282,7 +282,8 @@ class ObjectInspector(mui.FlexBox):
     async def update_locals(self,
                             key: str = _DEFAULT_LOCALS_NAME,
                             *,
-                            _frame_cnt: int = 1):
+                            _frame_cnt: int = 1,
+                            exclude_self: bool = False):
         cur_frame = inspect.currentframe()
         assert cur_frame is not None
         frame = cur_frame
@@ -293,6 +294,8 @@ class ObjectInspector(mui.FlexBox):
             _frame_cnt -= 1
         # del frame
         local_vars = cur_frame.f_locals.copy()
+        if exclude_self:
+            local_vars.pop("self", None)
         frame_name = cur_frame.f_code.co_name
         del frame
         del cur_frame
@@ -302,7 +305,8 @@ class ObjectInspector(mui.FlexBox):
                            key: str = _DEFAULT_LOCALS_NAME,
                            *,
                            _frame_cnt: int = 1,
-                           loop: Optional[asyncio.AbstractEventLoop] = None):
+                           loop: Optional[asyncio.AbstractEventLoop] = None,
+                           exclude_self: bool = False):
         """update locals in sync manner, usually used on non-sync code via appctx.
         """
         if loop is None:
@@ -317,6 +321,8 @@ class ObjectInspector(mui.FlexBox):
             _frame_cnt -= 1
         # del frame
         local_vars = cur_frame.f_locals.copy()
+        if exclude_self:
+            local_vars.pop("self", None)
         frame_name = cur_frame.f_code.co_name
         del frame
         del cur_frame

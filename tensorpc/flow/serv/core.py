@@ -831,10 +831,11 @@ class DataStorageNode(Node):
                   timestamp: int):
         meta.userdata = {
             "timestamp": timestamp,
+            "fileSize": len(data),
         }
         item = StorageDataItem(data, meta)
         with self.get_save_path(key).open("wb") as f:
-            pickle.dump(item, f)
+            pickle.dump(item.data, f)
         with self.get_meta_path(key).open("w") as f:
             json.dump(item.get_meta_dict(), f)
         if len(data) <= self.in_memory_limit_bytes:
@@ -844,8 +845,8 @@ class DataStorageNode(Node):
 
     def read_meta_dict(self, key: str) -> dict:
         if key in self.stored_data:
-            data = self.stored_data[key]
-            return data.get_meta_dict()
+            data_item = self.stored_data[key]
+            return data_item.get_meta_dict()
         meta_path = self.get_meta_path(key)
         if meta_path.exists():
             with meta_path.open("r") as f:
@@ -858,7 +859,6 @@ class DataStorageNode(Node):
         print("DELETE", key)
         if key is None:
             items = self.get_items()
-            print(items)
             for k in items:
                 self.remove_data(k)
             return 
@@ -872,23 +872,34 @@ class DataStorageNode(Node):
             path.unlink()
 
     def rename_data(self, key: str, new_name: str):
+        if key == new_name:
+            return False 
         if key not in self.stored_data:
             return False
         if new_name in self.stored_data:
             return False
         item = self.stored_data[key]
-        self.remove_data(key)
+        # rename data 
+        path = self.get_save_path(key)
+        if path.exists():
+            path.rename(self.get_save_path(new_name))
+        # self.remove_data(key)
         item.meta.name = new_name 
         item.meta.id = new_name
-        print(item.meta)
-        self.save_data(new_name, item.data, item.meta, item.timestamp)
+        meta_path = self.get_meta_path(key)
+        if meta_path.exists():
+            meta_path.unlink()
+        with self.get_meta_path(new_name).open("w") as f:
+            json.dump(item.get_meta_dict(), f)
+        # print(item.meta)
+        # self.save_data(new_name, item.data, item.meta, item.timestamp)
         return True 
 
     def read_data(self, key: str) -> StorageDataItem:
         if key in self.stored_data:
-            data = self.stored_data[key]
-            if len(data) > 0:
-                return data
+            data_item = self.stored_data[key]
+            if len(data_item.data) > 0:
+                return data_item
         path = self.get_save_path(key)
         meta_path = self.get_meta_path(key)
 
@@ -897,13 +908,14 @@ class DataStorageNode(Node):
                 meta_dict = json.load(f)
             meta = JsonLikeNode(**meta_dict)
             with path.open("rb") as f:
-                data: StorageDataItem = pickle.load(f)
+                data: bytes = pickle.load(f)
+                data_item = StorageDataItem(data, meta)
                 if len(data) <= self.in_memory_limit_bytes:
-                    self.stored_data[key] = data
+                    self.stored_data[key] = data_item
                 else:
                     self.stored_data[key] = StorageDataItem(
                         bytes(), meta)
-                return data
+                return data_item
         raise FileNotFoundError(f"{path} not exists")
 
     def need_update(self, key: str, timestamp: int):

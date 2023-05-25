@@ -32,20 +32,20 @@ P = ParamSpec('P')
 T = TypeVar('T')
 
 
-async def obj_inspector_update_locals():
+async def obj_inspector_update_locals(*, exclude_self: bool = False):
     comp = find_component(plus.ObjectInspector)
     if comp is None:
         return 
     assert comp is not None, "you must add inspector to your UI"
-    await comp.update_locals(_frame_cnt=2)
+    await comp.update_locals(_frame_cnt=2, exclude_self=exclude_self)
 
 
-def obj_inspector_update_locals_sync():
+def obj_inspector_update_locals_sync(*, exclude_self: bool = False):
     comp = find_component(plus.ObjectInspector)
     if comp is None:
         return 
     assert comp is not None, "you must add inspector to your UI"
-    return comp.update_locals_sync(_frame_cnt=2, loop=get_app()._loop)
+    return comp.update_locals_sync(_frame_cnt=2, loop=get_app()._loop, exclude_self=exclude_self)
 
 
 async def obj_inspector_set_object(obj, key: str):

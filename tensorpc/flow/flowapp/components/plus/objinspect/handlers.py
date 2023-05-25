@@ -54,7 +54,7 @@ class TensorHandler(ObjectPreviewHandler):
         # bind np object, update all metadata
         qualname = "np.ndarray"
         device = None
-        dtype = self.obj.dtype
+        dtype = obj.dtype
         is_contig = False
         if isinstance(obj, np.ndarray):
             is_contig = obj.flags['C_CONTIGUOUS']
