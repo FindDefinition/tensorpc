@@ -372,7 +372,15 @@ class PeerSSHClient:
             return ReadResult(res, is_eof, False)
         except asyncio.IncompleteReadError as exc:
             # print("WTFWTF")
-            return ReadResult(exc.partial, True, False)
+            tb_str = io.StringIO()
+            traceback.print_exc(file=tb_str)
+            is_eof = reader.at_eof()
+            print("IncompleteReadError")
+            if is_eof:
+                return ReadResult(exc.partial, True, False)
+            else:
+                return ReadResult(exc.partial, False, True, tb_str.getvalue())
+            # return ReadResult(exc.partial, True, False)
         except Exception as exc:
             tb_str = io.StringIO()
             traceback.print_exc(file=tb_str)

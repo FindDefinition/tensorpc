@@ -16,7 +16,6 @@ from tensorpc.flow import mui, three, plus, mark_create_layout, appctx
 import sys
 from tensorpc import PACKAGE_ROOT
 import numpy as np
-import scipy.spatial
 import open3d as o3d
 
 from tensorpc.flow.marker import mark_did_mount

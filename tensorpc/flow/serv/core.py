@@ -1515,7 +1515,7 @@ async def _get_free_port(count: int,
             if stdout is not None:
                 if isinstance(stdout, bytes):
                     stdout = stdout.decode("utf-8")
-                port_strs = stdout.strip().split(",")
+                port_strs = stdout.strip().split("\n")[-1].split(",")
                 ports = list(map(int, port_strs))
         except asyncssh.process.ProcessError as e:
             traceback.print_exc()
@@ -2026,6 +2026,8 @@ class Flow:
                 print(node.readable_id, "DISCONNECTING...", type(event))
                 if isinstance(event, ExceptionEvent):
                     print(event.traceback_str)
+                else:
+                    print(event)
                 await node.shutdown()
                 print(node.readable_id, "DISCONNECTED.")
             return prim.DynamicEvent(uid, event.to_dict())
