@@ -136,8 +136,9 @@ class ScriptManager(mui.FlexBox):
                 __tensorpc_script_res: List[Optional[Coroutine]] = [None]
                 lines = item.code.splitlines()
                 lines = [" " * 4 + line for line in lines]
-                lines.insert(0, "async def _run():")
-                lines.append("__tensorpc_script_res[0] = _run()")
+                run_name = f"run_{label}"
+                lines.insert(0, f"async def _{run_name}():")
+                lines.append(f"__tensorpc_script_res[0] = _{run_name}()")
                 code = "\n".join(lines)
                 exec(code, {},
                      {"__tensorpc_script_res": __tensorpc_script_res})

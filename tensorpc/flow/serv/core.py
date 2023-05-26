@@ -1810,6 +1810,8 @@ class Flow:
                 return await driver.http_remote_call(worker_key, graph_id,
                                                      node_id, type, ui_ev_dict, is_sync)
         else:
+            # if node.last_event == CommandEventType.COMMAND_COMPLETE:
+            #     return 
             if use_grpc:
                 sess = prim.get_http_client_session()
                 grpc_port = node.grpc_port

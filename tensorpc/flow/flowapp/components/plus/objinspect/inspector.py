@@ -274,10 +274,10 @@ class ObjectInspector(mui.FlexBox):
     def _filter_local_vars(self, local_var: Dict[str, Any]):
         new_local_vars: Dict[str, Any] = {}
         for k, v in local_var.items():
-            if not _is_obj_builtin_or_module(v):
+            if not _is_obj_builtin_or_module(v) and k != "__class__":
                 new_local_vars[k] = v 
-        return new_local_vars
 
+        return new_local_vars
 
     async def update_locals(self,
                             key: str = _DEFAULT_LOCALS_NAME,

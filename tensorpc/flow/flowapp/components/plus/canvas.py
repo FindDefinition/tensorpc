@@ -326,7 +326,7 @@ class SimpleCanvas(mui.FlexBox):
                        f"simulate first-persion")
 
         layout: mui.LayoutType = [
-            self.canvas.prop(z_index=1),
+            # self.canvas.prop(z_index=1),
             mui.HBox([
                 mui.VBox([
                     mui.ToggleButton("switch",
@@ -367,7 +367,9 @@ class SimpleCanvas(mui.FlexBox):
                                      width="100%",
                                      height="100%")
         ]
-
+        # layout: mui.LayoutType = [
+        #     self._cfg_panel
+        # ]
         self.register_event_handler(FrontendEventType.Drop.value,
                                     self._on_drop)
         self.prop(
