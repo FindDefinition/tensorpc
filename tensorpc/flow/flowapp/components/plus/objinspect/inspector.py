@@ -182,7 +182,7 @@ class ObjectInspector(mui.FlexBox):
 
     async def _on_select(self, uid_list: Union[List[str], str]):
         if isinstance(uid_list, list):
-            # node id list may empty (TODO don't send event in frontend?)
+            # node id list may empty
             if not uid_list:
                 return
             uid = uid_list[0]
@@ -236,14 +236,16 @@ class ObjectInspector(mui.FlexBox):
             if root is not None:
                 preview_layout.set_flow_event_context_creator(
                     lambda: root.enter_context(root))
-            preview_layout.event_emitter.on(
-                FrontendEventType.BeforeUnmount.name,
-                lambda: get_app()._get_self_as_editable_app(
+            # preview_layout.event_emitter.remove_listener()
+            if not preview_layout.event_emitter.listeners(FrontendEventType.BeforeUnmount.name):
+                preview_layout.event_emitter.on(
+                    FrontendEventType.BeforeUnmount.name,
+                    get_app()._get_self_as_editable_app(
                 )._flowapp_remove_observer(preview_layout))
-            preview_layout.event_emitter.on(
-                FrontendEventType.BeforeMount.name, lambda: get_app().
-                _get_self_as_editable_app()._flowapp_observe(preview_layout, self._on_preview_layout_reload))
-
+            if not preview_layout.event_emitter.listeners(FrontendEventType.BeforeMount.name):
+                preview_layout.event_emitter.on(
+                    FrontendEventType.BeforeMount.name, lambda: get_app().
+                    _get_self_as_editable_app()._flowapp_observe(preview_layout, self._on_preview_layout_reload))
             await self.detail_container.set_new_layout([preview_layout])
         else:
             childs = list(self.detail_container._child_comps.values())

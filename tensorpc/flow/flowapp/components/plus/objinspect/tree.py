@@ -49,7 +49,7 @@ BASE_OBJ_TO_TYPE = {
 
 _GLOBAL_SPLIT = "::"
 
-_IGNORE_ATTR_NAMES = set(["_abc_impl"])
+_IGNORE_ATTR_NAMES = set(["_abc_impl", "__abstractmethods__"])
 
 CONTAINER_TYPES = {mui.JsonLikeType.List.value, mui.JsonLikeType.Dict.value}
 FOLDER_TYPES = {
@@ -128,7 +128,8 @@ def parse_obj_item(obj,
                                 drag=is_draggable,
                                 iconBtns=[
                                     IconButtonData(ButtonType.Reload.value,
-                                                   mui.IconType.Refresh.value)
+                                                   mui.IconType.Refresh.value,
+                                                   "Reload Object")
                                 ])
     return node
 
@@ -182,17 +183,19 @@ def _get_obj_userdefined_properties(obj):
         # for common case.
         obj_type = type(obj)
         for key in dir(obj_type):
-            class_attr = getattr(obj_type, key)
-            if isinstance(class_attr, property):
-                if class_attr.fget is not None and type(
-                        class_attr.fget).__name__ != "instancemethod":
-                    res.add(key)
+            if not key.startswith("__") and not key.endswith("__"):
+                class_attr = getattr(obj_type, key)
+                if isinstance(class_attr, property):
+                    if class_attr.fget is not None and type(
+                            class_attr.fget).__name__ != "instancemethod":
+                        res.add(key)
     else:
         obj_type = type(obj)
         for key in dir(obj_type):
-            class_attr = getattr(obj_type, key)
-            if isinstance(class_attr, property):
-                res.add(key)
+            if not key.startswith("__") and not key.endswith("__"):
+                class_attr = getattr(obj_type, key)
+                if isinstance(class_attr, property):
+                    res.add(key)
     return res
 
 def _is_obj_builtin_or_module(v):

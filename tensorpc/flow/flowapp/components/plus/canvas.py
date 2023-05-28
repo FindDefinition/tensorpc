@@ -326,7 +326,7 @@ class SimpleCanvas(mui.FlexBox):
                        f"simulate first-persion")
 
         layout: mui.LayoutType = [
-            # self.canvas.prop(z_index=1),
+            self.canvas.prop(z_index=1),
             mui.HBox([
                 mui.VBox([
                     mui.ToggleButton("switch",

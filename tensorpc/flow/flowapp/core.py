@@ -1496,6 +1496,7 @@ class ContainerBase(Component[T_container_props, T_child]):
             reload_mgr: Optional[AppReloadManager] = None):
         if reload_mgr is None:
             reload_mgr = self.flow_app_comp_core.reload_mgr
+
         for attach in attached:
             special_methods = attach.get_special_methods(reload_mgr)
             if special_methods.did_mount is not None:

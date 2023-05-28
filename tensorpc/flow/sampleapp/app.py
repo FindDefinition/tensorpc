@@ -1119,7 +1119,7 @@ class CollectionApp:
         self.cfg = WTF(1, 0.5, WTF1(2), "WTF", [])
         self.wtf2 = plus.ConfigPanel(self.cfg, lambda x, y: print(x, y))
         # self.dev_0 = Dev()
-        appctx.get_app().set_enable_language_server(True)
+        # appctx.get_app().set_enable_language_server(True)
         pyright_setting = appctx.get_app().get_language_server_settings()
         pyright_setting.python.analysis.pythonPath = sys.executable
         pyright_setting.python.analysis.extraPaths = [
@@ -1128,7 +1128,7 @@ class CollectionApp:
 
         res = mui.HBox([
             mui.Allotment([
-                plus.ObjectInspector(self).prop(width="100%",
+                plus.ObjectInspector(self, use_fast_tree=False).prop(width="100%",
                                                 height="100%",
                                                 overflow="hidden"),
                 mui.HBox([
