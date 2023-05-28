@@ -24,6 +24,7 @@ from tensorpc.constants import PACKAGE_ROOT
 import getpass
 from tensorpc.autossh.coretypes import SSHTarget
 from asyncssh.scp import scp as asyncsshscp
+from tensorpc.compat import InWindows
 # 7-bit C1 ANSI sequences
 ANSI_ESCAPE_REGEX = re.compile(
     br'''
@@ -657,7 +658,13 @@ class SSHClient:
         async with conn_ctx as conn:
             if (not self.bash_file_inited) and init_bash:
                 p = PACKAGE_ROOT / "autossh" / "media" / BASH_HOOKS_FILE_NAME
-                await asyncsshscp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
+                if InWindows:
+                    # remove CRLF
+                    with open(p, "r") as f:
+                        content = f.readlines()
+                    await conn.run(f'cat > ~/.tensorpc_hooks-bash.sh', input="\n".join(content))
+                else:
+                    await asyncsshscp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
                 self.bash_file_inited = True
             yield conn
 
@@ -722,8 +729,14 @@ class SSHClient:
             async with conn_ctx as conn:
                 if not self.bash_file_inited:
                     p = PACKAGE_ROOT / "autossh" / "media" / BASH_HOOKS_FILE_NAME
-                    await asyncsshscp(str(p),
-                                      (conn, '~/.tensorpc_hooks-bash.sh'))
+                    if InWindows:
+                        # remove CRLF
+                        with open(p, "r") as f:
+                            content = f.readlines()
+                        await conn.run(f'cat > ~/.tensorpc_hooks-bash.sh', input="\n".join(content))
+                    else:
+                        await asyncsshscp(str(p),
+                                        (conn, '~/.tensorpc_hooks-bash.sh'))
                     self.bash_file_inited = True
                 if client_ip_callback is not None:
                     # TODO if fail?
