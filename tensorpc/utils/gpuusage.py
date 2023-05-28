@@ -19,6 +19,8 @@ class GPUMeasure:
         return msg
 
 def get_nvidia_gpu_measures():
+    gpumeasures: List[GPUMeasure] = []
+
     querys = [
         "gpu_name",
         "utilization.gpu",
@@ -27,14 +29,16 @@ def get_nvidia_gpu_measures():
         "memory.used",
         "memory.total",
     ]
-    output = subprocess.check_output(
-        ["nvidia-smi", f"--query-gpu={','.join(querys)}", "--format=csv"])
+    try:
+        output = subprocess.check_output(
+            ["nvidia-smi", f"--query-gpu={','.join(querys)}", "--format=csv"])
+    except:
+        return gpumeasures
     output_str = output.decode("utf-8")
     output_str_file = io.StringIO(output_str)
     csv_data = csv.reader(output_str_file, delimiter=',', quotechar=',')
     rows = list(csv_data)[1:]
     rows = [[r.strip() for r in row] for row in rows]
-    gpumeasures: List[GPUMeasure] = []
     for r in rows:
         query = dict(zip(querys, r))
         gpuusage = int(query["utilization.gpu"].split(" ")[0])
