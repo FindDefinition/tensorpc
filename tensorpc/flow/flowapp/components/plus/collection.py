@@ -1,4 +1,6 @@
 import dataclasses
+from functools import partial
+from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import numpy as np
@@ -10,8 +12,13 @@ from tensorpc.flow.flowapp import appctx, colors
 import io
 import json
 import numpy as np
-from numpy.lib.npyio import NpzFile 
-import pickle 
+from numpy.lib.npyio import NpzFile
+import pickle
+import asyncio
+import sys
+from runpy import run_path
+import shlex
+
 
 class SimpleFileReader(mui.FlexBox):
     """support json/pickle (.json/.pkl/.pickle) and numpy (.npy/.npz) files
@@ -24,12 +31,19 @@ class SimpleFileReader(mui.FlexBox):
 
         super().__init__([self.text])
         self.all_allowed_exts = [".json", ".pkl", ".pickle", ".npy", ".npz"]
-        self.prop(droppable=True, allow_file=True, flex_direction="column",
-                    border="4px solid white",
-                    sx_over_drop={"border": "4px solid green"}, width="100%", height="100%", overflow="hidden",
-                    justify_content="center", align_items="center")
+        self.prop(droppable=True,
+                  allow_file=True,
+                  flex_direction="column",
+                  border="4px solid white",
+                  sx_over_drop={"border": "4px solid green"},
+                  width="100%",
+                  height="100%",
+                  overflow="hidden",
+                  justify_content="center",
+                  align_items="center")
 
-        self.register_event_handler(FrontendEventType.Drop.value, self.on_drop_file)
+        self.register_event_handler(FrontendEventType.Drop.value,
+                                    self.on_drop_file)
 
     async def on_drop_file(self, file: File):
         suffix = file.name[file.name.rfind("."):]
@@ -47,3 +61,42 @@ class SimpleFileReader(mui.FlexBox):
             raise NotImplementedError
         await self.text.write(f"Loaded {file.name}")
         await appctx.obj_inspector_set_object(data, "droppedFile")
+
+
+
+class ScriptExecutor(mui.FlexBox):
+    def __init__(self):
+        self.path = mui.Input(label="Path").prop(mui_margin="dense")
+        self.args = mui.Input(label="Args").prop(mui_margin="dense")
+
+        super().__init__(
+            [self.path, self.args,
+             mui.HBox([
+                 mui.Button("Run", self._run),
+             ])])
+        self.prop(flex_direction="column")
+        self._external_argv_task: Optional[asyncio.Future] = None
+
+    async def _run(self):
+        if self._external_argv_task is not None:
+            raise RuntimeError("already running")
+        self._external_argv_task = asyncio.create_task(
+            appctx.run_in_executor_with_exception_inspect(
+                partial(self._run_app_script,
+                        path=self.path.value,
+                        argv=shlex.split(self.args.value)), ))
+
+    async def _cancel(self):
+        if self._external_argv_task is None:
+            raise RuntimeError("not running")
+        self._external_argv_task.cancel()
+
+    def _run_app_script(self, path: str, argv: List[str]):
+        assert Path(path).exists()
+        argv_bkp = sys.argv
+        sys.argv = argv
+        try:
+            run_path(path, run_name="__main__")
+        finally:
+            sys.argv = argv_bkp
+            self._external_argv_task = None

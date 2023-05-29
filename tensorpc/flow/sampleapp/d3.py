@@ -16,7 +16,6 @@ from tensorpc.flow import mui, three, plus, mark_create_layout, appctx
 import sys
 from tensorpc import PACKAGE_ROOT
 import numpy as np
-import open3d as o3d
 
 from tensorpc.flow.marker import mark_did_mount
 
@@ -25,6 +24,8 @@ class BufferMeshApp:
 
     @mark_create_layout
     def my_layout(self):
+        import open3d as o3d
+
         cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         mesh = o3d.io.read_triangle_mesh(
             "/root/tusimple/val_00800000_0.0001.ply")

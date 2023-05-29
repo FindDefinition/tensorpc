@@ -15,7 +15,7 @@ from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.appcore import AppSpecialEventType
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.components.plus.canvas import SimpleCanvas
-from tensorpc.flow.flowapp.components.plus.collection import SimpleFileReader
+from tensorpc.flow.flowapp.components.plus.collection import SimpleFileReader, ScriptExecutor
 from tensorpc.flow.flowapp.components.plus.monitor import \
     ComputeResourceMonitor
 from tensorpc.flow.flowapp.components.plus.objinspect.core import (
@@ -989,6 +989,7 @@ class ObjectTree(BasicObjectTree):
                 "monitor": ComputeResourceMonitor(),
                 "appTerminal": mui.AppTerminal(),
                 "simpleCanvas": SimpleCanvasCreator(),
+                "scriptRunner": ScriptExecutor(),
                 "fileReader": SimpleFileReader(),
                 "callbackSlider": CallbackSlider(),
             },

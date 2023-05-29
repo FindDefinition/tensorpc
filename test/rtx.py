@@ -1,29 +1,35 @@
+from pathlib import Path
 import traceback
 import sys
+import inspect 
+import threading
+from types import FrameType
+import re
+from typing import Optional, Set, Type
+from tensorpc.core.tracer import Tracer
+THREAD_GLOBAL = threading.local()
 
-from tensorpc.flow.flowapp import appctx
-def a(x):
-    b = x + 1
-    raise NotImplementedError
+def trace_Dev2(a, b):
+    c = a + b 
+    d = c * 2
+    return c + d
 
+def trace_dev(a, b):
+    c = a + b 
+    d = c * 2
+    e = trace_Dev2(c, d)
+    return c + d + e
+import random 
+def main():
+    lst = []
+    for i in range(10):
+        lst.append(random.randrange(1, 1000))
 
-def b(x):
-    return a(x)
+    frame = inspect.currentframe()
+    tracer = Tracer(lambda x: print(x), traced_names={"trace_dev", "trace_Dev2"})
+    with tracer:
+        trace_dev(1, 2)
+    pass 
 
-
-def c(x):
-    return b(x)
-
-print("???")
-if __name__ == "__main__":
-
-    ddd = 1 
-    appctx.obj_inspector_set_object_sync(ddd, "ddd")
-    try:
-        c(1)
-    except:
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-
-        for tb_frame, tb_lineno in traceback.walk_tb(exc_traceback):
-            print(tb_frame.f_locals.keys())
-            print(tb_lineno)
+if __name__ == '__main__':
+    main()

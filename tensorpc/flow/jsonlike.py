@@ -381,8 +381,11 @@ def parse_obj_to_jsonlike(obj, name: str, id: str):
                             JsonLikeType.Constant.value,
                             value=str(obj))
     elif isinstance(obj, JsonLikeNode):
-        # TODO should we check obj name/id?
-        return obj
+        obj_copy = dataclasses.replace(obj)
+        obj_copy.name = name
+        obj_copy.id = id
+        obj_copy.drag = False 
+        return obj_copy
     elif isinstance(obj, enum.Enum):
         return JsonLikeNode(id,
                             name,
