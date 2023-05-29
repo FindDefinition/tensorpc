@@ -81,7 +81,7 @@ class PendingReply:
 
         self.is_event = is_event
 
-        self.future = asyncio.Future()
+        self.future: asyncio.Future[Any] = asyncio.Future()
 
         self.header = header
 

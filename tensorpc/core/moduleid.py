@@ -45,7 +45,7 @@ def get_function_qualname(obj: Callable):
     return obj.__qualname__
 
 
-_ClassInfo: TypeAlias = Union[Tuple["_ClassInfo", ...], type]
+_ClassInfo: TypeAlias = Tuple[type, ...]
 
 def loose_isinstance(obj, _class_or_tuple: _ClassInfo):
     """for reloaded code, the type of obj may be different from the type of the class in the current module.

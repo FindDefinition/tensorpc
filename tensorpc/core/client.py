@@ -47,7 +47,7 @@ class RemoteObject(object):
     output_shared_mem: np.ndarray
     num_blocks: int
     """
-
+    _stub: Optional[remote_object_pb2_grpc.RemoteObjectStub]
     def __init__(self,
                  channel: Optional[grpc.Channel],
                  name="",
@@ -58,7 +58,6 @@ class RemoteObject(object):
             self._stub = remote_object_pb2_grpc.RemoteObjectStub(channel)
         else:
             self._stub = None
-        self.func_dict = {}
         self.name = name
         self.print_stdout = print_stdout
 

@@ -1,21 +1,30 @@
 from dataclasses import dataclass
+import enum
 from pathlib import Path
 import sys
 import inspect
 import threading
 from types import FrameType
-from typing import Any, Callable, Dict, Optional, Set, Type
+from typing import Any, Callable, Dict, Mapping, Optional, Set, Tuple, Type
+from tensorpc import compat 
 
 THREAD_GLOBALS = threading.local()
 
+class TraceType(enum.Enum):
+    Call = 0
+    Return = 1
+
+
 @dataclass
 class FrameResult:
+    type: TraceType
     qualname: str
     filename: str
     lineno: int
-    local_vars: Dict[str, Any]
+    local_vars: Mapping[str, Any]
     # depth only available when trace return (slower mode).
     depth: int = -1
+
 
 class Tracer(object):
     """A simple tracer for python functions.
@@ -28,7 +37,7 @@ class Tracer(object):
     def __init__(self,
                  callback: Callable[[FrameResult], Any],
                  depth: int = -1,
-                 traced_types: Optional[Set[Type]] = None,
+                 traced_types: Optional[Tuple[Type]] = None,
                  traced_names: Optional[Set[str]] = None,
                  traced_folders: Optional[Set[str]] = None,
                  trace_return: bool = True):
@@ -50,22 +59,21 @@ class Tracer(object):
         is_traced_names = True
         is_traced_folders = True
         if self.traced_types is not None and "self" in frame.f_locals:
-            is_traced_types = isinstance(frame.f_locals["self"],
-                                         tuple(self.traced_types))
+            is_traced_types = isinstance(frame.f_locals["self"],self.traced_types)
         if self.traced_names is not None:
             is_traced_names = frame.f_code.co_name in self.traced_names
         if self.traced_folders is not None:
             code_path = Path(frame.f_code.co_filename)
             found = False
             for candidate in self.traced_folders:
-                if code_path.is_relative_to(candidate):
+                if compat.is_relative_to(code_path, candidate):
                     found = True
                     break
             is_traced_folders = found
         return is_traced_types and is_traced_names and is_traced_folders
 
     def __enter__(self):
-        THREAD_GLOBALS.__dict__.setdefault('depth', -1)
+        THREAD_GLOBALS.__dict__.setdefault('depth', 0)
 
         current_frame = inspect.currentframe()
         assert current_frame is not None
@@ -98,17 +106,18 @@ class Tracer(object):
     def trace_lite(self, frame: FrameType, event, arg):
         if event == 'return':
             THREAD_GLOBALS.depth -= 1
-            self.callback(self._get_frame_result(frame, THREAD_GLOBALS.depth))
+            self.callback(self._get_frame_result(TraceType.Return, frame, THREAD_GLOBALS.depth))
 
-    def _get_frame_result(self, frame: FrameType, depth: int=-1):
+    def _get_frame_result(self, trace_type: TraceType, frame: FrameType, depth: int=-1):
         qname = frame.f_code.co_name
         if "self" in frame.f_locals:
             qname = type(frame.f_locals["self"]).__qualname__ + "." + qname
         return FrameResult(
+            type=trace_type,
             qualname=qname,
             filename=frame.f_code.co_filename,
             lineno=frame.f_lineno,
-            local_vars=frame.f_locals,
+            local_vars=frame.f_locals.copy(),
             depth=depth,
         )
 
@@ -136,7 +145,7 @@ class Tracer(object):
         if not self._filter_frame(frame):
             return None
         if event == "call":
-            self.callback(self._get_frame_result(frame))
+            self.callback(self._get_frame_result(TraceType.Call, frame))
         return None
 
     def trace_return_func(self, frame: FrameType, event, arg):
@@ -163,6 +172,7 @@ class Tracer(object):
         if not self._filter_frame(frame):
             return None
         if event == "call":
+            self.callback(self._get_frame_result(TraceType.Call, frame, THREAD_GLOBALS.depth))
             THREAD_GLOBALS.depth += 1
 
         return self.trace_lite

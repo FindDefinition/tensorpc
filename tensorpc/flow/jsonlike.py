@@ -10,6 +10,7 @@ from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
 import abc
 from collections.abc import MutableMapping
 import copy 
+from pydantic import BaseModel
 
 ValueType: TypeAlias = Union[int, float, str]
 NumberType: TypeAlias = Union[int, float]
@@ -19,7 +20,7 @@ T = TypeVar("T")
 
 
 def flatten_dict(d: MutableMapping, parent_key: str = '', sep: str ='.') -> MutableMapping:
-    items = []
+    items: List[Any] = []
     for k, v in d.items():
         new_key = parent_key + sep + k if parent_key else k
         if isinstance(v, MutableMapping):
@@ -474,16 +475,16 @@ class TreeItem(abc.ABC):
         return None 
     
     async def handle_button(self, button_key: str) -> Optional[bool]:
-        return 
+        return None
     
     async def handle_child_button(self, button_key: str, child_key: str) -> Optional[bool]:
-        return 
+        return None
     
     async def handle_context_menu(self, userdata: Dict[str, Any]) -> Optional[bool]:
-        return 
+        return None
     
     async def handle_child_context_menu(self, child_key: str, userdata: Dict[str, Any]) -> Optional[bool]:
-        return 
+        return None
     
     async def handle_child_rename(self, child_key: str, newname: str) -> Optional[bool]:
-        return 
+        return None

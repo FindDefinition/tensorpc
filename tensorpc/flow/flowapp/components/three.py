@@ -24,10 +24,7 @@ import urllib.request
 from tensorpc import compat
 from tensorpc.core.httpserver import JS_MAX_SAFE_INT
 from tensorpc.flow.jsonlike import DataClassWithUndefined
-if compat.Python3_8AndLater:
-    from typing import Literal
-else:
-    from typing_extensions import Literal
+from typing_extensions import Literal
 
 import dataclasses
 

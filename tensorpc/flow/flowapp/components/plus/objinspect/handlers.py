@@ -1,8 +1,9 @@
 from pathlib import PosixPath, WindowsPath
+import traceback
 from typing import Any
 
 import numpy as np
-
+import io 
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import ObservedFunction
 from tensorpc.flow.flowapp.components import mui
@@ -43,7 +44,16 @@ class TensorHandler(ObjectPreviewHandler):
 
     async def _on_show_slice(self):
         slice_eval_expr = f"a{self.slice_val.value}"
-        res = eval(slice_eval_expr, {"a": self.obj})
+        try:
+            res = eval(slice_eval_expr, {"a": self.obj})
+        except:
+            # we shouldn't raise this error because
+            # it may override automatic exception in
+            # tree.
+            ss = io.StringIO()
+            traceback.print_exc(file=ss)
+            await self.data_print.write(ss.getvalue())
+            return
         if get_qualname_of_type(type(res)) == CommonQualNames.TVTensor:
             res = res.cpu().numpy()
         else:

@@ -22,8 +22,8 @@ from tensorpc.flow.flowapp.objtree import UserObjTreeProtocol
 
 from .core import (ALL_OBJECT_PREVIEW_HANDLERS, USER_OBJ_TREE_TYPES,
                    ObjectPreviewHandler)
-from .tree import _DEFAULT_OBJ_NAME, FOLDER_TYPES, ObjectTree, _is_obj_builtin_or_module
-
+from .tree import _DEFAULT_OBJ_NAME, FOLDER_TYPES, ObjectTree
+from tensorpc.core import inspecttools
 _DEFAULT_LOCALS_NAME = "locals"
 
 _MAX_STRING_IN_DETAIL = 10000
@@ -273,14 +273,6 @@ class ObjectInspector(mui.FlexBox):
     async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):
         await self.tree.set_object(obj, key)
 
-    def _filter_local_vars(self, local_var: Dict[str, Any]):
-        new_local_vars: Dict[str, Any] = {}
-        for k, v in local_var.items():
-            if not _is_obj_builtin_or_module(v) and k != "__class__":
-                new_local_vars[k] = v 
-
-        return new_local_vars
-
     async def update_locals(self,
                             key: str = _DEFAULT_LOCALS_NAME,
                             *,
@@ -301,7 +293,7 @@ class ObjectInspector(mui.FlexBox):
         frame_name = cur_frame.f_code.co_name
         del frame
         del cur_frame
-        await self.tree.set_object(self._filter_local_vars(local_vars), key + f"-{frame_name}")
+        await self.tree.set_object(inspecttools.filter_local_vars(local_vars), key + f"-{frame_name}")
 
     def update_locals_sync(self,
                            key: str = _DEFAULT_LOCALS_NAME,
@@ -329,7 +321,7 @@ class ObjectInspector(mui.FlexBox):
         del frame
         del cur_frame
         fut = asyncio.run_coroutine_threadsafe(
-            self.tree.set_object(self._filter_local_vars(local_vars), key + f"-{frame_name}"), loop)
+            self.tree.set_object(inspecttools.filter_local_vars(local_vars), key + f"-{frame_name}"), loop)
         if get_app()._flowapp_thread_id == threading.get_ident():
             # we can't wait fut here
             return fut

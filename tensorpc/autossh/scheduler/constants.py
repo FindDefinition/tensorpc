@@ -4,7 +4,8 @@ prefix::port::uuid
 
 """
 
-import os 
+import os
+from typing import Optional 
 TMUX_SESSION_NAME_SPLIT = "-"
 TMUX_SESSION_PREFIX = "__tensorpc_ssh_scheduler"
 
@@ -17,6 +18,7 @@ TENSORPC_TMUX_TASK_UID = "TENSORPC_TMUX_TASK_UID"
 TENSORPC_TMUX_SCHEDULER_UUID = "TENSORPC_TMUX_SCHEDULER_UUID"
 
 class TmuxSchedulerEnvVariables:
+    port: Optional[int]
     def __init__(self) -> None:
         port = os.environ.get(TENSORPC_TMUX_TASK_SCHEDULER_PORT)
         if port is not None:

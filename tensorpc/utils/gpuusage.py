@@ -18,7 +18,7 @@ class GPUMeasure:
         msg += f"{self.temperature}\u2103,io={self.memusage}%"
         return msg
 
-def get_nvidia_gpu_measures():
+def get_nvidia_gpu_measures() -> List[GPUMeasure]:
     gpumeasures: List[GPUMeasure] = []
 
     querys = [

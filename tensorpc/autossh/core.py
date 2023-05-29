@@ -15,7 +15,7 @@ from collections import deque
 from dataclasses import dataclass
 import traceback
 from asyncssh import stream as asyncsshss
-from typing import Any, AnyStr, Awaitable, Callable, Deque, Dict, List, Optional, Set, Tuple, Type, Union, Iterable
+from typing import TYPE_CHECKING, Any, AnyStr, Awaitable, Callable, Deque, Dict, List, Optional, Set, Tuple, Type, Union, Iterable, cast
 from contextlib import suppress
 import asyncssh
 import tensorpc
@@ -25,6 +25,9 @@ import getpass
 from tensorpc.autossh.coretypes import SSHTarget
 from asyncssh.scp import scp as asyncsshscp
 from tensorpc.compat import InWindows
+if TYPE_CHECKING:
+    from asyncssh.misc import SoftEOFReceived
+
 # 7-bit C1 ANSI sequences
 ANSI_ESCAPE_REGEX = re.compile(
     br'''
@@ -141,15 +144,19 @@ class Event:
             other = other.timestamp
         return self.timestamp >= other
 
-    def __eq__(self, other: Union["Event", int]):
+    def __eq__(self, other: Any):
         if isinstance(other, Event):
-            other = other.timestamp
-        return self.timestamp == other
+            return self.timestamp == other.timestamp 
+        elif isinstance(other, int):
+            return self.timestamp == other 
+        raise NotImplementedError
 
-    def __ne__(self, other: Union["Event", int]):
+    def __ne__(self, other: Any):
         if isinstance(other, Event):
-            other = other.timestamp
-        return self.timestamp != other
+            return self.timestamp != other.timestamp 
+        elif isinstance(other, int):
+            return self.timestamp != other 
+        raise NotImplementedError
 
 
 class EofEvent(Event):
@@ -400,8 +407,13 @@ class PeerSSHClient:
                              is_stderr: bool):
         if res.is_eof:
             await callback(LineEvent(ts, res.data, uid=self.uid))
+            retcode: int = -1
+            if isinstance(reader.channel, asyncssh.SSHClientChannel):
+                retcode_maynone = reader.channel.get_returncode()
+                if retcode_maynone is not None:
+                    retcode = retcode_maynone
             await callback(
-                EofEvent(ts, reader.channel.get_returncode(), uid=self.uid))
+                EofEvent(ts, retcode, uid=self.uid))
             return True
         elif res.is_exc:
             await callback(
@@ -516,18 +528,12 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
         super().__init__()
         self.callback: Optional[Callable[[Event], Awaitable[None]]] = None
         self.uid = ""
-        self._tensorpc_encoding: Optional[str] = None
 
-    def data_received(self, data: AnyStr, datatype) -> None:
+    def data_received(self, data: bytes, datatype) -> None:
         res = super().data_received(data, datatype)
         if self.callback is not None:
             ts = time.time_ns()
             res_str = data
-            if self._tensorpc_encoding is not None:
-                if isinstance(data, bytes):
-                    res_str = data.decode(self._tensorpc_encoding)
-                else:
-                    res_str = data
             loop = asyncio.get_running_loop()
             asyncio.run_coroutine_threadsafe(
                 self.callback(RawEvent(ts, res_str, False, self.uid)), loop)
@@ -540,7 +546,7 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
         if not separator:
             raise ValueError('Separator cannot be empty')
 
-        buf = asyncsshss.cast(AnyStr, '' if self._encoding else b'')
+        buf = cast(AnyStr, '' if self._encoding else b'')
         recv_buf = self._recv_buf[datatype]
         is_re = False
         if isinstance(separator, re.Pattern):
@@ -550,14 +556,14 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
         else:
             if separator is asyncsshss._NEWLINE:
                 seplen = 1
-                separators = asyncsshss.cast(AnyStr,
+                separators = cast(AnyStr,
                                              '\n' if self._encoding else b'\n')
             elif isinstance(separator, (bytes, str)):
                 seplen = len(separator)
-                separators = re.escape(asyncsshss.cast(AnyStr, separator))
+                separators = re.escape(cast(AnyStr, separator))
             else:
-                bar = asyncsshss.cast(AnyStr, '|' if self._encoding else b'|')
-                seplist = list(asyncsshss.cast(Iterable[AnyStr], separator))
+                bar = cast(AnyStr, '|' if self._encoding else b'|')
+                seplist = list(cast(Iterable[AnyStr], separator))
                 seplen = max(len(sep) for sep in seplist)
                 separators = bar.join(re.escape(sep) for sep in seplist)
 
@@ -573,16 +579,16 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
                             recv_buf[:curbuf] = []
                             self._recv_buf_len -= buflen
                             raise asyncio.IncompleteReadError(
-                                asyncsshss.cast(bytes, buf), None)
+                                cast(bytes, buf), None)
                         else:
                             exc = recv_buf.pop(0)
 
-                            if isinstance(exc, asyncsshss.SoftEOFReceived):
+                            if isinstance(exc, SoftEOFReceived):
                                 return buf
                             else:
-                                raise asyncsshss.cast(Exception, exc)
+                                raise cast(Exception, exc)
 
-                    newbuf = asyncsshss.cast(AnyStr, recv_buf[curbuf])
+                    newbuf = cast(AnyStr, recv_buf[curbuf])
                     buf += newbuf
                     if is_re:
                         start = 0
@@ -610,7 +616,7 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
                     self._recv_buf_len -= buflen
                     self._maybe_resume_reading()
                     raise asyncio.IncompleteReadError(
-                        asyncsshss.cast(bytes, buf), None)
+                        cast(bytes, buf), None)
 
                 await self._block_read(datatype)
 
@@ -656,6 +662,7 @@ class SSHClient:
                                                 known_hosts=None)
         conn_ctx = await asyncio.wait_for(conn_task, timeout=10)
         async with conn_ctx as conn:
+            assert isinstance(conn, asyncssh.SSHClientConnection)
             if (not self.bash_file_inited) and init_bash:
                 p = PACKAGE_ROOT / "autossh" / "media" / BASH_HOOKS_FILE_NAME
                 if InWindows:
@@ -717,6 +724,7 @@ class SSHClient:
         if env is None:
             env = {}
         # TODO better keepalive
+        session: MySSHClientStreamSession
         try:
             conn_task = asyncssh.connection.connect(self.url_no_port,
                                                     self.port,
@@ -727,15 +735,16 @@ class SSHClient:
                                                     known_hosts=None)
             conn_ctx = await asyncio.wait_for(conn_task, timeout=10)
             async with conn_ctx as conn:
+                assert isinstance(conn, asyncssh.SSHClientConnection)
                 if not self.bash_file_inited:
-                    p = PACKAGE_ROOT / "autossh" / "media" / BASH_HOOKS_FILE_NAME
+                    bash_file_path = PACKAGE_ROOT / "autossh" / "media" / BASH_HOOKS_FILE_NAME
                     if InWindows:
                         # remove CRLF
-                        with open(p, "r") as f:
+                        with open(bash_file_path, "r") as f:
                             content = f.readlines()
                         await conn.run(f'cat > ~/.tensorpc_hooks-bash.sh', input="\n".join(content))
                     else:
-                        await asyncsshscp(str(p),
+                        await asyncsshscp(str(bash_file_path),
                                         (conn, '~/.tensorpc_hooks-bash.sh'))
                     self.bash_file_inited = True
                 if client_ip_callback is not None:
@@ -756,7 +765,6 @@ class SSHClient:
                 # chan, session = await conn.create_session(
                 #             MySSHClientStreamSession, request_pty="force") # type: ignore
 
-                session: MySSHClientStreamSession
                 session.uid = self.uid
                 session.callback = callback
                 # stdin, stdout, stderr = await conn.open_session(

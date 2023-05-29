@@ -1,14 +1,17 @@
+
 import json
 import pickle
 from collections import abc
 from enum import Enum
 from functools import reduce
-from typing import Any, Dict, Hashable, List, Tuple, Union
+from typing import Any, Callable, Dict, Hashable, List, Tuple, TypeVar, Union
+from typing_extensions import Literal
 
 import msgpack
 import numpy as np
 from tensorpc.protos_export import arraybuf_pb2, rpc_message_pb2, wsdef_pb2
 import traceback
+import numpy.typing as npt
 
 JSON_INDEX_KEY = "__jsonarray_index"
 
@@ -39,7 +42,11 @@ class Placeholder(object):
         return self.index == other.index and self.nbytes == other.nbytes
 
 
-def _inv_map(dict_map: dict) -> dict:
+KT = TypeVar("KT")
+VT = TypeVar("VT")
+
+
+def _inv_map(dict_map: Dict[KT, VT]) -> Dict[VT, KT]:
     return {v: k for k, v in dict_map.items()}
 
 
@@ -52,7 +59,7 @@ def byte_size(obj: Union[bytes, np.ndarray]) -> int:
         raise NotImplementedError
 
 
-NPDTYPE_TO_PB_MAP = {
+NPDTYPE_TO_PB_MAP: Dict[np.dtype, "arraybuf_pb2.dtype.DataType"] = {
     np.dtype(np.uint64): arraybuf_pb2.dtype.uint64,
     np.dtype(np.uint32): arraybuf_pb2.dtype.uint32,
     np.dtype(np.uint16): arraybuf_pb2.dtype.uint16,
@@ -64,10 +71,9 @@ NPDTYPE_TO_PB_MAP = {
     np.dtype(np.float64): arraybuf_pb2.dtype.float64,
     np.dtype(np.float32): arraybuf_pb2.dtype.float32,
     np.dtype(np.float16): arraybuf_pb2.dtype.float16,
-    "custom_bytes": arraybuf_pb2.dtype.CustomBytes,
 }
 
-NPDTYPE_TO_JSONARRAY_MAP = {
+NPDTYPE_TO_JSONARRAY_MAP: Dict[np.dtype, int] = {
     np.dtype(np.bool_): 5,
     np.dtype(np.float16): 7,
     np.dtype(np.float32): 0,
@@ -88,13 +94,14 @@ BYTES_SKELETON_CODE = 101
 INV_NPDTYPE_TO_PB_MAP = _inv_map(NPDTYPE_TO_PB_MAP)
 INV_NPDTYPE_TO_JSONARRAY_MAP = _inv_map(NPDTYPE_TO_JSONARRAY_MAP)
 
-NPBYTEORDER_TO_PB_MAP = {
+NPBYTEORDER_TO_PB_MAP: Dict[Literal["=", "<", ">", "|"], "arraybuf_pb2.dtype.ByteOrder"] = {
     "=": arraybuf_pb2.dtype.native,
     "<": arraybuf_pb2.dtype.littleEndian,
     ">": arraybuf_pb2.dtype.bigEndian,
     "|": arraybuf_pb2.dtype.na,
 }
-INV_NPBYTEORDER_TO_PB_MAP = _inv_map(NPBYTEORDER_TO_PB_MAP)
+INV_NPBYTEORDER_TO_PB_MAP: Dict["arraybuf_pb2.dtype.ByteOrder", Literal["=", "<", ">", "|"]] = _inv_map(NPBYTEORDER_TO_PB_MAP)
+
 
 
 def bytes2pb(data: bytes, send_data=True) -> arraybuf_pb2.ndarray:
@@ -108,12 +115,14 @@ def bytes2pb(data: bytes, send_data=True) -> arraybuf_pb2.ndarray:
     return pb
 
 
-def array2pb(array: np.ndarray, send_data=True) -> arraybuf_pb2.ndarray:
+def array2pb(array: npt.NDArray, send_data=True) -> arraybuf_pb2.ndarray:
     if array.ndim > 0 and send_data:
         if not array.flags['C_CONTIGUOUS']:
             array = np.ascontiguousarray(array)
+    assert isinstance(array, np.ndarray)
     dtype = NPDTYPE_TO_PB_MAP[array.dtype]
-    order = NPBYTEORDER_TO_PB_MAP[array.dtype.byteorder]
+    assert array.dtype.byteorder in ("=", "<", ">", "|")
+    order = NPBYTEORDER_TO_PB_MAP[array.dtype.byteorder] # type: ignore
     pb_dtype = arraybuf_pb2.dtype(
         type=dtype,
         byte_order=order,
@@ -127,7 +136,7 @@ def array2pb(array: np.ndarray, send_data=True) -> arraybuf_pb2.ndarray:
     return pb
 
 
-def pb2data(buf: arraybuf_pb2.ndarray) -> np.ndarray:
+def pb2data(buf: arraybuf_pb2.ndarray) -> Union[np.ndarray, bytes]:
     if buf.dtype.type == arraybuf_pb2.dtype.CustomBytes:
         return buf.data
     byte_order = INV_NPBYTEORDER_TO_PB_MAP[buf.dtype.byte_order]
@@ -136,9 +145,9 @@ def pb2data(buf: arraybuf_pb2.ndarray) -> np.ndarray:
     return res
 
 
-def pb2meta(buf: arraybuf_pb2.ndarray) -> Tuple[List[int], int]:
+def pb2meta(buf: arraybuf_pb2.ndarray) -> Tuple[List[int], np.dtype]:
     if buf.dtype.type == arraybuf_pb2.dtype.CustomBytes:
-        return list(buf.shape), None
+        return list(buf.shape), np.dtype(np.uint8)
     byte_order = INV_NPBYTEORDER_TO_PB_MAP[buf.dtype.byte_order]
     dtype = INV_NPDTYPE_TO_PB_MAP[buf.dtype.type].newbyteorder(byte_order)
     shape = list(buf.shape)
@@ -242,7 +251,7 @@ def to_protobuf_stream(data_list: List[Any],
             data_dtype = arraybuf_pb2.dtype(type=arraybuf_pb2.dtype.CustomBytes)
             # ref_buf = bytes2pb(arg)
             data_bytes = arg
-            shape = []
+            shape = ()
             length = len(data_bytes)
 
         else:
@@ -397,7 +406,7 @@ def _json_dumps_to_binary(obj):
     return json.dumps(obj).encode("ascii")
 
 
-_METHOD_TO_DUMP = {
+_METHOD_TO_DUMP: Dict[int, Callable] = {
     rpc_message_pb2.Json: _json_dumps_to_binary,
     rpc_message_pb2.JsonArray: _json_dumps_to_binary,
     rpc_message_pb2.MessagePack: msgpack.dumps,
@@ -406,13 +415,13 @@ _METHOD_TO_DUMP = {
     rpc_message_pb2.PickleArray: pickle.dumps,
 }
 
-_METHOD_TO_LOAD = {
-    rpc_message_pb2.EncodeMethod.Json: json.loads,
-    rpc_message_pb2.EncodeMethod.JsonArray: json.loads,
-    rpc_message_pb2.EncodeMethod.MessagePack: msgpack.loads,
-    rpc_message_pb2.EncodeMethod.MessagePackArray: msgpack.loads,
-    rpc_message_pb2.EncodeMethod.Pickle: pickle.loads,
-    rpc_message_pb2.EncodeMethod.PickleArray: pickle.loads,
+_METHOD_TO_LOAD: Dict[int, Callable] = {
+    rpc_message_pb2.Json: json.loads,
+    rpc_message_pb2.JsonArray: json.loads,
+    rpc_message_pb2.MessagePack: msgpack.loads,
+    rpc_message_pb2.MessagePackArray: msgpack.loads,
+    rpc_message_pb2.Pickle: pickle.loads,
+    rpc_message_pb2.PickleArray: pickle.loads,
 }
 
 
@@ -463,7 +472,7 @@ def data_from_pb(bufs, method: int):
 
 def data_to_json(data, method: int) -> Tuple[List[arraybuf_pb2.ndarray], str]:
     method &= _ENCODE_METHOD_MASK
-    if method == rpc_message_pb2.EncodeMethod.JsonArray:
+    if method == rpc_message_pb2.JsonArray:
         arrays, decoupled = extract_arrays_from_data(data, json_index=True)
         arrays = [data2pb(a) for a in arrays]
     else:
@@ -476,7 +485,7 @@ def data_from_json(bufs: List[arraybuf_pb2.ndarray], data: str, method: int):
     arrays = [pb2data(b) for b in bufs]
     data_skeleton = json.loads(data)
     method &= _ENCODE_METHOD_MASK
-    if method == rpc_message_pb2.EncodeMethod.JsonArray:
+    if method == rpc_message_pb2.JsonArray:
         res = put_arrays_to_data(arrays, data_skeleton, json_index=True)
     else:
         res = data_skeleton
@@ -785,7 +794,7 @@ class SocketMessageEncoder:
 
             for arr in self.arrays:
                 if isinstance(arr, np.ndarray):
-                    buff2 = memoryview(arr.reshape(-1).view(np.uint8))
+                    buff2 = arr.reshape(-1).view(np.uint8).data
                     binary_view[start:start + arr.nbytes] = buff2
                     start += arr.nbytes
                 else:
@@ -838,7 +847,7 @@ class SocketMessageEncoder:
         for arr in self.arrays:
             if isinstance(arr, np.ndarray):
                 size = arr.nbytes
-                memview = memoryview(arr.reshape(-1).view(np.uint8))
+                memview = arr.reshape(-1).view(np.uint8).data
             else:
                 size = len(arr)
                 memview = memoryview(arr)
@@ -902,7 +911,7 @@ def parse_array_of_chunked_message(req: wsdef_pb2.Header, chunks: List[bytes]):
     for dtype_jarr, shape in meta:
         if dtype_jarr == BYTES_JSONARRAY_CODE:
             data = np.empty(shape, np.uint8)
-            data_buffer = memoryview(data.reshape(-1).view(np.uint8))
+            data_buffer = data.reshape(-1).view(np.uint8).data
             size = shape[0]
         else:
             dtype_np = INV_NPDTYPE_TO_JSONARRAY_MAP[dtype_jarr]
@@ -910,7 +919,7 @@ def parse_array_of_chunked_message(req: wsdef_pb2.Header, chunks: List[bytes]):
             for s in shape[1:]:
                 size *= s
             data = np.empty(shape, dtype_np)
-            data_buffer = memoryview(data.reshape(-1).view(np.uint8))
+            data_buffer = data.reshape(-1).view(np.uint8).data
         arr_start = 0
         while size > 0:
             ser_size = min(size, chunk_size)
@@ -944,7 +953,7 @@ def parse_message_chunks(header: TensoRPCHeader, chunks: List[bytes]):
         # not chunked
         data_arr = chunks[0][header.req_length + 5:]
         start = 0
-        arrs = []
+        arrs: List[Union[npt.NDArray, bytes]] = []
         for dtype_jarr, shape in meta:
             if dtype_jarr == BYTES_JSONARRAY_CODE:
                 arrs.append(data_arr[start:start + shape[0]])
@@ -974,39 +983,3 @@ def get_exception_json(exc: BaseException):
     exception_json = {"error": str(exc), "detail": detail}
     return exception_json
 
-
-def _structured_data():
-    return {
-        "test0": [5, 3, np.random.uniform(size=(5, 3))],
-        "test1": {
-            "test2": np.random.uniform(size=(5, 3)),
-            "test3": (6, np.random.uniform(size=(4, )), b"asfasf")
-        }
-    }
-
-
-def _huge_structured_data():
-    return {
-        "test0": [5, 3, np.random.uniform(size=(5000, 300))],
-        "test1": {
-            "test2": np.random.uniform(size=(5000, 300)),
-            "test3": (6, np.random.uniform(size=(40000, )), b"asfasf")
-        }
-    }
-
-
-if __name__ == "__main__":
-    data = _huge_structured_data()
-    enc = SocketMessageEncoder(data)
-    chunks = list(
-        enc.get_message_chunks(
-            SocketMsgType.Event,
-            wsdef_pb2.Header(service_id=0, chunk_index=0, rpc_id=0), 1048576))
-    print(len(chunks))
-    _, _, de = parse_message_chunks(chunks)
-    # breakpoint()
-    assert np.allclose(data["test0"][2], de["test0"][2])
-    assert np.allclose(data["test1"]["test2"], de["test1"]["test2"])
-    assert np.allclose(data["test1"]["test3"][1], de["test1"]["test3"][1])
-
-    # print(de)

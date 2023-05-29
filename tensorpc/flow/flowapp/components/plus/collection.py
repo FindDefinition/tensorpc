@@ -73,6 +73,8 @@ class ScriptExecutor(mui.FlexBox):
             [self.path, self.args,
              mui.HBox([
                  mui.Button("Run", self._run),
+                 mui.Button("Cancel", self._cancel),
+
              ])])
         self.prop(flex_direction="column")
         self._external_argv_task: Optional[asyncio.Future] = None
@@ -84,7 +86,7 @@ class ScriptExecutor(mui.FlexBox):
             appctx.run_in_executor_with_exception_inspect(
                 partial(self._run_app_script,
                         path=self.path.value,
-                        argv=shlex.split(self.args.value)), ))
+                        argv=shlex.split(" ".join([self.path.value, self.args.value]))), ))
 
     async def _cancel(self):
         if self._external_argv_task is None:

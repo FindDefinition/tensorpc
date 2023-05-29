@@ -1,5 +1,7 @@
 import inspect
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Set 
+
+import types
 
 
 def isclassmethod(method):
@@ -61,3 +63,55 @@ def get_all_members_by_type(obj_type: Any):
 
 def get_members(obj: Any, no_parent: bool = True):
     return get_members_by_type(type(obj), no_parent)
+
+
+def chehck_obj_is_pybind(obj):
+    # TODO better way to check a type is a pybind11 type
+    obj_type = type(obj)
+    obj_type_dir = dir(obj_type)
+
+    return "__dict__" not in obj_type_dir and "__weakref__" not in obj_type_dir
+
+
+def get_obj_userdefined_properties(obj: Any) -> Set[str]:
+    res: Set[str] = set()
+    is_pybind = chehck_obj_is_pybind(obj)
+    if is_pybind:
+        # all properties in pybind object is property object
+        # so we must check setter.
+        # pybind object attrs defined by def_readwrite or def_readonly
+        # will have setter with type "instancemethod"
+        # otherwise is "builtin_function_or_method"
+        # for common case.
+        obj_type = type(obj)
+        for key in dir(obj_type):
+            if not key.startswith("__") and not key.endswith("__"):
+                class_attr = getattr(obj_type, key)
+                if isinstance(class_attr, property):
+                    if class_attr.fget is not None and type(
+                            class_attr.fget).__name__ != "instancemethod":
+                        res.add(key)
+    else:
+        obj_type = type(obj)
+        for key in dir(obj_type):
+            if not key.startswith("__") and not key.endswith("__"):
+                class_attr = getattr(obj_type, key)
+                if isinstance(class_attr, property):
+                    res.add(key)
+    return res
+
+def is_obj_builtin_or_module(v):
+    if isinstance(v, types.ModuleType):
+        return True 
+    if inspect.isfunction(v) or inspect.ismethod(v) or inspect.isbuiltin(
+            v):
+        return True 
+    return False 
+
+def filter_local_vars(local_var: Mapping[str, Any]) -> Mapping[str, Any]:
+    new_local_vars: Dict[str, Any] = {}
+    for k, v in local_var.items():
+        if not is_obj_builtin_or_module(v) and k != "__class__":
+            new_local_vars[k] = v 
+
+    return new_local_vars

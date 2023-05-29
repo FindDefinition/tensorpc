@@ -59,11 +59,13 @@ def launch_tmux_task(uuid_str: str, window_command: str, one_shot: bool, sched_p
         envs["CUDA_VISIBLE_DEVICES"] = ",".join(
             [str(gpu_id) for gpu_id in all_gpu_ids])
     env_export_str = " && ".join([f"export {k}={v}" for k, v in envs.items()])
+    pane: libtmux.Pane
     if s.has_session(sess_name):
         # assert not one_shot, f"one shot task already exists, {sess_name}"
         sess = s.sessions.get(session_name=sess_name)
         assert isinstance(sess, libtmux.Session)
-        pane: libtmux.Pane = sess.windows[0].panes[0]
+        pane = sess.windows[0].panes[0]
+        assert isinstance(pane, libtmux.Pane)
         pane.send_keys(env_export_str)
         if cwd:
             pane.send_keys(f"cd {cwd}")
@@ -76,7 +78,8 @@ def launch_tmux_task(uuid_str: str, window_command: str, one_shot: bool, sched_p
             #     f"{constants.TMUX_SESSION_TASK_PREFIX}{_SPLIT}{uuid_str}", window_command=f"{env_export_str} && {window_command}")
             sess = s.new_session(
                 f"{constants.TMUX_SESSION_TASK_PREFIX}{_SPLIT}{uuid_str}")
-            pane: libtmux.Pane = sess.windows[0].panes[0]
+            pane = sess.windows[0].panes[0]
+            assert isinstance(pane, libtmux.Pane)
             pane.send_keys(env_export_str)
             if cwd:
                 pane.send_keys(f"cd {cwd}")
@@ -84,7 +87,8 @@ def launch_tmux_task(uuid_str: str, window_command: str, one_shot: bool, sched_p
         else:
             sess = s.new_session(
                 f"{constants.TMUX_SESSION_TASK_PREFIX}{_SPLIT}{uuid_str}")
-            pane: libtmux.Pane = sess.windows[0].panes[0]
+            pane = sess.windows[0].panes[0]
+            assert isinstance(pane, libtmux.Pane)
             pane.send_keys(env_export_str)
             if cwd:
                 pane.send_keys(f"cd {cwd}")

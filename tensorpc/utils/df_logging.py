@@ -55,23 +55,23 @@ def _get_caller(offset=3):
 # and further changed in Python 3.8
 if _sys.version_info.major >= 3 and _sys.version_info.minor >= 8:
 
-    def _logger_find_caller(stack_info=False, stacklevel=1):  # pylint: disable=g-wrong-blank-lines
+    def _logger_find_caller(stack_info=False, stacklevel=1):  # pylint: disable=g-wrong-blank-lines  # type: ignore[no-redef]
         code, frame = _get_caller(4)
         sinfo = None
         if stack_info:
             sinfo = '\n'.join(_traceback.format_stack())
-        if code:
+        if code and frame is not None:
             return (code.co_filename, frame.f_lineno, code.co_name, sinfo)
         else:
             return '(unknown file)', 0, '(unknown function)', sinfo
 elif _sys.version_info.major >= 3 and _sys.version_info.minor >= 2:
 
-    def _logger_find_caller(stack_info=False):  # pylint: disable=g-wrong-blank-lines
+    def _logger_find_caller(stack_info=False):  # pylint: disable=g-wrong-blank-lines # type: ignore[no-redef]
         code, frame = _get_caller(4)
         sinfo = None
         if stack_info:
             sinfo = '\n'.join(_traceback.format_stack())
-        if code:
+        if code and frame is not None:
             return (code.co_filename, frame.f_lineno, code.co_name, sinfo)
         else:
             return '(unknown file)', 0, '(unknown function)', sinfo
@@ -79,7 +79,7 @@ else:
 
     def _logger_find_caller():  # pylint: disable=g-wrong-blank-lines
         code, frame = _get_caller(4)
-        if code:
+        if code and frame is not None:
             return (code.co_filename, frame.f_lineno, code.co_name)
         else:
             return '(unknown file)', 0, '(unknown function)'
@@ -246,7 +246,7 @@ def log_if(level, msg, condition, *args):
 def _GetFileAndLine():
     """Returns (filename, linenumber) for the stack frame."""
     code, f = _get_caller()
-    if not code:
+    if not code or f is None:
         return ('<unknown>', 0)
     return (code.co_filename, f.f_lineno)
 

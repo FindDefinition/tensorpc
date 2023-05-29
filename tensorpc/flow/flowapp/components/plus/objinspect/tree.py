@@ -10,7 +10,6 @@ from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
 
 import numpy as np
 
-from tensorpc.core.serviceunit import ReloadableDynamicClass
 from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.appcore import AppSpecialEventType
 from tensorpc.flow.flowapp.components import mui, three
@@ -30,6 +29,7 @@ from tensorpc.flow.jsonlike import (CommonQualNames, ContextMenuData,
                                     IconButtonData, parse_obj_to_jsonlike, TreeItem)
 from tensorpc.flow.marker import mark_did_mount, mark_will_unmount
 from .controllers import CallbackSlider
+from .analysis import GLOBAL_SPLIT, get_obj_dict, parse_obj_item, parse_obj_dict, get_obj_by_uid_trace, get_obj_by_uid
 
 _DEFAULT_OBJ_NAME = "default"
 
@@ -47,18 +47,10 @@ BASE_OBJ_TO_TYPE = {
     str: mui.JsonLikeType.String,
 }
 
-_GLOBAL_SPLIT = "::"
-
-_IGNORE_ATTR_NAMES = set(["_abc_impl", "__abstractmethods__"])
-
 CONTAINER_TYPES = {mui.JsonLikeType.List.value, mui.JsonLikeType.Dict.value}
 FOLDER_TYPES = {
     mui.JsonLikeType.ListFolder.value, mui.JsonLikeType.DictFolder.value
 }
-
-STRING_LENGTH_LIMIT = 500
-
-SET_CONTAINER_LIMIT_SIZE = 50
 
 
 class ButtonType(enum.Enum):
@@ -66,92 +58,6 @@ class ButtonType(enum.Enum):
     Delete = "delete"
     Watch = "watch"
     Record = "record"
-
-
-def parse_obj_item(obj,
-                   name: str,
-                   id: str,
-                   checker: Callable[[Type], bool],
-                   obj_meta_cache=None):
-    obj_type = type(obj)
-    if isinstance(obj, TreeItem):
-        node_candidate = obj.get_json_like_node(id)
-        if node_candidate is not None:
-            return node_candidate
-
-    node = parse_obj_to_jsonlike(obj, name, id)
-    if isinstance(obj, mui.JsonLikeNode):
-        return node
-    if node.type == mui.JsonLikeType.Object.value:
-        t = mui.JsonLikeType.Object
-        value = mui.undefined
-        count = 1  # make object expandable
-        if isinstance(obj, PurePath):
-            count = 0
-            value = str(obj)
-        obj_type = type(obj)
-        # obj_dict = _get_obj_dict(obj, checker)
-        if obj_meta_cache is None:
-            obj_meta_cache = {}
-        if obj_type in obj_meta_cache:
-            is_layout = obj_meta_cache[obj_type]
-        else:
-            if obj_type in ALL_OBJECT_LAYOUT_HANDLERS:
-                is_layout = True
-            else:
-                try:
-                    metas = ReloadableDynamicClass.get_metas_of_regular_methods(
-                        obj_type, False, no_code=True)
-                    special_methods = FlowSpecialMethods(metas)
-                    is_layout = special_methods.create_layout is not None
-                except:
-                    is_layout = False
-                    traceback.print_exc()
-                    print("ERROR", obj_type)
-            obj_meta_cache[obj_type] = is_layout
-        is_draggable = is_layout
-        if isinstance(obj, mui.Component):
-            is_layout = True
-            is_draggable = obj._flow_reference_count == 0
-        if isinstance(obj, ObjectLayoutCreator):
-            is_draggable = True
-            is_layout = True
-        is_draggable = True
-        if is_layout:
-            t = mui.JsonLikeType.Layout
-        return mui.JsonLikeNode(id,
-                                name,
-                                t.value,
-                                value=value,
-                                typeStr=obj_type.__qualname__,
-                                cnt=count,
-                                drag=is_draggable,
-                                iconBtns=[
-                                    IconButtonData(ButtonType.Reload.value,
-                                                   mui.IconType.Refresh.value,
-                                                   "Reload Object")
-                                ])
-    return node
-
-
-def parse_obj_dict(obj_dict: Dict[Hashable, Any],
-                   ns: str,
-                   checker: Callable[[Type], bool],
-                   obj_meta_cache=None):
-    res_node: List[mui.JsonLikeNode] = []
-    for k, v in obj_dict.items():
-        str_k = str(k)
-
-        node = parse_obj_item(v,
-                              str_k,
-                              f"{ns}{_GLOBAL_SPLIT}{str_k}",
-                              checker,
-                              obj_meta_cache=obj_meta_cache)
-        if not isinstance(k, str):
-            node.dictKey = mui.BackendOnlyProp(k)
-        res_node.append(node)
-    return res_node
-
 
 def _check_is_valid(obj_type, cared_types: Set[Type],
                     ignored_types: Set[Type]):
@@ -163,267 +69,15 @@ def _check_is_valid(obj_type, cared_types: Set[Type],
     return valid
 
 
-def _chehck_obj_is_pybind(obj):
-    # TODO better way to check a type is a pybind11 type
-    obj_type = type(obj)
-    obj_type_dir = dir(obj_type)
-
-    return "__dict__" not in obj_type_dir and "__weakref__" not in obj_type_dir
-
-
-def _get_obj_userdefined_properties(obj):
-    res: Set[str] = set()
-    is_pybind = _chehck_obj_is_pybind(obj)
-    if is_pybind:
-        # all properties in pybind object is property object
-        # so we must check setter.
-        # pybind object attrs defined by def_readwrite or def_readonly
-        # will have setter with type "instancemethod"
-        # otherwise is "builtin_function_or_method"
-        # for common case.
-        obj_type = type(obj)
-        for key in dir(obj_type):
-            if not key.startswith("__") and not key.endswith("__"):
-                class_attr = getattr(obj_type, key)
-                if isinstance(class_attr, property):
-                    if class_attr.fget is not None and type(
-                            class_attr.fget).__name__ != "instancemethod":
-                        res.add(key)
-    else:
-        obj_type = type(obj)
-        for key in dir(obj_type):
-            if not key.startswith("__") and not key.endswith("__"):
-                class_attr = getattr(obj_type, key)
-                if isinstance(class_attr, property):
-                    res.add(key)
-    return res
-
-def _is_obj_builtin_or_module(v):
-    if isinstance(v, types.ModuleType):
-        return True 
-    if inspect.isfunction(v) or inspect.ismethod(v) or inspect.isbuiltin(
-            v):
-        return True 
-    return False 
-
-def _get_obj_dict(obj,
-                  checker: Callable[[Type], bool],
-                  check_obj: bool = True) -> Dict[Hashable, Any]:
-    res: Dict[Hashable, Any] = {}
-    # TODO size limit node
-    if isinstance(obj, (list, tuple, set)):
-        if isinstance(obj, set):
-            # set size is limited since it don't support nested view.
-            obj_list = list(obj)[:SET_CONTAINER_LIMIT_SIZE]
-        else:
-            obj_list = obj
-        return {str(i): obj_list[i] for i in range(len(obj))}
-    elif isinstance(obj, dict):
-        # return {k: v for k, v in obj.items() if not _is_obj_builtin_or_module(v)}
-        return obj
-    if not checker(obj) and check_obj:
-        return {}
-    # if isinstance(obj, types.ModuleType):
-    #     return {}
-    if _is_obj_builtin_or_module(obj):
-        return {}
-    if isinstance(obj, tuple(USER_OBJ_TREE_TYPES)):
-        return obj.get_childs()
-    # if isinstance(obj, mui.Component):
-    #     return {}
-    # members = get_members(obj, no_parent=False)
-    # member_keys = set([m[0] for m in members])
-    user_defined_prop_keys = _get_obj_userdefined_properties(obj)
-    # print(_chehck_obj_is_pybind(obj), user_defined_prop_keys)
-    for k in dir(obj):
-        if k.startswith("__"):
-            continue
-        if k in _IGNORE_ATTR_NAMES:
-            continue
-        # if k in member_keys:
-        #     continue
-        # TODO here we ignore all properies, we should add a lazy evaluation
-        if k in user_defined_prop_keys:
-            continue
-        try:
-            v = getattr(obj, k)
-        except:
-            continue
-        if not (checker(v)):
-            continue
-        if _is_obj_builtin_or_module(v):
-            continue
-        res[k] = v
-    return res
-
-
-def _get_obj_single_attr(obj,
-                         key: str,
-                         checker: Callable[[Type], bool],
-                         check_obj: bool = True) -> Union[mui.Undefined, Any]:
-    # if isinstance(obj, (list, tuple, set)):
-    #     try:
-    #         key_int = int(key)
-    #     except:
-    #         return mui.undefined
-    #     if key_int < 0 or key_int >= len(obj):
-    #         return mui.undefined
-    #     obj_list = list(obj)
-    #     return obj_list[key_int]
-    # elif isinstance(obj, dict):
-    #     if key not in obj:
-    #         return mui.undefined
-    #     return obj[key]
-    if inspect.isbuiltin(obj):
-        return mui.undefined
-    if not checker(obj) and check_obj:
-        return mui.undefined
-    if isinstance(obj, types.ModuleType):
-        return mui.undefined
-    # if isinstance(obj, mui.Component):
-    #     return {}
-    # members = get_members(obj, no_parent=False)
-    # member_keys = set([m[0] for m in members])
-    obj_keys = dir(obj)
-    if key in obj_keys:
-        try:
-            v = getattr(obj, key)
-        except:
-            return mui.undefined
-        if not (checker(v)):
-            return mui.undefined
-        if isinstance(v, types.ModuleType):
-            return mui.undefined
-        if inspect.isfunction(v) or inspect.ismethod(v) or inspect.isbuiltin(
-                v):
-            return mui.undefined
-        return v
-    return mui.undefined
-
-
-async def _get_obj_by_uid(
-    obj,
-    uid: str,
-    checker: Callable[[Type], bool],
-    real_keys: Optional[List[Union[mui.Undefined, Hashable]]] = None
-) -> Tuple[Any, bool]:
-    parts = uid.split(_GLOBAL_SPLIT)
-    if real_keys is None:
-        real_keys = [mui.undefined for _ in range(len(parts))]
-    if len(parts) == 1:
-        return obj, True
-    # uid contains root, remove it at first.
-    return await _get_obj_by_uid_resursive(obj, parts[1:], real_keys[1:],
-                                           checker)
-
-
-async def _get_obj_by_uid_resursive(
-        obj, parts: List[str], real_keys: List[Union[mui.Undefined, Hashable]],
-        checker: Callable[[Type], bool]) -> Tuple[Any, bool]:
-    key = parts[0]
-    real_key = real_keys[0]
-    if isinstance(obj, (list, tuple, set)):
-        if isinstance(obj, set):
-            obj_list = list(obj)
-        else:
-            obj_list = obj
-        try:
-            key_index = int(key)
-        except:
-            return obj, False
-        if key_index < 0 or key_index >= len(obj_list):
-            return obj, False
-        child_obj = obj_list[key_index]
-    elif isinstance(obj, dict):
-        obj_dict = obj
-        if not isinstance(real_key, mui.Undefined):
-            key = real_key
-        if key not in obj_dict:
-            return obj, False
-        child_obj = obj_dict[key]
-    elif isinstance(obj, TreeItem):
-        child_obj = await obj.get_child(key)
-    elif isinstance(obj, tuple(USER_OBJ_TREE_TYPES)):
-        childs = obj.get_childs()
-        child_obj = childs[key]
-    else:
-        child_obj = _get_obj_single_attr(obj, key, checker)
-        if isinstance(obj, mui.Undefined):
-            return obj, False
-    if len(parts) == 1:
-        return child_obj, True
-    else:
-        return await _get_obj_by_uid_resursive(child_obj, parts[1:],
-                                               real_keys[1:], checker)
-
-
-async def _get_obj_by_uid_trace(
-    obj,
-    uid: str,
-    checker: Callable[[Type], bool],
-    real_keys: Optional[List[Union[mui.Undefined, Hashable]]] = None
-) -> Tuple[Any, bool]:
-    parts = uid.split(_GLOBAL_SPLIT)
-    if real_keys is None:
-        real_keys = [mui.undefined for _ in range(len(parts))]
-    if len(parts) == 1:
-        return [obj], True
-    # uid contains root, remove it at first.
-    trace, found = await _get_obj_by_uid_trace_resursive(
-        obj, parts[1:], real_keys[1:], checker)
-    return [obj] + trace, found
-
-
-async def _get_obj_by_uid_trace_resursive(
-        obj, parts: List[str], real_keys: List[Union[mui.Undefined, Hashable]],
-        checker: Callable[[Type], bool]) -> Tuple[List[Any], bool]:
-    key = parts[0]
-    real_key = real_keys[0]
-    if isinstance(obj, (list, tuple, set)):
-        if isinstance(obj, set):
-            obj_list = list(obj)
-        else:
-            obj_list = obj
-        try:
-            key_index = int(key)
-        except:
-            return [obj], False
-        if key_index < 0 or key_index >= len(obj_list):
-            return [obj], False
-        child_obj = obj_list[key_index]
-    elif isinstance(obj, dict):
-        obj_dict = obj
-        if not isinstance(real_key, mui.Undefined):
-            key = real_key
-        if key not in obj_dict:
-            return [obj], False
-        child_obj = obj_dict[key]
-    elif isinstance(obj, TreeItem):
-        child_obj = await obj.get_child(key)
-    elif isinstance(obj, tuple(USER_OBJ_TREE_TYPES)):
-        childs = obj.get_childs()
-        child_obj = childs[key]
-    else:
-        child_obj = _get_obj_single_attr(obj, key, checker)
-        if isinstance(obj, mui.Undefined):
-            return [obj], False
-    if len(parts) == 1:
-        return [child_obj], True
-    else:
-        trace, found = await _get_obj_by_uid_trace_resursive(
-            child_obj, parts[1:], real_keys[1:], checker)
-        return [child_obj] + trace, found
-
-
 def _get_root_tree(obj,
                    checker: Callable[[Type], bool],
                    key: str,
                    obj_meta_cache=None):
-    obj_dict = _get_obj_dict(obj, checker)
+    obj_dict = get_obj_dict(obj, checker)
     root_node = parse_obj_item(obj, key, key, checker, obj_meta_cache)
     root_node.children = parse_obj_dict(obj_dict, key, checker, obj_meta_cache)
     for (k, o), c in zip(obj_dict.items(), root_node.children):
-        obj_child_dict = _get_obj_dict(o, checker)
+        obj_child_dict = get_obj_dict(o, checker)
         c.drag = False
         c.children = parse_obj_dict(obj_child_dict, c.id, checker,
                                     obj_meta_cache)
@@ -435,15 +89,15 @@ async def _get_root_tree_async(obj,
                                checker: Callable[[Type], bool],
                                key: str,
                                obj_meta_cache=None):
-    obj_dict = _get_obj_dict(obj, checker)
+    obj_dict = get_obj_dict(obj, checker)
     root_node = parse_obj_item(obj, key, key, checker, obj_meta_cache)
     root_node.children = parse_obj_dict(obj_dict, key, checker, obj_meta_cache)
     for (k, o), c in zip(obj_dict.items(), root_node.children):
         if isinstance(o, TreeItem):
             obj_child_dict = await o.get_child_desps(c.id)  # type: ignore
         else:
-            obj_child_dict = _get_obj_dict(o, checker)
-        # obj_child_dict = _get_obj_dict(o, checker)
+            obj_child_dict = get_obj_dict(o, checker)
+        # obj_child_dict = get_obj_dict(o, checker)
         c.drag = False
         c.children = parse_obj_dict(obj_child_dict, c.id, checker,
                                     obj_meta_cache)
@@ -456,7 +110,7 @@ def _parse_obj_to_node(obj,
                        checker: Callable[[Type], bool],
                        cached_lazy_expand_ids: Set[str],
                        obj_meta_cache=None):
-    obj_dict = _get_obj_dict(obj, checker)
+    obj_dict = get_obj_dict(obj, checker)
     node.children = parse_obj_dict(obj_dict, node.id, checker, obj_meta_cache)
     node.cnt = len(obj_dict)
     for (k, v), child_node in zip(obj_dict.items(), node.children):
@@ -471,7 +125,7 @@ def _get_obj_tree(obj,
                   parent_id: str,
                   obj_meta_cache=None,
                   cached_lazy_expand_ids: Optional[List[str]] = None):
-    obj_id = f"{parent_id}{_GLOBAL_SPLIT}{key}"
+    obj_id = f"{parent_id}{GLOBAL_SPLIT}{key}"
     root_node = parse_obj_item(obj, key, obj_id, checker, obj_meta_cache)
     if cached_lazy_expand_ids is None:
         cached_lazy_expand_ids = []
@@ -481,7 +135,7 @@ def _get_obj_tree(obj,
 
         _parse_obj_to_node(obj, root_node, checker, cached_lazy_expand_ids_set,
                            obj_meta_cache)
-        # obj_dict = _get_obj_dict(obj, checker)
+        # obj_dict = get_obj_dict(obj, checker)
         # root_node.children = parse_obj_dict(obj_dict, obj_id, checker,
         #                                     obj_meta_cache)
         # root_node.cnt = len(obj_dict)
@@ -504,7 +158,7 @@ class DataStorageTreeItem(TreeItem):
                               parent_ns: str) -> Dict[str, mui.JsonLikeNode]:
         metas = await appctx.list_data_storage(self.node_id)
         for m in metas:
-            m.id = f"{parent_ns}{_GLOBAL_SPLIT}{m.id}"
+            m.id = f"{parent_ns}{GLOBAL_SPLIT}{m.id}"
             userdata = {
                 "type": ContextMenuType.DataStorageItemDelete.value,
             }
@@ -582,7 +236,7 @@ class ObservedFunctionTree(TreeItem):
                               parent_ns: str) -> Dict[str, mui.JsonLikeNode]:
         metas: Dict[str, mui.JsonLikeNode] = {}
         for k, v in appctx.get_app().get_observed_func_registry().items():
-            node = mui.JsonLikeNode(f"{parent_ns}{_GLOBAL_SPLIT}{k}", v.name,
+            node = mui.JsonLikeNode(f"{parent_ns}{GLOBAL_SPLIT}{k}", v.name,
                                     mui.JsonLikeType.Function.value)
             node.iconBtns = [
                 IconButtonData(ButtonType.Watch.value,
@@ -712,7 +366,7 @@ class BasicObjectTree(mui.FlexBox):
 
     async def _get_obj_by_uid(self, uid: str,
                               tree_node_trace: List[mui.JsonLikeNode]):
-        uids = uid.split(_GLOBAL_SPLIT)
+        uids = uid.split(GLOBAL_SPLIT)
         real_uids: List[str] = []
         real_keys: List[Union[Hashable, mui.Undefined]] = []
         for i in range(len(tree_node_trace)):
@@ -720,14 +374,14 @@ class BasicObjectTree(mui.FlexBox):
             if not tree_node_trace[i].is_folder():
                 real_keys.append(k)
                 real_uids.append(uids[i])
-        return await _get_obj_by_uid(self.root,
-                                     _GLOBAL_SPLIT.join(real_uids),
+        return await get_obj_by_uid(self.root,
+                                     GLOBAL_SPLIT.join(real_uids),
                                      self._valid_checker,
                                      real_keys=real_keys)
 
-    async def _get_obj_by_uid_trace(self, uid: str,
+    async def get_obj_by_uid_trace(self, uid: str,
                                     tree_node_trace: List[mui.JsonLikeNode]):
-        uids = uid.split(_GLOBAL_SPLIT)
+        uids = uid.split(GLOBAL_SPLIT)
         real_uids: List[str] = []
         real_keys: List[Union[Hashable, mui.Undefined]] = []
         for i in range(len(tree_node_trace)):
@@ -735,8 +389,8 @@ class BasicObjectTree(mui.FlexBox):
             if not tree_node_trace[i].is_folder():
                 real_keys.append(k)
                 real_uids.append(uids[i])
-        return await _get_obj_by_uid_trace(self.root,
-                                           _GLOBAL_SPLIT.join(real_uids),
+        return await get_obj_by_uid_trace(self.root,
+                                           GLOBAL_SPLIT.join(real_uids),
                                            self._valid_checker,
                                            real_keys=real_keys)
 
@@ -772,7 +426,7 @@ class BasicObjectTree(mui.FlexBox):
 
     async def _on_drag_collect(self, data):
         uid = data["id"]
-        objs, found = await _get_obj_by_uid_trace(self.root, uid,
+        objs, found = await get_obj_by_uid_trace(self.root, uid,
                                                   self._valid_checker)
         if not found:
             return None
@@ -817,7 +471,7 @@ class BasicObjectTree(mui.FlexBox):
             else:
                 assert not isinstance(node.keys, mui.Undefined)
                 data = {k: real_obj[k] for k in node.keys.data}
-            obj_dict = _get_obj_dict(data, self._checker)
+            obj_dict = get_obj_dict(data, self._checker)
             tree = parse_obj_dict(obj_dict, node.id, self._checker,
                                   self._obj_meta_cache)
             node.children = tree
@@ -836,7 +490,7 @@ class BasicObjectTree(mui.FlexBox):
         if isinstance(obj, TreeItem):
             obj_dict = await obj.get_child_desps(uid)  # type: ignore
         else:
-            obj_dict = _get_obj_dict(obj, self._checker)
+            obj_dict = get_obj_dict(obj, self._checker)
         tree = parse_obj_dict(obj_dict, node.id, self._checker,
                               self._obj_meta_cache)
         node.children = tree
@@ -845,9 +499,9 @@ class BasicObjectTree(mui.FlexBox):
 
     async def _on_rename(self, uid_newname: Tuple[str, str]):
         uid = uid_newname[0]
-        uid_parts = uid.split(_GLOBAL_SPLIT)
+        uid_parts = uid.split(GLOBAL_SPLIT)
 
-        obj_trace, found = await _get_obj_by_uid_trace(self.root, uid,
+        obj_trace, found = await get_obj_by_uid_trace(self.root, uid,
                                                        self._valid_checker)
         if not found:
             return
@@ -867,9 +521,9 @@ class BasicObjectTree(mui.FlexBox):
 
     async def _on_custom_button(self, uid_btn: Tuple[str, str]):
         uid = uid_btn[0]
-        uid_parts = uid.split(_GLOBAL_SPLIT)
+        uid_parts = uid.split(GLOBAL_SPLIT)
 
-        obj_trace, found = await _get_obj_by_uid_trace(self.root, uid,
+        obj_trace, found = await get_obj_by_uid_trace(self.root, uid,
                                                        self._valid_checker)
         if not found:
             return
@@ -906,10 +560,10 @@ class BasicObjectTree(mui.FlexBox):
     async def _on_contextmenu(self, uid_menuid_data: Tuple[str, str,
                                                            Optional[Any]]):
         uid = uid_menuid_data[0]
-        uid_parts = uid.split(_GLOBAL_SPLIT)
+        uid_parts = uid.split(GLOBAL_SPLIT)
         userdata = uid_menuid_data[2]
         if userdata is not None:
-            obj_trace, found = await _get_obj_by_uid_trace(
+            obj_trace, found = await get_obj_by_uid_trace(
                 self.root, uid, self._valid_checker)
             if found:
                 obj = obj_trace[-1]
@@ -996,7 +650,7 @@ class ObjectTree(BasicObjectTree):
             _DEFAULT_DATA_STORAGE_NAME: self._default_data_storage_nodes,
             _DEFAULT_OBSERVED_FUNC_NAME: self._default_obs_funcs,
         }
-        self._data_storage_uid = f"{_ROOT}{_GLOBAL_SPLIT}{_DEFAULT_DATA_STORAGE_NAME}"
+        self._data_storage_uid = f"{_ROOT}{GLOBAL_SPLIT}{_DEFAULT_DATA_STORAGE_NAME}"
         super().__init__(init, cared_types, ignored_types, limit, use_fast_tree)
         self.root.update(default_builtins)
 
@@ -1103,7 +757,7 @@ class ObjectTree(BasicObjectTree):
                 assert isinstance(folder_node.start, int)
                 real_nodes = self._objinspect_root._get_node_by_uid_trace(
                     folder_node.realId)
-                real_objs, found = await self._get_obj_by_uid_trace(
+                real_objs, found = await self.get_obj_by_uid_trace(
                     folder_node.realId, real_nodes)
                 real_obj = real_objs[-1]
                 obj = None
@@ -1125,7 +779,7 @@ class ObjectTree(BasicObjectTree):
                         obj = real_obj[key]
                     obj_trace.append(obj)
             else:
-                obj_trace, found = await self._get_obj_by_uid_trace(uid, nodes)
+                obj_trace, found = await self.get_obj_by_uid_trace(uid, nodes)
         else:
             obj_trace, found = await self._get_obj_by_uid(uid, nodes)
         return obj_trace, found
@@ -1133,7 +787,7 @@ class ObjectTree(BasicObjectTree):
     async def _on_contextmenu(self, uid_menuid_data: Tuple[str, str,
                                                            Optional[Any]]):
         uid = uid_menuid_data[0]
-        uid_parts = uid.split(_GLOBAL_SPLIT)
+        uid_parts = uid.split(GLOBAL_SPLIT)
         userdata = uid_menuid_data[2]
         if userdata is not None:
             nodes = self._objinspect_root._get_node_by_uid_trace(uid)

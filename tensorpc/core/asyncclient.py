@@ -26,6 +26,7 @@ from typing import (Any, AsyncIterator, Dict, Generator, Iterator, List,
                     Optional, Tuple, Union, AsyncGenerator)
 
 import grpc
+import grpc.aio
 import numpy as np
 
 from tensorpc.core import core_io as core_io
@@ -55,7 +56,7 @@ class AsyncRemoteObject(object):
     output_shared_mem: np.ndarray
     num_blocks: int
     """
-
+    _stub: Optional[remote_object_pb2_grpc.RemoteObjectStub]
     def __init__(self,
                  channel: Optional[grpc.aio.Channel],
                  name="",
