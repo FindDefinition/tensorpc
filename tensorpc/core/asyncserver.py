@@ -21,6 +21,7 @@ from functools import partial
 from typing import Callable, Dict, List, Mapping, Optional, Sequence, Union
 
 import grpc
+import grpc.aio
 import numpy as np
 
 from tensorpc import compat

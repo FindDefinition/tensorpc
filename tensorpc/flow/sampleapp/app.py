@@ -1144,9 +1144,8 @@ class CollectionApp:
 
     @mark_autorun
     async def _autorun_dev(self):
-        import inspect 
-        frame = inspect.currentframe()
-        await appctx.obj_inspector_update_locals()
+        
+        raise NotImplementedError
         # self.dev_0.dev()
 
 

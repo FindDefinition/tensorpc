@@ -25,6 +25,9 @@ class FrameResult:
     # depth only available when trace return (slower mode).
     depth: int = -1
 
+    def get_unique_id(self):
+        return f"{self.filename}@{self.qualname}"
+
 
 class Tracer(object):
     """A simple tracer for python functions.
@@ -36,11 +39,11 @@ class Tracer(object):
     """
     def __init__(self,
                  callback: Callable[[FrameResult], Any],
-                 depth: int = -1,
                  traced_types: Optional[Tuple[Type]] = None,
                  traced_names: Optional[Set[str]] = None,
                  traced_folders: Optional[Set[str]] = None,
-                 trace_return: bool = True):
+                 trace_return: bool = True,
+                 depth: int = 3):
         self.target_frames: Set[FrameType] = set()
         self.thread_local = threading.local()
         self.depth = depth
@@ -106,10 +109,13 @@ class Tracer(object):
     def trace_lite(self, frame: FrameType, event, arg):
         if event == 'return':
             THREAD_GLOBALS.depth -= 1
-            self.callback(self._get_frame_result(TraceType.Return, frame, THREAD_GLOBALS.depth))
+            self.callback(self.get_frame_result(TraceType.Return, frame, THREAD_GLOBALS.depth))
 
-    def _get_frame_result(self, trace_type: TraceType, frame: FrameType, depth: int=-1):
+    @staticmethod
+    def get_frame_result(trace_type: TraceType, frame: FrameType, depth: int=-1):
         qname = frame.f_code.co_name
+        if sys.version_info[:2] >= (3, 11):
+            qname = frame.f_code.co_qualname # type: ignore
         if "self" in frame.f_locals:
             qname = type(frame.f_locals["self"]).__qualname__ + "." + qname
         return FrameResult(
@@ -145,7 +151,7 @@ class Tracer(object):
         if not self._filter_frame(frame):
             return None
         if event == "call":
-            self.callback(self._get_frame_result(TraceType.Call, frame))
+            self.callback(self.get_frame_result(TraceType.Call, frame))
         return None
 
     def trace_return_func(self, frame: FrameType, event, arg):
@@ -169,10 +175,12 @@ class Tracer(object):
                     else:
                         return None
         # we only handle methods and global functions.
+        # print(event, frame.f_code.co_name)
         if not self._filter_frame(frame):
             return None
         if event == "call":
-            self.callback(self._get_frame_result(TraceType.Call, frame, THREAD_GLOBALS.depth))
+            self.callback(self.get_frame_result(TraceType.Call, frame, THREAD_GLOBALS.depth))
             THREAD_GLOBALS.depth += 1
 
         return self.trace_lite
+

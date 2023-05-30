@@ -192,6 +192,12 @@ class CommonQualNames:
     TorchTensor = "torch.Tensor"
     TVTensor = "cumm.core_cc.tensorview_bind.Tensor"
 
+class TensorType(enum.Enum):
+    Unknown = ""
+    NpArray = "numpy.ndarray"
+    TorchTensor = "torch.Tensor"
+    TVTensor = "cumm.core_cc.tensorview_bind.Tensor"
+
 
 class JsonLikeType(enum.Enum):
     Int = 0
@@ -236,6 +242,7 @@ class ContextMenuData:
 @dataclasses.dataclass
 class JsonLikeNode:
     id: str
+    # must be id.split(SPLIT)[-1] for child of list/dict
     name: str
     type: int
     typeStr: Union[Undefined, str] = undefined
@@ -253,6 +260,23 @@ class JsonLikeNode:
     menus: Union[Undefined, List[ContextMenuData]] = undefined
     edit: Union[Undefined, bool] = undefined
     userdata: Union[Undefined, Any] = undefined
+    alias: Union[Undefined, str] = undefined
+
+    def decode_uid(self, uid: str, split_length: int = 2):
+        index = uid.find("|")
+        lengths = list(map(int, uid[:index].split(",")))
+        res: List[str] = []
+        start = index + 1
+        for l in lengths:
+            end = start + l 
+            res.append(uid[start:end])
+            start = end + split_length
+        return res
+
+    def encode_uid(self, parts: List[str], split: str = "::"):
+        lengths = [str(len(p)) for p in parts]
+        lengths_str = f",".join(lengths)
+        return f"{lengths_str}|{split.join(parts)}"
 
     def last_part(self, split: str = "::"):
         return self.id[self.id.rfind(split) + len(split):]

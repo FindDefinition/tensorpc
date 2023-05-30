@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import enum
 import inspect
 import sys
@@ -15,8 +16,10 @@ from typing_extensions import ParamSpec
 from tensorpc.core.inspecttools import get_members
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServFunctionMeta
+from tensorpc.core.tracer import FrameResult, TraceType, Tracer
 from tensorpc.flow.flowapp.appcore import get_app
 from tensorpc.flow.flowapp.components import mui, three
+from tensorpc.flow.flowapp.components.plus.objinspect.treeitems import TraceTreeItem, parse_frame_result_to_trace_item
 from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType, _get_obj_def_path
 from tensorpc.flow.flowapp.objtree import UserObjTreeProtocol
 
@@ -31,6 +34,40 @@ P = ParamSpec('P')
 
 T = TypeVar('T')
 
+class TreeTracer(Tracer):
+    def __init__(self,
+                #  tree: "ObjectInspector",
+                 traced_types: Optional[Tuple[Type]] = None,
+                 traced_names: Optional[Set[str]] = None,
+                 traced_folders: Optional[Set[str]] = None,
+                 trace_return: bool = True,
+                 depth: int = -1):
+        super().__init__(self.callback, traced_types, traced_names, traced_folders, trace_return, depth)
+        # self.tree = tree
+
+        self._record_res: List[FrameResult] = []
+
+    def callback(self, fr: FrameResult):
+        print("????????????")
+        self._record_res.append(fr)
+
+    def __enter__(self):
+        self._record_res.clear()
+        print("ENTERENTER")
+        return super().__enter__()
+    
+    # def __exit__(self, exc_type, exc_value, exc_traceback):
+
+    #     return super().__exit__(exc_type, exc_value, exc_traceback)
+
+
+def get_exception_frame_stack() -> Dict[str, TraceTreeItem]:
+    _, _, exc_traceback = sys.exc_info()
+    frame_stacks: Dict[str, TraceTreeItem] = {}
+    for tb_frame, tb_lineno in traceback.walk_tb(exc_traceback):
+        fr = Tracer.get_frame_result(TraceType.Return, tb_frame)
+        frame_stacks[fr.get_unique_id()] = TraceTreeItem(fr)
+    return frame_stacks 
 
 class DefaultHandler(ObjectPreviewHandler):
     """
@@ -359,13 +396,8 @@ class ObjectInspector(mui.FlexBox):
         try:
             return func(*args, **kwargs)
         except:
-            _, _, exc_traceback = sys.exc_info()
-            target_f = None
-            for tb_frame, tb_lineno in traceback.walk_tb(exc_traceback):
-                target_f = tb_frame
-            if target_f is not None:
-                asyncio.run_coroutine_threadsafe(
-                    self.set_object(target_f.f_locals, "exception"), loop)
+            asyncio.run_coroutine_threadsafe(
+                self.set_object(get_exception_frame_stack(), "exception"), loop)
             raise
 
     async def run_with_exception_inspect_async(self, func: Callable[P, T],
@@ -378,12 +410,7 @@ class ObjectInspector(mui.FlexBox):
             else:
                 return res
         except:
-            _, _, exc_traceback = sys.exc_info()
-            target_f = None
-            for tb_frame, tb_lineno in traceback.walk_tb(exc_traceback):
-                target_f = tb_frame
-            if target_f is not None:
-                await self.set_object(target_f.f_locals, "exception")
+            await self.set_object(get_exception_frame_stack(), "exception")
             raise
 
     async def run_in_executor_with_exception_inspect(self, func: Callable[P,
@@ -403,10 +430,33 @@ class ObjectInspector(mui.FlexBox):
             else:
                 return await loop.run_in_executor(None, func, app, func, *args)
         except:
-            _, _, exc_traceback = sys.exc_info()
-            target_f = None
-            for tb_frame, tb_lineno in traceback.walk_tb(exc_traceback):
-                target_f = tb_frame
-            if target_f is not None:
-                await self.set_object(target_f.f_locals, "exception")
+            await self.set_object(get_exception_frame_stack(), "exception")
             raise
+
+    @contextlib.contextmanager
+    def trace_sync(self, key: str = "trace", traced_types: Optional[Tuple[Type]] = None,
+                 traced_names: Optional[Set[str]] = None,
+                 traced_folders: Optional[Set[str]] = None,
+                 trace_return: bool = True,
+                 depth: int = 3):
+        trace_res: List[FrameResult] = []
+        tracer = Tracer(lambda x: trace_res.append(x), traced_types, traced_names, traced_folders, trace_return, depth)
+        with tracer:
+            yield 
+        tree_items = parse_frame_result_to_trace_item(trace_res)
+        show_dict = {v.get_uid(): v for v in tree_items}
+        self.set_object_sync(show_dict, key)
+    
+    @contextlib.asynccontextmanager
+    async def trace(self, key: str = "trace", traced_types: Optional[Tuple[Type]] = None,
+                 traced_names: Optional[Set[str]] = None,
+                 traced_folders: Optional[Set[str]] = None,
+                 trace_return: bool = True,
+                 depth: int = 3):
+        trace_res: List[FrameResult] = []
+        tracer = Tracer(lambda x: trace_res.append(x), traced_types, traced_names, traced_folders, trace_return, depth)
+        with tracer:
+            yield 
+        tree_items = parse_frame_result_to_trace_item(trace_res)
+        show_dict = {v.get_uid(): v for v in tree_items}
+        await self.set_object(show_dict, key)

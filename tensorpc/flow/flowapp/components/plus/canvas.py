@@ -19,112 +19,74 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Un
 
 import numpy as np
 
-from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.flow import marker
 from tensorpc.flow.flowapp.appcore import find_component_by_uid
 from tensorpc.flow.flowapp.components import mui, three
-from tensorpc.flow.flowapp.components.plus.common import CommonQualNames
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from tensorpc.flow.flowapp.core import FrontendEventType
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 from tensorpc.flow.flowapp import colors
 from tensorpc.flow.jsonlike import TreeItem
 
-def _try_cast_tensor_dtype(obj: Any):
-    try:
-        if isinstance(obj, np.ndarray):
-            return obj.dtype
-        elif get_qualname_of_type(type(obj)) == CommonQualNames.TVTensor:
-            from cumm.dtypes import get_npdtype_from_tvdtype
-            return get_npdtype_from_tvdtype(obj.dtype)
-        elif get_qualname_of_type(type(obj)) == CommonQualNames.TorchTensor:
-            import torch
-            _TORCH_DTYPE_TO_NP = {
-                torch.float32: np.dtype(np.float32),
-                torch.float64: np.dtype(np.float64),
-                torch.float16: np.dtype(np.float16),
-                torch.int32: np.dtype(np.int32),
-                torch.int64: np.dtype(np.int64),
-                torch.int8: np.dtype(np.int8),
-                torch.int16: np.dtype(np.int16),
-                torch.uint8: np.dtype(np.uint8),
-            }
-            return _TORCH_DTYPE_TO_NP[obj.dtype]
-    except:
-        return None
-
-
-def _cast_tensor_to_np(obj: Any) -> Optional[np.ndarray]:
-    if isinstance(obj, np.ndarray):
-        return obj
-    elif get_qualname_of_type(type(obj)) == CommonQualNames.TVTensor:
-        if obj.device == 0:
-            return obj.cpu().numpy()
-        return obj.numpy()
-
-    elif get_qualname_of_type(type(obj)) == CommonQualNames.TorchTensor:
-        if obj.is_cuda():
-            return obj.cpu().numpy()
-        return obj.numpy()
-    return None
-
+from tensorpc.flow.flowapp.components.core import get_tensor_container
 
 def _try_cast_to_point_cloud(obj: Any):
-    obj_dtype = _try_cast_tensor_dtype(obj)
-    if obj_dtype is None:
-        return None
+    tc = get_tensor_container(obj)
+    if tc is None:
+        return None 
+
     ndim = obj.ndim
     if ndim == 2:
-        dtype = obj_dtype
+        dtype = tc.dtype
         if dtype == np.float32 or dtype == np.float16 or dtype == np.float64:
             num_ft = obj.shape[1]
             if num_ft >= 3 and num_ft <= 4:
-                return _cast_tensor_to_np(obj)
+                return tc.numpy()
     return None
 
 
 def _try_cast_to_box3d(obj: Any):
-    obj_dtype = _try_cast_tensor_dtype(obj)
-    if obj_dtype is None:
-        return None
+    tc = get_tensor_container(obj)
+    if tc is None:
+        return None 
     ndim = obj.ndim
     if ndim == 2:
-        dtype = obj_dtype
+        dtype = tc.dtype
         if dtype == np.float32 or dtype == np.float16 or dtype == np.float64:
             num_ft = obj.shape[1]
             if num_ft == 7:
-                return _cast_tensor_to_np(obj)
+                return tc.numpy()
     return None
 
 
 def _try_cast_to_lines(obj: Any):
-    obj_dtype = _try_cast_tensor_dtype(obj)
-    if obj_dtype is None:
-        return None
+    tc = get_tensor_container(obj)
+    if tc is None:
+        return None 
     ndim = obj.ndim
     if ndim == 3:
-        dtype = obj_dtype
+        dtype = tc.dtype
         if dtype == np.float32 or dtype == np.float16 or dtype == np.float64:
             if obj.shape[1] == 2 and obj.shape[2] == 3:
-                return _cast_tensor_to_np(obj)
+                return tc.numpy()
     return None
 
 
 def _try_cast_to_image(obj: Any):
-    obj_dtype = _try_cast_tensor_dtype(obj)
-    if obj_dtype is None:
-        return None
+    tc = get_tensor_container(obj)
+    if tc is None:
+        return None 
     ndim = obj.ndim
     valid = False
     is_rgba = False
     if ndim == 2:
-        valid = obj_dtype == np.uint8
+        valid = tc.dtype == np.uint8
     elif ndim == 3:
-        valid = obj_dtype == np.uint8 and (obj.shape[2] == 3
+        valid = tc.dtype == np.uint8 and (obj.shape[2] == 3
                                            or obj.shape[2] == 4)
         is_rgba = obj.shape[2] == 4
     if valid:
-        res = _cast_tensor_to_np(obj)
+        res = tc.numpy()
         if is_rgba and res is not None:
             res = res[..., :3]
         return res

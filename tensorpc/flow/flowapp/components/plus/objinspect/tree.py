@@ -801,7 +801,8 @@ class ObjectTree(BasicObjectTree):
                     if res == True:
                         # update this node
                         await self._on_expand(uid)
-                    return
+                    if res is not None: # handle this event
+                        return
                 if len(obj_trace) >= 2:
                     parent = obj_trace[-2]
                     nodes = self._objinspect_root._get_node_by_uid_trace(uid)
@@ -813,7 +814,8 @@ class ObjectTree(BasicObjectTree):
                         if res == True:
                             # update this node
                             await self._on_expand(parent_node.id)
-                        return
+                        if res is not None: # handle this event
+                            return
                 # handle regular objects
                 menu_type = ContextMenuType(userdata["type"])
                 if menu_type == ContextMenuType.DataStorageStore:

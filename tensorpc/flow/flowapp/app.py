@@ -66,6 +66,8 @@ from tensorpc.core.serviceunit import (ObservedFunctionRegistryProtocol,
                                        SimpleCodeManager, get_qualname_to_code)
 from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem
+from tensorpc.flow.flowapp.components.plus.objinspect.inspector import get_exception_frame_stack
+from tensorpc.flow.flowapp.components.plus.objinspect.treeitems import TraceTreeItem
 from tensorpc.flow.flowapp.reload import (AppReloadManager,
                                           bind_and_reset_object_methods,
                                           reload_object_methods)
@@ -83,6 +85,7 @@ from .appcore import enter_app_conetxt
 from .appcore import enter_app_conetxt as _enter_app_conetxt
 from .appcore import get_app, get_app_context
 from .components import mui, plus, three
+from tensorpc.core.tracer import FrameResult, Tracer, TraceType
 from .core import (AppComponentCore, AppEditorEvent, AppEditorEventType,
                    AppEditorFrontendEvent, AppEditorFrontendEventType,
                    AppEvent, AppEventType, BasicProps, Component,
@@ -903,12 +906,7 @@ class App:
         try:
             comp = self.find_component(plus.ObjectInspector)
             if comp is not None and comp.enable_exception_inspect:
-                _, _, exc_traceback = sys.exc_info()
-                target_f = None
-                for tb_frame, tb_lineno in traceback.walk_tb(exc_traceback):
-                    target_f = tb_frame
-                if target_f is not None:
-                    await comp.set_object(target_f.f_locals, "exception")
+                await comp.set_object(get_exception_frame_stack(), "exception")
         except:
             traceback.print_exc()
 
@@ -916,12 +914,7 @@ class App:
         try:
             comp = self.find_component(plus.ObjectInspector)
             if comp is not None and comp.enable_exception_inspect:
-                _, _, exc_traceback = sys.exc_info()
-                target_f = None
-                for tb_frame, tb_lineno in traceback.walk_tb(exc_traceback):
-                    target_f = tb_frame
-                if target_f is not None:
-                    comp.set_object_sync(target_f.f_locals, "exception")
+               comp.set_object_sync(get_exception_frame_stack(), "exception")
         except:
             traceback.print_exc()
 

@@ -10,7 +10,7 @@ from tensorpc.flow.flowapp.components import mui
 
 from ..common import CommonQualNames
 from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler
-
+from .treeitems import TraceTreeItem
 monospace_14px = dict(font_family="monospace", font_size="14px")
 
 
