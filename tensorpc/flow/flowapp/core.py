@@ -117,6 +117,7 @@ class UIType(enum.Enum):
     DynamicControls = 0x2b
     MonacoEditor = 0x2c
     Icon = 0x2d
+    Markdown = 0x2e
 
     # special
     TaskLoop = 0x100

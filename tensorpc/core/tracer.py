@@ -43,7 +43,9 @@ class Tracer(object):
                  traced_names: Optional[Set[str]] = None,
                  traced_folders: Optional[Set[str]] = None,
                  trace_return: bool = True,
-                 depth: int = 3):
+                 depth: int = 3,
+                 *,
+                 _frame_cnt: int = 1):
         self.target_frames: Set[FrameType] = set()
         self.thread_local = threading.local()
         self.depth = depth
@@ -55,7 +57,7 @@ class Tracer(object):
         if traced_folders is not None:
             self.traced_folders = set(
                 Path(folder) for folder in traced_folders)
-
+        self._frame_cnt = _frame_cnt
 
     def _filter_frame(self, frame: FrameType):
         is_traced_types = True
@@ -78,10 +80,16 @@ class Tracer(object):
     def __enter__(self):
         THREAD_GLOBALS.__dict__.setdefault('depth', 0)
 
-        current_frame = inspect.currentframe()
-        assert current_frame is not None
-        calling_frame = current_frame.f_back
-        assert calling_frame is not None
+        cur_frame = inspect.currentframe()
+        assert cur_frame is not None
+        frame = cur_frame
+        _frame_cnt = self._frame_cnt
+        while _frame_cnt > 0:
+            frame = cur_frame.f_back
+            assert frame is not None
+            cur_frame = frame
+            _frame_cnt -= 1
+        calling_frame = cur_frame
         trace_fn = self.trace_return_func
         if not self.trace_return:
             trace_fn = self.trace_call_func
@@ -97,9 +105,16 @@ class Tracer(object):
     def __exit__(self, exc_type, exc_value, exc_traceback):
         stack = self.thread_local.original_trace_functions
         sys.settrace(stack.pop())
-        current_frame = inspect.currentframe()
-        assert current_frame is not None
-        calling_frame = current_frame.f_back
+        cur_frame = inspect.currentframe()
+        assert cur_frame is not None
+        frame = cur_frame
+        _frame_cnt = self._frame_cnt
+        while _frame_cnt > 0:
+            frame = cur_frame.f_back
+            assert frame is not None
+            cur_frame = frame
+            _frame_cnt -= 1
+        calling_frame = cur_frame
         assert calling_frame is not None
         self.target_frames.discard(calling_frame)
 
@@ -116,8 +131,9 @@ class Tracer(object):
         qname = frame.f_code.co_name
         if sys.version_info[:2] >= (3, 11):
             qname = frame.f_code.co_qualname # type: ignore
-        if "self" in frame.f_locals:
-            qname = type(frame.f_locals["self"]).__qualname__ + "." + qname
+        else:
+            if "self" in frame.f_locals:
+                qname = type(frame.f_locals["self"]).__qualname__ + "." + qname
         return FrameResult(
             type=trace_type,
             qualname=qname,
@@ -155,6 +171,8 @@ class Tracer(object):
         return None
 
     def trace_return_func(self, frame: FrameType, event, arg):
+        # print(event, frame.f_code.co_name, self.target_frames, frame.f_code.co_filename)
+
         if not (frame in self.target_frames):
             if self.depth == 1:
                 # We did the most common and quickest check above, because the

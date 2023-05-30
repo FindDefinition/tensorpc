@@ -379,7 +379,7 @@ class BasicObjectTree(mui.FlexBox):
                                      self._valid_checker,
                                      real_keys=real_keys)
 
-    async def get_obj_by_uid_trace(self, uid: str,
+    async def _get_obj_by_uid_trace(self, uid: str,
                                     tree_node_trace: List[mui.JsonLikeNode]):
         uids = uid.split(GLOBAL_SPLIT)
         real_uids: List[str] = []
@@ -757,7 +757,7 @@ class ObjectTree(BasicObjectTree):
                 assert isinstance(folder_node.start, int)
                 real_nodes = self._objinspect_root._get_node_by_uid_trace(
                     folder_node.realId)
-                real_objs, found = await self.get_obj_by_uid_trace(
+                real_objs, found = await self._get_obj_by_uid_trace(
                     folder_node.realId, real_nodes)
                 real_obj = real_objs[-1]
                 obj = None
@@ -779,7 +779,7 @@ class ObjectTree(BasicObjectTree):
                         obj = real_obj[key]
                     obj_trace.append(obj)
             else:
-                obj_trace, found = await self.get_obj_by_uid_trace(uid, nodes)
+                obj_trace, found = await self._get_obj_by_uid_trace(uid, nodes)
         else:
             obj_trace, found = await self._get_obj_by_uid(uid, nodes)
         return obj_trace, found

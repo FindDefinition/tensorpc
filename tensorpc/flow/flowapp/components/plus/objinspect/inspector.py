@@ -27,6 +27,7 @@ from .core import (ALL_OBJECT_PREVIEW_HANDLERS, USER_OBJ_TREE_TYPES,
                    ObjectPreviewHandler)
 from .tree import _DEFAULT_OBJ_NAME, FOLDER_TYPES, ObjectTree
 from tensorpc.core import inspecttools
+
 _DEFAULT_LOCALS_NAME = "locals"
 
 _MAX_STRING_IN_DETAIL = 10000
@@ -34,15 +35,18 @@ P = ParamSpec('P')
 
 T = TypeVar('T')
 
+
 class TreeTracer(Tracer):
-    def __init__(self,
-                #  tree: "ObjectInspector",
-                 traced_types: Optional[Tuple[Type]] = None,
-                 traced_names: Optional[Set[str]] = None,
-                 traced_folders: Optional[Set[str]] = None,
-                 trace_return: bool = True,
-                 depth: int = -1):
-        super().__init__(self.callback, traced_types, traced_names, traced_folders, trace_return, depth)
+    def __init__(
+            self,
+            #  tree: "ObjectInspector",
+            traced_types: Optional[Tuple[Type]] = None,
+            traced_names: Optional[Set[str]] = None,
+            traced_folders: Optional[Set[str]] = None,
+            trace_return: bool = True,
+            depth: int = -1):
+        super().__init__(self.callback, traced_types, traced_names,
+                         traced_folders, trace_return, depth)
         # self.tree = tree
 
         self._record_res: List[FrameResult] = []
@@ -55,7 +59,7 @@ class TreeTracer(Tracer):
         self._record_res.clear()
         print("ENTERENTER")
         return super().__enter__()
-    
+
     # def __exit__(self, exc_type, exc_value, exc_traceback):
 
     #     return super().__exit__(exc_type, exc_value, exc_traceback)
@@ -67,7 +71,8 @@ def get_exception_frame_stack() -> Dict[str, TraceTreeItem]:
     for tb_frame, tb_lineno in traceback.walk_tb(exc_traceback):
         fr = Tracer.get_frame_result(TraceType.Return, tb_frame)
         frame_stacks[fr.get_unique_id()] = TraceTreeItem(fr)
-    return frame_stacks 
+    return frame_stacks
+
 
 class DefaultHandler(ObjectPreviewHandler):
     """
@@ -80,7 +85,7 @@ class DefaultHandler(ObjectPreviewHandler):
 
         self.data_print = mui.Typography("").prop(font_family="monospace",
                                                   font_size="12px",
-                                                  white_space="pre-wrap")
+                                                  word_break="break-word")
         layout = [
             self.title.prop(font_size="14px", font_family="monospace"),
             self.path.prop(font_size="14px", font_family="monospace"),
@@ -274,15 +279,18 @@ class ObjectInspector(mui.FlexBox):
                 preview_layout.set_flow_event_context_creator(
                     lambda: root.enter_context(root))
             # preview_layout.event_emitter.remove_listener()
-            if not preview_layout.event_emitter.listeners(FrontendEventType.BeforeUnmount.name):
+            if not preview_layout.event_emitter.listeners(
+                    FrontendEventType.BeforeUnmount.name):
                 preview_layout.event_emitter.on(
                     FrontendEventType.BeforeUnmount.name,
-                    get_app()._get_self_as_editable_app(
-                )._flowapp_remove_observer(preview_layout))
-            if not preview_layout.event_emitter.listeners(FrontendEventType.BeforeMount.name):
+                    get_app()._get_self_as_editable_app().
+                    _flowapp_remove_observer(preview_layout))
+            if not preview_layout.event_emitter.listeners(
+                    FrontendEventType.BeforeMount.name):
                 preview_layout.event_emitter.on(
                     FrontendEventType.BeforeMount.name, lambda: get_app().
-                    _get_self_as_editable_app()._flowapp_observe(preview_layout, self._on_preview_layout_reload))
+                    _get_self_as_editable_app()._flowapp_observe(
+                        preview_layout, self._on_preview_layout_reload))
             await self.detail_container.set_new_layout([preview_layout])
         else:
             childs = list(self.detail_container._child_comps.values())
@@ -330,7 +338,8 @@ class ObjectInspector(mui.FlexBox):
         frame_name = cur_frame.f_code.co_name
         del frame
         del cur_frame
-        await self.tree.set_object(inspecttools.filter_local_vars(local_vars), key + f"-{frame_name}")
+        await self.tree.set_object(inspecttools.filter_local_vars(local_vars),
+                                   key + f"-{frame_name}")
 
     def update_locals_sync(self,
                            key: str = _DEFAULT_LOCALS_NAME,
@@ -358,7 +367,8 @@ class ObjectInspector(mui.FlexBox):
         del frame
         del cur_frame
         fut = asyncio.run_coroutine_threadsafe(
-            self.tree.set_object(inspecttools.filter_local_vars(local_vars), key + f"-{frame_name}"), loop)
+            self.tree.set_object(inspecttools.filter_local_vars(local_vars),
+                                 key + f"-{frame_name}"), loop)
         if get_app()._flowapp_thread_id == threading.get_ident():
             # we can't wait fut here
             return fut
@@ -397,7 +407,8 @@ class ObjectInspector(mui.FlexBox):
             return func(*args, **kwargs)
         except:
             asyncio.run_coroutine_threadsafe(
-                self.set_object(get_exception_frame_stack(), "exception"), loop)
+                self.set_object(get_exception_frame_stack(), "exception"),
+                loop)
             raise
 
     async def run_with_exception_inspect_async(self, func: Callable[P, T],
@@ -434,29 +445,67 @@ class ObjectInspector(mui.FlexBox):
             raise
 
     @contextlib.contextmanager
-    def trace_sync(self, key: str = "trace", traced_types: Optional[Tuple[Type]] = None,
-                 traced_names: Optional[Set[str]] = None,
-                 traced_folders: Optional[Set[str]] = None,
-                 trace_return: bool = True,
-                 depth: int = 3):
+    def trace_sync(self,
+                   key: str = "trace",
+                   traced_types: Optional[Tuple[Type]] = None,
+                   traced_names: Optional[Set[str]] = None,
+                   traced_folders: Optional[Set[str]] = None,
+                   trace_return: bool = True,
+                   depth: int = 3,
+                   use_return_locals: bool = False,
+                   *,
+                   _frame_cnt=3):
         trace_res: List[FrameResult] = []
-        tracer = Tracer(lambda x: trace_res.append(x), traced_types, traced_names, traced_folders, trace_return, depth)
+        tracer = Tracer(lambda x: trace_res.append(x),
+                        traced_types,
+                        traced_names,
+                        traced_folders,
+                        trace_return,
+                        depth,
+                        _frame_cnt=_frame_cnt)
         with tracer:
-            yield 
-        tree_items = parse_frame_result_to_trace_item(trace_res)
+            yield
+        tree_items = parse_frame_result_to_trace_item(trace_res,
+                                                      use_return_locals)
         show_dict = {v.get_uid(): v for v in tree_items}
         self.set_object_sync(show_dict, key)
-    
+
+    def trace_sync_return(self,
+                          key: str = "trace",
+                          traced_types: Optional[Tuple[Type]] = None,
+                          traced_names: Optional[Set[str]] = None,
+                          traced_folders: Optional[Set[str]] = None,
+                          trace_return: bool = True,
+                          depth: int = 3):
+        return self.trace_sync(key,
+                               traced_types,
+                               traced_names,
+                               traced_folders,
+                               trace_return,
+                               depth,
+                               use_return_locals=True,
+                               _frame_cnt=4)
+
     @contextlib.asynccontextmanager
-    async def trace(self, key: str = "trace", traced_types: Optional[Tuple[Type]] = None,
-                 traced_names: Optional[Set[str]] = None,
-                 traced_folders: Optional[Set[str]] = None,
-                 trace_return: bool = True,
-                 depth: int = 3):
+    async def trace(self,
+                    key: str = "trace",
+                    traced_types: Optional[Tuple[Type]] = None,
+                    traced_names: Optional[Set[str]] = None,
+                    traced_folders: Optional[Set[str]] = None,
+                    trace_return: bool = True,
+                    depth: int = 3,
+                    use_return_locals: bool = False):
         trace_res: List[FrameResult] = []
-        tracer = Tracer(lambda x: trace_res.append(x), traced_types, traced_names, traced_folders, trace_return, depth)
+        tracer = Tracer(lambda x: trace_res.append(x),
+                        traced_types,
+                        traced_names,
+                        traced_folders,
+                        trace_return,
+                        depth,
+                        _frame_cnt=3)
         with tracer:
-            yield 
-        tree_items = parse_frame_result_to_trace_item(trace_res)
+            yield
+        tree_items = parse_frame_result_to_trace_item(trace_res,
+                                                      use_return_locals)
         show_dict = {v.get_uid(): v for v in tree_items}
         await self.set_object(show_dict, key)

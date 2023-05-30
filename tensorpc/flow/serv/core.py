@@ -1885,6 +1885,7 @@ class Flow:
     async def stop_app_node(self,
                               graph_id: str,
                               node_id: str):
+        print("?????????????????????????")
         node, driver = self._get_app_node_and_driver(graph_id, node_id)
         if not node.is_session_started():
             return None

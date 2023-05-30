@@ -25,8 +25,7 @@ import getpass
 from tensorpc.autossh.coretypes import SSHTarget
 from asyncssh.scp import scp as asyncsshscp
 from tensorpc.compat import InWindows
-if TYPE_CHECKING:
-    from asyncssh.misc import SoftEOFReceived
+from asyncssh.misc import SoftEOFReceived
 
 # 7-bit C1 ANSI sequences
 ANSI_ESCAPE_REGEX = re.compile(

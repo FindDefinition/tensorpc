@@ -46,17 +46,20 @@ def get_tmux_lang_server_info_may_create(ls_type: str, uid: str, port: int):
         if uid != uid_candidate:
             continue 
         found = True
+        # print(port, port_candidate, port_candidate != port)
         if port_candidate != port:
             close_tmux_lang_server(uid)
             window_command = window_command_fmt.format(port)
             scheduler_sess_name = f"{TENSORPC_FLOW_LANG_SERVER_PREFIX}{_SPLIT}{port}{_SPLIT}{uid}"
             sess = s.new_session(scheduler_sess_name,
                                     window_command=window_command)
+            return port
         else:
             assert port_candidate == port
             scheduler_sess_name = scheduler_sess_names[0]
             sess = s.sessions.get(session_name=scheduler_sess_name)
             assert isinstance(sess, libtmux.Session)
+            break
     # if port == -1:
     #     port = get_free_ports(1)[0]
     if not found:
@@ -68,6 +71,9 @@ def get_tmux_lang_server_info_may_create(ls_type: str, uid: str, port: int):
 
 def close_tmux_lang_server(uid: str):
     _prefix = TENSORPC_FLOW_LANG_SERVER_PREFIX
+    # print("CLOSE CLANG", uid)
+    # raise NotImplementedError
+
     # TODO pyright support
     s = libtmux.Server()
     sessions = s.sessions

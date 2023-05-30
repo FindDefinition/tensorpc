@@ -10,7 +10,6 @@ from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
 import abc
 from collections.abc import MutableMapping
 import copy 
-from pydantic import BaseModel
 
 ValueType: TypeAlias = Union[int, float, str]
 NumberType: TypeAlias = Union[int, float]
