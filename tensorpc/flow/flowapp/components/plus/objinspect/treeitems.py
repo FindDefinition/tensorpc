@@ -1,3 +1,7 @@
+import ast
+import sys
+import tokenize
+from tensorpc.core.funcid import find_toplevel_func_node_by_lineno
 from tensorpc.core.tracer import FrameResult, TraceType
 from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.components import mui
@@ -22,11 +26,11 @@ def parse_frame_result_to_trace_item(frame_results: List[FrameResult], use_retur
 
         elif fr.type == TraceType.Return:
             poped = fr_stack.pop()
+            if use_return_locals:
+                poped[1].set_frame_result(fr)
             if len(fr_stack) == 0:
                 res.append(poped[1])
             else:
-                if use_return_locals:
-                    poped[1].set_frame_result(fr)
                 fr_stack[-1][1].append_child(poped[1])
     return res
 
@@ -35,14 +39,25 @@ class TraceTreeItem(TreeItem):
     def __init__(self, frame_res: FrameResult) -> None:
         super().__init__()
         self.set_frame_result(frame_res)
+        self.call_var_names: List[str] = list(frame_res.local_vars.keys())
+
         self.child_trace_res: List[TraceTreeItem] = []
 
     def set_frame_result(self, frame_res: FrameResult):
         self.local_vars = inspecttools.filter_local_vars(frame_res.local_vars)
+        self.is_method = "self" in self.local_vars
         self.qname = frame_res.qualname
         self.name = self.qname.split(".")[-1]
         self.filename = frame_res.filename
         self.lineno = frame_res.lineno
+        self.module_qname = frame_res.module_qname
+
+    def get_display_name(self):
+        # if method, use "self.xxx" instead of full qualname
+        if self.is_method:
+            return f"self.{self.name}"
+        else:
+            return self.qname
 
     async def get_child_desps(self, parent_ns: str) -> Dict[str, JsonLikeNode]:
         res: Dict[str, JsonLikeNode] = {}
@@ -67,7 +82,7 @@ class TraceTreeItem(TreeItem):
                             typeStr="Frame",
                             cnt=len(self.local_vars),
                             drag=False,
-                            alias=self.qname)
+                            alias=self.get_display_name())
 
     def append_child(self, item: "TraceTreeItem"):
         self.child_trace_res.append(item)
@@ -76,7 +91,7 @@ class TraceTreeItem(TreeItem):
         return f"{self.filename}::{self.qname}"
 
     def get_uid(self):
-        return f"{self.filename}@{self.qname}"
+        return f"{self.filename}:{self.lineno}@{self.qname}"
 
     @mark_create_preview_layout
     def preview_layout(self):
@@ -92,12 +107,53 @@ class TraceTreeItem(TreeItem):
             mui.HBox([btn, reload_btn]),
         ]).prop(flex=1)
 
-    def _on_run_frame(self):
+    def _get_qname(self):
+        if sys.version_info[:2] >= (3, 11):
+            return self.qname 
+        else:
+            # use ast parse 
+            with tokenize.open(self.filename) as f:
+                data = f.read()
+            tree = ast.parse(data)
+            res = find_toplevel_func_node_by_lineno(tree, self.lineno)
+            if res is None:
+                return None 
+            if res[0].name != self.name:
+                return None 
+            ns = ".".join([x.name for x in res[1]])
+            return f"{ns}.{res[0]}"
+
+    def _get_static_method(self):
+        qname = self._get_qname()
+        if qname is None:
+            return None 
+        module = sys.modules.get(self.module_qname)
+        if module is None:
+            return None 
+        parts = qname.split(".")
+        obj = module.__dict__[parts[0]]
+        for part in parts[1:]:
+            obj = getattr(obj, part)
+        return obj
+
+    async def _on_run_frame(self):
+        """rerun this function with return trace.
+        """
         if "self" not in self.local_vars:
-            raise ValueError(
-                "self not in local vars, currently only support run frame with self"
-            )
-        getattr(self.local_vars["self"], self.name)(**self.local_vars)
+            # try find method via qualname
+            method = self._get_static_method()
+            if method is None:
+                raise ValueError(
+                    "self not in local vars, currently only support run frame with self"
+                )
+            async with appctx.trace(f"trace-{self.name}", traced_names=set([self.name]), use_return_locals=True):
+                method(**self.local_vars)
+        else:
+            local_vars = {k: v for k, v in self.local_vars.items()}
+            local_vars.pop("self")
+            fn = getattr(self.local_vars["self"], self.name)
+            async with appctx.trace(f"trace-{self.name}", traced_names=set([self.name]), use_return_locals=True):
+                fn(**local_vars)
 
     def _on_reload_self(self):
         if "self" not in self.local_vars:

@@ -237,7 +237,7 @@ class ObservedFunctionTree(TreeItem):
         metas: Dict[str, mui.JsonLikeNode] = {}
         for k, v in appctx.get_app().get_observed_func_registry().items():
             node = mui.JsonLikeNode(f"{parent_ns}{GLOBAL_SPLIT}{k}", v.name,
-                                    mui.JsonLikeType.Function.value)
+                                    mui.JsonLikeType.Function.value, alias=v.name)
             node.iconBtns = [
                 IconButtonData(ButtonType.Watch.value,
                                mui.IconType.Visibility.value, "Watch"),
@@ -489,10 +489,11 @@ class BasicObjectTree(mui.FlexBox):
         # function instead of analysis it.
         if isinstance(obj, TreeItem):
             obj_dict = await obj.get_child_desps(uid)  # type: ignore
+            tree = list(obj_dict.values())
         else:
             obj_dict = get_obj_dict(obj, self._checker)
-        tree = parse_obj_dict(obj_dict, node.id, self._checker,
-                              self._obj_meta_cache)
+            tree = parse_obj_dict(obj_dict, node.id, self._checker,
+                                self._obj_meta_cache)
         node.children = tree
         upd = self.tree.update_event(tree=self._objinspect_root)
         return await self.tree.send_and_wait(upd)

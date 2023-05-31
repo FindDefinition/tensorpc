@@ -41,6 +41,5 @@ class CallbackSlider(mui.FlexBox):
     async def update_callback(self, length: int, cb: Callable[[Any], mui._CORO_NONE]):
         self.slider.register_event_handler(mui.FrontendEventType.Change.value,
                                     cb)
-        print(length - 1)
         await self.slider.update_ranges(0, length - 1, 1)
 

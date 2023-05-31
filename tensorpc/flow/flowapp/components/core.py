@@ -48,7 +48,7 @@ def _cast_tensor_to_np(obj: Any) -> Optional[np.ndarray]:
 
     elif get_qualname_of_type(type(obj)) == TensorType.TorchTensor.value:
         if obj.is_cuda:
-            return obj.cpu().numpy()
+            return obj.detach().cpu().numpy()
         return obj.numpy()
     return None
 

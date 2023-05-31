@@ -32,7 +32,7 @@ def main():
 
     frame = inspect.currentframe()
     trace_res: List[FrameResult] = []
-    tracer = Tracer(lambda x: trace_res.append(x), depth=8)
+    tracer = Tracer(lambda x: trace_res.append(x), depth=3)
     with tracer:
         try:
             trace_dev(1, 2)

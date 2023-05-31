@@ -2113,6 +2113,41 @@ class Typography(MUIComponentBase[TypographyProps]):
 
 
 @dataclasses.dataclass
+class MarkdownProps(MUIComponentBaseProps):
+    katex: Union[bool,  Undefined] = undefined
+    code_highlight: Union[bool,  Undefined] = undefined
+    emoji: Union[bool,  Undefined] = undefined
+    value: str = ""
+
+
+class Markdown(MUIComponentBase[MarkdownProps]):
+    def __init__(self, init: str = "") -> None:
+        super().__init__(UIType.Markdown, MarkdownProps)
+        self.props.value = init
+
+    async def write(self, content: str):
+        assert isinstance(content, str)
+        self.props.value = content
+        await self.put_app_event(
+            self.create_update_event({"value": self.props.value}))
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
+        return res
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+
+@dataclasses.dataclass
 class PaperProps(MUIFlexBoxProps):
     elevation: Union[int, Undefined] = undefined
     square: Union[bool, Undefined] = undefined

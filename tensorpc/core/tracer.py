@@ -24,9 +24,10 @@ class FrameResult:
     local_vars: Mapping[str, Any]
     # depth only available when trace return (slower mode).
     depth: int = -1
+    module_qname: str = ""
 
     def get_unique_id(self):
-        return f"{self.filename}@{self.qualname}"
+        return f"{self.filename}@:{self.lineno}{self.qualname}"
 
 
 class Tracer(object):
@@ -43,7 +44,8 @@ class Tracer(object):
                  traced_names: Optional[Set[str]] = None,
                  traced_folders: Optional[Set[str]] = None,
                  trace_return: bool = True,
-                 depth: int = 3,
+                 depth: int = 5,
+                 ignored_names: Optional[Set[str]] = None,
                  *,
                  _frame_cnt: int = 1):
         self.target_frames: Set[FrameType] = set()
@@ -51,6 +53,8 @@ class Tracer(object):
         self.depth = depth
         self.traced_types = traced_types
         self.traced_names = traced_names
+        self.ignored_names = ignored_names
+
         self.traced_folders: Optional[Set[Path]] = None
         self.trace_return = trace_return
         self.callback = callback
@@ -63,10 +67,21 @@ class Tracer(object):
         is_traced_types = True
         is_traced_names = True
         is_traced_folders = True
+        co_name = frame.f_code.co_name
+        if co_name.startswith("<") and co_name.endswith(">"):
+            # ignore all comp frame such as <listcomp>
+            # listcomp frame will be removed in python 3.12
+            return False 
+        # TODO better check
+        if co_name == "__getattr__":
+            return False 
         if self.traced_types is not None and "self" in frame.f_locals:
             is_traced_types = isinstance(frame.f_locals["self"],self.traced_types)
         if self.traced_names is not None:
             is_traced_names = frame.f_code.co_name in self.traced_names
+        if self.ignored_names is not None:
+            if frame.f_code.co_name in self.ignored_names:
+                return False 
         if self.traced_folders is not None:
             code_path = Path(frame.f_code.co_filename)
             found = False
@@ -133,7 +148,11 @@ class Tracer(object):
             qname = frame.f_code.co_qualname # type: ignore
         else:
             if "self" in frame.f_locals:
-                qname = type(frame.f_locals["self"]).__qualname__ + "." + qname
+                qname = type(frame.f_locals["self"]).__qualname__ + "." + qname                
+        module = inspect.getmodule(frame)
+        module_qname = ""
+        if module is not None:
+            module_qname = module.__name__
         return FrameResult(
             type=trace_type,
             qualname=qname,
@@ -141,6 +160,7 @@ class Tracer(object):
             lineno=frame.f_lineno,
             local_vars=frame.f_locals.copy(),
             depth=depth,
+            module_qname=module_qname,
         )
 
     def trace_call_func(self, frame: FrameType, event, arg):

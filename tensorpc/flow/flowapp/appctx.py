@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import asyncio
+import contextlib
 import inspect
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
@@ -32,30 +33,124 @@ P = ParamSpec('P')
 T = TypeVar('T')
 
 
-async def obj_inspector_update_locals(*, exclude_self: bool = False, key: Optional[str] = None):
+async def obj_inspector_update_locals(*,
+                                      exclude_self: bool = False,
+                                      key: Optional[str] = None):
     comp = find_component(plus.ObjectInspector)
     if comp is None:
-        return 
+        return
     assert comp is not None, "you must add inspector to your UI"
     if key is None:
         await comp.update_locals(_frame_cnt=2, exclude_self=exclude_self)
     else:
-        await comp.update_locals(_frame_cnt=2, exclude_self=exclude_self, key=key)
+        await comp.update_locals(_frame_cnt=2,
+                                 exclude_self=exclude_self,
+                                 key=key)
 
-def obj_inspector_update_locals_sync(*, exclude_self: bool = False, key: Optional[str] = None):
+
+def obj_inspector_update_locals_sync(*,
+                                     exclude_self: bool = False,
+                                     key: Optional[str] = None):
     comp = find_component(plus.ObjectInspector)
     if comp is None:
-        return 
+        return
     assert comp is not None, "you must add inspector to your UI"
     if key is None:
-        return comp.update_locals_sync(_frame_cnt=2, loop=get_app()._loop, exclude_self=exclude_self)
+        return comp.update_locals_sync(_frame_cnt=2,
+                                       loop=get_app()._loop,
+                                       exclude_self=exclude_self)
     else:
-        return comp.update_locals_sync(_frame_cnt=2, loop=get_app()._loop, exclude_self=exclude_self, key=key)
+        return comp.update_locals_sync(_frame_cnt=2,
+                                       loop=get_app()._loop,
+                                       exclude_self=exclude_self,
+                                       key=key)
+
+@contextlib.contextmanager
+def trace_sync(key: str = "trace",
+               traced_types: Optional[Tuple[Type]] = None,
+               traced_names: Optional[Set[str]] = None,
+               traced_folders: Optional[Set[str]] = None,
+               trace_return: bool = True,
+               depth: int = 5,
+               use_return_locals: bool = False,
+               *,
+               _frame_cnt=5):
+    """trace, store call vars, then write result to ObjectInspector.
+    """
+    comp = find_component(plus.ObjectInspector)
+    if comp is None:
+        yield 
+        return 
+    assert comp is not None, "you must add inspector to your UI"
+    with comp.trace_sync(key,
+                           traced_types,
+                           traced_names,
+                           traced_folders,
+                           trace_return,
+                           depth,
+                           use_return_locals,
+                           _frame_cnt=_frame_cnt,
+                           loop=get_app()._loop):
+        yield
+
+@contextlib.contextmanager
+def trace_sync_return(key: str = "trace",
+               traced_types: Optional[Tuple[Type]] = None,
+               traced_names: Optional[Set[str]] = None,
+               traced_folders: Optional[Set[str]] = None,
+               trace_return: bool = True,
+               depth: int = 5,
+               *,
+               _frame_cnt=5):
+    """trace, store local vars in return stmt, then write result to ObjectInspector.
+    """
+    comp = find_component(plus.ObjectInspector)
+    if comp is None:
+        yield 
+        return 
+    assert comp is not None, "you must add inspector to your UI"
+    with  comp.trace_sync(key,
+                           traced_types,
+                           traced_names,
+                           traced_folders,
+                           trace_return,
+                           depth,
+                           True,
+                           _frame_cnt=_frame_cnt,
+                           loop=get_app()._loop):
+        yield
+
+@contextlib.asynccontextmanager
+async def trace(key: str = "trace",
+        traced_types: Optional[Tuple[Type]] = None,
+        traced_names: Optional[Set[str]] = None,
+        traced_folders: Optional[Set[str]] = None,
+        trace_return: bool = True,
+        depth: int = 5,
+        use_return_locals: bool = False,
+        *,
+        _frame_cnt=5):
+    """async trace, store local vars / args in return stmt, then write result to ObjectInspector.
+    """
+    comp = find_component(plus.ObjectInspector)
+    if comp is None:
+        yield 
+        return 
+    assert comp is not None, "you must add inspector to your UI"
+    async with comp.trace(key,
+                           traced_types,
+                           traced_names,
+                           traced_folders,
+                           trace_return,
+                           depth,
+                           use_return_locals,
+                           _frame_cnt=_frame_cnt):
+        yield
 
 async def obj_inspector_set_object(obj, key: str):
     comp = find_component(plus.ObjectInspector)
     if comp is None:
-        return 
+        return
     assert comp is not None, "you must add inspector to your UI"
     await comp.set_object(obj, key)
 
@@ -63,8 +158,8 @@ async def obj_inspector_set_object(obj, key: str):
 def obj_inspector_set_object_sync(obj, key: str):
     comp = find_component(plus.ObjectInspector)
     if comp is None:
-        return 
-    
+        return
+
     assert comp is not None, "you must add inspector to your UI"
     return comp.set_object_sync(obj, key, get_app()._loop)
 
@@ -122,7 +217,8 @@ async def run_in_executor_with_exception_inspect(func: Callable[P, T],
     """
     comp = find_component(plus.ObjectInspector)
     if comp is None:
-        return await asyncio.get_running_loop().run_in_executor(func, *args, **kwargs)
+        return await asyncio.get_running_loop().run_in_executor(
+            func, *args, **kwargs)
     assert comp is not None, "you must add inspector to your UI to use exception inspect"
     return await comp.run_in_executor_with_exception_inspect(
         _run_func_with_app, get_app(), func, *args, **kwargs)
@@ -144,25 +240,29 @@ async def read_data_storage(key: str,
     app = get_app()
     return await app.read_data_storage(key, node_id, graph_id, in_memory_limit)
 
+
 async def remove_data_storage(key: Optional[str],
-                            node_id: str,
-                            graph_id: Optional[str] = None) -> Any:
+                              node_id: str,
+                              graph_id: Optional[str] = None) -> Any:
     app = get_app()
     return await app.remove_data_storage_item(key, node_id, graph_id)
 
+
 async def rename_data_storage_item(key: str,
-                            newname: str, 
-                            node_id: str,
-                            graph_id: Optional[str] = None) -> Any:
+                                   newname: str,
+                                   node_id: str,
+                                   graph_id: Optional[str] = None) -> Any:
     app = get_app()
     return await app.rename_data_storage_item(key, newname, node_id, graph_id)
+
 
 async def list_data_storage(node_id: str, graph_id: Optional[str] = None):
     app = get_app()
     return await app.list_data_storage(node_id, graph_id)
 
 
-async def list_all_data_storage_nodes(graph_id: Optional[str] = None) -> List[str]:
+async def list_all_data_storage_nodes(
+        graph_id: Optional[str] = None) -> List[str]:
     app = get_app()
     return await app.list_all_data_storage_nodes(graph_id)
 
@@ -170,6 +270,7 @@ async def list_all_data_storage_nodes(graph_id: Optional[str] = None) -> List[st
 def set_observed_func_registry(registry: ObservedFunctionRegistryProtocol):
     app = get_app()
     return app.set_observed_func_registry(registry)
+
 
 async def read_inspector_item(uid: str):
     app = get_app()

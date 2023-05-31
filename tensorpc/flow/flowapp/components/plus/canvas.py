@@ -202,7 +202,7 @@ class SimpleCanvas(mui.FlexBox):
         ]
         # if with_grid:
         #     canvas_layout.append(infgrid)
-
+        self._ctrl_container = mui.Fragment([])
         self.canvas = three.ThreeCanvas(canvas_layout).prop(
             flex=1, allow_keyboard_event=True)
         if not self._is_transparent:
@@ -305,6 +305,14 @@ class SimpleCanvas(mui.FlexBox):
                                          size="small",
                                          tooltip="Enable Grid",
                                          tooltip_placement="right"),
+                    mui.ToggleButton("enableCfgPanel",
+                                     icon=mui.IconType.Settings,
+                                     callback=self._on_enable_cfg_panel).prop(
+                                         selected=False,
+                                         size="small",
+                                         tooltip="Enable Config Panel",
+                                         tooltip_placement="right"),
+
                     mui.IconButton(mui.IconType.Clear,
                                    callback=self._on_clear).prop(
                                        tooltip="Clear",
@@ -314,7 +322,8 @@ class SimpleCanvas(mui.FlexBox):
                                        tooltip="Reset Camera",
                                        tooltip_placement="right"),
                 ]),
-                self._cfg_panel,
+                # self._cfg_panel,
+                self._ctrl_container,
             ]).prop(position="absolute", top=3, left=3, z_index=5),
             mui.IconButton(mui.IconType.Help,
                            lambda: None).prop(tooltip=help_string,
@@ -378,6 +387,13 @@ class SimpleCanvas(mui.FlexBox):
                 [self.infgrid, self.axis_helper])
         else:
             await self._dynamic_grid.set_new_layout([])
+
+    async def _on_enable_cfg_panel(self, selected):
+        if selected:
+            await self._ctrl_container.set_new_layout(
+                [self._cfg_panel])
+        else:
+            await self._ctrl_container.set_new_layout([])
 
     async def _unknown_visualization(self, tree_id: str, obj: Any):
         pc_obj = _try_cast_to_point_cloud(obj)

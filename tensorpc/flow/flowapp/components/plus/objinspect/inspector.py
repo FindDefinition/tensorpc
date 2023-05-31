@@ -129,7 +129,7 @@ class ObjectInspector(mui.FlexBox):
                  cared_types: Optional[Set[Type]] = None,
                  ignored_types: Optional[Set[Type]] = None,
                  with_detail: bool = True,
-                 use_allotment: bool = False,
+                 use_allotment: bool = True,
                  enable_exception_inspect: bool = True,
                  use_fast_tree: bool = False) -> None:
         self.detail_container = mui.HBox([]).prop(overflow="auto",
@@ -159,17 +159,17 @@ class ObjectInspector(mui.FlexBox):
                 layout.append(mui.Divider())
             layout.append(self.detail_container)
         self.default_handler = DefaultHandler()
-        super().__init__(layout)
+        final_layout: mui.LayoutType = layout 
         if use_allotment:
-            self.prop(overflow="hidden",
-                      default_sizes=[1, 1] if with_detail else [1],
-                      vertical=True)
-        else:
-            self.prop(flex_direction="column",
-                      flex=1,
-                      overflow="hidden",
-                      min_height=0,
-                      min_width=0)
+            final_layout = [mui.Allotment(final_layout).prop(overflow="hidden",
+                      default_sizes=[1.5, 1] if with_detail else [1],
+                      vertical=True)]
+        super().__init__(final_layout)
+        self.prop(flex_direction="column",
+                    flex=1,
+                    overflow="hidden",
+                    min_height=0,
+                    min_width=0)
 
         if with_detail:
             self.tree.tree.register_event_handler(
@@ -283,7 +283,7 @@ class ObjectInspector(mui.FlexBox):
                     FrontendEventType.BeforeUnmount.name):
                 preview_layout.event_emitter.on(
                     FrontendEventType.BeforeUnmount.name,
-                    get_app()._get_self_as_editable_app().
+                    lambda: get_app()._get_self_as_editable_app().
                     _flowapp_remove_observer(preview_layout))
             if not preview_layout.event_emitter.listeners(
                     FrontendEventType.BeforeMount.name):
@@ -451,24 +451,31 @@ class ObjectInspector(mui.FlexBox):
                    traced_names: Optional[Set[str]] = None,
                    traced_folders: Optional[Set[str]] = None,
                    trace_return: bool = True,
-                   depth: int = 3,
+                   depth: int = 5,
                    use_return_locals: bool = False,
+                   ignored_names: Optional[Set[str]] = None,
                    *,
-                   _frame_cnt=3):
+                   _frame_cnt=3,
+                   loop: Optional[asyncio.AbstractEventLoop] = None):
         trace_res: List[FrameResult] = []
+        if ignored_names is None:
+            ignored_names = set([
+                "_call_impl", # torch nn forward
+            ])
         tracer = Tracer(lambda x: trace_res.append(x),
                         traced_types,
                         traced_names,
                         traced_folders,
                         trace_return,
                         depth,
+                        ignored_names,
                         _frame_cnt=_frame_cnt)
         with tracer:
             yield
         tree_items = parse_frame_result_to_trace_item(trace_res,
                                                       use_return_locals)
         show_dict = {v.get_uid(): v for v in tree_items}
-        self.set_object_sync(show_dict, key)
+        self.set_object_sync(show_dict, key, loop=loop)
 
     def trace_sync_return(self,
                           key: str = "trace",
@@ -476,15 +483,21 @@ class ObjectInspector(mui.FlexBox):
                           traced_names: Optional[Set[str]] = None,
                           traced_folders: Optional[Set[str]] = None,
                           trace_return: bool = True,
-                          depth: int = 3):
+                          depth: int = 5,
+                          ignored_names: Optional[Set[str]] = None,
+                          *,
+                          _frame_cnt: int = 4,
+                          loop: Optional[asyncio.AbstractEventLoop] = None):
         return self.trace_sync(key,
                                traced_types,
                                traced_names,
                                traced_folders,
                                trace_return,
                                depth,
+                                ignored_names=ignored_names,
                                use_return_locals=True,
-                               _frame_cnt=4)
+                               _frame_cnt=_frame_cnt,
+                               loop=loop)
 
     @contextlib.asynccontextmanager
     async def trace(self,
@@ -493,8 +506,11 @@ class ObjectInspector(mui.FlexBox):
                     traced_names: Optional[Set[str]] = None,
                     traced_folders: Optional[Set[str]] = None,
                     trace_return: bool = True,
-                    depth: int = 3,
-                    use_return_locals: bool = False):
+                    depth: int = 5,
+                    use_return_locals: bool = False,
+                    ignored_names: Optional[Set[str]] = None,
+                    *,
+                    _frame_cnt: int = 3):
         trace_res: List[FrameResult] = []
         tracer = Tracer(lambda x: trace_res.append(x),
                         traced_types,
@@ -502,7 +518,8 @@ class ObjectInspector(mui.FlexBox):
                         traced_folders,
                         trace_return,
                         depth,
-                        _frame_cnt=3)
+                        ignored_names,
+                        _frame_cnt=_frame_cnt)
         with tracer:
             yield
         tree_items = parse_frame_result_to_trace_item(trace_res,

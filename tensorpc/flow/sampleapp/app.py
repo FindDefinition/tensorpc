@@ -951,6 +951,7 @@ class PointCloudApp:
                                  callback=self._on_slider_select)
 
         res = mui.VBox([
+            mui.Markdown("### PointCloud App").prop(padding="10px"),
             mui.HBox([
                 mui.Button("Change Slider Range",
                            self._on_slider_range_change),

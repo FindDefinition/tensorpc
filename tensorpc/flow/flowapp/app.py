@@ -1189,6 +1189,7 @@ class EditableApp(App):
             return
         if changes is None:
             return
+        print("RELOAD", path)
         new, change, _ = changes
         new_data = self._flowapp_code_mgr.get_code(resolved_path)
         is_reload = False
@@ -1220,7 +1221,8 @@ class EditableApp(App):
                             autorun_names_queued.add(obmeta.autorun_name)
                             obmeta.metas = new_metas
             if resolved_path in self._flowapp_change_observers:
-                obmetas = self._flowapp_change_observers[resolved_path].obmetas
+                obmetas = self._flowapp_change_observers[resolved_path].obmetas.copy()
+                print("len(obmetas)", resolved_path, len(obmetas))
                 for obmeta in obmetas:
                     # get changed metas for special methods
                     # print(new, change)
@@ -1295,7 +1297,7 @@ class EditableApp(App):
                         updated_metas = self._flow_reload_manager.query_type_method_meta(
                             updated_type)
                         obmeta.metas = updated_metas
-                        print("CHANGED USER OBJ")
+                        print("CHANGED USER OBJ", len(obmetas))
                         for m in updated_metas:
                             m.bind(changed_user_obj)
                         changed_metas = [
