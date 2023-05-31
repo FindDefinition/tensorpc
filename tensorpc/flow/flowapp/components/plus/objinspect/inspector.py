@@ -107,7 +107,7 @@ class DefaultHandler(ObjectPreviewHandler):
             string = string[:_MAX_STRING_IN_DETAIL] + "..."
         await self.data_print.write(string)
 
-    async def bind(self, obj):
+    async def bind(self, obj: Any, uid: str):
         # bind np object, update all metadata
         self.obj = obj
         ev = self.data_print.update_event(value="")
@@ -296,7 +296,7 @@ class ObjectInspector(mui.FlexBox):
             childs = list(self.detail_container._child_comps.values())
             if not childs or childs[0] is not handler:
                 await self.detail_container.set_new_layout([handler])
-            await handler.bind(obj)
+            await handler.bind(obj, uid)
 
     async def _on_preview_layout_reload(self, layout: mui.FlexBox,
                                         create_layout: ServFunctionMeta):

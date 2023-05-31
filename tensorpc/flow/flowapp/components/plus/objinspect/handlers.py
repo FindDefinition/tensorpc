@@ -1,12 +1,14 @@
 from pathlib import PosixPath, WindowsPath
 import traceback
-from typing import Any
+from typing import Any, Dict
 
 import numpy as np
 import io 
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import ObservedFunction
+from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.components import mui
+from tensorpc.flow.flowapp.components.plus.canvas import SimpleCanvas
 
 from ..common import CommonQualNames
 from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler
@@ -25,7 +27,7 @@ class TensorHandler(ObjectPreviewHandler):
         self.data_print = mui.Typography("").prop(font_family="monospace",
                                                   font_size="12px",
                                                   white_space="pre-wrap")
-        self.slice_val = mui.Input("Slice").prop(size="small",
+        self.slice_val = mui.Input("Slice", callback=self._slice_change).prop(size="small",
                                                  mui_margin="dense")
         layout = [
             self.title.prop(font_size="14px", font_family="monospace"),
@@ -33,14 +35,19 @@ class TensorHandler(ObjectPreviewHandler):
             mui.Divider().prop(padding="3px"),
             mui.HBox([
                 self.slice_val.prop(flex=1),
+            ]),
+            mui.HBox([
                 mui.Button("show sliced", self._on_show_slice),
+                mui.Button("3d visualization", self._on_3d_vis),
             ]),
             self.data_print,
         ]
 
         super().__init__(layout)
-        self.prop(flex_direction="column")
+        self.prop(flex_direction="column", flex=1)
         self.obj: Any = np.zeros([1])
+        self.obj_uid: str = ""
+        self._tensor_slices: Dict[str, str] = {}
 
     async def _on_show_slice(self):
         slice_eval_expr = f"a{self.slice_val.value}"
@@ -60,7 +67,19 @@ class TensorHandler(ObjectPreviewHandler):
             res = res
         await self.data_print.write(str(res))
 
-    async def bind(self, obj):
+    async def _slice_change(self, value: str):
+        if self.obj_uid != "":
+             self._tensor_slices[self.obj_uid] = value
+
+    async def _on_3d_vis(self):
+        assert self.obj_uid in self._tensor_slices
+        slice_eval_expr = f"a{self._tensor_slices[self.obj_uid]}"
+        res = eval(slice_eval_expr, {"a": self.obj})
+        canvas = appctx.find_component(SimpleCanvas)
+        assert canvas is not None 
+        await canvas._unknown_visualization(self.obj_uid, res)
+
+    async def bind(self, obj, uid: str):
         # bind np object, update all metadata
         qualname = "np.ndarray"
         device = None
@@ -73,7 +92,7 @@ class TensorHandler(ObjectPreviewHandler):
             qualname = "torch.Tensor"
             device = obj.device.type
             is_contig = obj.is_contiguous()
-
+        
         elif get_qualname_of_type(type(obj)) == CommonQualNames.TVTensor:
             from cumm.dtypes import get_dtype_from_tvdtype
             qualname = "tv.Tensor"
@@ -83,9 +102,13 @@ class TensorHandler(ObjectPreviewHandler):
         else:
             raise NotImplementedError
         self.obj = obj
+        self.obj_uid = uid
         ev = self.data_print.update_event(value="")
         ev += self.title.update_event(
             value=f"{qualname} shape = {list(self.obj.shape)}")
+        if uid in self._tensor_slices:
+            ev += self.slice_val.update_event(value=self._tensor_slices[uid])
+
         await self.send_and_wait(ev)
         tags = [
             mui.Chip(str(dtype)).prop(size="small", clickable=False),
@@ -119,7 +142,7 @@ class StringHandler(ObjectPreviewHandler):
                                             white_space="pre-wrap")
         super().__init__([self.text])
 
-    async def bind(self, obj: str):
+    async def bind(self, obj: str, uid: str):
         if not isinstance(obj, str):
             str_obj = str(obj)
         else:
@@ -142,6 +165,6 @@ class ObservedFunctionHandler(ObjectPreviewHandler):
              mui.Divider().prop(padding="3px"), self.path])
         self.prop(flex_direction="column")
 
-    async def bind(self, obj: ObservedFunction):
+    async def bind(self, obj: ObservedFunction, uid: str):
         await self.qualname.write(obj.qualname)
         await self.path.write(obj.path)

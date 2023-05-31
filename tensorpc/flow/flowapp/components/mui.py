@@ -2121,6 +2121,19 @@ class MarkdownProps(MUIComponentBaseProps):
 
 
 class Markdown(MUIComponentBase[MarkdownProps]):
+    """markdown with color support and optional katex,
+    code highlight and emoji support. not that only colored
+    text is enabled by default, other features need to be
+    enabled explicitly.
+
+    Colored text: using the syntax :color[text to be colored], where color needs to be replaced with any of the color string in tensorpc.flow.flowapp.colors (e.g. :green[green text]).
+    
+    LaTeX expressions: by wrapping them in "$" or "$$" (the "$$" must be on their own lines). Supported LaTeX functions are listed at https://katex.org/docs/supported.html.
+    
+    Examples:
+        ":green[$\\sqrt{x^2+y^2}=1$] is a Pythagorean identity."
+        contains a colored block and a katex (latex) expression.
+    """
     def __init__(self, init: str = "") -> None:
         super().__init__(UIType.Markdown, MarkdownProps)
         self.props.value = init

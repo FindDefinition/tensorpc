@@ -19,8 +19,8 @@ def register_user_obj_tree_type(type):
     USER_OBJ_TREE_TYPES.add(type)
 
 class ObjectPreviewHandler(mui.FlexBox):
-
-    async def bind(self, obj):
+    @abc.abstractmethod
+    async def bind(self, obj: Any, uid: str):
         pass
 
 
