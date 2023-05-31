@@ -1,31 +1,34 @@
-import asyncio
-import bisect
-
 import abc
 import asyncio
 import bisect
 import contextlib
 import enum
+import getpass
 import io
+import os
 import re
 import sys
+import warnings
 import time
+import traceback
 from asyncio.tasks import FIRST_COMPLETED
 from collections import deque
-from dataclasses import dataclass
-import traceback
-from asyncssh import stream as asyncsshss
-from typing import TYPE_CHECKING, Any, AnyStr, Awaitable, Callable, Deque, Dict, List, Optional, Set, Tuple, Type, Union, Iterable, cast
 from contextlib import suppress
+from dataclasses import dataclass
+from typing import (TYPE_CHECKING, Any, AnyStr, Awaitable, Callable, Deque,
+                    Dict, Iterable, List, Optional, Set, Tuple, Type, Union,
+                    cast)
+
 import asyncssh
-import tensorpc
-from tensorpc.constants import TENSORPC_READUNTIL
-from tensorpc.constants import PACKAGE_ROOT
-import getpass
-from tensorpc.autossh.coretypes import SSHTarget
-from asyncssh.scp import scp as asyncsshscp
-from tensorpc.compat import InWindows
+from asyncssh import stream as asyncsshss
 from asyncssh.misc import SoftEOFReceived
+from asyncssh.scp import scp as asyncsshscp
+
+import tensorpc
+from tensorpc.autossh.constants import TENSORPC_ASYNCSSH_PROXY
+from tensorpc.autossh.coretypes import SSHTarget
+from tensorpc.compat import InWindows
+from tensorpc.constants import PACKAGE_ROOT, TENSORPC_READUNTIL
 
 # 7-bit C1 ANSI sequences
 ANSI_ESCAPE_REGEX = re.compile(
@@ -65,8 +68,8 @@ ANSI_ESCAPE_REGEX_8BIT = re.compile(
     )
 ''', re.VERBOSE)
 
-
 BASH_HOOKS_FILE_NAME = "hooks-bash-legacy.sh"
+
 
 class CommandEventType(enum.Enum):
     PROMPT_START = "A"
@@ -94,7 +97,6 @@ def remove_ansi_seq(string: Union[str, bytes]):
 
 
 class OutData:
-
     def __init__(self) -> None:
         pass
 
@@ -145,16 +147,16 @@ class Event:
 
     def __eq__(self, other: Any):
         if isinstance(other, Event):
-            return self.timestamp == other.timestamp 
+            return self.timestamp == other.timestamp
         elif isinstance(other, int):
-            return self.timestamp == other 
+            return self.timestamp == other
         raise NotImplementedError
 
     def __ne__(self, other: Any):
         if isinstance(other, Event):
-            return self.timestamp != other.timestamp 
+            return self.timestamp != other.timestamp
         elif isinstance(other, int):
-            return self.timestamp != other 
+            return self.timestamp != other
         raise NotImplementedError
 
 
@@ -318,7 +320,6 @@ async def _cancel(task):
 
 
 class ReadResult:
-
     def __init__(self,
                  data: Any,
                  is_eof: bool,
@@ -343,13 +344,26 @@ _ENCODE = "utf-8"
 # _ENCODE = "latin-1"
 
 
+class SocketProxyTunnel:
+    """A wrapper which opens a socket you can run an SSH connection over"""
+    def __init__(self, proxy_url):
+        self.proxy_url = proxy_url
+
+    async def create_connection(self, protocol_factory, host, port):
+        from python_socks.sync import Proxy
+        """Return a channel and transport to run SSH over"""
+        proxy = Proxy.from_url(self.proxy_url)
+        loop = asyncio.get_event_loop()
+        sock = proxy.connect(host, port)
+        return (await loop.create_connection(protocol_factory, sock=sock))
+
+
 class PeerSSHClient:
     """
     during handle stdout/err message, client will 
     1. identifier extraction
     2. code path detection
     """
-
     def __init__(self,
                  stdin: asyncssh.stream.SSHWriter,
                  stdout: asyncssh.stream.SSHReader,
@@ -363,8 +377,7 @@ class PeerSSHClient:
         # stdout/err history
         # create read tasks. they should exists during peer open.
         self.separators = separators
-        self._vsc_re = re.compile(
-            rb"\033\]784;([ABPCEFGD])(?:;(.*?))?\007")
+        self._vsc_re = re.compile(rb"\033\]784;([ABPCEFGD])(?:;(.*?))?\007")
 
         self.uid = uid
 
@@ -391,7 +404,11 @@ class PeerSSHClient:
                 return ReadResult(exc.partial, True, False, should_exit=True)
             else:
                 print(tb_str.getvalue())
-                return ReadResult(exc.partial, False, False, tb_str.getvalue(), should_exit=False)
+                return ReadResult(exc.partial,
+                                  False,
+                                  False,
+                                  tb_str.getvalue(),
+                                  should_exit=False)
             # return ReadResult(exc.partial, True, False)
         except Exception as exc:
             tb_str = io.StringIO()
@@ -411,8 +428,7 @@ class PeerSSHClient:
                 retcode_maynone = reader.channel.get_returncode()
                 if retcode_maynone is not None:
                     retcode = retcode_maynone
-            await callback(
-                EofEvent(ts, retcode, uid=self.uid))
+            await callback(EofEvent(ts, retcode, uid=self.uid))
             return True
         elif res.is_exc:
             await callback(
@@ -515,14 +531,12 @@ class SSHRequestType(enum.Enum):
 
 
 class SSHRequest:
-
     def __init__(self, type: SSHRequestType, data: Any) -> None:
         self.type = type
         self.data = data
 
 
 class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
-
     def __init__(self) -> None:
         super().__init__()
         self.callback: Optional[Callable[[Event], Awaitable[None]]] = None
@@ -555,8 +569,7 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
         else:
             if separator is asyncsshss._NEWLINE:
                 seplen = 1
-                separators = cast(AnyStr,
-                                             '\n' if self._encoding else b'\n')
+                separators = cast(AnyStr, '\n' if self._encoding else b'\n')
             elif isinstance(separator, (bytes, str)):
                 seplen = len(separator)
                 separators = re.escape(cast(AnyStr, separator))
@@ -614,14 +627,12 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
                     recv_buf[:curbuf] = []
                     self._recv_buf_len -= buflen
                     self._maybe_resume_reading()
-                    raise asyncio.IncompleteReadError(
-                        cast(bytes, buf), None)
+                    raise asyncio.IncompleteReadError(cast(bytes, buf), None)
 
                 await self._block_read(datatype)
 
 
 class SSHClient:
-
     def __init__(self,
                  url: str,
                  username: str,
@@ -643,12 +654,25 @@ class SSHClient:
 
         self.bash_file_inited: bool = False
         self.encoding = encoding
+        if TENSORPC_ASYNCSSH_PROXY is not None:
+            try:
+                import python_socks
+                self.tunnel = SocketProxyTunnel(TENSORPC_ASYNCSSH_PROXY)
+            except ImportError:
+                warnings.warn("you provide TENSORPC_ASYNCSSH_PROXY but python_socks not installed."
+                              " use 'pip install python-socks' and restart server.")
+                self.tunnel = None
+        else:
+            self.tunnel = None
 
     @classmethod
     def from_ssh_target(cls, target: SSHTarget):
         url = f"{target.hostname}:{target.port}"
-        return cls(url, target.username, target.password,
-                   target.known_hosts, uid=target.uid)
+        return cls(url,
+                   target.username,
+                   target.password,
+                   target.known_hosts,
+                   uid=target.uid)
 
     @contextlib.asynccontextmanager
     async def simple_connect(self, init_bash: bool = True):
@@ -658,7 +682,8 @@ class SSHClient:
                                                 password=self.password,
                                                 keepalive_interval=15,
                                                 login_timeout=10,
-                                                known_hosts=None)
+                                                known_hosts=None,
+                                                tunnel=self.tunnel)
         conn_ctx = await asyncio.wait_for(conn_task, timeout=10)
         async with conn_ctx as conn:
             assert isinstance(conn, asyncssh.SSHClientConnection)
@@ -668,9 +693,11 @@ class SSHClient:
                     # remove CRLF
                     with open(p, "r") as f:
                         content = f.readlines()
-                    await conn.run(f'cat > ~/.tensorpc_hooks-bash.sh', input="\n".join(content))
+                    await conn.run(f'cat > ~/.tensorpc_hooks-bash.sh',
+                                   input="\n".join(content))
                 else:
-                    await asyncsshscp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
+                    await asyncsshscp(str(p),
+                                      (conn, '~/.tensorpc_hooks-bash.sh'))
                 self.bash_file_inited = True
             yield conn
 
@@ -683,14 +710,16 @@ class SSHClient:
     #         line = await stdout.readuntil(TENSORPC_READUNTIL)
     #         return line
 
-    async def create_local_tunnel(self, port_pairs: List[Tuple[int, int]], shutdown_task: asyncio.Task):
+    async def create_local_tunnel(self, port_pairs: List[Tuple[int, int]],
+                                  shutdown_task: asyncio.Task):
         conn_task = asyncssh.connection.connect(self.url_no_port,
                                                 self.port,
                                                 username=self.username,
                                                 password=self.password,
                                                 keepalive_interval=10,
                                                 login_timeout=10,
-                                                known_hosts=None)
+                                                known_hosts=None,
+                                                tunnel=self.tunnel)
         conn_ctx = await asyncio.wait_for(conn_task, timeout=10)
         async with conn_ctx as conn:
             wait_tasks = [
@@ -699,11 +728,10 @@ class SSHClient:
             for p_local, p_remote in port_pairs:
                 listener = await conn.forward_local_port(
                     '', p_local, 'localhost', p_remote)
-                wait_tasks.append(
-                    asyncio.create_task(listener.wait_closed()))
+                wait_tasks.append(asyncio.create_task(listener.wait_closed()))
             done, pending = await asyncio.wait(
                 wait_tasks, return_when=asyncio.FIRST_COMPLETED)
-            return 
+            return
 
     async def connect_queue(
             self,
@@ -731,7 +759,8 @@ class SSHClient:
                                                     password=self.password,
                                                     keepalive_interval=10,
                                                     login_timeout=10,
-                                                    known_hosts=None)
+                                                    known_hosts=None,
+                                                    tunnel=self.tunnel)
             conn_ctx = await asyncio.wait_for(conn_task, timeout=10)
             async with conn_ctx as conn:
                 assert isinstance(conn, asyncssh.SSHClientConnection)
@@ -741,10 +770,11 @@ class SSHClient:
                         # remove CRLF
                         with open(bash_file_path, "r") as f:
                             content = f.readlines()
-                        await conn.run(f'cat > ~/.tensorpc_hooks-bash.sh', input="\n".join(content))
+                        await conn.run(f'cat > ~/.tensorpc_hooks-bash.sh',
+                                       input="\n".join(content))
                     else:
                         await asyncsshscp(str(bash_file_path),
-                                        (conn, '~/.tensorpc_hooks-bash.sh'))
+                                          (conn, '~/.tensorpc_hooks-bash.sh'))
                     self.bash_file_inited = True
                 if client_ip_callback is not None:
                     # TODO if fail?
