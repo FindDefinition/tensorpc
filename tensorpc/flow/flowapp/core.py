@@ -42,6 +42,8 @@ from tensorpc.flow.flowapp.reload import AppReloadManager, FlowSpecialMethods
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.uniquename import UniqueNamePool
 
+from tensorpc.core import dataclass_dispatch as dataclasses_strict
+
 from ..jsonlike import (DataClassWithUndefined, Undefined,
                         as_dict_no_undefined, snake_to_camel,
                         split_props_to_undefined, undefined)
@@ -809,15 +811,15 @@ class AppEvent:
         return self
 
 
-@dataclasses.dataclass
+@dataclasses_strict.dataclass
 class BasicProps(DataClassWithUndefined):
     status: int = UIRunStatus.Stop.value
     tensorpc_dynamic_eval: Union[Undefined, Dict[str, Any]] = undefined
 
 
-@dataclasses.dataclass
+@dataclasses_strict.dataclass
 class ContainerBaseProps(BasicProps):
-    childs: List[str] = dataclasses.field(default_factory=list)
+    childs: List[str] = dataclasses_strict.field(default_factory=list)
 
 
 T_base_props = TypeVar("T_base_props", bound=BasicProps)
@@ -957,6 +959,8 @@ class Component(Generic[T_base_props, T_child]):
         this function is used to provide intellisense result for all props.
         """
         def wrapper(*args: P.args, **kwargs: P.kwargs):
+            # do validation by pydantic first
+            self.__prop_cls(**kwargs)
             for k, v in kwargs.items():
                 setattr(self.__props, k, v)
             return this
@@ -970,6 +974,8 @@ class Component(Generic[T_base_props, T_child]):
         this function is used to provide intellisense result for all props.
         """
         def wrapper(*args: P.args, **kwargs: P.kwargs):
+            # do validation by pydantic first
+            self.__prop_cls(**kwargs)
             for k, v in kwargs.items():
                 setattr(self.__props, k, v)
             return self.create_update_event(kwargs, json_only)

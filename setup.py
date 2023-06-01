@@ -49,8 +49,8 @@ REQUIRED = [
     "psutil",
     "libtmux",
     "humanize",
-    "python-lsp-jsonrpc",
     "pyright",
+    "pydantic>=1.10,<2.0",
 ]
 
 # What packages are optional?

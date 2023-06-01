@@ -14,7 +14,7 @@
 
 import asyncio
 import base64
-import dataclasses
+import tensorpc.core.dataclass_dispatch as dataclasses
 from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Dict, Iterable,
                     List, Optional, Tuple, Type, TypeVar, Union)
 

@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-from dataclasses import dataclass
 import io
 import json
 import sys

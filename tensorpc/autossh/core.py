@@ -14,7 +14,6 @@ import traceback
 from asyncio.tasks import FIRST_COMPLETED
 from collections import deque
 from contextlib import suppress
-from dataclasses import dataclass
 from typing import (TYPE_CHECKING, Any, AnyStr, Awaitable, Callable, Deque,
                     Dict, Iterable, List, Optional, Set, Tuple, Type, Union,
                     cast)

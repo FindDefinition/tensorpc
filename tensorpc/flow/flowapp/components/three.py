@@ -26,7 +26,7 @@ from tensorpc.core.httpserver import JS_MAX_SAFE_INT
 from tensorpc.flow.jsonlike import DataClassWithUndefined
 from typing_extensions import Literal
 
-import dataclasses
+import tensorpc.core.dataclass_dispatch as dataclasses
 
 import numpy as np
 from typing_extensions import ParamSpec, TypeAlias
@@ -54,6 +54,9 @@ ThreeLayoutType: TypeAlias = Union[List["ThreeComponentType"],
                                    Dict[str, "ThreeComponentType"]]
 
 P = ParamSpec('P')
+
+class PyDanticConfigForNumpy:
+    arbitrary_types_allowed = True
 
 
 @dataclasses.dataclass
@@ -426,7 +429,7 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
                     self.run_callback(ccb(handler.cb), True, sync_first=False))
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(config=PyDanticConfigForNumpy)
 class PointProps(ThreeBasicProps):
     limit: int = 0
     points: Union[np.ndarray, Undefined] = undefined
@@ -577,7 +580,7 @@ class Points(ThreeComponentBase[PointProps]):
         return self._update_props_base(propcls)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(config=PyDanticConfigForNumpy)
 class SegmentsProps(ThreeBasicProps):
     limit: int = 0
     lines: Union[np.ndarray, Undefined] = undefined
@@ -655,7 +658,7 @@ class Segments(ThreeComponentBase[SegmentsProps]):
         return self._update_props_base(propcls)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(config=PyDanticConfigForNumpy)
 class Boxes2DProps(Object3dBaseProps):
     centers: Union[np.ndarray, Undefined] = undefined
     dimensions: Union[np.ndarray, Undefined] = undefined
@@ -2972,7 +2975,7 @@ class BufferMeshControlType(enum.Enum):
     CalculateVertexNormals = 1
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(config=PyDanticConfigForNumpy)
 class BufferMeshProps(Object3dContainerBaseProps):
     initial_buffers: Union[Dict[str, np.ndarray], Undefined] = undefined
     initial_index: Union[np.ndarray, Undefined] = undefined
@@ -2980,7 +2983,7 @@ class BufferMeshProps(Object3dContainerBaseProps):
     initial_calc_vertex_normals: Union[bool, Undefined] = undefined
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(config=PyDanticConfigForNumpy)
 class BufferMeshUpdate(DataClassWithUndefined):
     data: np.ndarray
     offset: Union[int, Undefined] = undefined
@@ -3068,7 +3071,7 @@ class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
         return await self.send_and_wait(self.create_comp_event(res))
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(config=PyDanticConfigForNumpy)
 class VoxelMeshProps(Object3dContainerBaseProps):
     size: Union[NumberType, Undefined] = undefined
     centers: Union[np.ndarray, Undefined] = undefined
@@ -3110,7 +3113,7 @@ class VoxelMesh(O3dContainerWithEventBase[VoxelMeshProps, ThreeComponentType]):
         return self._update_props_base(propcls)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(config=PyDanticConfigForNumpy)
 class InstancedMeshProps(Object3dContainerBaseProps):
     transforms: Union[np.ndarray, Undefined] = undefined
     scales: Union[np.ndarray, Undefined] = undefined

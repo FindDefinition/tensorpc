@@ -1,7 +1,7 @@
 import enum
 
 from typing import Any, Callable, Dict, Generic, Hashable, List, Optional, TypeVar, Union, Tuple
-import tensorpc.core.dataclass_dispatch as dataclasses
+import dataclasses
 import re
 import numpy as np
 from tensorpc.core.moduleid import get_qualname_of_type
@@ -9,6 +9,8 @@ from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
                                TypeAlias)
 import abc
 from collections.abc import MutableMapping
+from pydantic import BaseModel
+from pydantic.dataclasses import dataclass
 import copy 
 
 ValueType: TypeAlias = Union[int, float, str]
@@ -46,7 +48,6 @@ class Undefined:
             raise TypeError('undefined required')
         return cls()
 
-
 class BackendOnlyProp(Generic[T]):
     """when wrap a property with this class, it will be ignored when serializing to frontend
     """
@@ -57,6 +58,7 @@ class BackendOnlyProp(Generic[T]):
 
     def __repr__(self) -> str:
         return "BackendOnlyProp"
+
 
     @classmethod
     def __get_validators__(cls):
@@ -69,7 +71,8 @@ class BackendOnlyProp(Generic[T]):
     def validate(cls, v):
         if not isinstance(v, BackendOnlyProp):
             raise TypeError('undefined required')
-        return cls(v.data)
+        return cls(v)
+
 
 # DON'T MODIFY THIS VALUE!!!
 undefined = Undefined()
@@ -104,13 +107,15 @@ def split_props_to_undefined(props: Dict[str, Any]):
 
 def _undefined_dict_factory(x: List[Tuple[str, Any]]):
     res: Dict[str, Any] = {}
+    print("?")
     for k, v in x:
         if not isinstance(v, (Undefined, BackendOnlyProp)):
             res[k] = v
+    print(res)
     return res
 
 
-@dataclasses.dataclass
+@dataclass
 class _DataclassSer:
     obj: Any
 
@@ -158,8 +163,12 @@ def _asdict_flatten_field_only(obj, dict_factory, parent_key: str = '', sep: str
             result.append((new_key, obj_child))
     return dict_factory(result)
 
+class MyConfig:
+    arbitrary_types_allowed = True
 
-@dataclasses.dataclass
+
+
+@dataclass(config=MyConfig)
 class DataClassWithUndefined:
 
     def get_dict_and_undefined(self, state: Dict[str, Any]):
@@ -249,13 +258,13 @@ def _div_up(x: int, y: int):
 
 _FOLDER_TYPES = {JsonLikeType.ListFolder.value, JsonLikeType.DictFolder.value}
 
-@dataclasses.dataclass
+@dataclass
 class IconButtonData:
     id: ValueType
     icon: int
     tooltip: Union[Undefined, str] = undefined
 
-@dataclasses.dataclass
+@dataclass
 class ContextMenuData:
     title: str
     id: Union[Undefined, ValueType] = undefined
@@ -263,7 +272,7 @@ class ContextMenuData:
     userdata: Union[Undefined, Any] = undefined
 
 
-@dataclasses.dataclass
+@dataclass
 class JsonLikeNode:
     id: str
     # must be id.split(SPLIT)[-1] for child of list/dict
@@ -536,3 +545,105 @@ class TreeItem(abc.ABC):
     
     async def handle_child_rename(self, child_key: str, newname: str) -> Optional[bool]:
         return None
+    
+_OverflowType: TypeAlias = Literal["visible", "hidden", "scroll", "auto"]
+PointerEventsProperties: TypeAlias = Literal["auto", "none", "visiblePainted", "visibleFill", "visibleStroke", "visible", "painted", "fill", "stroke", 
+                                                   "all", "inherit" ]
+
+@dataclass
+class FlexComponentBaseProps(DataClassWithUndefined):
+    """all props must have a default value, 
+    manage state by your self.
+    """
+    display: Union[Literal["flex", "none", "block", "inline", "grid", "table"],
+                   Undefined] = undefined
+    cursor: Union[str, Undefined] = undefined
+    position: Union[Literal["absolute", "relative"], Undefined] = undefined
+    top: Union[ValueType, Undefined] = undefined
+    bottom: Union[ValueType, Undefined] = undefined
+    left: Union[ValueType, Undefined] = undefined
+    right: Union[ValueType, Undefined] = undefined
+    z_index: Union[ValueType, Undefined] = undefined
+
+    flex: Union[ValueType, Undefined] = undefined
+    align_self: Union[str, Undefined] = undefined
+    flex_grow: Union[str, Undefined] = undefined
+    flex_shrink: Union[str, Undefined] = undefined
+    flex_basis: Union[str, Undefined] = undefined
+
+    height: Union[ValueType, Undefined] = undefined
+    width: Union[ValueType, Undefined] = undefined
+    max_height: Union[ValueType, Undefined] = undefined
+    max_width: Union[ValueType, Undefined] = undefined
+    min_height: Union[ValueType, Undefined] = undefined
+    min_width: Union[ValueType, Undefined] = undefined
+    padding: Union[ValueType, Undefined] = undefined
+    padding_top: Union[ValueType, Undefined] = undefined
+    padding_bottom: Union[ValueType, Undefined] = undefined
+    padding_left: Union[ValueType, Undefined] = undefined
+    padding_right: Union[ValueType, Undefined] = undefined
+    margin: Union[ValueType, Undefined] = undefined
+    margin_top: Union[ValueType, Undefined] = undefined
+    margin_left: Union[ValueType, Undefined] = undefined
+    margin_right: Union[ValueType, Undefined] = undefined
+    margin_bottom: Union[ValueType, Undefined] = undefined
+
+    overflow: Union[_OverflowType, Undefined] = undefined
+    overflow_y: Union[_OverflowType, Undefined] = undefined
+    overflow_x: Union[_OverflowType, Undefined] = undefined
+
+    color: Union[ValueType, Undefined] = undefined
+    background_color: Union[ValueType, Undefined] = undefined
+    font_size: Union[ValueType, Undefined] = undefined
+    font_family: Union[str, Undefined] = undefined
+    border: Union[str, Undefined] = undefined
+    border_top: Union[ValueType, Undefined] = undefined
+    border_left: Union[ValueType, Undefined] = undefined
+    border_right: Union[ValueType, Undefined] = undefined
+    border_bottom: Union[ValueType, Undefined] = undefined
+    border_color: Union[str, Undefined] = undefined
+    white_space: Union[Literal["normal", "pre", "nowrap", "pre-wrap",
+                               "pre-line", "break-spaces"],
+                       Undefined] = undefined
+    word_break: Union[Literal["normal", "break-all", "keep-all", "break-word"],
+                      Undefined] = undefined
+    pointer_events: Union[PointerEventsProperties, Undefined] = undefined
+Vector3Type: TypeAlias = Tuple[float, float, float]
+
+from pydantic import BaseModel as PydanticBaseModel
+
+class BaseModel(PydanticBaseModel):
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class MyClass:
+    """A random class"""
+
+
+class Model(BaseModel):
+    x: MyClass
+
+
+@dataclass
+class Object3dBaseProps(DataClassWithUndefined):
+    # position already exists in base flex props, so we use another name
+    position: Union[Vector3Type, Undefined] = undefined
+    rotation: Union[Vector3Type, Undefined] = undefined
+    up: Union[Vector3Type, Undefined] = undefined
+    scale: Union[Vector3Type, Undefined] = undefined
+    visible: Union[bool, Undefined] = undefined
+    receive_shadow: Union[bool, Undefined] = undefined
+    cast_shadow: Union[bool, Undefined] = undefined
+    wtf: Union[np.ndarray, Undefined] = undefined
+
+if __name__ == "__main__":
+    node = JsonLikeNode("1", "1", JsonLikeType.List.value, cnt=10)
+
+    x = FlexComponentBaseProps(white_space="pre")
+    print(as_dict_no_undefined(x))
+    md = Model(x=MyClass())
+    # xx = Object3dBaseProps(position=undefined, wtf=np.zeros([2, 3]))
+    # print(xx)
+    # print(dataclasses.is_dataclass(x), dataclasses.is_dataclass(xx), dataclasses.is_dataclass(1))
+    

@@ -15,7 +15,7 @@
 import asyncio
 import base64
 import copy
-import dataclasses
+import tensorpc.core.dataclass_dispatch as dataclasses
 import enum
 import inspect
 import io
@@ -80,16 +80,9 @@ class MUIBasicProps(BasicProps):
     pass
 
 
-_OverflowType = Union[Literal["visible"], Literal["hidden"], Literal["scroll"],
-                      Literal["auto"]]
-PointerEventsProperties: TypeAlias = Union[Literal["auto"], Literal["none"],
-                                           Literal["visiblePainted"],
-                                           Literal["visibleFill"],
-                                           Literal["visibleStroke"],
-                                           Literal["visible"],
-                                           Literal["painted"], Literal["fill"],
-                                           Literal["stroke"], Literal["all"],
-                                           Literal["inherit"]]
+_OverflowType: TypeAlias = Literal["visible", "hidden", "scroll", "auto"]
+PointerEventsProperties: TypeAlias = Literal["auto", "none", "visiblePainted", "visibleFill", "visibleStroke", "visible", "painted", "fill", "stroke", 
+                                                   "all", "inherit" ]
 
 
 @dataclasses.dataclass
@@ -1885,6 +1878,7 @@ class TaskLoopProps(MUIComponentBaseProps):
 class TaskLoop(MUIComponentBase[TaskLoopProps]):
     """task loop that user use task_loop to start task.
     """
+
     def __init__(self,
                  label: str,
                  loop_callbcak: Optional[Callable[[], _CORO_NONE]] = None,
@@ -2027,6 +2021,7 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
 class RawTaskLoop(MUIComponentBase[TaskLoopProps]):
     """task loop that user control all events.
     """
+
     def __init__(self,
                  label: str,
                  callback: Callable[[int], _CORO_NONE],
@@ -2114,26 +2109,27 @@ class Typography(MUIComponentBase[TypographyProps]):
 
 @dataclasses.dataclass
 class MarkdownProps(MUIComponentBaseProps):
-    katex: Union[bool,  Undefined] = undefined
-    code_highlight: Union[bool,  Undefined] = undefined
-    emoji: Union[bool,  Undefined] = undefined
+    katex: Union[bool, Undefined] = undefined
+    code_highlight: Union[bool, Undefined] = undefined
+    emoji: Union[bool, Undefined] = undefined
     value: str = ""
 
 
 class Markdown(MUIComponentBase[MarkdownProps]):
-    """markdown with color support and optional katex,
-    code highlight and emoji support. not that only colored
-    text is enabled by default, other features need to be
+    """markdown with color support, gfm, latex math,
+    code highlight and :emoji: support. note that only colored
+    text and gfm are enabled by default, other features need to be
     enabled explicitly.
 
     Colored text: using the syntax :color[text to be colored], where color needs to be replaced with any of the color string in tensorpc.flow.flowapp.colors (e.g. :green[green text]).
-    
+
     LaTeX expressions: by wrapping them in "$" or "$$" (the "$$" must be on their own lines). Supported LaTeX functions are listed at https://katex.org/docs/supported.html.
-    
+
     Examples:
-        ":green[$\\sqrt{x^2+y^2}=1$] is a Pythagorean identity."
-        contains a colored block and a katex (latex) expression.
+        ":green[$\\sqrt{x^2+y^2}=1$] is a Pythagorean identity. :+1:"
+        contains a colored text, a latex expression and a emoji.
     """
+
     def __init__(self, init: str = "") -> None:
         super().__init__(UIType.Markdown, MarkdownProps)
         self.props.value = init

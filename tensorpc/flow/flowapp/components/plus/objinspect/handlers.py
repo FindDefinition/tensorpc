@@ -72,7 +72,10 @@ class TensorHandler(ObjectPreviewHandler):
              self._tensor_slices[self.obj_uid] = value
 
     async def _on_3d_vis(self):
-        assert self.obj_uid in self._tensor_slices
+        if self.obj_uid in self._tensor_slices:
+            slice_eval_expr = f"a{self._tensor_slices[self.obj_uid]}"
+        else:
+            slice_eval_expr = "a"
         slice_eval_expr = f"a{self._tensor_slices[self.obj_uid]}"
         res = eval(slice_eval_expr, {"a": self.obj})
         canvas = appctx.find_component(SimpleCanvas)

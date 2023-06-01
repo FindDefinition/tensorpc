@@ -27,7 +27,7 @@ if compat.Python3_8AndLater:
 else:
     from typing_extensions import Literal
 
-import dataclasses
+import tensorpc.core.dataclass_dispatch as dataclasses
 
 import numpy as np
 from tensorpc.utils.uniquename import UniqueNamePool
@@ -66,7 +66,7 @@ class MapEventBase:
     def __init__(self, type: MapEventType) -> None:
         self.type = type
 
-    def to_dict(self):
+    def to_dict(self) -> Dict[str, Any]:
         return {"type": self.type.value}
 
 
