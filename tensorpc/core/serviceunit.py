@@ -27,6 +27,7 @@ from tensorpc.core.funcid import (get_toplevel_class_node,
 from tensorpc.core.moduleid import TypeMeta, get_obj_type_meta, get_qualname_of_type
 from functools import wraps
 
+
 class ParamType(Enum):
     PosOnly = "PosOnly"
     PosOrKw = "PosOrKw"
@@ -76,7 +77,7 @@ class ServiceType(Enum):
 class AppFuncType(Enum):
     CreateLayout = "CreateLayout"
     # TODO support preview layout in tensorpc.flow
-    CreatePreviewLayout = "CreatePreviewLayout" # currently only used in treeview
+    CreatePreviewLayout = "CreatePreviewLayout"  # currently only used in treeview
 
     AutoRun = "AutoRun"
     CreateObject = "CreateObject"
@@ -171,7 +172,7 @@ class ServFunctionMeta:
             return self.binded_fn
         assert self.binded_fn is not None
         return self.binded_fn
-    
+
     def get_binded_fn(self):
         assert self.binded_fn is not None
         return self.binded_fn
@@ -180,38 +181,38 @@ class ServFunctionMeta:
 class ObservedFunctionProtocol(Protocol):
     name: str
     qualname: str
-    origin_func: Callable 
+    origin_func: Callable
     current_func: Callable
     current_sig: inspect.Signature
     path: str
     enable_args_record: bool = False
     recorded_data: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None
 
-
     def run_function_with_record(self) -> Any:
         ...
+
 
 @dataclass
 class ObservedFunction:
     name: str
     qualname: str
-    origin_func: Callable 
+    origin_func: Callable
     current_func: Callable
     current_sig: inspect.Signature
     path: str
     enable_args_record: bool = False
     recorded_data: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None
 
-
     def run_function_with_record(self):
-        assert self.recorded_data is not None 
+        assert self.recorded_data is not None
         return self.current_func(*self.recorded_data[0], **self.recorded_data[1])
+
 
 class ObservedFunctionRegistryProtocol(Protocol):
     def is_enabled(self) -> bool:
         ...
 
-    def register(self, func = None) -> Any:
+    def register(self, func=None) -> Any:
         ...
 
     def __contains__(self, key: str) -> bool:
@@ -237,7 +238,7 @@ class ObservedFunctionRegistryProtocol(Protocol):
 
     def invalid_record(self, entry: ObservedFunctionProtocol) -> None:
         ...
-    
+
     def observed_func_changed(self, resolved_path: str, changes: Dict[str, str]) -> List[str]:
         ...
 
@@ -245,8 +246,8 @@ class ObservedFunctionRegistryProtocol(Protocol):
 class ObservedFunctionRegistry:
 
     def __init__(self):
-        self.global_dict: Dict[str, ObservedFunctionProtocol] = {} 
-        self.path_to_qname: Dict[str, List[Tuple[str, str]]] = {} 
+        self.global_dict: Dict[str, ObservedFunctionProtocol] = {}
+        self.path_to_qname: Dict[str, List[Tuple[str, str]]] = {}
 
         self.is_frozen: bool = False
 
@@ -256,11 +257,11 @@ class ObservedFunctionRegistry:
     def get_path_to_qname(self):
         return self.path_to_qname
 
-    def register(self, func = None):
+    def register(self, func=None):
 
         def wrapper(func):
             if not self.is_enabled():
-                return func 
+                return func
             try:
                 path = inspect.getfile(inspect.unwrap(func))
                 path = str(Path(path).resolve())
@@ -277,7 +278,9 @@ class ObservedFunctionRegistry:
                 if path not in self.path_to_qname:
                     self.path_to_qname[path] = []
                 self.path_to_qname[path].append((qname, func.__qualname__))
-                self.global_dict[qname] = ObservedFunction(func.__name__, qname, func, func, func_sig, path) 
+                self.global_dict[qname] = ObservedFunction(
+                    func.__name__, qname, func, func, func_sig, path)
+
             @wraps(func)
             def wrapped_func(*args, **kwargs):
                 if qname in self.global_dict:
@@ -315,25 +318,26 @@ class ObservedFunctionRegistry:
         self.is_frozen = True
 
     def handle_record(self, entry: ObservedFunctionProtocol, args, kwargs):
-        return 
+        return
 
     def invalid_record(self, entry: ObservedFunctionProtocol):
         if entry.recorded_data is None:
-            return 
+            return
         try:
-            entry.current_sig.bind(*entry.recorded_data[0], **entry.recorded_data[1])
+            entry.current_sig.bind(
+                *entry.recorded_data[0], **entry.recorded_data[1])
         except TypeError:
-            entry.recorded_data = None 
-    
+            entry.recorded_data = None
+
     def observed_func_changed(self, resolved_path: str, changes: Dict[str, str]) -> List[str]:
         if resolved_path not in self.path_to_qname:
-            return [] 
+            return []
         qnames = self.path_to_qname[resolved_path]
         res: List[str] = []
         for qname_pair in qnames:
             if qname_pair[1] in changes:
-                res.append(qname_pair[0]) 
-        return res 
+                res.append(qname_pair[0])
+        return res
 
 
 @dataclass
@@ -469,16 +473,19 @@ def get_qualname_to_code(lines_or_source: Union[List[str], str]):
         qualname_to_code[qualname] = code
     return qualname_to_code
 
+
 @dataclass
 class ObjectReloadResult:
     module_entry: ModuleCacheEntry
-    is_reload: bool 
+    is_reload: bool
     file_entry: FileCacheEntry
+
 
 @dataclass
 class ObjectReloadResultWithType(ObjectReloadResult):
     type_meta: TypeMeta
 
+importlib.util.LazyLoader
 class ObjectReloadManager:
     """to resolve some side effects, users should
     always use reload manager defined in app.
@@ -560,7 +567,7 @@ class ObjectReloadManager:
 
     def _inspect_get_file_resolved(self, type):
         return str(Path(inspect.getfile(type)).resolve())
-    
+
     def reload_type(self, type):
         """we provide reload_type instead of reload_path
         because we want to use importlib.import_module
@@ -576,7 +583,7 @@ class ObjectReloadManager:
         if path in self.file_cache:
             # no need to reload.
             return ObjectReloadResultWithType(self.module_cache[path], False, self.file_cache[path], meta)
-            
+
         # invalid type method cache
         new_type_method_meta_cache = {}
         for t, vv in self.type_method_meta_cache.items():
@@ -603,7 +610,8 @@ class ObjectReloadManager:
             if resolved_path in self.observed_registry.get_path_to_qname():
                 qnames = self.observed_registry.get_path_to_qname()
                 for qname in qnames:
-                    new_func = TypeMeta.get_local_type_from_module_dict_qualname(qname, res[0])
+                    new_func = TypeMeta.get_local_type_from_module_dict_qualname(
+                        qname, res[0])
                     self.observed_registry.reload_func(qname, new_func)
         return ObjectReloadResultWithType(self.module_cache[path], True, self.file_cache[path], meta)
 
@@ -619,7 +627,8 @@ class ObjectReloadManager:
         if path in self.module_cache:
             # if obj is reloaded, we must use new type meta instead of old one
             entry = self.module_cache[path]
-            inspect_type = TypeMeta.get_local_type_from_module_dict_qualname(type.__qualname__, entry.module_dict)
+            inspect_type = TypeMeta.get_local_type_from_module_dict_qualname(
+                type.__qualname__, entry.module_dict)
         qualname_to_code = None
         # use qualname_to_code from ast to resolve some problem
         # if we just use inspect, inspect will use newest code
@@ -642,10 +651,12 @@ class ObjectReloadManager:
                 inspect_type, include_base=False, no_code=True)
         return new_metas
 
+
 @dataclasses.dataclass
 class SimpleCodeEntry:
-    code: str 
+    code: str
     qualname_to_code: Dict[str, str]
+
 
 class SimpleCodeManager:
 
@@ -663,7 +674,8 @@ class SimpleCodeManager:
         with tokenize.open(resolved_path) as f:
             code = f.read().strip()
         qualname_to_code = get_qualname_to_code(code)
-        self.file_to_entry[resolved_path] = SimpleCodeEntry(code, qualname_to_code)
+        self.file_to_entry[resolved_path] = SimpleCodeEntry(
+            code, qualname_to_code)
 
     def _remove_path(self, path: str):
         resolved_path = str(Path(path).resolve())
@@ -709,11 +721,12 @@ class SimpleCodeManager:
             new_data = new_code.strip()
         if resolved_path not in self.file_to_entry:
             new_meta = get_qualname_to_code(new_data)
-            self.file_to_entry[resolved_path] = SimpleCodeEntry(new_data, new_meta)
+            self.file_to_entry[resolved_path] = SimpleCodeEntry(
+                new_data, new_meta)
             return self._compare_qualname_to_code({}, new_meta)
         if new_data == self.file_to_entry[resolved_path]:
             return None
-        
+
         new_meta = get_qualname_to_code(new_data)
         prev = self.file_to_entry[resolved_path].qualname_to_code
         changes = self._compare_qualname_to_code(prev, new_meta)
@@ -730,9 +743,14 @@ class DynamicClass:
     def __init__(
         self,
         module_name: str,
+        code: str = ""
     ) -> None:
+            
         self.module_name = module_name
         module_cls = module_name.split(TENSORPC_SPLIT)
+        if code != "":
+            assert len(module_cls) == 1, "you only need to specify class name"
+        
         self.module_path = module_cls[0]
         self.alias: Optional[str] = None
         self.is_standard_module = False
@@ -744,33 +762,47 @@ class DynamicClass:
         else:
             self.cls_name = module_cls[-1]
         try:
-            if self.module_path.startswith("!"):
-                self.module_path = self.module_path[1:]
-                self.file_path = self.module_path
-                assert Path(self.module_path).exists(
-                ), f"your {self.module_path} not exists"
-                # treat module_path as a file path
-                # import sys
-                mod_name = Path(self.module_path).stem + "_" + uuid.uuid4().hex
-                mod_name = f"<{mod_name}>"
-                spec = importlib.util.spec_from_file_location(
-                    mod_name, self.module_path)
-                assert spec is not None, f"your {self.module_path} not exists"
-                self.standard_module = importlib.util.module_from_spec(spec)
-                assert spec.loader is not None, "shouldn't happen"
-                spec.loader.exec_module(self.standard_module)
-                sys.modules[mod_name] = self.standard_module
+            if code != "":
+                # TODO we need to redesign whole dynamic load
+                # system to handle dynamic code.
+                self.is_standard_module = False
+                mod_name = f"<dynamic-{uuid.uuid4().hex}>"
+                module = types.ModuleType(mod_name)
+                module.__file__ = "<dynamic>"
+                self.standard_module = module
+                codeobj = compile(code, "<dynamic>", "exec")
+                exec(codeobj, module.__dict__)
                 self.module_dict = self.standard_module.__dict__
                 self.is_standard_module = False
-                # self.module_dict = runpy.run_path(self.module_path)
+
             else:
-                self.standard_module = importlib.import_module(
-                    self.module_path)
-                file_path = inspect.getfile(self.standard_module)
-                assert file_path is not None, f"don't support compiled library, {file_path} must be .py"
-                self.file_path = file_path
-                self.module_dict = self.standard_module.__dict__
-                self.is_standard_module = True
+                if self.module_path.startswith("!"):
+                    self.module_path = self.module_path[1:]
+                    self.file_path = self.module_path
+                    assert Path(self.module_path).exists(
+                    ), f"your {self.module_path} not exists"
+                    # treat module_path as a file path
+                    # import sys
+                    mod_name = Path(self.module_path).stem + "_" + uuid.uuid4().hex
+                    mod_name = f"<{mod_name}>"
+                    spec = importlib.util.spec_from_file_location(
+                        mod_name, self.module_path)
+                    assert spec is not None, f"your {self.module_path} not exists"
+                    self.standard_module = importlib.util.module_from_spec(spec)
+                    assert spec.loader is not None, "shouldn't happen"
+                    spec.loader.exec_module(self.standard_module)
+                    sys.modules[mod_name] = self.standard_module
+                    self.module_dict = self.standard_module.__dict__
+                    self.is_standard_module = False
+                    # self.module_dict = runpy.run_path(self.module_path)
+                else:
+                    self.standard_module = importlib.import_module(
+                        self.module_path)
+                    file_path = inspect.getfile(self.standard_module)
+                    assert file_path is not None, f"don't support compiled library, {file_path} must be .py"
+                    self.file_path = file_path
+                    self.module_dict = self.standard_module.__dict__
+                    self.is_standard_module = True
         except ImportError:
             print(f"Can't Import {module_name}. Check your project or PWD")
             raise
@@ -783,8 +815,9 @@ class ReloadableDynamicClass(DynamicClass):
 
     def __init__(self,
                  module_name: str,
-                 reload_mgr: Optional[ObjectReloadManager] = None) -> None:
-        super().__init__(module_name)
+                 reload_mgr: Optional[ObjectReloadManager] = None,
+                code: str = "") -> None:
+        super().__init__(module_name, code)
         if reload_mgr is not None:
             self.serv_metas = reload_mgr.query_type_method_meta(self.obj_type)
         else:
@@ -1095,7 +1128,7 @@ class ServiceUnit(DynamicClass):
             if self.exit_fn is not None:
                 # TODO if exit fn is static
                 self.exit_fn = types.MethodType(self.exit_fn, self.obj)
-                self._is_exit_fn_binded = True 
+                self._is_exit_fn_binded = True
             if self.async_init is not None:
                 self.async_init = types.MethodType(self.async_init, self.obj)
             if self.ws_onconn_fn is not None:

@@ -84,16 +84,15 @@ _OverflowType: TypeAlias = Literal["visible", "hidden", "scroll", "auto"]
 PointerEventsProperties: TypeAlias = Literal["auto", "none", "visiblePainted", "visibleFill", "visibleStroke", "visible", "painted", "fill", "stroke", 
                                                    "all", "inherit" ]
 
-
 @dataclasses.dataclass
 class FlexComponentBaseProps(BasicProps):
     """all props must have a default value, 
     manage state by your self.
     """
-    display: Union[Literal["flex", "none", "block", "inline", "grid", "table"],
+    display: Union[Literal["flex", "none", "block", "inline", "grid", "table", "inline-block", "inline-flex"],
                    Undefined] = undefined
     cursor: Union[str, Undefined] = undefined
-    position: Union[Literal["absolute", "relative"], Undefined] = undefined
+    position: Union[Literal["absolute", "relative", "fixed"], Undefined] = undefined
     top: Union[ValueType, Undefined] = undefined
     bottom: Union[ValueType, Undefined] = undefined
     left: Union[ValueType, Undefined] = undefined

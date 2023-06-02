@@ -68,7 +68,7 @@ class BackendOnlyProp(Generic[T]):
     @classmethod
     def validate(cls, v):
         if not isinstance(v, BackendOnlyProp):
-            raise TypeError('undefined required')
+            raise TypeError('BackendOnlyProp required')
         return cls(v.data)
 
 # DON'T MODIFY THIS VALUE!!!

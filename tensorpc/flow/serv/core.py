@@ -1885,11 +1885,11 @@ class Flow:
     async def stop_app_node(self,
                               graph_id: str,
                               node_id: str):
-        print("?????????????????????????")
         node, driver = self._get_app_node_and_driver(graph_id, node_id)
         if not node.is_session_started():
             return None
         if isinstance(driver, DirectSSHNode):
+            # TODO if we stop and start a node in a short time, language server may not be able to start
             await node.stop_language_server(driver.enable_port_forward, driver.url, driver.username, driver.password, driver.init_commands)
 
     def query_app_node_urls(self, graph_id: str, node_id: str):
@@ -1978,6 +1978,7 @@ class Flow:
 
     @marker.mark_websocket_event
     async def command_node_event(self):
+        # TODO add a rate limit for terminal events
         # uid: {graph_id}@{node_id}
         while True:
             event = await self._ssh_q.get()

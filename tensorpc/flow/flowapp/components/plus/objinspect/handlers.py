@@ -111,7 +111,8 @@ class TensorHandler(ObjectPreviewHandler):
             value=f"{qualname} shape = {list(self.obj.shape)}")
         if uid in self._tensor_slices:
             ev += self.slice_val.update_event(value=self._tensor_slices[uid])
-
+        else:
+            ev += self.slice_val.update_event(value="")
         await self.send_and_wait(ev)
         tags = [
             mui.Chip(str(dtype)).prop(size="small", clickable=False),

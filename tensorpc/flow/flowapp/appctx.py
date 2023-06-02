@@ -27,6 +27,7 @@ from tensorpc.flow.flowapp.appcore import (enter_app_conetxt, find_component,
                                            get_reload_manager, is_inside_app,
                                            observe_function)
 from tensorpc.flow.flowapp.components import plus
+from tensorpc.flow.flowapp.components.plus.objinspect.controllers import ThreadLocker
 
 P = ParamSpec('P')
 
@@ -64,6 +65,13 @@ def obj_inspector_update_locals_sync(*,
                                        loop=get_app()._loop,
                                        exclude_self=exclude_self,
                                        key=key)
+    
+def thread_locker_wait_sync():
+    comp = find_component(ThreadLocker)
+    if comp is None:
+        return
+    assert comp is not None, "you must add ThreadLocker to your UI, you can find it in inspector builtins."
+    return comp.wait_sync()
 
 @contextlib.contextmanager
 def trace_sync(key: str = "trace",

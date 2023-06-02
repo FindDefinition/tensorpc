@@ -75,11 +75,11 @@ def get_objtree_context() -> Optional[ObjTreeContextProtocol]:
 class UserObjTree:
 
     def __init__(self) -> None:
-        self.childs: Dict[str, Union[Any, "UserObjTreeProtocol"]] = {}
+        self._childs: Dict[str, Union[Any, "UserObjTreeProtocol"]] = {}
         self._objtree_update_tree_callback: Optional[Callable[[], Union[Coroutine[None, None, None], None]]] = None
 
     def get_childs(self) -> Dict[str, Union[Any, "UserObjTreeProtocol"]]:
-        return self.childs
+        return self._childs
 
     @contextlib.contextmanager
     def enter_context(
