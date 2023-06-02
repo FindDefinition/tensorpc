@@ -1077,6 +1077,23 @@ class PlotApp:
         )
         await self.plot.show_raw(data, layout)
 
+class ThreadLockerApp:
+    @mark_create_layout
+    def my_layout(self):
+        return mui.VBox([
+            Button("enter lock", self._enter_lock),
+        ]).prop(width="100%")
+
+    async def _enter_lock(self):
+        return await appctx.run_in_executor(self.long_process)
+    
+    def long_process(self):
+
+        for i in range(100):
+            print(i)
+            appctx.thread_locker_wait_sync()
+
+
 
 class CollectionApp:
     @mark_create_layout
@@ -1119,6 +1136,7 @@ class CollectionApp:
         self.wtf = mui.DynamicControls(init=nodes, callback=lambda x: print(x))
         self.cfg = WTF(1, 0.5, WTF1(2), "WTF", [])
         self.wtf2 = plus.ConfigPanel(self.cfg, lambda x, y: print(x, y))
+        self.locker = ThreadLockerApp()
         # self.dev_0 = Dev()
         appctx.get_app().set_enable_language_server(True)
         pyright_setting = appctx.get_app().get_language_server_settings()
@@ -1148,6 +1166,7 @@ class CollectionApp:
         
         raise NotImplementedError
         # self.dev_0.dev()
+
 
 
 class SchedulerTest:

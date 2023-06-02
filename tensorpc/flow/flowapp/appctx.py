@@ -15,7 +15,7 @@
 import asyncio
 import contextlib
 import inspect
-from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
+from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
 
 from typing_extensions import ParamSpec
@@ -28,23 +28,44 @@ from tensorpc.flow.flowapp.appcore import (enter_app_conetxt, find_component,
                                            observe_function)
 from tensorpc.flow.flowapp.components import plus
 from tensorpc.flow.flowapp.components.plus.objinspect.controllers import ThreadLocker
+if TYPE_CHECKING:
+    from tensorpc.flow import App
+
 
 P = ParamSpec('P')
 
 T = TypeVar('T')
 
+def func_forward(func: Callable[P, T], *args: P.args,
+                       **kwargs: P.kwargs) -> T:
+    return func(*args, **kwargs)
+
+def func_forward2(func: Callable[P, T],
+                            *args: P.args,
+                            **kwargs: P.kwargs) -> T:
+    """run a sync function in executor with exception inspect.
+    """
+    res = func_forward(
+        func_forward, func, *args, **kwargs)
+    return res
+def add(a: int, b: int) -> int:
+    return a + b
+def main():
+    res = func_forward(add, 1, 2)
+    res2 = func_forward2(add, 1, 2)
 
 async def obj_inspector_update_locals(*,
                                       exclude_self: bool = False,
-                                      key: Optional[str] = None):
+                                      key: Optional[str] = None,
+                                      _frame_cnt: int = 2):
     comp = find_component(plus.ObjectInspector)
     if comp is None:
         return
     assert comp is not None, "you must add inspector to your UI"
     if key is None:
-        await comp.update_locals(_frame_cnt=2, exclude_self=exclude_self)
+        await comp.update_locals(_frame_cnt=_frame_cnt, exclude_self=exclude_self)
     else:
-        await comp.update_locals(_frame_cnt=2,
+        await comp.update_locals(_frame_cnt=_frame_cnt,
                                  exclude_self=exclude_self,
                                  key=key)
 
@@ -71,7 +92,7 @@ def thread_locker_wait_sync():
     if comp is None:
         return
     assert comp is not None, "you must add ThreadLocker to your UI, you can find it in inspector builtins."
-    return comp.wait_sync()
+    return comp.wait_sync(loop=get_app()._loop, _frame_cnt=2)
 
 @contextlib.contextmanager
 def trace_sync(key: str = "trace",
@@ -212,11 +233,19 @@ async def run_with_exception_inspect_async(func: Callable[P, T], *args: P.args,
     return await comp.run_with_exception_inspect_async(func, *args, **kwargs)
 
 
-def _run_func_with_app(app, func: Callable[P, T], *args: P.args,
+def _run_func_with_app(app: "App", func: Callable[P, T], *args: P.args,
                        **kwargs: P.kwargs) -> T:
     with enter_app_conetxt(app):
         return func(*args, **kwargs)
 
+async def run_in_executor(func: Callable[P, T],
+                            *args: P.args,
+                            **kwargs: P.kwargs) -> T:
+    """run a sync function in executor with exception inspect.
+    """
+    ft = asyncio.get_running_loop().run_in_executor(
+        None, _run_func_with_app, get_app(), func, *args, **kwargs)
+    return await ft
 
 async def run_in_executor_with_exception_inspect(func: Callable[P, T],
                                                  *args: P.args,
@@ -225,8 +254,9 @@ async def run_in_executor_with_exception_inspect(func: Callable[P, T],
     """
     comp = find_component(plus.ObjectInspector)
     if comp is None:
-        return await asyncio.get_running_loop().run_in_executor(
+        ft = asyncio.get_running_loop().run_in_executor(
             func, *args, **kwargs)
+        return await ft
     assert comp is not None, "you must add inspector to your UI to use exception inspect"
     return await comp.run_in_executor_with_exception_inspect(
         _run_func_with_app, get_app(), func, *args, **kwargs)
