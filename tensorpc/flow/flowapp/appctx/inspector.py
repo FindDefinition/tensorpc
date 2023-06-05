@@ -153,43 +153,9 @@ def set_object_sync(obj, key: str):
     return comp.set_object_sync(obj, key, get_app()._loop)
 
 
-def run_with_exception_inspect(func: Callable[P, T], *args: P.args,
-                               **kwargs: P.kwargs) -> T:
-    """WARNING: we shouldn't run this function in run_in_executor.
-    """
-    comp = find_component(plus.ObjectInspector)
-    assert comp is not None, "you must add inspector to your UI to use exception inspect"
-    return comp.run_with_exception_inspect(func, *args, **kwargs)
-
-
-async def run_with_exception_inspect_async(func: Callable[P, T], *args: P.args,
-                                           **kwargs: P.kwargs) -> T:
-    comp = find_component(plus.ObjectInspector)
-    assert comp is not None, "you must add inspector to your UI to use exception inspect"
-    return await comp.run_with_exception_inspect_async(func, *args, **kwargs)
-
-
-def _run_func_with_app(app, func: Callable[P, T], *args: P.args,
-                       **kwargs: P.kwargs) -> T:
-    with enter_app_conetxt(app):
-        return func(*args, **kwargs)
-
-
-async def run_in_executor_with_exception_inspect(func: Callable[P, T],
-                                                 *args: P.args,
-                                                 **kwargs: P.kwargs) -> T:
-    """run a sync function in executor with exception inspect.
-    """
-    comp = find_component(plus.ObjectInspector)
-    if comp is None:
-        return await asyncio.get_running_loop().run_in_executor(
-            func, *args, **kwargs)  # type: ignore
-    assert comp is not None, "you must add inspector to your UI to use exception inspect"
-    return await comp.run_in_executor_with_exception_inspect(
-        partial(_run_func_with_app, get_app(), func), *args, **kwargs)
-
 async def read_item(uid: str):
     app = get_app()
     comp = app.find_component(plus.ObjectInspector)
     assert comp is not None, "you must add inspector to your UI to use exception inspect"
     return await comp.get_object_by_uid(uid)
+

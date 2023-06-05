@@ -471,11 +471,13 @@ class ObjectInspector(mui.FlexBox):
                         ignored_names,
                         _frame_cnt=_frame_cnt)
         with tracer:
-            yield
-        tree_items = parse_frame_result_to_trace_item(trace_res,
-                                                      use_return_locals)
-        show_dict = {v.get_uid(): v for v in tree_items}
-        self.set_object_sync(show_dict, key, loop=loop)
+            try:
+                yield
+            finally:
+                tree_items = parse_frame_result_to_trace_item(trace_res,
+                                                            use_return_locals)
+                show_dict = {v.get_uid(): v for v in tree_items}
+                self.set_object_sync(show_dict, key, loop=loop)
 
     def trace_sync_return(self,
                           key: str = "trace",
@@ -521,8 +523,10 @@ class ObjectInspector(mui.FlexBox):
                         ignored_names,
                         _frame_cnt=_frame_cnt)
         with tracer:
-            yield
-        tree_items = parse_frame_result_to_trace_item(trace_res,
-                                                      use_return_locals)
-        show_dict = {v.get_uid(): v for v in tree_items}
-        await self.set_object(show_dict, key)
+            try:
+                yield
+            finally:
+                tree_items = parse_frame_result_to_trace_item(trace_res,
+                                                            use_return_locals)
+                show_dict = {v.get_uid(): v for v in tree_items}
+                await self.set_object(show_dict, key)

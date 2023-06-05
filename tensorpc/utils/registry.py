@@ -12,18 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Callable, Dict, Hashable, Optional, Generic, TypeVar
+import inspect
+from typing import Any, Callable, Dict, Hashable, List, Optional, Generic, Type, TypeVar, Union
+
+T = TypeVar("T", bound=Union[Type, Callable])
 
 
-class HashableRegistry:
+class HashableRegistry(Generic[T]):
 
     def __init__(self, allow_duplicate: bool = False):
-        self.global_dict = {}  # type: Dict[Hashable, Any]
+        self.global_dict: Dict[Hashable, T] = {}
         self.allow_duplicate = allow_duplicate
 
     def register(self, func=None, key: Optional[Hashable] = None):
 
-        def wrapper(func):
+        def wrapper(func: T) -> T:
             key_ = key
             if key is None:
                 key_ = func.__name__
@@ -41,6 +44,62 @@ class HashableRegistry:
         return key in self.global_dict
 
     def __getitem__(self, key: Hashable):
+        return self.global_dict[key]
+
+    def items(self):
+        yield from self.global_dict.items()
+
+
+class HashableRegistryKeyOnly(Generic[T]):
+
+    def __init__(self, allow_duplicate: bool = False):
+        self.global_dict: Dict[Hashable, T] = {}
+        self.allow_duplicate = allow_duplicate
+
+    def register(self, key: Optional[Hashable] = None):
+
+        def wrapper(func: T) -> T:
+            key_ = key
+            if key is None:
+                key_ = func.__name__
+            if not self.allow_duplicate and key_ in self.global_dict:
+                raise KeyError("key {} already exists".format(key_))
+            self.global_dict[key_] = func
+            return func
+
+        return wrapper
+
+    def __contains__(self, key: Hashable):
+        return key in self.global_dict
+
+    def __getitem__(self, key: Hashable):
+        return self.global_dict[key]
+
+    def items(self):
+        yield from self.global_dict.items()
+
+
+class HashableSeqRegistryKeyOnly(Generic[T]):
+
+    def __init__(self):
+        self.global_dict: Dict[Hashable, List[T]] = {}
+
+    def register(self, key: Optional[Hashable] = None):
+        def wrapper(func: T) -> T:
+            key_ = key
+            if key is None:
+                key_ = func.__name__
+            if key_ not in self.global_dict:
+                self.global_dict[key_] = []
+            self.global_dict[key_].append(func)
+            return func
+
+        return wrapper
+
+    def __contains__(self, key: Hashable):
+        return key in self.global_dict
+
+    def __getitem__(self, key: Hashable) -> List[T]:
         return self.global_dict[key]
 
     def items(self):

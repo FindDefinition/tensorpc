@@ -15,7 +15,7 @@ import dataclasses
 import enum
 import inspect
 import urllib.request
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Coroutine, Dict, Hashable, Iterable, List, Optional, Set, Tuple, Type, Union
 
 import numpy as np
 
@@ -27,8 +27,11 @@ from tensorpc.flow.flowapp.core import FrontendEventType
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 from tensorpc.flow.flowapp import colors
 from tensorpc.flow.jsonlike import TreeItem
-
+from tensorpc.utils.registry import HashableSeqRegistryKeyOnly
 from tensorpc.flow.flowapp.components.core import get_tensor_container
+
+UNKNOWN_VIS_REGISTRY: HashableSeqRegistryKeyOnly[Callable[[Any, str], Coroutine[None, None, bool]]] = HashableSeqRegistryKeyOnly()
+
 
 def _try_cast_to_point_cloud(obj: Any):
     tc = get_tensor_container(obj)
@@ -365,7 +368,17 @@ class SimpleCanvas(mui.FlexBox):
             await self.canvas.send_and_wait(
                 self.canvas.update_event(three_background_color="#ffffff"))
 
-
+    @staticmethod 
+    def register_unknown_vis_handler(key: Type):
+        """register a handler for unknown vis. the handle must be a 
+        function with (obj, uid) argument.
+        """
+        return UNKNOWN_VIS_REGISTRY.register(key)
+    
+    @staticmethod 
+    def get_tensor_container(obj: Any):
+        return get_tensor_container(obj)
+        
     async def register_cam_control_event_handler(self,
                                            handler: Callable[[Any],
                                                              mui.CORO_NONE],
@@ -395,7 +408,15 @@ class SimpleCanvas(mui.FlexBox):
         else:
             await self._ctrl_container.set_new_layout([])
 
-    async def _unknown_visualization(self, tree_id: str, obj: Any):
+    async def _unknown_visualization(self, tree_id: str, obj: Any, ignore_registry: bool = False):
+        obj_type = type(obj)
+        if obj_type in UNKNOWN_VIS_REGISTRY and not ignore_registry:
+            handlers = UNKNOWN_VIS_REGISTRY[obj_type]
+            for handler in handlers:
+                res = await handler(obj, tree_id)
+                if res == True:
+                    return True 
+        # found nothing in registry. use default one.
         pc_obj = _try_cast_to_point_cloud(obj)
         if pc_obj is not None:
             if tree_id in self._random_colors:

@@ -13,7 +13,18 @@ from typing import Any, Callable, Dict, Generic, Hashable, List, Optional, TypeV
 from tensorpc.core import inspecttools
 from tensorpc.flow.marker import mark_create_preview_layout
 from .analysis import parse_obj_dict, GLOBAL_SPLIT, parse_obj_item
+import humanize
+import datetime as dt
 
+_DELTA_SHORTCUTS = [
+    ("microseconds", "microsecond", "us"),
+    ("milliseconds", "millisecond", "ms"),
+]
+
+def _delta_shortcut(string: str):
+    for ss, s, sh in _DELTA_SHORTCUTS:
+        string = string.replace(ss, sh).replace(s, sh)
+    return string
 
 def parse_frame_result_to_trace_item(frame_results: List[FrameResult], use_return_locals: bool = False):
     fr_stack: List[Tuple[FrameResult, TraceTreeItem]] = []
@@ -27,7 +38,9 @@ def parse_frame_result_to_trace_item(frame_results: List[FrameResult], use_retur
         elif fr.type == TraceType.Return:
             poped = fr_stack.pop()
             if use_return_locals:
-                poped[1].set_frame_result(fr)
+                poped[1].set_return_frame_result(fr)
+            else:
+                poped[1].end_ts = fr.timestamp
             if len(fr_stack) == 0:
                 res.append(poped[1])
             else:
@@ -38,12 +51,13 @@ def parse_frame_result_to_trace_item(frame_results: List[FrameResult], use_retur
 class TraceTreeItem(TreeItem):
     def __init__(self, frame_res: FrameResult) -> None:
         super().__init__()
-        self.set_frame_result(frame_res)
+        self.set_return_frame_result(frame_res)
         self.call_var_names: List[str] = list(frame_res.local_vars.keys())
-
+        self.start_ts = frame_res.timestamp
+        self.end_ts = -1
         self.child_trace_res: List[TraceTreeItem] = []
 
-    def set_frame_result(self, frame_res: FrameResult):
+    def set_return_frame_result(self, frame_res: FrameResult):
         self.local_vars = inspecttools.filter_local_vars(frame_res.local_vars)
         self.is_method = "self" in self.local_vars
         self.qname = frame_res.qualname
@@ -51,6 +65,7 @@ class TraceTreeItem(TreeItem):
         self.filename = frame_res.filename
         self.lineno = frame_res.lineno
         self.module_qname = frame_res.module_qname
+        self.end_ts = frame_res.timestamp
 
     def get_display_name(self):
         # if method, use "self.xxx" instead of full qualname
@@ -82,7 +97,8 @@ class TraceTreeItem(TreeItem):
                             typeStr="Frame",
                             cnt=len(self.local_vars),
                             drag=False,
-                            alias=self.get_display_name())
+                            alias=self.get_display_name(),
+                            value=self.get_delta_str())
 
     def append_child(self, item: "TraceTreeItem"):
         self.child_trace_res.append(item)
@@ -92,6 +108,15 @@ class TraceTreeItem(TreeItem):
 
     def get_uid(self):
         return f"{self.filename}:{self.lineno}@{self.qname}"
+
+    def get_delta_str(self):
+        delta = 0
+        if self.end_ts != -1 and self.start_ts != -1:
+            delta = (self.end_ts - self.start_ts) / 1e6
+        delta_str = _delta_shortcut(humanize.naturaldelta(dt.timedelta(milliseconds=delta), minimum_unit="milliseconds"))
+        if delta == 0:
+            delta_str = "undefined"
+        return delta_str
 
     @mark_create_preview_layout
     def preview_layout(self):
@@ -104,6 +129,8 @@ class TraceTreeItem(TreeItem):
             mui.Typography(f"Frame: {self.qname}").prop(**font),
             mui.Typography(f"Path: {self.filename}:{self.lineno}").prop(
                 **font),
+            mui.Typography(f"Time: {self.get_delta_str()}").prop(
+                **font, variant="caption"),
             mui.HBox([btn, reload_btn]),
         ]).prop(flex=1)
 
@@ -146,13 +173,13 @@ class TraceTreeItem(TreeItem):
                 raise ValueError(
                     "self not in local vars, currently only support run frame with self"
                 )
-            async with appctx.trace(f"trace-{self.name}", traced_names=set([self.name]), use_return_locals=True):
+            async with appctx.inspector.trace(f"trace-{self.name}", traced_names=set([self.name]), use_return_locals=True):
                 method(**self.local_vars)
         else:
             local_vars = {k: v for k, v in self.local_vars.items()}
             local_vars.pop("self")
             fn = getattr(self.local_vars["self"], self.name)
-            async with appctx.trace(f"trace-{self.name}", traced_names=set([self.name]), use_return_locals=True):
+            async with appctx.inspector.trace(f"trace-{self.name}", traced_names=set([self.name]), use_return_locals=True):
                 fn(**local_vars)
 
     def _on_reload_self(self):

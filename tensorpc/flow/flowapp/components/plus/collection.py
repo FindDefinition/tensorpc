@@ -60,7 +60,7 @@ class SimpleFileReader(mui.FlexBox):
         else:
             raise NotImplementedError
         await self.text.write(f"Loaded {file.name}")
-        await appctx.obj_inspector_set_object(data, "droppedFile")
+        await appctx.inspector.set_object(data, "droppedFile")
 
 
 

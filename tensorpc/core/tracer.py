@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import inspect
 import threading
+import time
 from types import FrameType
 from typing import Any, Callable, Dict, Mapping, Optional, Set, Tuple, Type
 from tensorpc import compat 
@@ -25,6 +26,7 @@ class FrameResult:
     # depth only available when trace return (slower mode).
     depth: int = -1
     module_qname: str = ""
+    timestamp: int = -1
 
     def get_unique_id(self):
         return f"{self.filename}@:{self.lineno}{self.qualname}"
@@ -161,6 +163,7 @@ class Tracer(object):
             local_vars=frame.f_locals.copy(),
             depth=depth,
             module_qname=module_qname,
+            timestamp=time.time_ns(),
         )
 
     def trace_call_func(self, frame: FrameType, event, arg):

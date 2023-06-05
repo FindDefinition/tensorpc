@@ -122,14 +122,21 @@ def find_tree_child_item_may_exist(root: UserObjTreeProtocol, obj_type: Type[T],
                                    node_type: Type[T_treeitem]) -> Optional[T]:
     childs_dict = root.get_childs()
     obj_type_qname = get_qualname_of_type(obj_type)
+    res_foreach: List[UserObjTreeProtocol] = []
+
     for k, v in childs_dict.items():
         v_type_qname = get_qualname_of_type(type(v))
         if v_type_qname == obj_type_qname:
             return v # type: ignore
         if isinstance(v, node_type):
-            res = find_tree_child_item_may_exist(v, obj_type, node_type)
-            if res is not None:
-                return res
+            res_foreach.append(v)
+            # res = find_tree_child_item_may_exist(v, obj_type, node_type)
+            # if res is not None:
+            #     return res
+    for v in res_foreach:
+        res = find_tree_child_item_may_exist(v, obj_type, node_type)
+        if res is not None:
+            return res
     return None
 
 

@@ -18,7 +18,7 @@ from typing import Any, Callable, Optional, List, Dict, TypeVar, Generic, Union
 from tensorpc.core import inspecttools
 from tensorpc.flow.flowapp.components import mui
 
-from tensorpc.flow.marker import mark_autorun, mark_create_preview_layout 
+from tensorpc.flow.marker import mark_autorun, mark_create_preview_layout, mark_did_mount, mark_will_unmount 
 import inspect
 import asyncio
 from tensorpc.flow.flowapp.appcore import get_app
@@ -65,7 +65,7 @@ class ThreadLocker(mui.FlexBox):
                 mui.Button("Release", self._on_release),
                 mui.Button("Raise", self._on_raise),
                 mui.Button("Capture", self._on_capture),
-            ]),
+            ], wrap=True),
         ])
         self.prop(width="100%", flex_flow="column", padding_left="5px", padding_right="5px")
 
@@ -93,7 +93,7 @@ class ThreadLocker(mui.FlexBox):
         await inspector.tree.set_object(inspecttools.filter_local_vars(local_vars),
                                    "locals" + f"-{frame_name}")
 
-    def wait_sync(self, loop: Optional[asyncio.AbstractEventLoop] = None, *, _frame_cnt: int = 1):
+    def wait_sync(self, loop: Optional[asyncio.AbstractEventLoop] = None, msg: str = "", *, _frame_cnt: int = 1):
         assert get_app()._flowapp_thread_id != threading.get_ident(), "you must use this function in a thread."
         self._need_raise = False 
         cur_frame = inspect.currentframe()
@@ -110,6 +110,7 @@ class ThreadLocker(mui.FlexBox):
             self.text.write("### Thread Locker\n:red[Locked]"), loop)
         fut.result()
         self._prev_frame = cur_frame
+        print(f"ThreadLocker wait {msg}")
         self.event.clear()
         self.event.wait()
         fut = asyncio.run_coroutine_threadsafe(
@@ -119,3 +120,11 @@ class ThreadLocker(mui.FlexBox):
         if self._need_raise == True:
             self._need_raise = False 
             raise ValueError("You click raise exception button in ThreadLocker.")
+
+    @mark_will_unmount
+    async def _unmount(self):
+        self.event.set()
+
+    @mark_did_mount
+    async def _mount(self):
+        self.event.clear()

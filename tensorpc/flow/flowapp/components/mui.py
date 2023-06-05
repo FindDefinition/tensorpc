@@ -1040,15 +1040,15 @@ class MUIList(MUIContainerBase[MUIListProps, MUIComponentType]):
         return self._update_props_base(propcls)
 
 
-def VBox(layout: LayoutType):
+def VBox(layout: LayoutType, wrap: bool = False):
     res = FlexBox(children=layout)
-    res.prop(flex_flow="column")
+    res.prop(flex_flow="column wrap" if wrap else "column nowrap")
     return res
 
 
-def HBox(layout: LayoutType):
+def HBox(layout: LayoutType, wrap: bool = False):
     res = FlexBox(children=layout)
-    res.prop(flex_flow="row")
+    res.prop(flex_flow="row wrap" if wrap else "row nowrap")
     return res
 
 
@@ -2607,14 +2607,21 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
 
     class TabSet:
         def __init__(self,
-                     children: List["FlexLayout.Tab"],
+                     children: List[Union[MUIComponentType, "FlexLayout.Tab"]],
                      weight: NumberType = 100) -> None:
-            self.children = children
+            new_children: List[FlexLayout.Tab] = []
+            for c in children:
+                if isinstance(c, FlexLayout.Tab):
+                    new_children.append(c)
+                else:
+                    new_children.append(FlexLayout.Tab(c))
+            self.children = new_children
             self.weight = weight
 
         def get_model_dict(self):
             return {
                 "type": "tabset",
+                "weight": self.weight,
                 "children": [c.get_model_dict() for c in self.children]
             }
 

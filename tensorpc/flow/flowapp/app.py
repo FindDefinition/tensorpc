@@ -926,6 +926,8 @@ class App:
                 {AppEventType.CopyToClipboard: CopyToClipboardEvent(text)}))
 
     def find_component(self, type: Type[T]) -> Optional[T]:
+        """find component in comp tree. breath-first.
+        """
         res: List[Optional[T]] = [None]
 
         def handler(name, comp):
@@ -1445,7 +1447,7 @@ class EditableApp(App):
             dcls = self._get_app_dynamic_cls()
             print("WATCHDOG", ev)
             with self._watch_lock:
-                if self._flowapp_code_mgr is None:
+                if self._flowapp_code_mgr is None or self._loop is None:
                     return
                 asyncio.run_coroutine_threadsafe(
                     self._reload_object_with_new_code(ev.src_path), self._loop)

@@ -19,7 +19,7 @@ from .figure import HomogeneousMetricFigure
 from .monitor import ComputeResourceMonitor
 from .objinspect import (AnyFlexLayout, BasicObjectTree, CallbackSlider,
                          InspectPanel, ObjectInspector, ObjectLayoutHandler,
-                         ObjectPreviewHandler, TreeDragTarget,
+                         ObjectPreviewHandler, TreeDragTarget, ThreadLocker,
                          register_obj_layout_handler,
                          register_obj_preview_handler,
                          register_user_obj_tree_type)
