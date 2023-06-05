@@ -13,13 +13,16 @@
 # limitations under the License.
 
 import threading
+from types import FrameType
 from typing import Any, Callable, Optional, List, Dict, TypeVar, Generic, Union
+from tensorpc.core import inspecttools
 from tensorpc.flow.flowapp.components import mui
 
 from tensorpc.flow.marker import mark_autorun, mark_create_preview_layout 
 import inspect
 import asyncio
 from tensorpc.flow.flowapp.appcore import get_app
+
 
 T = TypeVar("T")
 
@@ -50,7 +53,7 @@ class CallbackSlider(mui.FlexBox):
 class ThreadLocker(mui.FlexBox):
     """a locker designed for long-time running sync function, you can
     use locker to wait for GUI release. e.g., you run a deeplearning
-    train function, you can visualize intermediate results in GUI, and
+    train function, you can visualize intermediate results in GUI (via capture), and
     wait for GUI release to continue training.
     """
     def __init__(self) -> None:
@@ -58,22 +61,61 @@ class ThreadLocker(mui.FlexBox):
         self.event = threading.Event()
         super().__init__([
             self.text,
-            mui.Button("Release", self._on_release),
+            mui.HBox([
+                mui.Button("Release", self._on_release),
+                mui.Button("Raise", self._on_raise),
+                mui.Button("Capture", self._on_capture),
+            ]),
         ])
         self.prop(width="100%", flex_flow="column", padding_left="5px", padding_right="5px")
 
+        self._prev_frame: Optional[FrameType] = None
+
+        self._need_raise: bool = False
+
     async def _on_release(self):
         self.event.set()
-        await self.text.write("### Thread Locker\n:green[Unlocked]")
 
-    def wait_sync(self, loop: Optional[asyncio.AbstractEventLoop] = None):
+    async def _on_raise(self):
+        self._need_raise = True
+        self.event.set()
+    
+    async def _on_capture(self):
+        """capture current locals to inspector.
+        """
+        from tensorpc.flow import appctx , plus
+        if self._prev_frame is None:
+            return 
+        frame_name = self._prev_frame.f_code.co_name
+        inspector = appctx.find_component(plus.ObjectInspector)
+        assert inspector is not None 
+        local_vars = self._prev_frame.f_locals.copy()
+        await inspector.tree.set_object(inspecttools.filter_local_vars(local_vars),
+                                   "locals" + f"-{frame_name}")
+
+    def wait_sync(self, loop: Optional[asyncio.AbstractEventLoop] = None, *, _frame_cnt: int = 1):
         assert get_app()._flowapp_thread_id != threading.get_ident(), "you must use this function in a thread."
+        self._need_raise = False 
+        cur_frame = inspect.currentframe()
+        assert cur_frame is not None
+        frame = cur_frame
+        while _frame_cnt > 0:
+            frame = cur_frame.f_back
+            assert frame is not None
+            cur_frame = frame
+            _frame_cnt -= 1
         if loop is None:
             loop = asyncio.get_running_loop()
         fut = asyncio.run_coroutine_threadsafe(
             self.text.write("### Thread Locker\n:red[Locked]"), loop)
         fut.result()
+        self._prev_frame = cur_frame
         self.event.clear()
         self.event.wait()
+        fut = asyncio.run_coroutine_threadsafe(
+            self.text.write("### Thread Locker\n:green[Unlocked]"), loop)
 
-    
+        self._prev_frame = None 
+        if self._need_raise == True:
+            self._need_raise = False 
+            raise ValueError("You click raise exception button in ThreadLocker.")
