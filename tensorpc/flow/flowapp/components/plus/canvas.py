@@ -20,7 +20,7 @@ from typing import Any, Callable, Coroutine, Dict, Hashable, Iterable, List, Opt
 import numpy as np
 
 from tensorpc.flow import marker
-from tensorpc.flow.flowapp.appcore import find_component_by_uid
+from tensorpc.flow.flowapp.appcore import find_component_by_uid_with_type_check
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from tensorpc.flow.flowapp.core import FrontendEventType
@@ -169,12 +169,6 @@ class SimpleCanvas(mui.FlexBox):
         gcfg = GlobalCfg(mui.ControlColorRGB(255, 255, 255))
         self.gcfg = gcfg
         self._cfg = CanvasGlobalCfg(PointCfg(), BoxCfg(), gcfg, CameraCfg())
-        self._cfg_panel = ConfigPanel(self._cfg, self._on_cfg_change)
-        self._cfg_panel.prop(border="1px solid",
-                             border_color="gray",
-                             collapsed=True,
-                             title="configs",
-                             margin_left="5px")
         self._dynamic_pcs = three.Group({})
         self._dynamic_lines = three.Group({})
         self._dynamic_images = three.Group({})
@@ -222,6 +216,15 @@ class SimpleCanvas(mui.FlexBox):
 
         super().__init__()
         self.init_add_layout([*self._layout_func()])
+
+    def __get_cfg_panel(self):
+        _cfg_panel = ConfigPanel(self._cfg, self._on_cfg_change)
+        _cfg_panel.prop(border="1px solid",
+                             border_color="gray",
+                             collapsed=True,
+                             title="configs",
+                             margin_left="5px")
+        return _cfg_panel
 
     async def _on_screen_shot_finish(self, img_and_data: Tuple[str, Any]):
         if self._screenshot_callback:
@@ -404,7 +407,7 @@ class SimpleCanvas(mui.FlexBox):
     async def _on_enable_cfg_panel(self, selected):
         if selected:
             await self._ctrl_container.set_new_layout(
-                [self._cfg_panel])
+                [self.__get_cfg_panel()])
         else:
             await self._ctrl_container.set_new_layout([])
 
@@ -467,16 +470,20 @@ class SimpleCanvas(mui.FlexBox):
             return True
         return False
 
+    async def _dnd_cb(self, uid: str, data: Any):
+        await self._unknown_visualization(uid, data)
+
     async def _on_drop(self, data):
+        from tensorpc.flow.flowapp.components.plus import BasicObjectTree
         if isinstance(data, TreeDragTarget):
             obj = data.obj
             success = await self._unknown_visualization(data.tree_id, obj)
             if success:
                 # register to tree
-                tree = find_component_by_uid(data.source_comp_uid)
+                tree = find_component_by_uid_with_type_check(data.source_comp_uid, BasicObjectTree)
                 if tree is not None:
                     tree._register_dnd_uid(data.tree_id,
-                                           self._unknown_visualization)
+                                           self._dnd_cb)
                     self._dnd_trees.add(data.source_comp_uid)
 
     async def _on_pan_to_fwd(self, selected):
@@ -487,6 +494,8 @@ class SimpleCanvas(mui.FlexBox):
         await self.ctrl.reset_camera()
 
     async def _on_clear(self):
+        from tensorpc.flow.flowapp.components.plus import BasicObjectTree
+
         self._point_dict.clear()
         self._segment_dict.clear()
         self._image_dict.clear()
@@ -498,7 +507,7 @@ class SimpleCanvas(mui.FlexBox):
         await self._dynamic_boxes.set_new_layout({})
 
         for uid in self._dnd_trees:
-            tree = find_component_by_uid(uid)
+            tree = find_component_by_uid_with_type_check(uid, BasicObjectTree)
             if tree is not None:
                 tree._unregister_all_dnd_uid()
         self._dnd_trees.clear()

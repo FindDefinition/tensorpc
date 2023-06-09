@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from typing import Dict
-from tensorpc.flow.flowapp import App, EditableApp, EditableLayoutApp, mui
+from tensorpc.flow import App, EditableApp, EditableLayoutApp, mui
 from tensorpc.flow.flowapp.core import Component
 
 from tensorpc.autossh import SSHClient
@@ -24,12 +24,12 @@ from pathlib import Path
 class DownloadFromSSH(EditableLayoutApp):
 
     def app_create_layout(self) -> Dict[str, Component]:
-        self.ssh_url = mui.Input("Url")
-        self.ssh_username = mui.Input("Username")
-        self.ssh_password = mui.Input("Password").prop(type="password")
+        self.ssh_url = mui.TextField("Url")
+        self.ssh_username = mui.TextField("Username")
+        self.ssh_password = mui.TextField("Password").prop(type="password")
 
-        self.ssh_files = mui.Input("Files", True)
-        self.target_loc = mui.Input("Target")
+        self.ssh_files = mui.TextField("Files", True)
+        self.target_loc = mui.TextField("Target")
         self.run = mui.Button("Run", self.download_files)
 
         return {
@@ -42,8 +42,8 @@ class DownloadFromSSH(EditableLayoutApp):
                     "ssh_password": self.ssh_password,
                     "target_loc": self.target_loc,
                     "run": self.run,
-                },
-                width=480,
+                }
+                ).prop(width=480,
                 height=480)
         }
 

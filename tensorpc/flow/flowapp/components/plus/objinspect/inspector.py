@@ -1,7 +1,10 @@
 import asyncio
 import contextlib
+import dataclasses
 import enum
+import importlib
 import inspect
+from pathlib import Path
 import sys
 import threading
 import traceback
@@ -24,7 +27,7 @@ from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType, _g
 from tensorpc.flow.flowapp.objtree import UserObjTreeProtocol
 
 from .core import (ALL_OBJECT_PREVIEW_HANDLERS, USER_OBJ_TREE_TYPES,
-                   ObjectPreviewHandler)
+                   ObjectPreviewHandler, DataClassesType)
 from .tree import _DEFAULT_OBJ_NAME, FOLDER_TYPES, ObjectTree
 from tensorpc.core import inspecttools
 
@@ -36,7 +39,23 @@ P = ParamSpec('P')
 T = TypeVar('T')
 
 
+def _parse_trace_modules(traced_locs: List[Union[str, Path, types.ModuleType]]):
+    traced_folders: Set[str] = set()
+    for m in traced_locs:
+        if isinstance(m, (str, Path)):
+            folder = Path(m)
+            assert folder.exists(), f"{folder} must exists"
+            traced_folders.add(str(folder))
+        else:
+            mod = m
+            if mod.__file__ is not None:
+                mod_file = Path(mod.__file__).parent.resolve()
+                traced_folders.add(str(mod_file))
+    return traced_folders
+
+
 class TreeTracer(Tracer):
+
     def __init__(
             self,
             #  tree: "ObjectInspector",
@@ -78,6 +97,7 @@ class DefaultHandler(ObjectPreviewHandler):
     """
     TODO if the object support any-layout, add a button to enable it.
     """
+
     def __init__(self) -> None:
         self.tags = mui.FlexBox().prop(flex_flow="row wrap")
         self.title = mui.Typography("").prop(word_break="break-word")
@@ -124,6 +144,7 @@ class DefaultHandler(ObjectPreviewHandler):
 
 
 class ObjectInspector(mui.FlexBox):
+
     def __init__(self,
                  init: Optional[Any] = None,
                  cared_types: Optional[Set[Type]] = None,
@@ -159,17 +180,20 @@ class ObjectInspector(mui.FlexBox):
                 layout.append(mui.Divider())
             layout.append(self.detail_container)
         self.default_handler = DefaultHandler()
-        final_layout: mui.LayoutType = layout 
+        final_layout: mui.LayoutType = layout
         if use_allotment:
-            final_layout = [mui.Allotment(final_layout).prop(overflow="hidden",
-                      default_sizes=[1.5, 1] if with_detail else [1],
-                      vertical=True)]
+            final_layout = [
+                mui.Allotment(final_layout).prop(
+                    overflow="hidden",
+                    default_sizes=[1.5, 1] if with_detail else [1],
+                    vertical=True)
+            ]
         super().__init__(final_layout)
         self.prop(flex_direction="column",
-                    flex=1,
-                    overflow="hidden",
-                    min_height=0,
-                    min_width=0)
+                  flex=1,
+                  overflow="hidden",
+                  min_height=0,
+                  min_width=0)
 
         if with_detail:
             self.tree.tree.register_event_handler(
@@ -239,36 +263,49 @@ class ObjectInspector(mui.FlexBox):
         if not found:
             raise ValueError(
                 f"your object {uid} is invalid, may need to reflesh")
-        obj_type = type(obj)
+        obj_type: Type = type(obj)
+        is_dcls = dataclasses.is_dataclass(obj)
+
         preview_layout: Optional[mui.FlexBox] = None
+        # preview layout is checked firstly, then preview handler.
         if obj_type in self._type_to_handler_object:
             handler = self._type_to_handler_object[obj_type]
+        elif is_dcls and DataClassesType in self._type_to_handler_object:
+            handler = self._type_to_handler_object[DataClassesType]
         else:
-            obj_qualname = get_qualname_of_type(type(obj))
-            handler_type: Optional[Type[ObjectPreviewHandler]] = None
-            if obj is not None:
-                obj_type = type(obj)
-                if obj_type in ALL_OBJECT_PREVIEW_HANDLERS:
-                    handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_type]
-                elif obj_qualname in ALL_OBJECT_PREVIEW_HANDLERS:
-                    handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_qualname]
-            if handler_type is not None:
-                handler = handler_type()
-            else:
-                # check obj have create_preview_layout
-                metas = self.flow_app_comp_core.reload_mgr.query_type_method_meta(
-                    obj_type, True)
-                special_methods = FlowSpecialMethods(metas)
-                if special_methods.create_preview_layout is not None:
-                    preview_layout = mui.flex_preview_wrapper(
-                        obj, metas, self.flow_app_comp_core.reload_mgr)
-
+            metas = self.flow_app_comp_core.reload_mgr.query_type_method_meta(
+                obj_type, True)
+            special_methods = FlowSpecialMethods(metas)
+            if special_methods.create_preview_layout is not None:
+                preview_layout = mui.flex_preview_wrapper(
+                    obj, metas, self.flow_app_comp_core.reload_mgr)
                 handler = self.default_handler
-            if preview_layout is None:
-                self._type_to_handler_object[obj_type] = handler
+            else:
+                obj_qualname = get_qualname_of_type(type(obj))
+                handler_type: Optional[Type[ObjectPreviewHandler]] = None
+                modified_obj_type = obj_type
+                if obj is not None:
+                    # check standard type first, if not found, check datasetclass type.
+                    if obj_type in ALL_OBJECT_PREVIEW_HANDLERS:
+                        handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_type]
+                    elif obj_qualname in ALL_OBJECT_PREVIEW_HANDLERS:
+                        handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_qualname]
+                    elif is_dcls and DataClassesType in ALL_OBJECT_PREVIEW_HANDLERS:
+                        modified_obj_type = DataClassesType
+                        handler_type = ALL_OBJECT_PREVIEW_HANDLERS[DataClassesType]
+                if handler_type is not None:
+                    handler = handler_type()
+                else:
+                    handler = self.default_handler
+                self._type_to_handler_object[modified_obj_type] = handler
+            # if preview_layout is None:
+            #     self._type_to_handler_object[modified_obj_type] = handler
         if preview_layout is not None:
             objs, found = await self.tree._get_obj_by_uid_trace(uid, nodes)
             # determine objtree root
+            # we don't require your tree is strictly nested,
+            # you can have a tree with non-tree-item container,
+            # e.g. treeitem-anyobject-treeitem
             assert found, f"shouldn't happen, {uid}"
             root: Optional[UserObjTreeProtocol] = None
             for obj_iter_val in objs:
@@ -279,18 +316,7 @@ class ObjectInspector(mui.FlexBox):
                 preview_layout.set_flow_event_context_creator(
                     lambda: root.enter_context(root))
             # preview_layout.event_emitter.remove_listener()
-            if not preview_layout.event_emitter.listeners(
-                    FrontendEventType.BeforeUnmount.name):
-                preview_layout.event_emitter.on(
-                    FrontendEventType.BeforeUnmount.name,
-                    lambda: get_app()._get_self_as_editable_app().
-                    _flowapp_remove_observer(preview_layout))
-            if not preview_layout.event_emitter.listeners(
-                    FrontendEventType.BeforeMount.name):
-                preview_layout.event_emitter.on(
-                    FrontendEventType.BeforeMount.name, lambda: get_app().
-                    _get_self_as_editable_app()._flowapp_observe(
-                        preview_layout, self._on_preview_layout_reload))
+            self.__install_preview_event_listeners(preview_layout)
             await self.detail_container.set_new_layout([preview_layout])
         else:
             childs = list(self.detail_container._child_comps.values())
@@ -298,10 +324,35 @@ class ObjectInspector(mui.FlexBox):
                 await self.detail_container.set_new_layout([handler])
             await handler.bind(obj, uid)
 
+    def __install_preview_event_listeners(self, layout: mui.FlexBox):
+        if not layout.event_emitter.listeners(
+                FrontendEventType.BeforeUnmount.name):
+            layout.event_emitter.on(
+                FrontendEventType.BeforeUnmount.name, partial(self._on_preview_layout_unmount, layout))
+        if not layout.event_emitter.listeners(
+                FrontendEventType.BeforeMount.name):
+            layout.event_emitter.on(
+                FrontendEventType.BeforeMount.name, partial(self._on_preview_layout_mount, layout))
+
+
+    def _on_preview_layout_mount(self, layout: mui.FlexBox):
+        # print("preview layout mount")
+        return get_app()._get_self_as_editable_app()._flowapp_observe(
+                        layout, self._on_preview_layout_reload)
+    
+    def _on_preview_layout_unmount(self, layout: mui.FlexBox):
+        # print("preview layout unmount")
+
+        return get_app()._get_self_as_editable_app()._flowapp_remove_observer(
+                        layout)
+
     async def _on_preview_layout_reload(self, layout: mui.FlexBox,
                                         create_layout: ServFunctionMeta):
+        # print("DO PREVIEW LAYOUT RELOAD", create_layout.user_app_meta)
         if create_layout.user_app_meta is not None and create_layout.user_app_meta.type == AppFuncType.CreatePreviewLayout:
             if layout._wrapped_obj is not None:
+                # print("DO PREVIEW LAYOUT RELOAD 2")
+
                 layout_flex = create_layout.get_binded_fn()()
                 assert isinstance(
                     layout_flex, mui.FlexBox
@@ -309,9 +360,13 @@ class ObjectInspector(mui.FlexBox):
                 layout_flex._flow_comp_def_path = _get_obj_def_path(
                     layout._wrapped_obj)
                 layout_flex._wrapped_obj = layout._wrapped_obj
+                layout_flex.set_flow_event_context_creator(layout._flow_event_context_creator)
+                self.__install_preview_event_listeners(layout_flex)
                 await self.detail_container.set_new_layout([layout_flex])
             else:
                 layout_flex = create_layout.get_binded_fn()()
+                layout_flex.set_flow_event_context_creator(layout._flow_event_context_creator)
+                self.__install_preview_event_listeners(layout_flex)
                 await layout.set_new_layout(layout_flex)
             return layout_flex
 
@@ -446,6 +501,7 @@ class ObjectInspector(mui.FlexBox):
 
     @contextlib.contextmanager
     def trace_sync(self,
+                   traced_locs: List[Union[str, Path, types.ModuleType]],
                    key: str = "trace",
                    traced_types: Optional[Tuple[Type]] = None,
                    traced_names: Optional[Set[str]] = None,
@@ -457,10 +513,13 @@ class ObjectInspector(mui.FlexBox):
                    *,
                    _frame_cnt=3,
                    loop: Optional[asyncio.AbstractEventLoop] = None):
+        if traced_folders is None:
+            traced_folders = set()
+        traced_folders.update(_parse_trace_modules(traced_locs))
         trace_res: List[FrameResult] = []
         if ignored_names is None:
             ignored_names = set([
-                "_call_impl", # torch nn forward
+                "_call_impl",  # torch nn forward
             ])
         tracer = Tracer(lambda x: trace_res.append(x),
                         traced_types,
@@ -470,16 +529,17 @@ class ObjectInspector(mui.FlexBox):
                         depth,
                         ignored_names,
                         _frame_cnt=_frame_cnt)
-        with tracer:
-            try:
+        try:
+            with tracer:
                 yield
-            finally:
-                tree_items = parse_frame_result_to_trace_item(trace_res,
-                                                            use_return_locals)
-                show_dict = {v.get_uid(): v for v in tree_items}
-                self.set_object_sync(show_dict, key, loop=loop)
+        finally:
+            tree_items = parse_frame_result_to_trace_item(
+                trace_res, use_return_locals)
+            show_dict = {v.get_uid(): v for v in tree_items}
+            self.set_object_sync(show_dict, key, loop=loop)
 
     def trace_sync_return(self,
+                          traced_locs: List[Union[str, Path, types.ModuleType]],
                           key: str = "trace",
                           traced_types: Optional[Tuple[Type]] = None,
                           traced_names: Optional[Set[str]] = None,
@@ -490,19 +550,21 @@ class ObjectInspector(mui.FlexBox):
                           *,
                           _frame_cnt: int = 4,
                           loop: Optional[asyncio.AbstractEventLoop] = None):
-        return self.trace_sync(key,
+        return self.trace_sync(traced_locs,
+                               key,
                                traced_types,
                                traced_names,
                                traced_folders,
                                trace_return,
                                depth,
-                                ignored_names=ignored_names,
+                               ignored_names=ignored_names,
                                use_return_locals=True,
                                _frame_cnt=_frame_cnt,
                                loop=loop)
 
     @contextlib.asynccontextmanager
     async def trace(self,
+                    traced_locs: List[Union[str, Path, types.ModuleType]],
                     key: str = "trace",
                     traced_types: Optional[Tuple[Type]] = None,
                     traced_names: Optional[Set[str]] = None,
@@ -513,6 +575,9 @@ class ObjectInspector(mui.FlexBox):
                     ignored_names: Optional[Set[str]] = None,
                     *,
                     _frame_cnt: int = 3):
+        if traced_folders is None:
+            traced_folders = set()
+        traced_folders.update(_parse_trace_modules(traced_locs))
         trace_res: List[FrameResult] = []
         tracer = Tracer(lambda x: trace_res.append(x),
                         traced_types,
@@ -522,11 +587,12 @@ class ObjectInspector(mui.FlexBox):
                         depth,
                         ignored_names,
                         _frame_cnt=_frame_cnt)
-        with tracer:
-            try:
+        try:
+            with tracer:
+
                 yield
-            finally:
-                tree_items = parse_frame_result_to_trace_item(trace_res,
-                                                            use_return_locals)
-                show_dict = {v.get_uid(): v for v in tree_items}
-                await self.set_object(show_dict, key)
+        finally:
+            tree_items = parse_frame_result_to_trace_item(
+                trace_res, use_return_locals)
+            show_dict = {v.get_uid(): v for v in tree_items}
+            await self.set_object(show_dict, key)

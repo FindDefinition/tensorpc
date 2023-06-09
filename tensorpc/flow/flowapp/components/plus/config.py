@@ -94,6 +94,7 @@ class SliderMeta(ConfigMeta):
 class ControlItemMeta:
     getter: Callable[[], Any]
     setter: Callable[[Any], None]
+    compare: Callable[[Any], bool]
 
 _BUILTIN_DCLS_TYPE = set([mui.ControlColorRGB, mui.ControlColorRGBA])
 
@@ -107,6 +108,12 @@ def setattr_single(val, obj, name, mapper: Optional[Callable] = None):
 def getattr_single(obj, name):
     return getattr(obj, name)
 
+
+def compare_single(value, obj, name, mapper: Optional[Callable] = None):
+    if mapper is not None:
+        return getattr(obj, name) == mapper(value)
+    else:
+        return getattr(obj, name) == value
 
 def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                            obj_uid_to_meta: Dict[str, ControlItemMeta]):
@@ -135,6 +142,7 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
             continue  # TODO add support for simple complex type
         # we support int/float/bool/str
         getter = partial(getattr_single, obj=current_obj, name=f.name)
+        comparer = partial(compare_single, obj=current_obj, name=f.name)
         if meta is not None and meta.alias is not None:
             child_node.alias = meta.alias
 
@@ -200,6 +208,10 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                                 obj=current_obj,
                                 name=f.name,
                                 mapper=mapper)
+            comparer = partial(compare_single,
+                                obj=current_obj,
+                                name=f.name,
+                                mapper=mapper)
         else:
             ty_origin = get_origin(ty)
             # print(ty, ty_origin, type(ty), type(ty_origin))
@@ -224,278 +236,18 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
             else:
                 # use textfield with json
                 child_node.type = mui.ControlNodeType.String.value
-                child_node.initValue = json.dumps(getattr(current_obj, f.name))
+                try:
+                    child_node.initValue = json.dumps(getattr(current_obj, f.name))
+                except:
+                    # ignore field that can't be dumped to json.
+                    continue 
                 if meta is not None and isinstance(meta, InputMeta):
                     child_node.rows = meta.multiline
 
                 setter = partial(setattr_single, obj=current_obj, name=f.name, mapper=json.loads)
         res_node.children.append(child_node)
-        obj_uid_to_meta[child_node.id] = ControlItemMeta(getter, setter)
+        obj_uid_to_meta[child_node.id] = ControlItemMeta(getter, setter, comparer)
     return res_node
-
-
-class ConfigPanelV1(mui.FlexBox):
-    """a composited component that parse dataclasses to config panel.
-    supported field: common value type and SINGLE nested dataclass,
-    don't support structured nested dataclass member, e.g.
-    List[OtherDataClass].
-    don't support optional/union.
-    WARNING: config object must be singleton. 
-    TODO add support for optional (add a checkbox/switch)
-    TODO add support for simple structure (List[some_dataclass] or Dict[some_dataclass])
-
-    """
-
-    def __init__(self,
-                 config_obj: Any,
-                 append_childs: Optional[Dict[str, mui.Component]] = None):
-        assert dataclasses.is_dataclass(config_obj)
-        # parse config dataclass.
-        layout_type, nfield_to_comp = self._parse_dataclass_and_bind(
-            config_obj, config_obj, "")
-        layout: Dict[str, mui.Component] = {**layout_type}
-        super().__init__()
-        if append_childs is not None:
-            layout.update(append_childs)
-        self.init_add_layout(layout)
-        self.props.flex_flow = "column nowrap"
-        self.__config_obj = config_obj
-        self.props.overflow_y = "auto"
-        self.props.min_height = 0
-        self._nfield_to_comp = nfield_to_comp
-
-    @property
-    def config(self):
-        return self.__config_obj
-
-    @staticmethod
-    def switch_meta(alias: Optional[str] = None):
-        return {_CONFIG_META_KEY: SwitchMeta(alias)}
-
-    @staticmethod
-    def input_meta(multiline: bool, rows: int, font_size: mui.ValueType,
-                   font_family: str, alias: Optional[str] = None):
-        return {
-            _CONFIG_META_KEY:
-            InputMeta(alias=alias,
-                      multiline=multiline,
-                      rows=rows,
-                      font_size=font_size,
-                      font_family=font_family)
-        }
-
-    @staticmethod
-    def slider_meta(begin: mui.NumberType, end: mui.NumberType, alias: Optional[str] = None):
-        return {_CONFIG_META_KEY: SliderMeta(begin=begin, end=end, alias=alias)}
-
-    def _sync_config_event(self, current_obj: Any, current_name: str):
-        uievent = mui.AppEvent("", {})
-        for f in dataclasses.fields(current_obj):
-            next_name = f.name
-            if current_name:
-                next_name = current_name + "." + f.name
-            ty = f.type
-            if dataclasses.is_dataclass(ty):
-                upd = self._sync_config_event(getattr(current_obj, f.name),
-                                              next_name)
-                continue
-            if not _check_is_basic_type(ty):
-                continue  # TODO add support for simple complex type
-            comp = self._nfield_to_comp[next_name]
-            if ty is bool:
-                # use switch
-                assert isinstance(comp, mui.SwitchBase)
-                upd = comp.update_event(checked=getattr(current_obj, f.name))
-            elif ty is int or ty is float or ty is str:
-                # use textfield with number type
-                if isinstance(comp, (mui.Input, mui.Slider)):
-                    upd = comp.update_event(value=getattr(current_obj, f.name))
-                elif isinstance(comp, mui.Slider):
-                    upd = comp.update_event(value=getattr(current_obj, f.name))
-                else:
-                    raise NotImplementedError
-            else:
-                ty_origin = get_origin(ty)
-                # use textfield with json
-                if ty_origin is Literal:
-                    assert isinstance(comp, mui.Select)
-                    upd = comp.update_event(value=getattr(current_obj, f.name))
-                elif ty_origin is None and issubclass(
-                        ty, (enum.Enum, enum.IntEnum)):
-                    assert isinstance(comp, mui.Select)
-                    upd = comp.update_event(
-                        value=getattr(current_obj, f.name).value)
-                else:
-                    assert isinstance(comp, mui.Input)
-                    upd = comp.update_event(
-                        value=json.dumps(getattr(current_obj, f.name)))
-            uievent += upd
-        return uievent
-
-    async def sync_config(self):
-        return await self.send_and_wait(
-            self._sync_config_event(self.__config_obj, ""))
-
-    def _parse_dataclass_and_bind(self, origin_obj, current_obj,
-                                  current_name: str):
-        layout: Dict[str, mui.MUIComponentType] = {}
-        nfield_to_comp: Dict[str, mui.MUIComponentType] = {}
-        for f in dataclasses.fields(current_obj):
-            next_name = f.name
-            if current_name:
-                next_name = current_name + "." + f.name
-            ty = f.type
-            if dataclasses.is_dataclass(ty):
-                # nested parse
-                summary = mui.AccordionSummary(
-                    {"t": mui.Typography(f"{f.name}")})
-                res = self._parse_dataclass_and_bind(
-                    origin_obj, getattr(current_obj, f.name), next_name)
-                detail = mui.AccordionDetails(res[0])
-                nfield_to_comp.update(res[1])
-                acc = mui.Accordion(
-                    summary,
-                    detail.prop(padding_left=1,
-                                padding_right=1,
-                                flex_flow="column nowrap"))
-                acc.prop(disable_gutters=True)
-                layout[f.name] = acc
-                continue
-            if not _check_is_basic_type(ty):
-                continue  # TODO add support for simple complex type
-            # we support int/float/bool/str
-            meta: Optional[ConfigMeta] = None
-            if _CONFIG_META_KEY in f.metadata:
-                meta = f.metadata[_CONFIG_META_KEY]
-
-            cb = partial(self._callback,
-                         cur_name=current_name,
-                         field_name=f.name,
-                         origin_obj=origin_obj,
-                         type=ty)
-
-            if ty is bool:
-                # use switch
-                if meta is not None:
-                    assert isinstance(meta, SwitchMeta)
-                comp = mui.Switch(f.name, cb)
-                comp.props.checked = getattr(current_obj, f.name)
-            elif ty is int or ty is float:
-                # use textfield with number type
-                if meta is not None:
-                    assert isinstance(meta, (InputMeta, SliderMeta))
-                if meta is None or isinstance(meta, InputMeta):
-                    if meta is None:
-                        comp = mui.Input(f.name, multiline=False, callback=cb)
-                        comp.prop(mui_margin="dense",
-                                  type="number",
-                                  size="small")
-                    else:
-                        comp = mui.Input(f.name,
-                                         multiline=meta.multiline,
-                                         callback=cb)
-                        comp.prop(mui_margin="dense",
-                                  type="number",
-                                  rows=meta.rows,
-                                  font_family=meta.font_family,
-                                  font_size=meta.font_size,
-                                  size="small")
-                    comp.props.value = str(getattr(current_obj, f.name))
-
-                elif isinstance(meta, SliderMeta):
-                    comp = mui.Slider(f.name,
-                                      meta.begin,
-                                      meta.end,
-                                      1,
-                                      callback=cb)
-                    comp.props.value = getattr(current_obj, f.name)
-                else:
-                    raise NotImplementedError
-            elif ty is str:
-                # use textfield
-                if meta is not None:
-                    assert isinstance(meta, InputMeta)
-
-                if meta is None:
-                    comp = mui.Input(f.name, multiline=False, callback=cb)
-                    comp.prop(mui_margin="dense", size="small")
-                else:
-                    comp = mui.Input(f.name,
-                                     multiline=meta.multiline,
-                                     callback=cb)
-                    comp.prop(mui_margin="dense",
-                              rows=meta.rows,
-                              font_family=meta.font_family,
-                              font_size=meta.font_size,
-                              size="small")
-
-                comp.props.value = str(getattr(current_obj, f.name))
-
-            else:
-                ty_origin = get_origin(ty)
-                # print(ty, ty_origin, type(ty), type(ty_origin))
-                if ty_origin is Literal:
-                    values = get_args(ty)
-                    names = list(map(str, values))
-                    comp = mui.Select(f.name,
-                                      list(zip(names, values)),
-                                      callback=cb).prop(mui_margin="dense",
-                                                        size="small")
-                    comp.props.value = getattr(current_obj, f.name)
-                elif ty_origin is None and issubclass(
-                        ty, (enum.Enum, enum.IntEnum)):
-                    comp = mui.Select(f.name,
-                                      list((x.name, x.value) for x in ty),
-                                      callback=cb).prop(mui_margin="dense",
-                                                        size="small")
-                    comp.props.value = getattr(current_obj, f.name).value
-                else:
-                    # use textfield with json
-                    if meta is not None:
-                        assert isinstance(meta, InputMeta)
-                    if meta is None:
-                        comp = mui.Input(f.name, multiline=False, callback=cb)
-                        comp.prop(mui_margin="dense", size="small")
-                    else:
-                        comp = mui.Input(f.name,
-                                         multiline=meta.multiline,
-                                         callback=cb)
-                        comp.prop(mui_margin="dense",
-                                  rows=meta.rows,
-                                  font_family=meta.font_family,
-                                  font_size=meta.font_size,
-                                  size="small")
-                    comp.props.value = json.dumps(getattr(current_obj, f.name))
-
-            layout[f.name] = comp
-            nfield_to_comp[next_name] = comp
-        return layout, nfield_to_comp
-
-    @staticmethod
-    def _callback(value, origin_obj, cur_name, field_name, type):
-        # print(type, value)
-        if type is bool:
-            value = value
-        elif type is int:
-            value = int(value)
-        elif type is float:
-            value = float(value)
-        elif type is str:
-            value = value
-        else:
-            ty_origin = get_origin(type)
-            if ty_origin is Literal:
-                value = value
-            elif ty_origin is None and issubclass(type,
-                                                  (enum.Enum, enum.IntEnum)):
-                value = type(value)
-            else:
-                value = json.loads(value)
-        if cur_name:
-            getter = operator.attrgetter(cur_name)
-            setattr(getter(origin_obj), field_name, value)
-        else:
-            setattr(origin_obj, field_name, value)
 
 
 class ConfigPanel(mui.DynamicControls):
@@ -520,12 +272,19 @@ class ConfigPanel(mui.DynamicControls):
     async def callback(self, value: Tuple[str, Any]):
         uid = value[0]
         cmeta = self._obj_to_ctrl_meta[uid]
-        cmeta.setter(value[1])
-        handler = self.get_event_handler(self.__callback_key)
-        if handler is not None:
-            coro = handler.cb(uid, cmeta.getter())
-            if inspect.iscoroutine(coro):
-                await coro
+        compare_res = cmeta.compare(value[1])
+        if not compare_res:
+            # here we need to compare value, emit event iff 
+            # the value is changed. 
+            # TODO this is due to limitation of leva control.
+            # we may need to write own dynamic control
+            # based on tanstack table.
+            cmeta.setter(value[1])
+            handler = self.get_event_handler(self.__callback_key)
+            if handler is not None:
+                coro = handler.cb(uid, cmeta.getter())
+                if inspect.iscoroutine(coro):
+                    await coro
 
     @property
     def config(self):

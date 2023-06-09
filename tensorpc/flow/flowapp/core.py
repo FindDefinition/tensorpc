@@ -120,6 +120,7 @@ class UIType(enum.Enum):
     MonacoEditor = 0x2c
     Icon = 0x2d
     Markdown = 0x2e
+    TextField = 0x2f
 
     # special
     TaskLoop = 0x100

@@ -66,8 +66,8 @@ class SimpleFileReader(mui.FlexBox):
 
 class ScriptExecutor(mui.FlexBox):
     def __init__(self):
-        self.path = mui.Input(label="Path").prop(mui_margin="dense")
-        self.args = mui.Input(label="Args").prop(mui_margin="dense")
+        self.path = mui.TextField(label="Path").prop(mui_margin="dense")
+        self.args = mui.TextField(label="Args").prop(mui_margin="dense")
 
         super().__init__(
             [self.path, self.args,

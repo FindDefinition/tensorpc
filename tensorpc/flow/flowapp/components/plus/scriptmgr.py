@@ -22,6 +22,7 @@ from typing import Any, Callable, Coroutine, Dict, Iterable, List, Optional, Set
 from typing_extensions import Literal
 
 import numpy as np
+from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 from tensorpc.flow.constants import TENSORPC_FLOW_APP_LANG_SERVER_PORT
 from tensorpc.flow.flowapp import appctx
 
@@ -30,6 +31,7 @@ from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.core import FrontendEventType
 from .options import CommonOptions
 
+from tensorpc.flow.client import MasterMeta
 
 @dataclasses.dataclass
 class Script:
@@ -67,6 +69,9 @@ class ScriptManager(mui.FlexBox):
         super().__init__()
 
         self._storage_node_rid = storage_node_rid
+        if graph_id is None:
+            graph_id = MasterMeta().graph_id
+
         self._graph_id = graph_id
         self.code_editor = mui.MonacoEditor("", "python",
                                             "default").prop(flex=1)
@@ -132,6 +137,7 @@ class ScriptManager(mui.FlexBox):
             item = await appctx.read_data_storage(label,
                                                   self._storage_node_rid, self._graph_id)
             assert isinstance(item, Script)
+            item_uid = f"{self._graph_id}@{self._storage_node_rid}@{item.label}"
             if item.lang == "python":
                 __tensorpc_script_res: List[Optional[Coroutine]] = [None]
                 lines = item.code.splitlines()
@@ -140,7 +146,8 @@ class ScriptManager(mui.FlexBox):
                 lines.insert(0, f"async def _{run_name}():")
                 lines.append(f"__tensorpc_script_res[0] = _{run_name}()")
                 code = "\n".join(lines)
-                exec(code, {},
+                code_comp = compile(code, f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-{item_uid}>", "exec")
+                exec(code_comp, {},
                      {"__tensorpc_script_res": __tensorpc_script_res})
                 res = __tensorpc_script_res[0]
                 assert res is not None

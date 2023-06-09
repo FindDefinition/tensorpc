@@ -19,3 +19,5 @@ TENSORPC_SUBPROCESS_SMEM = "TENSORPC_SUBPROCESS_SMEM"
 
 
 TENSORPC_READUNTIL = "__tensorpc_readuntil_string"
+
+TENSORPC_FILE_NAME_PREFIX = "__tensorpc_fname"

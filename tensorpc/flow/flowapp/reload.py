@@ -4,7 +4,7 @@ from typing import (Any, Callable, Dict, Generic, Hashable, List, Optional,
 
 from tensorpc.core.moduleid import (TypeMeta, get_obj_type_meta,
                                     get_qualname_of_type)
-from tensorpc.core.serviceunit import (AppFuncType, ObjectReloadManager,
+from tensorpc.core.serviceunit import (AppFuncType, AppFunctionMeta, ObjectReloadManager,
                                        ObservedFunctionRegistry,
                                        ObservedFunctionRegistryProtocol,
                                        ReloadableDynamicClass,
@@ -31,10 +31,21 @@ class FlowSpecialMethods:
             # assert m.is_binded, "metas must be binded before this class"
             if m.name == TENSORPC_ANYLAYOUT_FUNC_NAME:
                 self.create_layout = m
+                # handle legacy name-based layout function
+                if m.user_app_meta is None:
+                    m.user_app_meta = AppFunctionMeta(AppFuncType.CreateLayout)
+
             elif m.name == TENSORPC_LEGACY_LAYOUT_FUNC_NAME:
                 self.create_layout = m
+                # handle legacy name-based layout function
+                if m.user_app_meta is None:
+                    m.user_app_meta = AppFunctionMeta(AppFuncType.CreateLayout)
+
             elif m.name == TENSORPC_ANYLAYOUT_PREVIEW_FUNC_NAME:
                 self.create_preview_layout = m
+                # handle legacy name-based layout function
+                if m.user_app_meta is None:
+                    m.user_app_meta = AppFunctionMeta(AppFuncType.CreatePreviewLayout)
 
             elif m.user_app_meta is not None:
                 if m.user_app_meta.type == AppFuncType.CreateLayout:

@@ -50,3 +50,10 @@ class ContextMenuType(enum.Enum):
     DataStorageItemCommand = 2
 
     CopyReadItemCode = 3
+
+class DataClassesType:
+    """a placeholder that used for custom handlers.
+    user need to register this type to make sure
+    handler is used if object is dataclass.
+    """
+    pass

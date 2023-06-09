@@ -33,6 +33,9 @@ def parse_frame_result_to_trace_item(frame_results: List[FrameResult], use_retur
     for fr in frame_results:
         if fr.type == TraceType.Call:
             item = TraceTreeItem(fr)
+            if fr_stack:
+                prev = fr_stack[-1][1]
+                item.parent_cls_name = prev.cls_name
             fr_stack.append((fr, item))
 
         elif fr.type == TraceType.Return:
@@ -52,14 +55,20 @@ class TraceTreeItem(TreeItem):
     def __init__(self, frame_res: FrameResult) -> None:
         super().__init__()
         self.set_return_frame_result(frame_res)
+        self.depth = frame_res.depth
         self.call_var_names: List[str] = list(frame_res.local_vars.keys())
         self.start_ts = frame_res.timestamp
         self.end_ts = -1
         self.child_trace_res: List[TraceTreeItem] = []
+        self.parent_cls_name: str = ""
 
     def set_return_frame_result(self, frame_res: FrameResult):
         self.local_vars = inspecttools.filter_local_vars(frame_res.local_vars)
         self.is_method = "self" in self.local_vars
+        if self.is_method:
+            self.cls_name = type(self.local_vars["self"]).__name__
+        else:
+            self.cls_name = ""
         self.qname = frame_res.qualname
         self.name = self.qname.split(".")[-1]
         self.filename = frame_res.filename
@@ -69,7 +78,7 @@ class TraceTreeItem(TreeItem):
 
     def get_display_name(self):
         # if method, use "self.xxx" instead of full qualname
-        if self.is_method:
+        if self.is_method and self.parent_cls_name == self.cls_name:
             return f"self.{self.name}"
         else:
             return self.qname
@@ -126,7 +135,7 @@ class TraceTreeItem(TreeItem):
                     font_size="14px",
                     word_break="break-word")
         return mui.VBox([
-            mui.Typography(f"Frame: {self.qname}").prop(**font),
+            mui.Typography(f"Frame<{self.depth}>: {self.qname}").prop(**font),
             mui.Typography(f"Path: {self.filename}:{self.lineno}").prop(
                 **font),
             mui.Typography(f"Time: {self.get_delta_str()}").prop(
@@ -173,13 +182,13 @@ class TraceTreeItem(TreeItem):
                 raise ValueError(
                     "self not in local vars, currently only support run frame with self"
                 )
-            async with appctx.inspector.trace(f"trace-{self.name}", traced_names=set([self.name]), use_return_locals=True):
+            async with appctx.inspector.trace([], f"trace-{self.name}", traced_names=set([self.name]), use_return_locals=True):
                 method(**self.local_vars)
         else:
             local_vars = {k: v for k, v in self.local_vars.items()}
             local_vars.pop("self")
             fn = getattr(self.local_vars["self"], self.name)
-            async with appctx.inspector.trace(f"trace-{self.name}", traced_names=set([self.name]), use_return_locals=True):
+            async with appctx.inspector.trace([], f"trace-{self.name}", traced_names=set([self.name]), use_return_locals=True):
                 fn(**local_vars)
 
     def _on_reload_self(self):

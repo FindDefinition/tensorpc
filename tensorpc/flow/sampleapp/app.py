@@ -952,6 +952,7 @@ class PointCloudApp:
 
         res = mui.VBox([
             mui.Markdown("PointCloud **:red[App]** :dog: :+1: :green[$\\sqrt{2}$]").prop(padding="10px", katex=True, emoji=True),
+            mui.Input("hello world"),
             mui.HBox([
                 mui.Button("Change Slider Range",
                            self._on_slider_range_change),

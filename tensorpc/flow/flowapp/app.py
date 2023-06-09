@@ -1443,6 +1443,7 @@ class EditableApp(App):
         # 3. if layout function changed, load new layout
         # 4. if mount/unmount function changed, reset them
         # 5. if autorun changed, run them
+
         if isinstance(ev, watchdog.events.FileModifiedEvent):
             dcls = self._get_app_dynamic_cls()
             print("WATCHDOG", ev)

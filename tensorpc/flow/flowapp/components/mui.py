@@ -1134,36 +1134,28 @@ _HTMLInputType: TypeAlias = Literal["button", "checkbox", "color", "date",
                                     "search", "submit", "tel", "text", "time",
                                     "url", "week"]
 
-
 @dataclasses.dataclass
-class InputProps(MUIComponentBaseProps):
-    label: str = ""
+class InputBaseProps(MUIComponentBaseProps):
     multiline: bool = False
     value: str = ""
-    mui_color: Union[_StdColorNoDefault, Undefined] = undefined
     disabled: Union[bool, Undefined] = undefined
     error: Union[bool, Undefined] = undefined
     full_width: Union[bool, Undefined] = undefined
     rows: Union[NumberType, str, Undefined] = undefined
-    size: Union[Undefined, Literal["small", "medium"]] = undefined
-    mui_margin: Union[Undefined, Literal["dense", "none", "normal"]] = "dense"
-    variant: Union[Undefined, Literal["filled", "outlined",
-                                      "standard"]] = undefined
     type: Union[Undefined, _HTMLInputType] = undefined
 
+T_input_base_props = TypeVar("T_input_base_props", bound=InputBaseProps)
 
-class Input(MUIComponentBase[InputProps]):
-    def __init__(self,
-                 label: str,
-                 multiline: bool = False,
-                 callback: Optional[Callable[[str], _CORO_NONE]] = None,
-                 init: str = "") -> None:
-        super().__init__(UIType.Input, InputProps,
-                         [FrontendEventType.Change.value])
-        self.props.label = label
+
+class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
+    def __init__(self,callback: Optional[Callable[[str], _CORO_NONE]],
+                 type: UIType,
+                 prop_cls: Type[T_input_base_props],
+                 allowed_events: Optional[Iterable[ValueType]] = None,
+                 ) -> None:
+        super().__init__(type, prop_cls,
+                         allowed_events)
         self.callback = callback
-        self.props.value = init
-        self.props.multiline = multiline
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
@@ -1230,6 +1222,67 @@ class Input(MUIComponentBase[InputProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
+@dataclasses.dataclass
+class TextFieldProps(InputBaseProps):
+    label: str = ""
+    mui_color: Union[_StdColorNoDefault, Undefined] = undefined
+    size: Union[Undefined, Literal["small", "medium"]] = undefined
+    mui_margin: Union[Undefined, Literal["dense", "none", "normal"]] = "dense"
+    variant: Union[Undefined, Literal["filled", "outlined",
+                                      "standard"]] = undefined
+
+
+class TextField(_InputBaseComponent[TextFieldProps]):
+    def __init__(self,
+                 label: str,
+                 multiline: bool = False,
+                 callback: Optional[Callable[[str], _CORO_NONE]] = None,
+                 init: str = "") -> None:
+        super().__init__(callback, UIType.TextField, TextFieldProps,
+                         [FrontendEventType.Change.value])
+        self.props.label = label
+        self.props.value = init
+        self.props.multiline = multiline
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class InputProps(InputBaseProps):
+    placeholder: str = ""
+    mui_color: Union[Literal["primary", "secondary"], Undefined] = undefined
+    mui_margin: Union[Undefined, Literal["dense", "none"]] = "dense"
+
+
+class Input(_InputBaseComponent[InputProps]):
+    def __init__(self,
+                 placeholder: str,
+                 multiline: bool = False,
+                 callback: Optional[Callable[[str], _CORO_NONE]] = None,
+                 init: str = "") -> None:
+        super().__init__(callback, UIType.Input, InputProps,
+                         [FrontendEventType.Change.value])
+        self.props.placeholder = placeholder
+        self.props.value = init
+        self.props.multiline = multiline
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 @dataclasses.dataclass
 class MonacoEditorProps(MUIComponentBaseProps):

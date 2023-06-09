@@ -1,13 +1,15 @@
 from dataclasses import dataclass
 import enum
 from pathlib import Path
+import pickle
 import sys
 import inspect
 import threading
 import time
-from types import FrameType
+from types import CodeType, FrameType
 from typing import Any, Callable, Dict, Mapping, Optional, Set, Tuple, Type
-from tensorpc import compat 
+from tensorpc import compat
+from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX 
 
 THREAD_GLOBALS = threading.local()
 
@@ -56,26 +58,38 @@ class Tracer(object):
         self.traced_types = traced_types
         self.traced_names = traced_names
         self.ignored_names = ignored_names
-
+        self._tensorpc_prefix = f"<{TENSORPC_FILE_NAME_PREFIX}"
+        self.keep_one_frame_for_ignored: bool = True
+        # code type -> (should trace, filter_res)
+        self.code_res: Dict[CodeType, Tuple[bool, bool]] = {}
         self.traced_folders: Optional[Set[Path]] = None
         self.trace_return = trace_return
         self.callback = callback
-        if traced_folders is not None:
+        if traced_folders is not None and len(traced_folders) > 0:
             self.traced_folders = set(
                 Path(folder) for folder in traced_folders)
         self._frame_cnt = _frame_cnt
 
     def _filter_frame(self, frame: FrameType):
+        if frame.f_code in self.code_res:
+            return self.code_res[frame.f_code][0]
         is_traced_types = True
         is_traced_names = True
         is_traced_folders = True
         co_name = frame.f_code.co_name
+        # TODO better handle tensorpc scripts
+        if frame.f_code.co_filename.startswith(self._tensorpc_prefix):
+            self.code_res[frame.f_code] = (True, True)
+            return True 
         if co_name.startswith("<") and co_name.endswith(">"):
             # ignore all comp frame such as <listcomp>
             # listcomp frame will be removed in python 3.12
+            self.code_res[frame.f_code] = (False, False)
             return False 
         # TODO better check
-        if co_name == "__getattr__":
+        keep_one_frame = False
+        if co_name == "__getattr__" or co_name == "__setattr__" :
+            self.code_res[frame.f_code] = (False, False)
             return False 
         if self.traced_types is not None and "self" in frame.f_locals:
             is_traced_types = isinstance(frame.f_locals["self"],self.traced_types)
@@ -83,6 +97,7 @@ class Tracer(object):
             is_traced_names = frame.f_code.co_name in self.traced_names
         if self.ignored_names is not None:
             if frame.f_code.co_name in self.ignored_names:
+                self.code_res[frame.f_code] = (False, False)
                 return False 
         if self.traced_folders is not None:
             code_path = Path(frame.f_code.co_filename)
@@ -92,7 +107,17 @@ class Tracer(object):
                     found = True
                     break
             is_traced_folders = found
-        return is_traced_types and is_traced_names and is_traced_folders
+            if not found:
+                # keep external trace for one depth
+                back = frame.f_back
+                if self.keep_one_frame_for_ignored and back is not None and back.f_code in self.code_res and self.code_res[back.f_code][1]:
+                    keep_one_frame = True
+        res = is_traced_types and is_traced_names and is_traced_folders
+        filter_res = res 
+        if keep_one_frame:
+            filter_res = keep_one_frame
+        self.code_res[frame.f_code] = (filter_res, res)
+        return res
 
     def __enter__(self):
         THREAD_GLOBALS.__dict__.setdefault('depth', 0)
@@ -215,6 +240,7 @@ class Tracer(object):
                             break
                     else:
                         return None
+
         # we only handle methods and global functions.
         # print(event, frame.f_code.co_name)
         if not self._filter_frame(frame):

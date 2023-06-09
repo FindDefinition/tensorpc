@@ -9,9 +9,10 @@ from tensorpc.core.serviceunit import ObservedFunction
 from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.components import mui
 from tensorpc.flow.flowapp.components.plus.canvas import SimpleCanvas
+from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 
 from ..common import CommonQualNames
-from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler
+from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler, DataClassesType
 from .treeitems import TraceTreeItem
 monospace_14px = dict(font_family="monospace", font_size="14px")
 
@@ -27,7 +28,7 @@ class TensorHandler(ObjectPreviewHandler):
         self.data_print = mui.Typography("").prop(font_family="monospace",
                                                   font_size="12px",
                                                   white_space="pre-wrap")
-        self.slice_val = mui.Input("Slice", callback=self._slice_change).prop(size="small",
+        self.slice_val = mui.TextField("Slice", callback=self._slice_change).prop(size="small",
                                                  mui_margin="dense")
         layout = [
             self.title.prop(font_size="14px", font_family="monospace"),
@@ -172,3 +173,19 @@ class ObservedFunctionHandler(ObjectPreviewHandler):
     async def bind(self, obj: ObservedFunction, uid: str):
         await self.qualname.write(obj.qualname)
         await self.path.write(obj.path)
+
+
+
+@ALL_OBJECT_PREVIEW_HANDLERS.register(DataClassesType)
+class DataclassesHandler(ObjectPreviewHandler):
+
+    def __init__(self) -> None:
+        self.cfg_ctrl_container = mui.Fragment([])
+        super().__init__(
+            [self.cfg_ctrl_container])
+        self.prop(flex_direction="column", flex=1)
+
+    async def bind(self, obj: Any, uid: str):
+        panel = ConfigPanel(obj)
+        await self.cfg_ctrl_container.set_new_layout([panel])
+

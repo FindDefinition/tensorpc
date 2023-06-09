@@ -122,6 +122,16 @@ def find_component_by_uid(uid: str) -> Optional["Component"]:
         return appctx.app.root._get_comp_by_uid(uid)
     except KeyError:
         return None 
+    
+def find_component_by_uid_with_type_check(uid: str, type: Type[T_comp]) -> Optional[T_comp]:
+    appctx = get_app_context()
+    assert appctx is not None, "you must use this function in app"
+    try:
+        res = appctx.app.root._get_comp_by_uid(uid)
+        assert isinstance(res, type)
+        return res
+    except KeyError:
+        return None 
 
 def get_reload_manager():
     appctx = get_app_context()
@@ -143,6 +153,8 @@ class AppSpecialEventType(enum.Enum):
     WatchDogChange = "WatchDogChange"
 
     ObservedFunctionChange = "ObservedFunctionChange"
+    # emitted when layout update is sent to frontend.
+    LayoutChange = "LayoutChange"
 
 @dataclasses.dataclass
 class _CompReloadMeta:

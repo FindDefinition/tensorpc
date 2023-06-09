@@ -1,9 +1,9 @@
-
-
 import asyncio
 import contextlib
 from functools import partial
 import inspect
+from pathlib import Path
+import types
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
 
@@ -52,7 +52,8 @@ def update_locals_sync(*,
 
 
 @contextlib.contextmanager
-def trace_sync(key: str = "trace",
+def trace_sync(traced_locs: List[Union[str, Path, types.ModuleType]],
+               key: str = "trace",
                traced_types: Optional[Tuple[Type]] = None,
                traced_names: Optional[Set[str]] = None,
                traced_folders: Optional[Set[str]] = None,
@@ -68,7 +69,8 @@ def trace_sync(key: str = "trace",
         yield
         return
     assert comp is not None, "you must add inspector to your UI"
-    with comp.trace_sync(key,
+    with comp.trace_sync(traced_locs,
+                         key,
                          traced_types,
                          traced_names,
                          traced_folders,
@@ -81,7 +83,8 @@ def trace_sync(key: str = "trace",
 
 
 @contextlib.contextmanager
-def trace_sync_return(key: str = "trace",
+def trace_sync_return(traced_locs: List[Union[str, Path, types.ModuleType]],
+                      key: str = "trace",
                       traced_types: Optional[Tuple[Type]] = None,
                       traced_names: Optional[Set[str]] = None,
                       traced_folders: Optional[Set[str]] = None,
@@ -96,7 +99,8 @@ def trace_sync_return(key: str = "trace",
         yield
         return
     assert comp is not None, "you must add inspector to your UI"
-    with comp.trace_sync(key,
+    with comp.trace_sync(traced_locs,
+                         key,
                          traced_types,
                          traced_names,
                          traced_folders,
@@ -109,7 +113,8 @@ def trace_sync_return(key: str = "trace",
 
 
 @contextlib.asynccontextmanager
-async def trace(key: str = "trace",
+async def trace(traced_locs: List[Union[str, Path, types.ModuleType]],
+                key: str = "trace",
                 traced_types: Optional[Tuple[Type]] = None,
                 traced_names: Optional[Set[str]] = None,
                 traced_folders: Optional[Set[str]] = None,
@@ -125,7 +130,8 @@ async def trace(key: str = "trace",
         yield
         return
     assert comp is not None, "you must add inspector to your UI"
-    async with comp.trace(key,
+    async with comp.trace(traced_locs,
+                          key,
                           traced_types,
                           traced_names,
                           traced_folders,
@@ -158,4 +164,3 @@ async def read_item(uid: str):
     comp = app.find_component(plus.ObjectInspector)
     assert comp is not None, "you must add inspector to your UI to use exception inspect"
     return await comp.get_object_by_uid(uid)
-
