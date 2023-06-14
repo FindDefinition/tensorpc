@@ -41,11 +41,10 @@ class AsyncIOEventEmitter(EventEmitter[KT, Unpack[VTs]]):
     def _emit_run(
         self,
         f: Callable,
-        args: Tuple[Any, ...],
-        kwargs: Dict[str, Any],
+        args: Tuple[Unpack[VTs]],
     ):
         try:
-            coro: Any = f(*args, **kwargs)
+            coro: Any = f(*args)
         except Exception as exc:
             self.emit_exception(ExceptionParam(exc))
         else:

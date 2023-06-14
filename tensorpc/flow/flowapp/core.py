@@ -919,8 +919,8 @@ class Component(Generic[T_base_props, T_child]):
         self._flow_reference_count = 0
         # tensorpc will scan your prop dict to find
         # np.ndarray and bytes by default.
-        # this will cost time, so if you use
-        # json_only, this scan will be skiped.
+        # this will cost time in deep and large json, if you use
+        # json_only, this scan will be skipped.
         self._flow_json_only = json_only
 
         self._flow_event_context_creator: Optional[Callable[
@@ -931,7 +931,6 @@ class Component(Generic[T_base_props, T_child]):
     def _create_event_slot(self, event_type: Union[FrontendEventType, EventDataType]):
         if isinstance(event_type, FrontendEventType):
             event_type = event_type.value
-
         return _EventSlot(event_type, self)
 
     @property
