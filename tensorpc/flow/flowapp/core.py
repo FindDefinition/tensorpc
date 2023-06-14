@@ -17,6 +17,7 @@ import asyncio
 import builtins
 import dataclasses
 import enum
+from functools import partial
 import inspect
 import io
 import re
@@ -32,12 +33,13 @@ from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec,
                                Protocol, Self, TypeAlias)
 
 import pyee
+from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 
 from tensorpc.core.core_io import JsonOnlyData
 from tensorpc.core.serviceunit import (AppFuncType, ReloadableDynamicClass,
                                        ServFunctionMeta)
 from tensorpc.flow.coretypes import MessageLevel
-from tensorpc.flow.flowapp.appcore import EventHandler
+from tensorpc.flow.flowapp.appcore import EventHandler, EventHandlers
 from tensorpc.flow.flowapp.reload import AppReloadManager, FlowSpecialMethods
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.uniquename import UniqueNamePool
@@ -47,7 +49,7 @@ from tensorpc.core import dataclass_dispatch as dataclasses_strict
 from ..jsonlike import (DataClassWithUndefined, Undefined,
                         as_dict_no_undefined, snake_to_camel,
                         split_props_to_undefined, undefined)
-from .appcore import EventType, NumberType, ValueType, get_app
+from .appcore import SimpleEventType, NumberType, ValueType, get_app, Event, EventDataType
 
 ALL_APP_EVENTS = HashableRegistry()
 
@@ -409,7 +411,7 @@ class AppEditorFrontendEvent:
 @ALL_APP_EVENTS.register(key=AppEventType.UIEvent.value)
 class UIEvent:
 
-    def __init__(self, uid_to_data: Dict[str, EventType]) -> None:
+    def __init__(self, uid_to_data: Dict[str, SimpleEventType]) -> None:
         self.uid_to_data = uid_to_data
 
     def to_dict(self):
@@ -861,13 +863,38 @@ def _get_obj_def_path(obj):
         _flow_comp_def_path = ""
     return _flow_comp_def_path
 
+class _EventSlot:
+    def __init__(self, event_type: EventDataType, comp: "Component"):
+        self.event_type = event_type
+        self.comp = comp
+
+    def on_standard(self, handler: Callable[[Event], Any]) -> "_EventSlot":
+        """standard event means the handler must be a function with one argument of Event.
+        """
+        self.comp.register_event_handler(self.event_type, handler, simple_event=False)
+        return self 
+    
+    def on(self, handler: Callable) -> "_EventSlot":
+        """simple event means the event data isn't Event, but the data of Event, or none for no-arg event
+        such as click.
+        """
+        self.comp.register_event_handler(self.event_type, handler, simple_event=True)
+        return self 
+
+    def configure(self, stop_propagation: bool = False,
+            throttle: Optional[NumberType] = None,
+            debounce: Optional[NumberType] = None,
+            backend_only: bool = False) -> "_EventSlot":
+        self.comp.configure_event_handlers(self.event_type, stop_propagation,
+                throttle, debounce, backend_only)
+        return self
 
 class Component(Generic[T_base_props, T_child]):
 
     def __init__(self,
                  type: UIType,
                  prop_cls: Type[T_base_props],
-                 allowed_events: Optional[Iterable[ValueType]] = None,
+                 allowed_events: Optional[Iterable[EventDataType]] = None,
                  uid: str = "",
                  json_only: bool = False) -> None:
         self._flow_comp_core: Optional[AppComponentCore] = None
@@ -882,12 +909,11 @@ class Component(Generic[T_base_props, T_child]):
         self.__props = prop_cls()
         self.__prop_cls = prop_cls
         self._mounted_override = False
-        self._flow_event_handlers: Dict[ValueType, Union[EventHandler,
-                                                         Undefined]] = {}
+        self._flow_event_handlers: Dict[EventDataType, EventHandlers] = {}
         self.__sx_props: Dict[str, Any] = {}
-        self._flow_allowed_events: Set[ValueType] = set()
+        self._flow_allowed_events: Set[EventDataType] = set([FrontendEventType.BeforeMount.value, FrontendEventType.BeforeUnmount.value])
         if allowed_events is not None:
-            self._flow_allowed_events = set(allowed_events)
+            self._flow_allowed_events.update(allowed_events)
         self._flow_user_data: Any = None
         self._flow_comp_def_path = _get_obj_def_path(self)
         self._flow_reference_count = 0
@@ -899,11 +925,17 @@ class Component(Generic[T_base_props, T_child]):
 
         self._flow_event_context_creator: Optional[Callable[
             [], ContextManager]] = None
+        # TODO remove event emitter.
+        self._flow_event_emitter: AsyncIOEventEmitter[ValueType, Event] = AsyncIOEventEmitter()
 
-        self._flow_event_emitter = pyee.AsyncIOEventEmitter()
+    def _create_event_slot(self, event_type: Union[FrontendEventType, EventDataType]):
+        if isinstance(event_type, FrontendEventType):
+            event_type = event_type.value
+
+        return _EventSlot(event_type, self)
 
     @property
-    def event_emitter(self):
+    def flow_event_emitter(self) -> AsyncIOEventEmitter[ValueType, Event]:
         return self._flow_event_emitter
 
     def get_special_methods(self, reload_mgr: AppReloadManager):
@@ -937,7 +969,7 @@ class Component(Generic[T_base_props, T_child]):
             self._flow_uid = uid
             self._flow_comp_core = comp_core
             self._flow_reference_count += 1
-            self.event_emitter.emit(FrontendEventType.BeforeMount.name)
+            self.flow_event_emitter.emit(FrontendEventType.BeforeMount.name, Event(FrontendEventType.BeforeMount.name, None))
             return {uid: self}
         self._flow_reference_count += 1
         return {}
@@ -948,7 +980,7 @@ class Component(Generic[T_base_props, T_child]):
             res_uid = self._flow_uid
             self._flow_uid = ""
             self._flow_comp_core = None
-            self.event_emitter.emit(FrontendEventType.BeforeUnmount.name)
+            self.flow_event_emitter.emit(FrontendEventType.BeforeUnmount.name, Event(FrontendEventType.BeforeUnmount.name, None))
             return {res_uid: self}
         return {}
 
@@ -983,7 +1015,7 @@ class Component(Generic[T_base_props, T_child]):
 
         return wrapper
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         pass
 
     async def _clear(self):
@@ -1037,7 +1069,7 @@ class Component(Generic[T_base_props, T_child]):
     def _get_used_events_dict(self):
         evs = []
         for k, v in self._flow_event_handlers.items():
-            if not isinstance(v, Undefined) and not v.backend_only:
+            if not isinstance(v, Undefined) and not v.backend_only and v.handlers:
                 d = v.to_dict()
                 d["type"] = k
                 evs.append(d)
@@ -1086,7 +1118,7 @@ class Component(Generic[T_base_props, T_child]):
                 if name in name_to_fields:
                     setattr(self.__props, name, value)
 
-    async def put_loopback_ui_event(self, ev: EventType):
+    async def put_loopback_ui_event(self, ev: SimpleEventType):
         if self.is_mounted():
             return await self.queue.put(
                 AppEvent("",
@@ -1107,22 +1139,58 @@ class Component(Generic[T_base_props, T_child]):
         assert self._flow_comp_core is not None, f"you must add ui by flexbox.add_xxx"
         return self._flow_comp_core
 
+    def configure_event_handlers(self, 
+            type: Union[FrontendEventType, EventDataType],
+            stop_propagation: bool = False,
+            throttle: Optional[NumberType] = None,
+            debounce: Optional[NumberType] = None,
+            backend_only: bool = False):
+        if isinstance(type, FrontendEventType):
+            type_value = type.value
+        else:
+            type_value = type
+        if type_value not in self._flow_event_handlers:
+            self._flow_event_handlers[type_value] = EventHandlers([])
+        handlers = self._flow_event_handlers[type_value]
+        handlers.stop_propagation = stop_propagation
+        handlers.throttle = throttle
+        handlers.debounce = debounce
+        handlers.backend_only = backend_only
+        return 
+
+    
     def register_event_handler(self,
-                               type: ValueType,
+                               type: Union[FrontendEventType, EventDataType],
                                cb: Callable,
                                stop_propagation: bool = False,
                                throttle: Optional[NumberType] = None,
                                debounce: Optional[NumberType] = None,
-                               backend_only: bool = False):
+                               backend_only: bool = False,
+                               simple_event: bool = True):
         if self._flow_allowed_events:
             if not backend_only:
                 assert type in self._flow_allowed_events, f"only support events: {self._flow_allowed_events}"
-        evh = EventHandler(cb, stop_propagation, throttle, debounce,
-                           backend_only)
-        self._flow_event_handlers[type] = evh
+        
+        evh = EventHandler(cb, simple_event)
+        if isinstance(type, FrontendEventType):
+            type_value = type.value
+        else:
+            type_value = type
+        if type_value not in self._flow_event_handlers:
+            self._flow_event_handlers[type_value] = EventHandlers([])
+        handlers = self._flow_event_handlers[type_value]
+        if type == FrontendEventType.DragCollect:
+            assert len(handlers.handlers) == 0, "DragCollect only support one handler"
+        self.configure_event_handlers(type_value, stop_propagation, throttle, debounce, backend_only)
+        handlers.handlers.append(evh)
+        # self._flow_event_handlers[type_value] = evh
+        # if once:
+        #     self._flow_event_emitter.once(type_value, self.handle_event)
+        # else:
+        #     self._flow_event_emitter.once(type_value, self.handle_event)
         return evh
 
-    def remove_event_handler(self, type: ValueType):
+    def remove_event_handlers(self, type: EventDataType):
         if type in self._flow_event_handlers:
             del self._flow_event_handlers[type]
             return True
@@ -1131,7 +1199,7 @@ class Component(Generic[T_base_props, T_child]):
     def clear_event_handlers(self):
         self._flow_event_handlers.clear()
 
-    def get_event_handler(self, type: ValueType):
+    def get_event_handlers(self, type: EventDataType):
         res = self._flow_event_handlers.get(type)
         if isinstance(res, Undefined):
             res = None
@@ -1221,10 +1289,31 @@ class Component(Generic[T_base_props, T_child]):
     async def run_callback(self,
                            cb: Callable[[], _CORO_NONE],
                            sync_state: bool = False,
-                           sync_first: bool = True,
+                           sync_first: bool = False,
                            res_callback: Optional[Callable[[Any],
                                                            _CORO_NONE]] = None,
                            change_status: bool = True):
+        """
+        Runs the given callback function and handles its result and potential exceptions.
+
+        Args:
+            cb: The callback function to run.
+            sync_state: Whether to synchronize the component's state before and after running the callback.
+                this is required for components which can change state
+                in frontend, e.g. switch, slider, etc. for components that
+                won't interact with user in frontend, this can be set to False.
+            sync_first: Whether to wait for the component's state to be synchronized before running the callback.
+                should be used for components with loading support. e.g. buttons
+            res_callback: An optional callback function to run with the result of the main callback.
+            change_status: Whether to change the component's status to "Running" before running the callback and to "Stop" after.
+
+        Returns:
+            The result of the main callback function.
+
+        Raises:
+            Any exception raised by the main callback function.
+        """
+
         if change_status:
             self.props.status = UIRunStatus.Running.value
         # only ui with loading support need sync first.
@@ -1259,6 +1348,70 @@ class Component(Generic[T_base_props, T_child]):
             if change_status:
                 self.props.status = UIRunStatus.Stop.value
                 await self.sync_status(sync_state)
+        return res
+    
+    async def run_callbacks(self,
+                           cbs: List[Callable[[], _CORO_NONE]],
+                           sync_state: bool = False,
+                           sync_first: bool = False,
+                           res_callback: Optional[Callable[[Any],
+                                                           _CORO_NONE]] = None,
+                           change_status: bool = True):
+        """
+        Runs the given callback function and handles its result and potential exceptions.
+
+        Args:
+            cbs: The callback functions to run.
+            sync_state: Whether to synchronize the component's state before and after running the callback.
+                this is required for components which can change state
+                in frontend, e.g. switch, slider, etc. for components that
+                won't interact with user in frontend, this can be set to False.
+            sync_first: Whether to wait for the component's state to be synchronized before running the callback.
+                should be used for components with loading support. e.g. buttons
+            res_callback: An optional callback function to run with the result of the main callback.
+            change_status: Whether to change the component's status to "Running" before running the callback and to "Stop" after.
+
+        Returns:
+            The result of the main callback function.
+
+        Raises:
+            Any exception raised by the main callback function.
+        """
+
+        if change_status:
+            self.props.status = UIRunStatus.Running.value
+        # only ui with loading support need sync first.
+        # otherwise don't use this because slow
+        if sync_first:
+            ev = asyncio.Event()
+            await self.sync_status(sync_state, ev)
+            await ev.wait()
+        res = None
+        for cb in cbs:
+            try:
+                coro = cb()
+                if inspect.iscoroutine(coro):
+                    res = await coro
+                else:
+                    res = coro
+                if res_callback is not None:
+                    res_coro = res_callback(res)
+                    if inspect.iscoroutine(res_coro):
+                        await res_coro
+            except Exception as e:
+                traceback.print_exc()
+                ss = io.StringIO()
+                traceback.print_exc(file=ss)
+                user_exc = UserMessage.create_error(self._flow_uid, repr(e),
+                                                    ss.getvalue())
+                await self.put_app_event(self.create_user_msg_event(user_exc))
+                app = get_app()
+                if app._flowapp_enable_exception_inspect:
+                    await app._inspect_exception()
+        # finally:
+        if change_status:
+            self.props.status = UIRunStatus.Stop.value
+            await self.sync_status(sync_state)
         return res
 
     async def sync_status(self,
@@ -1297,7 +1450,7 @@ class ContainerBase(Component[T_container_props, T_child]):
                  uid_to_comp: Optional[Dict[str, Component]] = None,
                  _children: Optional[Dict[str, T_child]] = None,
                  inited: bool = False,
-                 allowed_events: Optional[Iterable[ValueType]] = None,
+                 allowed_events: Optional[Iterable[EventDataType]] = None,
                  uid: str = "",
                  app_comp_core: Optional[AppComponentCore] = None) -> None:
         super().__init__(base_type, prop_cls, allowed_events, uid)

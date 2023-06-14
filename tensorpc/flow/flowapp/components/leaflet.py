@@ -21,6 +21,7 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Tuple, Type, TypeVar, Union)
 
 from tensorpc import compat
+from tensorpc.flow.flowapp.appcore import Event
 
 if compat.Python3_8AndLater:
     from typing import Literal
@@ -33,7 +34,7 @@ import numpy as np
 from tensorpc.utils.uniquename import UniqueNamePool
 from typing_extensions import ParamSpec, TypeAlias
 
-from ..core import (BasicProps, Component, EventType, ContainerBase,
+from ..core import (BasicProps, Component, SimpleEventType, ContainerBase,
                     FrontendEventType, NumberType, T_base_props, T_child,
                     UIRunStatus, UIType, Undefined, undefined,
                     ContainerBaseProps, T_container_props, Fragment,
@@ -122,6 +123,8 @@ class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
                          uid_to_comp, children, inited, allow_evs)
         self.center = center
         self.zoom = zoom
+        self.event_move = self._create_event_slot(FrontendEventType.MapMove)
+        self.event_zoom = self._create_event_slot(FrontendEventType.MapZoom)
 
     def to_dict(self):
         res = super().to_dict()
@@ -129,21 +132,7 @@ class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
         res["zoom"] = self.zoom
         return res
 
-    def set_map_callback(self,
-                         on_move: Optional[Union[EventHandler,
-                                                 Undefined]] = None,
-                         on_zoom: Optional[Union[EventHandler,
-                                                 Undefined]] = None):
-
-        pointer_event_map = {
-            FrontendEventType.MapZoom: on_move,
-            FrontendEventType.MapMove: on_zoom,
-        }
-        for k, v in pointer_event_map.items():
-            if v is not None:
-                self._flow_event_handlers[k.value] = v
-
-    async def handle_event(self, ev: EventType):
+    async def handle_event(self, ev: Event):
         await handle_raw_event(ev, self, just_run=True)
 
     async def fly_to(self,
@@ -295,7 +284,7 @@ class Polyline(MapContainerBase[PolylineProps, MapElementChildType]):
         self.props.positions = positions
         self.on_click = on_click
 
-    async def handle_event(self, ev: EventType):
+    async def handle_event(self, ev: Event):
         await handle_standard_event(self, ev)
 
     @property
@@ -370,7 +359,7 @@ class CircleMarker(MapContainerBase[CircleMarkerProps, MapElementChildType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def handle_event(self, ev: EventType):
+    async def handle_event(self, ev: Event):
         await handle_standard_event(self, ev)
 
 
@@ -406,5 +395,5 @@ class Marker(MapContainerBase[MarkerProps, MapElementChildType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def handle_event(self, ev: EventType):
+    async def handle_event(self, ev: Event):
         await handle_standard_event(self, ev)

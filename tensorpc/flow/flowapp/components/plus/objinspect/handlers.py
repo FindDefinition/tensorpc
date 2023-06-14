@@ -186,6 +186,8 @@ class DataclassesHandler(ObjectPreviewHandler):
         self.prop(flex_direction="column", flex=1)
 
     async def bind(self, obj: Any, uid: str):
-        panel = ConfigPanel(obj)
+        # for uncontrolled component, use react_key to force remount.
+        # TODO currently no way to update if obj dataclass def is changed with same uid.
+        panel = ConfigPanel(obj).prop(react_key=uid)
         await self.cfg_ctrl_container.set_new_layout([panel])
 

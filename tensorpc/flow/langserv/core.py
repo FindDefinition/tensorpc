@@ -16,8 +16,8 @@ def get_tmux_lang_server_info_may_create(ls_type: str, uid: str, port: int):
     if ls_type == "pyright":
         window_command_fmt = "python -m tensorpc.cli.pyls --port={}"
         try:
-            subprocess.check_call(["pyright", "--version"])
-        except Exception:
+            import pyright
+        except ImportError:
             raise Exception("pyright not installed, you can install by pip install pyright")
     elif ls_type == "pylsp":
         window_command_fmt = "pylsp --ws --port {}"
@@ -32,7 +32,6 @@ def get_tmux_lang_server_info_may_create(ls_type: str, uid: str, port: int):
         except Exception:
             raise Exception("clangd not installed, you can install by sudo apt install clangd")
 
-    
     s = libtmux.Server()
     sessions = s.sessions
     sess_names = [sess.name for sess in sessions]

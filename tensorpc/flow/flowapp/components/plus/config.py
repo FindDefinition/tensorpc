@@ -280,11 +280,12 @@ class ConfigPanel(mui.DynamicControls):
             # we may need to write own dynamic control
             # based on tanstack table.
             cmeta.setter(value[1])
-            handler = self.get_event_handler(self.__callback_key)
-            if handler is not None:
-                coro = handler.cb(uid, cmeta.getter())
-                if inspect.iscoroutine(coro):
-                    await coro
+            handlers = self.get_event_handlers(self.__callback_key)
+            if handlers is not None:
+                for handler in handlers.handlers:
+                    coro = handler.cb(uid, cmeta.getter())
+                    if inspect.iscoroutine(coro):
+                        await coro
 
     @property
     def config(self):

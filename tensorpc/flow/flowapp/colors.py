@@ -172,15 +172,16 @@ CSS_COLORS_TO_HEX = {
 RANDOM_COLORS_FOR_UI = [
     "red",
     "blue",
-    "yellow",
-    "black",
-    "grey",
     "aqua",
     "pink",
     "purple",
     "slateblue",
     "green",
     "saddlebrown",
+    "yellow",
+    "black",
+    "grey",
+
 ]
 
 CSS_COLORS = list(CSS_COLORS_TO_HEX.keys())

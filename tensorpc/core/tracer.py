@@ -70,6 +70,8 @@ class Tracer(object):
                 Path(folder) for folder in traced_folders)
         self._frame_cnt = _frame_cnt
 
+        self._inner_frame_fnames: Set[str] = set([Tracer.__enter__.__code__.co_filename])
+
     def _filter_frame(self, frame: FrameType):
         if frame.f_code in self.code_res:
             return self.code_res[frame.f_code][0]
@@ -127,6 +129,7 @@ class Tracer(object):
         frame = cur_frame
         _frame_cnt = self._frame_cnt
         while _frame_cnt > 0:
+            self._inner_frame_fnames.add(cur_frame.f_code.co_filename)
             frame = cur_frame.f_back
             assert frame is not None
             cur_frame = frame
@@ -145,6 +148,7 @@ class Tracer(object):
         sys.settrace(trace_fn)
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
+        # print("EXIT", self._frame_cnt, self._inner_frame_fnames, self.target_frames)
         stack = self.thread_local.original_trace_functions
         sys.settrace(stack.pop())
         cur_frame = inspect.currentframe()
@@ -161,11 +165,13 @@ class Tracer(object):
         self.target_frames.discard(calling_frame)
 
     def _is_internal_frame(self, frame: FrameType):
-        return frame.f_code.co_filename == Tracer.__enter__.__code__.co_filename
+        return frame.f_code.co_filename in self._inner_frame_fnames
 
     def trace_lite(self, frame: FrameType, event, arg):
+        # print(frame.f_code.co_name, event, frame.f_lineno)
         if event == 'return':
             THREAD_GLOBALS.depth -= 1
+            # print(event, frame.f_code.co_name, "THREAD_GLOBALS.depth", THREAD_GLOBALS.depth)
             self.callback(self.get_frame_result(TraceType.Return, frame, THREAD_GLOBALS.depth))
 
     @staticmethod
@@ -219,7 +225,7 @@ class Tracer(object):
         return None
 
     def trace_return_func(self, frame: FrameType, event, arg):
-        # print(event, frame.f_code.co_name, self.target_frames, frame.f_code.co_filename)
+        # print(event, frame.f_code.co_name, self.target_frames, frame.f_code.co_filename, self._is_internal_frame(frame))
 
         if not (frame in self.target_frames):
             if self.depth == 1:
@@ -247,6 +253,8 @@ class Tracer(object):
             return None
         if event == "call":
             self.callback(self.get_frame_result(TraceType.Call, frame, THREAD_GLOBALS.depth))
+            # print("THREAD_GLOBALS.depth CALL", THREAD_GLOBALS.depth)
+
             THREAD_GLOBALS.depth += 1
 
         return self.trace_lite

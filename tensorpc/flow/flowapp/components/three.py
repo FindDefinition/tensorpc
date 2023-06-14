@@ -23,6 +23,7 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
 import urllib.request
 from tensorpc import compat
 from tensorpc.core.httpserver import JS_MAX_SAFE_INT
+from tensorpc.flow.flowapp.appcore import Event, EventDataType
 from tensorpc.flow.jsonlike import DataClassWithUndefined
 from typing_extensions import Literal
 
@@ -34,7 +35,7 @@ from typing_extensions import ParamSpec, TypeAlias
 from tensorpc.utils.uniquename import UniqueNamePool
 
 from ..core import (AppEvent, AppEventType, BasicProps, Component,
-                    ContainerBase, ContainerBaseProps, EventHandler, EventType,
+                    ContainerBase, ContainerBaseProps, EventHandler, SimpleEventType,
                     Fragment, FrontendEventType, NumberType, T_base_props,
                     T_child, T_container_props, TaskLoopEvent, UIEvent,
                     UIRunStatus, UIType, Undefined, ValueType, undefined)
@@ -179,8 +180,9 @@ T_o3d_container_prop = TypeVar("T_o3d_container_prop",
 
 
 class Object3dBase(ThreeComponentBase[T_o3d_prop]):
-    def __init__(self, base_type: UIType, prop_cls: Type[T_o3d_prop]) -> None:
-        super().__init__(base_type, prop_cls)
+    def __init__(self, base_type: UIType, prop_cls: Type[T_o3d_prop],
+                 allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
+        super().__init__(base_type, prop_cls, allowed_events)
 
     def update_object3d_event(self,
                               position: Optional[Union[Vector3Type,
@@ -232,68 +234,31 @@ class Object3dBase(ThreeComponentBase[T_o3d_prop]):
 
 class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
     def __init__(self, base_type: UIType, prop_cls: Type[T_o3d_prop]) -> None:
-        super().__init__(base_type, prop_cls)
+        super().__init__(base_type, prop_cls, allowed_events=[
+            FrontendEventType.Click.value,
+            FrontendEventType.DoubleClick.value,
+            FrontendEventType.Enter.value,
+            FrontendEventType.Leave.value,
+            FrontendEventType.Over.value,
+            FrontendEventType.Out.value,
+            FrontendEventType.Up.value,
+            FrontendEventType.Down.value,
+            FrontendEventType.ContextMenu.value,
+            FrontendEventType.Change.value,
+        ])
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
+        self.event_double_click = self._create_event_slot(FrontendEventType.DoubleClick)
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
+        self.event_enter = self._create_event_slot(FrontendEventType.Enter)
+        self.event_leave = self._create_event_slot(FrontendEventType.Leave)
+        self.event_over = self._create_event_slot(FrontendEventType.Over)
+        self.event_out = self._create_event_slot(FrontendEventType.Out)
+        self.event_up = self._create_event_slot(FrontendEventType.Up)
+        self.event_down = self._create_event_slot(FrontendEventType.Down)
+        self.event_context_menu = self._create_event_slot(FrontendEventType.ContextMenu)
 
-    def to_dict(self):
-        res = super().to_dict()
-        evs = []
-        for k, v in self._flow_event_handlers.items():
-            if k == FrontendEventType.Change.value:
-                continue
-            if not isinstance(v, Undefined):
-                d = v.to_dict()
-                d["type"] = k
-                evs.append(d)
-        res["props"]["usedEvents"] = evs
-        return res
-
-    def set_pointer_callback(
-            self,
-            on_click: Optional[Union[EventHandler, Undefined]] = None,
-            on_double_click: Optional[Union[EventHandler, Undefined]] = None,
-            on_enter: Optional[Union[EventHandler, Undefined]] = None,
-            on_leave: Optional[Union[EventHandler, Undefined]] = None,
-            on_over: Optional[Union[EventHandler, Undefined]] = None,
-            on_out: Optional[Union[EventHandler, Undefined]] = None,
-            on_up: Optional[Union[EventHandler, Undefined]] = None,
-            on_down: Optional[Union[EventHandler, Undefined]] = None,
-            on_context_menu: Optional[Union[EventHandler, Undefined]] = None,
-            on_change: Optional[Union[EventHandler, Undefined]] = None):
-        pointer_event_map = {
-            FrontendEventType.Click: on_click,
-            FrontendEventType.DoubleClick: on_double_click,
-            FrontendEventType.Enter: on_enter,
-            FrontendEventType.Leave: on_leave,
-            FrontendEventType.Over: on_over,
-            FrontendEventType.Out: on_out,
-            FrontendEventType.Up: on_up,
-            FrontendEventType.Down: on_down,
-            FrontendEventType.ContextMenu: on_context_menu,
-            FrontendEventType.Change: on_change,
-        }
-        for k, v in pointer_event_map.items():
-            if v is not None:
-                self._flow_event_handlers[k.value] = v
-
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
-        # ev: [type, data]
-        type, data = ev
-        # ev_type = FrontendEventType(type)
-        handler = self._flow_event_handlers[type]
-        if isinstance(handler, Undefined):
-            return
-        if self.props.status == UIRunStatus.Running.value:
-            # TODO send exception if ignored click
-            print("IGNORE EVENT", self.props.status)
-            return
-        elif self.props.status == UIRunStatus.Stop.value:
-            self.state_change_callback(data, type)
-
-            def ccb(cb):
-                return lambda: cb(data)
-
-            self._task = asyncio.create_task(
-                self.run_callback(ccb(handler.cb), True))
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync)
 
 
 class Object3dContainerBase(ThreeContainerBase[T_o3d_container_prop, T_child]):
@@ -363,70 +328,8 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
                  inited: bool = False) -> None:
         super().__init__(base_type, prop_cls, children, uid_to_comp, inited)
 
-    def to_dict(self):
-        res = super().to_dict()
-        evs = []
-        for k, v in self._flow_event_handlers.items():
-            if k == FrontendEventType.Change.value:
-                continue
-            if not isinstance(v, Undefined):
-                evs.append({"type": k, "stopPropagation": v.stop_propagation})
-        res["props"]["usedEvents"] = evs
-        return res
-
-    def set_pointer_callback(
-            self,
-            on_click: Optional[Union[EventHandler, Undefined]] = None,
-            on_double_click: Optional[Union[EventHandler, Undefined]] = None,
-            on_enter: Optional[Union[EventHandler, Undefined]] = None,
-            on_leave: Optional[Union[EventHandler, Undefined]] = None,
-            on_over: Optional[Union[EventHandler, Undefined]] = None,
-            on_out: Optional[Union[EventHandler, Undefined]] = None,
-            on_up: Optional[Union[EventHandler, Undefined]] = None,
-            on_down: Optional[Union[EventHandler, Undefined]] = None,
-            on_context_menu: Optional[Union[EventHandler, Undefined]] = None,
-            on_change: Optional[Union[EventHandler, Undefined]] = None):
-        pointer_event_map = {
-            FrontendEventType.Click: on_click,
-            FrontendEventType.DoubleClick: on_double_click,
-            FrontendEventType.Enter: on_enter,
-            FrontendEventType.Leave: on_leave,
-            FrontendEventType.Over: on_over,
-            FrontendEventType.Out: on_out,
-            FrontendEventType.Up: on_up,
-            FrontendEventType.Down: on_down,
-            FrontendEventType.ContextMenu: on_context_menu,
-            FrontendEventType.Change: on_change,
-        }
-        for k, v in pointer_event_map.items():
-            if v is not None:
-                self._flow_event_handlers[k.value] = v
-
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
-        # ev: [type, data]
-        type, data = ev
-        ev_type = FrontendEventType(type)
-        handler = self._flow_event_handlers[type]
-        if isinstance(handler, Undefined):
-            return
-        if self.props.status == UIRunStatus.Running.value:
-            # TODO send exception if ignored click
-            print("IGNORE EVENT", self.props.status)
-            return
-        elif self.props.status == UIRunStatus.Stop.value:
-            if ev_type == FrontendEventType.Change:
-                self.state_change_callback(data)
-
-            def ccb(cb):
-                return lambda: cb(data)
-
-            if is_sync:
-                return await self.run_callback(ccb(handler.cb),
-                                               True,
-                                               sync_first=False)
-            else:
-                self._task = asyncio.create_task(
-                    self.run_callback(ccb(handler.cb), True, sync_first=False))
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync)
 
 
 @dataclasses.dataclass(config=PyDanticConfigForNumpy)
@@ -439,7 +342,8 @@ class PointProps(ThreeBasicProps):
     size_attenuation: bool = False
     size: float = 3.0
     sizes: Union[np.ndarray, Undefined] = undefined
-
+    encode_method: Union[Literal["none", "int16"], Undefined] = undefined 
+    encode_scale: Union[NumberType, Undefined] = undefined
 
 class PointsControlType(enum.Enum):
     SetColors = 0
@@ -518,7 +422,9 @@ class Points(ThreeComponentBase[PointProps]):
                                                   Undefined]] = None,
                             size_attenuation: bool = False,
                             size: Optional[Union[NumberType,
-                                                 Undefined]] = None):
+                                                 Undefined]] = None,
+                            encode_method: Optional[Union[Literal["none", "int16"], Undefined]] = None, 
+                            encode_scale: Optional[Union[NumberType, Undefined] ]= 50):
         # TODO better check, we must handle all errors before sent to frontend.
         assert points.ndim == 2 and points.shape[1] in [
             3, 4
@@ -529,17 +435,24 @@ class Points(ThreeComponentBase[PointProps]):
         else:
             assert points.shape[
                 0] <= self.props.limit, f"your points size {points.shape[0]} must smaller than limit {self.props.limit}"
-
+            
         assert points.dtype == np.float32, "only support fp32 points"
         if points.shape[1] == 4 and colors is None:
             colors = points[:, 3].astype(np.uint8)
             points = points[:, :3]
         self._check_colors(colors, points)
-
-        upd: Dict[str, Any] = {
-            "points": points,
-            "size_attenuation": size_attenuation,
-        }
+        if encode_method == "int16":
+            upd: Dict[str, Any] = {
+                "points": (points * encode_scale).astype(np.int16),
+                "encode_method": "int16",
+                "encode_scale": encode_scale,
+                "size_attenuation": size_attenuation,
+            }
+        else:
+            upd: Dict[str, Any] = {
+                "points": points,
+                "size_attenuation": size_attenuation,
+            }
         if size is not None:
             upd["size"] = size
         if sizes is not None:
@@ -810,7 +723,7 @@ class BoundingBox(Object3dWithEventBase[BoundingBoxProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         await handle_standard_event(self, ev, is_sync=is_sync)
 
     def state_change_callback(
@@ -1176,10 +1089,8 @@ class CameraUserControlType(enum.Enum):
 class CameraControl(ThreeComponentBase[CameraControlProps]):
     """default values: https://github.com/yomotsu/camera-controls#properties
     """
-    EvChange = FrontendEventType.Change.value
-
     def __init__(self) -> None:
-        super().__init__(UIType.ThreeCameraControl, CameraControlProps)
+        super().__init__(UIType.ThreeCameraControl, CameraControlProps, [FrontendEventType.Change.value])
 
         # self.props.enable_damping = True
         # self.props.damping_factor = 1
@@ -1187,8 +1098,9 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
         self.props.smooth_time = 0
         # self.props.min_distance = 1
         # self.props.max_distance = 100
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         await handle_standard_event(self,
                                     ev,
                                     sync_state_after_change=False,
@@ -1217,7 +1129,6 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
         """
         cam2world = np.array(cam2world, np.float32).reshape(4, 4)
         cam2world = cam2world.T  # R|T to R/T
-
         return await self.send_and_wait(
             self.create_comp_event({
                 "type":
@@ -1410,8 +1321,10 @@ class ScreenShot(ThreeComponentBase[ScreenShotProps]):
     """
     def __init__(self, callback: Callable[[Tuple[str, Any]],
                                           _CORO_NONE]) -> None:
-        super().__init__(UIType.ThreeScreenShot, ScreenShotProps)
+        super().__init__(UIType.ThreeScreenShot, ScreenShotProps,
+                         allowed_events=[FrontendEventType.Change.value])
         self.register_event_handler(FrontendEventType.Change.value, callback)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     @property
     def prop(self):
@@ -1436,7 +1349,7 @@ class ScreenShot(ThreeComponentBase[ScreenShotProps]):
                 "data": data,
             }))
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
                                            sync_first=True,
@@ -1458,11 +1371,12 @@ class ScreenShotSyncReturn(ThreeComponentBase[ScreenShotProps]):
     currently impossible to get image from one function call.
     """
     def __init__(self) -> None:
-        super().__init__(UIType.ThreeScreenShot, ScreenShotProps)
+        super().__init__(UIType.ThreeScreenShot, ScreenShotProps, allowed_events=[FrontendEventType.Change.value])
         self.register_event_handler(FrontendEventType.Change.value,
                                     self._on_callback)
         self._pending_rpc: Dict[int, _PendingState] = {}
         self._uid_index = 0
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     @property
     def prop(self):
@@ -1503,7 +1417,7 @@ class ScreenShotSyncReturn(ThreeComponentBase[ScreenShotProps]):
                 self._pending_rpc.pop(uid)
             raise
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
                                            sync_first=True,
@@ -2583,7 +2497,7 @@ class ShapeButton(Group):
         material = MeshBasicMaterialV1()
         material.prop(color="#393939")
         mesh = MeshV1(ShapeGeometry(shape), material)
-        mesh.set_pointer_callback(on_click=EventHandler(callback, True))
+        mesh.register_event_handler(FrontendEventType.Click.value, callback, stop_propagation=True)
         mesh.prop(hover_color="#222222", click_color="#009A63")
         self.mesh = mesh
         text = Text(name)
@@ -2598,6 +2512,7 @@ class ShapeButton(Group):
         super().__init__(children)
         self.name = name
         # self.callback = callback
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
 
     def to_dict(self):
         res = super().to_dict()
@@ -2610,21 +2525,8 @@ class ShapeButton(Group):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
-        data = ev[1]
-        if self.props.status == UIRunStatus.Running.value:
-            # TODO send exception if ignored click
-            print("IGNORE EVENT", self.props.status)
-            return
-        elif self.props.status == UIRunStatus.Stop.value:
-            handler = self.get_event_handler(ev[0])
-            if handler is not None:
-                if is_sync:
-                    return await self.run_callback(lambda: handler.cb(data),
-                                                   sync_first=False)
-                else:
-                    self._task = asyncio.create_task(
-                        self.run_callback(lambda: handler.cb(data)))
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return handle_standard_event(self, ev, is_sync)
 
     @property
     def prop(self):
@@ -2652,7 +2554,9 @@ class Button(Group):
         material = MeshBasicMaterialV1()
         material.prop(color="#393939")
         mesh = MeshV1(RoundedRectGeometry(width, height, radius), material)
-        mesh.set_pointer_callback(on_click=EventHandler(callback, True))
+        mesh.register_event_handler(FrontendEventType.Click.value, callback, stop_propagation=True)
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
+
         mesh.prop(hover_color="#222222", click_color="#009A63")
         self.mesh = mesh
         text = Text(name)
@@ -2705,7 +2609,8 @@ class ToggleButton(Group):
         material = MeshBasicMaterialV1()
         material.prop(color="#393939")
         mesh = MeshV1(RoundedRectGeometry(width, height, radius), material)
-        mesh.set_pointer_callback(on_change=EventHandler(callback, True))
+        mesh.register_event_handler(FrontendEventType.Click.value, callback, stop_propagation=True)
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
 
         mesh.prop(hover_color="#222222",
                   click_color="#009A63",
@@ -2802,7 +2707,7 @@ class PivotControls(ThreeContainerBase[PivotControlsProps,
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
                                            sync_first=True,
@@ -3000,6 +2905,8 @@ class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
             initial_index: Union[np.ndarray, Undefined] = undefined) -> None:
         """initial_index and initial_buffers must be specified in init,
         they can't be setted in update_event.
+        WARNING: this element should only be used for advanced usage.
+        if you use this with wrong inputs, the frontend may crash. 
         Args:
             initial_index: if undefined, user can't setted in update_buffers.
             initial_buffers: dict of threejs buffer attributes.

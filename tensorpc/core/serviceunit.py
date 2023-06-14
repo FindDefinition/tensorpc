@@ -485,7 +485,6 @@ class ObjectReloadResult:
 class ObjectReloadResultWithType(ObjectReloadResult):
     type_meta: TypeMeta
 
-importlib.util.LazyLoader
 class ObjectReloadManager:
     """to resolve some side effects, users should
     always use reload manager defined in app.

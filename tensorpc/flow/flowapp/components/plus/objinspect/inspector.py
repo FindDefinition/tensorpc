@@ -20,7 +20,7 @@ from tensorpc.core.inspecttools import get_members
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.core.tracer import FrameResult, TraceType, Tracer
-from tensorpc.flow.flowapp.appcore import get_app
+from tensorpc.flow.flowapp.appcore import Event, get_app
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.components.plus.objinspect.treeitems import TraceTreeItem, parse_frame_result_to_trace_item
 from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType, _get_obj_def_path
@@ -52,36 +52,6 @@ def _parse_trace_modules(traced_locs: List[Union[str, Path, types.ModuleType]]):
                 mod_file = Path(mod.__file__).parent.resolve()
                 traced_folders.add(str(mod_file))
     return traced_folders
-
-
-class TreeTracer(Tracer):
-
-    def __init__(
-            self,
-            #  tree: "ObjectInspector",
-            traced_types: Optional[Tuple[Type]] = None,
-            traced_names: Optional[Set[str]] = None,
-            traced_folders: Optional[Set[str]] = None,
-            trace_return: bool = True,
-            depth: int = -1):
-        super().__init__(self.callback, traced_types, traced_names,
-                         traced_folders, trace_return, depth)
-        # self.tree = tree
-
-        self._record_res: List[FrameResult] = []
-
-    def callback(self, fr: FrameResult):
-        print("????????????")
-        self._record_res.append(fr)
-
-    def __enter__(self):
-        self._record_res.clear()
-        print("ENTERENTER")
-        return super().__enter__()
-
-    # def __exit__(self, exc_type, exc_value, exc_traceback):
-
-    #     return super().__exit__(exc_type, exc_value, exc_traceback)
 
 
 def get_exception_frame_stack() -> Dict[str, TraceTreeItem]:
@@ -267,6 +237,19 @@ class ObjectInspector(mui.FlexBox):
         is_dcls = dataclasses.is_dataclass(obj)
 
         preview_layout: Optional[mui.FlexBox] = None
+
+        objs, found = await self.tree._get_obj_by_uid_trace(uid, nodes)
+        # determine objtree root
+        # we don't require your tree is strictly nested,
+        # you can have a tree with non-tree-item container,
+        # e.g. treeitem-anyobject-treeitem
+        assert found, f"shouldn't happen, {uid}"
+        root: Optional[UserObjTreeProtocol] = None
+        for obj_iter_val in objs:
+            if isinstance(obj_iter_val, tuple(USER_OBJ_TREE_TYPES)):
+                root = obj_iter_val
+                break
+
         # preview layout is checked firstly, then preview handler.
         if obj_type in self._type_to_handler_object:
             handler = self._type_to_handler_object[obj_type]
@@ -277,8 +260,13 @@ class ObjectInspector(mui.FlexBox):
                 obj_type, True)
             special_methods = FlowSpecialMethods(metas)
             if special_methods.create_preview_layout is not None:
-                preview_layout = mui.flex_preview_wrapper(
-                    obj, metas, self.flow_app_comp_core.reload_mgr)
+                if root is None:
+                    preview_layout = mui.flex_preview_wrapper(
+                        obj, metas, self.flow_app_comp_core.reload_mgr)
+                else:
+                    with root.enter_context(root):
+                        preview_layout = mui.flex_preview_wrapper(
+                            obj, metas, self.flow_app_comp_core.reload_mgr)
                 handler = self.default_handler
             else:
                 obj_qualname = get_qualname_of_type(type(obj))
@@ -301,17 +289,6 @@ class ObjectInspector(mui.FlexBox):
             # if preview_layout is None:
             #     self._type_to_handler_object[modified_obj_type] = handler
         if preview_layout is not None:
-            objs, found = await self.tree._get_obj_by_uid_trace(uid, nodes)
-            # determine objtree root
-            # we don't require your tree is strictly nested,
-            # you can have a tree with non-tree-item container,
-            # e.g. treeitem-anyobject-treeitem
-            assert found, f"shouldn't happen, {uid}"
-            root: Optional[UserObjTreeProtocol] = None
-            for obj_iter_val in objs:
-                if isinstance(obj_iter_val, tuple(USER_OBJ_TREE_TYPES)):
-                    root = obj_iter_val
-                    break
             if root is not None:
                 preview_layout.set_flow_event_context_creator(
                     lambda: root.enter_context(root))
@@ -325,22 +302,22 @@ class ObjectInspector(mui.FlexBox):
             await handler.bind(obj, uid)
 
     def __install_preview_event_listeners(self, layout: mui.FlexBox):
-        if not layout.event_emitter.listeners(
-                FrontendEventType.BeforeUnmount.name):
-            layout.event_emitter.on(
-                FrontendEventType.BeforeUnmount.name, partial(self._on_preview_layout_unmount, layout))
-        if not layout.event_emitter.listeners(
-                FrontendEventType.BeforeMount.name):
-            layout.event_emitter.on(
-                FrontendEventType.BeforeMount.name, partial(self._on_preview_layout_mount, layout))
+        # if not layout.event_emitter.listeners(
+        #         FrontendEventType.BeforeUnmount.name):
+        layout.flow_event_emitter.once(
+            FrontendEventType.BeforeUnmount.name, partial(self._on_preview_layout_unmount, layout=layout))
+        # if not layout.event_emitter.listeners(
+        #         FrontendEventType.BeforeMount.name):
+        layout.flow_event_emitter.once(
+            FrontendEventType.BeforeMount.name, partial(self._on_preview_layout_mount, layout=layout))
 
 
-    def _on_preview_layout_mount(self, layout: mui.FlexBox):
+    def _on_preview_layout_mount(self, event: Event, layout: mui.FlexBox):
         # print("preview layout mount")
         return get_app()._get_self_as_editable_app()._flowapp_observe(
                         layout, self._on_preview_layout_reload)
     
-    def _on_preview_layout_unmount(self, layout: mui.FlexBox):
+    def _on_preview_layout_unmount(self, event: Event, layout: mui.FlexBox):
         # print("preview layout unmount")
 
         return get_app()._get_self_as_editable_app()._flowapp_remove_observer(

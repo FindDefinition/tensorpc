@@ -27,28 +27,68 @@ CORO_NONE = Union[Coroutine[None, None, None], None]
 CORO_ANY: TypeAlias = Union[Coroutine[None, None, Any], Any]
 
 ValueType: TypeAlias = Union[int, float, str]
-
+EventDataType: TypeAlias = Union[int, str]
 NumberType: TypeAlias = Union[int, float]
 
-EventType: TypeAlias = Tuple[ValueType, Any]
+SimpleEventType: TypeAlias = Tuple[EventDataType, Any]
 T = TypeVar("T")
 
 T_comp = TypeVar("T_comp")
 
+@dataclasses.dataclass
+class Event:
+    type: EventDataType
+    data: Any
+    # only used for template component such as table.
+    # key indicates the id of template item.
+    key: Union[Undefined, str] = undefined
+
 
 class EventHandler:
-
     def __init__(self,
                  cb: Callable,
+                 simple_event: bool = True) -> None:
+        self.cb = cb
+        self.simple_event = simple_event
+
+    def run_event(self, event: Event) -> CORO_NONE:
+        if self.simple_event:
+            return self.cb(event.data)
+        else:
+            return self.cb(event)
+        
+    async def run_event_async(self, event: Event):
+        if self.simple_event:
+            coro = self.cb(event.data)
+        else:
+            coro = self.cb(event)
+        if inspect.iscoroutine(coro):
+            res = await coro
+        else:
+            res = coro
+        return res
+
+    def run_noarg_event(self, event: Event) -> CORO_NONE:
+        if self.simple_event:
+            return self.cb()
+        else:
+            return self.cb(event)
+
+class EventHandlers:
+    def __init__(self,
+                 handlers: List[EventHandler],
                  stop_propagation: bool = False,
                  throttle: Optional[NumberType] = None,
                  debounce: Optional[NumberType] = None,
-                 backend_only: bool = False) -> None:
-        self.cb = cb
+                 backend_only: bool = False,
+                 simple_event: bool = True) -> None:
+
+        self.handlers = handlers
         self.stop_propagation = stop_propagation
         self.debounce = debounce
         self.throttle = throttle
         self.backend_only = backend_only
+        self.simple_event = simple_event
 
     def to_dict(self):
         res: Dict[str, Any] = {
@@ -60,6 +100,11 @@ class EventHandler:
             res["throttle"] = self.throttle
         return res
 
+    def get_bind_event_handlers(self, event: Event):
+        return [partial(handler.run_event, event=event) for handler in self.handlers]
+    
+    def get_bind_event_handlers_noarg(self, event: Event):
+        return [partial(handler.run_noarg_event, event=event) for handler in self.handlers]
 
 class AppContext:
 
@@ -105,15 +150,16 @@ def get_app_storage():
     return ctx.app.get_persist_storage()
 
 
-def find_component(type: Type[T_comp]) -> Optional[T_comp]:
+def find_component(type: Type[T_comp], validator: Optional[Callable[[T_comp], bool]] = None) -> Optional[T_comp]:
     appctx = get_app_context()
     assert appctx is not None, "you must use this function in app"
-    return appctx.app.find_component(type)
+    return appctx.app.find_component(type, validator)
 
-def find_all_components(type: Type[T_comp]) -> List[T_comp]:
+def find_all_components(type: Type[T_comp], check_nested: bool = False, 
+                        validator: Optional[Callable[[T_comp], bool]] = None) -> List[T_comp]:
     appctx = get_app_context()
     assert appctx is not None, "you must use this function in app"
-    return appctx.app.find_all_components(type)
+    return appctx.app.find_all_components(type, check_nested, validator)
 
 def find_component_by_uid(uid: str) -> Optional["Component"]:
     appctx = get_app_context()
@@ -175,8 +221,8 @@ def create_reload_metas(uid_to_comp: Dict[str, "Component"], path: str):
         #     continue
         # except:
         #     pass
-        for handler_type, handler in v._flow_event_handlers.items():
-            if not isinstance(handler, Undefined):
+        for handler_type, handlers in v._flow_event_handlers.items():
+            for handler in handlers.handlers:
                 cb = handler.cb
                 is_valid_func = is_valid_function(cb)
                 cb_real = cb

@@ -105,21 +105,26 @@ async def _get_root_tree_async(obj,
     return root_node
 
 
-def _parse_obj_to_node(obj,
+async def _parse_obj_to_node(obj,
                        node: mui.JsonLikeNode,
                        checker: Callable[[Type], bool],
                        cached_lazy_expand_ids: Set[str],
                        obj_meta_cache=None):
-    obj_dict = get_obj_dict(obj, checker)
-    node.children = parse_obj_dict(obj_dict, node.id, checker, obj_meta_cache)
+    if isinstance(obj, TreeItem):
+        obj_dict = await obj.get_child_desps(node.id)  # type: ignore
+        tree_children = list(obj_dict.values())
+    else:
+        obj_dict = get_obj_dict(obj, checker)
+        tree_children = parse_obj_dict(obj_dict, node.id, checker, obj_meta_cache)
+    node.children = tree_children
     node.cnt = len(obj_dict)
     for (k, v), child_node in zip(obj_dict.items(), node.children):
         if child_node.id in cached_lazy_expand_ids:
-            _parse_obj_to_node(v, child_node, checker, cached_lazy_expand_ids,
+            await _parse_obj_to_node(v, child_node, checker, cached_lazy_expand_ids,
                                obj_meta_cache)
 
 
-def _get_obj_tree(obj,
+async def _get_obj_tree(obj,
                   checker: Callable[[Type], bool],
                   key: str,
                   parent_id: str,
@@ -133,7 +138,7 @@ def _get_obj_tree(obj,
     # TODO determine auto-expand limits
     if root_node.type == mui.JsonLikeType.Object.value:
 
-        _parse_obj_to_node(obj, root_node, checker, cached_lazy_expand_ids_set,
+        await _parse_obj_to_node(obj, root_node, checker, cached_lazy_expand_ids_set,
                            obj_meta_cache)
         # obj_dict = get_obj_dict(obj, checker)
         # root_node.children = parse_obj_dict(obj_dict, obj_id, checker,
@@ -141,7 +146,7 @@ def _get_obj_tree(obj,
         # root_node.cnt = len(obj_dict)
     else:
         if obj_id in cached_lazy_expand_ids_set:
-            _parse_obj_to_node(obj, root_node, checker,
+            await _parse_obj_to_node(obj, root_node, checker,
                                cached_lazy_expand_ids_set, obj_meta_cache)
 
     return root_node
@@ -591,7 +596,7 @@ class BasicObjectTree(mui.FlexBox):
     async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):
         key_in_root = key in self.root
         self.root[key] = obj
-        obj_tree = _get_obj_tree(obj, self._checker, key,
+        obj_tree = await _get_obj_tree(obj, self._checker, key,
                                  self.tree.props.tree.id, self._obj_meta_cache,
                                  self._cached_lazy_expand_uids)
         if key_in_root:

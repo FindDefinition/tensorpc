@@ -80,7 +80,7 @@ from tensorpc.utils.reload import reload_method
 from tensorpc.utils.uniquename import UniqueNamePool
 
 from .appcore import (ALL_OBSERVED_FUNCTIONS, AppContext, AppSpecialEventType,
-                      _CompReloadMeta, create_reload_metas)
+                      _CompReloadMeta, Event, create_reload_metas)
 from .appcore import enter_app_conetxt
 from .appcore import enter_app_conetxt as _enter_app_conetxt
 from .appcore import get_app, get_app_context
@@ -94,7 +94,7 @@ from .core import (AppComponentCore, AppEditorEvent, AppEditorEventType,
                    TaskLoopEvent, UIEvent, UIExceptionEvent, UIRunStatus,
                    UIType, UIUpdateEvent, Undefined, UserMessage, ValueType,
                    undefined)
-
+from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 ALL_APP_EVENTS = HashableRegistry()
 P = ParamSpec('P')
 
@@ -223,14 +223,17 @@ class App:
                  maxqsize: int = 10,
                  enable_value_cache: bool = False,
                  external_root: Optional[mui.FlexBox] = None,
-                 external_wrapped_obj: Optional[Any] = None) -> None:
+                 external_wrapped_obj: Optional[Any] = None,
+                 reload_manager: Optional[AppReloadManager] = None) -> None:
         # self._uid_to_comp: Dict[str, Component] = {}
         self._queue: "asyncio.Queue[AppEvent]" = asyncio.Queue(
             maxsize=maxqsize)
-        self._flow_reload_manager = AppReloadManager(ALL_OBSERVED_FUNCTIONS)
+        if reload_manager is None:
+            reload_manager = AppReloadManager(ALL_OBSERVED_FUNCTIONS)
+        # self._flow_reload_manager = reload_manager
 
         self._flow_app_comp_core = AppComponentCore(self._queue,
-                                                    self._flow_reload_manager)
+                                                    reload_manager)
         self._send_callback: Optional[Callable[[AppEvent],
                                                Coroutine[None, None,
                                                          None]]] = None
@@ -265,7 +268,7 @@ class App:
         self.root = root.prop(min_height=0, min_width=0)
         self._enable_editor = False
 
-        self._flowapp_special_eemitter = pyee.AsyncIOEventEmitter()
+        self._flowapp_special_eemitter: AsyncIOEventEmitter[AppSpecialEventType, Any] = AsyncIOEventEmitter()
         self._flowapp_thread_id = threading.get_ident()
         self._flowapp_enable_exception_inspect: bool = True
 
@@ -290,8 +293,6 @@ class App:
         self.__flowapp_storage_cache: Dict[str, StorageDataItem] = {}
         # for app and dynamic layout in AnyFlexLayout
         self._flowapp_change_observers: Dict[str, _WatchDogWatchEntry] = {}
-        self._flowapp_obj_change_observers: Dict[str,
-                                                 _WatchDogObjWatchEntry] = {}
 
         self._flowapp_is_inited: bool = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -300,6 +301,10 @@ class App:
         self._flowapp_internal_lsp_config.python.analysis.pythonPath = sys.executable
         self._flowapp_observed_func_registry: Optional[
             ObservedFunctionRegistryProtocol] = None
+
+    @property 
+    def _flow_reload_manager(self):
+        return self._flow_app_comp_core.reload_mgr
 
     def set_enable_language_server(self, enable: bool):
         """must be setted before app init (in layout function), only valid
@@ -321,17 +326,17 @@ class App:
                                            handler: Callable[[Any],
                                                              mui._CORO_NONE]):
         assert isinstance(type, AppSpecialEventType)
-        self._flowapp_special_eemitter.on(type.value, handler)
+        self._flowapp_special_eemitter.on(type, handler)
 
     def unregister_app_special_event_handler(
             self, type: AppSpecialEventType,
             handler: Callable[[Any], mui._CORO_NONE]):
         assert isinstance(type, AppSpecialEventType)
-        self._flowapp_special_eemitter.remove_listener(type.value, handler)
+        self._flowapp_special_eemitter.remove_listener(type, handler)
 
     def unregister_app_special_event_handlers(self, type: AppSpecialEventType):
         assert isinstance(type, AppSpecialEventType)
-        self._flowapp_special_eemitter.remove_all_listeners(type.value)
+        self._flowapp_special_eemitter.remove_all_listeners(type)
 
     def _get_user_app_object(self):
         if self._is_external_root:
@@ -826,9 +831,10 @@ class App:
 
     @staticmethod
     async def __handle_dnd_event(handler: EventHandler,
-                                 src_handler: EventHandler, src_data):
-        res = await src_handler.cb(src_data)
-        await handler.cb(res)
+                                 src_handler: EventHandler, src_event: Event):
+        res = await src_handler.run_event_async(src_event)
+        ev_res = Event(FrontendEventType.Drop.value, res, src_event.key)
+        await handler.run_event_async(ev_res)
 
     def _is_editable_app(self):
         return isinstance(self, EditableApp)
@@ -840,25 +846,33 @@ class App:
     async def handle_event(self, ev: UIEvent, is_sync: bool = False):
         res: Dict[str, Any] = {}
         for uid, data in ev.uid_to_data.items():
+            key = undefined 
+            if len(data) == 3:
+                key = data[2]
+            event = Event(data[0], data[1], key)
             ev_type = data[0]
-            if ev_type == FrontendEventType.Drop.value:
+            if event.type == FrontendEventType.Drop.value:
                 # TODO add event context stack here.
                 src_data = data[1]
                 src_uid = src_data["uid"]
                 src_comp = self.root._get_comp_by_uid(src_uid)
-                collect_handler = src_comp.get_event_handler(
+                collect_handlers = src_comp.get_event_handlers(
                     FrontendEventType.DragCollect.value)
                 comp = self.root._get_comp_by_uid(uid)
-                handler = comp.get_event_handler(data[0])
+                handlers = comp.get_event_handlers(data[0])
                 # print(src_uid, comp, src_comp, handler, collect_handler)
-                if handler is not None and collect_handler is not None:
-                    cb = partial(self.__handle_dnd_event,
-                                 handler=handler,
-                                 src_handler=collect_handler,
-                                 src_data=src_data["data"])
+                if handlers is not None and collect_handlers is not None:
+                    src_event = Event(FrontendEventType.DragCollect.value, src_data["data"], key)
+                    cbs = []
+                    for handler in handlers.handlers:
+                        cb = partial(self.__handle_dnd_event,
+                                    handler=handler,
+                                    src_handler=collect_handlers.handlers[0],
+                                    src_event=src_event)
+                        cbs.append(cb)
                     comp._task = asyncio.create_task(
-                        comp.run_callback(cb, sync_first=False))
-            elif ev_type == FrontendEventType.FileDrop.value:
+                        comp.run_callbacks(cbs, sync_first=False))
+            elif event.type == FrontendEventType.FileDrop.value:
                 # for file drop, we can't use regular drop above, so
                 # just convert it to drop event, no drag collect needed.
                 comps = self.root._get_comps_by_uid(uid)
@@ -870,17 +884,19 @@ class App:
                     for ctx in ctxes:
                         stack.enter_context(ctx)
                     res[uid] = await comps[-1].handle_event(
-                        (FrontendEventType.Drop.value, data[1]), is_sync=is_sync)
+                        Event(FrontendEventType.Drop.value, data[1], key), 
+                        is_sync=is_sync)
             else:
                 comps = self.root._get_comps_by_uid(uid)
                 ctxes = [
                     c._flow_event_context_creator() for c in comps
                     if c._flow_event_context_creator is not None
                 ]
+                # comps[-1].flow_event_emitter.emit(event.type, event.data)
                 with contextlib.ExitStack() as stack:
                     for ctx in ctxes:
                         stack.enter_context(ctx)
-                    res[uid] = await comps[-1].handle_event(data, is_sync=is_sync)
+                    res[uid] = await comps[-1].handle_event(event, is_sync=is_sync)
         if is_sync:
             return res
             
@@ -896,7 +912,7 @@ class App:
             if inspect.iscoroutine(coro):
                 await coro
             self._flowapp_special_eemitter.emit(
-                AppSpecialEventType.AutoRunEnd.value, None)
+                AppSpecialEventType.AutoRunEnd, None)
         except:
             traceback.print_exc()
             if self._flowapp_enable_exception_inspect:
@@ -925,28 +941,30 @@ class App:
                 "",
                 {AppEventType.CopyToClipboard: CopyToClipboardEvent(text)}))
 
-    def find_component(self, type: Type[T]) -> Optional[T]:
+    def find_component(self, type: Type[T], validator: Optional[Callable[[T], bool]] = None) -> Optional[T]:
         """find component in comp tree. breath-first.
         """
         res: List[Optional[T]] = [None]
 
         def handler(name, comp):
             if isinstance(comp, type):
-                res[0] = comp
-                return ForEachResult.Return
+                if (validator is None) or (validator is not None and validator(comp)):
+                    res[0] = comp
+                    return ForEachResult.Return
 
         self.root._foreach_comp(handler)
         return res[0]
 
-    def find_all_components(self, type: Type[T], check_nested: bool = False) -> List[T]:
+    def find_all_components(self, type: Type[T], check_nested: bool = False, validator: Optional[Callable[[T], bool]] = None) -> List[T]:
         res: List[T] = []
 
         def handler(name, comp):
             if isinstance(comp, type):
-                res.append(comp)
-                # tell foreach to continue instead of search children
-                if not check_nested:
-                    return ForEachResult.Continue
+                if (validator is None) or (validator is not None and validator(comp)):
+                    res.append(comp)
+                    # tell foreach to continue instead of search children
+                    if not check_nested:
+                        return ForEachResult.Continue
                 
         self.root._foreach_comp(handler)
         return res
@@ -985,13 +1003,15 @@ class EditableApp(App):
                  maxqsize: int = 10,
                  observed_files: Optional[List[str]] = None,
                  external_root: Optional[mui.FlexBox] = None,
-                 external_wrapped_obj: Optional[Any] = None) -> None:
+                 external_wrapped_obj: Optional[Any] = None,
+                 reload_manager: Optional[AppReloadManager] = None) -> None:
         super().__init__(flex_flow,
                          justify_content,
                          align_items,
                          maxqsize,
                          external_root=external_root,
-                         external_wrapped_obj=external_wrapped_obj)
+                         external_wrapped_obj=external_wrapped_obj,
+                         reload_manager=reload_manager)
         self._use_app_editor = use_app_editor
         if use_app_editor:
             obj = type(self._get_user_app_object())
@@ -1006,7 +1026,6 @@ class EditableApp(App):
             self._app_force_use_layout_function()
         self._flow_observed_files = observed_files
 
-        self.__flow_obj_observes: List[Tuple[Any, str]] = []
 
     def app_initialize(self):
         super().app_initialize()
@@ -1045,8 +1064,6 @@ class EditableApp(App):
                 observer.schedule(self._watchdog_watcher, p, recursive=False)
             observer.start()
             self._watchdog_observer = observer
-            for obj, autorun_name in self.__flow_obj_observes:
-                self._flowapp_object_observe_core(obj, autorun_name)
         else:
             self._flowapp_code_mgr = None
         self._watchdog_ignore_next = False
@@ -1082,45 +1099,6 @@ class EditableApp(App):
         obmeta = _LayoutObserveMeta(obj, qualname_prefix, metas, callback)
         obentry.obmetas.append(obmeta)
 
-    def _flowapp_object_observe_core(self, obj: Any, autorun_name: str):
-        # TODO better error msg if app editable not enabled
-        try:
-            path = inspect.getfile(type(obj))
-            assert path != "" and self._watchdog_observer is not None
-            path_resolved = str(Path(path).resolve())
-            if path_resolved not in self._flowapp_obj_change_observers:
-                self._flowapp_obj_change_observers[
-                    path_resolved] = _WatchDogObjWatchEntry([], None)
-            obentry = self._flowapp_obj_change_observers[path_resolved]
-            if len(obentry.obmetas) == 0:
-                # no need to schedule watchdog.
-                watch = self._watchdog_observer.schedule(
-                    self._watchdog_watcher, path, False)
-                obentry.watch = watch
-            else:
-                for obmeta in obentry.obmetas:
-                    if obmeta.obj is obj:
-                        # already registered.
-                        return
-            assert self._flowapp_code_mgr is not None
-            if not self._flowapp_code_mgr._check_path_exists(path):
-                self._flowapp_code_mgr._add_new_code(path)
-            user_obj = obj
-            metas = self._flow_reload_manager.query_type_method_meta(type(obj))
-            qualname_prefix = type(user_obj).__qualname__
-            obmeta = _ObjectObserveMeta(obj, qualname_prefix, metas,
-                                        autorun_name)
-            obentry.obmetas.append(obmeta)
-        except:
-            traceback.print_exc()
-            return
-
-    def _flowapp_object_observe(self, obj: Any, autorun_name: str):
-        # TODO better error msg if app editable not enabled
-        if not self._flowapp_is_inited:
-            self.__flow_obj_observes.append((obj, autorun_name))
-            return
-        return self._flowapp_object_observe_core(obj, autorun_name)
 
     def _flowapp_remove_observer(self, obj: mui.FlexBox):
         path = obj._flow_comp_def_path
@@ -1138,21 +1116,6 @@ class EditableApp(App):
             if len(new_obmetas) == 0 and obentry.watch is not None:
                 self._watchdog_observer.unschedule(obentry.watch)
 
-    def _flowapp_remove_obj_observer(self, obj: Any):
-        path = inspect.getfile(type(obj))
-        assert path != "" and self._watchdog_observer is not None
-        path_resolved = str(Path(path).resolve())
-        assert self._flowapp_code_mgr is not None
-        # self._flowapp_code_mgr._remove_path(path)
-        if path_resolved in self._flowapp_obj_change_observers:
-            obentry = self._flowapp_obj_change_observers[path_resolved]
-            new_obmetas: List[_ObjectObserveMeta] = []
-            for obmeta in obentry.obmetas:
-                if obj is not obmeta.obj:
-                    new_obmetas.append(obmeta)
-            obentry.obmetas = new_obmetas
-            if len(new_obmetas) == 0 and obentry.watch is not None:
-                self._watchdog_observer.unschedule(obentry.watch)
 
     def __get_default_observe_paths(self):
         uid_to_comp = self.root._get_uid_to_comp_dict()
@@ -1201,27 +1164,6 @@ class EditableApp(App):
         try:
             autorun_names_queued: Set[str] = set()
 
-            if resolved_path in self._flowapp_obj_change_observers:
-                obmetas = self._flowapp_obj_change_observers[
-                    resolved_path].obmetas
-                for obmeta in obmetas:
-                    # get changed metas for special methods
-                    # print(new, change)
-                    changed_metas: List[ServFunctionMeta] = []
-                    for m in obmeta.metas:
-                        if m.qualname in change:
-                            changed_metas.append(m)
-                    new_method_names: List[str] = [
-                        x for x in new if x.startswith(obmeta.qualname_prefix)
-                        and x != obmeta.qualname_prefix
-                    ]
-                    do_reload = changed_metas or new_method_names
-                    if do_reload:
-                        new_metas, is_reload = reload_object_methods(
-                            obmeta.obj, reload_mgr=self._flow_reload_manager)
-                        if new_metas is not None:
-                            autorun_names_queued.add(obmeta.autorun_name)
-                            obmeta.metas = new_metas
             if resolved_path in self._flowapp_change_observers:
                 obmetas = self._flowapp_change_observers[resolved_path].obmetas.copy()
                 print("len(obmetas)", resolved_path, len(obmetas))
@@ -1373,22 +1315,6 @@ class EditableApp(App):
                                 await self._run_autorun(
                                     auto_run.get_binded_fn())
                     # handle special methods
-
-            if resolved_path in self._flowapp_obj_change_observers:
-                dcls = self._get_app_dynamic_cls()
-                path = dcls.file_path
-                with _enter_app_conetxt(self):
-                    app_obmetas = self._flowapp_change_observers[path].obmetas
-                    for meta in app_obmetas:
-                        if meta.layout is self:
-                            metas = meta.metas
-                            for m in metas:
-                                assert m.is_binded
-                            flow_special = FlowSpecialMethods(metas)
-                            for auto_run in flow_special.auto_runs:
-                                if auto_run is not None and auto_run.name in autorun_names_queued:
-                                    await self._run_autorun(
-                                        auto_run.get_binded_fn())
             ob_registry = self.get_observed_func_registry()
             observed_func_changed = ob_registry.observed_func_changed(
                 resolved_path, change)
@@ -1403,7 +1329,7 @@ class EditableApp(App):
                 # for qname in observed_func_changed:
                 with _enter_app_conetxt(self):
                     self._flowapp_special_eemitter.emit(
-                        AppSpecialEventType.ObservedFunctionChange.value,
+                        AppSpecialEventType.ObservedFunctionChange,
                         observed_func_changed)
 
             if is_callback_change or is_reload:
@@ -1503,7 +1429,8 @@ class EditableLayoutApp(EditableApp):
                  align_items: Union[str, Undefined] = undefined,
                  maxqsize: int = 10,
                  observed_files: Optional[List[str]] = None,
-                 external_root: Optional[mui.FlexBox] = None) -> None:
+                 external_root: Optional[mui.FlexBox] = None,
+                 reload_manager: Optional[AppReloadManager] = None) -> None:
         super().__init__(True,
                          use_app_editor,
                          flex_flow,
@@ -1511,7 +1438,8 @@ class EditableLayoutApp(EditableApp):
                          align_items,
                          maxqsize,
                          observed_files,
-                         external_root=external_root)
+                         external_root=external_root,
+                         reload_manager=reload_manager)
 
 
 async def _run_zeroarg_func(cb: Callable):

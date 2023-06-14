@@ -42,13 +42,14 @@ class ListSlider(mui.Slider, Generic[T]):
         await self.update_ranges(0, len(objs) - 1, 1)
 
     async def _callback(self, value: mui.NumberType):
-        handler = self.get_event_handler(self.__callback_key)
-        if handler is not None:
+        handlers = self.get_event_handlers(self.__callback_key)
+        if handlers is not None:
             index = int(value)
             if index >= len(self.obj_list):
                 return
             obj = self.obj_list[index]
-            coro = handler.cb(obj)
-            if inspect.iscoroutine(coro):
-                await coro
+            for handler in handlers.handlers:
+                coro = handler.cb(obj)
+                if inspect.iscoroutine(coro):
+                    await coro
 

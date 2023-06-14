@@ -43,16 +43,6 @@ def thread_locker_wait_sync(*, _frame_cnt: int = 2):
     return comp.wait_sync(loop=get_app()._loop, _frame_cnt=_frame_cnt)
 
 
-def register_obj_reload(*objs, autorun_func):
-    app = get_editable_app()
-    name = ""
-    if isinstance(autorun_func, str):
-        name = autorun_func
-    else:
-        name = autorun_func.__name__
-    for obj in objs:
-        app._flowapp_object_observe(obj, name)
-
 async def save_data_storage(key: str,
                             node_id: str,
                             data: Any,

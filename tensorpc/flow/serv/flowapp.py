@@ -19,7 +19,7 @@ from runpy import run_path
 from typing import Any, Dict, List, Optional
 from tensorpc.flow.coretypes import ScheduleEvent, get_uid
 from tensorpc.flow.flowapp import appctx
-from tensorpc.flow.flowapp.appcore import enter_app_conetxt
+from tensorpc.flow.flowapp.appcore import ALL_OBSERVED_FUNCTIONS, enter_app_conetxt
 from tensorpc.flow.flowapp.components.mui import FlexBox, flex_wrapper
 from tensorpc.flow.flowapp.core import AppEditorEvent, AppEditorFrontendEvent, AppEvent, AppEventType, InitLSPClientEvent, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
 from tensorpc.flow.flowapp.app import App, EditableApp
@@ -29,6 +29,7 @@ from tensorpc.core.httpclient import http_remote_call
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServiceUnit
 import tensorpc
 from tensorpc.flow.flowapp.reload import AppReloadManager
+
 from tensorpc.flow.langserv import close_tmux_lang_server, get_tmux_lang_server_info_may_create
 from ..client import MasterMeta
 from tensorpc import prim
@@ -68,7 +69,7 @@ class FlowApp:
         else:
             self._uid = ""
         self.headless = headless
-        reload_mgr = AppReloadManager()
+        reload_mgr = AppReloadManager(ALL_OBSERVED_FUNCTIONS)
         self.dynamic_app_cls = ReloadableDynamicClass(module_name, reload_mgr)
         static_creator = self.dynamic_app_cls.get_object_creator_if_exists()
         if static_creator is not None:
@@ -80,13 +81,13 @@ class FlowApp:
         elif isinstance(obj, FlexBox):
             # external root
             external_root = obj
-            self.app: App = EditableApp(external_root=external_root)
+            self.app: App = EditableApp(external_root=external_root, reload_manager=reload_mgr)
         else:
             # other object, must declare a tensorpc_flow_layout
             # external_root = flex_wrapper(obj)
-            self.app: App = EditableApp(external_wrapped_obj=obj)
+            self.app: App = EditableApp(external_wrapped_obj=obj, reload_manager=reload_mgr)
             self.app._app_force_use_layout_function()
-        self.app._flow_reload_manager = reload_mgr
+        self.app._flow_app_comp_core.reload_mgr = reload_mgr
         self.app_su = ServiceUnit(module_name, config)
         self.app_su.init_service(obj)
         self.app._app_dynamic_cls = self.dynamic_app_cls

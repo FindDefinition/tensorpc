@@ -12,7 +12,6 @@ add new object type to Object Inspector, you need to register it.
 
 """
 
-from asyncio import iscoroutine
 import asyncio
 import contextlib
 import contextvars
@@ -119,15 +118,18 @@ class UserObjTree:
 
 
 def find_tree_child_item_may_exist(root: UserObjTreeProtocol, obj_type: Type[T],
-                                   node_type: Type[T_treeitem]) -> Optional[T]:
-    childs_dict = root.get_childs()
+                                   node_type: Type[T_treeitem], 
+                                   validator: Optional[Callable[[T], bool]] = None) -> Optional[T]:
     obj_type_qname = get_qualname_of_type(obj_type)
+
+    childs_dict = root.get_childs()
     res_foreach: List[UserObjTreeProtocol] = []
 
     for k, v in childs_dict.items():
         v_type_qname = get_qualname_of_type(type(v))
         if v_type_qname == obj_type_qname:
-            return v # type: ignore
+            if validator is None or (validator is not None and validator(v)): # type: ignore
+                return v # type: ignore
         if isinstance(v, node_type):
             res_foreach.append(v)
             # res = find_tree_child_item_may_exist(v, obj_type, node_type)
@@ -140,8 +142,9 @@ def find_tree_child_item_may_exist(root: UserObjTreeProtocol, obj_type: Type[T],
     return None
 
 
-def get_tree_child_items(root: UserObjTreeProtocol, obj_type: Type[T],
-                         node_type: Type[T_treeitem]) -> List[T]:
+def _get_tree_child_items_recursive(root: UserObjTreeProtocol, obj_type: Type[T],
+                         node_type: Type[T_treeitem],
+                         validator: Optional[Callable[[T], bool]] = None) -> List[T]:
     childs_dict = root.get_childs()
     res: List[T] = []
     # we use qualname to compare type, because type may be different
@@ -150,34 +153,58 @@ def get_tree_child_items(root: UserObjTreeProtocol, obj_type: Type[T],
     for k, v in childs_dict.items():
         v_type_qname = get_qualname_of_type(type(v))
         if v_type_qname == obj_type_qname:
-            res.append(v) # type: ignore
+            if validator is None or (validator is not None and validator(v)): # type: ignore
+                res.append(v) # type: ignore
         elif isinstance(v, node_type):
-            res.extend(get_tree_child_items(v, obj_type, node_type))
+            res.extend(_get_tree_child_items_recursive(v, obj_type, node_type))
     return res
 
+def _check_node(node: UserObjTreeProtocol, obj_type: Type[T], validator: Optional[Callable[[T], bool]] = None):
+    obj_type_qname = get_qualname_of_type(obj_type)
+    # check root
+    v_type_qname = get_qualname_of_type(type(node))
+    if v_type_qname == obj_type_qname:
+        if validator is None or (validator is not None and validator(node)): # type: ignore
+            return True
+    return False
+
+def get_tree_child_items(root: UserObjTreeProtocol, obj_type: Type[T],
+                         node_type: Type[T_treeitem],
+                         validator: Optional[Callable[[T], bool]] = None) -> List[T]:
+    res: List[T] = []
+    if _check_node(root, obj_type, validator):
+        res.append(root) # type: ignore
+    res += _get_tree_child_items_recursive(root, obj_type, node_type, validator)
+    return res
 
 def find_tree_child_item(root: UserObjTreeProtocol, obj_type: Type[T],
-                         node_type: Type[T_treeitem]) -> T:
-    res = find_tree_child_item_may_exist(root, obj_type, node_type)
+                         node_type: Type[T_treeitem],
+                         validator: Optional[Callable[[T], bool]] = None) -> T:
+    res = find_tree_child_item_may_exist(root, obj_type, node_type, validator)
     assert res is not None, f"can't find type {obj_type} in root."
     return res
 
 
-def find(obj_type: Type[T]) -> T:
+def find(obj_type: Type[T], validator: Optional[Callable[[T], bool]] = None) -> T:
     """find a child object of current context node by type of obj.
     if not exist, raise an error.
     """
     ctx = get_objtree_context()
     assert ctx is not None
-    return find_tree_child_item(ctx.node, obj_type, UserObjTree)
+    if _check_node(ctx.node, obj_type, validator):
+        return ctx.node # type: ignore
+
+    return find_tree_child_item(ctx.node, obj_type, UserObjTree, validator)
 
 
-def find_may_exist(obj_type: Type[T]) -> Optional[T]:
+def find_may_exist(obj_type: Type[T], validator: Optional[Callable[[T], bool]] = None) -> Optional[T]:
     """find a child object of current context node by type of obj.
     if not exist, return None.
     """
     ctx = get_objtree_context()
     if ctx is None:
         return None 
+    if _check_node(ctx.node, obj_type, validator):
+        return ctx.node # type: ignore
     # assert ctx is not None
-    return find_tree_child_item_may_exist(ctx.node, obj_type, UserObjTree)
+    return find_tree_child_item_may_exist(ctx.node, obj_type, UserObjTree, validator)

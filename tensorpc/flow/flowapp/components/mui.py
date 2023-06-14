@@ -33,13 +33,14 @@ from typing_extensions import Literal, TypeAlias
 
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.serviceunit import AppFuncType, ObjectReloadManager, ReloadableDynamicClass, ServFunctionMeta
+from tensorpc.flow.flowapp.appcore import Event, EventDataType
 from tensorpc.flow.flowapp.components.common import (handle_standard_event)
 from tensorpc.flow.flowapp.reload import AppReloadManager
 from ...jsonlike import JsonLikeType, BackendOnlyProp, ContextMenuData, JsonLikeNode
 from .. import colors
 from ..core import (AppComponentCore, AppEvent, AppEventType, BasicProps,
                     Component, ContainerBase, ContainerBaseProps, EventHandler,
-                    EventType, FlowSpecialMethods, Fragment, FrontendEventType,
+                    SimpleEventType, FlowSpecialMethods, Fragment, FrontendEventType,
                     NumberType, T_base_props, T_child, T_container_props,
                     TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
                     ValueType, undefined, create_ignore_usr_msg,
@@ -222,6 +223,13 @@ class Image(MUIComponentBase[ImageProps]):
                          ImageProps,
                          allowed_events=ALL_POINTER_EVENTS)
         # self.image_str: bytes = b""
+        self.event_down = self._create_event_slot(FrontendEventType.Down)
+        self.event_up = self._create_event_slot(FrontendEventType.Up)
+        self.event_move = self._create_event_slot(FrontendEventType.Move)
+        self.event_enter = self._create_event_slot(FrontendEventType.Enter)
+        self.event_leave = self._create_event_slot(FrontendEventType.Leave)
+        self.event_over = self._create_event_slot(FrontendEventType.Over)
+        self.event_out = self._create_event_slot(FrontendEventType.Out)
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -246,6 +254,9 @@ class Image(MUIComponentBase[ImageProps]):
     async def show_raw(self, image_bytes: bytes, suffix: str):
         await self.put_app_event(self.show_raw_event(image_bytes, suffix))
 
+    async def clear(self):
+        await self.put_app_event(self.update_event(image=undefined))
+
     def show_raw_event(self, image_bytes: bytes, suffix: str):
         raw = b'data:image/' + suffix.encode(
             "utf-8") + b';base64,' + base64.b64encode(image_bytes)
@@ -263,10 +274,9 @@ class Image(MUIComponentBase[ImageProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=True,
                                            is_sync=is_sync)
 
 
@@ -416,13 +426,14 @@ class Button(MUIComponentBase[ButtonProps]):
                          [FrontendEventType.Click.value])
         self.props.name = name
         self.callback = callback
-        self.register_event_handler(FrontendEventType.Click.value, callback)
+        self.register_event_handler(FrontendEventType.Click.value, callback, simple_event=True)
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
 
     async def headless_click(self):
         return await self.put_loopback_ui_event(
             (FrontendEventType.Click.value, None))
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
                                            sync_first=True,
@@ -530,13 +541,14 @@ class IconButton(MUIComponentBase[IconButtonProps]):
         super().__init__(UIType.IconButton, IconButtonProps,
                          [FrontendEventType.Click.value])
         self.props.icon = icon.value
-        self.register_event_handler(FrontendEventType.Click.value, callback)
+        self.register_event_handler(FrontendEventType.Click.value, callback, simple_event=True)
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
 
     async def headless_click(self):
         return await self.put_loopback_ui_event(
             (FrontendEventType.Click.value, None))
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
                                            sync_first=True,
@@ -583,7 +595,7 @@ class Dialog(MUIContainerBase[DialogProps, MUIComponentType]):
     async def set_open(self, open: bool):
         await self.send_and_wait(self.update_event(open=open))
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
                                            sync_first=True,
@@ -672,7 +684,9 @@ class ToggleButton(MUIComponentBase[ToggleButtonProps]):
             icon: Union[IconType, Undefined] = undefined,
             name: str = "",
             callback: Optional[Callable[[bool], _CORO_NONE]] = None) -> None:
-        super().__init__(UIType.ToggleButton, ToggleButtonProps)
+        super().__init__(UIType.ToggleButton, ToggleButtonProps, allowed_events=[
+            FrontendEventType.Change.value
+        ])
         if isinstance(icon, Undefined):
             assert name != "", "if icon not provided, you must provide a valid name"
         else:
@@ -682,6 +696,7 @@ class ToggleButton(MUIComponentBase[ToggleButtonProps]):
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -694,7 +709,7 @@ class ToggleButton(MUIComponentBase[ToggleButtonProps]):
             type: ValueType = FrontendEventType.Change.value):
         self.props.selected = data
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
     @property
@@ -767,6 +782,7 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     async def update_items(self,
                            btns: List[ToggleButton],
@@ -816,7 +832,7 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
             type: ValueType = FrontendEventType.Change.value):
         self.props.value = value
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
 
@@ -907,7 +923,7 @@ class Accordion(MUIContainerBase[AccordionProps, Union[AccordionDetails,
             type: ValueType = FrontendEventType.Change.value):
         self.props.expanded = data
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
     @property
@@ -923,12 +939,13 @@ class ListItemButton(MUIComponentBase[ButtonProps]):
         self.props.name = name
         self.callback = callback
         self.register_event_handler(FrontendEventType.Click.value, callback)
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
 
     async def headless_click(self):
         return await self.put_loopback_ui_event(
             (FrontendEventType.Click.value, None))
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
                                            sync_first=False,
@@ -965,6 +982,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
                          app_comp_core=app_comp_core,
                          allowed_events=[FrontendEventType.Drop.value])
         self._wrapped_obj = wrapped_obj
+        self.event_drop = self._create_event_slot(FrontendEventType.Drop)
 
     def as_drag_handle(self):
         self.props.take_drag_ref = True
@@ -992,7 +1010,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
             return self._wrapped_obj
         return self
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
                                            sync_first=False,
@@ -1083,6 +1101,7 @@ class RadioGroup(MUIComponentBase[RadioGroupProps]):
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     def state_change_callback(self,
                               data: str,
@@ -1109,7 +1128,7 @@ class RadioGroup(MUIComponentBase[RadioGroupProps]):
         return await self.put_loopback_ui_event(
             (FrontendEventType.Change.value, self.props.names[index]))
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
     @property
@@ -1151,7 +1170,7 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
     def __init__(self,callback: Optional[Callable[[str], _CORO_NONE]],
                  type: UIType,
                  prop_cls: Type[T_input_base_props],
-                 allowed_events: Optional[Iterable[ValueType]] = None,
+                 allowed_events: Optional[Iterable[EventDataType]] = None,
                  ) -> None:
         super().__init__(type, prop_cls,
                          allowed_events)
@@ -1159,6 +1178,7 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -1190,7 +1210,9 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
     def int(self):
         return int(self.props.value)
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync=is_sync, sync_first=False,
+                                            sync_state_after_change=False)
 
         if self.props.status == UIRunStatus.Running.value:
             # TODO send exception if ignored click
@@ -1312,6 +1334,10 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
                                     self._default_on_save_state)
         self.register_event_handler(FrontendEventType.EditorQueryState.value,
                                     self._default_on_query_state)
+        
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
+        self.event_editor_save = self._create_event_slot(FrontendEventType.EditorSave)
+        self.event_editor_ready = self._create_event_slot(FrontendEventType.EditorReady)
 
     def state_change_callback(
             self,
@@ -1325,7 +1351,7 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
     def _default_on_query_state(self):
         return self.view_state
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
     @property
@@ -1362,6 +1388,7 @@ class SwitchBase(MUIComponentBase[SwitchProps]):
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -1387,7 +1414,7 @@ class SwitchBase(MUIComponentBase[SwitchProps]):
     def __bool__(self):
         return self.props.checked
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
     @property
@@ -1449,6 +1476,7 @@ class Select(MUIComponentBase[SelectProps]):
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     @property
     def value(self):
@@ -1501,7 +1529,7 @@ class Select(MUIComponentBase[SelectProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
     @property
@@ -1541,6 +1569,7 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     @property
     def values(self):
@@ -1593,7 +1622,7 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
     @property
@@ -1666,6 +1695,7 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     @property
     def value(self):
@@ -1724,7 +1754,7 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    async def handle_event(self, data: EventType, is_sync: bool = False):
+    async def handle_event(self, data: Event, is_sync: bool = False):
         return await handle_standard_event(self, data, is_sync=is_sync)
 
     @property
@@ -1765,6 +1795,7 @@ class MultipleAutocomplete(MUIComponentBase[MultipleAutocompleteProps]):
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     @property
     def value(self):
@@ -1816,7 +1847,7 @@ class MultipleAutocomplete(MUIComponentBase[MultipleAutocompleteProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    async def handle_event(self, data: EventType, is_sync: bool = False):
+    async def handle_event(self, data: Event, is_sync: bool = False):
         return await handle_standard_event(self, data, is_sync=is_sync)
 
     @property
@@ -1836,6 +1867,7 @@ class SliderProps(MUIComponentBaseProps):
     ranges: Tuple[NumberType, NumberType, NumberType] = (0, 1, 0)
     value: NumberType = 0
     vertical: Union[Undefined, bool] = undefined
+    value_input: Union[Undefined, bool] = undefined
 
 
 class Slider(MUIComponentBase[SliderProps]):
@@ -1851,12 +1883,13 @@ class Slider(MUIComponentBase[SliderProps]):
                          [FrontendEventType.Change.value])
         self.props.label = label
         self.callback = callback
-        assert end > begin and step <= end - begin
+        assert end > begin #  and step <= end - begin
         self.props.ranges = (begin, end, step)
         self.props.value = begin
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     @property
     def value(self):
@@ -1875,7 +1908,7 @@ class Slider(MUIComponentBase[SliderProps]):
         return res
 
     async def update_ranges(self, begin: NumberType, end: NumberType,
-                            step: NumberType):
+                            step: NumberType = 1):
         self.props.ranges = (begin, end, step)
         assert end > begin and step < end - begin
         self.props.value = begin
@@ -1902,7 +1935,7 @@ class Slider(MUIComponentBase[SliderProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
     @property
@@ -2030,10 +2063,10 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         if self._raw_update:
             return await handle_standard_event(self, ev, is_sync=is_sync)
-        data = ev[1]
+        data = ev.data
         if data == TaskLoopEvent.Start.value:
             if self.props.status == UIRunStatus.Stop.value:
                 if self.loop_callbcak is not None:
@@ -2106,7 +2139,7 @@ class RawTaskLoop(MUIComponentBase[TaskLoopProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    async def handle_event(self, data: EventType, is_sync: bool = False):
+    async def handle_event(self, data: Event, is_sync: bool = False):
         return await handle_standard_event(self, data, is_sync=is_sync)
 
     @property
@@ -2340,6 +2373,8 @@ class Chip(MUIComponentBase[ChipProps]):
         if delete_callback is not None:
             self.register_event_handler(FrontendEventType.Delete.value,
                                         delete_callback)
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
+        self.event_delete = self._create_event_slot(FrontendEventType.Delete)
 
     def to_dict(self):
         res = super().to_dict()
@@ -2350,17 +2385,8 @@ class Chip(MUIComponentBase[ChipProps]):
         return await self.put_loopback_ui_event(
             (FrontendEventType.Click.value, None))
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
-        # TODO add delete support
-        if self.props.status == UIRunStatus.Running.value:
-            # TODO send exception if ignored click
-            print("IGNORE EVENT", self.props.status)
-            return
-        elif self.props.status == UIRunStatus.Stop.value:
-            handler = self.get_event_handler(ev[0])
-            if handler is not None:
-                self._task = asyncio.create_task(
-                    self.run_callback(lambda: handler.cb()))
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync=is_sync)
 
     @property
     def prop(self):
@@ -2471,16 +2497,17 @@ class TabList(MUIComponentBase[TabListProps]):
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     @property
     def prop(self):
         propcls = self.propcls
         return self._prop_base(propcls, self)
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=True,
+                                           sync_first=False,
                                            is_sync=is_sync)
 
     @property
@@ -2742,6 +2769,12 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
         self.register_event_handler(
             FrontendEventType.ComplexLayoutStoreModel.value,
             self._on_save_model)
+        
+        self.event_close_tab = self._create_event_slot(FrontendEventType.ComplexLayoutCloseTab)
+        self.event_select_tab = self._create_event_slot(FrontendEventType.ComplexLayoutSelectTab)
+        self.event_select_tabset = self._create_event_slot(FrontendEventType.ComplexLayoutSelectTabSet)
+        self.event_drop = self._create_event_slot(FrontendEventType.Drop)
+        self.event_reload = self._create_event_slot(FrontendEventType.ComplexLayoutTabReload)
 
     def _on_save_model(self, model):
         self.props.model_json = model
@@ -2771,10 +2804,10 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=True,
+                                           sync_first=False,
                                            is_sync=is_sync,
                                            sync_state_after_change=False,
                                            change_status=False)
@@ -2880,6 +2913,14 @@ class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
                          json_only=True)
         self.props.tree = tree
 
+        self.event_select = self._create_event_slot(FrontendEventType.TreeItemSelect)
+        self.event_toggle = self._create_event_slot(FrontendEventType.TreeItemToggle)
+        self.event_lazy_expand = self._create_event_slot(FrontendEventType.TreeLazyExpand)
+        self.event_focus = self._create_event_slot(FrontendEventType.TreeItemFocus)
+        self.event_icon_button = self._create_event_slot(FrontendEventType.TreeItemButton)
+        self.event_context_menu = self._create_event_slot(FrontendEventType.TreeItemContextMenu)
+        self.event_rename = self._create_event_slot(FrontendEventType.TreeItemRename)
+
     @property
     def prop(self):
         propcls = self.propcls
@@ -2893,10 +2934,10 @@ class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
     async def update_tree(self, tree: JsonLikeNode):
         await self.send_and_wait(self.update_event(tree=tree))
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=True,
+                                           sync_first=False,
                                            is_sync=is_sync)
 
 
@@ -2949,6 +2990,11 @@ class DynamicControlsProps(MUIFlexBoxProps):
     debounce: Union[Undefined, NumberType] = undefined
     throttle: Union[Undefined, NumberType] = undefined
     title: Union[Undefined, str] = undefined
+    # leva is uncontrolled component. if we change nodes,
+    # the control won't be updated, so we must provide 
+    # a different react key to force component 
+    # remount.
+    react_key: Union[Undefined, str] = undefined
 
 
 class DynamicControls(MUIComponentBase[DynamicControlsProps]):
@@ -2964,6 +3010,7 @@ class DynamicControls(MUIComponentBase[DynamicControlsProps]):
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     @property
     def prop(self):
@@ -2975,10 +3022,10 @@ class DynamicControls(MUIComponentBase[DynamicControlsProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def handle_event(self, ev: EventType, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=True,
+                                           sync_first=False,
                                            is_sync=is_sync)
 
 

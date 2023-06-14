@@ -15,7 +15,7 @@ import dataclasses
 import enum
 import inspect
 import urllib.request
-from typing import Any, Callable, Coroutine, Dict, Hashable, Iterable, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Coroutine, Dict, Hashable, Iterable, List, Literal, Optional, Set, Tuple, Type, Union
 
 import numpy as np
 
@@ -30,7 +30,7 @@ from tensorpc.flow.jsonlike import TreeItem
 from tensorpc.utils.registry import HashableSeqRegistryKeyOnly
 from tensorpc.flow.flowapp.components.core import get_tensor_container
 
-UNKNOWN_VIS_REGISTRY: HashableSeqRegistryKeyOnly[Callable[[Any, str], Coroutine[None, None, bool]]] = HashableSeqRegistryKeyOnly()
+UNKNOWN_VIS_REGISTRY: HashableSeqRegistryKeyOnly[Callable[[Any, str, "SimpleCanvas"], Coroutine[None, None, bool]]] = HashableSeqRegistryKeyOnly()
 
 
 def _try_cast_to_point_cloud(obj: Any):
@@ -102,7 +102,9 @@ class CanvasTreeItem(TreeItem):
 class PointCfg:
     size: float = dataclasses.field(default=3,
                                     metadata=ConfigPanel.slider_meta(1, 10))
-
+    encode_method: Literal["none", "int16"] = "none"
+    encode_scale: mui.NumberType = dataclasses.field(default=50,
+                                    metadata=ConfigPanel.slider_meta(25, 100))
 
 @dataclasses.dataclass
 class BoxCfg:
@@ -110,6 +112,9 @@ class BoxCfg:
                                           metadata=ConfigPanel.slider_meta(
                                               1, 5))
     add_cross: bool = True
+    opacity: float = dataclasses.field(default=0.2,
+                                          metadata=ConfigPanel.slider_meta(
+                                              0.0, 1.0))
 
 
 @dataclasses.dataclass
@@ -156,7 +161,9 @@ class SimpleCanvas(mui.FlexBox):
             screenshot_callback: Optional[Callable[[bytes, Any],
                                                    mui._CORO_NONE]] = None,
             transparent_canvas: bool = False,
-            init_canvas_childs: Optional[List[three.ThreeComponentType]] = None):
+            init_canvas_childs: Optional[List[three.ThreeComponentType]] = None,
+            key: str = "canvas",
+            sync_canvases: Optional[Set["SimpleCanvas"]] = None):
         if camera is None:
             camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         self.camera = camera
@@ -168,7 +175,7 @@ class SimpleCanvas(mui.FlexBox):
         self._dynamic_grid = three.Group([infgrid, self.axis_helper])
         gcfg = GlobalCfg(mui.ControlColorRGB(255, 255, 255))
         self.gcfg = gcfg
-        self._cfg = CanvasGlobalCfg(PointCfg(), BoxCfg(), gcfg, CameraCfg())
+        self.cfg = CanvasGlobalCfg(PointCfg(), BoxCfg(), gcfg, CameraCfg())
         self._dynamic_pcs = three.Group({})
         self._dynamic_lines = three.Group({})
         self._dynamic_images = three.Group({})
@@ -213,17 +220,25 @@ class SimpleCanvas(mui.FlexBox):
         self._random_colors: Dict[str, str] = {}
 
         self._dnd_trees: Set[str] = set()
+        # for find_component selection
+        self.key = key
+        if sync_canvases is None:
+            sync_canvases = set()
+        self._sync_canvases: Set[SimpleCanvas] = sync_canvases
+        if len(sync_canvases) > 0:
+            self.ctrl.event_change.on(self._sync_camera_ctrl).configure(throttle=100)
 
         super().__init__()
         self.init_add_layout([*self._layout_func()])
 
     def __get_cfg_panel(self):
-        _cfg_panel = ConfigPanel(self._cfg, self._on_cfg_change)
+        _cfg_panel = ConfigPanel(self.cfg, self._on_cfg_change)
         _cfg_panel.prop(border="1px solid",
                              border_color="gray",
                              collapsed=True,
                              title="configs",
-                             margin_left="5px")
+                             margin_left="5px",
+                             max_height="400px")
         return _cfg_panel
 
     async def _on_screen_shot_finish(self, img_and_data: Tuple[str, Any]):
@@ -254,6 +269,13 @@ class SimpleCanvas(mui.FlexBox):
             for v in all_childs.values():
                 if isinstance(v, three.BoundingBox):
                     ev += v.update_event(edge_width=value)
+            await self.send_and_wait(ev)
+        elif uid == "box.opacity":
+            ev = mui.AppEvent("", {})
+            all_childs = self._dynamic_boxes._get_uid_to_comp_dict()
+            for v in all_childs.values():
+                if isinstance(v, three.BoundingBox):
+                    ev += v.update_event(opacity=value)
             await self.send_and_wait(ev)
         elif uid == "box.add_cross":
             ev = mui.AppEvent("", {})
@@ -330,7 +352,7 @@ class SimpleCanvas(mui.FlexBox):
                 ]),
                 # self._cfg_panel,
                 self._ctrl_container,
-            ]).prop(position="absolute", top=3, left=3, z_index=5),
+            ]).prop(position="absolute", top=3, left=3, z_index=5, max_height="10%"),
             mui.IconButton(mui.IconType.Help,
                            lambda: None).prop(tooltip=help_string,
                                               position="absolute",
@@ -387,14 +409,12 @@ class SimpleCanvas(mui.FlexBox):
                                                              mui.CORO_NONE],
                                            throttle: int = 100,
                                            debounce: Optional[int] = None):
-        self.ctrl.register_event_handler(self.ctrl.EvChange,
-                                         handler,
-                                         throttle=throttle,
+        self.ctrl.event_change.on(handler).configure(throttle=throttle,
                                          debounce=debounce)
         await self.ctrl.sync_used_events()
 
     async def clear_cam_control_event_handler(self):
-        self.ctrl.remove_event_handler(self.ctrl.EvChange)
+        self.ctrl.remove_event_handlers(self.ctrl.event_change.event_type)
         await self.ctrl.sync_used_events()
 
     async def _on_enable_grid(self, selected):
@@ -411,12 +431,29 @@ class SimpleCanvas(mui.FlexBox):
         else:
             await self._ctrl_container.set_new_layout([])
 
+    async def register_sync_canvases(self, *canvas: "SimpleCanvas"):
+        """add camera handler for canvas, if changed, will
+        set camera pose for all canvas.
+        """
+        for c in canvas:
+            self._sync_canvases.add(c)
+        if self._sync_canvases:
+            await self.register_cam_control_event_handler(self._sync_camera_ctrl)
+
+    async def _sync_camera_ctrl(self, camdata):
+        # TODO this looks so ugly
+        mat = np.array(camdata["matrixWorld"]).reshape(4, 4).T
+        mat[:, 1] = -mat[:, 1]
+        mat[:, 2] = -mat[:, 2]
+        for canvas in self._sync_canvases:
+            await canvas.set_cam2world(mat, 50)
+
     async def _unknown_visualization(self, tree_id: str, obj: Any, ignore_registry: bool = False):
         obj_type = type(obj)
         if obj_type in UNKNOWN_VIS_REGISTRY and not ignore_registry:
             handlers = UNKNOWN_VIS_REGISTRY[obj_type]
             for handler in handlers:
-                res = await handler(obj, tree_id)
+                res = await handler(obj, tree_id, self)
                 if res == True:
                     return True 
         # found nothing in registry. use default one.
@@ -500,11 +537,13 @@ class SimpleCanvas(mui.FlexBox):
         self._segment_dict.clear()
         self._image_dict.clear()
         self._box_dict.clear()
+        self._voxels_dict.clear()
 
         await self._dynamic_pcs.set_new_layout({})
         await self._dynamic_lines.set_new_layout({})
         await self._dynamic_images.set_new_layout({})
         await self._dynamic_boxes.set_new_layout({})
+        await self._dynamic_voxels.set_new_layout({})
 
         for uid in self._dnd_trees:
             tree = find_component_by_uid_with_type_check(uid, BasicObjectTree)
@@ -512,6 +551,7 @@ class SimpleCanvas(mui.FlexBox):
                 tree._unregister_all_dnd_uid()
         self._dnd_trees.clear()
         self._random_colors.clear()
+        await self.background_img.clear()
 
     async def set_cam2world(self,
                             cam2world: Union[List[float], np.ndarray],
@@ -532,18 +572,29 @@ class SimpleCanvas(mui.FlexBox):
                           sizes: Optional[Union[mui.Undefined,
                                                 np.ndarray]] = None,
                           size_attenuation: bool = False,
-                          size: Optional[float] = None):
+                          size: Optional[float] = None,
+                          encode_method: Optional[Union[Literal["none", "int16"], mui.Undefined]] = None, 
+                          encode_scale: Optional[Union[mui.NumberType, mui.Undefined]] = None):
+        if encode_method is None:
+            encode_method = self.cfg.point.encode_method
+        if encode_scale is None:
+            encode_scale = self.cfg.point.encode_scale
         if key not in self._point_dict:
-            ui = three.Points(limit)
+            if encode_method is not None:
+                ui = three.Points(limit).prop(encode_method=encode_method, encode_scale=encode_scale)
+            else:
+                ui = three.Points(limit)
             self._point_dict[key] = ui
             await self._dynamic_pcs.update_childs({key: ui})
         point_ui = self._point_dict[key]
         await point_ui.update_points(points,
                                      colors,
                                      limit=limit,
-                                     size=self._cfg.point.size if size is None else size,
+                                     size=self.cfg.point.size if size is None else size,
                                      sizes=sizes,
-                                     size_attenuation=size_attenuation)
+                                     size_attenuation=size_attenuation,
+                                     encode_method=encode_method, 
+                                     encode_scale=encode_scale)
 
     async def clear_points(self, clear_keys: Optional[List[str]] = None):
         if clear_keys is None:
@@ -568,7 +619,8 @@ class SimpleCanvas(mui.FlexBox):
                          edge_width: Optional[float] = None):
         box_dict = {}
         if edge_width is None:
-            edge_width = self._cfg.box.edge_width
+            edge_width = self.cfg.box.edge_width
+        opacity = self.cfg.box.opacity
         for i in range(len(dims)):
             if isinstance(color, list):
                 cur_color = color[i]
@@ -579,7 +631,8 @@ class SimpleCanvas(mui.FlexBox):
                 position=locs[i].tolist(),
                 rotation=rots[i].tolist(),
                 edge_width=edge_width,
-                add_cross=self._cfg.box.add_cross)
+                add_cross=self.cfg.box.add_cross,
+                opacity=opacity)
         if key not in self._dynamic_boxes:
             new_box = three.Group([]).prop()
             await self._dynamic_boxes.update_childs({key: new_box})
