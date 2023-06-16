@@ -17,7 +17,7 @@ from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
                                     is_valid_function)
 from tensorpc.flow.jsonlike import Undefined, BackendOnlyProp, undefined
 from tensorpc.core.serviceunit import ObservedFunction, ObservedFunctionRegistry, ObservedFunctionRegistryProtocol
-from tensorpc.flow.client import is_inside_app
+from tensorpc.flow.client import is_inside_app_session
 
 if TYPE_CHECKING:
     from .app import App, EditableApp
@@ -106,6 +106,10 @@ class EventHandlers:
     def get_bind_event_handlers_noarg(self, event: Event):
         return [partial(handler.run_noarg_event, event=event) for handler in self.handlers]
 
+    def remove_handler(self, handler: Callable):
+        self.handlers = [h for h in self.handlers if h.cb != handler]
+        return
+
 class AppContext:
 
     def __init__(self, app: "App") -> None:
@@ -123,6 +127,8 @@ APP_CONTEXT_VAR: contextvars.ContextVar[
 def get_app_context() -> Optional[AppContext]:
     return APP_CONTEXT_VAR.get()
 
+def is_inside_app():
+    return is_inside_app_session() and get_app_context() is not None
 
 def get_editable_app() -> "EditableApp":
     ctx = get_app_context()
@@ -229,6 +235,7 @@ def create_reload_metas(uid_to_comp: Dict[str, "Component"], path: str):
                 if isinstance(cb, partial):
                     is_valid_func = is_valid_function(cb.func)
                     cb_real = cb.func
+
                 if not is_valid_func or is_lambda(cb):
                     continue
                 cb_file = str(Path(inspect.getfile(cb_real)).resolve())
@@ -256,3 +263,4 @@ ALL_OBSERVED_FUNCTIONS: ObservedFunctionRegistryProtocol = AppObservedFunctionRe
 
 def observe_function(func: Callable):
     return ALL_OBSERVED_FUNCTIONS.register(func)
+

@@ -441,10 +441,9 @@ class SimpleCanvas(mui.FlexBox):
             await self.register_cam_control_event_handler(self._sync_camera_ctrl)
 
     async def _sync_camera_ctrl(self, camdata):
+        # print(camdata)
         # TODO this looks so ugly
         mat = np.array(camdata["matrixWorld"]).reshape(4, 4).T
-        mat[:, 1] = -mat[:, 1]
-        mat[:, 2] = -mat[:, 2]
         for canvas in self._sync_canvases:
             await canvas.set_cam2world(mat, 50)
 

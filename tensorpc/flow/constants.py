@@ -49,3 +49,7 @@ TENSORPC_ANYLAYOUT_PREVIEW_FUNC_NAME = "tensorpc_flow_preview_layout"
 
 TENSORPC_FLOW_LANG_SERVER_NAME_SPLIT = "@"
 TENSORPC_FLOW_LANG_SERVER_PREFIX = "__tensorpc_lang_server"
+
+# basic uid use ".", flexlayout use "#" and "-"
+TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT = "&"
+TENSORPC_FLOW_COMP_UID_STRUCTURE_SPLIT = "$"

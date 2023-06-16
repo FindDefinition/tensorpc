@@ -128,3 +128,20 @@ class ThreadLocker(mui.FlexBox):
     @mark_did_mount
     async def _mount(self):
         self.event.clear()
+
+class MarkdownViewer(mui.FlexBox):
+    """this class is existed for standard InspectPanel-based usage.
+    When you add it to your layout, you can access it by 
+    appctx.find_component(plus.MarkdownViewer).
+    this class has been added to Inspector builtins.
+    """
+    def __init__(self) -> None:
+        self.info = mui.Markdown()
+        super().__init__([
+            self.info,
+        ])
+        self.prop(width="100%")
+
+    async def write(self, content: str):
+        return await self.info.write(content)
+

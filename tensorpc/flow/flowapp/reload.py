@@ -9,7 +9,6 @@ from tensorpc.core.serviceunit import (AppFuncType, AppFunctionMeta, ObjectReloa
                                        ObservedFunctionRegistryProtocol,
                                        ReloadableDynamicClass,
                                        ServFunctionMeta)
-from tensorpc.flow.client import is_inside_app
 from tensorpc.flow.constants import (TENSORPC_ANYLAYOUT_FUNC_NAME,
                                      TENSORPC_ANYLAYOUT_PREVIEW_FUNC_NAME,
                                      TENSORPC_LEGACY_LAYOUT_FUNC_NAME)

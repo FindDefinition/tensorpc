@@ -115,7 +115,7 @@ def is_inside_devflow():
     return meta.is_inside_devflow
 
 
-def is_inside_app():
+def is_inside_app_session():
     meta = AppLocalMeta()
     return meta.is_inside_devflow
 

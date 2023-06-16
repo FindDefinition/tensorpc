@@ -22,7 +22,7 @@ from .objinspect import (AnyFlexLayout, BasicObjectTree, CallbackSlider,
                          ObjectPreviewHandler, TreeDragTarget, ThreadLocker,
                          register_obj_layout_handler,
                          register_obj_preview_handler,
-                         register_user_obj_tree_type)
+                         register_user_obj_tree_type, MarkdownViewer)
 from .options import CommonOptions
 from .scriptmgr import ScriptManager
 from .scheduler import TmuxScheduler, Task, SSHTarget

@@ -59,12 +59,13 @@ from tensorpc.constants import PACKAGE_ROOT, TENSORPC_FLOW_FUNC_META_KEY
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.inspecttools import get_all_members_by_type
 from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
-                                    is_valid_function)
+                                    is_valid_function, loose_isinstance)
 from tensorpc.core.serviceunit import (ObservedFunctionRegistryProtocol,
                                        ReloadableDynamicClass,
                                        ServFunctionMeta, ServiceUnit,
                                        SimpleCodeManager, get_qualname_to_code)
 from tensorpc.flow.client import MasterMeta
+from tensorpc.flow.constants import TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT
 from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem
 from tensorpc.flow.flowapp.components.plus.objinspect.inspector import get_exception_frame_stack
 from tensorpc.flow.flowapp.components.plus.objinspect.treeitems import TraceTreeItem
@@ -847,8 +848,10 @@ class App:
         res: Dict[str, Any] = {}
         for uid, data in ev.uid_to_data.items():
             key = undefined 
-            if len(data) == 3:
-                key = data[2]
+            if TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT in uid:
+                parts = uid.split(TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT)
+                uid = parts[0]
+                key = parts[1]
             event = Event(data[0], data[1], key)
             ev_type = data[0]
             if event.type == FrontendEventType.Drop.value:
@@ -947,11 +950,14 @@ class App:
         res: List[Optional[T]] = [None]
 
         def handler(name, comp):
-            if isinstance(comp, type):
+            if loose_isinstance(comp, (type,)):
                 if (validator is None) or (validator is not None and validator(comp)):
                     res[0] = comp
                     return ForEachResult.Return
-
+            elif isinstance(comp, mui.FlexBox) and comp._wrapped_obj is not None and loose_isinstance(comp._wrapped_obj, (type,)):
+                if (validator is None) or (validator is not None and validator(comp._wrapped_obj)):
+                    res[0] = comp._wrapped_obj
+                    return ForEachResult.Return
         self.root._foreach_comp(handler)
         return res[0]
 
@@ -1156,6 +1162,8 @@ class EditableApp(App):
             return
         print("RELOAD", path)
         new, change, _ = changes
+        for x in changes:
+            print(x.keys())
         new_data = self._flowapp_code_mgr.get_code(resolved_path)
         is_reload = False
         is_callback_change = False
@@ -1184,12 +1192,17 @@ class EditableApp(App):
                             callbacks_of_this_file = self.__get_callback_metas_in_file(
                                 resolved_path, self.root)
                         else:
+                            # TODO should we check all callbacks instead of changed layout?
+
                             callbacks_of_this_file = self.__get_callback_metas_in_file(
-                                resolved_path, layout)
+                                resolved_path, self.root)
+                        # print(len(callbacks_of_this_file), "callbacks_of_this_file 0", change.keys())
                         for cb_meta in callbacks_of_this_file:
+                            # print(cb_meta.cb_qualname)
                             if cb_meta.cb_qualname in change:
                                 is_callback_change = True
                                 break
+                        # print("is_callback_change", is_callback_change)
                     for m in changed_metas:
                         print(m.qualname, "CHANGED")
 
@@ -1331,12 +1344,13 @@ class EditableApp(App):
                     self._flowapp_special_eemitter.emit(
                         AppSpecialEventType.ObservedFunctionChange,
                         observed_func_changed)
-
+            # print(is_callback_change, is_reload)
             if is_callback_change or is_reload:
                 # reset all callbacks in this file
                 if callbacks_of_this_file is None:
                     callbacks_of_this_file = self.__get_callback_metas_in_file(
                         resolved_path, self.root)
+                # print(len(callbacks_of_this_file), "callbacks_of_this_file")
                 if callbacks_of_this_file:
                     cb_real = callbacks_of_this_file[0].cb_real
                     reload_res = self._flow_reload_manager.reload_type(

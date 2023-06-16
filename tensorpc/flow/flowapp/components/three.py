@@ -246,6 +246,7 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
             FrontendEventType.ContextMenu.value,
             FrontendEventType.Change.value,
         ])
+        # TODO we should remove event_change here.
         self.event_change = self._create_event_slot(FrontendEventType.Change)
         self.event_double_click = self._create_event_slot(FrontendEventType.DoubleClick)
         self.event_click = self._create_event_slot(FrontendEventType.Click)
@@ -266,9 +267,8 @@ class Object3dContainerBase(ThreeContainerBase[T_o3d_container_prop, T_child]):
                  base_type: UIType,
                  prop_cls: Type[T_o3d_container_prop],
                  children: Dict[str, T_child],
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(base_type, prop_cls, uid_to_comp, children, inited)
+        super().__init__(base_type, prop_cls, children, inited)
 
     def update_object3d_event(self,
                               position: Optional[Union[Vector3Type,
@@ -324,9 +324,8 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
                  base_type: UIType,
                  prop_cls: Type[T_o3d_container_prop],
                  children: Dict[str, T_child],
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(base_type, prop_cls, children, uid_to_comp, inited)
+        super().__init__(base_type, prop_cls, children, inited)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync)
@@ -858,12 +857,11 @@ class Group(Object3dContainerBase[Object3dContainerBaseProps,
     def __init__(self,
                  children: Union[Dict[str, ThreeComponentType],
                                  List[ThreeComponentType]],
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ThreeGroup, Object3dContainerBaseProps,
-                         children, uid_to_comp, inited)
+                         children, inited)
 
     @property
     def prop(self):
@@ -953,7 +951,6 @@ class PerspectiveCamera(Object3dBase[PerspectiveCameraProps]):
         self.props.far = far
         self.props.position = position
         self.props.up = up
-
         self.make_default = make_default
 
     # TODO from camera matrix and intrinsics
@@ -1084,10 +1081,15 @@ class CameraUserControlType(enum.Enum):
     SetCamPose = 0
     SetLookAt = 1
     Reset = 2
+    SetCamPoseRaw = 3
 
 
 class CameraControl(ThreeComponentBase[CameraControlProps]):
     """default values: https://github.com/yomotsu/camera-controls#properties
+    threejs camera default axes:
+        x: right
+        y: up
+        z: negative forward
     """
     def __init__(self) -> None:
         super().__init__(UIType.ThreeCameraControl, CameraControlProps, [FrontendEventType.Change.value])
@@ -1123,8 +1125,12 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
                             update_now: bool = False):
         """
         TODO handle OrthographicCamera
+        TODO currently we use a simple way to set cam2world, the
+            rotation is limited by fixed camera up. so only cam2world[:, 2]
+            is used in set_cam2world.
         Args: 
             cam2world: camera to world matrix, 4x4 ndaray or 16 list, R|T, not R/T
+                the coordinate system is right hand, x right, y up, z negative forward
             distance: camera orbit target distance.
         """
         cam2world = np.array(cam2world, np.float32).reshape(4, 4)
@@ -1143,6 +1149,7 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
                 "updateNow":
                 update_now,
             }))
+
 
     async def set_lookat(self, origin: List[float], target: List[float]):
         """
@@ -1441,11 +1448,10 @@ class ThreeCanvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
                  children: Union[List[ThreeComponentType],
                                  Dict[str, ThreeComponentType]],
                  background: Union[str, Undefined] = undefined,
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ThreeCanvas, ThreeCanvasProps, uid_to_comp,
+        super().__init__(UIType.ThreeCanvas, ThreeCanvasProps,
                          children, inited)
         self.props.three_background_color = background
 
@@ -1503,9 +1509,8 @@ class ThreeFlexProps(R3FlexPropsBase, ContainerBaseProps):
 class Flex(ThreeContainerBase[ThreeFlexProps, ThreeComponentType]):
     def __init__(self,
                  children: Dict[str, ThreeComponentType],
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(UIType.ThreeFlex, ThreeFlexProps, uid_to_comp,
+        super().__init__(UIType.ThreeFlex, ThreeFlexProps,
                          children, inited)
 
     @property
@@ -1527,10 +1532,9 @@ class ThreeFlexItemBoxProps(R3FlexPropsBase, ContainerBaseProps):
 class ItemBox(ThreeContainerBase[ThreeFlexItemBoxProps, ThreeComponentType]):
     def __init__(self,
                  children: Dict[str, ThreeComponentType],
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         super().__init__(UIType.ThreeFlexItemBox, ThreeFlexItemBoxProps,
-                         uid_to_comp, children, inited)
+                         children, inited)
 
     @property
     def prop(self):
@@ -1584,9 +1588,8 @@ class Html(Object3dContainerBase[HtmlProps, MUIComponentType]):
     """
     def __init__(self,
                  children: Dict[str, MUIComponentType],
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(UIType.ThreeHtml, HtmlProps, children, uid_to_comp,
+        super().__init__(UIType.ThreeHtml, HtmlProps, children,
                          inited)
 
     @property
@@ -2422,7 +2425,6 @@ class MeshV1(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
     def __init__(self,
                  geometry: ThreeGeometryBase,
                  material: ThreeMaterialBase,
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         self.geometry = geometry
         assert isinstance(geometry, ThreeGeometryBase)
@@ -2433,7 +2435,7 @@ class MeshV1(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
             "geometry": geometry,
             "material": material,
         }
-        super().__init__(UIType.ThreeMesh, MeshProps, children, uid_to_comp,
+        super().__init__(UIType.ThreeMesh, MeshProps, children,
                          inited)
         self.props.toggled = False
 
@@ -2474,9 +2476,8 @@ class Hud(ThreeContainerBase[HudProps, ThreeComponentType]):
     # TODO can/should group accept event?
     def __init__(self,
                  children: Dict[str, ThreeComponentType],
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(UIType.ThreeHud, HudProps, uid_to_comp, children,
+        super().__init__(UIType.ThreeHud, HudProps, children,
                          inited)
 
     @property

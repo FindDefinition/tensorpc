@@ -1095,6 +1095,85 @@ class ThreadLockerApp:
             appctx.thread_locker_wait_sync()
 
 
+class SwitchCaseApp:
+    @marker.mark_create_layout
+    def my_layout(self):
+        self.switchcase = mui.SwitchCase([
+            mui.SwitchCase.Case("1", mui.Typography("1")),
+            mui.SwitchCase.Case("2", mui.Typography("2")),
+            mui.SwitchCase.Case("3", mui.Typography("3")),
+            mui.SwitchCase.Case(mui.undefined, mui.Typography("default")),
+        ])
+        return mui.VBox([
+            mui.RadioGroup(["1", "2", "3"], self._on_select),
+            mui.Divider(),
+            self.switchcase,
+        ])
+
+    async def _on_select(self, value):
+        await self.switchcase.set_condition(value)
+
+class DataListApp:
+    @marker.mark_create_layout
+    def my_layout(self):
+        data_list = [
+            {
+                "id": "1",
+                "name": "name1",
+            },
+            {
+                "id": "2",
+                "name": "name2",
+            },
+            {
+                "id": "3",
+                "name": "name3",
+            },
+
+        ]
+        
+        return mui.VBox([
+            mui.DataFlexBox(mui.Typography("").set_override_props(value="name")).prop(flex_flow="column", data_list=data_list),
+        ])
+
+class DataGridApp:
+    def create_data(self, name: str, calories: float,
+        fat: float,
+        carbs: float,
+        protein: float):
+        return {
+            "name": name,
+            "calories": calories,
+            "fat": fat,
+            "carbs": carbs,
+            "protein": protein,
+
+        }
+    @marker.mark_create_layout
+    def my_layout(self):
+        rows = [
+            self.create_data('Frozen yoghurt', 159, 6.0, 24, 4.0),
+            self.create_data('Ice cream sandwich', 237, 9.0, 37, 4.3),
+            self.create_data('Eclair', 262, 16.0, 24, 6.0),
+            self.create_data('Cupcake', 305, 3.7, 67, 4.3),
+            self.create_data('Gingerbread', 356, 16.0, 49, 3.9),
+        ]
+        btn = mui.Button("Edit")
+        btn.event_click.on_standard(lambda x: print(x.key))
+        column_defs = [
+            mui.DataGrid.ColumnDef("name", accessorKey="name"),
+            mui.DataGrid.ColumnDef("calories", accessorKey="calories"),
+            mui.DataGrid.ColumnDef("fat", accessorKey="fat"),
+            mui.DataGrid.ColumnDef("carbs", cell=mui.Typography("").set_override_props(value="carbs")),
+            mui.DataGrid.ColumnDef("protein", accessorKey="protein"),
+            mui.DataGrid.ColumnDef("actions", cell=btn),
+
+        ]
+        return mui.VBox([
+            mui.DataGrid(column_defs, rows).prop(id_key="name", row_hover=True),
+        ])
+
+
 
 class CollectionApp:
     @mark_create_layout
@@ -1111,6 +1190,9 @@ class CollectionApp:
                                                             width="100%",
                                                             overflow="hidden")
         self.sm = plus.ScriptManager("CodeStorage")
+        self.switchcase = SwitchCaseApp()
+        self.datalist = DataListApp()
+        self.datagrid = DataGridApp()
         nodes = [
             mui.ControlNode("1",
                             "color",

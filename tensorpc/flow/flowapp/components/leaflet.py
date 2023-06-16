@@ -114,13 +114,12 @@ class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
                  center: Tuple[NumberType, NumberType],
                  zoom: NumberType,
                  children: Dict[str, MapComponentType],
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         allow_evs = [
             FrontendEventType.MapZoom.value, FrontendEventType.MapMove.value
         ]
         super().__init__(UIType.LeafletMapContainer, MapContainerProps,
-                         uid_to_comp, children, inited, allow_evs)
+                         children, inited, allow_evs)
         self.center = center
         self.zoom = zoom
         self.event_move = self._create_event_slot(FrontendEventType.MapMove)

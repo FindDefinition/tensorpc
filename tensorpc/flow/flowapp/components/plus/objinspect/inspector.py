@@ -305,11 +305,11 @@ class ObjectInspector(mui.FlexBox):
         # if not layout.event_emitter.listeners(
         #         FrontendEventType.BeforeUnmount.name):
         layout.flow_event_emitter.once(
-            FrontendEventType.BeforeUnmount.name, partial(self._on_preview_layout_unmount, layout=layout))
+            FrontendEventType.BeforeUnmount.value, partial(self._on_preview_layout_unmount, layout=layout))
         # if not layout.event_emitter.listeners(
         #         FrontendEventType.BeforeMount.name):
         layout.flow_event_emitter.once(
-            FrontendEventType.BeforeMount.name, partial(self._on_preview_layout_mount, layout=layout))
+            FrontendEventType.BeforeMount.value, partial(self._on_preview_layout_mount, layout=layout))
 
 
     def _on_preview_layout_mount(self, event: Event, layout: mui.FlexBox):

@@ -44,7 +44,7 @@ from ..core import (AppComponentCore, AppEvent, AppEventType, BasicProps,
                     NumberType, T_base_props, T_child, T_container_props,
                     TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
                     ValueType, undefined, create_ignore_usr_msg,
-                    ALL_POINTER_EVENTS, _get_obj_def_path)
+                    ALL_POINTER_EVENTS, _get_obj_def_path, SwitchCase)
 from tensorpc.flow.constants import TENSORPC_ANYLAYOUT_FUNC_NAME
 if TYPE_CHECKING:
     from .three import ThreeCanvas
@@ -200,7 +200,7 @@ _StdColorNoDefault: TypeAlias = Literal['primary', 'secondary', 'error',
                                         'info', 'success', 'warning']
 
 MUIComponentType: TypeAlias = Union[MUIComponentBase, MUIContainerBase,
-                                    Fragment]
+                                    Fragment, SwitchCase]
 
 LayoutType: TypeAlias = Union[List[MUIComponentType], Dict[str,
                                                            MUIComponentType]]
@@ -421,12 +421,12 @@ class ButtonProps(MUIComponentBaseProps):
 
 
 class Button(MUIComponentBase[ButtonProps]):
-    def __init__(self, name: str, callback: Callable[[], _CORO_NONE]) -> None:
+    def __init__(self, name: str, callback: Optional[Callable[[], _CORO_NONE]] = None) -> None:
         super().__init__(UIType.Button, ButtonProps,
                          [FrontendEventType.Click.value])
         self.props.name = name
-        self.callback = callback
-        self.register_event_handler(FrontendEventType.Click.value, callback, simple_event=True)
+        if callback is not None:
+            self.register_event_handler(FrontendEventType.Click.value, callback, simple_event=True)
         self.event_click = self._create_event_slot(FrontendEventType.Click)
 
     async def headless_click(self):
@@ -640,11 +640,10 @@ class ButtonGroupProps(MUIFlexBoxProps):
 class ButtonGroup(MUIContainerBase[ButtonGroupProps, Button]):
     def __init__(self,
                  children: Union[List[Button], Dict[str, Button]],
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ButtonGroup, ButtonGroupProps, uid_to_comp,
+        super().__init__(UIType.ButtonGroup, ButtonGroupProps,
                          children, inited)
         for v in children.values():
             assert isinstance(v, Button), "all childs must be button"
@@ -754,12 +753,11 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
                      Callable[[Optional[Union[ValueType, List[ValueType]]]],
                               _CORO_NONE]] = None,
                  value: Optional[Union[ValueType, List[ValueType]]] = None,
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ToggleButtonGroup, ToggleButtonGroupProps,
-                         uid_to_comp, children, inited,
+                         children, inited,
                          [FrontendEventType.Change.value])
         for v in children.values():
             assert isinstance(v,
@@ -850,12 +848,11 @@ class AccordionDetails(MUIContainerBase[AccordionDetailsProps,
                                         MUIComponentType]):
     def __init__(self,
                  children: LayoutType,
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.AccordionDetail, AccordionDetailsProps,
-                         uid_to_comp, children, inited)
+                         children, inited)
 
     @property
     def prop(self):
@@ -867,12 +864,11 @@ class AccordionSummary(MUIContainerBase[AccordionSummaryProps,
                                         MUIComponentType]):
     def __init__(self,
                  children: LayoutType,
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.AccordionSummary, AccordionSummaryProps,
-                         uid_to_comp, children, inited)
+                         children, inited)
 
     @property
     def prop(self):
@@ -893,7 +889,6 @@ class Accordion(MUIContainerBase[AccordionProps, Union[AccordionDetails,
     def __init__(self,
                  summary: AccordionSummary,
                  details: Optional[AccordionDetails] = None,
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         children: Dict[str, Union[AccordionDetails, AccordionSummary]] = {
             "summary": summary
@@ -904,7 +899,7 @@ class Accordion(MUIContainerBase[AccordionProps, Union[AccordionDetails,
             assert isinstance(
                 v, (AccordionSummary,
                     AccordionDetails)), "all childs must be summary or detail"
-        super().__init__(UIType.Accordion, AccordionProps, uid_to_comp,
+        super().__init__(UIType.Accordion, AccordionProps,
                          children, inited)
 
     def get_sync_props(self) -> Dict[str, Any]:
@@ -965,7 +960,6 @@ class ListItemButton(MUIComponentBase[ButtonProps]):
 class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
     def __init__(self,
                  children: Optional[LayoutType] = None,
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  base_type: UIType = UIType.FlexBox,
                  inited: bool = False,
                  uid: str = "",
@@ -975,7 +969,6 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(base_type,
                          MUIFlexBoxWithDndProps,
-                         uid_to_comp,
                          children,
                          inited,
                          uid=uid,
@@ -1028,6 +1021,44 @@ class DragHandleFlexBox(FlexBox):
 
 
 @dataclasses.dataclass
+class MUIDataFlexBoxWithDndProps(MUIFlexBoxWithDndProps):
+    data_list: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
+    id_key: str = "id"
+
+class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps, MUIComponentType]):
+    """ flex box that use data list and template component to render
+    list of data with same UI components.
+    """
+    def __init__(self,
+                 children: MUIComponentType,
+                 inited: bool = False,
+                 uid: str = "",
+                 app_comp_core: Optional[AppComponentCore] = None) -> None:
+        super().__init__(UIType.DataFlexBox,
+                         MUIDataFlexBoxWithDndProps,
+                         {"0": children},
+                         inited,
+                         uid=uid,
+                         app_comp_core=app_comp_core,
+                         allowed_events=[])
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self,
+                                           ev,
+                                           sync_first=False,
+                                           is_sync=is_sync)
+
+@dataclasses.dataclass
 class MUIListProps(MUIFlexBoxProps):
     subheader: str = ""
 
@@ -1035,14 +1066,12 @@ class MUIListProps(MUIFlexBoxProps):
 class MUIList(MUIContainerBase[MUIListProps, MUIComponentType]):
     def __init__(self,
                  children: Optional[LayoutType] = None,
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  subheader: str = "",
                  inited: bool = False) -> None:
         if children is not None and isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.MUIList,
                          MUIListProps,
-                         uid_to_comp=uid_to_comp,
                          _children=children,
                          inited=inited)
         self.props.subheader = subheader
@@ -1089,8 +1118,8 @@ class RadioGroup(MUIComponentBase[RadioGroupProps]):
     def __init__(
         self,
         names: List[str],
-        row: bool,
-        callback: Optional[Callable[[str], Coroutine[None, None, None]]] = None
+        callback: Optional[Callable[[str], Coroutine[None, None, None]]] = None,
+        row: bool = True,
     ) -> None:
         super().__init__(UIType.RadioGroup, RadioGroupProps,
                          [FrontendEventType.Change.value])
@@ -2166,7 +2195,7 @@ class TypographyProps(MUIComponentBaseProps):
 
 
 class Typography(MUIComponentBase[TypographyProps]):
-    def __init__(self, init: str) -> None:
+    def __init__(self, init: str = "") -> None:
         super().__init__(UIType.Typography, TypographyProps)
         self.props.value = init
 
@@ -2251,11 +2280,10 @@ class PaperProps(MUIFlexBoxProps):
 class Paper(MUIContainerBase[PaperProps, MUIComponentType]):
     def __init__(self,
                  children: Optional[LayoutType] = None,
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         if children is not None and isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.Paper, PaperProps, uid_to_comp, children,
+        super().__init__(UIType.Paper, PaperProps, children,
                          inited)
 
     @property
@@ -2279,9 +2307,8 @@ class FormControlProps(MUIFlexBoxProps):
 class FormControl(MUIContainerBase[FormControlProps, MUIComponentType]):
     def __init__(self,
                  children: Dict[str, MUIComponentType],
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
-        super().__init__(UIType.Paper, FormControlProps, uid_to_comp, children,
+        super().__init__(UIType.Paper, FormControlProps, children,
                          inited)
 
     @property
@@ -2309,7 +2336,7 @@ class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
     def __init__(self, children: Optional[LayoutType] = None) -> None:
         if children is not None and isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.Collapse, CollapseProps, None, children)
+        super().__init__(UIType.Collapse, CollapseProps, children)
 
     @property
     def prop(self):
@@ -2334,10 +2361,9 @@ class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
 #                  children: Dict[str, MUIComponentType],
 #                  uid: str = "",
 #                  queue: Optional[asyncio.Queue] = None,
-#                  uid_to_comp: Optional[Dict[str, Component]] = None,
 #                  inited: bool = False) -> None:
 #         super().__init__(UIType.Accordion, AccordionProps,
-#                          uid_to_comp, children, inited)
+#                          children, inited)
 
 #     @property
 #     def prop(self):
@@ -2525,11 +2551,10 @@ class TabContext(MUIContainerBase[TabContextProps, MUIComponentType]):
     def __init__(self,
                  children: LayoutType,
                  value: str,
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.TabContext, TabContextProps, uid_to_comp,
+        super().__init__(UIType.TabContext, TabContextProps,
                          children, inited)
         self.props.value = value
 
@@ -2566,11 +2591,10 @@ class TabPanel(MUIContainerBase[TabPanelProps, MUIComponentType]):
     def __init__(self,
                  children: LayoutType,
                  value: str,
-                 uid_to_comp: Optional[Dict[str, Component]] = None,
                  inited: bool = False) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.TabPanel, TabPanelProps, uid_to_comp, children,
+        super().__init__(UIType.TabPanel, TabPanelProps, children,
                          inited)
         self.props.value = value
 
@@ -2610,7 +2634,7 @@ class Allotment(MUIContainerBase[AllotmentProps, MUIComponentType]):
     def __init__(self, children: LayoutType) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.Allotment, AllotmentProps, None, children,
+        super().__init__(UIType.Allotment, AllotmentProps, children,
                          False)
 
     @property
@@ -2628,7 +2652,7 @@ class AllotmentPane(MUIContainerBase[AllotmentPaneProps, MUIComponentType]):
     def __init__(self, children: LayoutType) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.AllotmentPane, AllotmentPaneProps, None,
+        super().__init__(UIType.AllotmentPane, AllotmentPaneProps,
                          children, False)
 
     @property
@@ -2761,7 +2785,6 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
 
         super().__init__(UIType.FlexLayout,
                          FlexLayoutProps,
-                         None,
                          comp_children_dict,
                          False,
                          allowed_events=[x.value for x in events])
@@ -3028,6 +3051,48 @@ class DynamicControls(MUIComponentBase[DynamicControlsProps]):
                                            sync_first=False,
                                            is_sync=is_sync)
 
+@dataclasses.dataclass
+class DataGridColumnDef:
+    header: Union[Undefined, str] = undefined 
+    accessorKey: Union[Undefined, str] = undefined
+    cell: Union[Undefined, Component] = undefined
+    footer: Union[Undefined, str] = undefined
+    id: Union[Undefined, str] = undefined 
+    columns: "List[DataGridColumnDef]" = dataclasses.field(default_factory=list)
+
+@dataclasses.dataclass
+class DataGridProps(MUIFlexBoxProps):
+    # we can't put DataGridColumnDef here because
+    # it may contain component.
+    data_list: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
+    id_key: Union[Undefined, str] = undefined
+    row_hover: Union[Undefined, bool] = undefined
+    virtualized: Union[Undefined, bool] = undefined
+    virtualized_inf_scrolling: Union[Undefined, bool] = undefined
+
+
+class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
+    @dataclasses.dataclass
+    class ChildDef:
+        columnDefs: List[DataGridColumnDef]
+    ColumnDef = DataGridColumnDef
+    def __init__(self, column_def: List[DataGridColumnDef], init_data_list: Optional[List[Dict[str, Any]]] = None) -> None:
+        super().__init__(UIType.DataGrid, DataGridProps, DataGrid.ChildDef(column_def),
+                         False)
+        # TODO check set_new_layout argument, it must be DataGrid.ChildDef
+        if init_data_list is not None:
+            self.props.data_list = init_data_list
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
 
 def flex_wrapper(obj: Any,
                  metas: Optional[List[ServFunctionMeta]] = None,
@@ -3083,3 +3148,5 @@ def flex_preview_wrapper(obj: Any,
     raise ValueError(
         f"wrapped object must define a zero-arg function with @marker.mark_create_preview_layout and return a flexbox"
     )
+
+

@@ -28,7 +28,7 @@ from tensorpc.flow.flowapp.reload import reload_object_methods
 from tensorpc.flow.jsonlike import (CommonQualNames, ContextMenuData,
                                     IconButtonData, parse_obj_to_jsonlike, TreeItem)
 from tensorpc.flow.marker import mark_did_mount, mark_will_unmount
-from .controllers import CallbackSlider, ThreadLocker
+from .controllers import CallbackSlider, ThreadLocker, MarkdownViewer
 from .analysis import GLOBAL_SPLIT, get_obj_dict, parse_obj_item, parse_obj_dict, get_obj_by_uid_trace, get_obj_by_uid
 
 _DEFAULT_OBJ_NAME = "default"
@@ -653,6 +653,7 @@ class ObjectTree(BasicObjectTree):
                 "fileReader": SimpleFileReader(),
                 "callbackSlider": CallbackSlider(),
                 "threadLocker": ThreadLocker(),
+                "markdown": MarkdownViewer(),
             },
             _DEFAULT_DATA_STORAGE_NAME: self._default_data_storage_nodes,
             _DEFAULT_OBSERVED_FUNC_NAME: self._default_obs_funcs,
