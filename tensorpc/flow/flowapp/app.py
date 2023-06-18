@@ -852,8 +852,10 @@ class App:
                 parts = uid.split(TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT)
                 uid = parts[0]
                 key = parts[1]
-            event = Event(data[0], data[1], key)
-            ev_type = data[0]
+            index = undefined
+            if len(data) == 3:
+                index = data[2]
+            event = Event(data[0], data[1], key, index)
             if event.type == FrontendEventType.Drop.value:
                 # TODO add event context stack here.
                 src_data = data[1]

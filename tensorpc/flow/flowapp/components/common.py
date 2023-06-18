@@ -52,9 +52,15 @@ _ONEARG_SPECIAL_EVENTS = set([
     FrontendEventType.SelectNewItem.value,
 
 ])
+_ONEARG_DATAGRID_EVENTS = set([
+    FrontendEventType.DataGridRowSelection.value,
+    FrontendEventType.DataGridFetchDetail.value,
+
+])
 
 _ONEARG_EVENTS = set(
     ALL_POINTER_EVENTS) | _ONEARG_TREE_EVENTS | _ONEARG_COMPLEXL_EVENTS | _ONEARG_SPECIAL_EVENTS | _ONEARG_EDITOR_EVENTS
+_ONEARG_EVENTS = _ONEARG_EVENTS | _ONEARG_DATAGRID_EVENTS
 
 _NOARG_EVENTS = set([
     FrontendEventType.Click.value,
@@ -102,22 +108,25 @@ async def handle_standard_event(comp: Component,
     elif comp.props.status == UIRunStatus.Stop.value:
         if event.type in _STATE_CHANGE_EVENTS:
             handlers = comp.get_event_handlers(event.type)
-            comp.state_change_callback(event.data, event.type)
+            sync_state = True
+            if not isinstance(event.key, Undefined):
+                comp.state_change_callback(event.data, event.type)
+                sync_state = False
             if handlers is not None:
                 # state change events must sync state after callback
                 if is_sync:
                     return await comp.run_callbacks(handlers.get_bind_event_handlers(event),
-                                      True, 
+                                      sync_state, 
                                       sync_first=False, change_status=change_status)
                 else:
                     comp._task = asyncio.create_task(
                         comp.run_callbacks(handlers.get_bind_event_handlers(event),
-                                        True,
+                                        sync_state,
                                         sync_first=sync_first, change_status=change_status))
             else:
                 # all controlled component must sync state after state change
                 if sync_state_after_change:
-                    await comp.sync_status(True)
+                    await comp.sync_status(sync_state)
         elif event.type in _ONEARG_EVENTS:
             handlers = comp.get_event_handlers(event.type)
             # other events don't need to sync state

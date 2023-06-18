@@ -133,9 +133,10 @@ class UIType(enum.Enum):
     Markdown = 0x2e
     TextField = 0x2f
     DataGrid = 0x30
-    VirtualizedFixedBox = 0x31
-    VirtualizedDynamicBox = 0x32
+    DataMUIList = 0x31
+    VirtualizedBox = 0x32
     DataFlexBox = 0x33
+    JsonViewer = 0x34
 
     # special
     TaskLoop = 0x100
@@ -328,6 +329,11 @@ class FrontendEventType(enum.Enum):
     # leaflet events
     MapZoom = 60
     MapMove = 61
+
+    # data grid events
+    DataGridRowSelection = 70
+    DataGridFetchDetail = 71
+    DataGridFetchInf = 72
 
     PlotlyClickData = 100
     PlotlyClickAnnotation = 101
@@ -952,7 +958,7 @@ class Component(Generic[T_base_props, T_child]):
         self._parent = ""
         self.__props = prop_cls()
         self.__prop_cls = prop_cls
-        self.__prop_field_names: Set[str] = set([x.name for x in dataclasses.fields(prop_cls)])
+        self._prop_field_names: Set[str] = set([x.name for x in dataclasses.fields(prop_cls)])
         self._mounted_override = False
         self._flow_event_handlers: Dict[EventDataType, EventHandlers] = {}
         self.__sx_props: Dict[str, Any] = {}
@@ -1134,7 +1140,7 @@ class Component(Generic[T_base_props, T_child]):
             res["props"] = JsonOnlyData(props)
         evs = self._get_used_events_dict()
         if evs:
-            props["usedEvents"] = evs
+            res["usedEvents"] = evs
         return res
 
     def _get_used_events_dict(self):
@@ -1202,8 +1208,11 @@ class Component(Generic[T_base_props, T_child]):
 
     def set_override_props(self, **kwargs: str):
         for k in kwargs.keys():
-            assert k in self.__prop_field_names, f"overrided prop must be defined in props class, {k}"
-        self.props.override_props = kwargs
+            assert k in self._prop_field_names, f"overrided prop must be defined in props class, {k}"
+        if isinstance(self.props.override_props, Undefined):
+            self.props.override_props = kwargs
+        else:
+            self.props.override_props.update(kwargs)
         return self
 
     @property

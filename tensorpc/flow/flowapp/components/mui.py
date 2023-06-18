@@ -15,6 +15,7 @@
 import asyncio
 import base64
 import copy
+from functools import partial
 import tensorpc.core.dataclass_dispatch as dataclasses
 import enum
 import inspect
@@ -1020,43 +1021,6 @@ class DragHandleFlexBox(FlexBox):
         super().__init__(children)
 
 
-@dataclasses.dataclass
-class MUIDataFlexBoxWithDndProps(MUIFlexBoxWithDndProps):
-    data_list: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
-    id_key: str = "id"
-
-class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps, MUIComponentType]):
-    """ flex box that use data list and template component to render
-    list of data with same UI components.
-    """
-    def __init__(self,
-                 children: MUIComponentType,
-                 inited: bool = False,
-                 uid: str = "",
-                 app_comp_core: Optional[AppComponentCore] = None) -> None:
-        super().__init__(UIType.DataFlexBox,
-                         MUIDataFlexBoxWithDndProps,
-                         {"0": children},
-                         inited,
-                         uid=uid,
-                         app_comp_core=app_comp_core,
-                         allowed_events=[])
-
-    @property
-    def prop(self):
-        propcls = self.propcls
-        return self._prop_base(propcls, self)
-
-    @property
-    def update_event(self):
-        propcls = self.propcls
-        return self._update_props_base(propcls)
-
-    async def handle_event(self, ev: Event, is_sync: bool = False):
-        return await handle_standard_event(self,
-                                           ev,
-                                           sync_first=False,
-                                           is_sync=is_sync)
 
 @dataclasses.dataclass
 class MUIListProps(MUIFlexBoxProps):
@@ -2900,6 +2864,28 @@ class LinearProgress(MUIComponentBase[LinearProgressProps]):
         value = min(max(value, 0), 100)
         await self.send_and_wait(self.update_event(value=value))
 
+@dataclasses.dataclass
+class JsonViewerProps(MUIFlexBoxProps):
+    data: Any = None
+
+class JsonViewer(MUIComponentBase[JsonViewerProps]):
+    def __init__(
+        self,
+        init_data: Any = None,
+    ) -> None:
+        super().__init__(UIType.JsonViewer, JsonViewerProps)
+        self.props.data = init_data
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
 
 def _default_json_node():
     return JsonLikeNode("root", "root", JsonLikeType.Object.value, "Object",
@@ -3050,38 +3036,28 @@ class DynamicControls(MUIComponentBase[DynamicControlsProps]):
                                            ev,
                                            sync_first=False,
                                            is_sync=is_sync)
-
 @dataclasses.dataclass
-class DataGridColumnDef:
-    header: Union[Undefined, str] = undefined 
-    accessorKey: Union[Undefined, str] = undefined
-    cell: Union[Undefined, Component] = undefined
-    footer: Union[Undefined, str] = undefined
-    id: Union[Undefined, str] = undefined 
-    columns: "List[DataGridColumnDef]" = dataclasses.field(default_factory=list)
+class MUIVirtualizedBoxProps(MUIFlexBoxWithDndProps):
+    pass
 
-@dataclasses.dataclass
-class DataGridProps(MUIFlexBoxProps):
-    # we can't put DataGridColumnDef here because
-    # it may contain component.
-    data_list: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
-    id_key: Union[Undefined, str] = undefined
-    row_hover: Union[Undefined, bool] = undefined
-    virtualized: Union[Undefined, bool] = undefined
-    virtualized_inf_scrolling: Union[Undefined, bool] = undefined
-
-
-class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
-    @dataclasses.dataclass
-    class ChildDef:
-        columnDefs: List[DataGridColumnDef]
-    ColumnDef = DataGridColumnDef
-    def __init__(self, column_def: List[DataGridColumnDef], init_data_list: Optional[List[Dict[str, Any]]] = None) -> None:
-        super().__init__(UIType.DataGrid, DataGridProps, DataGrid.ChildDef(column_def),
-                         False)
-        # TODO check set_new_layout argument, it must be DataGrid.ChildDef
-        if init_data_list is not None:
-            self.props.data_list = init_data_list
+class VirtualizedBox(MUIContainerBase[MUIVirtualizedBoxProps, MUIComponentType]):
+    """ flex box that use data list and template component to render
+    list of data with same UI components.
+    """
+    def __init__(self,
+                 children: Optional[LayoutType] = None,
+                 inited: bool = False,
+                 uid: str = "",
+                 app_comp_core: Optional[AppComponentCore] = None) -> None:
+        if children is not None and isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+        super().__init__(UIType.VirtualizedBox,
+                         MUIVirtualizedBoxProps,
+                         children,
+                         inited,
+                         uid=uid,
+                         app_comp_core=app_comp_core,
+                         allowed_events=[])
 
     @property
     def prop(self):
@@ -3093,6 +3069,180 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+class DataListControlType(enum.IntEnum):
+    SetData = 0
+
+@dataclasses.dataclass
+class MUIDataFlexBoxWithDndProps(MUIFlexBoxWithDndProps):
+    data_list: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
+    id_key: str = "id"
+
+class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps, MUIComponentType]):
+    """ flex box that use data list and template component to render
+    list of data with same UI components.
+    """
+    def __init__(self,
+                 children: MUIComponentType,
+                 inited: bool = False,
+                 uid: str = "",
+                 app_comp_core: Optional[AppComponentCore] = None) -> None:
+        super().__init__(UIType.DataFlexBox,
+                         MUIDataFlexBoxWithDndProps,
+                         {"0": children},
+                         inited,
+                         uid=uid,
+                         app_comp_core=app_comp_core,
+                         allowed_events=[])
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self,
+                                           ev,
+                                           sync_first=False,
+                                           is_sync=is_sync)
+    
+    async def update_data_in_index(self, index: int, updates: Dict[str, Any]):
+        return await self.send_and_wait(
+            self.create_comp_event({
+                "type": DataListControlType.SetData.value,
+                "index": index,
+                "updates": updates,
+            }))
+    
+
+    async def _comp_bind_update_data(self, event: Event, prop_name: str):
+        key = event.key 
+        index = event.index 
+        assert not isinstance(key, Undefined) and not isinstance(index, Undefined)
+        data = event.data 
+        data_item = self.props.data_list[index]
+        assert prop_name in data_item
+        data_item[prop_name] = data
+        await self.update_data_in_index(index, {prop_name: data})
+
+    def bind_prop(self, comp: Component, prop_name: str):
+        """bind a data prop with control component. no type check.
+        """
+        if FrontendEventType.Change.value in comp._flow_allowed_events:
+            # TODO change all control components to use value as its data prop name
+            if "value" in comp._prop_field_names:
+                comp.set_override_props(value=prop_name)
+            elif "checked" in comp._prop_field_names:
+                comp.set_override_props(checked=prop_name)
+            comp.register_event_handler(FrontendEventType.Change.value, 
+                                        partial(self._comp_bind_update_data, prop_name=prop_name), simple_event=False)
+        else:
+            raise ValueError("only support components with change event") 
+
+class DataGridColumnSpecialType(enum.IntEnum):
+    # master detail can't be used with expand. 
+    MasterDetail = 0
+    Expand = 1
+    Checkbox = 2
+
+@dataclasses.dataclass
+class DataGridColumnDef:
+    header: Union[Undefined, str] = undefined 
+    accessorKey: Union[Undefined, str] = undefined
+    cell: Union[Undefined, Component] = undefined
+    footer: Union[Undefined, str] = undefined
+    id: Union[Undefined, str] = undefined 
+    columns: "List[DataGridColumnDef]" = dataclasses.field(default_factory=list)
+    align: Union[Undefined, Literal["center", "inherit", "justify", "left", "right"]] = undefined 
+    editable: Union[Undefined, bool] = undefined
+    specialType: Union[Undefined, int] = undefined
+    width: Union[Undefined, int] = undefined
+
+@dataclasses.dataclass
+class DataGridProps(MUIFlexBoxProps):
+    # we can't put DataGridColumnDef here because
+    # it may contain component.
+    data_list: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
+    id_key: Union[Undefined, str] = undefined
+    row_hover: Union[Undefined, bool] = undefined
+    virtualized: Union[Undefined, bool] = undefined
+    virtualized_inf_scrolling: Union[Undefined, bool] = undefined
+    enable_row_selection: Union[Undefined, bool] = undefined
+    enable_multi_row_selection: Union[Undefined, bool] = False
+    debug_table: Union[Undefined, bool] = undefined
+    master_detail_use_fetch: Union[Undefined, bool] = undefined
+    sticky_header: Union[Undefined, bool] = undefined
+    size: Union[Undefined, Literal["small", "medium"]] = undefined
+    
+
+class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
+    @dataclasses.dataclass
+    class ChildDef:
+        columnDefs: List[DataGridColumnDef]
+        masterDetail: Union[Undefined, Component] = undefined
+
+    ColumnDef: TypeAlias = DataGridColumnDef
+    def __init__(self, column_def: List[DataGridColumnDef], init_data_list: Optional[List[Dict[str, Any]]] = None, 
+                 master_detail: Union[Undefined, Component] = undefined) -> None:
+        super().__init__(UIType.DataGrid, DataGridProps, DataGrid.ChildDef(column_def, master_detail),
+                         False, allowed_events=[FrontendEventType.DataGridFetchDetail.value,
+                                                FrontendEventType.DataGridRowSelection.value])
+        # TODO check set_new_layout argument, it must be DataGrid.ChildDef
+        if init_data_list is not None:
+            self.props.data_list = init_data_list
+        self.event_fetch_detail = self._create_event_slot(FrontendEventType.DataGridFetchDetail)
+        self.event_row_selection = self._create_event_slot(FrontendEventType.DataGridRowSelection)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self,
+                                           ev,
+                                           is_sync=is_sync)
+
+    async def update_data_in_index(self, index: int, updates: Dict[str, Any]):
+        return await self.send_and_wait(
+            self.create_comp_event({
+                "type": DataListControlType.SetData.value,
+                "index": index,
+                "updates": updates,
+            }))
+    
+    async def _comp_bind_update_data(self, event: Event, prop_name: str):
+        key = event.key 
+        index = event.index 
+        assert not isinstance(key, Undefined) and not isinstance(index, Undefined)
+        data = event.data 
+        data_item = self.props.data_list[index]
+        assert prop_name in data_item
+        data_item[prop_name] = data
+        await self.update_data_in_index(index, {prop_name: data})
+
+    def bind_prop(self, comp: Component, prop_name: str):
+        """bind a data prop with control component. no type check.
+        """
+        if FrontendEventType.Change.value in comp._flow_allowed_events:
+            # TODO change all control components to use value as its data prop name
+            if "value" in comp._prop_field_names:
+                comp.set_override_props(value=prop_name)
+            elif "checked" in comp._prop_field_names:
+                comp.set_override_props(checked=prop_name)
+            comp.register_event_handler(FrontendEventType.Change.value, 
+                                        partial(self._comp_bind_update_data, prop_name=prop_name), simple_event=False)
+        else:
+            raise ValueError("only support components with change event") 
 
 def flex_wrapper(obj: Any,
                  metas: Optional[List[ServFunctionMeta]] = None,

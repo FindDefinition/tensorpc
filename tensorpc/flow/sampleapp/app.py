@@ -17,6 +17,7 @@ import base64
 import dataclasses
 import enum
 import io
+import random
 import sys
 import time
 import traceback
@@ -24,6 +25,8 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union
+
+import faker
 from tensorpc import PACKAGE_ROOT
 
 import cv2
@@ -1120,60 +1123,94 @@ class DataListApp:
             {
                 "id": "1",
                 "name": "name1",
+                "isCheck": True,
             },
             {
                 "id": "2",
                 "name": "name2",
+                "isCheck": True,
             },
             {
                 "id": "3",
                 "name": "name3",
+                "isCheck": False,
+
             },
 
         ]
-        
+        datalist_checkbox = mui.Checkbox("")
+        datalist_comp = mui.HBox([
+            mui.Typography().set_override_props(value="name"),
+            datalist_checkbox,
+        ])
+        datalist = mui.DataFlexBox(datalist_comp).prop(flex_flow="column", data_list=data_list)
+        datalist.bind_prop(datalist_checkbox, "isCheck")
         return mui.VBox([
-            mui.DataFlexBox(mui.Typography("").set_override_props(value="name")).prop(flex_flow="column", data_list=data_list),
+            datalist,
         ])
 
 class DataGridApp:
-    def create_data(self, name: str, calories: float,
+    def create_data(self, index: int, name: str, calories: float,
         fat: float,
         carbs: float,
-        protein: float):
+        protein: bool):
         return {
+            "id": str(index),
             "name": name,
             "calories": calories,
             "fat": fat,
             "carbs": carbs,
             "protein": protein,
-
         }
+    
+    def create_many_datas(self, count: int):
+        fake = Faker()
+        for i in range(count):
+            yield self.create_data(i, fake.name(), random.randint(100, 300), random.randint(1, 25), random.randint(22, 44), i % 2 == 0)
+
+
     @marker.mark_create_layout
     def my_layout(self):
-        rows = [
-            self.create_data('Frozen yoghurt', 159, 6.0, 24, 4.0),
-            self.create_data('Ice cream sandwich', 237, 9.0, 37, 4.3),
-            self.create_data('Eclair', 262, 16.0, 24, 6.0),
-            self.create_data('Cupcake', 305, 3.7, 67, 4.3),
-            self.create_data('Gingerbread', 356, 16.0, 49, 3.9),
-        ]
-        btn = mui.Button("Edit")
-        btn.event_click.on_standard(lambda x: print(x.key))
+        rows = list(self.create_many_datas(1000))
+        btn = mui.Button("Edit").prop(loading=False)
+        btn.event_click.on_standard(lambda x: print(x.key)).configure(True)
+        cbox = mui.Checkbox("")
         column_defs = [
-            mui.DataGrid.ColumnDef("name", accessorKey="name"),
+            # mui.DataGrid.ColumnDef("special", specialType=mui.DataGridColumnSpecialType.MasterDetail.value),
+            mui.DataGrid.ColumnDef("id", accessorKey="id"),
+            mui.DataGrid.ColumnDef("name", accessorKey="name", width=120),
             mui.DataGrid.ColumnDef("calories", accessorKey="calories"),
             mui.DataGrid.ColumnDef("fat", accessorKey="fat"),
-            mui.DataGrid.ColumnDef("carbs", cell=mui.Typography("").set_override_props(value="carbs")),
-            mui.DataGrid.ColumnDef("protein", accessorKey="protein"),
+            mui.DataGrid.ColumnDef("carbs", accessorKey="carbs"),
+            mui.DataGrid.ColumnDef("protein", accessorKey="protein", align="right", cell=cbox),
             mui.DataGrid.ColumnDef("actions", cell=btn),
 
         ]
+        dgrid = mui.DataGrid(column_defs, rows, mui.JsonViewer().set_override_props(data=".")).prop(id_key="id", row_hover=True)
+        dgrid.event_fetch_detail.on(self._fetch_detail)
+        dgrid.bind_prop(cbox, "protein")
         return mui.VBox([
-            mui.DataGrid(column_defs, rows).prop(id_key="name", row_hover=True),
-        ])
+            dgrid.prop(sticky_header=False, virtualized=True, size="small"),
+        ]).prop(width="100%", height="100%", overflow="hidden")
 
+    def _fetch_detail(self, key: str):
+        print("WTF", key)
+        return {"key": key}
+    
+class VirtualizedBoxApp:
+    
+    def create_many_datas(self, count: int):
+        fake = Faker()
+        for i in range(count):
+            yield fake.text()
 
+    @marker.mark_create_layout
+    def my_layout(self):
+        rows = list(self.create_many_datas(10))
+        row_elems = [mui.HBox([mui.Typography(row).prop(variant="body1")]) for row in rows]
+        return mui.VBox([
+            mui.VirtualizedDynamicBox([*row_elems]),
+        ]).prop(width="100%", height="100%", overflow="hidden")
 
 class CollectionApp:
     @mark_create_layout
@@ -1230,7 +1267,7 @@ class CollectionApp:
 
         res = mui.HBox([
             mui.Allotment([
-                plus.ObjectInspector(self, use_fast_tree=False).prop(width="100%",
+                plus.ObjectInspector(self, use_fast_tree=True).prop(width="100%",
                                                 height="100%",
                                                 overflow="hidden"),
                 mui.HBox([

@@ -42,6 +42,8 @@ class Event:
     # only used for template component such as table.
     # key indicates the id of template item.
     key: Union[Undefined, str] = undefined
+    # for template control components.
+    index: Union[Undefined, int] = undefined
 
 
 class EventHandler:
@@ -51,7 +53,7 @@ class EventHandler:
         self.cb = cb
         self.simple_event = simple_event
 
-    def run_event(self, event: Event) -> CORO_NONE:
+    def run_event(self, event: Event) -> CORO_ANY:
         if self.simple_event:
             return self.cb(event.data)
         else:
@@ -68,7 +70,7 @@ class EventHandler:
             res = coro
         return res
 
-    def run_noarg_event(self, event: Event) -> CORO_NONE:
+    def run_noarg_event(self, event: Event) -> CORO_ANY:
         if self.simple_event:
             return self.cb()
         else:
