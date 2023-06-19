@@ -82,7 +82,7 @@ class AppComponentCore:
 nodefault = NoDefault()
 
 
-class UIType(enum.Enum):
+class UIType(enum.IntEnum):
     # controls
     ButtonGroup = 0x0
     Input = 0x1
@@ -150,7 +150,7 @@ class UIType(enum.Enum):
     # special containers
     # react fragment
     Fragment = 0x200
-    SwitchCase = 0x201
+    MatchCase = 0x201
 
     MASK_THREE = 0x1000
     MASK_THREE_GEOMETRY = 0x0100
@@ -244,7 +244,7 @@ class UIType(enum.Enum):
     LeafletTracklet = 0x2100
 
 
-class AppEventType(enum.Enum):
+class AppEventType(enum.IntEnum):
     # layout events
     UpdateLayout = 0
     UpdateComponents = 1
@@ -271,7 +271,7 @@ class AppEventType(enum.Enum):
     ComponentEvent = 300
 
 
-class FrontendEventType(enum.Enum):
+class FrontendEventType(enum.IntEnum):
     """type for all component events.
     
     event handled in handle_event use FrontendEventType.EventName.value,
@@ -342,7 +342,7 @@ class FrontendEventType(enum.Enum):
 
 
 UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
-    UIType.DataGrid, UIType.SwitchCase
+    UIType.DataGrid, UIType.MatchCase
 }
 
 class AppDraggableType(enum.Enum):
@@ -360,24 +360,24 @@ ALL_POINTER_EVENTS = [
 ]
 
 
-class UIRunStatus(enum.Enum):
+class UIRunStatus(enum.IntEnum):
     Stop = 0
     Running = 1
     Pause = 2
 
 
-class TaskLoopEvent(enum.Enum):
+class TaskLoopEvent(enum.IntEnum):
     Start = 0
     Stop = 1
     Pause = 2
 
 
-class AppEditorEventType(enum.Enum):
+class AppEditorEventType(enum.IntEnum):
     SetValue = 0
     RevealLine = 1
 
 
-class AppEditorFrontendEventType(enum.Enum):
+class AppEditorFrontendEventType(enum.IntEnum):
     Save = 0
     Change = 1
     SaveEditorState = 2
@@ -1008,7 +1008,7 @@ class Component(Generic[T_base_props, T_child]):
     def _create_emitter_event_slot(self, event_type: Union[FrontendEventType, EventDataType]):
         if isinstance(event_type, FrontendEventType):
             event_type_value = event_type.value
-            assert event_type == FrontendEventType.BeforeMount or event_type == FrontendEventType.BeforeUnmount
+            assert event_type.value < 0, "only support backend events"
             return _EmitterEventSlot(event_type_value, self._flow_event_emitter)
         else:
             event_type_value = event_type
@@ -1970,31 +1970,67 @@ class Fragment(ContainerBase[FragmentProps, Component]):
 
 # FIXME use dataclasses_strict
 @dataclasses.dataclass
-class SwitchCaseProps(ContainerBaseProps):
+class MatchCaseProps(ContainerBaseProps):
     condition: Union[Undefined, ValueType] = undefined
 
 @dataclasses.dataclass
-class SwitchCaseItem:
+class MatchCaseItem:
     # if value is undefined, it is default case
     value: Union[ValueType, Undefined]
     child: Component
+    isExpr: Union[bool, Undefined] = undefined
 
 @dataclasses.dataclass
-class SwitchCaseChildDef:
-    items: List["SwitchCaseItem"]
+class ExprCaseItem:
+    value: str
+    child: Component
+    isExpr: bool = True
 
-class SwitchCase(ContainerBase[SwitchCaseProps, Component]):
-    """special container for switch case. It is not a real container, but a
-    component with children. It is used to implement switch case in frontend.
+@dataclasses.dataclass
+class MatchCaseChildDef:
+    items: List["Union[MatchCaseItem, ExprCaseItem]"]
+
+class MatchCase(ContainerBase[MatchCaseProps, Component]):
+    """special container for extended switch case. (implemented by if/else)
+    It is not a real container, but a component with children. 
+    It is used to implement switch case in frontend.
     this can be used to implement tab.
+
+    when you use ExprCaseItem, you need to specify a filter expr with "x"
+    instead of provide a single value, check [filtrex](https://github.com/m93a/filtrex)
+    for more details.
+
+    Example:
+    ```Python
+    mc = MatchCase([
+        MatchCase.Case("some_value", mui.LayoutA(...)),
+        MatchCase.Case("other_value", mui.LayoutB(...)),
+        MatchCase.ExprCase('\"value\" in x', mui.LayoutC(...)),
+        MatchCase.Case(undefined, mui.LayoutD(...)),
+    ]) # here condition is undefined, will use default case
+    ```
+
+    is equivalent to following javascript code:
+    ```javascript
+    if (condition === "some_value"){
+        return mui.LayoutA(...)
+    } else if (condition === "other_value"){
+        return mui.LayoutB(...)
+    } else if ("value" in condition){
+        return mui.LayoutC(...)
+    }
+    return mui.LayoutD(...)
+    ```
+
     """
-    Case = SwitchCaseItem
-    ChildDef = SwitchCaseChildDef
+    Case = MatchCaseItem
+    ExprCase = ExprCaseItem
+    ChildDef = MatchCaseChildDef
 
     def __init__(self,
-                 children: List[SwitchCaseItem],
+                 children: List[Union[MatchCaseItem, ExprCaseItem]],
                  inited: bool = False) -> None:
-        super().__init__(UIType.SwitchCase, SwitchCaseProps, SwitchCaseChildDef(items=children),
+        super().__init__(UIType.MatchCase, MatchCaseProps, MatchCaseChildDef(items=children),
                          inited)
     @property
     def prop(self):
@@ -2007,14 +2043,21 @@ class SwitchCase(ContainerBase[SwitchCaseProps, Component]):
         return self._update_props_base(propcls)
 
     async def set_condition(self, condition: Union[ValueType, Undefined]):
-        assert isinstance(self._child_structure, SwitchCaseChildDef)
+        assert isinstance(self._child_structure, MatchCaseChildDef)
         if isinstance(condition, Undefined):
             return await self.send_and_wait(self.update_event(condition=condition))
+        has_expr_case = False
         for item in self._child_structure.items:
             if item.value == condition:
                 await self.send_and_wait(self.update_event(condition=condition))
                 return
-        raise ValueError(f"Condition {condition} not found in SwitchCase")
+            if item.isExpr:
+                has_expr_case = True 
+        if not has_expr_case:
+            raise ValueError(f"Condition {condition} not found in MatchCase")
+        else:
+            await self.send_and_wait(self.update_event(condition=condition))
+
 
 
 def create_ignore_usr_msg(comp: Component):

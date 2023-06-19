@@ -108,10 +108,10 @@ async def handle_standard_event(comp: Component,
     elif comp.props.status == UIRunStatus.Stop.value:
         if event.type in _STATE_CHANGE_EVENTS:
             handlers = comp.get_event_handlers(event.type)
-            sync_state = True
-            if not isinstance(event.key, Undefined):
+            sync_state = False
+            if isinstance(event.key, Undefined):
                 comp.state_change_callback(event.data, event.type)
-                sync_state = False
+                sync_state = True
             if handlers is not None:
                 # state change events must sync state after callback
                 if is_sync:

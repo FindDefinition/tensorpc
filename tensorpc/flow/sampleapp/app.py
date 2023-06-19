@@ -1098,20 +1098,34 @@ class ThreadLockerApp:
             appctx.thread_locker_wait_sync()
 
 
-class SwitchCaseApp:
+class MatchCaseApp:
     @marker.mark_create_layout
     def my_layout(self):
-        self.switchcase = mui.SwitchCase([
-            mui.SwitchCase.Case("1", mui.Typography("1")),
-            mui.SwitchCase.Case("2", mui.Typography("2")),
-            mui.SwitchCase.Case("3", mui.Typography("3")),
-            mui.SwitchCase.Case(mui.undefined, mui.Typography("default")),
+        self.switchcase = mui.MatchCase([
+            mui.MatchCase.Case("1", mui.Typography("1")),
+            mui.MatchCase.Case("2", mui.Typography("2")),
+            mui.MatchCase.Case("3", mui.Typography("3")),
+            mui.MatchCase.Case(mui.undefined, mui.Typography("default")),
         ])
+        self.switchcase_fp = mui.MatchCase([
+            mui.MatchCase.ExprCase("x <= 0.2", mui.Typography("1")),
+            mui.MatchCase.ExprCase("x >= 0.2 and x < 0.6", mui.Typography("2")),
+            mui.MatchCase.ExprCase("x >= 0.6", mui.Typography("3")),
+            mui.MatchCase.Case(mui.undefined, mui.Typography("default")),
+        ])
+
         return mui.VBox([
             mui.RadioGroup(["1", "2", "3"], self._on_select),
             mui.Divider(),
             self.switchcase,
+            mui.Divider(),
+            mui.Slider("", 0, 1.0, 0.01, self._on_slider),
+            self.switchcase_fp,
         ])
+    
+    async def _on_slider(self, value):
+        print(value)
+        await self.switchcase_fp.set_condition(value)
 
     async def _on_select(self, value):
         await self.switchcase.set_condition(value)
@@ -1190,7 +1204,7 @@ class DataGridApp:
         dgrid.event_fetch_detail.on(self._fetch_detail)
         dgrid.bind_prop(cbox, "protein")
         return mui.VBox([
-            dgrid.prop(sticky_header=False, virtualized=True, size="small"),
+            dgrid.prop(sticky_header=False, virtualized=False, size="small"),
         ]).prop(width="100%", height="100%", overflow="hidden")
 
     def _fetch_detail(self, key: str):
@@ -1227,7 +1241,7 @@ class CollectionApp:
                                                             width="100%",
                                                             overflow="hidden")
         self.sm = plus.ScriptManager("CodeStorage")
-        self.switchcase = SwitchCaseApp()
+        self.switchcase = MatchCaseApp()
         self.datalist = DataListApp()
         self.datagrid = DataGridApp()
         nodes = [

@@ -45,7 +45,7 @@ from ..core import (AppComponentCore, AppEvent, AppEventType, BasicProps,
                     NumberType, T_base_props, T_child, T_container_props,
                     TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
                     ValueType, undefined, create_ignore_usr_msg,
-                    ALL_POINTER_EVENTS, _get_obj_def_path, SwitchCase)
+                    ALL_POINTER_EVENTS, _get_obj_def_path, MatchCase)
 from tensorpc.flow.constants import TENSORPC_ANYLAYOUT_FUNC_NAME
 if TYPE_CHECKING:
     from .three import ThreeCanvas
@@ -201,7 +201,7 @@ _StdColorNoDefault: TypeAlias = Literal['primary', 'secondary', 'error',
                                         'info', 'success', 'warning']
 
 MUIComponentType: TypeAlias = Union[MUIComponentBase, MUIContainerBase,
-                                    Fragment, SwitchCase]
+                                    Fragment, MatchCase]
 
 LayoutType: TypeAlias = Union[List[MUIComponentType], Dict[str,
                                                            MUIComponentType]]
@@ -3122,6 +3122,8 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps, MUIComponentType]
         return await self.update_datas_in_index([DataUpdate(index, updates)])
     
     async def update_datas_in_index(self, updates: List[DataUpdate]):
+        for du in updates:
+            self.props.data_list[du.index].update(du.update)
         return await self.send_and_wait(
             self.create_comp_event({
                 "type": DataListControlType.SetData.value,
@@ -3175,6 +3177,7 @@ class DataGridColumnDef:
     editable: Union[Undefined, bool] = undefined
     specialType: Union[Undefined, int] = undefined
     width: Union[Undefined, int] = undefined
+    editing_cell: Union[Undefined, Component] = undefined
 
 @dataclasses.dataclass
 class DataGridProps(MUIFlexBoxProps):
@@ -3194,6 +3197,14 @@ class DataGridProps(MUIFlexBoxProps):
     
 
 class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
+    """data grid, it takes list of data (dict) and render them
+    as table. note that this component don't use DataGrid in mui-X,
+    it use Tanstack-Table + mui-Table based solution
+    we support following pro features in mui-x DataGrid
+    without commercial license: row virtualization, 
+    lazy loading, tree data, header filters and master
+    detail.
+    """
     @dataclasses.dataclass
     class ChildDef:
         columnDefs: List[DataGridColumnDef]
@@ -3232,6 +3243,8 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         return await self.update_datas_in_index([DataUpdate(index, updates)])
     
     async def update_datas_in_index(self, updates: List[DataUpdate]):
+        for du in updates:
+            self.props.data_list[du.index].update(du.update)
         return await self.send_and_wait(
             self.create_comp_event({
                 "type": DataListControlType.SetData.value,
