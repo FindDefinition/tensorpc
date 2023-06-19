@@ -3121,13 +3121,14 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps, MUIComponentType]
 
     async def _comp_bind_update_data(self, event: Event, prop_name: str):
         key = event.key 
-        index = event.index 
-        assert not isinstance(key, Undefined) and not isinstance(index, Undefined)
+        indexes = event.indexes 
+        assert not isinstance(key, Undefined) and not isinstance(indexes, Undefined)
+        assert len(indexes) == 1, "update data list only supports single index"
         data = event.data 
-        data_item = self.props.data_list[index]
+        data_item = self.props.data_list[indexes[0]]
         assert prop_name in data_item
         data_item[prop_name] = data
-        await self.update_data_in_index(index, {prop_name: data})
+        await self.update_data_in_index(indexes[0], {prop_name: data})
 
     def bind_prop(self, comp: Component, prop_name: str):
         """bind a data prop with control component. no type check.
@@ -3222,13 +3223,14 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
     
     async def _comp_bind_update_data(self, event: Event, prop_name: str):
         key = event.key 
-        index = event.index 
-        assert not isinstance(key, Undefined) and not isinstance(index, Undefined)
+        indexes = event.indexes 
+        assert not isinstance(key, Undefined) and not isinstance(indexes, Undefined)
+        assert len(indexes) == 1, "update data list only supports single index"
         data = event.data 
-        data_item = self.props.data_list[index]
+        data_item = self.props.data_list[indexes[0]]
         assert prop_name in data_item
         data_item[prop_name] = data
-        await self.update_data_in_index(index, {prop_name: data})
+        await self.update_data_in_index(indexes[0], {prop_name: data})
 
     def bind_prop(self, comp: Component, prop_name: str):
         """bind a data prop with control component. no type check.

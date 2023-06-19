@@ -43,7 +43,7 @@ class Event:
     # key indicates the id of template item.
     key: Union[Undefined, str] = undefined
     # for template control components.
-    index: Union[Undefined, int] = undefined
+    indexes: Union[Undefined, List[int]] = undefined
 
 
 class EventHandler:
