@@ -3076,6 +3076,12 @@ class DataListControlType(enum.IntEnum):
 class MUIDataFlexBoxWithDndProps(MUIFlexBoxWithDndProps):
     data_list: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
     id_key: str = "id"
+    virtualized: Union[Undefined, bool] = undefined
+
+@dataclasses.dataclass
+class DataUpdate:
+    index: int 
+    update: Any
 
 class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps, MUIComponentType]):
     """ flex box that use data list and template component to render
@@ -3093,6 +3099,8 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps, MUIComponentType]
                          uid=uid,
                          app_comp_core=app_comp_core,
                          allowed_events=[])
+        # backend events
+        self.event_item_changed = self._create_emitter_event_slot(FrontendEventType.DataItemChange)
 
     @property
     def prop(self):
@@ -3111,13 +3119,17 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps, MUIComponentType]
                                            is_sync=is_sync)
     
     async def update_data_in_index(self, index: int, updates: Dict[str, Any]):
+        return await self.update_datas_in_index([DataUpdate(index, updates)])
+    
+    async def update_datas_in_index(self, updates: List[DataUpdate]):
         return await self.send_and_wait(
             self.create_comp_event({
                 "type": DataListControlType.SetData.value,
-                "index": index,
-                "updates": updates,
+                "updates": [{
+                    "index": x.index,
+                    "update": x.update
+                } for x in updates],
             }))
-    
 
     async def _comp_bind_update_data(self, event: Event, prop_name: str):
         key = event.key 
@@ -3129,6 +3141,7 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps, MUIComponentType]
         assert prop_name in data_item
         data_item[prop_name] = data
         await self.update_data_in_index(indexes[0], {prop_name: data})
+        self.flow_event_emitter.emit(FrontendEventType.DataItemChange.value, Event(FrontendEventType.DataItemChange.value, (key, indexes[0])))
 
     def bind_prop(self, comp: Component, prop_name: str):
         """bind a data prop with control component. no type check.
@@ -3197,6 +3210,8 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
             self.props.data_list = init_data_list
         self.event_fetch_detail = self._create_event_slot(FrontendEventType.DataGridFetchDetail)
         self.event_row_selection = self._create_event_slot(FrontendEventType.DataGridRowSelection)
+        # backend events
+        self.event_item_changed = self._create_emitter_event_slot(FrontendEventType.DataItemChange)
 
     @property
     def prop(self):
@@ -3214,13 +3229,18 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
                                            is_sync=is_sync)
 
     async def update_data_in_index(self, index: int, updates: Dict[str, Any]):
+        return await self.update_datas_in_index([DataUpdate(index, updates)])
+    
+    async def update_datas_in_index(self, updates: List[DataUpdate]):
         return await self.send_and_wait(
             self.create_comp_event({
                 "type": DataListControlType.SetData.value,
-                "index": index,
-                "updates": updates,
+                "updates": [{
+                    "index": x.index,
+                    "update": x.update
+                } for x in updates],
             }))
-    
+
     async def _comp_bind_update_data(self, event: Event, prop_name: str):
         key = event.key 
         indexes = event.indexes 
@@ -3231,6 +3251,7 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         assert prop_name in data_item
         data_item[prop_name] = data
         await self.update_data_in_index(indexes[0], {prop_name: data})
+        self.flow_event_emitter.emit(FrontendEventType.DataItemChange.value, Event(FrontendEventType.DataItemChange.value, (key, indexes[0])))
 
     def bind_prop(self, comp: Component, prop_name: str):
         """bind a data prop with control component. no type check.

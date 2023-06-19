@@ -287,6 +287,8 @@ class FrontendEventType(enum.Enum):
     BeforeMount = -3
     # emitted by event_emitter
     BeforeUnmount = -4
+    # emitted by DataGrid when data change. user can use this to save data item.
+    DataItemChange = -5
 
     Click = 0
     DoubleClick = 1
@@ -960,7 +962,6 @@ class Component(Generic[T_base_props, T_child]):
         self.__prop_cls = prop_cls
         self._prop_field_names: Set[str] = set([x.name for x in dataclasses.fields(prop_cls)])
         self._mounted_override = False
-        self._flow_event_handlers: Dict[EventDataType, EventHandlers] = {}
         self.__sx_props: Dict[str, Any] = {}
         self._flow_allowed_events: Set[EventDataType] = set([FrontendEventType.BeforeMount.value, FrontendEventType.BeforeUnmount.value])
         if allowed_events is not None:
@@ -976,7 +977,9 @@ class Component(Generic[T_base_props, T_child]):
 
         self._flow_event_context_creator: Optional[Callable[
             [], ContextManager]] = None
-        # TODO remove event emitter.
+        # flow event handlers is used for frontend events
+        self._flow_event_handlers: Dict[EventDataType, EventHandlers] = {}
+        # event emitter is used for backend events, e.g. mount, unmount
         self._flow_event_emitter: AsyncIOEventEmitter[EventDataType, Event] = AsyncIOEventEmitter()
 
         self.event_before_mount = self._create_emitter_event_slot(FrontendEventType.BeforeMount)

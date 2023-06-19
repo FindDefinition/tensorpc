@@ -1209,7 +1209,7 @@ class VirtualizedBoxApp:
         rows = list(self.create_many_datas(10))
         row_elems = [mui.HBox([mui.Typography(row).prop(variant="body1")]) for row in rows]
         return mui.VBox([
-            mui.VirtualizedDynamicBox([*row_elems]),
+            mui.VirtualizedBox([*row_elems]),
         ]).prop(width="100%", height="100%", overflow="hidden")
 
 class CollectionApp:
