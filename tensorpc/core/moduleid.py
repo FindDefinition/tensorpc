@@ -17,12 +17,15 @@ import importlib.util
 import inspect
 import sys
 import traceback
+import types
 import uuid
 from pathlib import Path
 from typing import (Any, Callable, Deque, Dict, List, Optional, Set, Tuple,
                     Type, Union)
-
+import time
 from typing_extensions import TypeAlias
+import importlib.machinery
+from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 
 
 def get_qualname_of_type(klass: Type) -> str:
@@ -60,6 +63,58 @@ def loose_isinstance(obj, _class_or_tuple: _ClassInfo):
     return False 
 
 @dataclasses.dataclass
+class InMemoryFSItem:
+    path: str 
+    st_size: int 
+    st_mtime: float
+    st_ctime: float
+    content: str
+
+class InMemoryFS:
+    def __init__(self):
+        self.fs_dict: Dict[str, InMemoryFSItem] = {}
+
+    def add_file(self, path: str, content: str):
+        self.fs_dict[path] = InMemoryFSItem(path, len(content), time.time(), time.time(), content)
+
+    def modify_file(self, path: str, content: str):
+        if path not in self.fs_dict:
+            raise ValueError("file not exist")
+        self.fs_dict[path] = InMemoryFSItem(path, len(content), time.time(), self.fs_dict[path].st_ctime, content)
+    
+    def add_or_modify_file(self, path: str, content: str):
+        if path not in self.fs_dict:
+            return self.add_file(path, content)
+        self.fs_dict[path] = InMemoryFSItem(path, len(content), time.time(), self.fs_dict[path].st_ctime, content)
+
+    def stat(self, path: str):
+        if path not in self.fs_dict:
+            raise OSError(f"file not exist {path}")
+        return self.fs_dict[path]
+
+    def __contains__(self, path: str):
+        return path in self.fs_dict
+    
+    def __getitem__(self, path: str):
+        return self.fs_dict[path]
+
+    def load_in_memory_module(self, path: str):
+        module = types.ModuleType(path)
+        spec = importlib.machinery.ModuleSpec(path, None)
+        module.__file__ = path
+        module.__spec__ = spec
+        code_comp = compile(self[path].content, path, "exec")
+        exec(code_comp, module.__dict__)
+        # we need to add module to sys.modules to get inspect.getfile work.
+        sys.modules[path] = module
+        return module
+    
+
+
+def is_tensorpc_dynamic_path(path: str):
+    return path.startswith(f"<{TENSORPC_FILE_NAME_PREFIX}")
+
+@dataclasses.dataclass
 class TypeMeta:
     module_key: str
     local_key: str
@@ -69,7 +124,7 @@ class TypeMeta:
     def module_id(self):
         return self.module_key + "::" + self.local_key
 
-    def get_reloaded_module(self):
+    def get_reloaded_module(self, in_memory_fs: Optional[InMemoryFS] = None):
         if not self.is_path:
             # use importlib to reload module
             module = importlib.import_module(self.module_key)
@@ -83,15 +138,18 @@ class TypeMeta:
             module_dict = module.__dict__
             return module_dict, module
         else:
-            mod_name = Path(self.module_key).stem + "_" + uuid.uuid4().hex
-            mod_name = f"<{mod_name}>"
-            spec = importlib.util.spec_from_file_location(
-                mod_name, self.module_key)
-            assert spec is not None, f"your {self.module_key} not exists"
-            standard_module = importlib.util.module_from_spec(spec)
-            standard_module.__file__ = self.module_key
-            assert spec.loader is not None, "shouldn't happen"
-            spec.loader.exec_module(standard_module)
+            if in_memory_fs is not None:
+                standard_module = in_memory_fs.load_in_memory_module(self.module_key)
+            else:
+                mod_name = Path(self.module_key).stem + "_" + uuid.uuid4().hex
+                mod_name = f"<{mod_name}>"
+                spec = importlib.util.spec_from_file_location(
+                    mod_name, self.module_key)
+                assert spec is not None, f"your {self.module_key} not exists"
+                standard_module = importlib.util.module_from_spec(spec)
+                standard_module.__file__ = self.module_key
+                assert spec.loader is not None, "shouldn't happen"
+                spec.loader.exec_module(standard_module)
             # do we need to add this module to sys?
             # sys.modules[mod_name] = standard_module
             return standard_module.__dict__, standard_module
@@ -125,11 +183,20 @@ def get_obj_type_meta(obj_type) -> Optional[TypeMeta]:
     if spec is None or spec.origin is None:
         is_standard_module = False
         try:
-            module_path_p = Path(inspect.getfile(obj_type)).resolve()
-            module_path = str(module_path_p)
+            path = inspect.getfile(obj_type)
+            if path.startswith(f"<{TENSORPC_FILE_NAME_PREFIX}"):
+                module_path = path
+            else:
+                module_path_p = Path(path).resolve()
+                module_path = str(module_path_p)
         except:
-            return None
-    assert spec is not None 
+            # all tensorpc dynamic class store path in __module__
+            type_path = obj_type.__module__
+            if type_path.startswith(f"<{TENSORPC_FILE_NAME_PREFIX}"):
+                module_path = type_path
+            else:
+                return None
+    # assert spec is not None 
     if spec is not None and spec.origin is not None:
         if "<" in spec.name:
             is_standard_module = False

@@ -58,7 +58,7 @@ from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.constants import PACKAGE_ROOT, TENSORPC_FLOW_FUNC_META_KEY
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.inspecttools import get_all_members_by_type
-from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
+from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda, is_tensorpc_dynamic_path,
                                     is_valid_function, loose_isinstance)
 from tensorpc.core.serviceunit import (ObservedFunctionRegistryProtocol,
                                        ReloadableDynamicClass,
@@ -1087,19 +1087,19 @@ class EditableApp(App):
         path = obj._flow_comp_def_path
 
         assert path != "" and self._watchdog_observer is not None
-        path_resolved = str(Path(path).resolve())
+        path_resolved = self._flow_reload_manager._resolve_path_may_in_memory(path)
         if path_resolved not in self._flowapp_change_observers:
             self._flowapp_change_observers[
                 path_resolved] = _WatchDogWatchEntry([], None)
         obentry = self._flowapp_change_observers[path_resolved]
-        if len(obentry.obmetas) == 0:
+        if len(obentry.obmetas) == 0 and not is_tensorpc_dynamic_path(path):
             # no need to schedule watchdog.
             watch = self._watchdog_observer.schedule(self._watchdog_watcher,
                                                      path, False)
             obentry.watch = watch
         assert self._flowapp_code_mgr is not None
         if not self._flowapp_code_mgr._check_path_exists(path):
-            self._flowapp_code_mgr._add_new_code(path)
+            self._flowapp_code_mgr._add_new_code(path, self._flow_reload_manager.in_memory_fs)
         user_obj = obj._get_user_object()
         metas = self._flow_reload_manager.query_type_method_meta(
             type(obj._get_user_object()))
@@ -1111,7 +1111,7 @@ class EditableApp(App):
     def _flowapp_remove_observer(self, obj: mui.FlexBox):
         path = obj._flow_comp_def_path
         assert path != "" and self._watchdog_observer is not None
-        path_resolved = str(Path(path).resolve())
+        path_resolved = self._flow_reload_manager._resolve_path_may_in_memory(path)
         assert self._flowapp_code_mgr is not None
         # self._flowapp_code_mgr._remove_path(path)
         if path_resolved in self._flowapp_change_observers:
@@ -1145,14 +1145,14 @@ class EditableApp(App):
     def __get_callback_metas_in_file(self, change_file: str,
                                      layout: mui.FlexBox):
         uid_to_comp = layout._get_uid_to_comp_dict()
-        resolved_path = str(Path(change_file).resolve())
+        resolved_path = self._flow_reload_manager._resolve_path_may_in_memory(change_file)
         return create_reload_metas(uid_to_comp, resolved_path)
 
     async def _reload_object_with_new_code(self,
                                            path: str,
                                            new_code: Optional[str] = None):
         assert self._flowapp_code_mgr is not None
-        resolved_path = str(Path(path).resolve())
+        resolved_path = self._flowapp_code_mgr._resolve_path(path)
         try:
             changes = self._flowapp_code_mgr.update_code(
                 resolved_path, new_code)
@@ -1207,14 +1207,13 @@ class EditableApp(App):
                         # print("is_callback_change", is_callback_change)
                     for m in changed_metas:
                         print(m.qualname, "CHANGED")
-
+                    # do reload, run special methods
                     flow_special_for_check = FlowSpecialMethods(changed_metas)
                     do_reload = flow_special_for_check.contains_special_method(
                     ) or bool(new_method_names)
                     # print("do_reload", do_reload)
                     if not do_reload:
                         continue
-                    layout = obmeta.layout
                     changed_user_obj = None
                     if layout is self:
                         # reload app
@@ -1235,11 +1234,11 @@ class EditableApp(App):
                                 self._flow_reload_manager)
                     else:
                         assert isinstance(layout, mui.FlexBox)
-                        if self.code_editor.external_path is not None and new_code is None:
-                            if str(
-                                    Path(self.code_editor.external_path).
-                                    resolve()) == resolved_path:
-                                await self.set_editor_value(new_data, lineno=0)
+                        # if self.code_editor.external_path is not None and new_code is None:
+                        #     if str(
+                        #             Path(self.code_editor.external_path).
+                        #             resolve()) == resolved_path:
+                        #         await self.set_editor_value(new_data, lineno=0)
                         # reload dynamic layout
                         if changed_metas or bool(new_method_names):
                             changed_user_obj = layout._get_user_object()

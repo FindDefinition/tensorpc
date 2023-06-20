@@ -11,9 +11,17 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from typing_extensions import TypedDict
+class AddableAutocompleteType(TypedDict):
+    select_on_focus: bool 
+    clear_on_blur: bool
+    handle_home_end_keys: bool
+    free_solo: bool
+    add_option: bool
 
 class CommonOptions:
-    AddableAutocomplete = {
+
+    AddableAutocomplete: AddableAutocompleteType = {
         "select_on_focus": True,
         "clear_on_blur": True,
         "handle_home_end_keys": True,

@@ -8,9 +8,9 @@ class User(BaseModel):
     signup_ts: Optional[datetime] = None
     friends: List[int] = []
 
-external_data = {
-    'id': 'RTX',
-    'signup_ts': '2019-06-01 12:22',
-    'friends': [1, 2, '3'],
-}
-user = User(**external_data)
+# external_data = {
+#     'id': 'RTX',
+#     'signup_ts': '2019-06-01 12:22',
+#     'friends': [1, 2, '3'],
+# }
+# user = User(**external_data)

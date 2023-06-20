@@ -1189,12 +1189,15 @@ class DataGridApp:
         btn = mui.Button("Edit").prop(loading=False)
         btn.event_click.on_standard(lambda x: print(x.key)).configure(True)
         cbox = mui.Checkbox("")
+        input_cell = mui.Input("dev")
+        fat_cell = mui.Slider(mui.undefined, 0, 100, 1)
+
         column_defs = [
             # mui.DataGrid.ColumnDef("special", specialType=mui.DataGridColumnSpecialType.MasterDetail.value),
             mui.DataGrid.ColumnDef("id", accessorKey="id"),
-            mui.DataGrid.ColumnDef("name", accessorKey="name", width=120),
+            mui.DataGrid.ColumnDef("name", accessorKey="name", width=120, editCell=input_cell),
             mui.DataGrid.ColumnDef("calories", accessorKey="calories"),
-            mui.DataGrid.ColumnDef("fat", accessorKey="fat"),
+            mui.DataGrid.ColumnDef("fat", accessorKey="fat", editCell=fat_cell),
             mui.DataGrid.ColumnDef("carbs", accessorKey="carbs"),
             mui.DataGrid.ColumnDef("protein", accessorKey="protein", align="right", cell=cbox),
             mui.DataGrid.ColumnDef("actions", cell=btn),
@@ -1203,6 +1206,9 @@ class DataGridApp:
         dgrid = mui.DataGrid(column_defs, rows, mui.JsonViewer().set_override_props(data=".")).prop(id_key="id", row_hover=True)
         dgrid.event_fetch_detail.on(self._fetch_detail)
         dgrid.bind_prop(cbox, "protein")
+        dgrid.bind_prop(input_cell, "name")
+        dgrid.bind_prop(fat_cell, "fat")
+
         return mui.VBox([
             dgrid.prop(sticky_header=False, virtualized=False, size="small"),
         ]).prop(width="100%", height="100%", overflow="hidden")
@@ -1211,6 +1217,24 @@ class DataGridApp:
         print("WTF", key)
         return {"key": key}
     
+class TutorialApp:
+    @marker.mark_create_layout
+    def my_layout(self):
+        code = f"""
+from tensorpc.flow.flowapp import appctx
+from tensorpc.flow.flowapp.components import mui, three, plus
+from tensorpc.flow import mark_create_layout
+class App:
+    @mark_create_layout
+    def my_layout(self):
+        return mui.VBox([
+            mui.Typography("Hello World"),
+        ])
+        """
+        return mui.VBox([
+            plus.AppInMemory("sample_code", code),
+        ])
+
 class VirtualizedBoxApp:
     
     def create_many_datas(self, count: int):

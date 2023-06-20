@@ -3,6 +3,7 @@ import dataclasses
 import importlib
 import importlib.util
 import inspect
+import io
 import os
 import runpy
 import sys
@@ -24,7 +25,7 @@ from tensorpc.core import inspecttools
 from typing import Protocol
 from tensorpc.core.funcid import (get_toplevel_class_node,
                                   get_toplevel_func_node)
-from tensorpc.core.moduleid import TypeMeta, get_obj_type_meta, get_qualname_of_type
+from tensorpc.core.moduleid import TypeMeta, get_obj_type_meta, get_qualname_of_type, InMemoryFS, is_tensorpc_dynamic_path
 from functools import wraps
 
 
@@ -485,6 +486,7 @@ class ObjectReloadResult:
 class ObjectReloadResultWithType(ObjectReloadResult):
     type_meta: TypeMeta
 
+
 class ObjectReloadManager:
     """to resolve some side effects, users should
     always use reload manager defined in app.
@@ -492,12 +494,17 @@ class ObjectReloadManager:
 
     def __init__(self, observed_registry: Optional[ObservedFunctionRegistryProtocol] = None) -> None:
         self.file_cache: Dict[str, FileCacheEntry] = {}
-        self.type_cache: Dict[str, TypeCacheEntry] = {}
-        self.type_meta_cache: Dict[str, TypeMeta] = {}
-        self.type_method_meta_cache: Dict[Type, List[ServFunctionMeta]] = {}
+        # self.type_cache: Dict[str, TypeCacheEntry] = {}
+        self.type_meta_cache: Dict[Tuple[str, str], TypeMeta] = {}
+        self.type_method_meta_cache: Dict[Tuple[str, str], List[ServFunctionMeta]] = {}
         self.module_cache: Dict[str, ModuleCacheEntry] = {}
 
         self.observed_registry = observed_registry
+
+        self.in_memory_fs = InMemoryFS()
+
+    def _is_memory_fs_path(self, path: str):
+        return path in self.in_memory_fs
 
     def check_file_cache(self, path: str):
         if path not in self.file_cache:
@@ -506,27 +513,34 @@ class ObjectReloadManager:
         if entry.invalid:
             return
         try:
-            stat = os.stat(entry.fullname)
+            if path in self.in_memory_fs:
+                stat = self.in_memory_fs.stat(path)
+            else:
+                stat = os.stat(entry.fullname)
         except OSError:
             self.file_cache.pop(path)
             return
         if entry.size != stat.st_size or entry.mtime != stat.st_mtime:
             self.file_cache.pop(path)
 
-    def cached_get_obj_meta(self, type):
-        if type in self.type_meta_cache:
+    def cached_get_obj_meta(self, type: Type, uid: Tuple[str, str]):
+        if uid in self.type_meta_cache:
             meta = self.type_meta_cache[type]
         else:
             meta = get_obj_type_meta(type)
             if meta is not None:
-                self.type_meta_cache[type] = meta
+                self.type_meta_cache[uid] = meta
         return meta
 
     def _update_file_cache(self, path: str):
         fullname = path
         stat = None
+        path_is_memory_fs = self._is_memory_fs_path(path)
         try:
-            stat = os.stat(path)
+            if path_is_memory_fs:
+                stat = self.in_memory_fs.stat(path)
+            else:
+                stat = os.stat(path)
         except OSError:
             basename = path
             # Try looking through the module search path, which is only useful
@@ -550,8 +564,7 @@ class ObjectReloadManager:
                 raise ValueError("can't reload this type", type)
         assert stat is not None
         try:
-            with tokenize.open(fullname) as fp:
-                lines = fp.readlines()
+            lines = self._tokenize_read_path_lines(path)
         except OSError:
             lines = []
         size, mtime = stat.st_size, stat.st_mtime
@@ -565,7 +578,13 @@ class ObjectReloadManager:
                 pass
 
     def _inspect_get_file_resolved(self, type):
-        return str(Path(inspect.getfile(type)).resolve())
+        path = inspect.getfile(type)
+        return self._resolve_path_may_in_memory(path)
+    
+    def _resolve_path_may_in_memory(self, path: str):
+        if is_tensorpc_dynamic_path(path):
+            return path
+        return str(Path(path).resolve())
 
     def reload_type(self, type):
         """we provide reload_type instead of reload_path
@@ -573,7 +592,12 @@ class ObjectReloadManager:
         if possible instead of reload from raw path.
         """
         print("PREPARE RELOAD", type)
-        meta = self.cached_get_obj_meta(type)
+        try:
+            uid = self._get_type_unique_id(type)
+        except:
+            raise ValueError("can't reload this type", type)
+
+        meta = self.cached_get_obj_meta(type, uid)
         if meta is None:
             raise ValueError("can't reload this type", type)
         # determine should perform real reload
@@ -584,7 +608,7 @@ class ObjectReloadManager:
             return ObjectReloadResultWithType(self.module_cache[path], False, self.file_cache[path], meta)
 
         # invalid type method cache
-        new_type_method_meta_cache = {}
+        new_type_method_meta_cache: Dict[Tuple[str, str], List[ServFunctionMeta]] = {}
         for t, vv in self.type_method_meta_cache.items():
             try:
                 patht = self._inspect_get_file_resolved(t)
@@ -614,9 +638,19 @@ class ObjectReloadManager:
                     self.observed_registry.reload_func(qname, new_func)
         return ObjectReloadResultWithType(self.module_cache[path], True, self.file_cache[path], meta)
 
+    def _get_type_unique_id(self, type: Type):
+        return (self._inspect_get_file_resolved(type), type.__qualname__)
+
     def query_type_method_meta(self, type: Type, no_code: bool = False) -> List[ServFunctionMeta]:
-        if type in self.type_method_meta_cache:
-            return self.type_method_meta_cache[type]
+        """we should always use new type (after reload) with this function.
+        """
+        try:
+            uid = self._get_type_unique_id(type)
+        except:
+            return []
+
+        if uid in self.type_method_meta_cache:
+            return self.type_method_meta_cache[uid]
         try:
             path = self._inspect_get_file_resolved(type)
         except TypeError:
@@ -637,19 +671,24 @@ class ObjectReloadManager:
                 qualname_to_code = self.file_cache[path].qualname_to_code
             else:
                 try:
-                    with tokenize.open(path) as f:
-                        lines = f.readlines()
+                    lines  = self._tokenize_read_path_lines(path)
                     qualname_to_code = get_qualname_to_code(lines)
                 except:
                     pass
             new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
                 inspect_type, include_base=False, qualname_to_code=qualname_to_code)
-            self.type_method_meta_cache[type] = new_metas
+            self.type_method_meta_cache[uid] = new_metas
         else:
             new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
                 inspect_type, include_base=False, no_code=True)
         return new_metas
 
+    def _tokenize_read_path_lines(self, path: str):
+        if path in self.in_memory_fs:
+            return "\n".split(self.in_memory_fs[path].content)
+        else:
+            with tokenize.open(path) as f:
+                return f.readlines()
 
 @dataclasses.dataclass
 class SimpleCodeEntry:
@@ -664,20 +703,29 @@ class SimpleCodeManager:
         for path in paths:
             self._add_new_code(path)
 
+    def _resolve_path(self, path: str):
+        if is_tensorpc_dynamic_path(path):
+            return path
+        return str(Path(path).resolve())
+
+
     def _check_path_exists(self, path: str):
-        resolved_path = str(Path(path).resolve())
+        resolved_path = self._resolve_path(path)
         return resolved_path in self.file_to_entry
 
-    def _add_new_code(self, path: str):
-        resolved_path = str(Path(path).resolve())
-        with tokenize.open(resolved_path) as f:
-            code = f.read().strip()
+    def _add_new_code(self, path: str, in_memory_fs: Optional[InMemoryFS] = None):
+        resolved_path = self._resolve_path(path)
+        if in_memory_fs is not None and resolved_path in in_memory_fs:
+            code = in_memory_fs[resolved_path].content
+        else:
+            with tokenize.open(resolved_path) as f:
+                code = f.read().strip()
         qualname_to_code = get_qualname_to_code(code)
         self.file_to_entry[resolved_path] = SimpleCodeEntry(
             code, qualname_to_code)
 
     def _remove_path(self, path: str):
-        resolved_path = str(Path(path).resolve())
+        resolved_path = self._resolve_path(path)
         if resolved_path in self.file_to_entry:
             self.file_to_entry.pop(resolved_path)
 
@@ -700,7 +748,7 @@ class SimpleCodeManager:
         new: Dict[str, str] = {}
         change: Dict[str, str] = {}
         delete: Dict[str, str] = {}
-        resolved_path = str(Path(path).resolve())
+        resolved_path = self._resolve_path(path)
         if new_data == self.file_to_entry[resolved_path].code:
             return new, change, delete
         prev = self.file_to_entry[resolved_path].qualname_to_code
@@ -710,7 +758,7 @@ class SimpleCodeManager:
         return changes
 
     def update_code(self, change_file: str, new_code: Optional[str] = None):
-        resolved_path = str(Path(change_file).resolve())
+        resolved_path = self._resolve_path(change_file)
         # if resolved_path not in self.file_to_code:
         #     return False
         if new_code is None:

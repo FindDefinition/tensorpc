@@ -1149,7 +1149,8 @@ _HTMLInputType: TypeAlias = Literal["button", "checkbox", "color", "date",
 @dataclasses.dataclass
 class InputBaseProps(MUIComponentBaseProps):
     multiline: bool = False
-    value: str = ""
+    value: Union[Undefined, str] = undefined
+    default_value: Union[Undefined, str] = undefined
     disabled: Union[bool, Undefined] = undefined
     error: Union[bool, Undefined] = undefined
     full_width: Union[bool, Undefined] = undefined
@@ -1195,12 +1196,15 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
     def json(self):
+        assert not isinstance(self.props.value, Undefined)
         return json.loads(self.props.value)
 
     def float(self):
+        assert not isinstance(self.props.value, Undefined)
         return float(self.props.value)
 
     def int(self):
+        assert not isinstance(self.props.value, Undefined)
         return int(self.props.value)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
@@ -1253,11 +1257,12 @@ class TextField(_InputBaseComponent[TextFieldProps]):
                  label: str,
                  multiline: bool = False,
                  callback: Optional[Callable[[str], _CORO_NONE]] = None,
-                 init: str = "") -> None:
+                 init: Optional[str] = None) -> None:
         super().__init__(callback, UIType.TextField, TextFieldProps,
                          [FrontendEventType.Change.value])
         self.props.label = label
-        self.props.value = init
+        if init is not None:
+            self.props.value = init
         self.props.multiline = multiline
 
     @property
@@ -1282,11 +1287,12 @@ class Input(_InputBaseComponent[InputProps]):
                  placeholder: str,
                  multiline: bool = False,
                  callback: Optional[Callable[[str], _CORO_NONE]] = None,
-                 init: str = "") -> None:
+                 init: Optional[str] = None) -> None:
         super().__init__(callback, UIType.Input, InputProps,
                          [FrontendEventType.Change.value])
         self.props.placeholder = placeholder
-        self.props.value = init
+        if init is not None:
+            self.props.value = init
         self.props.multiline = multiline
 
     @property
@@ -3177,7 +3183,7 @@ class DataGridColumnDef:
     editable: Union[Undefined, bool] = undefined
     specialType: Union[Undefined, int] = undefined
     width: Union[Undefined, int] = undefined
-    editing_cell: Union[Undefined, Component] = undefined
+    editCell: Union[Undefined, Component] = undefined
 
 @dataclasses.dataclass
 class DataGridProps(MUIFlexBoxProps):
@@ -3257,6 +3263,7 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
     async def _comp_bind_update_data(self, event: Event, prop_name: str):
         key = event.key 
         indexes = event.indexes 
+        print(event, prop_name)
         assert not isinstance(key, Undefined) and not isinstance(indexes, Undefined)
         assert len(indexes) == 1, "update data list only supports single index"
         data = event.data 
@@ -3271,7 +3278,9 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         """
         if FrontendEventType.Change.value in comp._flow_allowed_events:
             # TODO change all control components to use value as its data prop name
-            if "value" in comp._prop_field_names:
+            if "default_value" in comp._prop_field_names:
+                comp.set_override_props(default_value=prop_name)
+            elif "value" in comp._prop_field_names:
                 comp.set_override_props(value=prop_name)
             elif "checked" in comp._prop_field_names:
                 comp.set_override_props(checked=prop_name)

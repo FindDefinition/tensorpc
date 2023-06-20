@@ -37,6 +37,7 @@ import pyee
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 
 from tensorpc.core.core_io import JsonOnlyData
+from tensorpc.core.moduleid import is_tensorpc_dynamic_path
 from tensorpc.core.serviceunit import (AppFuncType, ReloadableDynamicClass,
                                        ServFunctionMeta)
 from tensorpc.flow.coretypes import MessageLevel
@@ -48,7 +49,7 @@ from tensorpc.utils.uniquename import UniqueNamePool
 from tensorpc.core import dataclass_dispatch as dataclasses_strict
 
 from ..jsonlike import (BackendOnlyProp, DataClassWithUndefined, Undefined,
-                        as_dict_no_undefined, asdict_no_deepcopy, snake_to_camel,
+                        as_dict_no_undefined, asdict_no_deepcopy, camel_to_snake, snake_to_camel,
                         split_props_to_undefined, undefined, undefined_dict_factory)
 from .appcore import SimpleEventType, NumberType, ValueType, get_app, Event, EventDataType
 from tensorpc.flow.constants import TENSORPC_FLOW_COMP_UID_STRUCTURE_SPLIT
@@ -880,12 +881,20 @@ T_child = TypeVar("T_child")
 
 
 def _get_obj_def_path(obj):
+    is_dynamic_path = False
     try:
-        _flow_comp_def_path = str(
-            Path(inspect.getfile(builtins.type(obj))).resolve())
+        path = inspect.getfile(builtins.type(obj))
+        is_dynamic_path = is_tensorpc_dynamic_path(path)
+        if is_dynamic_path:
+            _flow_comp_def_path = path 
+        else:
+            _flow_comp_def_path = str(
+                Path(inspect.getfile(builtins.type(obj))).resolve())
     except:
         traceback.print_exc()
         _flow_comp_def_path = ""
+    if is_dynamic_path:
+        return _flow_comp_def_path
     path = Path(_flow_comp_def_path)
     if not path.exists() or path.suffix != ".py":
         _flow_comp_def_path = ""
@@ -1212,10 +1221,13 @@ class Component(Generic[T_base_props, T_child]):
     def set_override_props(self, **kwargs: str):
         for k in kwargs.keys():
             assert k in self._prop_field_names, f"overrided prop must be defined in props class, {k}"
+        new_kwargs: Dict[str, str] = {}
+        for k, v in kwargs.items():
+            new_kwargs[snake_to_camel(k)] = v
         if isinstance(self.props.override_props, Undefined):
-            self.props.override_props = kwargs
+            self.props.override_props = new_kwargs
         else:
-            self.props.override_props.update(kwargs)
+            self.props.override_props.update(new_kwargs)
         return self
 
     @property
