@@ -9,6 +9,7 @@ import runpy
 import sys
 import time
 import tokenize
+import traceback
 import types
 import uuid
 from dataclasses import dataclass
@@ -525,7 +526,7 @@ class ObjectReloadManager:
 
     def cached_get_obj_meta(self, type: Type, uid: Tuple[str, str]):
         if uid in self.type_meta_cache:
-            meta = self.type_meta_cache[type]
+            meta = self.type_meta_cache[uid]
         else:
             meta = get_obj_type_meta(type)
             if meta is not None:
@@ -620,7 +621,7 @@ class ObjectReloadManager:
         # do reload
         print("DO RELOAD", type, meta)
 
-        res = meta.get_reloaded_module()
+        res = meta.get_reloaded_module(self.in_memory_fs)
         if res is None:
             raise ValueError("can't reload this type", type)
         self.module_cache[path] = ModuleCacheEntry(res[1], res[0])
@@ -674,6 +675,7 @@ class ObjectReloadManager:
                     lines  = self._tokenize_read_path_lines(path)
                     qualname_to_code = get_qualname_to_code(lines)
                 except:
+                    traceback.print_exc()
                     pass
             new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
                 inspect_type, include_base=False, qualname_to_code=qualname_to_code)
@@ -685,7 +687,8 @@ class ObjectReloadManager:
 
     def _tokenize_read_path_lines(self, path: str):
         if path in self.in_memory_fs:
-            return "\n".split(self.in_memory_fs[path].content)
+            ss = io.StringIO(self.in_memory_fs[path].content)
+            return ss.readlines()
         else:
             with tokenize.open(path) as f:
                 return f.readlines()
@@ -781,7 +784,7 @@ class SimpleCodeManager:
         return changes
 
     def get_code(self, change_file: str):
-        resolved_path = str(Path(change_file).resolve())
+        resolved_path = self._resolve_path(change_file)
         return self.file_to_entry[resolved_path].code
 
 
@@ -913,6 +916,8 @@ class ReloadableDynamicClass(DynamicClass):
             else:
                 if qualname_to_code is not None:
                     # TODO check mro
+                    # if v.__qualname__ not in qualname_to_code:
+                    #     print(v.__qualname__, qualname_to_code.keys())
                     if v.__qualname__ in qualname_to_code:
                         code = [qualname_to_code[v.__qualname__]]
                 if code is None:

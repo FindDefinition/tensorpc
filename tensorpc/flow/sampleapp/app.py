@@ -1231,8 +1231,15 @@ class App:
             mui.Typography("Hello World"),
         ])
         """
+        appctx.get_app().set_enable_language_server(True)
+        pyright_setting = appctx.get_app().get_language_server_settings()
+        pyright_setting.python.analysis.pythonPath = sys.executable
+        pyright_setting.python.analysis.extraPaths = [
+            str(PACKAGE_ROOT.parent),
+        ]
+
         return mui.VBox([
-            plus.AppInMemory("sample_code", code),
+            plus.AppInMemory("sample_code", code).prop(flex=1),
         ])
 
 class VirtualizedBoxApp:

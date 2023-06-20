@@ -369,7 +369,7 @@ class SimpleCanvas(mui.FlexBox):
         # layout: mui.LayoutType = [
         #     self._cfg_panel
         # ]
-        self.register_event_handler(FrontendEventType.Drop.value,
+        self.register_event_handler(FrontendEventType.Drop,
                                     self._on_drop)
         self.prop(
             min_height=0,
@@ -653,7 +653,7 @@ class SimpleCanvas(mui.FlexBox):
             await self._dynamic_lines.update_childs({key: ui})
         ui = self._segment_dict[key]
 
-        await ui.update_lines(lines)
+        await ui.update_lines(lines, limit=limit)
 
     async def clear_all_lines(self):
         # TODO currently no way to clear lines without unmount

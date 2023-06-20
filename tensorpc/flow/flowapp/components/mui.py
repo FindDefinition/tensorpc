@@ -987,6 +987,14 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
         propcls = self.propcls
         return self._prop_base(propcls, self)
 
+    def get_wrapped_obj(self):
+        return self._wrapped_obj
+
+    def set_wrapped_obj(self, wrapped_obj: Any):
+        self._wrapped_obj = wrapped_obj
+        self._flow_comp_def_path = _get_obj_def_path(
+            wrapped_obj)
+
     @property
     def update_event(self):
         propcls = self.propcls

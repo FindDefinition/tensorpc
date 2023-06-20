@@ -478,6 +478,7 @@ class Points(ThreeComponentBase[PointProps]):
         if limit is not None:
             assert limit > 0
             upd["limit"] = limit
+            self.props.limit = limit
         self.props.points = points
         await self.send_and_wait(self.create_update_event(upd))
 
@@ -535,11 +536,17 @@ class Segments(ThreeComponentBase[SegmentsProps]):
     async def update_lines(self,
                            lines: np.ndarray,
                            colors: Optional[Union[np.ndarray,
-                                                  Undefined]] = None):
+                                                  Undefined]] = None,
+                                                        limit: Optional[int] = None
+):
         assert lines.ndim == 3 and lines.shape[1] == 2 and lines.shape[
             2] == 3, f"{lines.shape} lines must be [N, 2, 3]"
-        assert lines.shape[
-            0] <= self.props.limit, f"your line size must smaller than limit {self.props.limit}"
+        if limit is not None:
+            assert lines.shape[
+                0] <= limit, f"your points size {lines.shape[0]} must smaller than limit {limit}"
+        else:
+            assert lines.shape[
+                0] <= self.props.limit, f"your points size {lines.shape[0]} must smaller than limit {self.props.limit}"
         upd: Dict[str, Any] = {
             "lines": lines,
         }
@@ -549,7 +556,13 @@ class Segments(ThreeComponentBase[SegmentsProps]):
                     0], "color shape not valid"
             upd["colors"] = colors
             self.props.colors = colors
+        if limit is not None:
+            assert limit > 0
+            upd["limit"] = limit
+            self.props.limit = limit
+
         self.props.lines = lines.astype(np.float32)
+
         await self.send_and_wait(self.create_update_event(upd))
 
     async def update_mesh_lines(self, mesh: np.ndarray):

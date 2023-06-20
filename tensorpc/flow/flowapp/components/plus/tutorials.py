@@ -12,15 +12,35 @@ from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.components import mui, three
 
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
-from tensorpc.flow.marker import mark_did_mount
+from tensorpc.flow.marker import mark_did_mount, mark_will_unmount
 from tensorpc.flow.flowapp.core import (_get_obj_def_path)
 
+@dataclasses.dataclass
+class MarkdownBlock:
+    content: str
+    type: Literal["markdown", "code"] = "markdown"
 
 def _parse_markdown_very_trivial(content: str):
     """this function only check ```Python ``` block, then split
     markdown into several markdown blocks and code blocks.
     """
-    pass 
+    res_blocks: List[MarkdownBlock] = []
+    remain_code_index = 0
+    code_block_prefix = "```Python"
+    code_block_suffix = "```"
+    while True:
+        code_block_start = content.find(code_block_prefix, remain_code_index)
+        if code_block_start == -1:
+            res_blocks.append(MarkdownBlock(content[remain_code_index:], "markdown"))
+            break
+        code_block_end = content.find(code_block_suffix, code_block_start + len(code_block_prefix))
+        if code_block_end == -1:
+            res_blocks.append(MarkdownBlock(content[remain_code_index:], "markdown"))
+            break
+        res_blocks.append(MarkdownBlock(content[remain_code_index:code_block_start], "markdown"))
+        res_blocks.append(MarkdownBlock(content[code_block_start + len(code_block_prefix):code_block_end], "code"))
+        remain_code_index = code_block_end + len(code_block_suffix)
+    return res_blocks
 
 class AppInMemory(mui.FlexBox):
     """app with editor (app must be anylayout)
@@ -39,6 +59,7 @@ class AppInMemory(mui.FlexBox):
         ])
         self._layout_for_reload: Optional[mui.FlexBox] = None
         self.prop(flex_flow="row" if is_horizontal else "column")
+        self.editor.event_editor_save.on(self._on_editor_save)
 
     @mark_did_mount
     async def _on_mount(self):
@@ -49,27 +70,46 @@ class AppInMemory(mui.FlexBox):
         layout = mui.flex_wrapper(app_cls())
         self._layout_for_reload = layout
         await self.show_box.update_childs({"layout": layout})
-        appctx.get_editable_app()._flowapp_observe(layout)
+        appctx.get_editable_app()._flowapp_observe(layout, self._handle_reload_layout)
 
-    @mark_did_mount
+    @mark_will_unmount
     async def _on_unmount(self):
         if self._layout_for_reload is not None:
             appctx.get_editable_app()._flowapp_remove_observer(self._layout_for_reload)
 
     async def _handle_reload_layout(self, layout: mui.FlexBox,
-                                    create_layout: ServFunctionMeta,
-                                    name: str):
-        if create_layout.user_app_meta is not None and create_layout.user_app_meta.type == AppFuncType.CreateLayout:
-            layout_flex = create_layout.get_binded_fn()()
-            assert isinstance(
-                layout_flex, mui.FlexBox
-            ), f"create_layout must return a flexbox when use anylayout"
-            layout_flex._flow_comp_def_path = _get_obj_def_path(
-                layout._wrapped_obj)
-            layout_flex._wrapped_obj = layout._wrapped_obj
-            await self.show_box.update_childs({name: layout_flex})
+                                    create_layout: ServFunctionMeta):
+        # if create_layout.user_app_meta is not None and create_layout.user_app_meta.type == AppFuncType.CreateLayout:
+        layout_flex = create_layout.get_binded_fn()()
+        assert isinstance(
+            layout_flex, mui.FlexBox
+        ), f"create_layout must return a flexbox when use anylayout"
+        layout_flex.set_wrapped_obj(layout.get_wrapped_obj())
+        await self.show_box.update_childs({"layout": layout_flex})
 
     async def _on_editor_save(self, value: str):
         reload_mgr = self.flow_app_comp_core.reload_mgr
         reload_mgr.in_memory_fs.modify_file(self.path, value)
         await appctx.get_editable_app()._reload_object_with_new_code(self.path, value)
+
+class MarkdownTutorial(mui.VirtualizedBox):
+    """ this component parse markdowns in a very simple way, don't use it in production, it's only for tutorials.
+    """
+    def __init__(self, md_content: str, path_uid: str):
+        res_blocks = _parse_markdown_very_trivial(md_content)
+        layout: mui.LayoutType = []
+        for i, block in enumerate(res_blocks):
+            if block.type == "markdown":
+                layout.append(mui.Markdown(block.content))
+            elif block.type == "code":
+                layout.append(AppInMemory(f"{path_uid}-{i}", block.content).prop(min_height="400px", padding="10px"))
+        super().__init__(layout)
+        self.prop(flex_flow="column", padding="10px")
+
+
+
+# if __name__ == "__main__":
+#     with open("/root/distflow/tensorpc/examples/tutorials/basic/01-Hello World.md") as f:
+#         data = f.read()
+#     res_blocks = _parse_markdown_very_trivial(data)
+#     print(res_blocks)
