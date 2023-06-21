@@ -37,3 +37,4 @@ class MarkdownTutorialsTree:
 
         res = plus.InspectPanel(tutorials)
         return res
+

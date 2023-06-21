@@ -16,8 +16,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from types import ModuleType
-from typing import (Any, Callable, ClassVar, Coroutine, Dict, Generator, List, Optional, Set, Tuple,
-                    Type, Union)
+from typing import (Any, Callable, ClassVar, Coroutine, Dict, Generator, List,
+                    Optional, Set, Tuple, Type, Union)
 
 from tensorpc import compat
 from tensorpc.constants import (TENSORPC_FLOW_FUNC_META_KEY,
@@ -129,6 +129,7 @@ class ServFunctionMeta:
                  user_app_meta: Optional[AppFunctionMeta] = None) -> None:
         self.name = name
         self.type = type
+        self.sig = sig
         self.args = [ParamMeta(n, p) for n, p in sig.parameters.items()]
         if not is_static:
             self.args = self.args[1:]
@@ -140,6 +141,12 @@ class ServFunctionMeta:
         self.code = ""
         self.qualname = qualname
         self.user_app_meta = user_app_meta
+
+    def copy(self):
+        return ServFunctionMeta(self.fn, self.name, self.type, self.sig,
+                                self.is_gen, self.is_async, self.is_static,
+                                self.is_binded, self.qualname,
+                                self.user_app_meta)
 
     def to_json(self):
         if self.user_app_meta is not None:
@@ -207,10 +214,12 @@ class ObservedFunction:
 
     def run_function_with_record(self):
         assert self.recorded_data is not None
-        return self.current_func(*self.recorded_data[0], **self.recorded_data[1])
+        return self.current_func(*self.recorded_data[0],
+                                 **self.recorded_data[1])
 
 
 class ObservedFunctionRegistryProtocol(Protocol):
+
     def is_enabled(self) -> bool:
         ...
 
@@ -226,7 +235,9 @@ class ObservedFunctionRegistryProtocol(Protocol):
     def __len__(self) -> int:
         ...
 
-    def items(self) -> Generator[Tuple[str, ObservedFunctionProtocol], None, None]:
+    def items(
+            self
+    ) -> Generator[Tuple[str, ObservedFunctionProtocol], None, None]:
         ...
 
     def get_path_to_qname(self) -> Dict[str, List[Tuple[str, str]]]:
@@ -241,7 +252,8 @@ class ObservedFunctionRegistryProtocol(Protocol):
     def invalid_record(self, entry: ObservedFunctionProtocol) -> None:
         ...
 
-    def observed_func_changed(self, resolved_path: str, changes: Dict[str, str]) -> List[str]:
+    def observed_func_changed(self, resolved_path: str,
+                              changes: Dict[str, str]) -> List[str]:
         ...
 
 
@@ -293,6 +305,7 @@ class ObservedFunctionRegistry:
                     return entry.current_func(*args, **kwargs)
                 else:
                     return func(*args, **kwargs)
+
             return wrapped_func
 
         if func is None:
@@ -326,12 +339,13 @@ class ObservedFunctionRegistry:
         if entry.recorded_data is None:
             return
         try:
-            entry.current_sig.bind(
-                *entry.recorded_data[0], **entry.recorded_data[1])
+            entry.current_sig.bind(*entry.recorded_data[0],
+                                   **entry.recorded_data[1])
         except TypeError:
             entry.recorded_data = None
 
-    def observed_func_changed(self, resolved_path: str, changes: Dict[str, str]) -> List[str]:
+    def observed_func_changed(self, resolved_path: str,
+                              changes: Dict[str, str]) -> List[str]:
         if resolved_path not in self.path_to_qname:
             return []
         qnames = self.path_to_qname[resolved_path]
@@ -493,11 +507,15 @@ class ObjectReloadManager:
     always use reload manager defined in app.
     """
 
-    def __init__(self, observed_registry: Optional[ObservedFunctionRegistryProtocol] = None) -> None:
+    def __init__(
+        self,
+        observed_registry: Optional[ObservedFunctionRegistryProtocol] = None
+    ) -> None:
         self.file_cache: Dict[str, FileCacheEntry] = {}
         # self.type_cache: Dict[str, TypeCacheEntry] = {}
         self.type_meta_cache: Dict[Tuple[str, str], TypeMeta] = {}
-        self.type_method_meta_cache: Dict[Tuple[str, str], List[ServFunctionMeta]] = {}
+        self.type_method_meta_cache: Dict[Tuple[str, str],
+                                          List[ServFunctionMeta]] = {}
         self.module_cache: Dict[str, ModuleCacheEntry] = {}
 
         self.observed_registry = observed_registry
@@ -581,7 +599,7 @@ class ObjectReloadManager:
     def _inspect_get_file_resolved(self, type):
         path = inspect.getfile(type)
         return self._resolve_path_may_in_memory(path)
-    
+
     def _resolve_path_may_in_memory(self, path: str):
         if is_tensorpc_dynamic_path(path):
             return path
@@ -606,10 +624,12 @@ class ObjectReloadManager:
         self.check_file_cache(path)
         if path in self.file_cache:
             # no need to reload.
-            return ObjectReloadResultWithType(self.module_cache[path], False, self.file_cache[path], meta)
+            return ObjectReloadResultWithType(self.module_cache[path], False,
+                                              self.file_cache[path], meta)
 
         # invalid type method cache
-        new_type_method_meta_cache: Dict[Tuple[str, str], List[ServFunctionMeta]] = {}
+        new_type_method_meta_cache: Dict[Tuple[str, str],
+                                         List[ServFunctionMeta]] = {}
         for t, vv in self.type_method_meta_cache.items():
             try:
                 patht = self._inspect_get_file_resolved(t)
@@ -637,12 +657,16 @@ class ObjectReloadManager:
                     new_func = TypeMeta.get_local_type_from_module_dict_qualname(
                         qname, res[0])
                     self.observed_registry.reload_func(qname, new_func)
-        return ObjectReloadResultWithType(self.module_cache[path], True, self.file_cache[path], meta)
+        return ObjectReloadResultWithType(self.module_cache[path], True,
+                                          self.file_cache[path], meta)
 
     def _get_type_unique_id(self, type: Type):
         return (self._inspect_get_file_resolved(type), type.__qualname__)
 
-    def query_type_method_meta(self, type: Type, no_code: bool = False) -> List[ServFunctionMeta]:
+    def query_type_method_meta(self,
+                               type: Type,
+                               no_code: bool = False
+                               ) -> List[ServFunctionMeta]:
         """we should always use new type (after reload) with this function.
         """
         try:
@@ -672,13 +696,15 @@ class ObjectReloadManager:
                 qualname_to_code = self.file_cache[path].qualname_to_code
             else:
                 try:
-                    lines  = self._tokenize_read_path_lines(path)
+                    lines = self._tokenize_read_path_lines(path)
                     qualname_to_code = get_qualname_to_code(lines)
                 except:
                     traceback.print_exc()
                     pass
             new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
-                inspect_type, include_base=False, qualname_to_code=qualname_to_code)
+                inspect_type,
+                include_base=False,
+                qualname_to_code=qualname_to_code)
             self.type_method_meta_cache[uid] = new_metas
         else:
             new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
@@ -692,6 +718,7 @@ class ObjectReloadManager:
         else:
             with tokenize.open(path) as f:
                 return f.readlines()
+
 
 @dataclasses.dataclass
 class SimpleCodeEntry:
@@ -711,12 +738,13 @@ class SimpleCodeManager:
             return path
         return str(Path(path).resolve())
 
-
     def _check_path_exists(self, path: str):
         resolved_path = self._resolve_path(path)
         return resolved_path in self.file_to_entry
 
-    def _add_new_code(self, path: str, in_memory_fs: Optional[InMemoryFS] = None):
+    def _add_new_code(self,
+                      path: str,
+                      in_memory_fs: Optional[InMemoryFS] = None):
         resolved_path = self._resolve_path(path)
         if in_memory_fs is not None and resolved_path in in_memory_fs:
             code = in_memory_fs[resolved_path].content
@@ -732,7 +760,8 @@ class SimpleCodeManager:
         if resolved_path in self.file_to_entry:
             self.file_to_entry.pop(resolved_path)
 
-    def _compare_qualname_to_code(self, prev_qualname_to_code: Dict[str, str], qualname_to_code: Dict[str, str]):
+    def _compare_qualname_to_code(self, prev_qualname_to_code: Dict[str, str],
+                                  qualname_to_code: Dict[str, str]):
         new: Dict[str, str] = {}
         change: Dict[str, str] = {}
         delete: Dict[str, str] = {}
@@ -790,17 +819,13 @@ class SimpleCodeManager:
 
 class DynamicClass:
 
-    def __init__(
-        self,
-        module_name: str,
-        code: str = ""
-    ) -> None:
-            
+    def __init__(self, module_name: str, code: str = "") -> None:
+
         self.module_name = module_name
         module_cls = module_name.split(TENSORPC_SPLIT)
         if code != "":
             assert len(module_cls) == 1, "you only need to specify class name"
-        
+
         self.module_path = module_cls[0]
         self.alias: Optional[str] = None
         self.is_standard_module = False
@@ -833,12 +858,14 @@ class DynamicClass:
                     ), f"your {self.module_path} not exists"
                     # treat module_path as a file path
                     # import sys
-                    mod_name = Path(self.module_path).stem + "_" + uuid.uuid4().hex
+                    mod_name = Path(
+                        self.module_path).stem + "_" + uuid.uuid4().hex
                     mod_name = f"<{mod_name}>"
                     spec = importlib.util.spec_from_file_location(
                         mod_name, self.module_path)
                     assert spec is not None, f"your {self.module_path} not exists"
-                    self.standard_module = importlib.util.module_from_spec(spec)
+                    self.standard_module = importlib.util.module_from_spec(
+                        spec)
                     assert spec.loader is not None, "shouldn't happen"
                     spec.loader.exec_module(self.standard_module)
                     sys.modules[mod_name] = self.standard_module
@@ -866,7 +893,7 @@ class ReloadableDynamicClass(DynamicClass):
     def __init__(self,
                  module_name: str,
                  reload_mgr: Optional[ObjectReloadManager] = None,
-                code: str = "") -> None:
+                 code: str = "") -> None:
         super().__init__(module_name, code)
         if reload_mgr is not None:
             self.serv_metas = reload_mgr.query_type_method_meta(self.obj_type)

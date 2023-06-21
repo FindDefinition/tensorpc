@@ -3271,7 +3271,7 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
     async def _comp_bind_update_data(self, event: Event, prop_name: str):
         key = event.key 
         indexes = event.indexes 
-        print(event, prop_name)
+        # print(event, prop_name)
         assert not isinstance(key, Undefined) and not isinstance(indexes, Undefined)
         assert len(indexes) == 1, "update data list only supports single index"
         data = event.data 

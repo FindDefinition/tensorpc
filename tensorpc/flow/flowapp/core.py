@@ -1029,6 +1029,8 @@ class Component(Generic[T_base_props, T_child]):
 
     def get_special_methods(self, reload_mgr: AppReloadManager):
         metas = reload_mgr.query_type_method_meta(type(self), no_code=True)
+        # copy here to avoid different obj bind same meta.
+        metas = [x.copy() for x in metas]
         res = FlowSpecialMethods(metas)
         res.bind(self)
         return res

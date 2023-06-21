@@ -854,7 +854,7 @@ class App:
                 key = TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT.join(parts[1:])
             indexes = undefined
             if len(data) == 3:
-                indexes = data[2]
+                indexes = list(map(int, data[2].split(".")))
             event = Event(data[0], data[1], key, indexes)
             if event.type == FrontendEventType.Drop.value:
                 # TODO add event context stack here.
@@ -1220,11 +1220,6 @@ class EditableApp(App):
                         if self._use_app_editor:
                             if self.code_editor.external_path is None and new_code is None:
                                 await self.set_editor_value(new_data)
-                                # fut = asyncio.run_coroutine_threadsafe(
-                                #     self.set_editor_value(new_data),
-                                #     self._loop)
-                                # # this won't block main UI thread, so it's ok
-                                # fut.result()
                         if changed_metas or bool(new_method_names):
                             # reload app servunit and method
                             changed_user_obj = self._get_user_app_object()
