@@ -61,7 +61,7 @@ def parse_obj_item(obj,
             else:
                 try:
                     metas = ReloadableDynamicClass.get_metas_of_regular_methods(
-                        obj_type, False, no_code=True)
+                        obj_type, True, no_code=True)
                     special_methods = FlowSpecialMethods(metas)
                     is_layout = special_methods.create_layout is not None
                 except:

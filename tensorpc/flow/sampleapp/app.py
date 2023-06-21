@@ -1098,7 +1098,7 @@ class ThreadLockerApp:
             appctx.thread_locker_wait_sync()
 
 
-class MatchCaseApp:
+class MatchCaseAppBase:
     @marker.mark_create_layout
     def my_layout(self):
         self.switchcase = mui.MatchCase([
@@ -1129,6 +1129,9 @@ class MatchCaseApp:
 
     async def _on_select(self, value):
         await self.switchcase.set_condition(value)
+
+class MatchCaseApp(MatchCaseAppBase):
+    pass
 
 class DataListApp:
     @marker.mark_create_layout

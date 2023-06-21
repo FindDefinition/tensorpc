@@ -1002,7 +1002,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
 
     def get_special_methods(self, reload_mgr: AppReloadManager):
         user_obj = self._get_user_object()
-        metas = reload_mgr.query_type_method_meta(type(user_obj))
+        metas = reload_mgr.query_type_method_meta(type(user_obj), no_code=True, include_base=True)
         res = FlowSpecialMethods(metas)
         res.bind(self)
         return res
@@ -3305,7 +3305,7 @@ def flex_wrapper(obj: Any,
     """
     if metas is None:
         if reload_mgr is not None:
-            metas = reload_mgr.query_type_method_meta(type(obj), no_code=True)
+            metas = reload_mgr.query_type_method_meta(type(obj), no_code=True, include_base=True)
         else:
             metas = ReloadableDynamicClass.get_metas_of_regular_methods(
                 type(obj), True, no_code=True)
@@ -3333,7 +3333,7 @@ def flex_preview_wrapper(obj: Any,
     """
     if metas is None:
         if reload_mgr is not None:
-            metas = reload_mgr.query_type_method_meta(type(obj), no_code=True)
+            metas = reload_mgr.query_type_method_meta(type(obj), no_code=True, include_base=True)
         else:
             metas = ReloadableDynamicClass.get_metas_of_regular_methods(
                 type(obj), True, no_code=True)

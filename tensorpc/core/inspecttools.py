@@ -1,5 +1,5 @@
 import inspect
-from typing import Any, Dict, List, Mapping, Optional, Set 
+from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Type, Union 
 
 import types
 
@@ -33,10 +33,6 @@ def get_members_by_type(obj_type: Any, no_parent: bool = True):
     this_cls = obj_type
     if not no_parent:
         res = inspect.getmembers(this_cls, inspect.isfunction)
-        # inspect.getsourcelines need to read file, so .__code__.co_firstlineno
-        # is greatly faster than it.
-        # res.sort(key=lambda x: inspect.getsourcelines(x[1])[1])
-        res.sort(key=lambda x: x[1].__code__.co_firstlineno)
         return res
     parents = inspect.getmro(this_cls)[1:]
     parents_methods = set()
@@ -49,6 +45,8 @@ def get_members_by_type(obj_type: Any, no_parent: bool = True):
     child_only_methods = child_methods - parents_methods
     res = list(child_only_methods)
     # res.sort(key=lambda x: inspect.getsourcelines(x[1])[1])
+    # inspect.getsourcelines need to read file, so .__code__.co_firstlineno
+    # is greatly faster than it.
     res.sort(key=lambda x: x[1].__code__.co_firstlineno)
     return res
 
@@ -115,3 +113,21 @@ def filter_local_vars(local_var: Mapping[str, Any]) -> Mapping[str, Any]:
             new_local_vars[k] = v 
 
     return new_local_vars
+
+def get_function_defined_type(func: Callable):
+    func = inspect.unwrap(func)
+    mod = inspect.getmodule(func)
+    if mod is None:
+        return None 
+    if mod.__name__.startswith("tensorpc"):
+        # ignore all tensorpc type
+        return None
+    func_qname = func.__qualname__
+    func_qname_parts = func_qname.split(".")
+    res: Union[Type, types.ModuleType] = mod
+    cur_obj = mod.__dict__
+    for part in func_qname_parts[:-1]:
+        cur_obj = cur_obj[part]
+        res = cur_obj
+    return res
+        

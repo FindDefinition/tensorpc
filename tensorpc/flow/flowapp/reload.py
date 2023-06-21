@@ -107,6 +107,8 @@ def reload_object_methods(
         obj: Any,
         previous_metas: Optional[List[ServFunctionMeta]] = None,
         reload_mgr: Optional[ObjectReloadManager] = None):
+    """this function only reload leaf type, methods in base type won't be reloaded.
+    """
     obj_type = type(obj)
     tmeta = get_obj_type_meta(obj_type)
     if tmeta is None:

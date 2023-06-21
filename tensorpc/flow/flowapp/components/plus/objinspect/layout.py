@@ -23,8 +23,6 @@ from tensorpc.flow.flowapp.core import (AppEditorFrontendEvent,
                                         FlowSpecialMethods, FrontendEventType,
                                         _get_obj_def_path)
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
-from tensorpc.flow.flowapp.reload import reload_object_methods
-from tensorpc.utils.reload import reload_method
 
 FlexLayoutInitType: TypeAlias = Union[List[Union[mui.FlexLayout.Row,
                                                      mui.FlexLayout.TabSet]],

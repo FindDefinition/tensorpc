@@ -18,7 +18,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import (Any, Callable, ClassVar, Coroutine, Dict, Generator, List,
                     Optional, Set, Tuple, Type, Union)
-
+from typing_extensions import TypeAlias
 from tensorpc import compat
 from tensorpc.constants import (TENSORPC_FLOW_FUNC_META_KEY,
                                 TENSORPC_FUNC_META_KEY, TENSORPC_SPLIT)
@@ -502,7 +502,15 @@ class ObjectReloadResultWithType(ObjectReloadResult):
     type_meta: TypeMeta
 
 
+@dataclasses.dataclass 
+class MethodMetaItem:
+    type: Optional[Type]
+    metas: List[ServFunctionMeta]
+    is_leaf: bool
+
+
 class ObjectReloadManager:
+    TypeUID: TypeAlias = Tuple[str, str]
     """to resolve some side effects, users should
     always use reload manager defined in app.
     """
@@ -513,8 +521,8 @@ class ObjectReloadManager:
     ) -> None:
         self.file_cache: Dict[str, FileCacheEntry] = {}
         # self.type_cache: Dict[str, TypeCacheEntry] = {}
-        self.type_meta_cache: Dict[Tuple[str, str], TypeMeta] = {}
-        self.type_method_meta_cache: Dict[Tuple[str, str],
+        self.type_meta_cache: Dict[ObjectReloadManager.TypeUID, TypeMeta] = {}
+        self.type_method_meta_cache: Dict[ObjectReloadManager.TypeUID,
                                           List[ServFunctionMeta]] = {}
         self.module_cache: Dict[str, ModuleCacheEntry] = {}
 
@@ -612,7 +620,7 @@ class ObjectReloadManager:
         """
         print("PREPARE RELOAD", type)
         try:
-            uid = self._get_type_unique_id(type)
+            uid = self.get_type_unique_id(type)
         except:
             raise ValueError("can't reload this type", type)
 
@@ -660,17 +668,18 @@ class ObjectReloadManager:
         return ObjectReloadResultWithType(self.module_cache[path], True,
                                           self.file_cache[path], meta)
 
-    def _get_type_unique_id(self, type: Type):
+    def get_type_unique_id(self, type: Type):
         return (self._inspect_get_file_resolved(type), type.__qualname__)
 
     def query_type_method_meta(self,
                                type: Type,
-                               no_code: bool = False
+                               no_code: bool = False,
+                               include_base: bool = False
                                ) -> List[ServFunctionMeta]:
         """we should always use new type (after reload) with this function.
         """
         try:
-            uid = self._get_type_unique_id(type)
+            uid = self.get_type_unique_id(type)
         except:
             return []
 
@@ -703,14 +712,36 @@ class ObjectReloadManager:
                     pass
             new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
                 inspect_type,
-                include_base=False,
+                include_base=include_base,
                 qualname_to_code=qualname_to_code)
             self.type_method_meta_cache[uid] = new_metas
         else:
             new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
-                inspect_type, include_base=False, no_code=True)
+                inspect_type, include_base=include_base, no_code=True)
+        new_metas = [m.copy() for m in new_metas]
         return new_metas
 
+    def query_type_method_meta_dict(self, this_type: Type,
+                               no_code: bool = False) -> Dict["ObjectReloadManager.TypeUID", MethodMetaItem]:
+        res_list = self.query_type_method_meta(this_type, no_code, include_base=True)
+        res: Dict[Tuple[str, str], MethodMetaItem] = {}
+        for meta in res_list:
+            fn = meta.fn
+            type = inspecttools.get_function_defined_type(fn)
+            if type is None:
+                continue 
+            key = type
+            if inspect.ismodule(key):
+                key = None
+                is_leaf = True 
+            else:
+                is_leaf = self.get_type_unique_id(this_type) == self.get_type_unique_id(type)
+            uid = self.get_type_unique_id(type)
+            if uid not in res:
+                res[uid] = MethodMetaItem(key, [], is_leaf)
+            res[uid].metas.append(meta)
+        return res
+    
     def _tokenize_read_path_lines(self, path: str):
         if path in self.in_memory_fs:
             ss = io.StringIO(self.in_memory_fs[path].content)

@@ -60,7 +60,7 @@ from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.inspecttools import get_all_members_by_type
 from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda, is_tensorpc_dynamic_path,
                                     is_valid_function, loose_isinstance)
-from tensorpc.core.serviceunit import (ObservedFunctionRegistryProtocol,
+from tensorpc.core.serviceunit import (ObjectReloadManager, ObservedFunctionRegistryProtocol,
                                        ReloadableDynamicClass,
                                        ServFunctionMeta, ServiceUnit,
                                        SimpleCodeManager, get_qualname_to_code)
@@ -182,33 +182,22 @@ T = TypeVar("T")
 
 @dataclasses.dataclass
 class _LayoutObserveMeta:
-    layout: Union[mui.FlexBox, "App"]
+    # one type (base class) may related to multiple layouts
+    layouts: List[Union[mui.FlexBox, "App"]]
     qualname_prefix: str
+    # if type is None, it means they are defined in global scope.
+    type: Type
+    is_leaf: bool
     metas: List[ServFunctionMeta]
     callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta],
                                 Coroutine[None, None, Optional[mui.FlexBox]]]]
 
 
-@dataclasses.dataclass
-class _ObjectObserveMeta:
-    obj: Any
-    qualname_prefix: str
-    metas: List[ServFunctionMeta]
-    autorun_name: str
-
 
 @dataclasses.dataclass
 class _WatchDogWatchEntry:
-    obmetas: List[_LayoutObserveMeta]
+    obmetas: Dict[ObjectReloadManager.TypeUID, _LayoutObserveMeta]
     watch: Optional[ObservedWatch]
-
-
-@dataclasses.dataclass
-class _WatchDogObjWatchEntry:
-    obmetas: List[_ObjectObserveMeta]
-    watch: Optional[ObservedWatch]
-
-
 
 class App:
     """
@@ -1040,13 +1029,24 @@ class EditableApp(App):
         dcls = self._get_app_dynamic_cls()
         path = dcls.file_path
         user_obj = self._get_user_app_object()
-        metas = self._flow_reload_manager.query_type_method_meta(
+        metas_dict = self._flow_reload_manager.query_type_method_meta_dict(
             type(user_obj))
-        for m in metas:
-            m.bind(user_obj)
-        qualname_prefix = type(user_obj).__qualname__
+
+        # for m in metas:
+        #     m.bind(user_obj)
+        # qualname_prefix = type(user_obj).__qualname__
         obentry = _WatchDogWatchEntry(
-            [_LayoutObserveMeta(self, qualname_prefix, metas, None)], None)
+            {}, None)
+
+        for meta_type_uid, meta_item in metas_dict.items():
+            if meta_item.type is not None:
+                # TODO should we ignore global functions?
+                qualname_prefix = meta_type_uid[1]
+                obmeta = _LayoutObserveMeta([self], qualname_prefix, meta_item.type, 
+                                            meta_item.is_leaf, meta_item.metas, None)
+                obentry.obmetas[meta_type_uid] = obmeta
+        # obentry = _WatchDogWatchEntry(
+        #     [_LayoutObserveMeta(self, qualname_prefix, metas, None)], None)
         self._flowapp_change_observers[path] = obentry
         self._watchdog_watcher = None
         self._watchdog_observer = None
@@ -1090,7 +1090,7 @@ class EditableApp(App):
         path_resolved = self._flow_reload_manager._resolve_path_may_in_memory(path)
         if path_resolved not in self._flowapp_change_observers:
             self._flowapp_change_observers[
-                path_resolved] = _WatchDogWatchEntry([], None)
+                path_resolved] = _WatchDogWatchEntry({}, None)
         obentry = self._flowapp_change_observers[path_resolved]
         if len(obentry.obmetas) == 0 and not is_tensorpc_dynamic_path(path):
             # no need to schedule watchdog.
@@ -1101,11 +1101,21 @@ class EditableApp(App):
         if not self._flowapp_code_mgr._check_path_exists(path):
             self._flowapp_code_mgr._add_new_code(path, self._flow_reload_manager.in_memory_fs)
         user_obj = obj._get_user_object()
-        metas = self._flow_reload_manager.query_type_method_meta(
+        metas_dict = self._flow_reload_manager.query_type_method_meta_dict(
             type(obj._get_user_object()))
-        qualname_prefix = type(user_obj).__qualname__
-        obmeta = _LayoutObserveMeta(obj, qualname_prefix, metas, callback)
-        obentry.obmetas.append(obmeta)
+        
+        for meta_type_uid, meta_item in metas_dict.items():
+            if meta_item.type is not None:
+                if meta_type_uid in obentry.obmetas:
+                    obentry.obmetas[meta_type_uid].layouts.append(obj)
+                else:
+                    qualname_prefix = meta_type_uid[1]
+                    obmeta = _LayoutObserveMeta([user_obj], qualname_prefix, meta_item.type, meta_item.is_leaf, meta_item.metas, callback)
+                    obentry.obmetas[meta_type_uid] = obmeta
+
+        # qualname_prefix = type(user_obj).__qualname__
+        # obmeta = _LayoutObserveMeta(obj, qualname_prefix, metas, callback)
+        # obentry.obmetas.append(obmeta)
 
 
     def _flowapp_remove_observer(self, obj: mui.FlexBox):
@@ -1116,12 +1126,20 @@ class EditableApp(App):
         # self._flowapp_code_mgr._remove_path(path)
         if path_resolved in self._flowapp_change_observers:
             obentry = self._flowapp_change_observers[path_resolved]
-            new_obmetas: List[_LayoutObserveMeta] = []
-            for obmeta in obentry.obmetas:
-                if obj is not obmeta.layout:
-                    new_obmetas.append(obmeta)
-            obentry.obmetas = new_obmetas
-            if len(new_obmetas) == 0 and obentry.watch is not None:
+            types_to_remove: List[ObjectReloadManager.TypeUID] = []
+            for k, v in obentry.obmetas.items():
+                if obj in v.layouts:
+                    v.layouts.remove(obj)
+                if len(v.layouts) == 0:
+                    types_to_remove.append(k)
+            for k in types_to_remove:
+                del obentry.obmetas[k]
+            # new_obmetas: List[_LayoutObserveMeta] = []
+            # for obmeta in obentry.obmetas:
+            #     if obj is not obmeta.layout:
+            #         new_obmetas.append(obmeta)
+            # obentry.obmetas = new_obmetas
+            if len(obentry.obmetas) == 0 and obentry.watch is not None:
                 self._watchdog_observer.unschedule(obentry.watch)
 
 
@@ -1151,8 +1169,19 @@ class EditableApp(App):
     async def _reload_object_with_new_code(self,
                                            path: str,
                                            new_code: Optional[str] = None):
+        """reload order:
+        for leaf type, we will support new method. if code change, we will replace all method with reloaded methods.
+        for base types, we don't support new method. if code change, only reload method with same name. if the method
+            is already reloaded in child type, it will be ignored.
+        """
         assert self._flowapp_code_mgr is not None
         resolved_path = self._flowapp_code_mgr._resolve_path(path)
+        if self._use_app_editor:
+            dcls = self._get_app_dynamic_cls()
+            resolved_app_path = self._flowapp_code_mgr._resolve_path(dcls.file_path)
+
+            if resolved_path == resolved_app_path and new_code is not None:
+                await self.set_editor_value(new_code)
         try:
             changes = self._flowapp_code_mgr.update_code(
                 resolved_path, new_code)
@@ -1160,26 +1189,31 @@ class EditableApp(App):
             # ast parse error
             traceback.print_exc()
             return
+        
         if changes is None:
             return
         print("RELOAD", path)
         new, change, _ = changes
-        for x in changes:
-            print(x.keys())
+        # for x in changes:
+        #     print(x.keys())
         new_data = self._flowapp_code_mgr.get_code(resolved_path)
         is_reload = False
         is_callback_change = False
         callbacks_of_this_file: Optional[List[_CompReloadMeta]] = None
 
         try:
-            autorun_names_queued: Set[str] = set()
-
             if resolved_path in self._flowapp_change_observers:
                 obmetas = self._flowapp_change_observers[resolved_path].obmetas.copy()
-                print("len(obmetas)", resolved_path, len(obmetas))
-                for obmeta in obmetas:
+                obmetas_items = list(obmetas.items())
+                # sort obmetas_items by mro
+                obmetas_items.sort(key=lambda x: x[1].type.mro(), reverse=True)
+                resolved_metas: Dict[ObjectReloadManager.TypeUID, Set[str]] = {}
+                # print("len(obmetas)", resolved_path, len(obmetas))
+                for type_uid, obmeta in obmetas_items:
                     # get changed metas for special methods
                     # print(new, change)
+                    if type_uid not in resolved_metas:
+                        resolved_metas[type_uid] = set()
                     changed_metas: List[ServFunctionMeta] = []
                     for m in obmeta.metas:
                         if m.qualname in change:
@@ -1188,22 +1222,22 @@ class EditableApp(App):
                         x for x in new if x.startswith(obmeta.qualname_prefix)
                         and x != obmeta.qualname_prefix
                     ]
-                    layout = obmeta.layout
-                    if not is_callback_change:
-                        if isinstance(layout, App):
-                            callbacks_of_this_file = self.__get_callback_metas_in_file(
-                                resolved_path, self.root)
-                        else:
-                            # TODO should we check all callbacks instead of changed layout?
-
-                            callbacks_of_this_file = self.__get_callback_metas_in_file(
-                                resolved_path, self.root)
-                        # print(len(callbacks_of_this_file), "callbacks_of_this_file 0", change.keys())
-                        for cb_meta in callbacks_of_this_file:
-                            # print(cb_meta.cb_qualname)
-                            if cb_meta.cb_qualname in change:
-                                is_callback_change = True
-                                break
+                    # layout = obmeta.layout
+                    for layout in obmeta.layouts:
+                        if not is_callback_change:
+                            if isinstance(layout, App):
+                                callbacks_of_this_file = self.__get_callback_metas_in_file(
+                                    resolved_path, self.root)
+                            else:
+                                # TODO should we check all callbacks instead of changed layout?
+                                callbacks_of_this_file = self.__get_callback_metas_in_file(
+                                    resolved_path, self.root)
+                            # print(len(callbacks_of_this_file), "callbacks_of_this_file 0", change.keys())
+                            for cb_meta in callbacks_of_this_file:
+                                # print(cb_meta.cb_qualname)
+                                if cb_meta.cb_qualname in change:
+                                    is_callback_change = True
+                                    break
                         # print("is_callback_change", is_callback_change)
                     for m in changed_metas:
                         print(m.qualname, "CHANGED")
@@ -1214,116 +1248,114 @@ class EditableApp(App):
                     # print("do_reload", do_reload)
                     if not do_reload:
                         continue
-                    changed_user_obj = None
-                    if layout is self:
-                        # reload app
-                        if self._use_app_editor:
-                            if self.code_editor.external_path is None and new_code is None:
-                                await self.set_editor_value(new_data)
-                        if changed_metas or bool(new_method_names):
-                            # reload app servunit and method
-                            changed_user_obj = self._get_user_app_object()
-                            # self._get_app_dynamic_cls(
-                            # ).reload_obj_methods(user_obj, {}, self._flow_reload_manager)
-                            self._get_app_service_unit().reload_metas(
-                                self._flow_reload_manager)
-                    else:
-                        assert isinstance(layout, mui.FlexBox)
-                        # if self.code_editor.external_path is not None and new_code is None:
-                        #     if str(
-                        #             Path(self.code_editor.external_path).
-                        #             resolve()) == resolved_path:
-                        #         await self.set_editor_value(new_data, lineno=0)
-                        # reload dynamic layout
-                        if changed_metas or bool(new_method_names):
-                            changed_user_obj = layout._get_user_object()
-                    # print("RTX", changed_user_obj, new_method_names)
-                    if changed_user_obj is not None:
-                        reload_res = self._flow_reload_manager.reload_type(
-                            type(changed_user_obj))
-                        if not is_reload:
-                            is_reload = reload_res.is_reload
-                        updated_type = reload_res.type_meta.get_local_type_from_module_dict(
-                            reload_res.module_entry.module_dict)
-                        # recreate metas with new type and new qualname_to_code
-                        # TODO handle special methods in mro
-                        updated_metas = self._flow_reload_manager.query_type_method_meta(
-                            updated_type)
-                        obmeta.metas = updated_metas
-                        print("CHANGED USER OBJ", len(obmetas))
-                        for m in updated_metas:
-                            m.bind(changed_user_obj)
-                        changed_metas = [
-                            m for m in updated_metas if m.qualname in change
-                        ]
-                        changed_metas += [
-                            m for m in updated_metas if m.qualname in new
-                        ]
-                        for c in changed_metas:
-                            print(f"{c.name}, ------------")
-                            # print(c.code)
-                            # print("-----------")
-                            # print(change[c.qualname])
-                        # we need to update metas of layout with new type.
-                        # meta is binded in bind_and_reset_object_methods
-                        bind_and_reset_object_methods(changed_user_obj,
-                                                      changed_metas)
+                    for i, layout in enumerate(obmeta.layouts):
+                        changed_user_obj = None
+
                         if layout is self:
-                            self._get_app_dynamic_cls(
-                            ).module_dict = reload_res.module_entry.module_dict
-                            self._get_app_service_unit().reload_metas(
-                                self._flow_reload_manager)
-                    # use updated metas to run special methods such as create_layout and auto_run
-                    flow_special = FlowSpecialMethods(changed_metas)
-                    with _enter_app_conetxt(self):
-                        # asyncio.run_coroutine_threadsafe(
-                        #     self._run_autorun(
-                        #         auto_run.get_binded_fn()),
-                        #     self._loop)
-                        # print(code_changed_metas)
-                        if flow_special.create_layout:
-                            fn = flow_special.create_layout.get_binded_fn()
-                            if isinstance(layout, App):
-                                await self._app_run_layout_function(
-                                    True,
-                                    with_code_editor=False,
-                                    reload=True,
-                                    decorator_fn=fn)
+                            # reload app
+                            if changed_metas or bool(new_method_names):
+                                # reload app servunit and method
+                                changed_user_obj = self._get_user_app_object()
+                                # self._get_app_dynamic_cls(
+                                # ).reload_obj_methods(user_obj, {}, self._flow_reload_manager)
+                                self._get_app_service_unit().reload_metas(
+                                    self._flow_reload_manager)
+                        else:
+                            assert isinstance(layout, mui.FlexBox)
+                            # if self.code_editor.external_path is not None and new_code is None:
+                            #     if str(
+                            #             Path(self.code_editor.external_path).
+                            #             resolve()) == resolved_path:
+                            #         await self.set_editor_value(new_data, lineno=0)
+                            # reload dynamic layout
+                            if changed_metas or bool(new_method_names):
+                                changed_user_obj = layout._get_user_object()
+                        # print("RTX", changed_user_obj, new_method_names)
+                        if changed_user_obj is not None:
+                            # reload_res = self._flow_reload_manager.reload_type(
+                            #     type(changed_user_obj))
+                            reload_res = self._flow_reload_manager.reload_type(
+                                obmeta.type)
 
-                                # fut = asyncio.run_coroutine_threadsafe(
-                                #     self._app_run_layout_function(
-                                #         True,
-                                #         with_code_editor=False,
-                                #         reload=True,
-                                #         decorator_fn=fn), self._loop)
-                                # fut.result()
+                            if not is_reload:
+                                is_reload = reload_res.is_reload
+                            updated_type = reload_res.type_meta.get_local_type_from_module_dict(
+                                reload_res.module_entry.module_dict)
+                            # recreate metas with new type and new qualname_to_code
+                            # TODO handle special methods in mro
+                            updated_metas = self._flow_reload_manager.query_type_method_meta(
+                                updated_type, include_base=False)
+                            # if is leaf type, reload all meta, otherwise only reload meta saved initally.
+                            if is_reload and obmeta.is_leaf:
+                                obmeta.metas = updated_metas
+                            print("CHANGED USER OBJ", len(obmetas))
+                            changed_metas = [
+                                m for m in updated_metas if m.qualname in change
+                            ]
+                            if obmeta.is_leaf:
+                                changed_metas += [
+                                    m for m in updated_metas if m.qualname in new
+                                ]
                             else:
-                                if obmeta.callback is not None:
-                                    # handle layout in callback
-                                    new_layout = await obmeta.callback(
-                                        layout, flow_special.create_layout)
-                                    if new_layout is not None:
-                                        obmeta.layout = new_layout
-                                    # fut = asyncio.run_coroutine_threadsafe(
-                                    #     obmeta.callback(layout, flow_special.create_layout), self._loop)
-                                    # fut.result()
-
-                                # dynamic layout
-                        if flow_special.create_preview_layout:
-                            if not isinstance(layout, App):
-                                if obmeta.callback is not None:
-                                    # handle layout in callback
-                                    new_layout = await obmeta.callback(
-                                        layout, flow_special.create_preview_layout)
-                                    if new_layout is not None:
-                                        obmeta.layout = new_layout
-                        for auto_run in flow_special.auto_runs:
-                            if auto_run is not None:
-                                if layout is self and auto_run.name in autorun_names_queued:
-                                    autorun_names_queued.remove(auto_run.name)
-                                await self._run_autorun(
-                                    auto_run.get_binded_fn())
-                    # handle special methods
+                                prev_meta_names = [x.qualname for x in obmeta.metas]
+                                changed_metas = list(filter(lambda x: x.qualname in prev_meta_names, changed_metas))
+                            changed_metas_candidate = changed_metas
+                            new_changed_metas: List[ServFunctionMeta] = []
+                            # if meta already reloaded in child type, ignore it.
+                            for c in changed_metas_candidate:
+                                if c.name not in resolved_metas[type_uid]:
+                                    resolved_metas[type_uid].add(c.name)
+                                    new_changed_metas.append(c)
+                            change_metas = new_changed_metas
+                            for c in change_metas:
+                                c.bind(changed_user_obj)
+                                print(f"{c.name}, ------------")
+                                # print(c.code)
+                                # print("-----------")
+                                # print(change[c.qualname])
+                            # we need to update metas of layout with new type.
+                            # meta is binded in bind_and_reset_object_methods
+                            if changed_metas:
+                                bind_and_reset_object_methods(changed_user_obj,
+                                                            changed_metas)
+                            if layout is self:
+                                self._get_app_dynamic_cls(
+                                ).module_dict = reload_res.module_entry.module_dict
+                                self._get_app_service_unit().reload_metas(
+                                    self._flow_reload_manager)
+                        # use updated metas to run special methods such as create_layout and auto_run
+                        if changed_metas:
+                            flow_special = FlowSpecialMethods(changed_metas)
+                            with _enter_app_conetxt(self):
+                                if flow_special.create_layout:
+                                    fn = flow_special.create_layout.get_binded_fn()
+                                    if isinstance(layout, App):
+                                        await self._app_run_layout_function(
+                                            True,
+                                            with_code_editor=False,
+                                            reload=True,
+                                            decorator_fn=fn)
+                                    else:
+                                        if obmeta.callback is not None:
+                                            # handle layout in callback
+                                            new_layout = await obmeta.callback(
+                                                layout, flow_special.create_layout)
+                                            if new_layout is not None:
+                                                obmeta.layouts[i] = new_layout
+                                        # dynamic layout
+                                if flow_special.create_preview_layout:
+                                    if not isinstance(layout, App):
+                                        if obmeta.callback is not None:
+                                            # handle layout in callback
+                                            new_layout = await obmeta.callback(
+                                                layout, flow_special.create_preview_layout)
+                                            if new_layout is not None:
+                                                obmeta.layouts[i] = new_layout
+                                for auto_run in flow_special.auto_runs:
+                                    if auto_run is not None:
+                                        await self._run_autorun(
+                                            auto_run.get_binded_fn())
+                        # handle special methods
             ob_registry = self.get_observed_func_registry()
             observed_func_changed = ob_registry.observed_func_changed(
                 resolved_path, change)
