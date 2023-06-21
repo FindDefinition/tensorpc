@@ -85,8 +85,8 @@ class ScriptExecutor(mui.FlexBox):
         self._external_argv_task = asyncio.create_task(
             appctx.run_in_executor_with_exception_inspect(
                 partial(self._run_app_script,
-                        path=self.path.value,
-                        argv=shlex.split(" ".join([self.path.value, self.args.value]))), ))
+                        path=self.path.str(),
+                        argv=shlex.split(" ".join([self.path.str(), self.args.str()]))), ))
 
     async def _cancel(self):
         if self._external_argv_task is None:

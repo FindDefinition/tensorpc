@@ -119,7 +119,7 @@ def get_function_defined_type(func: Callable):
     mod = inspect.getmodule(func)
     if mod is None:
         return None 
-    if mod.__name__.startswith("tensorpc"):
+    if mod.__name__.startswith("tensorpc") and not mod.__name__.startswith("tensorpc.flow.sampleapp"):
         # ignore all tensorpc type
         return None
     func_qname = func.__qualname__

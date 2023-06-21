@@ -522,7 +522,7 @@ class ObjectReloadManager:
         self.file_cache: Dict[str, FileCacheEntry] = {}
         # self.type_cache: Dict[str, TypeCacheEntry] = {}
         self.type_meta_cache: Dict[ObjectReloadManager.TypeUID, TypeMeta] = {}
-        self.type_method_meta_cache: Dict[ObjectReloadManager.TypeUID,
+        self.type_method_meta_cache: Dict[Tuple[ObjectReloadManager.TypeUID, bool],
                                           List[ServFunctionMeta]] = {}
         self.module_cache: Dict[str, ModuleCacheEntry] = {}
 
@@ -636,7 +636,7 @@ class ObjectReloadManager:
                                               self.file_cache[path], meta)
 
         # invalid type method cache
-        new_type_method_meta_cache: Dict[Tuple[str, str],
+        new_type_method_meta_cache: Dict[Tuple[Tuple[str, str], bool],
                                          List[ServFunctionMeta]] = {}
         for t, vv in self.type_method_meta_cache.items():
             try:
@@ -647,7 +647,7 @@ class ObjectReloadManager:
                 new_type_method_meta_cache[t] = vv
         self.type_method_meta_cache = new_type_method_meta_cache
         # do reload
-        print("DO RELOAD", type, meta)
+        print("DO RELOAD", type)
 
         res = meta.get_reloaded_module(self.in_memory_fs)
         if res is None:
@@ -682,9 +682,9 @@ class ObjectReloadManager:
             uid = self.get_type_unique_id(type)
         except:
             return []
-
-        if uid in self.type_method_meta_cache:
-            return self.type_method_meta_cache[uid]
+        method_meta_cache_key = (uid, include_base)
+        if method_meta_cache_key in self.type_method_meta_cache:
+            return self.type_method_meta_cache[method_meta_cache_key]
         try:
             path = self._inspect_get_file_resolved(type)
         except TypeError:
@@ -714,7 +714,7 @@ class ObjectReloadManager:
                 inspect_type,
                 include_base=include_base,
                 qualname_to_code=qualname_to_code)
-            self.type_method_meta_cache[uid] = new_metas
+            self.type_method_meta_cache[method_meta_cache_key] = new_metas
         else:
             new_metas = ReloadableDynamicClass.get_metas_of_regular_methods(
                 inspect_type, include_base=include_base, no_code=True)

@@ -47,7 +47,7 @@ class AppInMemory(mui.FlexBox):
     """
     def __init__(self, path: str, code: str, is_horizontal: bool = True):
         wrapped_path = f"<{TENSORPC_FILE_NAME_PREFIX}-{path}>"
-        self.editor = mui.MonacoEditor(code, "python", wrapped_path)
+        self.editor = mui.MonacoEditor(code, "python", wrapped_path).prop(min_width=0, min_height=0)
         self.path = wrapped_path 
         self.code = code 
         self.app_cls_name = "App"

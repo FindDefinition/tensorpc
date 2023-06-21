@@ -29,7 +29,7 @@ class ListSlider(mui.Slider, Generic[T]):
                  label: Union[str, mui.Undefined] = mui.undefined) -> None:
         if init is None:
             init = []
-        super().__init__(label, 0, max(1, len(init)), 1, self._callback)
+        super().__init__(0, max(1, len(init)), 1, self._callback, label)
         # save callback to standard flow event handlers to enable reload for user callback
         self.__callback_key = "list_slider_ev_handler"
         self.register_event_handler(self.__callback_key,

@@ -842,7 +842,7 @@ class App:
                 uid = parts[0]
                 key = TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT.join(parts[1:])
             indexes = undefined
-            if len(data) == 3:
+            if len(data) == 3 and data[2] is not None:
                 indexes = list(map(int, data[2].split(".")))
             event = Event(data[0], data[1], key, indexes)
             if event.type == FrontendEventType.Drop.value:
@@ -1037,7 +1037,6 @@ class EditableApp(App):
         # qualname_prefix = type(user_obj).__qualname__
         obentry = _WatchDogWatchEntry(
             {}, None)
-
         for meta_type_uid, meta_item in metas_dict.items():
             if meta_item.type is not None:
                 # TODO should we ignore global functions?
@@ -1100,7 +1099,6 @@ class EditableApp(App):
         assert self._flowapp_code_mgr is not None
         if not self._flowapp_code_mgr._check_path_exists(path):
             self._flowapp_code_mgr._add_new_code(path, self._flow_reload_manager.in_memory_fs)
-        user_obj = obj._get_user_object()
         metas_dict = self._flow_reload_manager.query_type_method_meta_dict(
             type(obj._get_user_object()))
         
@@ -1110,12 +1108,8 @@ class EditableApp(App):
                     obentry.obmetas[meta_type_uid].layouts.append(obj)
                 else:
                     qualname_prefix = meta_type_uid[1]
-                    obmeta = _LayoutObserveMeta([user_obj], qualname_prefix, meta_item.type, meta_item.is_leaf, meta_item.metas, callback)
+                    obmeta = _LayoutObserveMeta([obj], qualname_prefix, meta_item.type, meta_item.is_leaf, meta_item.metas, callback)
                     obentry.obmetas[meta_type_uid] = obmeta
-
-        # qualname_prefix = type(user_obj).__qualname__
-        # obmeta = _LayoutObserveMeta(obj, qualname_prefix, metas, callback)
-        # obentry.obmetas.append(obmeta)
 
 
     def _flowapp_remove_observer(self, obj: mui.FlexBox):
@@ -1192,7 +1186,7 @@ class EditableApp(App):
         
         if changes is None:
             return
-        print("RELOAD", path)
+        print(f"[WatchDog]{path}")
         new, change, _ = changes
         # for x in changes:
         #     print(x.keys())
@@ -1200,13 +1194,14 @@ class EditableApp(App):
         is_reload = False
         is_callback_change = False
         callbacks_of_this_file: Optional[List[_CompReloadMeta]] = None
-
+        
         try:
             if resolved_path in self._flowapp_change_observers:
                 obmetas = self._flowapp_change_observers[resolved_path].obmetas.copy()
                 obmetas_items = list(obmetas.items())
                 # sort obmetas_items by mro
-                obmetas_items.sort(key=lambda x: x[1].type.mro(), reverse=True)
+                obmetas_items.sort(key=lambda x: len(x[1].type.mro()), reverse=True)
+                # store accessed metas in inheritance tree
                 resolved_metas: Dict[ObjectReloadManager.TypeUID, Set[str]] = {}
                 # print("len(obmetas)", resolved_path, len(obmetas))
                 for type_uid, obmeta in obmetas_items:
@@ -1261,7 +1256,7 @@ class EditableApp(App):
                                 self._get_app_service_unit().reload_metas(
                                     self._flow_reload_manager)
                         else:
-                            assert isinstance(layout, mui.FlexBox)
+                            assert isinstance(layout, mui.FlexBox), f"{type(layout)}"
                             # if self.code_editor.external_path is not None and new_code is None:
                             #     if str(
                             #             Path(self.code_editor.external_path).

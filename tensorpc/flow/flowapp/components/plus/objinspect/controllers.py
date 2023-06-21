@@ -31,7 +31,7 @@ class CallbackSlider(mui.FlexBox):
     """
 
     def __init__(self) -> None:
-        self.slider = mui.Slider(mui.undefined, 0, 1, 1).prop(flex=1)
+        self.slider = mui.Slider(0, 1, 1).prop(flex=1)
         super().__init__([self.slider])
         self.slider.register_event_handler(mui.FrontendEventType.Change.value,
                                     self._default_callback)

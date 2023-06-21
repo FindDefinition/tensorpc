@@ -102,10 +102,10 @@ class FlexComponentBaseProps(BasicProps):
     z_index: Union[ValueType, Undefined] = undefined
 
     flex: Union[ValueType, Undefined] = undefined
-    align_self: Union[str, Undefined] = undefined
-    flex_grow: Union[str, Undefined] = undefined
-    flex_shrink: Union[str, Undefined] = undefined
-    flex_basis: Union[str, Undefined] = undefined
+    align_self: Union[Literal["auto", "flex-start", "flex-end", "center", "baseline", "stretch"], Undefined] = undefined
+    flex_grow: Union[ValueType, Undefined] = undefined
+    flex_shrink: Union[ValueType, Undefined] = undefined
+    flex_basis: Union[ValueType, Undefined] = undefined
 
     height: Union[ValueType, Undefined] = undefined
     width: Union[ValueType, Undefined] = undefined
@@ -138,6 +138,9 @@ class FlexComponentBaseProps(BasicProps):
     border_right: Union[ValueType, Undefined] = undefined
     border_bottom: Union[ValueType, Undefined] = undefined
     border_color: Union[str, Undefined] = undefined
+    border_radius: Union[ValueType, Undefined] = undefined
+    border_image: Union[str, Undefined] = undefined
+
     white_space: Union[Literal["normal", "pre", "nowrap", "pre-wrap",
                                "pre-line", "break-spaces"],
                        Undefined] = undefined
@@ -161,12 +164,11 @@ class MUIContainerBase(ContainerBase[T_container_props, T_child]):
 
 @dataclasses.dataclass
 class FlexBoxProps(FlexComponentBaseProps):
-    # TODO add literal here.
-    align_content: Union[str, Undefined] = undefined
-    align_items: Union[str, Undefined] = undefined
-    justify_content: Union[str, Undefined] = undefined
-    flex_direction: Union[str, Undefined] = undefined
-    flex_wrap: Union[str, Undefined] = undefined
+    align_content: Union[Literal["flex-start", "flex-end", "center", "space-between", "space-around", "stretch"], Undefined] = undefined
+    align_items: Union[Literal["flex-start", "flex-end", "center", "baseline", "stretch"], Undefined] = undefined
+    justify_content: Union[Literal["flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly"], Undefined] = undefined
+    flex_direction: Union[Literal["row", "row-reverse", "column", "column-reverse"], Undefined] = undefined
+    flex_wrap: Union[Literal["nowrap", "wrap", "wrap-reverse"], Undefined] = undefined
     flex_flow: Union[str, Undefined] = undefined
 
 
@@ -1214,30 +1216,14 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
     def int(self):
         assert not isinstance(self.props.value, Undefined)
         return int(self.props.value)
+    
+    def str(self):
+        assert not isinstance(self.props.value, Undefined)
+        return str(self.props.value)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync, sync_first=False,
                                             sync_state_after_change=False)
-
-        if self.props.status == UIRunStatus.Running.value:
-            # TODO send exception if ignored click
-            return
-        elif self.props.status == UIRunStatus.Stop.value:
-            cb = self.callback
-            self.state_change_callback(ev[1])
-            # we can't update input state
-            # because input is an uncontrolled
-            # component.
-            if cb is not None:
-
-                def ccb(cb):
-                    return lambda: cb(ev[1])
-
-                if is_sync:
-                    return self.run_callback(ccb(cb), sync_first=False)
-                else:
-                    self._task = asyncio.create_task(self.run_callback(
-                        ccb(cb)))
 
     @property
     def prop(self):
@@ -1470,15 +1456,21 @@ class Select(MUIComponentBase[SelectProps]):
             label: str,
             items: List[Tuple[str, ValueType]],
             callback: Optional[Callable[[ValueType],
-                                        _CORO_NONE]] = None) -> None:
+                                        _CORO_NONE]] = None,
+            init_value: Optional[ValueType] = None) -> None:
         super().__init__(UIType.Select, SelectProps,
                          [FrontendEventType.Change.value])
+        if init_value is not None:
+            assert init_value in [x[1] for x in items]
+
         self.props.label = label
         self.callback = callback
         # assert len(items) > 0
         self.props.items = items
         # item value must implement eq/ne
         self.props.value = ""
+        if init_value is not None:
+            self.props.value = init_value
         self.props.size = "small"
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
@@ -1880,19 +1872,26 @@ class SliderProps(MUIComponentBaseProps):
 class Slider(MUIComponentBase[SliderProps]):
     def __init__(
             self,
-            label: Union[Undefined, str],
             begin: NumberType,
             end: NumberType,
-            step: NumberType,
+            step: Optional[NumberType] = None,
             callback: Optional[Callable[[NumberType],
-                                        _CORO_NONE]] = None) -> None:
+                                        _CORO_NONE]] = None,
+            label: Union[Undefined, str] = undefined,
+            init_value: Optional[NumberType] = None) -> None:
         super().__init__(UIType.Slider, SliderProps,
                          [FrontendEventType.Change.value])
+        if isinstance(begin, int) and isinstance(end, int):
+            if step is None:
+                step = 1
+        assert step is not None, "step must be specified for float type"
         self.props.label = label
         self.callback = callback
         assert end > begin #  and step <= end - begin
         self.props.ranges = (begin, end, step)
-        self.props.value = begin
+        if init_value is None:
+            init_value = begin
+        self.props.value = init_value
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
@@ -1915,7 +1914,9 @@ class Slider(MUIComponentBase[SliderProps]):
         return res
 
     async def update_ranges(self, begin: NumberType, end: NumberType,
-                            step: NumberType = 1):
+                            step: Optional[NumberType] = None):
+        if step is None:
+            step = self.props.ranges[2]
         self.props.ranges = (begin, end, step)
         assert end > begin and step < end - begin
         self.props.value = begin

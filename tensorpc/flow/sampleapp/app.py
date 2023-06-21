@@ -1119,19 +1119,22 @@ class MatchCaseAppBase:
             mui.Divider(),
             self.switchcase,
             mui.Divider(),
-            mui.Slider("", 0, 1.0, 0.01, self._on_slider),
+            mui.Slider(0, 1.0, 0.01, self._on_slider),
             self.switchcase_fp,
         ])
     
     async def _on_slider(self, value):
-        print(value)
+        print(value, 4)
         await self.switchcase_fp.set_condition(value)
 
     async def _on_select(self, value):
+        print(3)
         await self.switchcase.set_condition(value)
 
 class MatchCaseApp(MatchCaseAppBase):
-    pass
+    async def _on_slider(self, value):
+        print(value, 2)
+        await self.switchcase_fp.set_condition(value)
 
 class DataListApp:
     @marker.mark_create_layout
@@ -1193,7 +1196,7 @@ class DataGridApp:
         btn.event_click.on_standard(lambda x: print(x.key)).configure(True)
         cbox = mui.Checkbox("")
         input_cell = mui.Input("dev")
-        fat_cell = mui.Slider(mui.undefined, 0, 100, 1)
+        fat_cell = mui.Slider(0, 100, 1)
 
         column_defs = [
             # mui.DataGrid.ColumnDef("special", specialType=mui.DataGridColumnSpecialType.MasterDetail.value),

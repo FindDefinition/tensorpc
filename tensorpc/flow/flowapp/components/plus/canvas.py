@@ -573,14 +573,19 @@ class SimpleCanvas(mui.FlexBox):
                           size_attenuation: bool = False,
                           size: Optional[float] = None,
                           encode_method: Optional[Union[Literal["none", "int16"], mui.Undefined]] = None, 
-                          encode_scale: Optional[Union[mui.NumberType, mui.Undefined]] = None):
+                          encode_scale: Optional[Union[mui.NumberType, mui.Undefined]] = None,
+                        attrs: Optional[Union[np.ndarray,
+                                                mui.Undefined]] = None,
+                        attr_fields: Optional[List[str]] = None,
+
+                          ):
         if encode_method is None:
             encode_method = self.cfg.point.encode_method
         if encode_scale is None:
             encode_scale = self.cfg.point.encode_scale
         if key not in self._point_dict:
             if encode_method is not None:
-                ui = three.Points(limit).prop(encode_method=encode_method, encode_scale=encode_scale)
+                ui = three.Points(limit).prop(encode_method=encode_method, encode_scale=encode_scale, attrs=attrs, attr_fields=attr_fields)
             else:
                 ui = three.Points(limit)
             self._point_dict[key] = ui
@@ -593,7 +598,9 @@ class SimpleCanvas(mui.FlexBox):
                                      sizes=sizes,
                                      size_attenuation=size_attenuation,
                                      encode_method=encode_method, 
-                                     encode_scale=encode_scale)
+                                     encode_scale=encode_scale,
+                                     attrs=attrs,
+                                     attr_fields=attr_fields)
 
     async def clear_points(self, clear_keys: Optional[List[str]] = None):
         if clear_keys is None:
