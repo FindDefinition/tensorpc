@@ -208,8 +208,6 @@ class App:
 
     def __init__(self,
                  flex_flow: Union[str, Undefined] = "column nowrap",
-                 justify_content: Union[str, Undefined] = undefined,
-                 align_items: Union[str, Undefined] = undefined,
                  maxqsize: int = 10,
                  enable_value_cache: bool = False,
                  external_root: Optional[mui.FlexBox] = None,
@@ -247,15 +245,13 @@ class App:
             root = mui.FlexBox(inited=True,
                                uid=_ROOT,
                                app_comp_core=self._flow_app_comp_core)
-            root.prop(flex_flow=flex_flow,
-                      justify_content=justify_content,
-                      align_items=align_items)
+            root.prop(flexFlow=flex_flow)
             if external_wrapped_obj is not None:
                 root._wrapped_obj = external_wrapped_obj
                 self._is_external_root = True
 
         # self._uid_to_comp[_ROOT] = root
-        self.root = root.prop(min_height=0, min_width=0)
+        self.root = root.prop(minHeight=0, minWidth=0)
         self._enable_editor = False
 
         self._flowapp_special_eemitter: AsyncIOEventEmitter[AppSpecialEventType, Any] = AsyncIOEventEmitter()
@@ -558,7 +554,12 @@ class App:
                     }
         if reload:
             detached = self.root._detach()
-            await self.root._run_special_methods([], list(detached.values()),
+            # make sure did_mount is called from root to leaf (breadth first order)
+            detached_items = list(detached.items())
+            detached_items.sort(key=lambda x: len(x[0].split(".")), reverse=False)
+
+
+            await self.root._run_special_methods([], [x[1] for x in detached_items],
                                                  self._flow_reload_manager)
             del detached
 
@@ -645,7 +646,11 @@ class App:
                 })
             await self._queue.put(ev)
             if reload:
-                await self.root._run_special_methods(list(attached.values()),
+                # make sure did_mount is called from leaf to root (reversed breadth first order)
+                attached_items = list(attached.items())
+                attached_items.sort(key=lambda x: len(x[0].split(".")), reverse=True)
+
+                await self.root._run_special_methods([x[1] for x in attached_items],
                                                      [],
                                                      self._flow_reload_manager)
 
@@ -659,8 +664,11 @@ class App:
         """
         self._loop = asyncio.get_running_loop()
         uid_to_comp = self.root._get_uid_to_comp_dict()
+        # make sure did_mount is called from leaf to root (reversed breadth first order)
+        uid_to_comp_items = list(uid_to_comp.items())
+        uid_to_comp_items.sort(key=lambda x: len(x[0].split(".")), reverse=True)
         with enter_app_conetxt(self):
-            for v in uid_to_comp.values():
+            for _, v in uid_to_comp_items:
                 special_methods = v.get_special_methods(
                     self._flow_reload_manager)
                 if special_methods.did_mount is not None:
@@ -995,16 +1003,12 @@ class EditableApp(App):
                  reloadable_layout: bool = False,
                  use_app_editor: bool = True,
                  flex_flow: Union[str, Undefined] = "column nowrap",
-                 justify_content: Union[str, Undefined] = undefined,
-                 align_items: Union[str, Undefined] = undefined,
                  maxqsize: int = 10,
                  observed_files: Optional[List[str]] = None,
                  external_root: Optional[mui.FlexBox] = None,
                  external_wrapped_obj: Optional[Any] = None,
                  reload_manager: Optional[AppReloadManager] = None) -> None:
         super().__init__(flex_flow,
-                         justify_content,
-                         align_items,
                          maxqsize,
                          external_root=external_root,
                          external_wrapped_obj=external_wrapped_obj,
@@ -1462,8 +1466,6 @@ class EditableLayoutApp(EditableApp):
     def __init__(self,
                  use_app_editor: bool = True,
                  flex_flow: Union[str, Undefined] = "column nowrap",
-                 justify_content: Union[str, Undefined] = undefined,
-                 align_items: Union[str, Undefined] = undefined,
                  maxqsize: int = 10,
                  observed_files: Optional[List[str]] = None,
                  external_root: Optional[mui.FlexBox] = None,
@@ -1471,8 +1473,6 @@ class EditableLayoutApp(EditableApp):
         super().__init__(True,
                          use_app_editor,
                          flex_flow,
-                         justify_content,
-                         align_items,
                          maxqsize,
                          observed_files,
                          external_root=external_root,

@@ -32,15 +32,15 @@ class SimpleFileReader(mui.FlexBox):
         super().__init__([self.text])
         self.all_allowed_exts = [".json", ".pkl", ".pickle", ".npy", ".npz"]
         self.prop(droppable=True,
-                  allow_file=True,
-                  flex_direction="column",
+                  allowFile=True,
+                  flexDirection="column",
                   border="4px solid white",
-                  sx_over_drop={"border": "4px solid green"},
+                  sxOverDrop={"border": "4px solid green"},
                   width="100%",
                   height="100%",
                   overflow="hidden",
-                  justify_content="center",
-                  align_items="center")
+                  justifyContent="center",
+                  alignItems="center")
 
         self.register_event_handler(FrontendEventType.Drop.value,
                                     self.on_drop_file)
@@ -66,8 +66,8 @@ class SimpleFileReader(mui.FlexBox):
 
 class ScriptExecutor(mui.FlexBox):
     def __init__(self):
-        self.path = mui.TextField(label="Path").prop(mui_margin="dense")
-        self.args = mui.TextField(label="Args").prop(mui_margin="dense")
+        self.path = mui.TextField(label="Path").prop(muiMargin="dense")
+        self.args = mui.TextField(label="Args").prop(muiMargin="dense")
 
         super().__init__(
             [self.path, self.args,
@@ -76,7 +76,7 @@ class ScriptExecutor(mui.FlexBox):
                  mui.Button("Cancel", self._cancel),
 
              ])])
-        self.prop(flex_direction="column")
+        self.prop(flexDirection="column")
         self._external_argv_task: Optional[asyncio.Future] = None
 
     async def _run(self):

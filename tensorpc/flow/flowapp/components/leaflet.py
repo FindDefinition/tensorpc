@@ -190,16 +190,16 @@ class PathOptions:
     color: Union[Undefined, str] = undefined
     weight: Union[Undefined, NumberType] = undefined
     opacity: Union[Undefined, NumberType] = undefined
-    line_cap: Union[Undefined, Literal['butt', 'round', 'square',
+    lineCap: Union[Undefined, Literal['butt', 'round', 'square',
                                        'inherit']] = undefined
-    line_join: Union[Undefined, Literal['miter', 'round', 'bevel',
+    lineJoin: Union[Undefined, Literal['miter', 'round', 'bevel',
                                         'inherit']] = undefined
-    dash_array: Union[Undefined, str, List[NumberType]] = undefined
-    dash_offset: Union[Undefined, str] = undefined
+    dashArray: Union[Undefined, str, List[NumberType]] = undefined
+    dashOffset: Union[Undefined, str] = undefined
     fill: Union[Undefined, bool] = undefined
-    fill_color: Union[Undefined, str] = undefined
-    fill_opacity: Union[Undefined, NumberType] = undefined
-    fill_rule: Union[Undefined, Literal['nonzero', 'evenodd',
+    fillColor: Union[Undefined, str] = undefined
+    fillOpacity: Union[Undefined, NumberType] = undefined
+    fillRule: Union[Undefined, Literal['nonzero', 'evenodd',
                                         'inherit']] = undefined
 
 

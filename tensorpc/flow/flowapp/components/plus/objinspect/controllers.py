@@ -35,7 +35,7 @@ class CallbackSlider(mui.FlexBox):
         super().__init__([self.slider])
         self.slider.register_event_handler(mui.FrontendEventType.Change.value,
                                     self._default_callback)
-        self.prop(width="100%", flex_flow="row nowrap", padding_left="5px", padding_right="5px")
+        self.prop(width="100%", flexFlow="row nowrap", paddingLeft="5px", paddingRight="5px")
 
     async def _default_callback(self, index):
         pass
@@ -67,7 +67,7 @@ class ThreadLocker(mui.FlexBox):
                 mui.Button("Capture", self._on_capture),
             ], wrap=True),
         ])
-        self.prop(width="100%", flex_flow="column", padding_left="5px", padding_right="5px")
+        self.prop(width="100%", flexFlow="column", paddingLeft="5px", paddingRight="5px")
 
         self._prev_frame: Optional[FrameType] = None
 

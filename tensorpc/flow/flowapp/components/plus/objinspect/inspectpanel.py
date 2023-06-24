@@ -19,7 +19,7 @@ class InspectPanel(mui.FlexBox):
             mui.HBox([
                 self.anylayout,
             ]).prop(width="100%", height="100%", overflow="hidden")
-        ]).prop(default_sizes=[1, 3], width="100%", height="100%")
+        ]).prop(defaultSizes=[1, 3], width="100%", height="100%")
 
         super().__init__([child])
-        self.prop(flex_flow="row nowrap")
+        self.prop(flexFlow="row nowrap")

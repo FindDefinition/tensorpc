@@ -14,7 +14,7 @@ from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from ..common import CommonQualNames
 from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler, DataClassesType
 from .treeitems import TraceTreeItem
-monospace_14px = dict(font_family="monospace", font_size="14px")
+monospace_14px = dict(fontFamily="monospace", fontSize="14px")
 
 
 @ALL_OBJECT_PREVIEW_HANDLERS.register(np.ndarray)
@@ -23,15 +23,15 @@ monospace_14px = dict(font_family="monospace", font_size="14px")
 class TensorHandler(ObjectPreviewHandler):
 
     def __init__(self) -> None:
-        self.tags = mui.FlexBox().prop(flex_flow="row wrap")
+        self.tags = mui.FlexBox().prop(flexFlow="row wrap")
         self.title = mui.Typography("np.ndarray shape = []")
-        self.data_print = mui.Typography("").prop(font_family="monospace",
-                                                  font_size="12px",
-                                                  white_space="pre-wrap")
+        self.data_print = mui.Typography("").prop(fontFamily="monospace",
+                                                  fontSize="12px",
+                                                  whiteSpace="pre-wrap")
         self.slice_val = mui.TextField("Slice", callback=self._slice_change).prop(size="small",
-                                                 mui_margin="dense")
+                                                 muiMargin="dense")
         layout = [
-            self.title.prop(font_size="14px", font_family="monospace"),
+            self.title.prop(fontSize="14px", fontFamily="monospace"),
             self.tags,
             mui.Divider().prop(padding="3px"),
             mui.HBox([
@@ -45,7 +45,7 @@ class TensorHandler(ObjectPreviewHandler):
         ]
 
         super().__init__(layout)
-        self.prop(flex_direction="column", flex=1)
+        self.prop(flexDirection="column", flex=1)
         self.obj: Any = np.zeros([1])
         self.obj_uid: str = ""
         self._tensor_slices: Dict[str, str] = {}
@@ -142,9 +142,9 @@ class TensorHandler(ObjectPreviewHandler):
 class StringHandler(ObjectPreviewHandler):
 
     def __init__(self) -> None:
-        self.text = mui.Typography("").prop(font_family="monospace",
-                                            font_size="14px",
-                                            white_space="pre-wrap")
+        self.text = mui.Typography("").prop(fontFamily="monospace",
+                                            fontSize="14px",
+                                            whiteSpace="pre-wrap")
         super().__init__([self.text])
 
     async def bind(self, obj: str, uid: str):
@@ -160,15 +160,15 @@ class StringHandler(ObjectPreviewHandler):
 class ObservedFunctionHandler(ObjectPreviewHandler):
 
     def __init__(self) -> None:
-        self.qualname = mui.Typography("").prop(word_break="break-word",
+        self.qualname = mui.Typography("").prop(wordBreak="break-word",
                                                 **monospace_14px)
-        self.path = mui.Typography("").prop(word_break="break-word",
+        self.path = mui.Typography("").prop(wordBreak="break-word",
                                             **monospace_14px)
 
         super().__init__(
             [self.qualname,
              mui.Divider().prop(padding="3px"), self.path])
-        self.prop(flex_direction="column")
+        self.prop(flexDirection="column")
 
     async def bind(self, obj: ObservedFunction, uid: str):
         await self.qualname.write(obj.qualname)
@@ -183,7 +183,7 @@ class DataclassesHandler(ObjectPreviewHandler):
         self.cfg_ctrl_container = mui.Fragment([])
         super().__init__(
             [self.cfg_ctrl_container])
-        self.prop(flex_direction="column", flex=1)
+        self.prop(flexDirection="column", flex=1)
 
     async def bind(self, obj: Any, uid: str):
         # for uncontrolled component, use react_key to force remount.

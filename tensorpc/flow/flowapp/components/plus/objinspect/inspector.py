@@ -69,16 +69,16 @@ class DefaultHandler(ObjectPreviewHandler):
     """
 
     def __init__(self) -> None:
-        self.tags = mui.FlexBox().prop(flex_flow="row wrap")
-        self.title = mui.Typography("").prop(word_break="break-word")
-        self.path = mui.Typography("").prop(word_break="break-word")
+        self.tags = mui.FlexBox().prop(flexFlow="row wrap")
+        self.title = mui.Typography("").prop(wordBreak="break-word")
+        self.path = mui.Typography("").prop(wordBreak="break-word")
 
-        self.data_print = mui.Typography("").prop(font_family="monospace",
-                                                  font_size="12px",
-                                                  word_break="break-word")
+        self.data_print = mui.Typography("").prop(fontFamily="monospace",
+                                                  fontSize="12px",
+                                                  wordBreak="break-word")
         layout = [
-            self.title.prop(font_size="14px", font_family="monospace"),
-            self.path.prop(font_size="14px", font_family="monospace"),
+            self.title.prop(fontSize="14px", fontFamily="monospace"),
+            self.path.prop(fontSize="14px", fontFamily="monospace"),
             self.tags,
             mui.Divider().prop(padding="3px"),
             mui.HBox([
@@ -88,7 +88,7 @@ class DefaultHandler(ObjectPreviewHandler):
         ]
 
         super().__init__(layout)
-        self.prop(flex_direction="column")
+        self.prop(flexDirection="column")
         self.obj: Any = np.zeros([1])
 
     async def _on_print(self):
@@ -155,15 +155,15 @@ class ObjectInspector(mui.FlexBox):
             final_layout = [
                 mui.Allotment(final_layout).prop(
                     overflow="hidden",
-                    default_sizes=[1.5, 1] if with_detail else [1],
+                    defaultSizes=[1.5, 1] if with_detail else [1],
                     vertical=True)
             ]
         super().__init__(final_layout)
-        self.prop(flex_direction="column",
+        self.prop(flexDirection="column",
                   flex=1,
                   overflow="hidden",
-                  min_height=0,
-                  min_width=0)
+                  minHeight=0,
+                  minWidth=0)
 
         if with_detail:
             self.tree.tree.register_event_handler(
@@ -347,8 +347,9 @@ class ObjectInspector(mui.FlexBox):
                 await layout.set_new_layout(layout_flex)
             return layout_flex
 
-    async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME):
-        await self.tree.set_object(obj, key)
+    async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME, expand_level: int = 1):
+        await self.tree.set_object(obj, key, expand_level=expand_level)
+
 
     async def update_locals(self,
                             key: str = _DEFAULT_LOCALS_NAME,

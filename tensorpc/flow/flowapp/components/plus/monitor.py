@@ -76,7 +76,7 @@ class ComputeResourceMonitor(mui.FlexBox):
                                               variant="determinate")
             self.gpus.append(GPUMonitor(util, mem))
             gpu_uis.extend([mui.Divider("vertical"), util, mem])
-        self.net_info_str = mui.Typography("").prop(white_space="pre-wrap", font_size="14px", font_family="monospace")
+        self.net_info_str = mui.Typography("").prop(whiteSpace="pre-wrap", fontSize="14px", fontFamily="monospace")
         super().__init__([
             mui.HBox([
                 self.cpu,
@@ -85,7 +85,7 @@ class ComputeResourceMonitor(mui.FlexBox):
             ]),
             self.net_info_str,
         ])
-        self.prop(flex_flow="column")
+        self.prop(flexFlow="column")
         self.prev_net_measures: Dict[str, NetworkMeasure] = {}
         self.period = 2.0
 

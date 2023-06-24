@@ -37,7 +37,7 @@ class HomogeneousMetricFigure(FlexBox):
 
     def __init__(self, width: int, height: int):
         super().__init__()
-        self.props.flex_flow = "row wrap"
+        self.props.flexFlow = "row wrap"
         self.base_layout = plotly.Layout(width=width, height=height)
         self.traces: List[plotly.Trace] = []
         self._trace_dict: Dict[str, Dict[str, plotly.Trace]] = {}

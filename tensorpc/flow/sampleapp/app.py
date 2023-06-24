@@ -353,7 +353,7 @@ class SampleThreeApp(EditableApp):
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
         # makesure three canvas size fit parent.
-        self.root.props.min_height = 0
+        self.root.props.minHeight = 0
         # store components here if you want to keep
         # data after reload layout.
         self.points = three.Points(2000000)
@@ -370,7 +370,7 @@ class SampleThreeApp(EditableApp):
 
         # ctrl = three.OrbitControl()
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
-        self.lines.prop(line_width=1, color="green")
+        self.lines.prop(lineWidth=1, color="green")
         self.b2d = three.Boxes2D(1000).prop(color="red", alpha=0.5)
         mesh = three.MeshV1(three.BoxGeometry(), three.MeshBasicMaterial())
         mesh.set_pointer_callback(
@@ -395,14 +395,14 @@ class SampleThreeApp(EditableApp):
                 "d3":
                 VBox({
                     "d32": self.canvas,
-                }).prop(flex=1, min_height=0, min_width=0),
+                }).prop(flex=1, minHeight=0, minWidth=0),
                 "btn":
                 btn_random_pc,
                 # "btn2":
                 # Button("rpcTest", self.rpc_test),
                 "btn3":
                 Button("Reset Camera", self.reset_camera),
-            }).prop(flex=1, min_height=0),
+            }).prop(flex=1, minHeight=0),
         }
 
     async def show_Random_pc(self):
@@ -419,11 +419,11 @@ class SampleThreeApp(EditableApp):
         # print(pc.shape)
         # attrs = [str(i) for i in range(num)]
         attrs = pc
-        attr_fields = ["x", "y", "z"]
+        attrFields = ["x", "y", "z"]
         # print("???", pc.size * pc.itemsize)
         await self.points.update_points(pc,
                                         attrs=attrs,
-                                        attr_fields=attr_fields)
+                                        attrFields=attrFields)
 
         random_lines = np.random.uniform(-5, 5, size=[5, 2,
                                                       3]).astype(np.float32)
@@ -452,7 +452,7 @@ class SampleThreeApp(EditableApp):
             intensity = pc[:, 3]
         await self.points.update_points(pc, intensity=intensity)
 
-    async def show_pc_with_attrs(self, pc, attrs, attr_fields):
+    async def show_pc_with_attrs(self, pc, attrs, attrFields):
         intensity = None
         is_nan_mask = np.isnan(pc).any(1)
         is_not_nan_mask = np.logical_not(is_nan_mask)
@@ -465,7 +465,7 @@ class SampleThreeApp(EditableApp):
         await self.points.update_points(pc,
                                         intensity=intensity,
                                         attrs=attrs[is_not_nan_mask],
-                                        attr_fields=attr_fields)
+                                        attrFields=attrFields)
 
 
 
@@ -474,7 +474,7 @@ class SampleThreePointsApp(EditableApp):
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
         # makesure three canvas size fit parent.
-        self.root.props.min_height = 0
+        self.root.props.minHeight = 0
         # store components here if you want to keep
         # data after reload layout.
         self.points = three.Points(5000000)
@@ -507,9 +507,9 @@ class SampleThreePointsApp(EditableApp):
             mui.VBox([
                 mui.VBox([
                     self.canvas,
-                ]).prop(flex=1, min_height=0, min_width=0),
+                ]).prop(flex=1, minHeight=0, minWidth=0),
                 slider,
-            ]).prop(flex=1, min_height=0),
+            ]).prop(flex=1, minHeight=0),
         ]
 
     async def _on_frame_select(self, index):
@@ -542,7 +542,7 @@ class SampleThreeHudApp(EditableApp):
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
         # makesure three canvas size fit parent.
-        self.root.props.min_height = 0
+        self.root.props.minHeight = 0
         # store components here if you want to keep
         # data after reload layout.
         self.points = three.Points(2000000)
@@ -566,12 +566,12 @@ class SampleThreeHudApp(EditableApp):
             on_click=three.EventHandler(lambda x: print(1), True))
         mesh.prop(hover_color="#222222", click_color="#009A63")
         text = three.Text("WTF")
-        text.prop(color="red", font_size=2)
+        text.prop(color="red", fontSize=2)
         text.set_pointer_callback(
             on_click=three.EventHandler(lambda x: print(2)))
 
         self.text2 = three.Text("T")
-        self.text2.prop(color="red", font_size=0.5)
+        self.text2.prop(color="red", fontSize=0.5)
         self.text2.set_pointer_callback(
             on_click=three.EventHandler(lambda x: print(3)))
         material = three.MeshBasicMaterial()
@@ -586,45 +586,45 @@ class SampleThreeHudApp(EditableApp):
         self.img.prop(scale=(4, 4, 1))
         self.html = three.Html(
             {"btn": mui.Button("RTX", lambda: print("RTX1"))})
-        self.html.prop(transform=True, center=False, inside_flex=True)
+        self.html.prop(transform=True, center=False, insideFlex=True)
         self.html2 = three.Html(
             {"btn2": mui.Button("RTX2", lambda: print("RTX2"))})
-        res = self.html2.prop(transform=True, center=False, inside_flex=True)
+        res = self.html2.prop(transform=True, center=False, insideFlex=True)
         self.flex_container = three.Flex({
             "mesh1":
             three.ItemBox({
                 "mesh03":
                 three.Button("RTX", 2, 1, lambda x: print("HELLO")),
-            }).prop(center_anchor=True),
+            }).prop(centerAnchor=True),
         })
         self.hud = three.Hud({
             "mesh":
             three.ItemBox({
                 "mesh0":
                 three.Button("RTX", 2, 1, lambda x: print("HELLO")),
-            }).prop(center_anchor=True),
+            }).prop(centerAnchor=True),
             "mesh1":
             three.ItemBox({
                 "mesh0":
                 three.ToggleButton("RTX2", 2, 1, lambda x: print("HELLO2", x)),
-            }).prop(center_anchor=True),
+            }).prop(centerAnchor=True),
             "text":
             three.ItemBox({
                 "text0": self.html,
-            }).prop(center_anchor=True),
+            }).prop(centerAnchor=True),
             "text4":
             three.ItemBox({
                 "text0": self.html2,
-            }).prop(center_anchor=True),
+            }).prop(centerAnchor=True),
             "text3":
             three.ItemBox({
                 "text0": three.BoundingBox((2, 5, 2)),
-            }).prop(center_anchor=True),
+            }).prop(centerAnchor=True),
             "autoreflow":
             three.FlexAutoReflow(),
         }).prop(render_priority=1,
-                flex_direction="row",
-                justify_content="flex-start")
+                flexDirection="row",
+                justifyContent="flex-start")
         self.canvas = three.ThreeCanvas({
             "cam":
             cam,
@@ -633,19 +633,19 @@ class SampleThreeHudApp(EditableApp):
             # "lines": self.lines,
             # "flexdev": three.Flex({
             #     "box1": three.ItemBox({
-            #         "text0": three.Text("WTF1").prop(color="red", font_size=2),
-            #     }).prop(center_anchor=True),
+            #         "text0": three.Text("WTF1").prop(color="red", fontSize=2),
+            #     }).prop(centerAnchor=True),
             #     "box2": three.ItemBox({
-            #         "text0": three.Text("WTF2").prop(color="red", font_size=2),
-            #     }).prop(center_anchor=True),
+            #         "text0": three.Text("WTF2").prop(color="red", fontSize=2),
+            #     }).prop(centerAnchor=True),
             #     "box3": three.ItemBox({
-            #         "text0": three.Text("WTF3").prop(color="red", font_size=2),
-            #     }).prop(center_anchor=True),
+            #         "text0": three.Text("WTF3").prop(color="red", fontSize=2),
+            #     }).prop(centerAnchor=True),
             #     "box4": three.ItemBox({
-            #         "text0": three.Text("WTF4").prop(color="red", font_size=2),
-            #     }).prop(center_anchor=True),
+            #         "text0": three.Text("WTF4").prop(color="red", fontSize=2),
+            #     }).prop(centerAnchor=True),
 
-            # }).prop(flex_direction="row", size=(20, 20, 0), position=(-20, -20, 0), flex_wrap="wrap"),
+            # }).prop(flexDirection="row", size=(20, 20, 0), position=(-20, -20, 0), flexWrap="wrap"),
             "ctrl":
             ctrl,
             "axes":
@@ -658,7 +658,7 @@ class SampleThreeHudApp(EditableApp):
             mesh2,
             # "img": self.img,
             "text":
-            three.Text("WTF").prop(color="red", font_size=2),
+            three.Text("WTF").prop(color="red", fontSize=2),
             "box":
             three.BoundingBox((2, 5, 2)).prop(position=(5, 0, 0)),
             #
@@ -680,9 +680,9 @@ class SampleThreeHudApp(EditableApp):
                 }).prop(position="absolute",
                         top=0,
                         right=0,
-                        z_index=5,
-                        justify_content="flex-end")
-            }).prop(position="relative", flex=1, min_height=0),
+                        zIndex=5,
+                        justifyContent="flex-end")
+            }).prop(position="relative", flex=1, minHeight=0),
         }
 
     async def on_read_img(self):
@@ -698,7 +698,7 @@ class SampleThreeHudApp(EditableApp):
             three.ItemBox({
                 "mesh0":
                 three.Button("RTX2", 2, 1, lambda x: print("HELLO")),
-            }).prop(center_anchor=True),
+            }).prop(centerAnchor=True),
         })
 
 
@@ -707,7 +707,7 @@ class SampleThree2DApp(EditableApp):
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
         # makesure three canvas size fit parent.
-        self.root.props.min_height = 0
+        self.root.props.minHeight = 0
         # store components here if you want to keep
         # data after reload layout.
 
@@ -720,9 +720,9 @@ class SampleThree2DApp(EditableApp):
         self.box2d = three.Boxes2D(20000)
 
         self.box2d.prop(color="aqua",
-                        line_color="red",
+                        lineColor="red",
                         alpha=0.1,
-                        line_width=1,
+                        lineWidth=1,
                         hover_line_color="blue",
                         hover_line_width=2)
 
@@ -753,9 +753,9 @@ class SampleThree2DApp(EditableApp):
                 }).prop(position="absolute",
                         top=0,
                         right=0,
-                        z_index=5,
-                        justify_content="flex-end")
-            }).prop(position="relative", flex=1, min_height=0),
+                        zIndex=5,
+                        justifyContent="flex-end")
+            }).prop(position="relative", flex=1, minHeight=0),
         }
 
     async def on_box2d_update(self, ev=None):
@@ -776,10 +776,10 @@ class SampleMapApp(EditableApp):
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
         # makesure three canvas size fit parent.
-        # self.root.props.min_height = 0
+        # self.root.props.minHeight = 0
         # store components here if you want to keep
         # data after reload layout.
-        self.root.props.flex_flow = "row nowrap"
+        self.root.props.flexFlow = "row nowrap"
 
     def app_create_layout(self) -> Dict[str, MUIComponentType]:
         google_url = "http://{s}.google.com/vt?lyrs=m&x={x}&y={y}&z={z}"
@@ -793,7 +793,7 @@ class SampleMapApp(EditableApp):
                 "btn":
                 mui.Button("FlyTo", lambda: self.leaflet.fly_to(
                     (40, 100), zoom=10)),
-            }).prop(min_height=0, flex=1),
+            }).prop(minHeight=0, flex=1),
             "mmap":
             self.leaflet,
         }
@@ -836,10 +836,10 @@ class SampleConfigApp(EditableApp):
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
         # makesure three canvas size fit parent.
-        # self.root.props.min_height = 0
+        # self.root.props.minHeight = 0
         # store components here if you want to keep
         # data after reload layout.
-        self.root.props.flex_flow = "row nowrap"
+        self.root.props.flexFlow = "row nowrap"
         self.cfg = WTF(1, 0.5, WTF1(2), "WTF", [])
 
     def app_create_layout(self) -> Dict[str, MUIComponentType]:
@@ -853,10 +853,10 @@ class SampleDataControlApp(EditableApp):
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         # makesure three canvas size fit parent.
-        # self.root.props.min_height = 0
+        # self.root.props.minHeight = 0
         # store components here if you want to keep
         # data after reload layout.
-        self.root.props.flex_flow = "row nowrap"
+        self.root.props.flexFlow = "row nowrap"
 
     def app_create_layout(self) -> Dict[str, MUIComponentType]:
         return {
@@ -901,7 +901,7 @@ class AutoComputeApp:
 
         return mui.VBox([
             mui.MultipleAutocomplete("Movies", self.options).prop(
-                variant="checkbox", disable_close_on_select=True),
+                variant="checkbox", disableCloseOnSelect=True),
         ]).prop(width=640, height=480)
 
 
@@ -963,8 +963,8 @@ class PointCloudApp:
                 self.slider.prop(flex=1),
             ]),
             self.canvas.prop(flex=1),
-        ]).prop(min_height=0,
-                min_width=0,
+        ]).prop(minHeight=0,
+                minWidth=0,
                 flex=1,
                 width="100%",
                 height="100%",
@@ -1139,7 +1139,7 @@ class MatchCaseApp(MatchCaseAppBase):
 class DataListApp:
     @marker.mark_create_layout
     def my_layout(self):
-        data_list = [
+        dataList = [
             {
                 "id": "1",
                 "name": "name1",
@@ -1163,7 +1163,7 @@ class DataListApp:
             mui.Typography().set_override_props(value="name"),
             datalist_checkbox,
         ])
-        datalist = mui.DataFlexBox(datalist_comp).prop(flex_flow="column", data_list=data_list)
+        datalist = mui.DataFlexBox(datalist_comp).prop(flexFlow="column", dataList=dataList)
         datalist.bind_prop(datalist_checkbox, "isCheck")
         return mui.VBox([
             datalist,
@@ -1209,7 +1209,7 @@ class DataGridApp:
             mui.DataGrid.ColumnDef("actions", cell=btn),
 
         ]
-        dgrid = mui.DataGrid(column_defs, rows, mui.JsonViewer().set_override_props(data=".")).prop(id_key="id", row_hover=True)
+        dgrid = mui.DataGrid(column_defs, rows, mui.JsonViewer().set_override_props(data=".")).prop(idKey="id", rowHover=True)
         dgrid.event_fetch_detail.on(self._fetch_detail)
         dgrid.bind_prop(cbox, "protein")
         dgrid.bind_prop(input_cell, "name")
@@ -1327,8 +1327,8 @@ class CollectionApp:
                             mui.FlexLayout.Tab(self.sm),
                         ])),
                 ]).prop(width="100%", height="100%", overflow="hidden")
-            ]).prop(default_sizes=[1, 3], width="100%", height="100%")
-        ]).prop(flex_flow="row nowrap")
+            ]).prop(defaultSizes=[1, 3], width="100%", height="100%")
+        ]).prop(flexFlow="row nowrap")
 
         return res
 

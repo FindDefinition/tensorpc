@@ -56,7 +56,7 @@ class BufferMeshApp:
                 # three.MeshDepthMaterial(),
 
                 # three.Edges(threshold=10, scale=1.1, color="black"),
-            ]).prop(cast_shadow=True, receive_shadow=True)
+            ]).prop(castShadow=True, receiveShadow=True)
         mesh_points = mesh_points[:500000]
         random_pcs = np.random.randint(-10, 10, size=[100, 3])
         random_pc_colors = np.random.uniform(0,
@@ -69,8 +69,8 @@ class BufferMeshApp:
             voxel_size,
             mesh_points.shape[0],
             [
-                # three.MeshPhongMaterial().prop(vertex_colors=True, color="aqua", specular="#ffffff", shininess=250, transparent=True),
-                three.MeshBasicMaterial().prop(vertex_colors=True),
+                # three.MeshPhongMaterial().prop(vertexColors=True, color="aqua", specular="#ffffff", shininess=250, transparent=True),
+                three.MeshBasicMaterial().prop(vertexColors=True),
                 # three.Edges(),
             ],
             colors=random_pc_colors).prop()
@@ -78,7 +78,7 @@ class BufferMeshApp:
             mesh_points.astype(np.float32),
             mesh_points.shape[0],
             [
-                # three.MeshPhongMaterial().prop(vertex_colors=True, color="aqua", specular="#ffffff", shininess=250, transparent=True),
+                # three.MeshPhongMaterial().prop(vertexColors=True, color="aqua", specular="#ffffff", shininess=250, transparent=True),
                 three.BoxGeometry(voxel_size, voxel_size, voxel_size),
                 three.MeshBasicMaterial().prop(),
             ],
@@ -90,7 +90,7 @@ class BufferMeshApp:
         dirlight = three.DirectionalLight((64, 20, 15),
                                           target_position=(0, 20, 0),
                                           color=0xffffff,
-                                          intensity=5).prop(cast_shadow=True)
+                                          intensity=5).prop(castShadow=True)
         dirlight.set_sx_props({
             "shadow-mapSize-height": 2048,
             "shadow-mapSize-width": 2048,
@@ -108,11 +108,11 @@ class BufferMeshApp:
                 #     three.BoxGeometry(),
                 #     three.MeshStandardMaterial().prop(color="red"),
                 #     # three.Edges(threshold=20, scale=1.1, color="black"),
-                # ]).prop(position=(0, 0, 1), cast_shadow=True),
+                # ]).prop(position=(0, 0, 1), castShadow=True),
                 # three.Mesh([
                 #     three.PlaneGeometry(50, 50),
                 #     three.MeshStandardMaterial().prop(color="#f0f0f0"),
-                # ]).prop(receive_shadow=True, position=(0, 0, -0.1)),
+                # ]).prop(receiveShadow=True, position=(0, 0, -0.1)),
                 # three.AmbientLight(color=0xeeeeee, intensity=1),
                 # dirlight,
 
@@ -120,7 +120,7 @@ class BufferMeshApp:
                 three.AmbientLight(),
                 three.PointLight(color=0xffffff,
                                  intensity=5).prop(position=(13, 3, 5),
-                                                   cast_shadow=True),
+                                                   castShadow=True),
                 # buffer_mesh,
                 # voxel_mesh,
                 instanced_voxel_mesh,
@@ -129,8 +129,8 @@ class BufferMeshApp:
         res = mui.VBox([
             mui.Button("Add", self._on_btn),
             self.canvas.prop(flex=1),
-        ]).prop(min_height=0,
-                min_width=0,
+        ]).prop(minHeight=0,
+                minWidth=0,
                 flex=1,
                 width="100%",
                 height="100%",
@@ -160,18 +160,18 @@ class BufferMeshDevApp:
             voxel_size,
             self.limit,
             [
-                # three.MeshPhongMaterial().prop(vertex_colors=True, color="aqua", specular="#ffffff", shininess=250, transparent=False),
-                three.MeshStandardMaterial().prop(vertex_colors=True),
-                # three.MeshBasicMaterial().prop(vertex_colors=True),
+                # three.MeshPhongMaterial().prop(vertexColors=True, color="aqua", specular="#ffffff", shininess=250, transparent=False),
+                three.MeshStandardMaterial().prop(vertexColors=True),
+                # three.MeshBasicMaterial().prop(vertexColors=True),
                 # three.Edges(),
                 # three.Wireframe(),
             ],
-            colors=random_pc_colors).prop(receive_shadow=True, cast_shadow=True)
+            colors=random_pc_colors).prop(receiveShadow=True, castShadow=True)
         instanced_voxel_mesh = three.InstancedMesh(
             random_pcs.astype(np.float32) * voxel_size,
             random_pcs.shape[0],
             [
-                # three.MeshPhongMaterial().prop(vertex_colors=True, color="aqua", specular="#ffffff", shininess=250, transparent=True),
+                # three.MeshPhongMaterial().prop(vertexColors=True, color="aqua", specular="#ffffff", shininess=250, transparent=True),
                 three.BoxGeometry(voxel_size, voxel_size, voxel_size),
                 three.MeshStandardMaterial().prop(),
             ],
@@ -182,27 +182,27 @@ class BufferMeshDevApp:
             init_canvas_childs=[
                 # three.Environment().prop(preset="forest"),
                 # three.PerformanceMonitor(),
-                three.Sky().prop(sun_position=(1, 1, 1), distance=450000, inclination=0, azimuth=0.25),
+                three.Sky().prop(sunPosition=(1, 1, 1), distance=450000, inclination=0, azimuth=0.25),
                 three.AmbientLight(),
-                three.SpotLight((10, 10, 10)).prop(angle=0.25, penumbra=0.5, cast_shadow=True),
+                three.SpotLight((10, 10, 10)).prop(angle=0.25, penumbra=0.5, castShadow=True),
                 # three.HemisphereLight(color=0xffffff, ground_color=0xb9b9b9, intensity=0.85).prop(position=(-7, 25, 13)),
                 # three.PointLight(intensity=0.8).prop(position=(100, 100, 100),
-                #                                    cast_shadow=True),
+                #                                    castShadow=True),
                 # buffer_mesh,
                 # voxel_mesh,
                 voxel_mesh,
                 three.Mesh([
                     three.PlaneGeometry(1000, 1000),
                     three.MeshStandardMaterial().prop(color="#f0f0f0"),
-                ]).prop(receive_shadow=True, position=(0.0, 0.0, -0.1)),
+                ]).prop(receiveShadow=True, position=(0.0, 0.0, -0.1)),
                 # three.Mesh([
                 #     three.BoxGeometry(),
                 #     three.MeshStandardMaterial().prop(color="orange"),
-                # ]).prop(cast_shadow=True, position=(0, 5, 2)),
+                # ]).prop(castShadow=True, position=(0, 5, 2)),
                 # three.Mesh([
                 #     three.BoxGeometry(),
                 #     three.MeshStandardMaterial().prop(color="orange"),
-                # ]).prop(cast_shadow=True, position=(0.45, 7, 1.25)),
+                # ]).prop(castShadow=True, position=(0.45, 7, 1.25)),
 
             ])
         # <pointLight position={[100, 100, 100]} intensity={0.8} />
@@ -213,8 +213,8 @@ class BufferMeshDevApp:
             mui.Button("750 Points", self._on_btn_750),
             mui.Button("250 Points", self._on_btn_250),
             self.canvas.prop(flex=1),
-        ]).prop(min_height=0,
-                min_width=0,
+        ]).prop(minHeight=0,
+                minWidth=0,
                 flex=1,
                 width="100%",
                 height="100%",
@@ -280,14 +280,14 @@ class BufferIndexedMeshApp:
                     # "normal": normals,
                 }, self.limit, [
                     three.MeshPhongMaterial().prop(color="#f0f0f0"),
-                ], initial_index=indices).prop(initial_calc_vertex_normals=True)
+                ], initialIndex=indices).prop(initialCalcVertexNormals=True)
         self.buffer_mesh = buffer_mesh
         self.canvas = plus.SimpleCanvas(
             cam,
             init_canvas_childs=[
-                three.Sky().prop(sun_position=(0, 1, 0), distance=450000, inclination=0, azimuth=0.25),
+                three.Sky().prop(sunPosition=(0, 1, 0), distance=450000, inclination=0, azimuth=0.25),
                 three.AmbientLight(),
-                three.SpotLight((10, 10, 5)).prop(angle=0.25, penumbra=0.5, cast_shadow=True),
+                three.SpotLight((10, 10, 5)).prop(angle=0.25, penumbra=0.5, castShadow=True),
                 buffer_mesh,
             ])
         self.canvas.canvas.prop(shadows=True)
@@ -295,8 +295,8 @@ class BufferIndexedMeshApp:
             mui.Button("750 Points", self._on_btn_750),
             mui.Button("250 Points", self._on_btn_250),
             self.canvas.prop(flex=1),
-        ]).prop(min_height=0,
-                min_width=0,
+        ]).prop(minHeight=0,
+                minWidth=0,
                 flex=1,
                 width="100%",
                 height="100%",
@@ -328,20 +328,20 @@ class MeshApp:
                     three.BoxGeometry(),
                     three.MeshStandardMaterial().prop(color="red"),
                     three.Edges(threshold=20, scale=1.1, color="black"),
-                ]).prop(position=(0, 0, 1), cast_shadow=True),
+                ]).prop(position=(0, 0, 1), castShadow=True),
                 three.Mesh([
                     three.PlaneGeometry(50, 50),
                     three.MeshStandardMaterial().prop(color="#f0f0f0"),
-                ]).prop(receive_shadow=True, position=(0, 0, -0.1)),
+                ]).prop(receiveShadow=True, position=(0, 0, -0.1)),
                 three.PointLight(color=0xffffff,
                                  intensity=10).prop(position=(3, 3, 5),
-                                                    cast_shadow=True),
+                                                    castShadow=True),
             ])
         self.canvas.canvas.prop(shadows=True)
         res = mui.VBox([
             self.canvas.prop(flex=1),
-        ]).prop(min_height=0,
-                min_width=0,
+        ]).prop(minHeight=0,
+                minWidth=0,
                 flex=1,
                 width="100%",
                 height="100%",

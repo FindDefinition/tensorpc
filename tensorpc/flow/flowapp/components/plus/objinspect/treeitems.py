@@ -131,9 +131,9 @@ class TraceTreeItem(TreeItem):
     def preview_layout(self):
         btn = mui.Button("Run Frame", self._on_run_frame)
         reload_btn = mui.Button("Reload Object", self._on_reload_self)
-        font = dict(font_family="monospace",
-                    font_size="14px",
-                    word_break="break-word")
+        font = dict(fontFamily="monospace",
+                    fontSize="14px",
+                    wordBreak="break-word")
         return mui.VBox([
             mui.Typography(f"Frame<{self.depth}>: {self.qname}").prop(**font),
             mui.Typography(f"Path: {self.filename}:{self.lineno}").prop(

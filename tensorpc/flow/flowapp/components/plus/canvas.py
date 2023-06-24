@@ -167,7 +167,7 @@ class SimpleCanvas(mui.FlexBox):
         if camera is None:
             camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         self.camera = camera
-        self.ctrl = three.CameraControl().prop(make_default=True)
+        self.ctrl = three.CameraControl().prop(makeDefault=True)
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.axis_helper = three.AxesHelper(20)
         self.infgrid = infgrid
@@ -208,9 +208,9 @@ class SimpleCanvas(mui.FlexBox):
         #     canvas_layout.append(infgrid)
         self._ctrl_container = mui.Fragment([])
         self.canvas = three.ThreeCanvas(canvas_layout).prop(
-            flex=1, allow_keyboard_event=True)
+            flex=1, allowKeyboardEvent=True)
         if not self._is_transparent:
-            self.canvas.prop(three_background_color="#ffffff")
+            self.canvas.prop(threeBackgroundColor="#ffffff")
         self._point_dict: Dict[str, three.Points] = {}
         self._image_dict: Dict[str, three.Image] = {}
         self._segment_dict: Dict[str, three.Segments] = {}
@@ -234,11 +234,11 @@ class SimpleCanvas(mui.FlexBox):
     def __get_cfg_panel(self):
         _cfg_panel = ConfigPanel(self.cfg, self._on_cfg_change)
         _cfg_panel.prop(border="1px solid",
-                             border_color="gray",
+                             borderColor="gray",
                              collapsed=True,
                              title="configs",
-                             margin_left="5px",
-                             max_height="400px")
+                             marginLeft="5px",
+                             maxHeight="400px")
         return _cfg_panel
 
     async def _on_screen_shot_finish(self, img_and_data: Tuple[str, Any]):
@@ -268,7 +268,7 @@ class SimpleCanvas(mui.FlexBox):
             all_childs = self._dynamic_boxes._get_uid_to_comp_dict()
             for v in all_childs.values():
                 if isinstance(v, three.BoundingBox):
-                    ev += v.update_event(edge_width=value)
+                    ev += v.update_event(edgeWidth=value)
             await self.send_and_wait(ev)
         elif uid == "box.opacity":
             ev = mui.AppEvent("", {})
@@ -287,24 +287,24 @@ class SimpleCanvas(mui.FlexBox):
         elif uid == "camera.keyboard_mode":
             if value == CamCtrlKeyboardMode.Helicopter:
                 await self.send_and_wait(
-                    self.ctrl.update_event(keyboard_front=False))
+                    self.ctrl.update_event(keyboardFront=False))
             elif value == CamCtrlKeyboardMode.Fly:
                 await self.send_and_wait(
-                    self.ctrl.update_event(keyboard_front=True))
+                    self.ctrl.update_event(keyboardFront=True))
         elif uid == "canvas.background":
             if not self._is_transparent:
                 color_str = f"rgb({value.r}, {value.g}, {value.b})"
                 await self.canvas.send_and_wait(
-                    self.canvas.update_event(three_background_color=color_str))
+                    self.canvas.update_event(threeBackgroundColor=color_str))
         elif uid == "canvas.enable_perf":
             await self.canvas.send_and_wait(
-                self.canvas.update_event(enable_perf=value))
+                self.canvas.update_event(enablePerf=value))
         elif uid == "camera.move_speed":
             await self.canvas.send_and_wait(
-                self.ctrl.update_event(keyboard_move_speed=value / 1000))
+                self.ctrl.update_event(keyboardMoveSpeed=value / 1000))
         elif uid == "camera.elevate_speed":
             await self.canvas.send_and_wait(
-                self.ctrl.update_event(keyboard_elevate_speed=value / 1000))
+                self.ctrl.update_event(keyboardElevateSpeed=value / 1000))
 
     @marker.mark_create_layout
     def _layout_func(self):
@@ -316,7 +316,7 @@ class SimpleCanvas(mui.FlexBox):
                        f"simulate first-persion")
 
         layout: mui.LayoutType = [
-            self.canvas.prop(z_index=1),
+            self.canvas.prop(zIndex=1),
             mui.HBox([
                 mui.VBox([
                     mui.ToggleButton("switch",
@@ -325,41 +325,41 @@ class SimpleCanvas(mui.FlexBox):
                                          selected=True,
                                          size="small",
                                          tooltip="Mouse Right Button Mode",
-                                         tooltip_placement="right"),
+                                         tooltipPlacement="right"),
                     mui.ToggleButton("enableGrid",
                                      icon=mui.IconType.Grid3x3,
                                      callback=self._on_enable_grid).prop(
                                          selected=True,
                                          size="small",
                                          tooltip="Enable Grid",
-                                         tooltip_placement="right"),
+                                         tooltipPlacement="right"),
                     mui.ToggleButton("enableCfgPanel",
                                      icon=mui.IconType.Settings,
                                      callback=self._on_enable_cfg_panel).prop(
                                          selected=False,
                                          size="small",
                                          tooltip="Enable Config Panel",
-                                         tooltip_placement="right"),
+                                         tooltipPlacement="right"),
 
                     mui.IconButton(mui.IconType.Clear,
                                    callback=self._on_clear).prop(
                                        tooltip="Clear",
-                                       tooltip_placement="right"),
+                                       tooltipPlacement="right"),
                     mui.IconButton(mui.IconType.Refresh,
                                    callback=self._on_reset_cam).prop(
                                        tooltip="Reset Camera",
-                                       tooltip_placement="right"),
+                                       tooltipPlacement="right"),
                 ]),
                 # self._cfg_panel,
                 self._ctrl_container,
-            ]).prop(position="absolute", top=3, left=3, z_index=5, max_height="10%"),
+            ]).prop(position="absolute", top=3, left=3, zIndex=5, maxHeight="10%"),
             mui.IconButton(mui.IconType.Help,
                            lambda: None).prop(tooltip=help_string,
                                               position="absolute",
-                                              tooltip_multiline=True,
+                                              tooltipMultiline=True,
                                               top=3,
                                               right=3,
-                                              z_index=5),
+                                              zIndex=5),
             self.background_img.prop(position="absolute",
                                      top=0,
                                      left=0,
@@ -372,8 +372,8 @@ class SimpleCanvas(mui.FlexBox):
         self.register_event_handler(FrontendEventType.Drop,
                                     self._on_drop)
         self.prop(
-            min_height=0,
-            min_width=0,
+            minHeight=0,
+            minWidth=0,
             flex=1,
             position="relative",
             droppable=True,
@@ -381,17 +381,17 @@ class SimpleCanvas(mui.FlexBox):
             height="100%",
             overflow="hidden",
             border="4px solid transparent",
-            sx_over_drop={"border": "4px solid green"},
+            sxOverDrop={"border": "4px solid green"},
         )
         return layout
     
     async def set_transparent(self, is_transparent: bool):
         if is_transparent:
             await self.canvas.send_and_wait(
-                self.canvas.update_event(three_background_color=mui.undefined))
+                self.canvas.update_event(threeBackgroundColor=mui.undefined))
         else:
             await self.canvas.send_and_wait(
-                self.canvas.update_event(three_background_color="#ffffff"))
+                self.canvas.update_event(threeBackgroundColor="#ffffff"))
 
     @staticmethod 
     def register_unknown_vis_handler(key: Type):
@@ -524,7 +524,7 @@ class SimpleCanvas(mui.FlexBox):
 
     async def _on_pan_to_fwd(self, selected):
         await self.ctrl.send_and_wait(
-            self.ctrl.update_event(vertical_drag_to_forward=not selected))
+            self.ctrl.update_event(verticalDragToForward=not selected))
 
     async def _on_reset_cam(self):
         await self.ctrl.reset_camera()
@@ -585,7 +585,10 @@ class SimpleCanvas(mui.FlexBox):
             encode_scale = self.cfg.point.encode_scale
         if key not in self._point_dict:
             if encode_method is not None:
-                ui = three.Points(limit).prop(encode_method=encode_method, encode_scale=encode_scale, attrs=attrs, attr_fields=attr_fields)
+                if attrs is None:
+                    ui = three.Points(limit).prop(encodeMethod=encode_method, encodeScale=encode_scale)
+                else:
+                    ui = three.Points(limit).prop(encodeMethod=encode_method, encodeScale=encode_scale, attrs=attrs, attrFields=attr_fields)
             else:
                 ui = three.Points(limit)
             self._point_dict[key] = ui
@@ -633,10 +636,10 @@ class SimpleCanvas(mui.FlexBox):
             else:
                 cur_color = color
             box_dict[str(i)] = three.BoundingBox(dims[i].tolist()).prop(
-                edge_color=cur_color,
+                edgeColor=cur_color,
                 position=locs[i].tolist(),
                 rotation=rots[i].tolist(),
-                edge_width=edge_width,
+                edgeWidth=edge_width,
                 add_cross=self.cfg.box.add_cross,
                 opacity=opacity)
         if key not in self._dynamic_boxes:
@@ -675,7 +678,7 @@ class SimpleCanvas(mui.FlexBox):
                          limit: int):
         if key not in self._voxels_dict:
             ui = three.VoxelMesh(centers, size, limit, [
-                three.MeshBasicMaterial().prop(vertex_colors=True),
+                three.MeshBasicMaterial().prop(vertexColors=True),
             ], colors=colors)
             self._voxels_dict[key] = ui
             await self._dynamic_voxels.update_childs({key: ui})

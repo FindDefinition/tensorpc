@@ -68,7 +68,7 @@ class TaskCard(mui.FlexBox):
         self.status = mui.Typography("unknown")
         status_name_color = _TASK_STATUS_TO_UI_TEXT_AND_COLOR[
             task.state.status]
-        self.status.prop(mui_color=status_name_color[1],
+        self.status.prop(muiColor=status_name_color[1],
                          value=status_name_color[0])
         progress_0 = task.state.progress == 0 and task.state.status == TaskStatus.Running
         self.progress = mui.CircularProgress(task.state.progress * 100).prop(
@@ -78,13 +78,13 @@ class TaskCard(mui.FlexBox):
                                                tooltip="Show Detail",
                                                size="small")
         self.command = mui.Typography(task.command).prop(
-            font_size="14px", font_family="monospace", word_break="break-word")
+            fontSize="14px", fontFamily="monospace", wordBreak="break-word")
         self.tmux_pane = mui.Typography("").prop(
-            font_size="12px", font_family="monospace", white_space="pre-line", border="1px solid #ccc", padding="5px")
+            fontSize="12px", fontFamily="monospace", whiteSpace="pre-line", border="1px solid #ccc", padding="5px")
 
         self.detail = mui.Collapse([
-            mui.VBox([self.command, self.tmux_pane]).prop(max_height="300px", overflow="auto"),
-        ]).prop(timeout="auto", unmount_on_exit=True)
+            mui.VBox([self.command, self.tmux_pane]).prop(maxHeight="300px", overflow="auto"),
+        ]).prop(timeout="auto", unmountOnExit=True)
         self._expanded = False
         self.gpu_tag = mui.Chip(f"{task.num_gpu_used} gpus").prop(color="green",
                                     size="small",
@@ -95,7 +95,7 @@ class TaskCard(mui.FlexBox):
                 mui.HBox([
                     mui.FlexBox([
                         mui.Icon(mui.IconType.DragIndicator).prop(),
-                    ]).prop(take_drag_ref=True, cursor="move"),
+                    ]).prop(takeDragRef=True, cursor="move"),
                     self.name,
                     mui.Chip("copy tmux cmd",
                              self._on_tmux_chip).prop(color="blue",
@@ -119,12 +119,12 @@ class TaskCard(mui.FlexBox):
                 mui.IconButton(mui.IconType.Delete, self._on_kill_task).prop(
                     tooltip="Kill Task",
                     size="small",
-                    confirm_message="Are You Sure to Kill This Task?"),
+                    confirmMessage="Are You Sure to Kill This Task?"),
                 mui.IconButton(mui.IconType.Delete, self._on_delete_task).prop(
                     tooltip="Delete Task",
                     size="small",
-                    confirm_message="Are You Sure to Delete This Task?",
-                    mui_color="error"),
+                    confirmMessage="Are You Sure to Delete This Task?",
+                    muiColor="error"),
                 self.collapse_btn,
             ]).prop(margin="0 5px 0 5px", flex=0),
         ]
@@ -133,20 +133,20 @@ class TaskCard(mui.FlexBox):
                 mui.VBox([
                     *layout,
                 ]).prop(
-                    flex_flow="row wrap",
-                    align_items="center",
+                    flexFlow="row wrap",
+                    alignItems="center",
                 ),
                 self.detail,
-            ]).prop(flex_flow="column",
+            ]).prop(flexFlow="column",
                     padding="5px",
                     margin="5px",
                     elevation=4,
                     flex=1)
         ])
         self.prop(draggable=True,
-                  drag_type="TaskCard",
-                  drag_in_child=True,
-                  sx_over_drop={
+                  dragType="TaskCard",
+                  dragInChild=True,
+                  sxOverDrop={
                       "opacity": "0.5",
                   })
 
@@ -184,7 +184,7 @@ class TaskCard(mui.FlexBox):
         is_running = task.state.status == TaskStatus.Running
         status_name_color = _TASK_STATUS_TO_UI_TEXT_AND_COLOR[
             task.state.status]
-        ev = self.status.update_event(mui_color=status_name_color[1],
+        ev = self.status.update_event(muiColor=status_name_color[1],
                                       value=status_name_color[0])
         if self.command.props.value != task.command:
             ev += self.command.update_event(value=task.command)
@@ -223,14 +223,14 @@ class TmuxScheduler(mui.FlexBox):
             ssh_desp = f"SSH: {ssh_target.username}@{ssh_target.hostname}:{ssh_target.port}"
             if ssh_target.is_localhost():
                 ssh_desp = f"SSH: localhost"
-            self.info = mui.Typography(ssh_desp).prop(margin="5px", font_size="14px", font_family="monospace")
+            self.info = mui.Typography(ssh_desp).prop(margin="5px", fontSize="14px", fontFamily="monospace")
         else:
             ssh_target_creator = ssh_target
             ssh_target = SSHTarget.create_fake_target()
 
             self.info = mui.Typography(f"SSH: ").prop(margin="5px",
-                                                      font_size="14px",
-                                                      font_family="monospace")
+                                                      fontSize="14px",
+                                                      fontFamily="monospace")
         self._ssh_target_creator = ssh_target_creator
         self.tasks = mui.VBox([]).prop(flex=1)
         super().__init__([
@@ -238,10 +238,10 @@ class TmuxScheduler(mui.FlexBox):
                 self.info.prop(flex=1),
                 mui.Chip("copy tmux cmd",
                          self._on_tmux_chip).prop(color="blue", size="small")
-            ]).prop(align_items="center"),
+            ]).prop(alignItems="center"),
             self.tasks,
         ])
-        self.prop(flex_flow="column",
+        self.prop(flexFlow="column",
                   overflow="auto",
                   width="100%",
                   height="100%")

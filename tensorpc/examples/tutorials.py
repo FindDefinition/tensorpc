@@ -5,6 +5,7 @@ from tensorpc.flow.flowapp.components import mui, three, plus
 from tensorpc.flow import mark_create_layout
 import sys
 from tensorpc import PACKAGE_ROOT
+from tensorpc.flow.marker import mark_did_mount
 
 
 class MarkdownTutorialsTree:
@@ -20,7 +21,7 @@ class MarkdownTutorialsTree:
         tutorials_path = PACKAGE_ROOT / "examples" / "tutorials"
         tutorials: Dict[str, Any] = {}
         paths = list(tutorials_path.rglob("*.md"))
-        paths.sort()
+        paths.sort(key=lambda p: list(map(int, p.stem.split("-")[0].split("."))))
         for p in paths:
             md_relative_path = p.relative_to(tutorials_path)
             parts = md_relative_path.parts
@@ -34,7 +35,10 @@ class MarkdownTutorialsTree:
                 md_content, str(md_relative_path)).prop(width="100%",
                     height="100%",
                     overflow="auto")
+        self.tutorials = tutorials
+        self.panel = plus.InspectPanel({})
+        return self.panel
 
-        res = plus.InspectPanel(tutorials)
-        return res
-
+    @mark_did_mount
+    async def _on_init(self):
+        await self.panel.inspector.set_object(self.tutorials, key="tutorials", expand_level=3)

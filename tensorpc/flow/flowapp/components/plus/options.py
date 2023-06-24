@@ -13,20 +13,20 @@
 # limitations under the License.
 from typing_extensions import TypedDict
 class AddableAutocompleteType(TypedDict):
-    select_on_focus: bool 
-    clear_on_blur: bool
-    handle_home_end_keys: bool
-    free_solo: bool
-    add_option: bool
+    selectOnFocus: bool 
+    clearOnBlur: bool
+    handleHomeEndKeys: bool
+    freeSolo: bool
+    addOption: bool
 
 class CommonOptions:
 
     AddableAutocomplete: AddableAutocompleteType = {
-        "select_on_focus": True,
-        "clear_on_blur": True,
-        "handle_home_end_keys": True,
-        "free_solo": True,
-        "add_option": True,
+        "selectOnFocus": True,
+        "clearOnBlur": True,
+        "handleHomeEndKeys": True,
+        "freeSolo": True,
+        "addOption": True,
     }
     FitParent = {
         "width": "100%",

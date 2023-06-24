@@ -47,7 +47,7 @@ class AppInMemory(mui.FlexBox):
     """
     def __init__(self, path: str, code: str, is_horizontal: bool = True):
         wrapped_path = f"<{TENSORPC_FILE_NAME_PREFIX}-{path}>"
-        self.editor = mui.MonacoEditor(code, "python", wrapped_path).prop(min_width=0, min_height=0)
+        self.editor = mui.MonacoEditor(code, "python", wrapped_path).prop(minWidth=0, minHeight=0)
         self.path = wrapped_path 
         self.code = code 
         self.app_cls_name = "App"
@@ -58,7 +58,7 @@ class AppInMemory(mui.FlexBox):
             self.show_box.prop(flex=1),
         ])
         self._layout_for_reload: Optional[mui.FlexBox] = None
-        self.prop(flex_flow="row" if is_horizontal else "column")
+        self.prop(flexFlow="row" if is_horizontal else "column")
         self.editor.event_editor_save.on(self._on_editor_save)
 
     @mark_did_mount
@@ -102,9 +102,9 @@ class MarkdownTutorial(mui.VirtualizedBox):
             if block.type == "markdown":
                 layout.append(mui.Markdown(block.content))
             elif block.type == "code":
-                layout.append(AppInMemory(f"{path_uid}-{i}", block.content).prop(min_height="400px", padding="10px"))
+                layout.append(AppInMemory(f"{path_uid}-{i}", block.content).prop(minHeight="400px", padding="10px"))
         super().__init__(layout)
-        self.prop(flex_flow="column", padding="10px")
+        self.prop(flexFlow="column", padding="10px")
 
 
 

@@ -67,33 +67,33 @@ class ThreeBasicProps(BasicProps):
 
 @dataclasses.dataclass
 class R3FlexPropsBase(BasicProps):
-    align_content: Union[str, Undefined] = undefined
-    align_items: Union[str, Undefined] = undefined
-    justify_content: Union[str, Undefined] = undefined
-    flex_direction: Union[str, Undefined] = undefined
-    flex_wrap: Union[str, Undefined] = undefined
+    alignContent: Union[str, Undefined] = undefined
+    alignItems: Union[str, Undefined] = undefined
+    justifyContent: Union[str, Undefined] = undefined
+    flexDirection: Union[str, Undefined] = undefined
+    flexWrap: Union[str, Undefined] = undefined
 
-    align_self: Union[str, Undefined] = undefined
-    flex_grow: Union[str, Undefined] = undefined
-    flex_shrink: Union[str, Undefined] = undefined
-    flex_basis: Union[str, Undefined] = undefined
+    alignSelf: Union[str, Undefined] = undefined
+    flexGrow: Union[str, Undefined] = undefined
+    flexShrink: Union[str, Undefined] = undefined
+    flexBasis: Union[str, Undefined] = undefined
 
     height: Union[ValueType, Undefined] = undefined
     width: Union[ValueType, Undefined] = undefined
-    max_height: Union[ValueType, Undefined] = undefined
-    max_width: Union[ValueType, Undefined] = undefined
-    min_height: Union[ValueType, Undefined] = undefined
-    min_width: Union[ValueType, Undefined] = undefined
+    maxHeight: Union[ValueType, Undefined] = undefined
+    maxWidth: Union[ValueType, Undefined] = undefined
+    minHeight: Union[ValueType, Undefined] = undefined
+    minWidth: Union[ValueType, Undefined] = undefined
     padding: Union[ValueType, Undefined] = undefined
-    padding_top: Union[ValueType, Undefined] = undefined
-    padding_bottom: Union[ValueType, Undefined] = undefined
-    padding_left: Union[ValueType, Undefined] = undefined
-    padding_right: Union[ValueType, Undefined] = undefined
+    paddingTop: Union[ValueType, Undefined] = undefined
+    paddingBottom: Union[ValueType, Undefined] = undefined
+    paddingLeft: Union[ValueType, Undefined] = undefined
+    paddingRight: Union[ValueType, Undefined] = undefined
     margin: Union[ValueType, Undefined] = undefined
-    margin_top: Union[ValueType, Undefined] = undefined
-    margin_left: Union[ValueType, Undefined] = undefined
-    margin_right: Union[ValueType, Undefined] = undefined
-    margin_bottom: Union[ValueType, Undefined] = undefined
+    marginTop: Union[ValueType, Undefined] = undefined
+    marginLeft: Union[ValueType, Undefined] = undefined
+    marginRight: Union[ValueType, Undefined] = undefined
+    marginBottom: Union[ValueType, Undefined] = undefined
 
 
 class Side(enum.Enum):
@@ -120,12 +120,12 @@ class MeshMaterialType(enum.Enum):
 @dataclasses.dataclass
 class ThreeMaterialPropsBase(ThreeBasicProps):
     # deprecated, only works in MeshBasicMaterialV1 and MeshStandardMaterialV1
-    material_type: int = 0
+    materialType: int = 0
     transparent: Union[bool, Undefined] = undefined
     opacity: Union[NumberType, Undefined] = undefined
-    depth_test: Union[bool, Undefined] = undefined
-    depth_write: Union[bool, Undefined] = undefined
-    alpha_test: Union[NumberType, Undefined] = undefined
+    depthTest: Union[bool, Undefined] = undefined
+    depthWrite: Union[bool, Undefined] = undefined
+    alphaTest: Union[NumberType, Undefined] = undefined
     visible: Union[bool, Undefined] = undefined
     side: Union[SideType, Undefined] = undefined
 
@@ -165,8 +165,8 @@ class Object3dBaseProps(ThreeBasicProps):
     up: Union[Vector3Type, Undefined] = undefined
     scale: Union[Vector3Type, Undefined] = undefined
     visible: Union[bool, Undefined] = undefined
-    receive_shadow: Union[bool, Undefined] = undefined
-    cast_shadow: Union[bool, Undefined] = undefined
+    receiveShadow: Union[bool, Undefined] = undefined
+    castShadow: Union[bool, Undefined] = undefined
 
 
 @dataclasses.dataclass
@@ -337,12 +337,12 @@ class PointProps(ThreeBasicProps):
     points: Union[np.ndarray, Undefined] = undefined
     colors: Union[np.ndarray, str, Undefined] = undefined
     attrs: Union[np.ndarray, Undefined] = undefined
-    attr_fields: Union[List[str], Undefined] = undefined
-    size_attenuation: bool = False
+    attrFields: Union[List[str], Undefined] = undefined
+    sizeAttenuation: bool = False
     size: float = 3.0
     sizes: Union[np.ndarray, Undefined] = undefined
-    encode_method: Union[Literal["none", "int16"], Undefined] = undefined 
-    encode_scale: Union[NumberType, Undefined] = undefined
+    encodeMethod: Union[Literal["none", "int16"], Undefined] = undefined 
+    encodeScale: Union[NumberType, Undefined] = undefined
 
 class PointsControlType(enum.Enum):
     SetColors = 0
@@ -360,7 +360,7 @@ class Points(ThreeComponentBase[PointProps]):
         res["colors"] = self.props.colors
         res["sizes"] = self.props.sizes
         res["attrs"] = self.props.attrs
-        res["attr_fields"] = self.props.attr_fields
+        res["attrFields"] = self.props.attrFields
         return res
 
     def validate_props(self, props: Dict[str, Any]):
@@ -399,14 +399,14 @@ class Points(ThreeComponentBase[PointProps]):
         self.props.points = np.zeros((0, 3), np.float32)
         self.props.colors = undefined
         self.props.attrs = undefined
-        self.props.attr_fields = undefined
+        self.props.attrFields = undefined
         self.props.sizes = undefined
 
         return await self.send_and_wait(
             self.update_event(points=self.props.points,
                               colors=undefined,
                               attrs=undefined,
-                              attr_fields=undefined,
+                              attrFields=undefined,
                               sizes=undefined))
 
     async def update_points(self,
@@ -443,14 +443,14 @@ class Points(ThreeComponentBase[PointProps]):
         if encode_method == "int16":
             upd: Dict[str, Any] = {
                 "points": (points * encode_scale).astype(np.int16),
-                "encode_method": "int16",
-                "encode_scale": encode_scale,
-                "size_attenuation": size_attenuation,
+                "encodeMethod": "int16",
+                "encodeScale": encode_scale,
+                "sizeAttenuation": size_attenuation,
             }
         else:
             upd: Dict[str, Any] = {
                 "points": points,
-                "size_attenuation": size_attenuation,
+                "sizeAttenuation": size_attenuation,
             }
         if size is not None:
             upd["size"] = size
@@ -472,9 +472,9 @@ class Points(ThreeComponentBase[PointProps]):
                 if attr_fields is None:
                     attr_fields = [f"{i}" for i in range(attrs.shape[1])]
             upd["attrs"] = attrs
-            upd["attr_fields"] = attr_fields
+            upd["attrFields"] = attr_fields
             if attr_fields is not None:
-                self.props.attr_fields = attr_fields
+                self.props.attrFields = attr_fields
         if limit is not None:
             assert limit > 0
             upd["limit"] = limit
@@ -498,7 +498,7 @@ class SegmentsProps(ThreeBasicProps):
     limit: int = 0
     lines: Union[np.ndarray, Undefined] = undefined
     colors: Union[np.ndarray, Undefined] = undefined
-    line_width: float = 1.0
+    lineWidth: float = 1.0
     color: Union[str, Undefined] = undefined
     transparent: Union[bool, Undefined] = undefined
     opacity: Union[float, Undefined] = undefined
@@ -511,7 +511,7 @@ class Segments(ThreeComponentBase[SegmentsProps]):
                  color: Union[str, Undefined] = undefined) -> None:
         super().__init__(UIType.ThreeSegments, SegmentsProps)
         self.props.lines = np.zeros((0, 2, 3), np.float32)
-        self.props.line_width = line_width
+        self.props.lineWidth = line_width
         self.props.limit = limit
         self.props.colors = undefined
         self.props.color = color
@@ -591,10 +591,10 @@ class Boxes2DProps(Object3dBaseProps):
     attrs: Union[List[str], Undefined] = undefined
     color: Union[str, Undefined] = undefined
     alpha: Union[NumberType, Undefined] = undefined
-    line_color: Union[str, Undefined] = undefined
-    line_width: Union[NumberType, Undefined] = undefined
-    hover_line_color: Union[str, Undefined] = undefined
-    hover_line_width: Union[NumberType, Undefined] = undefined
+    lineColor: Union[str, Undefined] = undefined
+    lineWidth: Union[NumberType, Undefined] = undefined
+    hoverLineColor: Union[str, Undefined] = undefined
+    hoverLineWidth: Union[NumberType, Undefined] = undefined
 
 
 class Boxes2D(Object3dWithEventBase[Boxes2DProps]):
@@ -692,12 +692,12 @@ class Boxes2D(Object3dWithEventBase[Boxes2DProps]):
 @dataclasses.dataclass
 class BoundingBoxProps(Object3dBaseProps):
     dimension: Union[Vector3Type, Undefined] = undefined
-    edge_width: Union[float, Undefined] = undefined
-    edge_color: Union[str, Undefined] = undefined
+    edgeWidth: Union[float, Undefined] = undefined
+    edgeColor: Union[str, Undefined] = undefined
     emissive: Union[str, Undefined] = undefined
     color: Union[str, Undefined] = undefined
     opacity: Union[float, Undefined] = undefined
-    edge_opacity: Union[float, Undefined] = undefined
+    edgeOpacity: Union[float, Undefined] = undefined
     checked: bool = False
     add_cross: bool = True
 
@@ -713,12 +713,13 @@ class BoundingBox(Object3dWithEventBase[BoundingBoxProps]):
                  edge_opacity: float = 0.5) -> None:
         super().__init__(UIType.ThreeBoundingBox, BoundingBoxProps)
         self.props.dimension = dimension
-        self.props.edge_width = edge_width
-        self.props.edge_color = edge_color
+        self.props.edgeWidth = edge_width
+        self.props.edgeColor = edge_color
         self.props.emissive = emissive
         self.props.color = color
         self.props.opacity = opacity
-        self.props.edge_opacity = edge_opacity
+        self.props.edgeOpacity = edge_opacity
+        
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -798,20 +799,20 @@ class Edges(ThreeComponentBase[EdgesProps]):
 
 @dataclasses.dataclass
 class WireframeProps(ThreeBasicProps):
-    fill_opacity: Union[NumberType, Undefined] = undefined
-    fill_mix: Union[NumberType, Undefined] = undefined
-    stroke_opacity: Union[NumberType, Undefined] = undefined
+    fillOpacity: Union[NumberType, Undefined] = undefined
+    fillMix: Union[NumberType, Undefined] = undefined
+    strokeOpacity: Union[NumberType, Undefined] = undefined
     thickness: Union[NumberType, Undefined] = undefined
-    color_backfaces: Union[bool, Undefined] = undefined
-    dash_invert: Union[bool, Undefined] = undefined
+    colorBackfaces: Union[bool, Undefined] = undefined
+    dashInvert: Union[bool, Undefined] = undefined
     dash: Union[bool, Undefined] = undefined
-    dash_repeats: Union[NumberType, Undefined] = undefined
-    dash_length: Union[NumberType, Undefined] = undefined
+    dashRepeats: Union[NumberType, Undefined] = undefined
+    dashLength: Union[NumberType, Undefined] = undefined
     squeeze: Union[bool, Undefined] = undefined
-    squeeze_min: Union[NumberType, Undefined] = undefined
-    squeeze_max: Union[NumberType, Undefined] = undefined
+    squeezeMin: Union[NumberType, Undefined] = undefined
+    squeezeMax: Union[NumberType, Undefined] = undefined
     stroke: Union[ValueType, Undefined] = undefined
-    backface_stroke: Union[ValueType, Undefined] = undefined
+    backfaceStroke: Union[ValueType, Undefined] = undefined
     fill: Union[ValueType, Undefined] = undefined
 
 
@@ -1028,56 +1029,56 @@ class OrthographicCamera(Object3dBase[OrthographicCameraProps]):
 
 @dataclasses.dataclass
 class OrbitControlProps(ThreeBasicProps):
-    enable_damping: Union[bool, Undefined] = undefined
-    damping_factor: Union[NumberType, Undefined] = undefined
-    min_distance: Union[NumberType, Undefined] = undefined
-    max_distance: Union[NumberType, Undefined] = undefined
-    min_polar_angle: Union[NumberType, Undefined] = undefined
-    max_polar_angle: Union[NumberType, Undefined] = undefined
-    min_zoom: Union[NumberType, Undefined] = undefined
-    max_zoom: Union[NumberType, Undefined] = undefined
-    enable_zoom: Union[bool, Undefined] = undefined
-    zoom_speed: Union[NumberType, Undefined] = undefined
-    enable_rotate: Union[bool, Undefined] = undefined
-    rotate_speed: Union[NumberType, Undefined] = undefined
-    enable_pan: Union[bool, Undefined] = undefined
-    pan_speed: Union[NumberType, Undefined] = undefined
-    key_pan_speed: Union[NumberType, Undefined] = undefined
-    make_default: Union[bool, Undefined] = undefined
+    enableDamping: Union[bool, Undefined] = undefined
+    dampingFactor: Union[NumberType, Undefined] = undefined
+    minDistance: Union[NumberType, Undefined] = undefined
+    maxDistance: Union[NumberType, Undefined] = undefined
+    minPolarAngle: Union[NumberType, Undefined] = undefined
+    maxPolarAngle: Union[NumberType, Undefined] = undefined
+    minZoom: Union[NumberType, Undefined] = undefined
+    maxZoom: Union[NumberType, Undefined] = undefined
+    enableZoom: Union[bool, Undefined] = undefined
+    zoomSpeed: Union[NumberType, Undefined] = undefined
+    enableRotate: Union[bool, Undefined] = undefined
+    rotateSpeed: Union[NumberType, Undefined] = undefined
+    enablePan: Union[bool, Undefined] = undefined
+    panSpeed: Union[NumberType, Undefined] = undefined
+    keyPanSpeed: Union[NumberType, Undefined] = undefined
+    makeDefault: Union[bool, Undefined] = undefined
 
 
 @dataclasses.dataclass
 class CameraControlProps(ThreeBasicProps):
-    damping_factor: Union[NumberType, Undefined] = undefined
-    smooth_time: Union[NumberType, Undefined] = undefined
-    dragging_smooth_time: Union[NumberType, Undefined] = undefined
+    dampingFactor: Union[NumberType, Undefined] = undefined
+    smoothTime: Union[NumberType, Undefined] = undefined
+    draggingSmoothTime: Union[NumberType, Undefined] = undefined
 
-    min_distance: Union[NumberType, Undefined] = undefined
-    max_distance: Union[NumberType, Undefined] = undefined
-    min_polar_angle: Union[NumberType, Undefined] = undefined
-    max_polar_angle: Union[NumberType, Undefined] = undefined
-    min_zoom: Union[NumberType, Undefined] = undefined
-    max_zoom: Union[NumberType, Undefined] = undefined
-    polar_rotate_speed: Union[NumberType, Undefined] = undefined
-    azimuth_rotate_speed: Union[NumberType, Undefined] = undefined
-    truck_speed: Union[NumberType, Undefined] = undefined
-    dolly_speed: Union[NumberType, Undefined] = undefined
-    vertical_drag_to_forward: Union[bool, Undefined] = undefined
-    keyboard_front: Union[bool, Undefined] = undefined
-    keyboard_move_speed: Union[NumberType, Undefined] = undefined
-    keyboard_elevate_speed: Union[NumberType, Undefined] = undefined
+    minDistance: Union[NumberType, Undefined] = undefined
+    maxDistance: Union[NumberType, Undefined] = undefined
+    minPolarAngle: Union[NumberType, Undefined] = undefined
+    maxPolarAngle: Union[NumberType, Undefined] = undefined
+    minZoom: Union[NumberType, Undefined] = undefined
+    maxZoom: Union[NumberType, Undefined] = undefined
+    polarRotateSpeed: Union[NumberType, Undefined] = undefined
+    azimuthRotateSpeed: Union[NumberType, Undefined] = undefined
+    truckSpeed: Union[NumberType, Undefined] = undefined
+    dollySpeed: Union[NumberType, Undefined] = undefined
+    verticalDragToForward: Union[bool, Undefined] = undefined
+    keyboardFront: Union[bool, Undefined] = undefined
+    keyboardMoveSpeed: Union[NumberType, Undefined] = undefined
+    keyboardElevateSpeed: Union[NumberType, Undefined] = undefined
 
-    infinity_dolly: Union[bool, Undefined] = undefined
-    make_default: Union[bool, Undefined] = undefined
+    infinityDolly: Union[bool, Undefined] = undefined
+    makeDefault: Union[bool, Undefined] = undefined
 
 
 class MapControl(ThreeComponentBase[OrbitControlProps]):
     def __init__(self) -> None:
         super().__init__(UIType.ThreeMapControl, OrbitControlProps)
-        self.props.enable_damping = True
-        self.props.damping_factor = 0.25
-        self.props.min_distance = 1
-        self.props.max_distance = 100
+        self.props.enableDamping = True
+        self.props.dampingFactor = 0.25
+        self.props.minDistance = 1
+        self.props.maxDistance = 100
 
     @property
     def prop(self):
@@ -1107,12 +1108,12 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
     def __init__(self) -> None:
         super().__init__(UIType.ThreeCameraControl, CameraControlProps, [FrontendEventType.Change.value])
 
-        # self.props.enable_damping = True
-        # self.props.damping_factor = 1
-        self.props.dragging_smooth_time = 0
-        self.props.smooth_time = 0
-        # self.props.min_distance = 1
-        # self.props.max_distance = 100
+        # self.props.enableDamping = True
+        # self.props.dampingFactor = 1
+        self.props.draggingSmoothTime = 0
+        self.props.smoothTime = 0
+        # self.props.minDistance = 1
+        # self.props.maxDistance = 100
         self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
@@ -1211,10 +1212,10 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
 class OrbitControl(ThreeComponentBase[OrbitControlProps]):
     def __init__(self) -> None:
         super().__init__(UIType.ThreeOrbitControl, OrbitControlProps)
-        self.props.enable_damping = True
-        self.props.damping_factor = 0.25
-        self.props.min_distance = 1
-        self.props.max_distance = 100
+        self.props.enableDamping = True
+        self.props.dampingFactor = 0.25
+        self.props.minDistance = 1
+        self.props.maxDistance = 100
 
     @property
     def prop(self):
@@ -1230,8 +1231,8 @@ class OrbitControl(ThreeComponentBase[OrbitControlProps]):
 @dataclasses.dataclass
 class PointerLockControlProps(Object3dBaseProps):
     enabled: Union[bool, Undefined] = undefined
-    min_polar_angle: Union[float, Undefined] = undefined
-    max_polar_angle: Union[float, Undefined] = undefined
+    minPolarAngle: Union[float, Undefined] = undefined
+    maxPolarAngle: Union[float, Undefined] = undefined
 
 
 class PointerLockControl(ThreeComponentBase[PointerLockControlProps]):
@@ -1242,8 +1243,8 @@ class PointerLockControl(ThreeComponentBase[PointerLockControlProps]):
         super().__init__(UIType.ThreePointerLockControl,
                          PointerLockControlProps)
         self.props.enabled = enabled
-        self.props.min_polar_angle = min_polar_angle
-        self.props.max_polar_angle = max_polar_angle
+        self.props.minPolarAngle = min_polar_angle
+        self.props.maxPolarAngle = max_polar_angle
 
     @property
     def prop(self):
@@ -1259,19 +1260,19 @@ class PointerLockControl(ThreeComponentBase[PointerLockControlProps]):
 @dataclasses.dataclass
 class FirstPersonControlProps(ThreeBasicProps):
     enabled: Union[bool, Undefined] = undefined
-    movement_speed: Union[float, Undefined] = undefined
-    auto_forward: Union[bool, Undefined] = undefined
-    look_speed: Union[float, Undefined] = undefined
-    look_vertical: Union[bool, Undefined] = undefined
-    active_look: Union[bool, Undefined] = undefined
-    height_speed: Union[bool, Undefined] = undefined
-    height_coef: Union[float, Undefined] = undefined
-    height_min: Union[float, Undefined] = undefined
-    height_max: Union[float, Undefined] = undefined
-    constrain_vertical: Union[bool, Undefined] = undefined
-    vertical_min: Union[float, Undefined] = undefined
-    vertical_max: Union[float, Undefined] = undefined
-    mouse_drag_on: Union[bool, Undefined] = undefined
+    movementSpeed: Union[float, Undefined] = undefined
+    autoForward: Union[bool, Undefined] = undefined
+    lookSpeed: Union[float, Undefined] = undefined
+    lookVertical: Union[bool, Undefined] = undefined
+    activeLook: Union[bool, Undefined] = undefined
+    heightSpeed: Union[bool, Undefined] = undefined
+    heightCoef: Union[float, Undefined] = undefined
+    heightMin: Union[float, Undefined] = undefined
+    heightMax: Union[float, Undefined] = undefined
+    constrainVertical: Union[bool, Undefined] = undefined
+    verticalMin: Union[float, Undefined] = undefined
+    verticalMax: Union[float, Undefined] = undefined
+    mouseDragOn: Union[bool, Undefined] = undefined
 
 
 class FirstPersonControl(ThreeComponentBase[FirstPersonControlProps]):
@@ -1447,12 +1448,12 @@ class ScreenShotSyncReturn(ThreeComponentBase[ScreenShotProps]):
 
 @dataclasses.dataclass
 class ThreeCanvasProps(MUIFlexBoxProps):
-    three_background_color: Union[str, Undefined] = undefined
-    allow_keyboard_event: Union[bool, Undefined] = undefined
-    tab_index: Union[int, Undefined] = undefined
+    threeBackgroundColor: Union[str, Undefined] = undefined
+    allowKeyboardEvent: Union[bool, Undefined] = undefined
+    tabIndex: Union[int, Undefined] = undefined
     shadows: Union[bool, Undefined] = undefined
-    enable_perf: Union[bool, Undefined] = undefined
-    perf_position: Union[Literal['top-right', 'top-left', 'bottom-right',
+    enablePerf: Union[bool, Undefined] = undefined
+    perfPosition: Union[Literal['top-right', 'top-left', 'bottom-right',
                                  'bottom-left'], Undefined] = undefined
 
 
@@ -1466,7 +1467,7 @@ class ThreeCanvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ThreeCanvas, ThreeCanvasProps,
                          children, inited)
-        self.props.three_background_color = background
+        self.props.threeBackgroundColor = background
 
     @property
     def prop(self):
@@ -1484,15 +1485,15 @@ class TransformControlsProps(ContainerBaseProps):
     enabled: Union[bool, Undefined] = undefined
     axis: Union[str, Undefined] = undefined
     mode: Union[str, Undefined] = undefined
-    translation_snap: Union[NumberType, Undefined] = undefined
-    rotation_snap: Union[NumberType, Undefined] = undefined
-    scale_snap: Union[NumberType, Undefined] = undefined
+    translationSnap: Union[NumberType, Undefined] = undefined
+    rotationSnap: Union[NumberType, Undefined] = undefined
+    scaleSnap: Union[NumberType, Undefined] = undefined
     space: Union[str, Undefined] = undefined
     size: Union[NumberType, Undefined] = undefined
-    show_x: Union[bool, Undefined] = undefined
-    show_y: Union[bool, Undefined] = undefined
-    show_z: Union[bool, Undefined] = undefined
-    object3d_uid: Union[str, Undefined] = undefined
+    showX: Union[bool, Undefined] = undefined
+    showY: Union[bool, Undefined] = undefined
+    showZ: Union[bool, Undefined] = undefined
+    object3dUid: Union[str, Undefined] = undefined
 
 
 class TransformControls(ThreeComponentBase[TransformControlsProps]):
@@ -1516,7 +1517,7 @@ class ThreeFlexProps(R3FlexPropsBase, ContainerBaseProps):
     position: Union[Vector3Type, Undefined] = undefined
     direction: Union[str, Undefined] = undefined
     plane: Union[str, Undefined] = undefined
-    scale_factor: Union[int, Undefined] = undefined
+    scaleFactor: Union[int, Undefined] = undefined
 
 
 class Flex(ThreeContainerBase[ThreeFlexProps, ThreeComponentType]):
@@ -1539,7 +1540,7 @@ class Flex(ThreeContainerBase[ThreeFlexProps, ThreeComponentType]):
 
 @dataclasses.dataclass
 class ThreeFlexItemBoxProps(R3FlexPropsBase, ContainerBaseProps):
-    center_anchor: Union[bool, Undefined] = undefined  # false
+    centerAnchor: Union[bool, Undefined] = undefined  # false
 
 
 class ItemBox(ThreeContainerBase[ThreeFlexItemBoxProps, ThreeComponentType]):
@@ -1562,13 +1563,13 @@ class ItemBox(ThreeContainerBase[ThreeFlexItemBoxProps, ThreeComponentType]):
 
 def VBox(children: Dict[str, ThreeComponentType]):
     box = ItemBox(children)
-    box.props.flex_direction = "column"
+    box.props.flexDirection = "column"
     return box
 
 
 def HBox(children: Dict[str, ThreeComponentType]):
     box = ItemBox(children)
-    box.props.flex_direction = "row"
+    box.props.flexDirection = "row"
     return box
 
 
@@ -1585,14 +1586,14 @@ class HtmlProps(Object3dContainerBaseProps):
     center: Union[bool, Undefined] = undefined
     fullscreen: Union[bool, Undefined] = undefined
     eps: Union[float, Undefined] = undefined
-    distance_factor: Union[float, Undefined] = undefined
+    distanceFactor: Union[float, Undefined] = undefined
     sprite: Union[bool, Undefined] = undefined
     transform: Union[bool, Undefined] = undefined
-    z_index_range: Union[List[Union[int, float]], Undefined] = undefined
-    wrapper_class: Union[str, Undefined] = undefined
-    pointer_events: Union[PointerEventsProperties, Undefined] = undefined
+    zIndexRange: Union[List[Union[int, float]], Undefined] = undefined
+    wrapperClass: Union[str, Undefined] = undefined
+    pointerEvents: Union[PointerEventsProperties, Undefined] = undefined
     occlude: Union[bool, Undefined] = undefined
-    inside_flex: Union[bool, Undefined] = undefined
+    insideFlex: Union[bool, Undefined] = undefined
 
 
 class Html(Object3dContainerBase[HtmlProps, MUIComponentType]):
@@ -1621,35 +1622,35 @@ class TextProps(Object3dBaseProps):
     value: str = ""
     characters: Union[str, Undefined] = undefined
     color: Union[str, Undefined] = undefined
-    font_size: Union[NumberType, Undefined] = undefined
-    max_width: Union[NumberType, Undefined] = undefined
-    line_height: Union[NumberType, Undefined] = undefined
-    letter_spacing: Union[NumberType, Undefined] = undefined
-    text_align: Union[Literal["left", "right", "center", "justify"],
+    fontSize: Union[NumberType, Undefined] = undefined
+    maxWidth: Union[NumberType, Undefined] = undefined
+    lineHeight: Union[NumberType, Undefined] = undefined
+    letterSpacing: Union[NumberType, Undefined] = undefined
+    textAlign: Union[Literal["left", "right", "center", "justify"],
                       Undefined] = undefined
     font: Union[str, Undefined] = undefined
-    anchor_x: Union[NumberType, Literal["left", "center", "right"],
+    anchorX: Union[NumberType, Literal["left", "center", "right"],
                     Undefined] = undefined
-    anchor_y: Union[NumberType, Literal["top", "top-baseline", "middle",
+    anchorY: Union[NumberType, Literal["top", "top-baseline", "middle",
                                         "bottom-baseline", "bottom"],
                     Undefined] = undefined
-    clip_rect: Union[Tuple[NumberType, NumberType, NumberType, NumberType],
+    clipRect: Union[Tuple[NumberType, NumberType, NumberType, NumberType],
                      Undefined] = undefined
-    depth_offset: Union[NumberType, Undefined] = undefined
+    depthOffset: Union[NumberType, Undefined] = undefined
     direction: Union[Literal["auto", "ltr", "rtl"], Undefined] = undefined
-    overflow_wrap: Union[Literal["normal", "break-word"],
+    overflowWrap: Union[Literal["normal", "break-word"],
                          Undefined] = undefined
-    white_space: Union[Literal['normal', 'nowrap'], Undefined] = undefined
-    outline_width: Union[ValueType, Undefined] = undefined
-    outline_offset_x: Union[ValueType, Undefined] = undefined
-    outline_offset_y: Union[ValueType, Undefined] = undefined
-    outline_blur: Union[ValueType, Undefined] = undefined
-    outline_color: Union[str, Undefined] = undefined
-    outline_opacity: Union[NumberType, Undefined] = undefined
-    stroke_width: Union[ValueType, Undefined] = undefined
-    stroke_color: Union[NumberType, Undefined] = undefined
-    stroke_opacity: Union[NumberType, Undefined] = undefined
-    fill_opacity: Union[NumberType, Undefined] = undefined
+    whiteSpace: Union[Literal['normal', 'nowrap'], Undefined] = undefined
+    outlineWidth: Union[ValueType, Undefined] = undefined
+    outlineOffsetX: Union[ValueType, Undefined] = undefined
+    outlineOffsetY: Union[ValueType, Undefined] = undefined
+    outlineBlur: Union[ValueType, Undefined] = undefined
+    outlineColor: Union[str, Undefined] = undefined
+    outlineOpacity: Union[NumberType, Undefined] = undefined
+    strokeWidth: Union[ValueType, Undefined] = undefined
+    strokeColor: Union[NumberType, Undefined] = undefined
+    strokeOpacity: Union[NumberType, Undefined] = undefined
+    fillOpacity: Union[NumberType, Undefined] = undefined
 
 
 class Text(Object3dWithEventBase[TextProps]):
@@ -1684,9 +1685,9 @@ class LineProps(Object3dBaseProps):
                        NumberType]] = dataclasses.field(default_factory=list)
     color: Union[str, Undefined] = undefined
     dashed: Union[bool, Undefined] = undefined
-    vertex_colors: Union[Tuple[NumberType, NumberType, NumberType],
+    vertexColors: Union[Tuple[NumberType, NumberType, NumberType],
                          Undefined] = undefined
-    line_width: Union[NumberType, Undefined] = undefined
+    lineWidth: Union[NumberType, Undefined] = undefined
     transparent: Union[bool, Undefined] = undefined
     opacity: Union[NumberType, Undefined] = undefined
 
@@ -1763,11 +1764,11 @@ class ArrowXYMeasure(Group):
                                         transparent=transparent,
                                         opacity=opacity,
                                         color=color)
-        self.text = Text(label).prop(font_size=label_size,
+        self.text = Text(label).prop(fontSize=label_size,
                                      position=positions,
                                      color=color,
-                                     stroke_opacity=opacity,
-                                     fill_opacity=opacity)
+                                     strokeOpacity=opacity,
+                                     fillOpacity=opacity)
         layout = {
             "a0": self.arrow0,
             "a1": self.arrow1,
@@ -1808,15 +1809,15 @@ class PathOpType(enum.Enum):
 
 @dataclasses.dataclass
 class SimpleGeometryProps(ThreeGeometryPropsBase):
-    shape_type: int = 0
-    shape_args: Union[List[Union[int, float, bool]], Undefined] = undefined
+    shapeType: int = 0
+    shapeArgs: Union[List[Union[int, float, bool]], Undefined] = undefined
 
 
 @dataclasses.dataclass
 class PathShapeProps(ThreeGeometryPropsBase):
-    path_ops: List[Tuple[int, List[Union[float, bool]]]] = dataclasses.field(
+    pathOps: List[Tuple[int, List[Union[float, bool]]]] = dataclasses.field(
         default_factory=list)
-    curve_segments: Union[NumberType, Undefined] = undefined
+    curveSegments: Union[NumberType, Undefined] = undefined
 
 
 class Shape:
@@ -1860,7 +1861,7 @@ class Shape:
 class ShapeGeometry(ThreeGeometryBase[PathShapeProps]):
     def __init__(self, shape: Shape) -> None:
         super().__init__(UIType.ThreeShape, PathShapeProps)
-        self.props.path_ops = shape.ops
+        self.props.pathOps = shape.ops
 
     @property
     def prop(self):
@@ -1918,8 +1919,8 @@ class SimpleGeometry(ThreeGeometryBase[SimpleGeometryProps]):
     def __init__(self, type: GeometryType, args: List[Union[int, float,
                                                             bool]]) -> None:
         super().__init__(UIType.ThreeSimpleGeometry, SimpleGeometryProps)
-        self.props.shape_type = type.value
-        self.props.shape_args = args
+        self.props.shapeType = type.value
+        self.props.shapeArgs = args
 
     @property
     def prop(self):
@@ -2104,7 +2105,7 @@ class TorusKnotGeometry(SimpleGeometry):
 class MeshBasicMaterialProps(ThreeMaterialPropsBase):
     color: Union[str, Undefined] = undefined
     wireframe: Union[bool, Undefined] = undefined
-    vertex_colors: Union[bool, Undefined] = undefined
+    vertexColors: Union[bool, Undefined] = undefined
     fog: Union[bool, Undefined] = undefined
 
 
@@ -2113,7 +2114,7 @@ class MeshStandardMaterialProps(MeshBasicMaterialProps):
     emissive: Union[str, Undefined] = undefined
     roughness: Union[NumberType, Undefined] = undefined
     metalness: Union[NumberType, Undefined] = undefined
-    flag_shading: Union[bool, Undefined] = undefined
+    flagShading: Union[bool, Undefined] = undefined
 
 
 @dataclasses.dataclass
@@ -2123,13 +2124,13 @@ class MeshLambertMaterialProps(MeshBasicMaterialProps):
 
 @dataclasses.dataclass
 class MeshMatcapMaterialProps(ThreeMaterialPropsBase):
-    flag_shading: Union[bool, Undefined] = undefined
+    flagShading: Union[bool, Undefined] = undefined
     color: Union[str, Undefined] = undefined
 
 
 @dataclasses.dataclass
 class MeshNormalMaterialProps(ThreeMaterialPropsBase):
-    flag_shading: Union[bool, Undefined] = undefined
+    flagShading: Union[bool, Undefined] = undefined
     wireframe: Union[bool, Undefined] = undefined
 
 
@@ -2141,7 +2142,7 @@ class MeshDepthMaterialProps(ThreeMaterialPropsBase):
 @dataclasses.dataclass
 class MeshPhongMaterialProps(MeshBasicMaterialProps):
     reflectivity: Union[NumberType, Undefined] = undefined
-    refraction_ratio: Union[NumberType, Undefined] = undefined
+    refractionRatio: Union[NumberType, Undefined] = undefined
     emissive: Union[str, Undefined] = undefined
     specular: Union[str, Undefined] = undefined
     shininess: Union[NumberType, Undefined] = undefined
@@ -2151,18 +2152,18 @@ class MeshPhongMaterialProps(MeshBasicMaterialProps):
 class MeshPhysicalMaterialProps(MeshStandardMaterialProps):
     reflectivity: Union[NumberType, Undefined] = undefined
     clearcoat: Union[NumberType, Undefined] = undefined
-    clearcoat_roughness: Union[NumberType, Undefined] = undefined
+    clearcoatRoughness: Union[NumberType, Undefined] = undefined
     metalness: Union[NumberType, Undefined] = undefined
     roughness: Union[NumberType, Undefined] = undefined
     sheen: Union[NumberType, Undefined] = undefined
     transmission: Union[NumberType, Undefined] = undefined
     ior: Union[NumberType, Undefined] = undefined
-    attenuation_color: Union[str, NumberType, Undefined] = undefined
-    attenuation_distance: Union[NumberType, Undefined] = undefined
-    specular_intensity: Union[NumberType, Undefined] = undefined
-    specular_color: Union[str, NumberType, Undefined] = undefined
-    sheen_roughness: Union[NumberType, Undefined] = undefined
-    sheen_color: Union[str, NumberType, Undefined] = undefined
+    attenuationColor: Union[str, NumberType, Undefined] = undefined
+    attenuationDistance: Union[NumberType, Undefined] = undefined
+    specularIntensity: Union[NumberType, Undefined] = undefined
+    specularColor: Union[str, NumberType, Undefined] = undefined
+    sheenRoughness: Union[NumberType, Undefined] = undefined
+    sheenColor: Union[str, NumberType, Undefined] = undefined
 
 
 @dataclasses.dataclass
@@ -2174,17 +2175,17 @@ class MeshToonMaterialProps(ThreeMaterialPropsBase):
 class MeshTransmissionMaterialProps(MeshPhysicalMaterialProps):
     transmission: Union[NumberType, Undefined] = undefined
     thickness: Union[NumberType, Undefined] = undefined
-    backside_thickness: Union[NumberType, Undefined] = undefined
+    backsideThickness: Union[NumberType, Undefined] = undefined
     roughness: Union[NumberType, Undefined] = undefined
-    chromatic_aberration: Union[NumberType, Undefined] = undefined
+    chromaticAberration: Union[NumberType, Undefined] = undefined
     anisotropy: Union[NumberType, Undefined] = undefined
     distortion: Union[NumberType, Undefined] = undefined
     distortion_scale: Union[NumberType, Undefined] = undefined
-    temporal_distortion: Union[NumberType, Undefined] = undefined
+    temporalDistortion: Union[NumberType, Undefined] = undefined
     transmission_sampler: Union[bool, Undefined] = undefined
     backside: Union[bool, Undefined] = undefined
     resolution: Union[NumberType, Undefined] = undefined
-    backside_resolution: Union[NumberType, Undefined] = undefined
+    backsideResolution: Union[NumberType, Undefined] = undefined
     samples: Union[NumberType, Undefined] = undefined
 
 
@@ -2196,7 +2197,7 @@ class MeshDiscardMaterialProps(ThreeBasicProps):
 class MeshBasicMaterialV1(ThreeMaterialBase[MeshBasicMaterialProps]):
     def __init__(self) -> None:
         super().__init__(UIType.ThreeMeshMaterial, MeshBasicMaterialProps)
-        self.props.material_type = MeshMaterialType.Basic.value
+        self.props.materialType = MeshMaterialType.Basic.value
 
     @property
     def prop(self):
@@ -2212,7 +2213,7 @@ class MeshBasicMaterialV1(ThreeMaterialBase[MeshBasicMaterialProps]):
 class MeshStandardMaterialV1(ThreeMaterialBase[MeshStandardMaterialProps]):
     def __init__(self) -> None:
         super().__init__(UIType.ThreeMeshMaterial, MeshStandardMaterialProps)
-        self.props.material_type = MeshMaterialType.Standard.value
+        self.props.materialType = MeshMaterialType.Standard.value
 
     @property
     def prop(self):
@@ -2409,9 +2410,9 @@ class PrimitiveMeshProps(Object3dContainerBaseProps):
 
 @dataclasses.dataclass
 class MeshProps(PrimitiveMeshProps):
-    hover_color: Union[str, Undefined] = undefined
-    click_color: Union[str, Undefined] = undefined
-    toggle_mode: Union[bool, Undefined] = undefined
+    hoverColor: Union[str, Undefined] = undefined
+    clickColor: Union[str, Undefined] = undefined
+    toggleMode: Union[bool, Undefined] = undefined
     toggled: Union[bool, Undefined] = undefined
 
 
@@ -2482,7 +2483,7 @@ class MeshV1(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
 
 @dataclasses.dataclass
 class HudProps(ThreeFlexProps):
-    render_priority: Union[int, Undefined] = undefined
+    renderPriority: Union[int, Undefined] = undefined
 
 
 class Hud(ThreeContainerBase[HudProps, ThreeComponentType]):
@@ -2512,13 +2513,13 @@ class ShapeButton(Group):
         material.prop(color="#393939")
         mesh = MeshV1(ShapeGeometry(shape), material)
         mesh.register_event_handler(FrontendEventType.Click.value, callback, stop_propagation=True)
-        mesh.prop(hover_color="#222222", click_color="#009A63")
+        mesh.prop(hoverColor="#222222", clickColor="#009A63")
         self.mesh = mesh
         text = Text(name)
-        text.prop(font_size=font_size,
+        text.prop(fontSize=font_size,
                   color="white",
                   position=(0, 0, 0),
-                  max_width=text_max_width)
+                  maxWidth=text_max_width)
         children = {
             "mesh": mesh,
             "text": text,
@@ -2571,13 +2572,13 @@ class Button(Group):
         mesh.register_event_handler(FrontendEventType.Click.value, callback, stop_propagation=True)
         self.event_click = self._create_event_slot(FrontendEventType.Click)
 
-        mesh.prop(hover_color="#222222", click_color="#009A63")
+        mesh.prop(hoverColor="#222222", clickColor="#009A63")
         self.mesh = mesh
         text = Text(name)
-        text.prop(font_size=font_size,
+        text.prop(fontSize=font_size,
                   color="white",
                   position=(0, 0, 0),
-                  max_width=width)
+                  maxWidth=width)
         children = {
             "mesh": mesh,
             "text": text,
@@ -2626,16 +2627,16 @@ class ToggleButton(Group):
         mesh.register_event_handler(FrontendEventType.Click.value, callback, stop_propagation=True)
         self.event_click = self._create_event_slot(FrontendEventType.Click)
 
-        mesh.prop(hover_color="#222222",
-                  click_color="#009A63",
-                  toggle_mode=True)
+        mesh.prop(hoverColor="#222222",
+                  clickColor="#009A63",
+                  toggleMode=True)
         self.mesh = mesh
 
         text = Text(name)
-        text.prop(font_size=font_size,
+        text.prop(fontSize=font_size,
                   color="white",
                   position=(0, 0, 0),
-                  max_width=width)
+                  maxWidth=width)
         children = {
             "mesh": mesh,
             "text": text,
@@ -2675,16 +2676,16 @@ class PivotControlsProps(ContainerBaseProps):
     rotation: Union[Vector3Type, Undefined] = undefined
 
     scale: Union[NumberType, Undefined] = undefined
-    line_width: Union[NumberType, Undefined] = undefined
+    lineWidth: Union[NumberType, Undefined] = undefined
     fixed: Union[bool, Undefined] = undefined
     matrix: Union[List[float], Undefined] = undefined
     anchor: Union[Vector3Type, Undefined] = undefined
-    auto_transform: Union[bool, Undefined] = undefined
-    active_axes: Union[Tuple[bool, bool, bool], Undefined] = undefined
-    axis_colors: Union[Tuple[ValueType, ValueType, ValueType],
+    autoTransform: Union[bool, Undefined] = undefined
+    activeAxes: Union[Tuple[bool, bool, bool], Undefined] = undefined
+    axisColors: Union[Tuple[ValueType, ValueType, ValueType],
                        Undefined] = undefined
-    hovered_color: Union[ValueType, Undefined] = undefined
-    depth_test: Union[bool, Undefined] = undefined
+    hoveredColor: Union[ValueType, Undefined] = undefined
+    depthTest: Union[bool, Undefined] = undefined
     opacity: Union[float, Undefined] = undefined
     visible: Union[bool, Undefined] = undefined
     annotations: Union[bool, Undefined] = undefined
@@ -2735,7 +2736,7 @@ class PointLightProps(Object3dBaseProps):
     intensity: Union[NumberType, Undefined] = undefined
     distance: Union[NumberType, Undefined] = undefined
     decay: Union[NumberType, Undefined] = undefined
-    cast_shadow: Union[bool, Undefined] = undefined
+    castShadow: Union[bool, Undefined] = undefined
     power: Union[NumberType, Undefined] = undefined
 
 
@@ -2789,7 +2790,7 @@ class AmbientLight(Object3dBase[AmbientLightProps]):
 class HemisphereLightProps(Object3dBaseProps):
     color: Union[NumberType, str, Undefined] = undefined
     intensity: Union[NumberType, Undefined] = undefined
-    ground_color: Union[NumberType, str, Undefined] = undefined
+    groundColor: Union[NumberType, str, Undefined] = undefined
 
 
 class HemisphereLight(Object3dBase[HemisphereLightProps]):
@@ -2802,7 +2803,7 @@ class HemisphereLight(Object3dBase[HemisphereLightProps]):
         super().__init__(UIType.ThreeHemisphereLight, HemisphereLightProps)
         self.props.color = color
         self.props.intensity = intensity
-        self.props.ground_color = ground_color
+        self.props.groundColor = ground_color
 
     @property
     def prop(self):
@@ -2819,10 +2820,10 @@ class HemisphereLight(Object3dBase[HemisphereLightProps]):
 class DirectionalLightProps(Object3dBaseProps):
     color: Union[NumberType, str, Undefined] = undefined
     intensity: Union[NumberType, Undefined] = undefined
-    cast_shadow: Union[bool, Undefined] = undefined
-    target_position: Union[Vector3Type, Undefined] = undefined
-    helper_color: Union[NumberType, Undefined] = undefined
-    helper_size: Union[NumberType, Undefined] = undefined
+    castShadow: Union[bool, Undefined] = undefined
+    targetPosition: Union[Vector3Type, Undefined] = undefined
+    helperColor: Union[NumberType, Undefined] = undefined
+    helperSize: Union[NumberType, Undefined] = undefined
 
 
 class DirectionalLight(Object3dBase[DirectionalLightProps]):
@@ -2836,7 +2837,7 @@ class DirectionalLight(Object3dBase[DirectionalLightProps]):
         super().__init__(UIType.ThreeDirectionalLight, DirectionalLightProps)
         self.props.color = color
         self.props.intensity = intensity
-        self.props.target_position = target_position
+        self.props.targetPosition = target_position
         self.props.position = position
 
     @property
@@ -2856,12 +2857,12 @@ class SpotLightProps(Object3dBaseProps):
     intensity: Union[NumberType, Undefined] = undefined
     distance: Union[NumberType, Undefined] = undefined
     decay: Union[NumberType, Undefined] = undefined
-    cast_shadow: Union[bool, Undefined] = undefined
+    castShadow: Union[bool, Undefined] = undefined
     angle: Union[NumberType, Undefined] = undefined
     penumbra: Union[NumberType, Undefined] = undefined
     power: Union[NumberType, Undefined] = undefined
-    target_position: Union[Vector3Type, Undefined] = undefined
-    helper_color: Union[NumberType, Undefined] = undefined
+    targetPosition: Union[Vector3Type, Undefined] = undefined
+    helperColor: Union[NumberType, Undefined] = undefined
 
 
 class SpotLight(Object3dBase[SpotLightProps]):
@@ -2875,7 +2876,7 @@ class SpotLight(Object3dBase[SpotLightProps]):
         super().__init__(UIType.ThreeDirectionalLight, SpotLightProps)
         self.props.color = color
         self.props.intensity = intensity
-        self.props.target_position = target_position
+        self.props.targetPosition = target_position
         self.props.position = position
 
     @property
@@ -2896,17 +2897,17 @@ class BufferMeshControlType(enum.Enum):
 
 @dataclasses.dataclass(config=PyDanticConfigForNumpy)
 class BufferMeshProps(Object3dContainerBaseProps):
-    initial_buffers: Union[Dict[str, np.ndarray], Undefined] = undefined
-    initial_index: Union[np.ndarray, Undefined] = undefined
+    initialBuffers: Union[Dict[str, np.ndarray], Undefined] = undefined
+    initialIndex: Union[np.ndarray, Undefined] = undefined
     limit: Union[int, Undefined] = undefined
-    initial_calc_vertex_normals: Union[bool, Undefined] = undefined
+    initialCalcVertexNormals: Union[bool, Undefined] = undefined
 
 
 @dataclasses.dataclass(config=PyDanticConfigForNumpy)
 class BufferMeshUpdate(DataClassWithUndefined):
     data: np.ndarray
     offset: Union[int, Undefined] = undefined
-    new_count: Union[int, Undefined] = undefined
+    newCount: Union[int, Undefined] = undefined
 
 
 class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
@@ -2917,7 +2918,7 @@ class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
             limit: int,
             children: ThreeLayoutType,
             initial_index: Union[np.ndarray, Undefined] = undefined) -> None:
-        """initial_index and initial_buffers must be specified in init,
+        """initialIndex and initialBuffers must be specified in init,
         they can't be setted in update_event.
         WARNING: this element should only be used for advanced usage.
         if you use this with wrong inputs, the frontend may crash. 
@@ -2941,9 +2942,9 @@ class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
             children = {str(i): v for i, v in enumerate(children)}
 
         super().__init__(UIType.ThreeBufferMesh, BufferMeshProps, children)
-        self.props.initial_buffers = initial_buffers
+        self.props.initialBuffers = initial_buffers
         self.props.limit = limit
-        self.props.initial_index = initial_index
+        self.props.initialIndex = initial_index
         self.initial_buffers = initial_buffers
         self.initial_index = initial_index
 
@@ -2969,7 +2970,7 @@ class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
                              new_index: Optional[np.ndarray] = None):
         """
         Args: 
-            updates: contains the updates for each buffer, the key must be in initial_buffers.
+            updates: contains the updates for each buffer, the key must be in initialBuffers.
             update_bound: if true, the bound will be updated. user should update this when they 
                 change the position.
             new_index: if not None, the index will be updated.
@@ -3079,11 +3080,11 @@ class InstancedMesh(O3dContainerWithEventBase[InstancedMeshProps,
 @dataclasses.dataclass
 class SkyProps(ThreeBasicProps):
     distance: Union[NumberType, Undefined] = undefined
-    sun_position: Union[Vector3Type, Undefined] = undefined
+    sunPosition: Union[Vector3Type, Undefined] = undefined
     inclination: Union[NumberType, Undefined] = undefined
     azimuth: Union[NumberType, Undefined] = undefined
-    mie_coefficient: Union[NumberType, Undefined] = undefined
-    mie_directional_g: Union[NumberType, Undefined] = undefined
+    mieCoefficient: Union[NumberType, Undefined] = undefined
+    mieDirectionalG: Union[NumberType, Undefined] = undefined
     rayleigh: Union[NumberType, Undefined] = undefined
     turbidity: Union[NumberType, Undefined] = undefined
 

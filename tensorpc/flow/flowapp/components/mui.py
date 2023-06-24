@@ -99,54 +99,54 @@ class FlexComponentBaseProps(BasicProps):
     bottom: Union[ValueType, Undefined] = undefined
     left: Union[ValueType, Undefined] = undefined
     right: Union[ValueType, Undefined] = undefined
-    z_index: Union[ValueType, Undefined] = undefined
+    zIndex: Union[ValueType, Undefined] = undefined
 
     flex: Union[ValueType, Undefined] = undefined
-    align_self: Union[Literal["auto", "flex-start", "flex-end", "center", "baseline", "stretch"], Undefined] = undefined
-    flex_grow: Union[ValueType, Undefined] = undefined
-    flex_shrink: Union[ValueType, Undefined] = undefined
-    flex_basis: Union[ValueType, Undefined] = undefined
+    alignSelf: Union[Literal["auto", "flex-start", "flex-end", "center", "baseline", "stretch"], Undefined] = undefined
+    flexGrow: Union[ValueType, Undefined] = undefined
+    flexShrink: Union[ValueType, Undefined] = undefined
+    flexBasis: Union[ValueType, Undefined] = undefined
 
     height: Union[ValueType, Undefined] = undefined
     width: Union[ValueType, Undefined] = undefined
-    max_height: Union[ValueType, Undefined] = undefined
-    max_width: Union[ValueType, Undefined] = undefined
-    min_height: Union[ValueType, Undefined] = undefined
-    min_width: Union[ValueType, Undefined] = undefined
+    maxHeight: Union[ValueType, Undefined] = undefined
+    maxWidth: Union[ValueType, Undefined] = undefined
+    minHeight: Union[ValueType, Undefined] = undefined
+    minWidth: Union[ValueType, Undefined] = undefined
     padding: Union[ValueType, Undefined] = undefined
-    padding_top: Union[ValueType, Undefined] = undefined
-    padding_bottom: Union[ValueType, Undefined] = undefined
-    padding_left: Union[ValueType, Undefined] = undefined
-    padding_right: Union[ValueType, Undefined] = undefined
+    paddingTop: Union[ValueType, Undefined] = undefined
+    paddingBottom: Union[ValueType, Undefined] = undefined
+    paddingLeft: Union[ValueType, Undefined] = undefined
+    paddingRight: Union[ValueType, Undefined] = undefined
     margin: Union[ValueType, Undefined] = undefined
-    margin_top: Union[ValueType, Undefined] = undefined
-    margin_left: Union[ValueType, Undefined] = undefined
-    margin_right: Union[ValueType, Undefined] = undefined
-    margin_bottom: Union[ValueType, Undefined] = undefined
+    marginTop: Union[ValueType, Undefined] = undefined
+    marginLeft: Union[ValueType, Undefined] = undefined
+    marginRight: Union[ValueType, Undefined] = undefined
+    marginBottom: Union[ValueType, Undefined] = undefined
 
     overflow: Union[_OverflowType, Undefined] = undefined
-    overflow_y: Union[_OverflowType, Undefined] = undefined
-    overflow_x: Union[_OverflowType, Undefined] = undefined
+    overflowY: Union[_OverflowType, Undefined] = undefined
+    overflowX: Union[_OverflowType, Undefined] = undefined
 
     color: Union[ValueType, Undefined] = undefined
-    background_color: Union[ValueType, Undefined] = undefined
-    font_size: Union[ValueType, Undefined] = undefined
-    font_family: Union[str, Undefined] = undefined
+    backgroundColor: Union[ValueType, Undefined] = undefined
+    fontSize: Union[ValueType, Undefined] = undefined
+    fontFamily: Union[str, Undefined] = undefined
     border: Union[str, Undefined] = undefined
-    border_top: Union[ValueType, Undefined] = undefined
-    border_left: Union[ValueType, Undefined] = undefined
-    border_right: Union[ValueType, Undefined] = undefined
-    border_bottom: Union[ValueType, Undefined] = undefined
-    border_color: Union[str, Undefined] = undefined
-    border_radius: Union[ValueType, Undefined] = undefined
-    border_image: Union[str, Undefined] = undefined
+    borderTop: Union[ValueType, Undefined] = undefined
+    borderLeft: Union[ValueType, Undefined] = undefined
+    borderRight: Union[ValueType, Undefined] = undefined
+    borderBottom: Union[ValueType, Undefined] = undefined
+    borderColor: Union[str, Undefined] = undefined
+    borderRadius: Union[ValueType, Undefined] = undefined
+    borderImage: Union[str, Undefined] = undefined
 
-    white_space: Union[Literal["normal", "pre", "nowrap", "pre-wrap",
+    whiteSpace: Union[Literal["normal", "pre", "nowrap", "pre-wrap",
                                "pre-line", "break-spaces"],
                        Undefined] = undefined
-    word_break: Union[Literal["normal", "break-all", "keep-all", "break-word"],
+    wordBreak: Union[Literal["normal", "break-all", "keep-all", "break-word"],
                       Undefined] = undefined
-    pointer_events: Union[PointerEventsProperties, Undefined] = undefined
+    pointerEvents: Union[PointerEventsProperties, Undefined] = undefined
 
 
 @dataclasses.dataclass
@@ -164,12 +164,12 @@ class MUIContainerBase(ContainerBase[T_container_props, T_child]):
 
 @dataclasses.dataclass
 class FlexBoxProps(FlexComponentBaseProps):
-    align_content: Union[Literal["flex-start", "flex-end", "center", "space-between", "space-around", "stretch"], Undefined] = undefined
-    align_items: Union[Literal["flex-start", "flex-end", "center", "baseline", "stretch"], Undefined] = undefined
-    justify_content: Union[Literal["flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly"], Undefined] = undefined
-    flex_direction: Union[Literal["row", "row-reverse", "column", "column-reverse"], Undefined] = undefined
-    flex_wrap: Union[Literal["nowrap", "wrap", "wrap-reverse"], Undefined] = undefined
-    flex_flow: Union[str, Undefined] = undefined
+    alignContent: Union[Literal["flex-start", "flex-end", "center", "space-between", "space-around", "stretch"], Undefined] = undefined
+    alignItems: Union[Literal["flex-start", "flex-end", "center", "baseline", "stretch"], Undefined] = undefined
+    justifyContent: Union[Literal["flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly"], Undefined] = undefined
+    flexDirection: Union[Literal["row", "row-reverse", "column", "column-reverse"], Undefined] = undefined
+    flexWrap: Union[Literal["nowrap", "wrap", "wrap-reverse"], Undefined] = undefined
+    flexFlow: Union[str, Undefined] = undefined
 
 
 # we can't let mui use three component.
@@ -182,13 +182,13 @@ class MUIFlexBoxProps(FlexBoxProps, ContainerBaseProps):
 class MUIFlexBoxWithDndProps(MUIFlexBoxProps):
     draggable: Union[bool, Undefined] = undefined
     droppable: Union[bool, Undefined] = undefined
-    allowed_dnd_types: Union[str, List[str], Undefined] = undefined
-    sx_over_drop: Union[Dict[str, Any], Undefined] = undefined
-    allow_file: Union[bool, Undefined] = undefined
-    drag_type: Union[str, Undefined] = undefined
-    drag_data: Union[Dict[str, Any], Undefined] = undefined
-    drag_in_child: Union[bool, Undefined] = undefined
-    take_drag_ref: Union[bool, Undefined] = undefined
+    allowedDndTypes: Union[str, List[str], Undefined] = undefined
+    sxOverDrop: Union[Dict[str, Any], Undefined] = undefined
+    allowFile: Union[bool, Undefined] = undefined
+    dragType: Union[str, Undefined] = undefined
+    dragData: Union[Dict[str, Any], Undefined] = undefined
+    dragInChild: Union[bool, Undefined] = undefined
+    takeDragRef: Union[bool, Undefined] = undefined
 
 
 _TypographyVarient: TypeAlias = Literal['body1', 'body2', 'button', 'caption',
@@ -329,7 +329,7 @@ class AlertProps(MUIComponentBaseProps):
     value: str = ""
     severity: _SEVERITY_TYPES = "info"
     title: Union[str, Undefined] = undefined
-    mui_color: Union[_SEVERITY_TYPES, Undefined] = undefined
+    muiColor: Union[_SEVERITY_TYPES, Undefined] = undefined
     variant: Union[Literal["filled", "outlined", "standard"],
                    Undefined] = undefined
 
@@ -413,14 +413,14 @@ _TooltipPlacement: TypeAlias = Literal['top', 'right', 'left', 'bottom']
 @dataclasses.dataclass
 class ButtonProps(MUIComponentBaseProps):
     name: str = ""
-    mui_color: Union[_BtnGroupColor, Undefined] = undefined
+    muiColor: Union[_BtnGroupColor, Undefined] = undefined
     disabled: Union[bool, Undefined] = undefined
-    full_width: Union[bool, Undefined] = undefined
+    fullWidth: Union[bool, Undefined] = undefined
     size: Union[Literal["small", "medium", "large"], Undefined] = undefined
     variant: Union[Literal["contained", "outlined", "text"],
                    Undefined] = undefined
     loading: Union[Undefined, bool] = undefined
-    loading_indicator: Union[Undefined, str] = undefined
+    loadingIndicator: Union[Undefined, str] = undefined
 
 
 class Button(MUIComponentBase[ButtonProps]):
@@ -496,10 +496,10 @@ class IconType(enum.IntEnum):
 @dataclasses.dataclass
 class IconProps(BasicProps):
     icon: int = 0
-    icon_size: Union[Literal["small", "medium", "large", "inherit"],
+    iconSize: Union[Literal["small", "medium", "large", "inherit"],
                      Undefined] = undefined
-    icon_font_size: Union[NumberType, Undefined] = undefined
-    take_drag_ref: Union[Undefined, bool] = undefined
+    iconFontSize: Union[NumberType, Undefined] = undefined
+    takeDragRef: Union[Undefined, bool] = undefined
 
 
 class Icon(MUIComponentBase[IconProps]):
@@ -522,20 +522,20 @@ class Icon(MUIComponentBase[IconProps]):
 class IconButtonProps(MUIComponentBaseProps):
 
     tooltip: Union[str, Undefined] = undefined
-    tooltip_placement: Union[_TooltipPlacement, Undefined] = undefined
-    mui_color: Union[_BtnGroupColor, Undefined] = undefined
+    tooltipPlacement: Union[_TooltipPlacement, Undefined] = undefined
+    muiColor: Union[_BtnGroupColor, Undefined] = undefined
     disabled: Union[bool, Undefined] = undefined
     size: Union[Literal["small", "medium", "large"], Undefined] = undefined
     icon: int = 0
-    icon_size: Union[Literal["small", "medium", "large", "inherit"],
+    iconSize: Union[Literal["small", "medium", "large", "inherit"],
                      Undefined] = undefined
-    icon_font_size: Union[NumberType, Undefined] = undefined
-    tooltip_multiline: Union[bool, Undefined] = undefined
-    progress_color: Union[_BtnGroupColor, Undefined] = undefined
-    progress_size: Union[NumberType, Undefined] = undefined
+    iconFontSize: Union[NumberType, Undefined] = undefined
+    tooltipMultiline: Union[bool, Undefined] = undefined
+    progressColor: Union[_BtnGroupColor, Undefined] = undefined
+    progressSize: Union[NumberType, Undefined] = undefined
     # if defined, will show a confirm dialog before executing the callback
-    confirm_message: Union[str, Undefined] = undefined
-    confirm_title: Union[str, Undefined] = undefined
+    confirmMessage: Union[str, Undefined] = undefined
+    confirmTitle: Union[str, Undefined] = undefined
 
 
 class IconButton(MUIComponentBase[IconButtonProps]):
@@ -572,9 +572,9 @@ class IconButton(MUIComponentBase[IconButtonProps]):
 class DialogProps(ContainerBaseProps):
     open: bool = False
     title: Union[str, Undefined] = undefined
-    full_screen: Union[str, Undefined] = undefined
-    full_width: Union[str, Undefined] = undefined
-    max_width: Union[Literal['xs', 'sm', "md", "lg", "xl"],
+    fullScreen: Union[str, Undefined] = undefined
+    fullWidth: Union[str, Undefined] = undefined
+    maxWidth: Union[Literal['xs', 'sm', "md", "lg", "xl"],
                      Undefined] = undefined
     scroll: Union[Literal["body", "paper"], Undefined] = undefined
 
@@ -632,9 +632,9 @@ class Dialog(MUIContainerBase[DialogProps, MUIComponentType]):
 class ButtonGroupProps(MUIFlexBoxProps):
     orientation: Union[Literal["horizontal", "vertical"],
                        Undefined] = undefined
-    mui_color: Union[_BtnGroupColor, Undefined] = undefined
+    muiColor: Union[_BtnGroupColor, Undefined] = undefined
     disabled: Union[bool, Undefined] = undefined
-    full_width: Union[bool, Undefined] = undefined
+    fullWidth: Union[bool, Undefined] = undefined
     size: Union[Literal["small", "medium", "large"], Undefined] = undefined
     variant: Union[Literal["contained", "outlined", "text"],
                    Undefined] = undefined
@@ -668,15 +668,15 @@ class ToggleButtonProps(MUIComponentBaseProps):
     name: str = ""
     selected: Union[Undefined, bool] = undefined
     tooltip: Union[str, Undefined] = undefined
-    tooltip_placement: Union[_TooltipPlacement, Undefined] = undefined
-    mui_color: Union[_BtnGroupColor, Undefined] = undefined
+    tooltipPlacement: Union[_TooltipPlacement, Undefined] = undefined
+    muiColor: Union[_BtnGroupColor, Undefined] = undefined
     disabled: Union[bool, Undefined] = undefined
-    full_width: Union[bool, Undefined] = undefined
+    fullWidth: Union[bool, Undefined] = undefined
     size: Union[Literal["small", "medium", "large"], Undefined] = undefined
     icon: Union[int, Undefined] = undefined
-    icon_size: Union[Literal["small", "medium", "large"],
+    iconSize: Union[Literal["small", "medium", "large"],
                      Undefined] = undefined
-    icon_font_size: Union[NumberType, Undefined] = undefined
+    iconFontSize: Union[NumberType, Undefined] = undefined
 
 
 class ToggleButton(MUIComponentBase[ToggleButtonProps]):
@@ -734,17 +734,17 @@ class ToggleButtonGroupProps(MUIFlexBoxProps):
     value: Optional[Union[ValueType, List[ValueType]]] = None
     orientation: Union[Literal["horizontal", "vertical"],
                        Undefined] = undefined
-    mui_color: Union[_BtnGroupColor, Undefined] = undefined
+    muiColor: Union[_BtnGroupColor, Undefined] = undefined
     disabled: Union[bool, Undefined] = undefined
-    full_width: Union[bool, Undefined] = undefined
+    fullWidth: Union[bool, Undefined] = undefined
     exclusive: Union[bool, Undefined] = undefined
     size: Union[Literal["small", "medium", "large"], Undefined] = undefined
-    name_or_icons: List[ValueType] = dataclasses.field(default_factory=list)
+    nameOrIcons: List[ValueType] = dataclasses.field(default_factory=list)
     values: List[ValueType] = dataclasses.field(default_factory=list)
-    icon_size: Union[Literal["small", "medium", "large"],
+    iconSize: Union[Literal["small", "medium", "large"],
                      Undefined] = undefined
-    icon_font_size: Union[NumberType, Undefined] = undefined
-    enforce_value_set: Union[bool, Undefined] = undefined
+    iconFontSize: Union[NumberType, Undefined] = undefined
+    enforceValueSet: Union[bool, Undefined] = undefined
 
 
 class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
@@ -766,9 +766,9 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
             assert isinstance(v,
                               ToggleButton), "all childs must be toggle button"
             if not isinstance(v.props.icon, Undefined):
-                self.props.name_or_icons.append(v.props.icon)
+                self.props.nameOrIcons.append(v.props.icon)
             else:
-                self.props.name_or_icons.append(v.props.name)
+                self.props.nameOrIcons.append(v.props.name)
             self.props.values.append(v.props.value)
         self.props.value = value
         self.props.exclusive = exclusive
@@ -805,7 +805,7 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
             assert value in values
         await self.send_and_wait(
             self.update_event(value=value,
-                              name_or_icons=name_or_icons,
+                              nameOrIcons=name_or_icons,
                               values=values))
 
     @property
@@ -884,7 +884,7 @@ class AccordionProps(MUIFlexBoxProps):
     disabled: Union[Undefined, bool] = undefined
     expanded: bool = False
     square: Union[Undefined, bool] = undefined
-    disable_gutters: Union[Undefined, bool] = undefined
+    disableGutters: Union[Undefined, bool] = undefined
 
 
 class Accordion(MUIContainerBase[AccordionProps, Union[AccordionDetails,
@@ -981,7 +981,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
         self.event_drop = self._create_event_slot(FrontendEventType.Drop)
 
     def as_drag_handle(self):
-        self.props.take_drag_ref = True
+        self.props.takeDragRef = True
         return self
 
     @property
@@ -1006,7 +1006,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
         user_obj = self._get_user_object()
         metas = reload_mgr.query_type_method_meta(type(user_obj), no_code=True, include_base=True)
         res = FlowSpecialMethods(metas)
-        res.bind(self)
+        res.bind(user_obj)
         return res
 
     def _get_user_object(self):
@@ -1063,13 +1063,13 @@ class MUIList(MUIContainerBase[MUIListProps, MUIComponentType]):
 
 def VBox(layout: LayoutType, wrap: bool = False):
     res = FlexBox(children=layout)
-    res.prop(flex_flow="column wrap" if wrap else "column nowrap")
+    res.prop(flexFlow="column wrap" if wrap else "column nowrap")
     return res
 
 
 def HBox(layout: LayoutType, wrap: bool = False):
     res = FlexBox(children=layout)
-    res.prop(flex_flow="row wrap" if wrap else "row nowrap")
+    res.prop(flexFlow="row wrap" if wrap else "row nowrap")
     return res
 
 
@@ -1160,10 +1160,10 @@ _HTMLInputType: TypeAlias = Literal["button", "checkbox", "color", "date",
 class InputBaseProps(MUIComponentBaseProps):
     multiline: bool = False
     value: Union[Undefined, str] = undefined
-    default_value: Union[Undefined, str] = undefined
+    defaultValue: Union[Undefined, str] = undefined
     disabled: Union[bool, Undefined] = undefined
     error: Union[bool, Undefined] = undefined
-    full_width: Union[bool, Undefined] = undefined
+    fullWidth: Union[bool, Undefined] = undefined
     rows: Union[NumberType, str, Undefined] = undefined
     type: Union[Undefined, _HTMLInputType] = undefined
 
@@ -1239,9 +1239,9 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
 @dataclasses.dataclass
 class TextFieldProps(InputBaseProps):
     label: str = ""
-    mui_color: Union[_StdColorNoDefault, Undefined] = undefined
+    muiColor: Union[_StdColorNoDefault, Undefined] = undefined
     size: Union[Undefined, Literal["small", "medium"]] = undefined
-    mui_margin: Union[Undefined, Literal["dense", "none", "normal"]] = "dense"
+    muiMargin: Union[Undefined, Literal["dense", "none", "normal"]] = "dense"
     variant: Union[Undefined, Literal["filled", "outlined",
                                       "standard"]] = undefined
 
@@ -1272,8 +1272,8 @@ class TextField(_InputBaseComponent[TextFieldProps]):
 @dataclasses.dataclass
 class InputProps(InputBaseProps):
     placeholder: str = ""
-    mui_color: Union[Literal["primary", "secondary"], Undefined] = undefined
-    mui_margin: Union[Undefined, Literal["dense", "none"]] = "dense"
+    muiColor: Union[Literal["primary", "secondary"], Undefined] = undefined
+    muiMargin: Union[Undefined, Literal["dense", "none"]] = "dense"
 
 
 class Input(_InputBaseComponent[InputProps]):
@@ -1305,7 +1305,7 @@ class MonacoEditorProps(MUIComponentBaseProps):
     language: Union[str, Undefined] = undefined
     path: Union[str, Undefined] = undefined
     debounce: Union[NumberType, Undefined] = undefined
-    lsp_port: Union[int, Undefined] = undefined
+    lspPort: Union[int, Undefined] = undefined
 
 
 class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
@@ -1363,8 +1363,8 @@ class SwitchProps(MUIComponentBaseProps):
     label: str = ""
     checked: bool = False
     size: Union[Literal["small", "medium"], Undefined] = undefined
-    mui_color: Union[_BtnGroupColor, Undefined] = undefined
-    label_placement: Union[Literal["top", "start", "bottom", "end"],
+    muiColor: Union[_BtnGroupColor, Undefined] = undefined
+    labelPlacement: Union[Literal["top", "start", "bottom", "end"],
                            Undefined] = undefined
 
 
@@ -1444,7 +1444,7 @@ class SelectProps(MUIComponentBaseProps):
                       ValueType]] = dataclasses.field(default_factory=list)
     value: ValueType = ""
     size: Union[Undefined, Literal["small", "medium"]] = undefined
-    mui_margin: Union[Undefined, Literal["dense", "none",
+    muiMargin: Union[Undefined, Literal["dense", "none",
                                          "normal"]] = undefined
     variant: Union[Undefined, Literal["filled", "outlined",
                                       "standard"]] = undefined
@@ -1641,31 +1641,31 @@ class AutocompletePropsBase(MUIComponentBaseProps):
     # input_value: str = ""
     options: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
     size: Union[Undefined, Literal["small", "medium"]] = undefined
-    input_margin: Union[Undefined, Literal["dense", "none",
+    inputMargin: Union[Undefined, Literal["dense", "none",
                                            "normal"]] = undefined
-    input_variant: Union[Undefined, Literal["filled", "outlined",
+    inputVariant: Union[Undefined, Literal["filled", "outlined",
                                             "standard"]] = undefined
     variant: Union[Undefined, Literal["checkbox", "standard"]] = undefined
 
-    disable_clearable: Union[Undefined, bool] = undefined
-    disable_close_on_select: Union[Undefined, bool] = undefined
-    clear_on_escape: Union[Undefined, bool] = undefined
-    include_input_in_list: Union[Undefined, bool] = undefined
-    disable_list_wrap: Union[Undefined, bool] = undefined
-    open_on_focus: Union[Undefined, bool] = undefined
-    auto_highlight: Union[Undefined, bool] = undefined
-    auto_select: Union[Undefined, bool] = undefined
+    disableClearable: Union[Undefined, bool] = undefined
+    disableCloseOnSelect: Union[Undefined, bool] = undefined
+    clearOnEscape: Union[Undefined, bool] = undefined
+    includeInputInList: Union[Undefined, bool] = undefined
+    disableListWrap: Union[Undefined, bool] = undefined
+    openOnFocus: Union[Undefined, bool] = undefined
+    autoHighlight: Union[Undefined, bool] = undefined
+    autoSelect: Union[Undefined, bool] = undefined
     disabled: Union[Undefined, bool] = undefined
-    disable_portal: Union[Undefined, bool] = undefined
-    blur_on_select: Union[Undefined, bool] = undefined
-    clear_on_blur: Union[Undefined, bool] = undefined
-    select_on_focus: Union[Undefined, bool] = undefined
-    read_only: Union[Undefined, bool] = undefined
-    free_solo: Union[Undefined, bool] = undefined
-    handle_home_end_keys: Union[Undefined, bool] = undefined
-    group_by_key: Union[Undefined, str] = undefined
-    limit_tags: Union[Undefined, int] = undefined
-    add_option: Union[Undefined, bool] = undefined
+    disablePortal: Union[Undefined, bool] = undefined
+    blurOnSelect: Union[Undefined, bool] = undefined
+    clearOnBlur: Union[Undefined, bool] = undefined
+    selectOnFocus: Union[Undefined, bool] = undefined
+    readOnly: Union[Undefined, bool] = undefined
+    freeSolo: Union[Undefined, bool] = undefined
+    handleHomeEndKeys: Union[Undefined, bool] = undefined
+    groupByKey: Union[Undefined, str] = undefined
+    limitTags: Union[Undefined, int] = undefined
+    addOption: Union[Undefined, bool] = undefined
 
 
 @dataclasses.dataclass
@@ -1866,7 +1866,7 @@ class SliderProps(MUIComponentBaseProps):
     ranges: Tuple[NumberType, NumberType, NumberType] = (0, 1, 0)
     value: NumberType = 0
     vertical: Union[Undefined, bool] = undefined
-    value_input: Union[Undefined, bool] = undefined
+    valueInput: Union[Undefined, bool] = undefined
 
 
 class Slider(MUIComponentBase[SliderProps]):
@@ -1965,7 +1965,7 @@ class TaskLoopProps(MUIComponentBaseProps):
     label: str = ""
     progresses: List[float] = dataclasses.field(default_factory=list)
     linear: Union[Undefined, bool] = undefined
-    task_status: Union[Undefined, int] = undefined
+    taskStatus: Union[Undefined, int] = undefined
 
 
 class TaskLoop(MUIComponentBase[TaskLoopProps]):
@@ -2060,7 +2060,7 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
     async def clear(self):
         await cancel_task(self._task)
         await self.send_and_wait(
-            self.update_event(task_status=UIRunStatus.Stop.value,
+            self.update_event(taskStatus=UIRunStatus.Stop.value,
                               progresses=[0]))
 
     async def headless_run(self):
@@ -2165,11 +2165,11 @@ class RawTaskLoop(MUIComponentBase[TaskLoopProps]):
 class TypographyProps(MUIComponentBaseProps):
     align: Union[Literal["center", "inherit", "justify", "left", "right"],
                  Undefined] = undefined
-    gutter_bottom: Union[bool, Undefined] = undefined
-    no_wrap: Union[bool, Undefined] = undefined
+    gutterBottom: Union[bool, Undefined] = undefined
+    noWrap: Union[bool, Undefined] = undefined
     variant: Union[_TypographyVarient, Undefined] = undefined
     paragraph: Union[bool, Undefined] = undefined
-    mui_color: Union[_StdColorNoDefault, Undefined] = undefined
+    muiColor: Union[_StdColorNoDefault, Undefined] = undefined
     value: str = ""
 
 
@@ -2203,7 +2203,7 @@ class Typography(MUIComponentBase[TypographyProps]):
 @dataclasses.dataclass
 class MarkdownProps(MUIComponentBaseProps):
     katex: Union[bool, Undefined] = undefined
-    code_highlight: Union[bool, Undefined] = undefined
+    codeHighlight: Union[bool, Undefined] = undefined
     emoji: Union[bool, Undefined] = undefined
     value: str = ""
 
@@ -2279,7 +2279,7 @@ class Paper(MUIContainerBase[PaperProps, MUIComponentType]):
 @dataclasses.dataclass
 class FormControlProps(MUIFlexBoxProps):
     size: Union[Undefined, Literal["small", "medium"]] = undefined
-    mui_margin: Union[Undefined, Literal["dense", "none",
+    muiMargin: Union[Undefined, Literal["dense", "none",
                                          "normal"]] = undefined
 
 
@@ -2307,8 +2307,8 @@ class CollapseProps(MUIFlexBoxProps):
                        Undefined] = undefined
     timeout: Union[NumberType, Undefined, Literal["auto"]] = undefined
     triggered: Union[bool, Undefined] = undefined
-    collapsed_size: Union[NumberType, Undefined] = undefined
-    unmount_on_exit: Union[bool, Undefined] = undefined
+    collapsedSize: Union[NumberType, Undefined] = undefined
+    unmountOnExit: Union[bool, Undefined] = undefined
 
 
 class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
@@ -2352,7 +2352,7 @@ class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
 
 @dataclasses.dataclass
 class ChipProps(MUIComponentBaseProps):
-    mui_color: Union[_StdColor, str, Undefined] = undefined
+    muiColor: Union[_StdColor, str, Undefined] = undefined
     clickable: Union[bool, Undefined] = undefined
     size: Union[Literal["small", "medium"], Undefined] = undefined
     variant: Union[Literal["filled", "outlined"], Undefined] = undefined
@@ -2481,12 +2481,12 @@ class TabListProps(MUIFlexBoxProps):
                        Undefined] = undefined
     variant: Union[Literal["scrollable", "vertical", "fullWidth"],
                    Undefined] = undefined
-    text_color: Union[Literal["inherit", "primary", "secondary"],
+    textColor: Union[Literal["inherit", "primary", "secondary"],
                       Undefined] = undefined
     centered: Union[Undefined, bool] = undefined
-    indicator_color: Union[Literal["primary", "secondary"],
+    indicatorColor: Union[Literal["primary", "secondary"],
                            Undefined] = undefined
-    visible_scrollbar: Union[Undefined, bool] = undefined
+    visibleScrollbar: Union[Undefined, bool] = undefined
 
 
 class TabList(MUIComponentBase[TabListProps]):
@@ -2590,10 +2590,10 @@ class TabPanel(MUIContainerBase[TabPanelProps, MUIComponentType]):
 
 @dataclasses.dataclass
 class AllotmentProps(MUIFlexBoxProps):
-    default_sizes: Union[List[NumberType], Undefined] = undefined
-    max_size: Union[NumberType, Undefined] = undefined
-    min_size: Union[NumberType, Undefined] = undefined
-    proportional_layout: Union[bool, Undefined] = undefined
+    defaultSizes: Union[List[NumberType], Undefined] = undefined
+    maxSize: Union[NumberType, Undefined] = undefined
+    minSize: Union[NumberType, Undefined] = undefined
+    proportionalLayout: Union[bool, Undefined] = undefined
     separator: Union[bool, Undefined] = undefined
     snap: Union[bool, Undefined] = undefined
     vertical: Union[bool, Undefined] = undefined
@@ -2601,10 +2601,10 @@ class AllotmentProps(MUIFlexBoxProps):
 
 @dataclasses.dataclass
 class AllotmentPaneProps(MUIFlexBoxProps):
-    max_size: Union[NumberType, Undefined] = undefined
-    min_size: Union[NumberType, Undefined] = undefined
+    maxSize: Union[NumberType, Undefined] = undefined
+    minSize: Union[NumberType, Undefined] = undefined
     priority: Union[NumberType, Undefined] = undefined
-    preferred_size: Union[ValueType, Undefined] = undefined
+    preferredSize: Union[ValueType, Undefined] = undefined
     snap: Union[bool, Undefined] = undefined
     visible: Union[bool, Undefined] = undefined
 
@@ -2647,7 +2647,7 @@ class AllotmentPane(MUIContainerBase[AllotmentPaneProps, MUIComponentType]):
 
 @dataclasses.dataclass
 class FlexLayoutProps(ContainerBaseProps):
-    model_json: Union[Any, Undefined] = undefined
+    modelJson: Union[Any, Undefined] = undefined
     # model change save debounce.
     debounce: Union[NumberType, Undefined] = undefined
 
@@ -2779,14 +2779,14 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
         self.event_reload = self._create_event_slot(FrontendEventType.ComplexLayoutTabReload)
 
     def _on_save_model(self, model):
-        self.props.model_json = model
+        self.props.modelJson = model
 
     def get_props(self):
         res = super().get_props()
         # we delay init model here because we need
         # to wait for all components to be initialized
         # to get uid of child components.
-        if isinstance(self.props.model_json, Undefined):
+        if isinstance(self.props.modelJson, Undefined):
             res["modelJson"] = {
                 "global": {
                     "tabEnableClose": True
@@ -2818,9 +2818,9 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
 @dataclasses.dataclass
 class CircularProgressProps(MUIFlexBoxProps):
     value: NumberType = 0
-    label_color: Union[Undefined, str] = undefined
-    mui_color: Union[_BtnGroupColor, Undefined] = undefined
-    label_variant: Union[_TypographyVarient, Undefined] = undefined
+    labelColor: Union[Undefined, str] = undefined
+    muiColor: Union[_BtnGroupColor, Undefined] = undefined
+    labelVariant: Union[_TypographyVarient, Undefined] = undefined
     size: Union[Undefined, str, NumberType] = undefined
     variant: Union[Undefined, Literal["determinate",
                                       "indeterminate"]] = undefined
@@ -2850,9 +2850,9 @@ class CircularProgress(MUIComponentBase[CircularProgressProps]):
 @dataclasses.dataclass
 class LinearProgressProps(MUIFlexBoxProps):
     value: NumberType = 0
-    label_color: Union[Undefined, str] = undefined
-    mui_color: Union[_BtnGroupColor, Undefined] = undefined
-    label_variant: Union[_TypographyVarient, Undefined] = undefined
+    labelColor: Union[Undefined, str] = undefined
+    muiColor: Union[_BtnGroupColor, Undefined] = undefined
+    labelVariant: Union[_TypographyVarient, Undefined] = undefined
     variant: Union[Undefined, Literal["determinate", "indeterminate", "buffer",
                                       "query"]] = undefined
 
@@ -2910,12 +2910,12 @@ def _default_json_node():
 @dataclasses.dataclass
 class JsonLikeTreeProps(MUIFlexBoxProps):
     tree: JsonLikeNode = dataclasses.field(default_factory=_default_json_node)
-    multi_select: Union[Undefined, bool] = undefined
-    disabled_items_focusable: Union[Undefined, bool] = undefined
-    disable_selection: Union[Undefined, bool] = undefined
-    ignore_root: Union[Undefined, bool] = undefined
-    use_fast_tree: Union[Undefined, bool] = undefined
-    context_menus: Union[Undefined, List[ContextMenuData]] = undefined
+    multiSelect: Union[Undefined, bool] = undefined
+    disabledItemsFocusable: Union[Undefined, bool] = undefined
+    disableSelection: Union[Undefined, bool] = undefined
+    ignoreRoot: Union[Undefined, bool] = undefined
+    useFastTree: Union[Undefined, bool] = undefined
+    contextMenus: Union[Undefined, List[ContextMenuData]] = undefined
 
 
 class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
@@ -3018,7 +3018,7 @@ class DynamicControlsProps(MUIFlexBoxProps):
     # the control won't be updated, so we must provide 
     # a different react key to force component 
     # remount.
-    react_key: Union[Undefined, str] = undefined
+    reactKey: Union[Undefined, str] = undefined
 
 
 class DynamicControls(MUIComponentBase[DynamicControlsProps]):
@@ -3089,8 +3089,8 @@ class DataListControlType(enum.IntEnum):
 
 @dataclasses.dataclass
 class MUIDataFlexBoxWithDndProps(MUIFlexBoxWithDndProps):
-    data_list: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
-    id_key: str = "id"
+    dataList: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
+    idKey: str = "id"
     virtualized: Union[Undefined, bool] = undefined
 
 @dataclasses.dataclass
@@ -3138,7 +3138,7 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps, MUIComponentType]
     
     async def update_datas_in_index(self, updates: List[DataUpdate]):
         for du in updates:
-            self.props.data_list[du.index].update(du.update)
+            self.props.dataList[du.index].update(du.update)
         return await self.send_and_wait(
             self.create_comp_event({
                 "type": DataListControlType.SetData.value,
@@ -3154,7 +3154,7 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps, MUIComponentType]
         assert not isinstance(key, Undefined) and not isinstance(indexes, Undefined)
         assert len(indexes) == 1, "update data list only supports single index"
         data = event.data 
-        data_item = self.props.data_list[indexes[0]]
+        data_item = self.props.dataList[indexes[0]]
         assert prop_name in data_item
         data_item[prop_name] = data
         await self.update_data_in_index(indexes[0], {prop_name: data})
@@ -3198,16 +3198,16 @@ class DataGridColumnDef:
 class DataGridProps(MUIFlexBoxProps):
     # we can't put DataGridColumnDef here because
     # it may contain component.
-    data_list: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
-    id_key: Union[Undefined, str] = undefined
-    row_hover: Union[Undefined, bool] = undefined
+    dataList: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
+    idKey: Union[Undefined, str] = undefined
+    rowHover: Union[Undefined, bool] = undefined
     virtualized: Union[Undefined, bool] = undefined
-    virtualized_inf_scrolling: Union[Undefined, bool] = undefined
-    enable_row_selection: Union[Undefined, bool] = undefined
-    enable_multi_row_selection: Union[Undefined, bool] = False
-    debug_table: Union[Undefined, bool] = undefined
-    master_detail_use_fetch: Union[Undefined, bool] = undefined
-    sticky_header: Union[Undefined, bool] = undefined
+    virtualizedInfScrolling: Union[Undefined, bool] = undefined
+    enableRowSelection: Union[Undefined, bool] = undefined
+    enableMultiRowSelection: Union[Undefined, bool] = False
+    debugTable: Union[Undefined, bool] = undefined
+    masterDetailUseFetch: Union[Undefined, bool] = undefined
+    stickyHeader: Union[Undefined, bool] = undefined
     size: Union[Undefined, Literal["small", "medium"]] = undefined
     
 
@@ -3233,7 +3233,7 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
                                                 FrontendEventType.DataGridRowSelection.value])
         # TODO check set_new_layout argument, it must be DataGrid.ChildDef
         if init_data_list is not None:
-            self.props.data_list = init_data_list
+            self.props.dataList = init_data_list
         self.event_fetch_detail = self._create_event_slot(FrontendEventType.DataGridFetchDetail)
         self.event_row_selection = self._create_event_slot(FrontendEventType.DataGridRowSelection)
         # backend events
@@ -3259,7 +3259,7 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
     
     async def update_datas_in_index(self, updates: List[DataUpdate]):
         for du in updates:
-            self.props.data_list[du.index].update(du.update)
+            self.props.dataList[du.index].update(du.update)
         return await self.send_and_wait(
             self.create_comp_event({
                 "type": DataListControlType.SetData.value,
@@ -3276,7 +3276,7 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         assert not isinstance(key, Undefined) and not isinstance(indexes, Undefined)
         assert len(indexes) == 1, "update data list only supports single index"
         data = event.data 
-        data_item = self.props.data_list[indexes[0]]
+        data_item = self.props.dataList[indexes[0]]
         assert prop_name in data_item
         data_item[prop_name] = data
         await self.update_data_in_index(indexes[0], {prop_name: data})
@@ -3287,8 +3287,8 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         """
         if FrontendEventType.Change.value in comp._flow_allowed_events:
             # TODO change all control components to use value as its data prop name
-            if "default_value" in comp._prop_field_names:
-                comp.set_override_props(default_value=prop_name)
+            if "defaultValue" in comp._prop_field_names:
+                comp.set_override_props(defaultValue=prop_name)
             elif "value" in comp._prop_field_names:
                 comp.set_override_props(value=prop_name)
             elif "checked" in comp._prop_field_names:

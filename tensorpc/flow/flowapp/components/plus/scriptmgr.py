@@ -80,7 +80,7 @@ class ScriptManager(mui.FlexBox):
             [],
             self._on_script_select,
         ).prop(size="small",
-               input_margin="dense",
+               inputMargin="dense",
                padding="0 3px 0 3px",
                **CommonOptions.AddableAutocomplete)
         self.langs = mui.ToggleButtonGroup([
@@ -90,24 +90,24 @@ class ScriptManager(mui.FlexBox):
             mui.ToggleButton("bash", name="BASH"),
 
         ], True, self._on_lang_select).prop(value="python",
-                                            enforce_value_set=True)
+                                            enforceValueSet=True)
         self._enable_save_watch = mui.ToggleButton(
                     "value",
-                    mui.IconType.Visibility).prop(mui_color="secondary", size="small")
+                    mui.IconType.Visibility).prop(muiColor="secondary", size="small")
         self._run_button = mui.IconButton(
                     mui.IconType.PlayArrow,
-                    self._on_run_script).prop(progress_color="primary")
+                    self._on_run_script).prop(progressColor="primary")
         self.init_add_layout([
             mui.HBox([
                 self.scripts.prop(flex=1),
                 self._run_button,
                 self._enable_save_watch,
                 self.langs,
-            ]).prop(align_items="center"),
+            ]).prop(alignItems="center"),
             self.code_editor,
         ])
         self.prop(flex=1,
-                  flex_direction="column",
+                  flexDirection="column",
                   width="100%",
                   height="100%",
                   overflow="hidden")
