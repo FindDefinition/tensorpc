@@ -142,21 +142,21 @@ async def trace(traced_locs: List[Union[str, Path, types.ModuleType]],
         yield
 
 
-async def set_object(obj, key: str):
+async def set_object(obj, key: str, expand_level: int = 0):
     comp = find_component(plus.ObjectInspector)
     if comp is None:
         return
     assert comp is not None, "you must add inspector to your UI"
-    await comp.set_object(obj, key)
+    await comp.set_object(obj, key, expand_level=expand_level)
 
 
-def set_object_sync(obj, key: str):
+def set_object_sync(obj, key: str, expand_level: int = 0):
     comp = find_component(plus.ObjectInspector)
     if comp is None:
         return
 
     assert comp is not None, "you must add inspector to your UI"
-    return comp.set_object_sync(obj, key, get_app()._loop)
+    return comp.set_object_sync(obj, key, get_app()._loop, expand_level)
 
 
 async def read_item(uid: str):

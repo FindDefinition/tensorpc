@@ -52,6 +52,9 @@ FOLDER_TYPES = {
     mui.JsonLikeType.ListFolder.value, mui.JsonLikeType.DictFolder.value
 }
 
+_SHOULD_EXPAND_TYPES = {mui.JsonLikeType.List.value, mui.JsonLikeType.Dict.value, mui.JsonLikeType.Object.value,
+                            mui.JsonLikeType.ListFolder.value, mui.JsonLikeType.DictFolder.value,
+                            mui.JsonLikeType.Layout.value}
 
 class ButtonType(enum.Enum):
     Reload = "reload"
@@ -110,7 +113,9 @@ async def _parse_obj_to_node(obj,
                        checker: Callable[[Type], bool],
                        cached_lazy_expand_ids: Set[str],
                        obj_meta_cache=None,
-                       total_expand_level: int = 1):
+                       total_expand_level: int = 0):
+    if node.type not in _SHOULD_EXPAND_TYPES:
+        return 
     if isinstance(obj, TreeItem):
         obj_dict = await obj.get_child_desps(node.id)  # type: ignore
         tree_children = list(obj_dict.values())
@@ -131,12 +136,12 @@ async def _get_obj_tree(obj,
                   parent_id: str,
                   obj_meta_cache=None,
                   cached_lazy_expand_ids: Optional[List[str]] = None,
-                  total_expand_level: int = 1):
+                  total_expand_level: int = 0):
     if parent_id == "":
         obj_id = key 
     else:
         obj_id = f"{parent_id}{GLOBAL_SPLIT}{key}"
-    assert total_expand_level >= 1
+    assert total_expand_level >= 0
     root_node = parse_obj_item(obj, key, obj_id, checker, obj_meta_cache)
     if cached_lazy_expand_ids is None:
         cached_lazy_expand_ids = []
@@ -151,9 +156,9 @@ async def _get_obj_tree(obj,
         #                                     obj_meta_cache)
         # root_node.cnt = len(obj_dict)
     else:
-        if obj_id in cached_lazy_expand_ids_set or total_expand_level > 0:
+        if obj_id in cached_lazy_expand_ids_set or total_expand_level >= 0:
             await _parse_obj_to_node(obj, root_node, checker,
-                               cached_lazy_expand_ids_set, obj_meta_cache)
+                               cached_lazy_expand_ids_set, obj_meta_cache, total_expand_level=total_expand_level)
 
     return root_node
 

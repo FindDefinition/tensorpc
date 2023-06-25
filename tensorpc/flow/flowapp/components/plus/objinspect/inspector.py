@@ -347,7 +347,7 @@ class ObjectInspector(mui.FlexBox):
                 await layout.set_new_layout(layout_flex)
             return layout_flex
 
-    async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME, expand_level: int = 1):
+    async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME, expand_level: int = 0):
         await self.tree.set_object(obj, key, expand_level=expand_level)
 
 
@@ -412,12 +412,13 @@ class ObjectInspector(mui.FlexBox):
     def set_object_sync(self,
                         obj,
                         key: str = _DEFAULT_OBJ_NAME,
-                        loop: Optional[asyncio.AbstractEventLoop] = None):
+                        loop: Optional[asyncio.AbstractEventLoop] = None,
+                        expand_level: int = 0):
         """set object in sync manner, usually used on non-sync code via appctx.
         """
         if loop is None:
             loop = asyncio.get_running_loop()
-        fut = asyncio.run_coroutine_threadsafe(self.set_object(obj, key), loop)
+        fut = asyncio.run_coroutine_threadsafe(self.set_object(obj, key, expand_level), loop)
         if get_app()._flowapp_thread_id == threading.get_ident():
             # we can't wait fut here
             return fut
