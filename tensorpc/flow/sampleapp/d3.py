@@ -280,7 +280,7 @@ class BufferIndexedMeshApp:
                     # "normal": normals,
                 }, self.limit, [
                     three.MeshPhongMaterial().prop(color="#f0f0f0"),
-                ], initialIndex=indices).prop(initialCalcVertexNormals=True)
+                ], initial_index=indices).prop(initialCalcVertexNormals=True)
         self.buffer_mesh = buffer_mesh
         self.canvas = plus.SimpleCanvas(
             cam,

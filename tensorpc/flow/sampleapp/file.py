@@ -28,7 +28,7 @@ class DownloadFromSSH(EditableLayoutApp):
         self.ssh_username = mui.TextField("Username")
         self.ssh_password = mui.TextField("Password").prop(type="password")
 
-        self.ssh_files = mui.TextField("Files", True)
+        self.ssh_files = mui.TextField("Files").prop(multiline=True)
         self.target_loc = mui.TextField("Target")
         self.run = mui.Button("Run", self.download_files)
 

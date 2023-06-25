@@ -1216,7 +1216,7 @@ class DataGridApp:
         dgrid.bind_prop(fat_cell, "fat")
 
         return mui.VBox([
-            dgrid.prop(sticky_header=False, virtualized=False, size="small"),
+            dgrid.prop(stickyHeader=False, virtualized=False, size="small"),
         ]).prop(width="100%", height="100%", overflow="hidden")
 
     def _fetch_detail(self, key: str):

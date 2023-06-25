@@ -358,6 +358,10 @@ ALL_POINTER_EVENTS = [
     FrontendEventType.Leave.value,
     FrontendEventType.Over.value,
     FrontendEventType.Out.value,
+    FrontendEventType.Click.value,
+    FrontendEventType.DoubleClick.value,
+    FrontendEventType.ContextMenu.value,
+
 ]
 
 
@@ -1150,11 +1154,11 @@ class Component(Generic[T_base_props, T_child]):
             "type": self._flow_comp_type.value,
             "props": props,
         }
-        if self._flow_json_only:
-            res["props"] = JsonOnlyData(props)
         evs = self._get_used_events_dict()
         if evs:
-            res["usedEvents"] = evs
+            res["props"]["usedEvents"] = evs
+        if self._flow_json_only:
+            res["props"] = JsonOnlyData(props)
         return res
 
     def _get_used_events_dict(self):
@@ -1337,9 +1341,7 @@ class Component(Generic[T_base_props, T_child]):
 
     def create_update_used_events_event(self):
         used_events = self._get_used_events_dict()
-        ev = UpdateUsedEventsEvent({self._flow_uid: used_events})
-        # uid is set in flowapp service later.
-        return AppEvent("", {AppEventType.UIUpdateUsedEvents: ev})
+        return self.create_update_event({"usedEvents": used_events}, True)
 
     async def sync_used_events(self):
         return await self.put_app_event(self.create_update_used_events_event())
@@ -1894,21 +1896,14 @@ class ContainerBase(Component[T_container_props, T_child]):
     async def remove_childs_by_keys(self, keys: List[str]):
         self.__check_child_structure_is_none()
         detached_uid_to_comp = self._detach_child(keys)
-        for comp in detached_uid_to_comp.values():
+        for k, comp in detached_uid_to_comp.items():
             await comp._cancel_task()
+        for k in keys:
+            self._child_comps.pop(k)
         if not detached_uid_to_comp:
             return
         await self.put_app_event(
             self.create_delete_comp_event(list(detached_uid_to_comp.keys())))
-        child_uids = [self[c]._flow_uid for c in self._child_comps]
-        update_msg: Dict[str, Any] = {
-            "childs": child_uids
-        }
-        if self._child_structure is not None:
-            update_msg["childsComplex"] = asdict_no_deepcopy(self._child_structure, dict_factory=_undefined_comp_dict_factory)
-
-        await self.put_app_event(
-            self.create_update_event(update_msg))
         await self._run_special_methods([],
                                         list(detached_uid_to_comp.values()))
 

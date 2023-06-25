@@ -229,13 +229,16 @@ class Image(MUIComponentBase[ImageProps]):
                          ImageProps,
                          allowed_events=ALL_POINTER_EVENTS)
         # self.image_str: bytes = b""
-        self.event_down = self._create_event_slot(FrontendEventType.Down)
-        self.event_up = self._create_event_slot(FrontendEventType.Up)
-        self.event_move = self._create_event_slot(FrontendEventType.Move)
-        self.event_enter = self._create_event_slot(FrontendEventType.Enter)
-        self.event_leave = self._create_event_slot(FrontendEventType.Leave)
-        self.event_over = self._create_event_slot(FrontendEventType.Over)
-        self.event_out = self._create_event_slot(FrontendEventType.Out)
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
+        self.event_double_click = self._create_event_slot(FrontendEventType.DoubleClick)
+        self.event_pointer_enter = self._create_event_slot(FrontendEventType.Enter)
+        self.event_pointer_leave = self._create_event_slot(FrontendEventType.Leave)
+        self.event_pointer_down = self._create_event_slot(FrontendEventType.Down)
+        self.event_pointer_up = self._create_event_slot(FrontendEventType.Up)
+        self.event_pointer_move = self._create_event_slot(FrontendEventType.Move)
+        self.event_pointer_over = self._create_event_slot(FrontendEventType.Over)
+        self.event_pointer_out = self._create_event_slot(FrontendEventType.Out)
+        self.event_pointer_context_menu = self._create_event_slot(FrontendEventType.ContextMenu)
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -998,9 +1001,19 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
                          inited,
                          uid=uid,
                          app_comp_core=app_comp_core,
-                         allowed_events=[FrontendEventType.Drop.value])
+                         allowed_events=[FrontendEventType.Drop.value] + list(ALL_POINTER_EVENTS))
         self._wrapped_obj = wrapped_obj
         self.event_drop = self._create_event_slot(FrontendEventType.Drop)
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
+        self.event_double_click = self._create_event_slot(FrontendEventType.DoubleClick)
+        self.event_pointer_enter = self._create_event_slot(FrontendEventType.Enter)
+        self.event_pointer_leave = self._create_event_slot(FrontendEventType.Leave)
+        self.event_pointer_down = self._create_event_slot(FrontendEventType.Down)
+        self.event_pointer_up = self._create_event_slot(FrontendEventType.Up)
+        self.event_pointer_move = self._create_event_slot(FrontendEventType.Move)
+        self.event_pointer_over = self._create_event_slot(FrontendEventType.Over)
+        self.event_pointer_out = self._create_event_slot(FrontendEventType.Out)
+        self.event_pointer_context_menu = self._create_event_slot(FrontendEventType.ContextMenu)
 
     def as_drag_handle(self):
         self.props.takeDragRef = True
@@ -1180,7 +1193,7 @@ _HTMLInputType: TypeAlias = Literal["button", "checkbox", "color", "date",
 
 @dataclasses.dataclass
 class InputBaseProps(MUIComponentBaseProps):
-    multiline: bool = False
+    multiline: Union[bool, Undefined] = undefined
     value: Union[Undefined, str] = undefined
     defaultValue: Union[Undefined, str] = undefined
     disabled: Union[bool, Undefined] = undefined
@@ -1188,6 +1201,7 @@ class InputBaseProps(MUIComponentBaseProps):
     fullWidth: Union[bool, Undefined] = undefined
     rows: Union[NumberType, str, Undefined] = undefined
     type: Union[Undefined, _HTMLInputType] = undefined
+    debounce: Union[Undefined, NumberType] = undefined
 
 T_input_base_props = TypeVar("T_input_base_props", bound=InputBaseProps)
 
@@ -1271,7 +1285,6 @@ class TextFieldProps(InputBaseProps):
 class TextField(_InputBaseComponent[TextFieldProps]):
     def __init__(self,
                  label: str,
-                 multiline: bool = False,
                  callback: Optional[Callable[[str], _CORO_NONE]] = None,
                  init: Optional[str] = None) -> None:
         super().__init__(callback, UIType.TextField, TextFieldProps,
@@ -1279,7 +1292,6 @@ class TextField(_InputBaseComponent[TextFieldProps]):
         self.props.label = label
         if init is not None:
             self.props.value = init
-        self.props.multiline = multiline
 
     @property
     def prop(self):
@@ -1301,7 +1313,6 @@ class InputProps(InputBaseProps):
 class Input(_InputBaseComponent[InputProps]):
     def __init__(self,
                  placeholder: str,
-                 multiline: bool = False,
                  callback: Optional[Callable[[str], _CORO_NONE]] = None,
                  init: Optional[str] = None) -> None:
         super().__init__(callback, UIType.Input, InputProps,
@@ -1309,7 +1320,6 @@ class Input(_InputBaseComponent[InputProps]):
         self.props.placeholder = placeholder
         if init is not None:
             self.props.value = init
-        self.props.multiline = multiline
 
     @property
     def prop(self):
@@ -3095,6 +3105,16 @@ class VirtualizedBox(MUIContainerBase[MUIVirtualizedBoxProps, MUIComponentType])
                          uid=uid,
                          app_comp_core=app_comp_core,
                          allowed_events=[])
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
+        self.event_double_click = self._create_event_slot(FrontendEventType.DoubleClick)
+        self.event_pointer_enter = self._create_event_slot(FrontendEventType.Enter)
+        self.event_pointer_leave = self._create_event_slot(FrontendEventType.Leave)
+        self.event_pointer_down = self._create_event_slot(FrontendEventType.Down)
+        self.event_pointer_up = self._create_event_slot(FrontendEventType.Up)
+        self.event_pointer_move = self._create_event_slot(FrontendEventType.Move)
+        self.event_pointer_over = self._create_event_slot(FrontendEventType.Over)
+        self.event_pointer_out = self._create_event_slot(FrontendEventType.Out)
+        self.event_pointer_context_menu = self._create_event_slot(FrontendEventType.ContextMenu)
 
     @property
     def prop(self):
@@ -3138,6 +3158,17 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps, MUIComponentType]
                          allowed_events=[])
         # backend events
         self.event_item_changed = self._create_emitter_event_slot(FrontendEventType.DataItemChange)
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
+        self.event_double_click = self._create_event_slot(FrontendEventType.DoubleClick)
+        self.event_pointer_enter = self._create_event_slot(FrontendEventType.Enter)
+        self.event_pointer_leave = self._create_event_slot(FrontendEventType.Leave)
+        self.event_pointer_down = self._create_event_slot(FrontendEventType.Down)
+        self.event_pointer_up = self._create_event_slot(FrontendEventType.Up)
+        self.event_pointer_move = self._create_event_slot(FrontendEventType.Move)
+        self.event_pointer_over = self._create_event_slot(FrontendEventType.Over)
+        self.event_pointer_out = self._create_event_slot(FrontendEventType.Out)
+        self.event_pointer_context_menu = self._create_event_slot(FrontendEventType.ContextMenu)
+
 
     @property
     def prop(self):
@@ -3326,6 +3357,7 @@ def flex_wrapper(obj: Any,
     """wrap a object which define a layout function "tensorpc_flow_layout"
     enable simple layout creation for arbitrary object without inherit
     """
+    # TODO watch added object in watchdog
     if metas is None:
         if reload_mgr is not None:
             metas = reload_mgr.query_type_method_meta(type(obj), no_code=True, include_base=True)

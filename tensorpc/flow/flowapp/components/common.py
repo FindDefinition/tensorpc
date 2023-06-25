@@ -127,16 +127,6 @@ async def handle_standard_event(comp: Component,
                 # all controlled component must sync state after state change
                 if sync_state_after_change:
                     await comp.sync_status(sync_state)
-        elif event.type in _ONEARG_EVENTS:
-            handlers = comp.get_event_handlers(event.type)
-            # other events don't need to sync state
-            if handlers is not None:
-                run_funcs = handlers.get_bind_event_handlers(event)
-                if is_sync:
-                    return await comp.run_callbacks(run_funcs, sync_first=False, change_status=change_status)
-                else:
-                    comp._task = asyncio.create_task(
-                        comp.run_callbacks(run_funcs, sync_first=sync_first, change_status=change_status))
         elif event.type in _NOARG_EVENTS:
             handlers = comp.get_event_handlers(event.type)
             # other events don't need to sync state
@@ -144,6 +134,16 @@ async def handle_standard_event(comp: Component,
                 run_funcs = handlers.get_bind_event_handlers_noarg(event)
                 if is_sync:
                     return await comp.run_callbacks(run_funcs, sync_first=False)
+                else:
+                    comp._task = asyncio.create_task(
+                        comp.run_callbacks(run_funcs, sync_first=sync_first, change_status=change_status))
+        elif event.type in _ONEARG_EVENTS:
+            handlers = comp.get_event_handlers(event.type)
+            # other events don't need to sync state
+            if handlers is not None:
+                run_funcs = handlers.get_bind_event_handlers(event)
+                if is_sync:
+                    return await comp.run_callbacks(run_funcs, sync_first=False, change_status=change_status)
                 else:
                     comp._task = asyncio.create_task(
                         comp.run_callbacks(run_funcs, sync_first=sync_first, change_status=change_status))
