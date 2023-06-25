@@ -100,9 +100,12 @@ class MarkdownTutorial(mui.VirtualizedBox):
         layout: mui.LayoutType = []
         for i, block in enumerate(res_blocks):
             if block.type == "markdown":
+                if block.content.strip() == "":
+                    continue
                 layout.append(mui.Markdown(block.content))
             elif block.type == "code":
-                layout.append(AppInMemory(f"{path_uid}-{i}", block.content).prop(minHeight="400px", padding="10px"))
+
+                layout.append(AppInMemory(f"{path_uid}-{i}", block.content.lstrip()).prop(minHeight="400px", padding="10px"))
         super().__init__(layout)
         self.prop(flexFlow="column", padding="10px")
 

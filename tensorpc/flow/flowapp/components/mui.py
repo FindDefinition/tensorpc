@@ -16,6 +16,8 @@ import asyncio
 import base64
 import copy
 from functools import partial
+
+from sklearn import base
 import tensorpc.core.dataclass_dispatch as dataclasses
 import enum
 import inspect
@@ -31,6 +33,7 @@ from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterable,
 import numpy as np
 from PIL import Image as PILImage
 from typing_extensions import Literal, TypeAlias
+from pydantic import validator
 
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.serviceunit import AppFuncType, ObjectReloadManager, ReloadableDynamicClass, ServFunctionMeta
@@ -521,31 +524,50 @@ class Icon(MUIComponentBase[IconProps]):
 @dataclasses.dataclass
 class IconButtonProps(MUIComponentBaseProps):
 
-    tooltip: Union[str, Undefined] = undefined
-    tooltipPlacement: Union[_TooltipPlacement, Undefined] = undefined
+
     muiColor: Union[_BtnGroupColor, Undefined] = undefined
     disabled: Union[bool, Undefined] = undefined
     size: Union[Literal["small", "medium", "large"], Undefined] = undefined
+    edge: Union[Literal["start", "end"], Undefined] = undefined
     icon: int = 0
+    iconSvgString: Union[str, Undefined] = undefined
     iconSize: Union[Literal["small", "medium", "large", "inherit"],
                      Undefined] = undefined
     iconFontSize: Union[NumberType, Undefined] = undefined
+
+    tooltip: Union[str, Undefined] = undefined
+    tooltipPlacement: Union[_TooltipPlacement, Undefined] = undefined
     tooltipMultiline: Union[bool, Undefined] = undefined
+
     progressColor: Union[_BtnGroupColor, Undefined] = undefined
     progressSize: Union[NumberType, Undefined] = undefined
     # if defined, will show a confirm dialog before executing the callback
     confirmMessage: Union[str, Undefined] = undefined
     confirmTitle: Union[str, Undefined] = undefined
 
+    @validator('iconSvgString')
+    def svg_validator(cls, v):
+        if isinstance(v, Undefined):
+            return v
+        if not v.startswith('data:image/svg+xml;base64'):
+            raise ValueError('you must use mui.IconButton.encode_svg to encode svg string')
+        return v
+
 
 class IconButton(MUIComponentBase[IconButtonProps]):
-    def __init__(self, icon: IconType, callback: Callable[[],
-                                                          _CORO_NONE]) -> None:
+    def __init__(self, icon: IconType, callback: Optional[Callable[[], _CORO_NONE]] = None) -> None:
         super().__init__(UIType.IconButton, IconButtonProps,
                          [FrontendEventType.Click.value])
         self.props.icon = icon.value
-        self.register_event_handler(FrontendEventType.Click.value, callback, simple_event=True)
+        if callback is not None:
+            self.register_event_handler(FrontendEventType.Click.value, callback, simple_event=True)
         self.event_click = self._create_event_slot(FrontendEventType.Click)
+
+    @staticmethod
+    def encode_svg(svg: str) -> str:
+        base64_bytes = base64.b64encode(svg.strip().encode('utf-8'))
+        base64_string = base64_bytes.decode('utf-8')
+        return f"data:image/svg+xml;base64,{base64_string}"
 
     async def headless_click(self):
         return await self.put_loopback_ui_event(

@@ -41,4 +41,4 @@ class MarkdownTutorialsTree:
 
     @mark_did_mount
     async def _on_init(self):
-        await self.panel.inspector.set_object(self.tutorials, key="tutorials", expand_level=3)
+        await self.panel.inspector.set_object(self.tutorials, key="tutorials", expand_level=1)
