@@ -109,10 +109,3 @@ class MarkdownTutorial(mui.VirtualizedBox):
         super().__init__(layout)
         self.prop(flexFlow="column", padding="10px")
 
-
-
-# if __name__ == "__main__":
-#     with open("/root/distflow/tensorpc/examples/tutorials/basic/01-Hello World.md") as f:
-#         data = f.read()
-#     res_blocks = _parse_markdown_very_trivial(data)
-#     print(res_blocks)

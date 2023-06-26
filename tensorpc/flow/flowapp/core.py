@@ -37,6 +37,7 @@ import pyee
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 
 from tensorpc.core.core_io import JsonOnlyData
+from tensorpc.core.event_emitter.base import ExceptionParam
 from tensorpc.core.moduleid import is_tensorpc_dynamic_path
 from tensorpc.core.serviceunit import (AppFuncType, ReloadableDynamicClass,
                                        ServFunctionMeta)
@@ -343,7 +344,8 @@ class FrontendEventType(enum.IntEnum):
 
 
 UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
-    UIType.DataGrid, UIType.MatchCase
+    UIType.DataGrid, UIType.MatchCase,
+    UIType.DataFlexBox
 }
 
 class AppDraggableType(enum.Enum):
@@ -994,7 +996,7 @@ class Component(Generic[T_base_props, T_child]):
         self._flow_event_handlers: Dict[EventDataType, EventHandlers] = {}
         # event emitter is used for backend events, e.g. mount, unmount
         self._flow_event_emitter: AsyncIOEventEmitter[EventDataType, Event] = AsyncIOEventEmitter()
-
+        self._flow_event_emitter.add_exception_listener(self.__event_emitter_on_exc)
         self.event_before_mount = self._create_emitter_event_slot(FrontendEventType.BeforeMount)
         self.event_before_unmount = self._create_emitter_event_slot(FrontendEventType.BeforeUnmount)
     
@@ -1395,6 +1397,19 @@ class Component(Generic[T_base_props, T_child]):
         # uid is set in flowapp service later.
         ev = AppEditorEvent(type, data)
         return AppEvent("", {AppEventType.AppEditor: ev})
+
+    async def __event_emitter_on_exc(self, exc_param: ExceptionParam):
+        traceback.print_exc()
+        e = exc_param.exc
+        ss = io.StringIO()
+        traceback.print_exc(file=ss)
+        user_exc = UserMessage.create_error(self._flow_uid, repr(e),
+                                            ss.getvalue())
+        await self.put_app_event(self.create_user_msg_event(user_exc))
+        app = get_app()
+        if app._flowapp_enable_exception_inspect:
+            await app._inspect_exception()
+
 
     async def run_callback(self,
                            cb: Callable[[], _CORO_NONE],

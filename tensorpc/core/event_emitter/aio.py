@@ -38,6 +38,21 @@ class AsyncIOEventEmitter(EventEmitter[KT, Unpack[VTs]]):
         self._loop: Optional[AbstractEventLoop] = loop
         self._waiting: Set[Future] = set()
 
+    def _emit_exc_run(
+        self,
+        f: Callable[[ExceptionParam], Any],
+        arg: ExceptionParam,
+    ) -> None:
+        coro = f(arg)
+        if iscoroutine(coro):
+            if self._loop:
+                # ensure_future is *extremely* cranky about the types here,
+                # but this is relatively well-tested and I think the types
+                # are more strict than they should be
+                fut: Any = ensure_future(cast(Any, coro), loop=self._loop)
+            else:
+                fut = ensure_future(cast(Any, coro))
+
     def _emit_run(
         self,
         f: Callable,

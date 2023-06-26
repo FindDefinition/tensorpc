@@ -185,13 +185,25 @@ class MUIFlexBoxProps(FlexBoxProps, ContainerBaseProps):
 class MUIFlexBoxWithDndProps(MUIFlexBoxProps):
     draggable: Union[bool, Undefined] = undefined
     droppable: Union[bool, Undefined] = undefined
-    allowedDndTypes: Union[str, List[str], Undefined] = undefined
+    allowedDndTypes: Union[List[str], Undefined] = undefined
     sxOverDrop: Union[Dict[str, Any], Undefined] = undefined
     allowFile: Union[bool, Undefined] = undefined
     dragType: Union[str, Undefined] = undefined
     dragData: Union[Dict[str, Any], Undefined] = undefined
     dragInChild: Union[bool, Undefined] = undefined
     takeDragRef: Union[bool, Undefined] = undefined
+
+
+    @validator('sxOverDrop')
+    def sx_over_drop_validator(cls, v: Union[Dict[str, Any], Undefined]):
+        if isinstance(v, Undefined):
+            return v
+        # avoid nested check
+        if "sxOverDrop" in v:
+            v.pop("sxOverDrop")
+        # validate sx over drop
+        MUIFlexBoxWithDndProps(**v)
+        return v
 
 
 _TypographyVarient: TypeAlias = Literal['body1', 'body2', 'button', 'caption',
@@ -1001,7 +1013,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
                          inited,
                          uid=uid,
                          app_comp_core=app_comp_core,
-                         allowed_events=[FrontendEventType.Drop.value] + list(ALL_POINTER_EVENTS))
+                         allowed_events=[FrontendEventType.Drop.value, FrontendEventType.DragCollect.value] + list(ALL_POINTER_EVENTS))
         self._wrapped_obj = wrapped_obj
         self.event_drop = self._create_event_slot(FrontendEventType.Drop)
         self.event_click = self._create_event_slot(FrontendEventType.Click)
@@ -1014,6 +1026,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
         self.event_pointer_over = self._create_event_slot(FrontendEventType.Over)
         self.event_pointer_out = self._create_event_slot(FrontendEventType.Out)
         self.event_pointer_context_menu = self._create_event_slot(FrontendEventType.ContextMenu)
+        self.event_drag_collect = self._create_event_slot(FrontendEventType.DragCollect)
 
     def as_drag_handle(self):
         self.props.takeDragRef = True
@@ -1392,7 +1405,7 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
 
 @dataclasses.dataclass
 class SwitchProps(MUIComponentBaseProps):
-    label: str = ""
+    label: Union[str, Undefined] = undefined
     checked: bool = False
     size: Union[Literal["small", "medium"], Undefined] = undefined
     muiColor: Union[_BtnGroupColor, Undefined] = undefined
@@ -1403,12 +1416,13 @@ class SwitchProps(MUIComponentBaseProps):
 class SwitchBase(MUIComponentBase[SwitchProps]):
     def __init__(
             self,
-            label: str,
+            label: Union[str, Undefined],
             base_type: UIType,
             callback: Optional[Callable[[bool], _CORO_NONE]] = None) -> None:
         super().__init__(base_type, SwitchProps,
                          [FrontendEventType.Change.value])
-        self.props.label = label
+        if not isinstance(label, Undefined):
+            self.props.label = label
         self.props.checked = False
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
@@ -1456,7 +1470,7 @@ class SwitchBase(MUIComponentBase[SwitchProps]):
 class Switch(SwitchBase):
     def __init__(
             self,
-            label: str,
+            label: Union[str, Undefined] = undefined,
             callback: Optional[Callable[[bool], _CORO_NONE]] = None) -> None:
         super().__init__(label, UIType.Switch, callback)
 
@@ -1464,7 +1478,7 @@ class Switch(SwitchBase):
 class Checkbox(SwitchBase):
     def __init__(
             self,
-            label: str,
+            label: Union[str, Undefined] = undefined,
             callback: Optional[Callable[[bool], _CORO_NONE]] = None) -> None:
         super().__init__(label, UIType.Checkbox, callback)
 
@@ -3144,18 +3158,23 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps, MUIComponentType]
     """ flex box that use data list and template component to render
     list of data with same UI components.
     """
+    @dataclasses.dataclass
+    class ChildDef:
+        component: Component
+
+
     def __init__(self,
-                 children: MUIComponentType,
+                 children: Component,
                  inited: bool = False,
                  uid: str = "",
                  app_comp_core: Optional[AppComponentCore] = None) -> None:
         super().__init__(UIType.DataFlexBox,
                          MUIDataFlexBoxWithDndProps,
-                         {"0": children},
+                         DataFlexBox.ChildDef(children),
                          inited,
                          uid=uid,
                          app_comp_core=app_comp_core,
-                         allowed_events=[])
+                         allowed_events=[FrontendEventType.Drop.value, FrontendEventType.DragCollect.value] + list(ALL_POINTER_EVENTS))
         # backend events
         self.event_item_changed = self._create_emitter_event_slot(FrontendEventType.DataItemChange)
         self.event_click = self._create_event_slot(FrontendEventType.Click)
@@ -3168,7 +3187,7 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps, MUIComponentType]
         self.event_pointer_over = self._create_event_slot(FrontendEventType.Over)
         self.event_pointer_out = self._create_event_slot(FrontendEventType.Out)
         self.event_pointer_context_menu = self._create_event_slot(FrontendEventType.ContextMenu)
-
+        self.event_drag_collect = self._create_event_slot(FrontendEventType.DragCollect)
 
     @property
     def prop(self):
@@ -3211,14 +3230,16 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps, MUIComponentType]
         assert prop_name in data_item
         data_item[prop_name] = data
         await self.update_data_in_index(indexes[0], {prop_name: data})
-        self.flow_event_emitter.emit(FrontendEventType.DataItemChange.value, Event(FrontendEventType.DataItemChange.value, (key, indexes[0])))
+        self.flow_event_emitter.emit(FrontendEventType.DataItemChange.value, Event(FrontendEventType.DataItemChange.value, (key, indexes[0]), key, indexes))
 
     def bind_prop(self, comp: Component, prop_name: str):
         """bind a data prop with control component. no type check.
         """
         if FrontendEventType.Change.value in comp._flow_allowed_events:
             # TODO change all control components to use value as its data prop name
-            if "value" in comp._prop_field_names:
+            if "defaultValue" in comp._prop_field_names:
+                comp.set_override_props(defaultValue=prop_name)
+            elif "value" in comp._prop_field_names:
                 comp.set_override_props(value=prop_name)
             elif "checked" in comp._prop_field_names:
                 comp.set_override_props(checked=prop_name)
@@ -3333,7 +3354,7 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         assert prop_name in data_item
         data_item[prop_name] = data
         await self.update_data_in_index(indexes[0], {prop_name: data})
-        self.flow_event_emitter.emit(FrontendEventType.DataItemChange.value, Event(FrontendEventType.DataItemChange.value, (key, indexes[0])))
+        self.flow_event_emitter.emit(FrontendEventType.DataItemChange.value, Event(FrontendEventType.DataItemChange.value, (key, indexes[0]), key, indexes))
 
     def bind_prop(self, comp: Component, prop_name: str):
         """bind a data prop with control component. no type check.
