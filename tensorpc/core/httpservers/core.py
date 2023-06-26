@@ -1,15 +1,15 @@
+import abc
 import asyncio
 import contextlib
+import dataclasses
+import enum
 import io
 import json
 import sys
 import threading
 import traceback
 from functools import partial
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple, Type, Union
-
-import aiohttp
-from aiohttp import web
+from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 from tensorpc import compat
 from tensorpc.core import core_io, defs
@@ -34,25 +34,39 @@ from concurrent.futures import ThreadPoolExecutor
 LOGGER = df_logging.get_logger()
 JS_MAX_SAFE_INT = 2 ** 53 - 1
 
+class HttpServerType(enum.IntEnum):
+    AioHttp = 0
+    Blacksheep = 1
 
-class WebsocketClient(object):
+class WebsocketMsgType(enum.IntEnum):
+    Binary = 0
+    Text = 1
+    Error = 2
+
+@dataclasses.dataclass
+class WebsocketMsg:
+    data: bytes
+    type: WebsocketMsgType
+
+class WebsocketClientBase(abc.ABC):
     # TODO peer client use a async queue instead of recv because
     # aiohttp don't allow parallel recv
     def __init__(self,
-                 ws: web.WebSocketResponse,
                  serv_id_to_name: Dict[int, str],
                  uid: Optional[int] = None):
-        self.ws = ws
         self._uid = uid  # type: Optional[int]
         self._serv_id_to_name = serv_id_to_name
         self._name_to_serv_id = {v: k for k, v in serv_id_to_name.items()}
         self._ev_cnt = 0
 
-    async def send_raw(self, data):
-        return await self.ws.send_bytes(data)
+    @abc.abstractmethod
+    def get_msg_max_size(self) -> int: ...
 
-    def get_client_id(self):
-        return id(self.ws)
+    @abc.abstractmethod
+    async def send_bytes(self, data: bytes): ...
+
+    @abc.abstractmethod
+    def get_client_id(self) -> int: ...
 
     def get_event_id(self):
         self._ev_cnt = (self._ev_cnt + 1) % JS_MAX_SAFE_INT
@@ -84,9 +98,9 @@ class WebsocketClient(object):
                                    rpc_id=request_id,
                                    dynamic_key=dynamic_key)
         if is_json:
-            return await self.ws.send_bytes(
+            return await self.send_bytes(
                 core_io.json_only_encode(data, msg_type, req))
-        max_size = self.ws._max_msg_size - 128
+        max_size = self.get_msg_max_size() - 128
         # max_size = 1024 * 1024
         # TODO reslove "8192"
         encoder = core_io.SocketMessageEncoder(data, skeleton_size_limit=max_size - 8192)
@@ -108,7 +122,7 @@ class WebsocketClient(object):
             for chunk in encoder.get_message_chunks(msg_type, req, max_size):
                 assert len(chunk) <= max_size
                 # tasks.append(self.ws.send_bytes(chunk))
-                await self.ws.send_bytes(chunk)
+                await self.send_bytes(chunk)
             # if encoder.get_total_array_binary_size() > max_size:
 
                 # print("WS SEND TIME", time.time() - t)
@@ -153,6 +167,9 @@ class WebsocketClient(object):
                                          core_io.SocketMsgType.SubscribeError,
                                          request_id)
 
+    @abc.abstractmethod
+    async def binary_msg_generator(self) -> AsyncGenerator[WebsocketMsg, None]: ...
+
 
 def create_task(coro):
     if compat.Python3_7AndLater:
@@ -168,7 +185,7 @@ async def _cancel(task):
         await task
 
 
-class AllWebsocketHandler:
+class WebsocketHandler:
 
     def __init__(self, service_core: ProtobufServiceCore):
         self.service_core = service_core
@@ -182,8 +199,8 @@ class AllWebsocketHandler:
             service_core.service_units.init_service()
         self.all_ev_providers = service_core.service_units.get_all_event_providers(
         )
-        self.event_to_clients: Dict[str, Set[WebsocketClient]] = {}
-        self.client_to_events: Dict[WebsocketClient, Set[str]] = {}
+        self.event_to_clients: Dict[str, Set[WebsocketClientBase]] = {}
+        self.client_to_events: Dict[WebsocketClientBase, Set[str]] = {}
 
         self._serv_id_to_name = service_core.service_units.get_service_id_to_name(
         )
@@ -195,7 +212,7 @@ class AllWebsocketHandler:
         self._new_events: Set[str] = set()
         self._delete_events: Set[str] = set()
 
-    async def _handle_rpc(self, client: WebsocketClient, service_key: str,
+    async def _handle_rpc(self, client: WebsocketClientBase, service_key: str,
                           data, req_id: int, is_notification: bool):
         _, serv_meta = self.service_core.service_units.get_service_and_meta(
             service_key)
@@ -227,16 +244,12 @@ class AllWebsocketHandler:
             return
         await client.send([res], msg_type=msg_type, request_id=req_id)
 
-    async def handle_new_connection(self, request):
-        print("NEW CONN", request)
+    async def handle_new_connection(self, client: WebsocketClientBase):
+        print("NEW CONN")
         service_core = self.service_core
-        ws = web.WebSocketResponse()
         conn_st_ev = asyncio.Event()
         # wait at most 100 rpcs
         conn_rpc_queue: "asyncio.Queue[asyncio.Task]" = asyncio.Queue(1000)
-        await ws.prepare(request)
-        client = WebsocketClient(
-            ws, service_core.service_units.get_service_id_to_name())
         with service_core._enter_exec_context():
             try:
                 service_core.service_units.websocket_onconnect(client)
@@ -253,8 +266,8 @@ class AllWebsocketHandler:
                               is_json=True)
             # TODO we should wait shutdown here
             # TODO handle send error
-            async for ws_msg in ws:
-                if ws_msg.type == aiohttp.WSMsgType.BINARY:
+            async for ws_msg in client.binary_msg_generator():
+                if ws_msg.type == WebsocketMsgType.Binary:
                     data = ws_msg.data
                     try:
                         header = core_io.TensoRPCHeader(data)
@@ -362,7 +375,7 @@ class AllWebsocketHandler:
                                           is_json=True)
                     else:
                         raise NotImplementedError
-                elif ws_msg.type == aiohttp.WSMsgType.ERROR:
+                elif ws_msg.type == WebsocketMsgType.Error:
                     print("ERROR", ws_msg)
                     print("ERROR", ws_msg.data)
 
@@ -394,7 +407,7 @@ class AllWebsocketHandler:
                     await _cancel(task)
                 except:
                     break
-        print("CONN", request, "disconnected.")
+        print("CONN", "disconnected.")
 
     async def rpc_awaiter(self, rpc_queue: "asyncio.Queue[asyncio.Task]",
                           shutdown_ev: asyncio.Event):
@@ -597,165 +610,3 @@ class AllWebsocketHandler:
             # print("SEND TIME", cur_ev, time.time() - t)
             task_to_ev = new_task_to_ev
 
-
-class HttpService:
-
-    def __init__(self, service_core: ProtobufServiceCore):
-        self.service_core = service_core
-
-    async def remote_json_call_http(self, request: web.Request):
-        try:
-            data_bin = await request.read()
-            pb_data = rpc_message_pb2.RemoteJsonCallRequest()
-            pb_data.ParseFromString(data_bin)
-            pb_data.flags = rpc_message_pb2.JsonArray
-            res = await self.service_core.remote_json_call_async(pb_data)
-        except Exception as e:
-            data = self.service_core._remote_exception_json(e)
-            res = rpc_message_pb2.RemoteCallReply(exception=data)
-        byte = res.SerializeToString()
-        # TODO better headers
-        headers = {
-            'Access-Control-Allow-Origin': '*',
-            # 'Access-Control-Allow-Headers': '*',
-            # 'Access-Control-Allow-Method': 'POST',
-        }
-        res = web.Response(body=byte, headers=headers)
-        return res
-
-    async def file_upload_call(self, request: web.Request):
-        reader = await request.multipart()
-        # /!\ Don't forget to validate your inputs /!\
-        # reader.next() will `yield` the fields of your form
-        headers = {
-            'Access-Control-Allow-Origin': '*',
-            # 'Access-Control-Allow-Headers': '*',
-            # 'Access-Control-Allow-Method': 'POST',
-        }
-
-        field = await reader.next()
-        assert field is not None
-        assert field.name == 'data'
-        # TODO how to handle large file?
-        data = await field.read()
-        data = json.loads(data)
-        serv_key = data["serv_key"]
-        serv_data = data["serv_data"]
-        file_size = data["file_size"]
-
-        field = await reader.next()
-        assert field is not None
-        assert field.name == 'file'
-        filename = field.filename
-        content = await field.read()
-        f = defs.File(filename, content, serv_data)
-        # return web.Response(text='{} sized of {} successfully stored'
-        #                             ''.format(filename, content), headers=headers)
-        res, is_exc = await self.service_core.execute_async_service(
-            serv_key, [f], {}, json_call=False)
-        # You cannot rely on Content-Length if transfer is chunked.
-        if not is_exc:
-            return web.Response(text='{} sized of {} successfully stored'
-                                ''.format(filename, content),
-                                headers=headers)
-        else:
-            return web.Response(status=500, text=res, headers=headers)
-
-    async def remote_pickle_call_http(self, request: web.Request):
-        try:
-            data_bin = await request.read()
-            pb_data = rpc_message_pb2.RemoteCallRequest()
-            pb_data.ParseFromString(data_bin)
-            pb_data.flags = rpc_message_pb2.Pickle
-            res = await self.service_core.remote_call_async(pb_data)
-        except Exception as e:
-            data = self.service_core._remote_exception_json(e)
-            res = rpc_message_pb2.RemoteCallReply(exception=data)
-        byte = res.SerializeToString()
-        # TODO better headers
-        headers = {
-            'Access-Control-Allow-Origin': '*',
-            # 'Access-Control-Allow-Headers': '*',
-            # 'Access-Control-Allow-Method': 'POST',
-        }
-        res = web.Response(body=byte, headers=headers)
-        return res
-
-
-async def _await_shutdown(shutdown_ev, loop):
-    return await loop.run_in_executor(None, shutdown_ev.wait)
-
-
-async def serve_app(app,
-                    port,
-                    shutdown_ev: threading.Event,
-                    async_shutdown_ev: asyncio.Event,
-                    is_sync: bool = False,
-                    url=None,
-                    ssl_context=None):
-    loop = asyncio.get_running_loop()
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, host=url, port=port, ssl_context=ssl_context)
-    await site.start()
-    if not is_sync:
-        await async_shutdown_ev.wait()
-    else:
-        await _await_shutdown(shutdown_ev, loop)
-        async_shutdown_ev.set()
-    await runner.cleanup()
-
-
-async def serve_service_core_task(server_core: ProtobufServiceCore,
-                                  port=50052,
-                                  rpc_name="/api/rpc",
-                                  ws_name="/api/ws",
-                                  is_sync: bool = False,
-                                  rpc_pickle_name: str = "/api/rpc_pickle",
-                                  client_max_size: int = 4 * 1024**2,
-                                  standalone: bool = True,
-                                  ssl_key_path: str = "",
-                                  ssl_crt_path: str = ""):
-    # client_max_size 4MB is enough for most image upload.
-    http_service = HttpService(server_core)
-    ctx = contextlib.nullcontext()
-    if standalone:
-        ctx = server_core.enter_global_context()
-    with ctx:
-        if standalone:
-            await server_core._init_async_members()
-        ws_service = AllWebsocketHandler(server_core)
-        app = web.Application(client_max_size=client_max_size)
-        # TODO should we create a global client session for all http call in server?
-        loop_task = asyncio.create_task(ws_service.event_provide_executor())
-        app.router.add_post(rpc_name, http_service.remote_json_call_http)
-        app.router.add_post(rpc_pickle_name,
-                            http_service.remote_pickle_call_http)
-        app.router.add_post("/api/rpc_file", http_service.file_upload_call)
-        app.router.add_get(ws_name, ws_service.handle_new_connection)
-        ssl_context = None
-        if ssl_key_path != "" and ssl_key_path != "":
-            ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-            ssl_context.load_cert_chain(ssl_crt_path, ssl_key_path)
-        return await asyncio.gather(
-            serve_app(app,
-                      port,
-                      server_core.shutdown_event,
-                      server_core.async_shutdown_event,
-                      is_sync,
-                      ssl_context=ssl_context), loop_task)
-
-
-def serve_service_core(server_core: ProtobufServiceCore,
-                       port=50052,
-                       rpc_name="/api/rpc",
-                       ws_name="/api/ws"):
-    http_task = serve_service_core_task(server_core,
-                                        port,
-                                        is_sync=True,
-                                        standalone=True)
-    try:
-        asyncio.run(http_task)
-    except KeyboardInterrupt:
-
-        print("shutdown by keyboard interrupt")

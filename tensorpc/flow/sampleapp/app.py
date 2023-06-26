@@ -1394,6 +1394,60 @@ class SchedulerApp:
         return res
 
 
+class CameraBenchmarkApp:
+    @mark_create_layout
+    def my_layout(self):
+        self.img_ui = mui.Image()
+        self.task = None
+        return mui.VBox([
+            mui.Button("OpenCam",
+                        self.on_button_click),
+            self.img_ui,
+        ]).prop(width="400px", height="400px")
+
+    async def on_button_click(self):
+        if self.task is None:
+            loop = asyncio.get_running_loop()
+            self.task = asyncio.create_task(self._video_task())
+        else:
+            await cancel_task(self.task)
+            self.task = None
+
+    async def _video_task(self):
+        import time
+        cap = cv2.VideoCapture(0)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+
+        loop = asyncio.get_running_loop()
+
+        t = time.time()
+        fr = 0
+        dura = 1
+        t = time.time()
+        fr = 0
+        while True:
+            t3 = time.time()
+            ret, frame = cap.read()
+            dura_cv = time.time() - t3
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            now = datetime.now()
+            dt_string = now.strftime("%H:%M:%S")
+
+            frame = cv2.putText(frame, f'{dt_string} FrameRate={1 / dura:.2f}',
+                                (10, 30), font, 1, (255, 255, 255), 2,
+                                cv2.LINE_AA)
+            suffix = "jpg"
+            t2 = time.time()
+            _, img_str = cv2.imencode(".{}".format(suffix), frame)
+            await self.img_ui.show_raw(img_str, "jpg")
+            dura_encode = time.time() - t2
+
+            dura = time.time() - t
+            t = time.time()
+            # await asyncio.sleep(0)
+            # print(dura, dura_encode, dura_cv, len(img_str), frame.shape)
+
 if __name__ == "__main__":
     import time
     tps = get_all_members_by_type(mui.FlexBox)

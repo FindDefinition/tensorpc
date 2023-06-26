@@ -199,7 +199,7 @@ def serve_with_http(service_def: ServiceDef,
                     max_threads=10,
                     process_id=-1,
                     credentials=None):
-    from tensorpc.core import httpserver
+    from tensorpc.core.httpservers import aiohttp_impl as httpserver
 
     # run grpc server in background, and ws in main
     url = '[::]:{}'.format(port)
