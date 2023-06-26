@@ -1026,6 +1026,7 @@ class EditableApp(App):
         if reloadable_layout:
             self._app_force_use_layout_function()
         self._flow_observed_files = observed_files
+        self._init_observe_paths: Set[str] = set()
 
 
     def app_initialize(self):
@@ -1065,8 +1066,10 @@ class EditableApp(App):
             else:
                 paths = set(self.__get_default_observe_paths())
             paths.add(str(Path(path).resolve()))
+
             for p in registry.get_path_to_qname().keys():
                 paths.add(str(Path(p).resolve()))
+            self._init_observe_paths.update(paths)
             self._flowapp_code_mgr = SimpleCodeManager(list(paths))
             paths = set(self._flowapp_code_mgr.file_to_entry.keys())
             # print(paths)
@@ -1097,9 +1100,10 @@ class EditableApp(App):
         obentry = self._flowapp_change_observers[path_resolved]
         if len(obentry.obmetas) == 0 and not is_tensorpc_dynamic_path(path):
             # no need to schedule watchdog.
-            watch = self._watchdog_observer.schedule(self._watchdog_watcher,
-                                                     path, False)
-            obentry.watch = watch
+            if path_resolved not in self._init_observe_paths:
+                watch = self._watchdog_observer.schedule(self._watchdog_watcher,
+                                                        path, False)
+                obentry.watch = watch
         assert self._flowapp_code_mgr is not None
         if not self._flowapp_code_mgr._check_path_exists(path):
             self._flowapp_code_mgr._add_new_code(path, self._flow_reload_manager.in_memory_fs)
@@ -1138,7 +1142,8 @@ class EditableApp(App):
             #         new_obmetas.append(obmeta)
             # obentry.obmetas = new_obmetas
             if len(obentry.obmetas) == 0 and obentry.watch is not None:
-                self._watchdog_observer.unschedule(obentry.watch)
+                if path_resolved not in self._init_observe_paths:
+                    self._watchdog_observer.unschedule(obentry.watch)
 
 
     def __get_default_observe_paths(self):
