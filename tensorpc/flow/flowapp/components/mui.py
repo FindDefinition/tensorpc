@@ -570,10 +570,13 @@ class IconButtonProps(MUIComponentBaseProps):
 
 
 class IconButton(MUIComponentBase[IconButtonProps]):
-    def __init__(self, icon: IconType, callback: Optional[Callable[[], _CORO_NONE]] = None) -> None:
+    def __init__(self, icon: Union[str, IconType], callback: Optional[Callable[[], _CORO_NONE]] = None) -> None:
         super().__init__(UIType.IconButton, IconButtonProps,
                          [FrontendEventType.Click.value])
-        self.props.icon = icon.value
+        if isinstance(icon, IconType):
+            self.props.icon = icon.value
+        else:
+            self.prop(iconSvgString=self.encode_svg(icon)) 
         if callback is not None:
             self.register_event_handler(FrontendEventType.Click.value, callback, simple_event=True)
         self.event_click = self._create_event_slot(FrontendEventType.Click)
@@ -2408,14 +2411,15 @@ class ChipProps(MUIComponentBaseProps):
 class Chip(MUIComponentBase[ChipProps]):
     def __init__(
         self,
-        label: str,
+        label: Optional[str] = None,
         callback: Optional[Callable[[], _CORO_NONE]] = None,
         delete_callback: Optional[Callable[[], _CORO_NONE]] = None,
     ) -> None:
         super().__init__(
             UIType.Chip, ChipProps,
             [FrontendEventType.Click.value, FrontendEventType.Delete.value])
-        self.props.label = label
+        if label is not None:
+            self.props.label = label
         self.callback = callback
         self.delete_callback = delete_callback
         if callback is not None:

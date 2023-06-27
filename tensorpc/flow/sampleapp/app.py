@@ -1144,25 +1144,42 @@ class DataListApp:
                 "id": "1",
                 "name": "name1",
                 "isCheck": True,
+                "tags": [{
+                    "id": "0",
+                    "tag": "good",
+                }],
             },
             {
                 "id": "2",
                 "name": "name2",
                 "isCheck": True,
+                "tags": [{
+                    "id": "0",
+                    "tag": "good",
+                }, {
+                    "id": "1",
+                    "tag": "small",
+                }],
+
             },
             {
                 "id": "3",
                 "name": "name3",
                 "isCheck": False,
+                "tags": [{
+                    "id": "0",
+                    "tag": "fat",
+                }],
 
             },
 
         ]
-        datalist_checkbox = mui.Checkbox("")
+        datalist_checkbox = mui.Checkbox()
         datalist_comp = mui.HBox([
             mui.Typography().set_override_props(value="name"),
             datalist_checkbox,
-        ])
+            mui.DataFlexBox(mui.Chip().prop(size="small").set_override_props(label="tag")).set_override_props(dataList="tags").prop(flexFlow="row", virtualized=False),
+        ]).prop(alignItems="center")
         datalist = mui.DataFlexBox(datalist_comp).prop(flexFlow="column", dataList=dataList)
         datalist.bind_prop(datalist_checkbox, "isCheck")
         return mui.VBox([
