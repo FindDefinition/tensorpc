@@ -845,6 +845,7 @@ class App:
         res: Dict[str, Any] = {}
         for uid, data in ev.uid_to_data.items():
             key = undefined 
+            uid_original = uid
             if TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT in uid:
                 parts = uid.split(TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT)
                 uid = parts[0]
@@ -885,7 +886,7 @@ class App:
                 with contextlib.ExitStack() as stack:
                     for ctx in ctxes:
                         stack.enter_context(ctx)
-                    res[uid] = await comps[-1].handle_event(
+                    res[uid_original] = await comps[-1].handle_event(
                         Event(FrontendEventType.Drop.value, data[1], key, indexes), 
                         is_sync=is_sync)
             else:
@@ -898,7 +899,7 @@ class App:
                 with contextlib.ExitStack() as stack:
                     for ctx in ctxes:
                         stack.enter_context(ctx)
-                    res[uid] = await comps[-1].handle_event(event, is_sync=is_sync)
+                    res[uid_original] = await comps[-1].handle_event(event, is_sync=is_sync)
         if is_sync:
             return res
             

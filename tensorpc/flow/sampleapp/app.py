@@ -1198,6 +1198,12 @@ class DataGridApp:
             "fat": fat,
             "carbs": carbs,
             "protein": protein,
+            "nested": [
+                {
+                    "id": str(i),
+                    "iq": random.randint(0, 100),
+                } for i in range(random.randint(2, 6))
+            ]
         }
     
     def create_many_datas(self, count: int):
@@ -1216,7 +1222,7 @@ class DataGridApp:
         fat_cell = mui.Slider(0, 100, 1)
 
         column_defs = [
-            # mui.DataGrid.ColumnDef("special", specialType=mui.DataGridColumnSpecialType.MasterDetail.value),
+            mui.DataGrid.ColumnDef("special", specialType=mui.DataGridColumnSpecialType.MasterDetail.value),
             mui.DataGrid.ColumnDef("id", accessorKey="id"),
             mui.DataGrid.ColumnDef("name", accessorKey="name", width=120, editCell=input_cell),
             mui.DataGrid.ColumnDef("calories", accessorKey="calories"),
@@ -1224,10 +1230,22 @@ class DataGridApp:
             mui.DataGrid.ColumnDef("carbs", accessorKey="carbs"),
             mui.DataGrid.ColumnDef("protein", accessorKey="protein", align="right", cell=cbox),
             mui.DataGrid.ColumnDef("actions", cell=btn),
-
         ]
-        dgrid = mui.DataGrid(column_defs, rows, mui.JsonViewer().set_override_props(data=".")).prop(idKey="id", rowHover=True)
-        dgrid.event_fetch_detail.on(self._fetch_detail)
+        master_detail = mui.JsonViewer().set_override_props(data=".")
+        master_detail = mui.VBox([
+            mui.Typography("Master Detail").prop(variant="h4"),
+            mui.DataGrid([
+                mui.DataGrid.ColumnDef("id", accessorKey="id"),
+                mui.DataGrid.ColumnDef("iq", accessorKey="iq"),
+            ]).prop(idKey="id", rowHover=True, stickyHeader=False, virtualized=False, size="small").set_override_props(dataList="nested")
+        ]).prop(width="100%", alignItems="center")
+        # master_detail = mui.DataFlexBox(mui.HBox([
+        #     mui.Typography().set_override_props(value="id"),
+        #     mui.Divider(orientation="vertical"),
+        #     mui.Typography().set_override_props(value="iq"),
+        # ])).set_override_props(dataList="nested").prop(flexFlow="column")
+        dgrid = mui.DataGrid(column_defs, rows, master_detail).prop(idKey="id", rowHover=True, virtualized=False)
+        # dgrid.event_fetch_detail.on(self._fetch_detail)
         dgrid.bind_prop(cbox, "protein")
         dgrid.bind_prop(input_cell, "name")
         dgrid.bind_prop(fat_cell, "fat")
