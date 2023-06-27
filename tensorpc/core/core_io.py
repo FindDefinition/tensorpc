@@ -694,6 +694,9 @@ class SocketMsgType(Enum):
     EventChunk = 0x08
     HeaderChunk = 0x09
 
+    Ping = 0x0a
+    Pong = 0x0b
+
     EventError = 0x10
     RPCError = 0x20
     UserError = 0x30
@@ -701,6 +704,8 @@ class SocketMsgType(Enum):
     OnConnectError = 0x50
 
     ErrorMask = 0xF0
+
+    
 
 
 def encode_protobuf_uint(val: int):

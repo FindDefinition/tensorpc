@@ -32,8 +32,8 @@ from tensorpc.protos_export import rpc_message_pb2
 from tensorpc.protos_export import \
     remote_object_pb2_grpc as remote_object_pb2_grpc
 from tensorpc.utils.df_logging import get_logger
-# from tensorpc.core import httpserver
-from tensorpc.core.httpservers import blacksheep_impl as httpserver
+from tensorpc.core.httpservers import aiohttp_impl as httpserver
+# from tensorpc.core.httpservers import blacksheep_impl as httpserver
 import aiohttp
 
 LOGGER = get_logger()

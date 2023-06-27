@@ -22,7 +22,7 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Tuple, Type, TypeVar, Union)
 import urllib.request
 from tensorpc import compat
-from tensorpc.core.httpserver import JS_MAX_SAFE_INT
+from tensorpc.core.httpservers.core import JS_MAX_SAFE_INT
 from tensorpc.flow.flowapp.appcore import Event, EventDataType
 from tensorpc.flow.jsonlike import DataClassWithUndefined
 from typing_extensions import Literal

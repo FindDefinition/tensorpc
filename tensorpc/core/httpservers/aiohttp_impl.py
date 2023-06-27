@@ -14,8 +14,14 @@ from pathlib import Path
 from tensorpc.protos_export import remote_object_pb2
 from tensorpc.protos_export import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos_export import rpc_message_pb2
+from contextlib import suppress
 
 from .core import WebsocketClientBase, WebsocketMsg, WebsocketMsgType, WebsocketHandler
+async def _cancel(task):
+    # more info: https://stackoverflow.com/a/43810272/1113207
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
 
 class AiohttpWebsocketClient(WebsocketClientBase):
     def __init__(self,
@@ -36,6 +42,40 @@ class AiohttpWebsocketClient(WebsocketClientBase):
         return id(self.ws)
 
     async def binary_msg_generator(self) -> AsyncGenerator[WebsocketMsg, None]: 
+        # while True:
+        #     # msg = await self.ws.receive()
+        #     # if msg.type == aiohttp.WSMsgType.BINARY:
+        #     #     yield WebsocketMsg(msg.data, WebsocketMsgType.Binary)
+        #     # elif msg.type == aiohttp.WSMsgType.TEXT:
+        #     #     yield WebsocketMsg(msg.data, WebsocketMsgType.Text)
+        #     # elif msg.type == aiohttp.WSMsgType.ERROR:
+        #     #     raise Exception("websocket connection closed with exception %s" %
+        #     #                     self.ws.exception())
+        #     await self._allow_recv_event.wait()
+        #     async with self._lock:
+        #         recv_task = asyncio.create_task(self.ws.receive(), name="recv_task")
+        #         ev_task = asyncio.create_task(self._recv_cancel_event.wait(), name="ev_task")
+        #         done, pending = await asyncio.wait([recv_task, ev_task], return_when=asyncio.FIRST_COMPLETED)
+        #         if ev_task in done:
+        #             # cancel recv task 
+                    
+        #             print("cancel recv task")
+        #             await _cancel(recv_task)
+        #             # self._recv_cancel_event.set()
+        #             # ev_task = asyncio.create_task(self._recv_cancel_event.wait(), name="ev_task")
+
+        #         else:
+        #             msg = recv_task.result()
+        #             if msg.type == aiohttp.WSMsgType.BINARY:
+        #                 yield WebsocketMsg(msg.data, WebsocketMsgType.Binary)
+        #             elif msg.type == aiohttp.WSMsgType.TEXT:
+        #                 yield WebsocketMsg(msg.data, WebsocketMsgType.Text)
+        #             elif msg.type == aiohttp.WSMsgType.ERROR:
+        #                 raise Exception("websocket connection closed with exception %s" %
+        #                                 self.ws.exception())
+        #     # recv_task = asyncio.create_task(self.ws.receive(), name="recv_task")
+
+        #         # msg = await self.ws.receive()
         async for msg in self.ws:
             if msg.type == aiohttp.WSMsgType.BINARY:
                 yield WebsocketMsg(msg.data, WebsocketMsgType.Binary)
@@ -170,7 +210,7 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
                                   ws_name="/api/ws",
                                   is_sync: bool = False,
                                   rpc_pickle_name: str = "/api/rpc_pickle",
-                                  client_max_size: int = 4 * 1024**2,
+                                  client_max_size: int = 16 * 1024**2,
                                   standalone: bool = True,
                                   ssl_key_path: str = "",
                                   ssl_crt_path: str = ""):

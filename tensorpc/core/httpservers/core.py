@@ -11,6 +11,8 @@ import traceback
 from functools import partial
 from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
+import async_timeout
+
 from tensorpc import compat
 from tensorpc.core import core_io, defs
 from tensorpc.core import serviceunit
@@ -58,6 +60,12 @@ class WebsocketClientBase(abc.ABC):
         self._serv_id_to_name = serv_id_to_name
         self._name_to_serv_id = {v: k for k, v in serv_id_to_name.items()}
         self._ev_cnt = 0
+        self._lock = asyncio.Lock()
+        self._pingpong_cnt = 0
+        self._recv_cancel_event = asyncio.Event()
+        self._recv_task: Optional[asyncio.Task] = None
+        self._allow_recv_event = asyncio.Event()
+        self._allow_recv_event.set()
 
     @abc.abstractmethod
     def get_msg_max_size(self) -> int: ...
@@ -71,11 +79,65 @@ class WebsocketClientBase(abc.ABC):
     def get_event_id(self):
         self._ev_cnt = (self._ev_cnt + 1) % JS_MAX_SAFE_INT
         return self._ev_cnt
+    
+    def get_pingpong_id(self):
+        self._pingpong_cnt = (self._pingpong_cnt + 1) % JS_MAX_SAFE_INT
+        return self._pingpong_cnt
 
     def __hash__(self):
         return self.get_client_id()
+    
+    async def send_ping(self):
+        rid = self.get_pingpong_id()
+        await self.send("", core_io.SocketMsgType.Ping, request_id=rid, is_json=True)
+        return rid
+    
+    async def send_pong(self, rpc_id: int):
+        await self.send("", core_io.SocketMsgType.Pong, request_id=rpc_id, is_json=True)
 
     async def send(self,
+                   data,
+                   msg_type: core_io.SocketMsgType,
+                   service_key: str = "",
+                   request_id: int = 0,
+                   is_json: bool = False,
+                   dynamic_key: str = ""):
+        """data must not be encoded.
+        """
+        if self._uid is not None:
+            request_id = self._uid
+        sid = 0
+        if service_key != "":
+            sid = self._name_to_serv_id[service_key]
+        if msg_type.value & core_io.SocketMsgType.ErrorMask.value:
+            req = wsdef_pb2.Header(service_id=sid,
+                                   data=json.dumps(data),
+                                   rpc_id=request_id)
+        else:
+            req = wsdef_pb2.Header(service_id=sid,
+                                   rpc_id=request_id,
+                                   dynamic_key=dynamic_key)
+        if is_json:
+            return await self.send_bytes(
+                core_io.json_only_encode(data, msg_type, req))
+        max_size = self.get_msg_max_size() - 128
+        # max_size = 1024 * 1024
+        # TODO reslove "8192"
+        encoder = core_io.SocketMessageEncoder(data, skeleton_size_limit=max_size - 8192)
+        try:
+            for chunk in encoder.get_message_chunks(msg_type, req, max_size):
+                assert len(chunk) <= max_size
+                async with async_timeout.timeout(5):
+                    await self.send_bytes(chunk)
+        except ConnectionResetError:
+            print("CLIENT SEND ERROR, RETURN")
+        except:
+            print("CLIENT SEND TIMEOUT ERROR", )
+            raise
+        finally:
+            return 
+
+    async def send_with_lock(self,
                    data,
                    msg_type: core_io.SocketMsgType,
                    service_key: str = "",
@@ -115,20 +177,32 @@ class WebsocketClientBase(abc.ABC):
         # print("SEND CHUNKS", len(chunks))
         # if len(chunks) > 1:
         #     print("BEFORE SEND")
+        self._recv_cancel_event.set()
+        self._allow_recv_event.clear()
         try:
             # if encoder.get_total_array_binary_size() > max_size:
             #     print("WS PREPARE SEND", encoder.get_total_array_binary_size())
             # t = time.time()
-            for chunk in encoder.get_message_chunks(msg_type, req, max_size):
-                assert len(chunk) <= max_size
-                # tasks.append(self.ws.send_bytes(chunk))
-                await self.send_bytes(chunk)
+            async with self._lock:
+                for chunk in encoder.get_message_chunks(msg_type, req, max_size):
+                    assert len(chunk) <= max_size
+                    # tasks.append(self.ws.send_bytes(chunk))
+                    async with async_timeout.timeout(5):
+                        await self.send_bytes(chunk)
             # if encoder.get_total_array_binary_size() > max_size:
 
                 # print("WS SEND TIME", time.time() - t)
         except ConnectionResetError:
             print("CLIENT SEND ERROR, RETURN")
-            return
+        except:
+            print("CLIENT SEND TIMEOUT ERROR", )
+            raise
+        finally:
+
+            self._recv_cancel_event.clear()
+            self._allow_recv_event.set()
+
+            return 
         # await tasks[0]
         # if len(tasks) > 1:
         #     tasks = [asyncio.create_task(t) for t in tasks[1:]]
@@ -244,6 +318,12 @@ class WebsocketHandler:
             return
         await client.send([res], msg_type=msg_type, request_id=req_id)
 
+    async def send_ping_loop(self, client: WebsocketClientBase):
+        while True:
+            await asyncio.sleep(5)
+            rid = await client.send_ping()
+            print("sent ping", rid)
+
     async def handle_new_connection(self, client: WebsocketClientBase):
         print("NEW CONN")
         service_core = self.service_core
@@ -256,6 +336,7 @@ class WebsocketHandler:
             except Exception as e:
                 await client.send_user_error(e, 0)
         # assert not self.event_to_clients and not self.client_to_events
+        # pingpong_task = asyncio.create_task(self.send_ping_loop(client))
         wait_task = asyncio.create_task(
             self.rpc_awaiter(conn_rpc_queue, conn_st_ev))
         try:
@@ -275,6 +356,12 @@ class WebsocketHandler:
                         req = header.req
                     except Exception as e:
                         await client.send_user_error(e, 0)
+                        continue
+                    if msg_type == core_io.SocketMsgType.Pong:
+                        print("receive pong", header.req.rpc_id)
+                        continue
+                    if msg_type == core_io.SocketMsgType.Ping:
+                        await client.send_pong(header.req.rpc_id)
                         continue
                     if req.service_id < 0:
                         serv_key = req.service_key
@@ -400,6 +487,7 @@ class WebsocketHandler:
                 traceback.print_exc()
             conn_st_ev.set()
             await wait_task
+            # await _cancel(pingpong_task)
             # cancel all rpc
             while True:
                 try:
@@ -584,7 +672,9 @@ class WebsocketHandler:
             if sending_tasks:
                 try:
                     # TODO if this function fail...
-                    await asyncio.wait([x[0] for x in sending_tasks])
+                    for task in sending_tasks:
+                        await task[0]
+                    # await asyncio.wait([x[0] for x in sending_tasks])
                 except ConnectionResetError:
                     print("Cannot write to closing transport")
             for task, ev_str in sending_tasks:

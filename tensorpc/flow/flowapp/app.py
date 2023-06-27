@@ -1192,7 +1192,7 @@ class EditableApp(App):
             # ast parse error
             traceback.print_exc()
             return
-        
+        # print(changes)
         if changes is None:
             return
         print(f"[WatchDog]{path}")
