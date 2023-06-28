@@ -733,7 +733,7 @@ class ObjectTree(BasicObjectTree):
             if qualname in rg and qualname in self._default_obs_funcs._watched_funcs:
                 if entry.recorded_data is not None:
                     await self.run_callback(entry.run_function_with_record,
-                                            sync_first=False,
+                                            sync_status_first=False,
                                             change_status=False)
 
     async def _sync_data_storage_node(self):

@@ -487,7 +487,7 @@ class Button(MUIComponentBase[ButtonProps]):
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=True,
+                                           sync_status_first=True,
                                            is_sync=is_sync)
 
     @property
@@ -630,7 +630,7 @@ class IconButton(MUIComponentBase[IconButtonProps]):
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=True,
+                                           sync_status_first=True,
                                            is_sync=is_sync)
 
     @property
@@ -678,7 +678,7 @@ class Dialog(MUIContainerBase[DialogProps, MUIComponentType]):
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=True,
+                                           sync_status_first=True,
                                            is_sync=is_sync)
 
     def get_sync_props(self) -> Dict[str, Any]:
@@ -1022,7 +1022,7 @@ class ListItemButton(MUIComponentBase[ButtonProps]):
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=False,
+                                           sync_status_first=False,
                                            is_sync=is_sync)
 
     @property
@@ -1117,7 +1117,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=False,
+                                           sync_status_first=False,
                                            is_sync=is_sync)
 
 
@@ -1333,7 +1333,7 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
         return await handle_standard_event(self,
                                            ev,
                                            is_sync=is_sync,
-                                           sync_first=False,
+                                           sync_status_first=False,
                                            sync_state_after_change=False)
 
     @property
@@ -1983,9 +1983,10 @@ class MultipleAutocomplete(MUIComponentBase[MultipleAutocompleteProps]):
 class SliderProps(MUIComponentBaseProps):
     label: Union[Undefined, str] = undefined
     ranges: Tuple[NumberType, NumberType, NumberType] = (0, 1, 0)
-    value: NumberType = 0
+    value: Union[Undefined, NumberType] = undefined
     vertical: Union[Undefined, bool] = undefined
     valueInput: Union[Undefined, bool] = undefined
+    defaultValue: Union[Undefined, NumberType] = undefined
 
 
 class Slider(MUIComponentBase[SliderProps]):
@@ -2637,7 +2638,7 @@ class TabList(MUIComponentBase[TabListProps]):
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=False,
+                                           sync_status_first=False,
                                            is_sync=is_sync)
 
     @property
@@ -2943,7 +2944,7 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=False,
+                                           sync_status_first=False,
                                            is_sync=is_sync,
                                            sync_state_after_change=False,
                                            change_status=False)
@@ -3108,7 +3109,7 @@ class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=False,
+                                           sync_status_first=False,
                                            is_sync=is_sync)
 
 
@@ -3197,7 +3198,7 @@ class DynamicControls(MUIComponentBase[DynamicControlsProps]):
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=False,
+                                           sync_status_first=False,
                                            is_sync=is_sync)
 
 
@@ -3332,7 +3333,7 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps,
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=False,
+                                           sync_status_first=False,
                                            is_sync=is_sync)
 
     async def update_data_in_index(self, index: int, updates: Dict[str, Any]):
@@ -3374,7 +3375,8 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps,
         by yourself.
         """
         if isinstance(comp, (Slider, _InputBaseComponent)):
-            assert isinstance(comp.value, Undefined), "slider and input must be uncontrolled."
+            comp.props.value = undefined
+            # assert isinstance(comp.value, Undefined), "slider and input must be uncontrolled."
         # TODO only support subset of all components
         if FrontendEventType.Change.value in comp._flow_allowed_events:
             # TODO change all control components to use value as its data prop name
@@ -3507,6 +3509,7 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         key = event.keys
         indexes = event.indexes
         # print(event, prop_name)
+        print(indexes, key)
         assert not isinstance(key, Undefined) and not isinstance(
             indexes, Undefined)
         assert len(indexes) == 1, "update data list only supports single index"
@@ -3524,7 +3527,8 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         """bind a data prop with control component. no type check.
         """
         if isinstance(comp, (Slider, _InputBaseComponent)):
-            assert isinstance(comp.value, Undefined), "slider and input must be uncontrolled."
+            comp.props.value = undefined
+            # assert isinstance(comp.props.value, Undefined), "slider and input must be uncontrolled."
         if FrontendEventType.Change.value in comp._flow_allowed_events:
             # TODO change all control components to use value as its data prop name
             if "defaultValue" in comp._prop_field_names:

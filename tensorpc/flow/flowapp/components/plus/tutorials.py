@@ -2,6 +2,7 @@ import asyncio
 import dataclasses
 import enum
 import inspect
+from operator import is_
 import os
 import time
 from typing import Any, Callable, Coroutine, Dict, Iterable, List, Optional, Set, Tuple, Union
@@ -42,19 +43,26 @@ def _parse_markdown_very_trivial(content: str):
         remain_code_index = code_block_end + len(code_block_suffix)
     return res_blocks
 
+
 class AppInMemory(mui.FlexBox):
     """app with editor (app must be anylayout)
     """
+    # @dataclasses.dataclass
+    class Config:
+        is_horizontal: bool = True
+        height: Union[mui.ValueType, mui.Undefined] = mui.undefined
+
     def __init__(self, path: str, code: str, is_horizontal: bool = True):
         wrapped_path = f"<{TENSORPC_FILE_NAME_PREFIX}-{path}>"
         self.editor = mui.MonacoEditor(code, "python", wrapped_path).prop(minWidth=0, minHeight=0)
         self.path = wrapped_path 
         self.code = code 
         self.app_cls_name = "App"
-        self.show_box = mui.FlexBox()
+        self.show_box = mui.FlexBox().prop(overflowY="auto")
+        self.divider = mui.Divider("horizontal" if is_horizontal else "vertical")
         super().__init__([
             self.editor.prop(flex=1),
-            mui.Divider("horizontal" if is_horizontal else "vertical"),
+            self.divider,
             self.show_box.prop(flex=1),
         ])
         self._layout_for_reload: Optional[mui.FlexBox] = None
@@ -67,6 +75,15 @@ class AppInMemory(mui.FlexBox):
         reload_mgr.in_memory_fs.add_file(self.path, self.code)
         mod = reload_mgr.in_memory_fs.load_in_memory_module(self.path)
         app_cls = mod.__dict__[self.app_cls_name]
+        if hasattr(app_cls, "Config"):
+            cfg_cls = getattr(app_cls, "Config")
+            assert issubclass(cfg_cls, AppInMemory.Config)
+            if cfg_cls.is_horizontal:
+                await self.send_and_wait(self.update_event(flexFlow="row") + self.divider.update_event(orientation="horizontal"))
+            else:
+                await self.send_and_wait(self.update_event(flexFlow="column") + self.divider.update_event(orientation="vertical"))
+            if cfg_cls.height is not mui.undefined:
+                await self.send_and_wait(self.update_event(height=cfg_cls.height))
         layout = mui.flex_wrapper(app_cls())
         self._layout_for_reload = layout
         await self.show_box.update_childs({"layout": layout})
@@ -85,6 +102,7 @@ class AppInMemory(mui.FlexBox):
             layout_flex, mui.FlexBox
         ), f"create_layout must return a flexbox when use anylayout"
         layout_flex.set_wrapped_obj(layout.get_wrapped_obj())
+        wobj = layout.get_wrapped_obj()
         await self.show_box.update_childs({"layout": layout_flex})
 
     async def _on_editor_save(self, value: str):

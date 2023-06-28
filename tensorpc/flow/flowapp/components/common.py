@@ -95,7 +95,7 @@ async def handle_raw_event(event: Event, comp: Component, just_run: bool = False
 
 async def handle_standard_event(comp: Component,
                                 event: Event,
-                                sync_first: bool = False,
+                                sync_status_first: bool = False,
                                 sync_state_after_change: bool = True,
                                 is_sync: bool = False,
                                 change_status: bool = True):
@@ -106,10 +106,18 @@ async def handle_standard_event(comp: Component,
         # await comp.send_and_wait(msg)
         return
     elif comp.props.status == UIRunStatus.Stop.value:
+        if not isinstance(event.keys, Undefined):
+            # for all template components, we must disable 
+            # status change and sync. status indicator 
+            # in Button and IconButton will be disabled.
+            sync_status_first = False
+            change_status = False
+
         if event.type in _STATE_CHANGE_EVENTS:
             handlers = comp.get_event_handlers(event.type)
             sync_state = False
-            if isinstance(event.key, Undefined):
+            # for template components, we don't need to sync state.
+            if isinstance(event.keys, Undefined):
                 comp.state_change_callback(event.data, event.type)
                 sync_state = True
             if handlers is not None:
@@ -117,12 +125,12 @@ async def handle_standard_event(comp: Component,
                 if is_sync:
                     return await comp.run_callbacks(handlers.get_bind_event_handlers(event),
                                       sync_state, 
-                                      sync_first=False, change_status=change_status)
+                                      sync_status_first=False, change_status=change_status)
                 else:
                     comp._task = asyncio.create_task(
                         comp.run_callbacks(handlers.get_bind_event_handlers(event),
                                         sync_state,
-                                        sync_first=sync_first, change_status=change_status))
+                                        sync_status_first=sync_status_first, change_status=change_status))
             else:
                 # all controlled component must sync state after state change
                 if sync_state_after_change:
@@ -133,26 +141,26 @@ async def handle_standard_event(comp: Component,
             if handlers is not None:
                 run_funcs = handlers.get_bind_event_handlers_noarg(event)
                 if is_sync:
-                    return await comp.run_callbacks(run_funcs, sync_first=False)
+                    return await comp.run_callbacks(run_funcs, sync_status_first=False)
                 else:
                     comp._task = asyncio.create_task(
-                        comp.run_callbacks(run_funcs, sync_first=sync_first, change_status=change_status))
+                        comp.run_callbacks(run_funcs, sync_status_first=sync_status_first, change_status=change_status))
         elif event.type in _ONEARG_EVENTS:
             handlers = comp.get_event_handlers(event.type)
             # other events don't need to sync state
             if handlers is not None:
                 run_funcs = handlers.get_bind_event_handlers(event)
                 if is_sync:
-                    return await comp.run_callbacks(run_funcs, sync_first=False, change_status=change_status)
+                    return await comp.run_callbacks(run_funcs, sync_status_first=False, change_status=change_status)
                 else:
                     comp._task = asyncio.create_task(
-                        comp.run_callbacks(run_funcs, sync_first=sync_first, change_status=change_status))
+                        comp.run_callbacks(run_funcs, sync_status_first=sync_status_first, change_status=change_status))
 
         else:
             raise NotImplementedError
 
 
-# async def handle_change_event_no_arg(comp: Component, sync_first: bool = False):
+# async def handle_change_event_no_arg(comp: Component, sync_status_first: bool = False):
 #     if comp.props.status == UIRunStatus.Running.value:
 #         msg = create_ignore_usr_msg(comp)
 #         await comp.send_and_wait(msg)
@@ -160,4 +168,4 @@ async def handle_standard_event(comp: Component,
 #     elif comp.props.status == UIRunStatus.Stop.value:
 #         cb2 = comp.get_callback()
 #         if cb2 is not None:
-#             comp._task = asyncio.create_task(comp.run_callback(cb2, sync_first=sync_first))
+#             comp._task = asyncio.create_task(comp.run_callback(cb2, sync_status_first=sync_status_first))

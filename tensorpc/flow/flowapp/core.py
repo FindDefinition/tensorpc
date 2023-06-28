@@ -1414,7 +1414,7 @@ class Component(Generic[T_base_props, T_child]):
     async def run_callback(self,
                            cb: Callable[[], _CORO_NONE],
                            sync_state: bool = False,
-                           sync_first: bool = False,
+                           sync_status_first: bool = False,
                            res_callback: Optional[Callable[[Any],
                                                            _CORO_NONE]] = None,
                            change_status: bool = True):
@@ -1427,7 +1427,7 @@ class Component(Generic[T_base_props, T_child]):
                 this is required for components which can change state
                 in frontend, e.g. switch, slider, etc. for components that
                 won't interact with user in frontend, this can be set to False.
-            sync_first: Whether to wait for the component's state to be synchronized before running the callback.
+            sync_status_first: Whether to wait for the component's state to be synchronized before running the callback.
                 should be used for components with loading support. e.g. buttons
             res_callback: An optional callback function to run with the result of the main callback.
             change_status: Whether to change the component's status to "Running" before running the callback and to "Stop" after.
@@ -1443,7 +1443,7 @@ class Component(Generic[T_base_props, T_child]):
             self.props.status = UIRunStatus.Running.value
         # only ui with loading support need sync first.
         # otherwise don't use this because slow
-        if sync_first:
+        if sync_status_first:
             ev = asyncio.Event()
             await self.sync_status(sync_state, ev)
             await ev.wait()
@@ -1478,7 +1478,7 @@ class Component(Generic[T_base_props, T_child]):
     async def run_callbacks(self,
                            cbs: List[Callable[[], _CORO_NONE]],
                            sync_state: bool = False,
-                           sync_first: bool = False,
+                           sync_status_first: bool = False,
                            res_callback: Optional[Callable[[Any],
                                                            _CORO_NONE]] = None,
                            change_status: bool = True):
@@ -1491,7 +1491,7 @@ class Component(Generic[T_base_props, T_child]):
                 this is required for components which can change state
                 in frontend, e.g. switch, slider, etc. for components that
                 won't interact with user in frontend, this can be set to False.
-            sync_first: Whether to wait for the component's state to be synchronized before running the callback.
+            sync_status_first: Whether to wait for the component's state to be synchronized before running the callback.
                 should be used for components with loading support. e.g. buttons
             res_callback: An optional callback function to run with the result of the main callback.
             change_status: Whether to change the component's status to "Running" before running the callback and to "Stop" after.
@@ -1507,7 +1507,7 @@ class Component(Generic[T_base_props, T_child]):
             self.props.status = UIRunStatus.Running.value
         # only ui with loading support need sync first.
         # otherwise don't use this because slow
-        if sync_first:
+        if sync_status_first:
             ev = asyncio.Event()
             await self.sync_status(sync_state, ev)
             await ev.wait()
@@ -1853,14 +1853,14 @@ class ContainerBase(Component[T_container_props, T_child]):
             if special_methods.did_mount is not None:
                 await self.run_callback(
                     special_methods.did_mount.get_binded_fn(),
-                    sync_first=False,
+                    sync_status_first=False,
                     change_status=False)
         for deleted in detached:
             special_methods = deleted.get_special_methods(reload_mgr)
             if special_methods.will_unmount is not None:
                 await self.run_callback(
                     special_methods.will_unmount.get_binded_fn(),
-                    sync_first=False,
+                    sync_status_first=False,
                     change_status=False)
 
     def set_new_layout_locally(self, layout: Union[Dict[str, Component], T_child_structure]):

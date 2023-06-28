@@ -674,7 +674,7 @@ class App:
                 if special_methods.did_mount is not None:
                     await v.run_callback(
                         special_methods.did_mount.get_binded_fn(),
-                        sync_first=False,
+                        sync_status_first=False,
                         change_status=False)
 
     def app_terminate(self):
@@ -693,7 +693,7 @@ class App:
                 if special_methods.will_unmount is not None:
                     await v.run_callback(
                         special_methods.will_unmount.get_binded_fn(),
-                        sync_first=False,
+                        sync_status_first=False,
                         change_status=False)
 
     def app_create_layout(self) -> mui.LayoutType:
@@ -716,7 +716,10 @@ class App:
     def _get_app_dynamic_cls(self):
         assert self._app_dynamic_cls is not None
         return self._app_dynamic_cls
-
+    
+    def __repr__(self):
+        return f"App[{self._get_app_dynamic_cls().module_path}]"
+    
     def _get_app_service_unit(self):
         assert self._app_service_unit is not None
         return self._app_service_unit
@@ -875,7 +878,7 @@ class App:
                                     src_event=src_event)
                         cbs.append(cb)
                     comp._task = asyncio.create_task(
-                        comp.run_callbacks(cbs, sync_first=False))
+                        comp.run_callbacks(cbs, sync_status_first=False))
             elif event.type == FrontendEventType.FileDrop.value:
                 # for file drop, we can't use regular drop above, so
                 # just convert it to drop event, no drag collect needed.

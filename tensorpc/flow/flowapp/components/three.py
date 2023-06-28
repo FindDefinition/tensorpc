@@ -1373,7 +1373,7 @@ class ScreenShot(ThreeComponentBase[ScreenShotProps]):
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=True,
+                                           sync_status_first=True,
                                            is_sync=is_sync)
 
 
@@ -1441,7 +1441,7 @@ class ScreenShotSyncReturn(ThreeComponentBase[ScreenShotProps]):
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=True,
+                                           sync_status_first=True,
                                            sync_state_after_change=False,
                                            is_sync=is_sync)
 
@@ -2725,7 +2725,7 @@ class PivotControls(ThreeContainerBase[PivotControlsProps,
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self,
                                            ev,
-                                           sync_first=True,
+                                           sync_status_first=True,
                                            sync_state_after_change=False,
                                            is_sync=is_sync)
 
