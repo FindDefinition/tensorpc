@@ -1210,7 +1210,7 @@ class DataGridApp:
     def my_layout(self):
         rows = list(self.create_many_datas(1000))
         btn = mui.Button("Edit").prop(loading=False)
-        btn.event_click.on_standard(lambda x: print(x.key)).configure(True)
+        btn.event_click.on_standard(lambda x: print(x.keys)).configure(True)
         cbox = mui.Checkbox("")
         input_cell = mui.Input("dev")
         fat_cell = mui.Slider(0, 100, 1)

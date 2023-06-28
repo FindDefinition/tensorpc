@@ -41,7 +41,7 @@ class Event:
     data: Any
     # only used for template component such as table.
     # key indicates the id of template item.
-    key: Union[Undefined, str] = undefined
+    keys: Union[Undefined, List[str]] = undefined
     # for template control components.
     indexes: Union[Undefined, List[int]] = undefined
 

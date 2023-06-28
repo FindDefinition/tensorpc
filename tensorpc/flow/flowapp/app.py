@@ -831,7 +831,7 @@ class App:
     async def __handle_dnd_event(handler: EventHandler,
                                  src_handler: EventHandler, src_event: Event):
         res = await src_handler.run_event_async(src_event)
-        ev_res = Event(FrontendEventType.Drop.value, res, src_event.key)
+        ev_res = Event(FrontendEventType.Drop.value, res, src_event.keys)
         await handler.run_event_async(ev_res)
 
     def _is_editable_app(self):
@@ -844,15 +844,15 @@ class App:
     async def handle_event(self, ev: UIEvent, is_sync: bool = False):
         res: Dict[str, Any] = {}
         for uid, data in ev.uid_to_data.items():
-            key = undefined 
+            keys: Union[Undefined, List[str]] = undefined 
             if TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT in uid:
                 parts = uid.split(TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT)
                 uid = parts[0]
-                key = TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT.join(parts[1:])
+                keys = parts[1:]
             indexes = undefined
             if len(data) == 3 and data[2] is not None:
                 indexes = list(map(int, data[2].split(".")))
-            event = Event(data[0], data[1], key, indexes)
+            event = Event(data[0], data[1], keys, indexes)
             if event.type == FrontendEventType.Drop.value:
                 # TODO add event context stack here.
                 src_data = data[1]
@@ -864,7 +864,7 @@ class App:
                 handlers = comp.get_event_handlers(data[0])
                 # print(src_uid, comp, src_comp, handler, collect_handler)
                 if handlers is not None and collect_handlers is not None:
-                    src_event = Event(FrontendEventType.DragCollect.value, src_data["data"], key, indexes)
+                    src_event = Event(FrontendEventType.DragCollect.value, src_data["data"], keys, indexes)
                     cbs = []
                     for handler in handlers.handlers:
                         cb = partial(self.__handle_dnd_event,
@@ -886,7 +886,7 @@ class App:
                     for ctx in ctxes:
                         stack.enter_context(ctx)
                     res[uid] = await comps[-1].handle_event(
-                        Event(FrontendEventType.Drop.value, data[1], key, indexes), 
+                        Event(FrontendEventType.Drop.value, data[1], keys, indexes), 
                         is_sync=is_sync)
             else:
                 comps = self.root._get_comps_by_uid(uid)
