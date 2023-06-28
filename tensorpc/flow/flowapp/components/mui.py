@@ -1330,11 +1330,14 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
         return str(self.props.value)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
+        # for fully controlled components, we need to sync the state after the
+        # backend state chagne.
+        sync_state_after_change = isinstance(self.props.debounce, Undefined)
         return await handle_standard_event(self,
                                            ev,
                                            is_sync=is_sync,
                                            sync_status_first=False,
-                                           sync_state_after_change=False)
+                                           sync_state_after_change=sync_state_after_change)
 
     @property
     def prop(self):
@@ -3509,7 +3512,6 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         key = event.keys
         indexes = event.indexes
         # print(event, prop_name)
-        print(indexes, key)
         assert not isinstance(key, Undefined) and not isinstance(
             indexes, Undefined)
         assert len(indexes) == 1, "update data list only supports single index"

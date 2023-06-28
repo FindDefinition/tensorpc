@@ -771,23 +771,17 @@ class SampleThree2DApp(EditableApp):
         await self.box2d.update_boxes(centers, dimensions, attrs=attrs)
 
 
-class SampleMapApp(EditableApp):
-    def __init__(self) -> None:
-        super().__init__(reloadable_layout=True)
-        self.set_init_window_size([800, 600])
-        # makesure three canvas size fit parent.
-        # self.root.props.minHeight = 0
-        # store components here if you want to keep
-        # data after reload layout.
-        self.root.props.flexFlow = "row nowrap"
+class SampleMapApp:
 
-    def app_create_layout(self) -> Dict[str, MUIComponentType]:
+    @mark_create_layout
+    def app_create_layout(self):
         google_url = "http://{s}.google.com/vt?lyrs=m&x={x}&y={y}&z={z}"
+        esri_url = "https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png"
         self.leaflet = leaflet.MapContainer(
             (30, 100), 13, {
-                "tile": leaflet.TileLayer(google_url),
+                "tile": leaflet.TileLayer(esri_url),
             }).prop(height="100%", flex=3)
-        return {
+        return mui.HBox({
             "control":
             mui.VBox({
                 "btn":
@@ -796,7 +790,7 @@ class SampleMapApp(EditableApp):
             }).prop(minHeight=0, flex=1),
             "mmap":
             self.leaflet,
-        }
+        }).prop(width="640px", height="480px")
 
 
 class TestEnum(enum.Enum):

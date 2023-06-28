@@ -105,16 +105,17 @@ class MapEventSetZoom(MapEventBase):
 class MapContainerProps(ContainerBaseProps, FlexBoxProps):
     pass
 
-
+MapLayoutType = Union[List[MapComponentType], Dict[str,
+                                    MapComponentType]]
 class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
-    EvMove = FrontendEventType.MapMove
-    EvZoom = FrontendEventType.MapZoom
 
     def __init__(self,
                  center: Tuple[NumberType, NumberType],
                  zoom: NumberType,
-                 children: Dict[str, MapComponentType],
+                 children: MapLayoutType,
                  inited: bool = False) -> None:
+        if children is not None and isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
         allow_evs = [
             FrontendEventType.MapZoom.value, FrontendEventType.MapMove.value
         ]
@@ -162,7 +163,9 @@ class TileLayerProps(BasicProps):
 
 
 class TileLayer(MapComponentBase[TileLayerProps]):
-
+    """see https://leaflet-extras.github.io/leaflet-providers/preview/
+    for all leaflet providers.
+    """
     def __init__(
         self,
         url: str = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -273,7 +276,7 @@ class Polyline(MapContainerBase[PolylineProps, MapElementChildType]):
         positions: Union[List[Tuple[NumberType, NumberType]],
                          Undefined] = undefined,
         children: Optional[Dict[str, MapElementChildType]] = None,
-        on_click: Optional[Callable[
+        callback: Optional[Callable[
             [Tuple[NumberType, NumberType, NumberType]], _CORO_NONE]] = None
     ) -> None:
         super().__init__(UIType.LeafletPolyline,
@@ -281,7 +284,9 @@ class Polyline(MapContainerBase[PolylineProps, MapElementChildType]):
                          _children=children)
         self.props.color = color
         self.props.positions = positions
-        self.on_click = on_click
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
+        if callback is not None:
+            self.event_change.on(callback)
 
     async def handle_event(self, ev: Event):
         await handle_standard_event(self, ev)
