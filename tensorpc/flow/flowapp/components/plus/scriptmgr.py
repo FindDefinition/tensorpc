@@ -74,13 +74,13 @@ class ScriptManager(mui.FlexBox):
 
         self._graph_id = graph_id
         self.code_editor = mui.MonacoEditor("", "python",
-                                            "default").prop(flex=1)
+                                            "default").prop(flex=1, minHeight=0, minWidth=0)
         self.scripts = mui.Autocomplete(
             "Scripts",
             [],
             self._on_script_select,
         ).prop(size="small",
-               inputMargin="dense",
+               muiMargin="dense",
                padding="0 3px 0 3px",
                **CommonOptions.AddableAutocomplete)
         self.langs = mui.ToggleButtonGroup([

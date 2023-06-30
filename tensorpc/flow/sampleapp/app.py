@@ -57,7 +57,7 @@ from tensorpc.flow.flowapp.objtree import get_objtree_context
 class SampleApp(App):
     def __init__(self) -> None:
         super().__init__()
-        self.img_ui = mui.Images()
+        self.img_ui = mui.Image()
         self.task_loop = mui.TaskLoop("Test", self.on_task_loop)
         self.swi = mui.Switch("Switch Dynamic Layout", self.on_switch)
         self.swi_box = mui.FlexBox()

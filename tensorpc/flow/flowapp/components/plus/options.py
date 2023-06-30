@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from typing_extensions import TypedDict
-class AddableAutocompleteType(TypedDict):
+class CreatableAutocompleteType(TypedDict):
     selectOnFocus: bool 
     clearOnBlur: bool
     handleHomeEndKeys: bool
@@ -21,7 +21,7 @@ class AddableAutocompleteType(TypedDict):
 
 class CommonOptions:
 
-    AddableAutocomplete: AddableAutocompleteType = {
+    AddableAutocomplete: CreatableAutocompleteType = {
         "selectOnFocus": True,
         "clearOnBlur": True,
         "handleHomeEndKeys": True,

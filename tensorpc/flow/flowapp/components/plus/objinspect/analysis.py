@@ -34,7 +34,12 @@ def parse_obj_item(obj,
                    checker: Callable[[Type], bool],
                    obj_meta_cache=None):
     obj_type = type(obj)
-    if isinstance(obj, TreeItem):
+    try:
+        isinst = isinstance(obj, TreeItem)
+    except:
+        print("???", type(obj))
+        raise 
+    if isinst:
         node_candidate = obj.get_json_like_node(id)
         if node_candidate is not None:
             return node_candidate
@@ -160,6 +165,10 @@ def get_obj_dict(obj,
         if not (checker(v)):
             continue
         if inspecttools.is_obj_builtin_or_module(v):
+            continue
+        try:
+            isinstance(v, TreeItem)
+        except:
             continue
         res[k] = v
     return res

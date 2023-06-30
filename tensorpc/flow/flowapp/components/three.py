@@ -41,7 +41,7 @@ from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     UIRunStatus, UIType, Undefined, ValueType, undefined)
 from .mui import (FlexBoxProps, MUIFlexBoxProps, MUIComponentType,
                   MUIContainerBase, PointerEventsProperties,
-                  _encode_image_bytes)
+                  Image as MUIImage)
 from .common import handle_standard_event
 
 Vector3Type: TypeAlias = Tuple[float, float, float]
@@ -898,7 +898,7 @@ class Image(Object3dWithEventBase[ImageProps]):
         super().__init__(UIType.ThreeImage, ImageProps)
 
     async def show(self, image: np.ndarray):
-        encoded = _encode_image_bytes(image)
+        encoded = MUIImage.encode_image_bytes(image)
         self.props.image = encoded
         await self.send_and_wait(self.create_update_event({
             "image": encoded,
@@ -967,12 +967,6 @@ class PerspectiveCamera(Object3dBase[PerspectiveCameraProps]):
         self.props.up = up
         self.make_default = make_default
 
-    # TODO from camera matrix and intrinsics
-    def to_dict(self):
-        res = super().to_dict()
-        res["makeDefault"] = self.make_default
-        return res
-
     @property
     def prop(self):
         propcls = self.propcls
@@ -1009,12 +1003,6 @@ class OrthographicCamera(Object3dBase[OrthographicCameraProps]):
         self.props.position = position
         self.props.up = up
         self.make_default = make_default
-
-    # TODO from camera matrix and intrinsics
-    def to_dict(self):
-        res = super().to_dict()
-        res["makeDefault"] = self.make_default
-        return res
 
     @property
     def prop(self):

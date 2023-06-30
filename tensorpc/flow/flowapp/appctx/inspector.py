@@ -164,3 +164,10 @@ async def read_item(uid: str):
     comp = app.find_component(plus.ObjectInspector)
     assert comp is not None, "you must add inspector to your UI to use exception inspect"
     return await comp.get_object_by_uid(uid)
+
+def has_object(key: str):
+    comp = find_component(plus.ObjectInspector)
+    if comp is None:
+        return False
+    assert comp is not None, "you must add inspector to your UI"
+    return comp.tree.has_object(key)

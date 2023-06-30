@@ -52,7 +52,8 @@ FOLDER_TYPES = {
     mui.JsonLikeType.ListFolder.value, mui.JsonLikeType.DictFolder.value
 }
 
-_SHOULD_EXPAND_TYPES = {mui.JsonLikeType.List.value, mui.JsonLikeType.Dict.value, mui.JsonLikeType.Object.value,
+_SHOULD_EXPAND_TYPES = {mui.JsonLikeType.List.value, mui.JsonLikeType.Tuple.value,
+                        mui.JsonLikeType.Dict.value, mui.JsonLikeType.Object.value,
                             mui.JsonLikeType.ListFolder.value, mui.JsonLikeType.DictFolder.value,
                             mui.JsonLikeType.Layout.value}
 
@@ -609,7 +610,10 @@ class BasicObjectTree(mui.FlexBox):
                             await self._on_expand(parent_node.id)
                         return
 
-    async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME, expand_level: int = 1):
+    def has_object(self, key: str):
+        return key in self.root
+
+    async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME, expand_level: int = 0):
         key_in_root = key in self.root
         self.root[key] = obj
         obj_tree = await _get_obj_tree(obj, self._checker, key,
@@ -853,5 +857,5 @@ class ObjectTree(BasicObjectTree):
                     await appctx.save_data_storage(uid_parts[-1], node_id, obj)
                     await self._sync_data_storage_node()
                 if menu_type == ContextMenuType.CopyReadItemCode:
-                    await appctx.get_app().copy_text_to_clipboard(f"await appctx.read_inspector_item('{uid}')")
+                    await appctx.get_app().copy_text_to_clipboard(f"await appctx.inspector.read_item('{uid}')")
 

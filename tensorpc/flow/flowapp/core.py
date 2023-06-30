@@ -135,10 +135,11 @@ class UIType(enum.IntEnum):
     Markdown = 0x2e
     TextField = 0x2f
     DataGrid = 0x30
-    DataMUIList = 0x31
+    Tabs = 0x31
     VirtualizedBox = 0x32
     DataFlexBox = 0x33
     JsonViewer = 0x34
+    ListItemIcon = 0x35
 
     # special
     TaskLoop = 0x100
@@ -345,7 +346,8 @@ class FrontendEventType(enum.IntEnum):
 
 UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
     UIType.DataGrid, UIType.MatchCase,
-    UIType.DataFlexBox
+    UIType.DataFlexBox,
+    UIType.Tabs,
 }
 
 class AppDraggableType(enum.Enum):
