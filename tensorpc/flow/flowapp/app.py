@@ -253,7 +253,7 @@ class App:
         # self._uid_to_comp[_ROOT] = root
         self.root = root.prop(minHeight=0, minWidth=0)
         self._enable_editor = False
-
+        self._dialog_z_index: Optional[int] = None
         self._flowapp_special_eemitter: AsyncIOEventEmitter[AppSpecialEventType, Any] = AsyncIOEventEmitter()
         self._flowapp_thread_id = threading.get_ident()
         self._flowapp_enable_exception_inspect: bool = True
@@ -733,6 +733,8 @@ class App:
             "enableEditor": self._enable_editor,
             "fallback": "",
         }
+        if self._dialog_z_index is not None:
+            res["zIndex"] = self._dialog_z_index
         if with_code_editor:
             res.update({
                 "codeEditor": self.code_editor.get_state(),

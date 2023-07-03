@@ -13,6 +13,7 @@ class MarkdownTutorialsTree:
     @mark_create_layout
     def my_layout(self):
         appctx.get_app().set_enable_language_server(True)
+        appctx.set_app_z_index(200) # required for drawer/dialog.
         pyright_setting = appctx.get_app().get_language_server_settings()
         pyright_setting.python.analysis.pythonPath = sys.executable
         pyright_setting.python.analysis.extraPaths = [
@@ -37,7 +38,7 @@ class MarkdownTutorialsTree:
                     overflow="auto")
         self.tutorials = tutorials
         self.panel = plus.InspectPanel({})
-        return self.panel
+        return self.panel.prop(width="1280px", height="720px")
 
     @mark_did_mount
     async def _on_init(self):

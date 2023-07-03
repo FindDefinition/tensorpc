@@ -85,6 +85,9 @@ async def list_all_data_storage_nodes(
     app = get_app()
     return await app.list_all_data_storage_nodes(graph_id)
 
+def set_app_z_index(z_index: int):
+    app = get_app()
+    app._dialog_z_index = z_index 
 
 def set_observed_func_registry(registry: ObservedFunctionRegistryProtocol):
     app = get_app()

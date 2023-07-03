@@ -17,7 +17,6 @@ import base64
 import copy
 from functools import partial
 
-from sklearn import base
 import tensorpc.core.dataclass_dispatch as dataclasses
 import enum
 import inspect
@@ -672,7 +671,7 @@ class ListItemIcon(MUIComponentBase[ListItemIconProps]):
         return self._update_props_base(propcls)
 
 @dataclasses.dataclass
-class DialogProps(ContainerBaseProps):
+class DialogProps(MUIFlexBoxProps):
     open: bool = False
     title: Union[str, Undefined] = undefined
     fullScreen: Union[str, Undefined] = undefined
@@ -694,9 +693,9 @@ class Dialog(MUIContainerBase[DialogProps, MUIComponentType]):
         super().__init__(UIType.Dialog,
                          DialogProps,
                          _children=children,
-                         allowed_events=[FrontendEventType.DialogClose.value])
+                         allowed_events=[FrontendEventType.ModalClose.value])
         if callback is not None:
-            self.register_event_handler(FrontendEventType.DialogClose.value,
+            self.register_event_handler(FrontendEventType.ModalClose.value,
                                         callback)
 
     async def set_open(self, open: bool):
@@ -726,7 +725,64 @@ class Dialog(MUIContainerBase[DialogProps, MUIComponentType]):
     def state_change_callback(
             self,
             value: bool,
-            type: ValueType = FrontendEventType.DialogClose.value):
+            type: ValueType = FrontendEventType.ModalClose.value):
+        # this only triggered when dialog closed, so we always set
+        # open to false.
+        self.props.open = False
+
+@dataclasses.dataclass
+class DrawerProps(MUIFlexBoxProps):
+    open: bool = False
+    anchor: Union[Literal["left", "top", "right", "bottom"], Undefined] = undefined
+    variant: Union[Literal["permanent", "persistent", "temporary"], Undefined] = undefined
+    keepMounted: Union[bool, Undefined] = undefined
+
+
+class Drawer(MUIContainerBase[DrawerProps, MUIComponentType]):
+
+    def __init__(
+            self,
+            children: LayoutType,
+            callback: Optional[Callable[[bool], _CORO_NONE]] = None) -> None:
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+
+        super().__init__(UIType.Drawer,
+                         DrawerProps,
+                         _children=children,
+                         allowed_events=[FrontendEventType.ModalClose.value])
+        if callback is not None:
+            self.register_event_handler(FrontendEventType.ModalClose.value,
+                                        callback)
+
+    async def set_open(self, open: bool):
+        await self.send_and_wait(self.update_event(open=open))
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self,
+                                           ev,
+                                           sync_status_first=True,
+                                           is_sync=is_sync)
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["open"] = self.props.open
+        return res
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    def state_change_callback(
+            self,
+            value: bool,
+            type: ValueType = FrontendEventType.ModalClose.value):
         # this only triggered when dialog closed, so we always set
         # open to false.
         self.props.open = False
@@ -2830,8 +2886,15 @@ class TabList(MUIComponentBase[TabListProps]):
 @dataclasses.dataclass
 class TabsProps(MUIFlexBoxProps):
     value: str = ""
-    textColor: Union[Undefined, _StdColor] = undefined
-    indicatorColor: Union[Undefined, _StdColor] = undefined
+    textColor: Union[Literal["inherit", "primary", "secondary"], Undefined] = undefined
+    indicatorColor: Union[Literal["primary", "secondary"], Undefined] = undefined
+    orientation: Union[Literal["horizontal", "vertical"], Undefined] = undefined
+    variant: Union[Literal["scrollable", "vertical", "fullWidth"], Undefined] = undefined
+    visibleScrollbar: Union[Undefined, bool] = undefined
+    centered: Union[Undefined, bool] = undefined
+    scrollButtons: Union[Literal["auto"], bool, Undefined] = undefined
+    selectionFollowsFocus: Union[Undefined, bool] = undefined
+
 
 @dataclasses.dataclass
 class TabDef:
@@ -2863,7 +2926,6 @@ class Tabs(MUIContainerBase[TabsProps, MUIComponentType]):
                          allowed_events=[
                              FrontendEventType.Change,
                          ])
-        print(all_values)
         if init_value is not None:
             assert init_value in all_values
             self.props.value = init_value

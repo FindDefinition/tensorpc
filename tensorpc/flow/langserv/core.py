@@ -50,8 +50,10 @@ def get_tmux_lang_server_info_may_create(ls_type: str, uid: str, port: int):
             close_tmux_lang_server(uid)
             window_command = window_command_fmt.format(port)
             scheduler_sess_name = f"{TENSORPC_FLOW_LANG_SERVER_PREFIX}{_SPLIT}{port}{_SPLIT}{uid}"
-            sess = s.new_session(scheduler_sess_name,
-                                    window_command=window_command)
+            sess = s.new_session(scheduler_sess_name, window_command=window_command)
+            # pane: libtmux.Pane = sess.windows[0].panes[0]
+            # pane.send_keys(window_command)
+
             return port
         else:
             assert port_candidate == port
@@ -64,8 +66,11 @@ def get_tmux_lang_server_info_may_create(ls_type: str, uid: str, port: int):
     if not found:
         window_command = window_command_fmt.format(port)
         scheduler_sess_name = f"{TENSORPC_FLOW_LANG_SERVER_PREFIX}{_SPLIT}{port}{_SPLIT}{uid}"
-        sess = s.new_session(scheduler_sess_name,
-                                window_command=window_command)
+        sess = s.new_session(scheduler_sess_name, window_command=window_command)
+
+        # pane: libtmux.Pane = sess.windows[0].panes[0]
+        # pane.send_keys(window_command)
+
     return port
 
 def close_tmux_lang_server(uid: str):

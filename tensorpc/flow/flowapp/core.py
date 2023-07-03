@@ -306,7 +306,8 @@ class FrontendEventType(enum.IntEnum):
     Change = 20
     Delete = 21
     InputChange = 22
-    DialogClose = 23
+    # modal close: include dialog and drawer (modal based).
+    ModalClose = 23
     Drag = 24
     Drop = 25
     SelectNewItem = 26

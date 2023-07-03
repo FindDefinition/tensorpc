@@ -20,7 +20,7 @@ from tensorpc.flow.flowapp.core import Component, Event, create_ignore_usr_msg, 
 _STATE_CHANGE_EVENTS = set([
     FrontendEventType.Change.value,
     FrontendEventType.InputChange.value,
-    FrontendEventType.DialogClose.value,
+    FrontendEventType.ModalClose.value,
 ])
 
 _ONEARG_TREE_EVENTS = set([

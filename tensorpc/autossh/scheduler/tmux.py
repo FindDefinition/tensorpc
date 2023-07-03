@@ -137,5 +137,3 @@ def capture_pane_last_lines(uuid_str: str, num_lines: int):
     return pane.capture_pane(0)[-num_lines:]
 
 
-if __name__ == "__main__":
-    print(capture_pane_last_lines("junyi", 3))
