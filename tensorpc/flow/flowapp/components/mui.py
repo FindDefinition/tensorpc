@@ -27,7 +27,7 @@ import uuid
 
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterable,
                     Awaitable, Callable, Coroutine, Dict, Iterable, List,
-                    Optional, Tuple, Type, TypeVar, Union)
+                    Optional, Set, Tuple, Type, TypeVar, Union)
 
 import numpy as np
 from PIL import Image as PILImage
@@ -165,6 +165,8 @@ class MUIContainerBase(ContainerBase[T_container_props, T_child]):
 
 @dataclasses.dataclass
 class FlexBoxProps(FlexComponentBaseProps):
+    # element id only available in container
+    elementId: Union[str, Undefined] = undefined
     alignContent: Union[Literal["flex-start", "flex-end", "center",
                                 "space-between", "space-around", "stretch"],
                         Undefined] = undefined
@@ -679,7 +681,8 @@ class DialogProps(MUIFlexBoxProps):
     maxWidth: Union[Literal['xs', 'sm', "md", "lg", "xl"],
                     Undefined] = undefined
     scroll: Union[Literal["body", "paper"], Undefined] = undefined
-
+    cancelLabel: Union[str, Undefined] = undefined
+    okLabel: Union[str, Undefined] = undefined
 
 class Dialog(MUIContainerBase[DialogProps, MUIComponentType]):
 
@@ -697,6 +700,8 @@ class Dialog(MUIContainerBase[DialogProps, MUIComponentType]):
         if callback is not None:
             self.register_event_handler(FrontendEventType.ModalClose.value,
                                         callback)
+
+        self.event_modal_close = self._create_event_slot(FrontendEventType.ModalClose)
 
     async def set_open(self, open: bool):
         await self.send_and_wait(self.update_event(open=open))
@@ -736,7 +741,7 @@ class DrawerProps(MUIFlexBoxProps):
     anchor: Union[Literal["left", "top", "right", "bottom"], Undefined] = undefined
     variant: Union[Literal["permanent", "persistent", "temporary"], Undefined] = undefined
     keepMounted: Union[bool, Undefined] = undefined
-
+    containerId: Union[str, Undefined] = undefined
 
 class Drawer(MUIContainerBase[DrawerProps, MUIComponentType]):
 
@@ -838,7 +843,9 @@ class ToggleButtonProps(MUIComponentBaseProps, IconBaseProps):
     size: Union[Literal["small", "medium", "large"], Undefined] = undefined
 
 class ToggleButton(MUIComponentBase[ToggleButtonProps]):
-
+    """value is used in toggle group. for standalone toggle button, it isn't used,
+    you can use it as name.
+    """
     def __init__(
             self,
             value: ValueType = "",
@@ -848,6 +855,8 @@ class ToggleButton(MUIComponentBase[ToggleButtonProps]):
         super().__init__(UIType.ToggleButton,
                          ToggleButtonProps,
                          allowed_events=[FrontendEventType.Change.value])
+        if name == "" and isinstance(value, str) and value != "":
+            name = value 
         if isinstance(icon, Undefined):
             assert name != "", "if icon not provided, you must provide a valid name"
         elif isinstance(icon, IconType):
@@ -922,6 +931,7 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ToggleButtonGroup, ToggleButtonGroupProps,
                          children, inited, [FrontendEventType.Change.value])
+        values_set: Set[ValueType] = set()
         for v in children.values():
             assert isinstance(v,
                               ToggleButton), "all childs must be toggle button"
@@ -930,7 +940,9 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
                 self.props.nameOrIcons.append((True, v.props.icon))
             else:
                 self.props.nameOrIcons.append((False, v.props.name))
+            values_set.add(v.props.value)
             self.props.values.append(v.props.value)
+        assert len(values_set) == len(self.props.values), "values must be unique"
         self.props.value = value
         self.props.exclusive = exclusive
         self.callback = callback
@@ -2660,10 +2672,11 @@ class FormControl(MUIContainerBase[FormControlProps, MUIComponentType]):
 
 @dataclasses.dataclass
 class CollapseProps(MUIFlexBoxProps):
+    triggered: Union[bool, Undefined] = undefined
+
     orientation: Union[Literal["horizontal", "vertical"],
                        Undefined] = undefined
     timeout: Union[NumberType, Undefined, Literal["auto"]] = undefined
-    triggered: Union[bool, Undefined] = undefined
     collapsedSize: Union[NumberType, Undefined] = undefined
     unmountOnExit: Union[bool, Undefined] = undefined
 
@@ -3264,7 +3277,8 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
 
 @dataclasses.dataclass
 class CircularProgressProps(MUIFlexBoxProps):
-    value: NumberType = 0
+    value: Union[NumberType, Undefined] = undefined
+    withLabel: Union[Undefined, bool] = undefined
     labelColor: Union[Undefined, str] = undefined
     muiColor: Union[_BtnGroupColor, Undefined] = undefined
     labelVariant: Union[_TypographyVarient, Undefined] = undefined
@@ -3276,7 +3290,7 @@ class CircularProgressProps(MUIFlexBoxProps):
 
 class CircularProgress(MUIComponentBase[CircularProgressProps]):
 
-    def __init__(self, init_value: NumberType = 0) -> None:
+    def __init__(self, init_value: Union[NumberType, Undefined] = undefined) -> None:
         super().__init__(UIType.CircularProgress, CircularProgressProps)
         self.props.value = init_value
 
@@ -3297,7 +3311,9 @@ class CircularProgress(MUIComponentBase[CircularProgressProps]):
 
 @dataclasses.dataclass
 class LinearProgressProps(MUIFlexBoxProps):
-    value: NumberType = 0
+    value: Union[NumberType, Undefined] = undefined
+    valueBuffer: Union[NumberType, Undefined] = undefined
+    withLabel: Union[Undefined, bool] = undefined
     labelColor: Union[Undefined, str] = undefined
     muiColor: Union[_BtnGroupColor, Undefined] = undefined
     labelVariant: Union[_TypographyVarient, Undefined] = undefined
@@ -3309,7 +3325,7 @@ class LinearProgress(MUIComponentBase[LinearProgressProps]):
 
     def __init__(
         self,
-        init_value: NumberType = 0,
+        init_value: Union[NumberType, Undefined] = undefined,
     ) -> None:
         super().__init__(UIType.LinearProgress, LinearProgressProps)
         self.props.value = init_value

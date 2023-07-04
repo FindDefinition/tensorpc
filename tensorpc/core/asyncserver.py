@@ -316,7 +316,8 @@ def serve(service_def: ServiceDef,
                         ssl_crt_path=ssl_crt_path))
     except KeyboardInterrupt:
         loop.run_until_complete(run_exit_async(server_core))
-        loop.run_until_complete(*_cleanup_coroutines)
+        if _cleanup_coroutines:
+            loop.run_until_complete(*_cleanup_coroutines)
         print("shutdown by keyboard interrupt")
 
 
@@ -354,5 +355,6 @@ def serve_with_http(service_def: ServiceDef,
                                   ssl_crt_path=ssl_crt_path))
     except KeyboardInterrupt:
         loop.run_until_complete(run_exit_async(server_core))
-        loop.run_until_complete(*_cleanup_coroutines)
+        if _cleanup_coroutines:
+            loop.run_until_complete(*_cleanup_coroutines)
         print("shutdown by keyboard interrupt")
