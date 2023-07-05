@@ -172,6 +172,7 @@ class _ServiceNames:
         return get_service_key_by_type(FlowWorker,
                                        FlowWorker.get_layout.__name__)
 
+
     @property
     def APP_RUN_SINGLE_EVENT(self):
         from tensorpc.flow.serv.flowapp import FlowApp
@@ -182,6 +183,11 @@ class _ServiceNames:
     def APP_GET_LAYOUT(self):
         from tensorpc.flow.serv.flowapp import FlowApp
         return get_service_key_by_type(FlowApp, FlowApp.get_layout.__name__)
+    @property
+    def APP_GET_FILE(self):
+        from tensorpc.flow.serv.flowapp import FlowApp
+        return get_service_key_by_type(FlowApp,
+                                       FlowApp.get_file.__name__)
 
     @property
     def FLOW_DATA_SAVE(self):

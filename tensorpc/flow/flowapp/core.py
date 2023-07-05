@@ -140,6 +140,7 @@ class UIType(enum.IntEnum):
     DataFlexBox = 0x33
     JsonViewer = 0x34
     ListItemIcon = 0x35
+    Link = 0x36
 
     # special
     TaskLoop = 0x100

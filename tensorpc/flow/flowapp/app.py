@@ -287,10 +287,14 @@ class App:
         self._flowapp_internal_lsp_config.python.analysis.pythonPath = sys.executable
         self._flowapp_observed_func_registry: Optional[
             ObservedFunctionRegistryProtocol] = None
+        self._flowapp_file_resource_handlers: Dict[str, Callable[[str], bytes]] = {}
 
     @property 
     def _flow_reload_manager(self):
         return self._flow_app_comp_core.reload_mgr
+
+    def add_file_resource(self, prefix: str, handler: Callable[[str], bytes]):
+        self._flowapp_file_resource_handlers[prefix] = handler
 
     def set_enable_language_server(self, enable: bool):
         """must be setted before app init (in layout function), only valid
@@ -334,7 +338,7 @@ class App:
 
     def _is_wrapped_obj(self):
         return self._is_external_root and self.root._wrapped_obj is not None
-
+    
     async def save_data_storage(self,
                                 key: str,
                                 node_id: str,

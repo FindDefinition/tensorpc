@@ -1813,7 +1813,6 @@ class Flow:
             # if node.last_event == CommandEventType.COMMAND_COMPLETE:
             #     return 
             if use_grpc:
-                sess = prim.get_http_client_session()
                 grpc_port = node.grpc_port
                 durl, _ = get_url_port(driver.url)
                 if driver.enable_port_forward:
@@ -1860,6 +1859,26 @@ class Flow:
                                                AppEventType.UIEvent.value,
                                                ev.to_dict(), True)
 
+    async def app_get_file(self, node_uid: str, file_key: str):
+        graph_id = node_uid.split("@")[0]
+        node_id = node_uid.split("@")[1]
+
+        node, driver = self._get_app_node_and_driver(graph_id, node_id)
+        if not node.is_session_started():
+            return None
+        if isinstance(driver, RemoteSSHNode):
+            raise NotImplementedError
+        else:
+            grpc_port = node.grpc_port
+            durl, _ = get_url_port(driver.url)
+            if driver.enable_port_forward:
+                app_url = get_grpc_url("localhost", node.fwd_grpc_port)
+            else:
+                app_url = get_grpc_url(durl, grpc_port)
+            return await tensorpc.simple_chunk_call_async(
+                app_url, serv_names.APP_GET_FILE, file_key)
+
+
     async def query_app_state(self,
                               graph_id: str,
                               node_id: str,
@@ -1874,13 +1893,14 @@ class Flow:
                 serv_names.FLOWWORKER_APP_GET_LAYOUT, graph_id, node_id,
                 editor_only)
         else:
-            sess = prim.get_http_client_session()
-            http_port = node.http_port
+            grpc_port = node.grpc_port
             durl, _ = get_url_port(driver.url)
-            app_url = get_http_url(durl, http_port)
-            return await http_remote_call(sess, app_url,
-                                          serv_names.APP_GET_LAYOUT,
-                                          editor_only)
+            if driver.enable_port_forward:
+                app_url = get_grpc_url("localhost", node.fwd_grpc_port)
+            else:
+                app_url = get_grpc_url(durl, grpc_port)
+            return await tensorpc.simple_chunk_call_async(
+                app_url, serv_names.APP_GET_LAYOUT, editor_only)
 
     async def stop_app_node(self,
                               graph_id: str,

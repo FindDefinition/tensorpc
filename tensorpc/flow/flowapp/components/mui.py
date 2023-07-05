@@ -450,6 +450,7 @@ _BtnGroupColor: TypeAlias = Literal['inherit', 'primary', 'secondary', 'error',
 _TooltipPlacement: TypeAlias = Literal['top', 'right', 'left', 'bottom']
 
 
+
 @dataclasses.dataclass
 class ButtonProps(MUIComponentBaseProps):
     name: str = ""
@@ -2539,6 +2540,40 @@ class TypographyProps(MUIComponentBaseProps):
     paragraph: Union[bool, Undefined] = undefined
     muiColor: Union[_StdColorNoDefault, Undefined] = undefined
     value: str = ""
+
+@dataclasses.dataclass
+class LinkProps(MUIComponentBaseProps):
+    href: Union[Undefined, str] = undefined
+    underline: Union[Undefined, Literal["always", "hover", "none"]] = undefined
+    variant: Union[Undefined, _TypographyVarient] = undefined
+    muiColor: Union[Undefined, _StdColorNoDefault] = undefined
+    rel: Union[Undefined, str] = undefined
+    target: Union[Undefined, str] = undefined
+    download: Union[Undefined, str] = undefined
+
+class Link(MUIComponentBase[LinkProps]):
+
+    def __init__(self, href: str = "") -> None:
+        super().__init__(UIType.Link, LinkProps)
+        if href != "":
+            self.props.href = href
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+    
+    @classmethod 
+    def safe_download_link(cls, href: str):
+        link = cls(href)
+        link.props.rel = "noopener noreferrer"
+        link.props.target = "_blank"
+        return link
 
 
 class Typography(MUIComponentBase[TypographyProps]):

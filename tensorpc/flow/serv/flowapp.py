@@ -201,6 +201,13 @@ class FlowApp:
             res["lspPort"] = self.lsp_port
         return res 
 
+    def get_file(self, file_key: str):
+        if file_key in self.app._flowapp_file_resource_handlers:
+            handler = self.app._flowapp_file_resource_handlers[file_key]
+            return handler(file_key)
+        else:
+            return None 
+
     async def _http_remote_call(self, key: str, *args, **kwargs):
         return await http_remote_call(prim.get_http_client_session(),
                                       self.master_meta.http_url, key, *args,
