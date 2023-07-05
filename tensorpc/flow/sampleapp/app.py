@@ -1276,6 +1276,18 @@ class App:
         return mui.VBox([
             plus.AppInMemory("sample_code", code).prop(flex=1),
         ])
+    
+class LinkDownloadApp:
+    @marker.mark_create_layout
+    def my_layout(self):
+        appctx.get_app().add_file_resource("sample.py", self.sample_file)
+        return mui.VBox([
+            mui.Markdown("## WTF"),
+            mui.Link.app_download_link("click to download", "sample.py"),
+        ])
+
+    def sample_file(self):
+        return Path(__file__).read_bytes()
 
 class VirtualizedBoxApp:
     

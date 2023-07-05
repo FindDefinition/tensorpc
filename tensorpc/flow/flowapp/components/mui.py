@@ -35,8 +35,10 @@ from typing_extensions import Literal, TypeAlias, TypedDict
 from pydantic import validator
 
 from tensorpc.core.asynctools import cancel_task
+from tensorpc.core.defs import FileResource
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 from tensorpc.core.serviceunit import AppFuncType, ObjectReloadManager, ReloadableDynamicClass, ServFunctionMeta
+from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.flowapp.appcore import Event, EventDataType
 from tensorpc.flow.flowapp.components.common import (handle_standard_event)
 from tensorpc.flow.flowapp.reload import AppReloadManager
@@ -2543,6 +2545,7 @@ class TypographyProps(MUIComponentBaseProps):
 
 @dataclasses.dataclass
 class LinkProps(MUIComponentBaseProps):
+    value: str = ""
     href: Union[Undefined, str] = undefined
     underline: Union[Undefined, Literal["always", "hover", "none"]] = undefined
     variant: Union[Undefined, _TypographyVarient] = undefined
@@ -2550,13 +2553,14 @@ class LinkProps(MUIComponentBaseProps):
     rel: Union[Undefined, str] = undefined
     target: Union[Undefined, str] = undefined
     download: Union[Undefined, str] = undefined
+    isTensoRPCUri: Union[Undefined, bool] = undefined
 
 class Link(MUIComponentBase[LinkProps]):
 
-    def __init__(self, href: str = "") -> None:
+    def __init__(self, value: str, href: str = "#") -> None:
         super().__init__(UIType.Link, LinkProps)
-        if href != "":
-            self.props.href = href
+        self.props.value = value
+        self.props.href = href
 
     @property
     def prop(self):
@@ -2569,11 +2573,29 @@ class Link(MUIComponentBase[LinkProps]):
         return self._update_props_base(propcls)
     
     @classmethod 
-    def safe_download_link(cls, href: str):
-        link = cls(href)
+    def safe_download_link(cls, value: str, href: str):
+        link = cls(value, href)
         link.props.rel = "noopener noreferrer"
         link.props.target = "_blank"
         return link
+    
+    @classmethod 
+    def app_download_link(cls, value: str, key: str):
+        link = cls(value, cls.encode_app_link(key))
+        link.props.rel = "noopener noreferrer"
+        link.props.target = "_blank"
+        link.props.isTensoRPCUri = True
+        return link
+
+    @staticmethod
+    def encode_app_link(key: str):
+        import urllib.parse
+        master_meta = MasterMeta()
+        params = {
+            "nodeUid": f"{master_meta.graph_id}@{master_meta.node_id}",
+            "key": key
+        }
+        return urllib.parse.urlencode(params, doseq=True)
 
 
 class Typography(MUIComponentBase[TypographyProps]):

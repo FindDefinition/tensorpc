@@ -163,10 +163,11 @@ class Object3dBaseProps(ThreeBasicProps):
     position: Union[Vector3Type, Undefined] = undefined
     rotation: Union[Vector3Type, Undefined] = undefined
     up: Union[Vector3Type, Undefined] = undefined
-    scale: Union[Vector3Type, Undefined] = undefined
+    scale: Union[Vector3Type, NumberType, Undefined] = undefined
     visible: Union[bool, Undefined] = undefined
     receiveShadow: Union[bool, Undefined] = undefined
     castShadow: Union[bool, Undefined] = undefined
+    renderOrder: Union[NumberType, Undefined] = undefined
 
 
 @dataclasses.dataclass
@@ -3101,6 +3102,7 @@ class EnvGround:
 
 @dataclasses.dataclass
 class EnvironmentProps(ContainerBaseProps):
+    files: Union[List[str], str, Undefined] = undefined
     resolution: Union[int, Undefined] = undefined
     background: Union[bool, Literal["only"], Undefined] = undefined
     blur: Union[int, Undefined] = undefined
@@ -3108,6 +3110,7 @@ class EnvironmentProps(ContainerBaseProps):
                           "apartment", "studio", "city", "park", "lobby"],
                   Undefined] = undefined
     ground: Union[EnvGround, bool, Undefined] = undefined
+    path: Union[str, Undefined] = undefined
 
 
 class Environment(ThreeContainerBase[EnvironmentProps, ThreeComponentType]):
@@ -3119,6 +3122,92 @@ class Environment(ThreeContainerBase[EnvironmentProps, ThreeComponentType]):
 
         super().__init__(UIType.ThreeEnvironment, EnvironmentProps,
                          {**children})
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+    
+@dataclasses.dataclass
+class LoaderContextProps(ContainerBaseProps):
+    uri: str = ""
+
+
+class GLTFLoaderContext(ThreeContainerBase[LoaderContextProps, ThreeComponentType]):
+    def __init__(self, uri: str, children: Optional[ThreeLayoutType] = None) -> None:
+        if children is None:
+            children = {}
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+
+        super().__init__(UIType.ThreeGLTFLoaderContext, LoaderContextProps,
+                         {**children})
+        self.props.uri = uri
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+
+    
+@dataclasses.dataclass
+class CubeCameraProps(Object3dContainerBaseProps):
+    frames: Union[int, Undefined] = undefined
+    resolution: Union[NumberType, Undefined] = undefined
+    near: Union[NumberType, Undefined] = undefined
+    far: Union[NumberType, Undefined] = undefined
+    dataKey: Union[str, Undefined] = undefined
+
+
+class CubeCamera(Object3dContainerBase[CubeCameraProps, ThreeComponentType]):
+    def __init__(self, children: ThreeLayoutType) -> None:
+        if children is None:
+            children = {}
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+        assert children, "CubeCamera must have children"
+        super().__init__(UIType.ThreeCubeCamera, CubeCameraProps,
+                         {**children})
+    
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class ContactShadowsProps(Object3dBaseProps):
+    opacity: Union[NumberType, Undefined] = undefined
+    width: Union[NumberType, Undefined] = undefined
+    height: Union[NumberType, Undefined] = undefined
+    blur: Union[NumberType, Undefined] = undefined
+    near: Union[NumberType, Undefined] = undefined
+    far: Union[NumberType, Undefined] = undefined
+    smooth: Union[bool, Undefined] = undefined
+    resolution: Union[NumberType, Undefined] = undefined
+    frames: Union[int, Undefined] = undefined
+    scale: Union[NumberType, Tuple[NumberType, NumberType], Undefined] = undefined
+    color: Union[str, NumberType, Undefined] = undefined
+    depthWrite: Union[bool, Undefined] = undefined
+
+
+class ContactShadows(ThreeComponentBase[ContactShadowsProps]):
+    def __init__(self) -> None:
+        super().__init__(UIType.ThreeContactShadows, ContactShadowsProps)
 
     @property
     def prop(self):

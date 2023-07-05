@@ -57,6 +57,7 @@ from tensorpc import simple_chunk_call_async
 from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.constants import PACKAGE_ROOT, TENSORPC_FLOW_FUNC_META_KEY
 from tensorpc.core.asynctools import cancel_task
+from tensorpc.core.defs import FileResource
 from tensorpc.core.inspecttools import get_all_members_by_type
 from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda, is_tensorpc_dynamic_path,
                                     is_valid_function, loose_isinstance)
@@ -287,14 +288,18 @@ class App:
         self._flowapp_internal_lsp_config.python.analysis.pythonPath = sys.executable
         self._flowapp_observed_func_registry: Optional[
             ObservedFunctionRegistryProtocol] = None
-        self._flowapp_file_resource_handlers: Dict[str, Callable[[str], bytes]] = {}
+        self._flowapp_file_resource_handlers: Dict[str, Callable[[], Union[bytes, FileResource]]] = {}
 
     @property 
     def _flow_reload_manager(self):
         return self._flow_app_comp_core.reload_mgr
 
-    def add_file_resource(self, prefix: str, handler: Callable[[str], bytes]):
-        self._flowapp_file_resource_handlers[prefix] = handler
+    def add_file_resource(self, key: str, handler: Callable[[], Union[bytes, FileResource]]):
+        self._flowapp_file_resource_handlers[key] = handler
+
+    def remove_file_resource(self, key: str, ):
+        if key in self._flowapp_file_resource_handlers:
+            self._flowapp_file_resource_handlers.pop(key)
 
     def set_enable_language_server(self, enable: bool):
         """must be setted before app init (in layout function), only valid

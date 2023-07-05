@@ -13,10 +13,13 @@
 # limitations under the License.
 
 from functools import partial
+import inspect
 import io
+from pathlib import Path
 import pickle
 from runpy import run_path
 from typing import Any, Dict, List, Optional
+from tensorpc.core.defs import FileDesp, FileResource
 from tensorpc.flow.coretypes import ScheduleEvent, get_uid
 from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.appcore import ALL_OBSERVED_FUNCTIONS, enter_app_conetxt
@@ -201,12 +204,52 @@ class FlowApp:
             res["lspPort"] = self.lsp_port
         return res 
 
-    def get_file(self, file_key: str):
+    async def get_file(self, file_key: str, chunk_size=2 ** 16):
         if file_key in self.app._flowapp_file_resource_handlers:
-            handler = self.app._flowapp_file_resource_handlers[file_key]
-            return handler(file_key)
+            try:
+                handler = self.app._flowapp_file_resource_handlers[file_key]
+                res = handler()
+                if inspect.iscoroutine(res):
+                    res = await res 
+                assert isinstance(res, (str, bytes, FileResource))
+                if isinstance(res, (str, bytes)):
+                    if isinstance(res, str):
+                        res = res.encode()
+                    bio = io.BytesIO(res)
+                    chunk = bio.read(chunk_size)
+                    yield FileDesp(file_key)
+                    while chunk:
+                        yield chunk
+                        chunk = bio.read(chunk_size)
+                else:
+                    fname = res.name 
+                    if res.chunk_size is not None:
+                        assert res.chunk_size > 1024
+                        chunk_size = res.chunk_size
+                    if res.path is not None:
+                        yield FileDesp(Path(res.path).name, res.content_type)
+                        with open(res.path, "rb") as f:
+                            chunk = f.read(chunk_size)
+                            while chunk:
+                                yield chunk
+                                chunk = f.read(chunk_size)
+                    elif res.content is not None:
+                        content = res.content 
+                        if isinstance(content, str):
+                            content = content.encode()
+                        bio = io.BytesIO(content)
+                        chunk = bio.read(chunk_size)
+                        yield FileDesp(fname, res.content_type)
+                        while chunk:
+                            yield chunk
+                            chunk = bio.read(chunk_size)
+                    else:
+                        raise NotImplementedError
+            except:
+                traceback.print_exc()
+                raise
         else:
-            return None 
+            raise NotImplementedError 
 
     async def _http_remote_call(self, key: str, *args, **kwargs):
         return await http_remote_call(prim.get_http_client_session(),

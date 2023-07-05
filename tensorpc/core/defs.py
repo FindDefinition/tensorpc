@@ -41,6 +41,18 @@ class File:
     content: bytes
     data: Any
 
+@dataclass
+class FileResource:
+    name: str
+    path: Optional[str] = None 
+    content: Optional[Union[str, bytes]] = None
+    chunk_size: Optional[int] = None
+    content_type: Optional[str] = None 
+
+@dataclass 
+class FileDesp:
+    name: str
+    content_type: Optional[str] = None 
 
 def from_yaml_path(path: Union[Path, str]) -> ServiceDef:
     """read yaml config with strong-type check

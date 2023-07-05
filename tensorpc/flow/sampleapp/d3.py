@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from pathlib import Path
 from tensorpc.flow import mui, three, plus, mark_create_layout, appctx
 import sys
 from tensorpc import PACKAGE_ROOT
@@ -180,7 +181,14 @@ class BufferMeshDevApp:
         self.canvas = plus.SimpleCanvas(
             cam,
             init_canvas_childs=[
-                # three.Environment().prop(preset="forest"),
+                # three.GLTFLoaderContext("tensorpc://porsche-transformed.glb", [
+
+                # ]),
+                # three.Environment
+                three.Environment([
+                    three.AmbientLight(),
+
+                ]).prop(files="tensorpc://old_depot_2k.hdr", ground=three.EnvGround(radius=130, height=32)),
                 # three.PerformanceMonitor(),
                 three.Sky().prop(sunPosition=(1, 1, 1), distance=450000, inclination=0, azimuth=0.25),
                 three.AmbientLight(),
@@ -207,6 +215,9 @@ class BufferMeshDevApp:
             ])
         # <pointLight position={[100, 100, 100]} intensity={0.8} />
         # <hemisphereLight color="#ffffff" groundColor="#b9b9b9" position={[-7, 25, 13]} intensity={0.85} />
+        appctx.get_app().add_file_resource("porsche-transformed.glb", self.porsche)
+        appctx.get_app().add_file_resource("old_depot_2k.hdr", self.old_depot_2k)
+        appctx.get_app().add_file_resource("std.png", self.std_png)
 
         self.canvas.canvas.prop(shadows=True)
         res = mui.VBox([
@@ -220,6 +231,14 @@ class BufferMeshDevApp:
                 height="100%",
                 overflow="hidden")
         return res
+    def std_png(self):
+        return mui.FileResource(name="std.png", path=str(Path.home() / "Pictures/Screenshot from 2023-03-10 15-40-39.png"), content_type="image/png")
+
+    def old_depot_2k(self):
+        return mui.FileResource(name="old_depot_2k.hdr", path=str(Path.home() / "old_depot_2k.hdr"))
+    
+    def porsche(self):
+        return mui.FileResource(name="porsche-transformed.glb", path=str(Path.home() / "porsche-transformed.glb"))
 
     async def _on_btn_750(self):
         pcs = np.random.randint(-10, 10, size=[75, 3])
@@ -239,6 +258,109 @@ class BufferMeshDevApp:
             self.voxel_mesh.update_event(centers=pcs.astype(np.float32) *
                                          self.voxel_size,
                                          colors=pc_colors))
+class EnvmapGroupdProjectionApp:
+
+    @mark_create_layout
+    def my_layout(self):
+        self.limit = 1000
+        initial_num_pts = 500
+        cam = three.PerspectiveCamera(fov=35).prop(position=(-30, 100, 120))
+        car_group = three.Group([
+                three.CubeCamera([
+                    three.Group([
+                        three.Group([
+                            three.Mesh([]).prop(position=(-7.966238, -0.10155, -7.966238), scale=0.000973)
+                                .set_override_props_unchecked(geometry="nodes.mesh_1_instance_0.geometry", 
+                                                              material="materials.930_plastics"),
+                            three.Mesh([]).prop(position=(-7.966238, -0.10155, -7.966238), scale=0.000973)
+                                .set_override_props_unchecked(geometry="nodes.mesh_1_instance_1.geometry", 
+                                                              material="materials.930_plastics"),
+
+                        ]).prop(rotation=(np.pi / 2, 0, 0)),
+                        three.Group([
+                            three.Mesh([]).set_override_props_unchecked_dict({
+                                "geometry": "nodes.mesh_0.geometry",
+                                "material": "materials.paint",
+                                "material-envMap": "CubeCameraTexture",
+                            }),
+                            three.Mesh([]).set_override_props_unchecked(geometry="nodes.mesh_0_1.geometry", 
+                                                              material="materials.930_chromes"),
+                            three.Mesh([]).set_override_props_unchecked(geometry="nodes.mesh_0_2.geometry", 
+                                                              material="materials.black"),
+                            three.Mesh([]).set_override_props_unchecked(geometry="nodes.mesh_0_3.geometry", 
+                                                              material="materials.930_lights"),
+                            three.Mesh([]).set_override_props_unchecked(geometry="nodes.mesh_0_4.geometry", 
+                                                              material="materials.glass"),
+                            three.Mesh([]).set_override_props_unchecked(geometry="nodes.mesh_0_5.geometry", 
+                                                              material="materials.930_stickers"),
+                            three.Mesh([]).set_override_props_unchecked(geometry="nodes.mesh_0_6.geometry", 
+                                                              material="materials.930_plastics").set_sx_props({
+                                                                  "material-polygonOffset": True,
+                                                                  "material-polygonOffsetFactor": -10,
+                                                              }),
+                            three.Mesh([]).set_override_props_unchecked(geometry="nodes.mesh_0_7.geometry", 
+                                                              material="materials.930_lights_refraction"),
+                            three.Mesh([]).set_override_props_unchecked(geometry="nodes.mesh_0_8.geometry", 
+                                                              material="materials.930_rim"),
+                            three.Mesh([]).set_override_props_unchecked(geometry="nodes.mesh_0_9.geometry", 
+                                                              material="materials.930_tire"),
+
+                        ]).prop(position=(-7.966238, -0.10155, -7.966238), scale=0.000973),
+                    ]).prop(position=(0, -1.5, 0))
+                ]).prop(frames=1, position=(0.0, 1.5, 0), near=0.1, resolution=128),
+                three.Group([
+                    three.Mesh([]).set_override_props_unchecked(geometry="nodes.mesh_2.geometry", 
+                                                        material="materials.plate").set_sx_props({
+                                                            "material-roughness": 1,
+                                                        }),
+                    three.Mesh([]).set_override_props_unchecked(geometry="nodes.mesh_2_1.geometry", 
+                                                        material="materials.DefaultMaterial"),
+                    three.Mesh([]).set_override_props_unchecked(geometry="nodes.mesh_2_2.geometry", 
+                                                        material=r"materials.Material\.001").set_sx_props({
+                                                            "material-depthWrite": False,
+                                                            "material-opacity": 0.6,
+                                                        }),
+
+                ]).prop(position=(-7.966238, -0.10155, -7.966238), scale=0.000973),
+
+            ])
+        car = three.GLTFLoaderContext("tensorpc://porsche-transformed.glb", [
+            car_group.prop(position=(-8, 0, -2), scale=20).set_sx_props({
+                        "rotation-y": -np.pi / 4
+            }),
+        ])
+        self.canvas = plus.SimpleCanvas(
+            cam,
+            init_canvas_childs=[
+                # three.Environment
+                # three.AmbientLight(),
+                three.Environment([]).prop(files="tensorpc://old_depot_2k.hdr", ground=three.EnvGround(radius=130, height=32)),
+                car,
+                three.SpotLight((-80, 200, -100)).prop(angle=1, intensity=1),
+                three.ContactShadows().prop(renderOrder=2, frames=1, resolution=1024, scale=120, blur=2, opacity=0.6, far=100)
+                # three.PerformanceMonitor(),
+            ])
+        # <pointLight position={[100, 100, 100]} intensity={0.8} />
+        # <hemisphereLight color="#ffffff" groundColor="#b9b9b9" position={[-7, 25, 13]} intensity={0.85} />
+        appctx.get_app().add_file_resource("porsche-transformed.glb", self.porsche)
+        appctx.get_app().add_file_resource("old_depot_2k.hdr", self.old_depot_2k)
+
+        self.canvas.canvas.prop(shadows=True)
+        res = mui.VBox([
+            self.canvas.prop(flex=1),
+        ]).prop(minHeight=0,
+                minWidth=0,
+                flex=1,
+                width="100%",
+                height="100%",
+                overflow="hidden")
+        return res
+
+    def old_depot_2k(self):
+        return mui.FileResource(name="old_depot_2k.hdr", path=str(Path.home() / "old_depot_2k.hdr"))
+    
+    def porsche(self):
+        return mui.FileResource(name="porsche-transformed.glb", path=str(Path.home() / "porsche-transformed.glb"))
 
 class BufferIndexedMeshApp:
 
