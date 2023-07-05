@@ -536,6 +536,7 @@ class IconType(enum.IntEnum):
     PlayCircleOutline = 34
     DragIndicator = 35
     Cancel = 36
+    Done = 37
 
 @dataclasses.dataclass
 class IconBaseProps:
@@ -2722,12 +2723,15 @@ class Collapse(MUIContainerBase[CollapseProps, MUIComponentType]):
 
 
 @dataclasses.dataclass
-class ChipProps(MUIComponentBaseProps):
+class ChipProps(MUIComponentBaseProps, IconBaseProps):
     muiColor: Union[_StdColor, str, Undefined] = undefined
     clickable: Union[bool, Undefined] = undefined
+    deletable: Union[bool, Undefined] = undefined
     size: Union[Literal["small", "medium"], Undefined] = undefined
     variant: Union[Literal["filled", "outlined"], Undefined] = undefined
     label: str = ""
+    icon: Union[IconType, Undefined] = undefined
+    deleteIcon: Union[IconType, Undefined] = undefined
 
 
 class Chip(MUIComponentBase[ChipProps]):
