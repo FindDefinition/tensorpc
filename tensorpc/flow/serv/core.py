@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import (Any, Awaitable, Callable, Coroutine, Dict, Iterable, List,
                     Optional, Set, Tuple, Type, Union)
 from tensorpc.autossh.coretypes import SSHTarget
+from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.defs import File
 from tensorpc.core.moduleid import get_qualname_of_type
 import aiohttp
@@ -1865,7 +1866,7 @@ class Flow:
 
         node, driver = self._get_app_node_and_driver(graph_id, node_id)
         if not node.is_session_started():
-            return None
+            raise NotImplementedError
         if isinstance(driver, RemoteSSHNode):
             raise NotImplementedError
         else:
@@ -1875,8 +1876,9 @@ class Flow:
                 app_url = get_grpc_url("localhost", node.fwd_grpc_port)
             else:
                 app_url = get_grpc_url(durl, grpc_port)
-            return await tensorpc.simple_chunk_call_async(
-                app_url, serv_names.APP_GET_FILE, file_key)
+            async with AsyncRemoteManager(app_url) as robj:
+                async for x in robj.remote_generator(serv_names.APP_GET_FILE, file_key):
+                    yield x
 
 
     async def query_app_state(self,

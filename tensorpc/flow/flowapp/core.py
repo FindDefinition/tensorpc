@@ -221,6 +221,9 @@ class UIType(enum.IntEnum):
     ThreeLightFormer = 0x103d
     ThreeAccumulativeShadows = 0x103e
     ThreeRandomizedLight = 0x103f
+    ThreeURILoaderContext = 0x1040
+    ThreeCubeCamera = 0x1041
+    ThreeContactShadows = 0x1042
 
     ThreeMeshBasicMaterial = 0x1050
     ThreeMeshStandardMaterial = 0x1051
@@ -1153,6 +1156,7 @@ class Component(Generic[T_base_props, T_child]):
 
     def set_sx_props(self, sx_props: Dict[str, Any]):
         self.__sx_props = sx_props
+        return self
 
     def to_dict(self):
         """undefined will be removed here.
@@ -1240,6 +1244,26 @@ class Component(Generic[T_base_props, T_child]):
     def set_override_props(self, **kwargs: str):
         for k in kwargs.keys():
             assert k in self._prop_field_names, f"overrided prop must be defined in props class, {k}"
+        new_kwargs: Dict[str, str] = {}
+        for k, v in kwargs.items():
+            new_kwargs[snake_to_camel(k)] = v
+        if isinstance(self.props.override_props, Undefined):
+            self.props.override_props = new_kwargs
+        else:
+            self.props.override_props.update(new_kwargs)
+        return self
+
+    def set_override_props_unchecked(self, **kwargs: str):
+        new_kwargs: Dict[str, str] = {}
+        for k, v in kwargs.items():
+            new_kwargs[snake_to_camel(k)] = v
+        if isinstance(self.props.override_props, Undefined):
+            self.props.override_props = new_kwargs
+        else:
+            self.props.override_props.update(new_kwargs)
+        return self
+    
+    def set_override_props_unchecked_dict(self, kwargs: Dict[str, str]):
         new_kwargs: Dict[str, str] = {}
         for k, v in kwargs.items():
             new_kwargs[snake_to_camel(k)] = v

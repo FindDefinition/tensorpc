@@ -32,6 +32,18 @@ async def file_sender(writer, file_bytes: bytes, chunk_size=2**16):
         await writer.write(chunk)
         chunk = bio.read(2 ** 16)
 
+@streamer
+async def grpc_iter_file_sender(writer, reader):
+    """
+    This function will read large file chunk by chunk and send it through HTTP
+    without reading them into memory
+    """
+    async for chunk, is_exc in reader:
+        if is_exc:
+            raise ValueError(chunk)
+        await writer.write(chunk)
+
+
 from .core import WebsocketClientBase, WebsocketMsg, WebsocketMsgType, WebsocketHandler
 async def _cancel(task):
     # more info: https://stackoverflow.com/a/43810272/1113207
@@ -138,26 +150,29 @@ class HttpService:
         return res
     
     async def resource_download_call(self, request: web.Request):
-
-        node_uid = request.match_info.get('nodeUid')
-        resource_key = request.match_info.get('key')
+        params = request.rel_url.query
+        node_uid = params.get('nodeUid')
+        resource_key = params.get('key')
         headers = {
             'Access-Control-Allow-Origin': '*',
+            "Content-Disposition": f"Attachment;filename={resource_key}",
             # 'Access-Control-Allow-Headers': '*',
             # 'Access-Control-Allow-Method': 'POST',
         }
         if node_uid is not None and resource_key is not None:
-            res, is_exc = await self.service_core.execute_async_service(
+            ait = self.service_core.execute_async_generator_service(
                 "tensorpc.flow.serv.core::Flow.app_get_file", [node_uid, resource_key], {}, json_call=False)
-            if not is_exc:
-                # res is bytes
-                return web.Response(
-                    body=file_sender(file_bytes=res),
-                    headers=headers
-                )
-            else:
-                return web.Response(status=500, text=res, headers=headers)
-
+            desp, is_exc = await ait.__anext__()
+            if is_exc:
+                return web.Response(status=500, text=desp, headers=headers)
+            assert isinstance(desp, defs.FileDesp)
+            headers["Content-Disposition"] = f"Attachment;filename={desp.name}"
+            if desp.content_type is not None:
+                headers["Content-Type"] = desp.content_type
+            return web.Response(
+                body=grpc_iter_file_sender(reader=ait),
+                headers=headers
+            )
         else:
             raise web.HTTPBadRequest(text="nodeUid or key is None")
 
@@ -271,7 +286,7 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
         app.router.add_post(rpc_pickle_name,
                             http_service.remote_pickle_call_http)
         app.router.add_post(TENSORPC_API_FILE_UPLOAD, http_service.file_upload_call)
-        app.router.add_post(TENSORPC_API_FILE_DOWNLOAD, http_service.resource_download_call)
+        app.router.add_get(TENSORPC_API_FILE_DOWNLOAD, http_service.resource_download_call)
 
         app.router.add_get(ws_name, ws_service.handle_new_connection_aiohttp)
         ssl_context = None
