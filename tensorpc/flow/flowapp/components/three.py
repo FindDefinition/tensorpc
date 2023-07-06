@@ -840,6 +840,7 @@ class InfiniteGridHelperProps(Object3dBaseProps):
     size2: Union[NumberType, Undefined] = undefined
     color: Union[str, Undefined] = undefined
     distance: Union[NumberType, Undefined] = undefined
+    axes: Union[str, Undefined] = undefined
 
 
 class InfiniteGridHelper(ThreeComponentBase[InfiniteGridHelperProps]):
@@ -3132,22 +3133,35 @@ class Environment(ThreeContainerBase[EnvironmentProps, ThreeComponentType]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
-    
+
+class URILoaderType(enum.IntEnum):
+    GLTF = 0
+    FBX = 1
+    RGBE = 2
+    TEXTURE = 3
+
 @dataclasses.dataclass
 class LoaderContextProps(ContainerBaseProps):
     uri: str = ""
+    loaderType: URILoaderType = URILoaderType.GLTF
+    dataKey: Union[str, Undefined] = undefined # default: URILoader
 
 
-class GLTFLoaderContext(ThreeContainerBase[LoaderContextProps, ThreeComponentType]):
-    def __init__(self, uri: str, children: Optional[ThreeLayoutType] = None) -> None:
+class URILoaderContext(ThreeContainerBase[LoaderContextProps, ThreeComponentType]):
+    """create a context with template data.
+    default dataKey: "" (empty), this means the data itself is passed to children
+    """
+    def __init__(self, type: URILoaderType, uri: str, children: Optional[ThreeLayoutType] = None) -> None:
         if children is None:
             children = {}
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
 
-        super().__init__(UIType.ThreeGLTFLoaderContext, LoaderContextProps,
+        super().__init__(UIType.ThreeURILoaderContext, LoaderContextProps,
                          {**children})
         self.props.uri = uri
+        self.props.loaderType = type
+
     @property
     def prop(self):
         propcls = self.propcls
@@ -3170,6 +3184,9 @@ class CubeCameraProps(Object3dContainerBaseProps):
 
 
 class CubeCamera(Object3dContainerBase[CubeCameraProps, ThreeComponentType]):
+    """create a context with template data. 
+    default dataKey: CubeCameraTexture
+    """
     def __init__(self, children: ThreeLayoutType) -> None:
         if children is None:
             children = {}

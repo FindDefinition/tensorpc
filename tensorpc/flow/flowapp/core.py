@@ -214,7 +214,7 @@ class UIType(enum.IntEnum):
     ThreeLightFormer = 0x103d
     ThreeAccumulativeShadows = 0x103e
     ThreeRandomizedLight = 0x103f
-    ThreeGLTFLoaderContext = 0x1040
+    ThreeURILoaderContext = 0x1040
     ThreeCubeCamera = 0x1041
     ThreeContactShadows = 0x1042
 
