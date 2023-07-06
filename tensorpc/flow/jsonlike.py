@@ -11,6 +11,11 @@ import abc
 from collections.abc import MutableMapping
 import copy 
 
+from pydantic_core import PydanticCustomError, core_schema
+from pydantic import (
+    GetCoreSchemaHandler,
+)
+
 ValueType: TypeAlias = Union[int, float, str]
 NumberType: TypeAlias = Union[int, float]
 
@@ -34,11 +39,11 @@ class Undefined:
         return "undefined"
 
     @classmethod
-    def __get_validators__(cls):
-        # one or more validators may be yielded which will be called in the
-        # order to validate the input, each validator will receive as an input
-        # the value returned from the previous validator
-        yield cls.validate
+    def __get_pydantic_core_schema__(cls, _source_type: Any, _handler: GetCoreSchemaHandler):
+        return core_schema.no_info_after_validator_function(
+            cls.validate,
+            core_schema.any_schema(),
+        )
 
     @classmethod
     def validate(cls, v):
@@ -59,11 +64,11 @@ class BackendOnlyProp(Generic[T]):
         return "BackendOnlyProp"
 
     @classmethod
-    def __get_validators__(cls):
-        # one or more validators may be yielded which will be called in the
-        # order to validate the input, each validator will receive as an input
-        # the value returned from the previous validator
-        yield cls.validate
+    def __get_pydantic_core_schema__(cls, _source_type: Any, _handler: GetCoreSchemaHandler):
+        return core_schema.no_info_after_validator_function(
+            cls.validate,
+            core_schema.any_schema(),
+        )
 
     @classmethod
     def validate(cls, v):

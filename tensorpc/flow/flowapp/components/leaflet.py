@@ -352,6 +352,7 @@ class CircleMarker(MapContainerBase[CircleMarkerProps, MapElementChildType]):
         if callback is not None:
             self.register_event_handler(FrontendEventType.Click.value,
                                         callback)
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
 
     @property
     def prop(self):
@@ -388,6 +389,7 @@ class Marker(MapContainerBase[MarkerProps, MapElementChildType]):
         if callback is not None:
             self.register_event_handler(FrontendEventType.Click.value,
                                         callback)
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
 
     @property
     def prop(self):

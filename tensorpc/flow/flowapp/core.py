@@ -35,6 +35,13 @@ from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec,
 
 import pyee
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
+from pydantic import (
+    BaseModel,
+    GetCoreSchemaHandler,
+    GetJsonSchemaHandler,
+    ValidationError,
+)
+from pydantic_core import PydanticCustomError, core_schema
 
 from tensorpc.core.core_io import JsonOnlyData
 from tensorpc.core.event_emitter.base import ExceptionParam
@@ -1005,11 +1012,11 @@ class Component(Generic[T_base_props, T_child]):
         self.event_before_unmount = self._create_emitter_event_slot(FrontendEventType.BeforeUnmount)
     
     @classmethod
-    def __get_validators__(cls):
-        # one or more validators may be yielded which will be called in the
-        # order to validate the input, each validator will receive as an input
-        # the value returned from the previous validator
-        yield cls.validate
+    def __get_pydantic_core_schema__(cls, _source_type: Any, _handler: GetCoreSchemaHandler):
+        return core_schema.no_info_after_validator_function(
+            cls.validate,
+            core_schema.any_schema(),
+        )
 
     @classmethod
     def validate(cls, v):

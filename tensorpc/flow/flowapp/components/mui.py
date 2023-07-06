@@ -32,7 +32,7 @@ from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterable,
 import numpy as np
 from PIL import Image as PILImage
 from typing_extensions import Literal, TypeAlias, TypedDict
-from pydantic import validator
+from pydantic import field_validator
 
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
@@ -200,7 +200,7 @@ class MUIFlexBoxWithDndProps(MUIFlexBoxProps):
     dragInChild: Union[bool, Undefined] = undefined
     takeDragRef: Union[bool, Undefined] = undefined
 
-    @validator('sxOverDrop')
+    @field_validator('sxOverDrop')
     def sx_over_drop_validator(cls, v: Union[Dict[str, Any], Undefined]):
         if isinstance(v, Undefined):
             return v
@@ -545,7 +545,7 @@ class IconBaseProps:
     iconSize: Union[Literal["small", "medium", "large", "inherit"],
                     Undefined] = undefined
     iconFontSize: Union[NumberType, Undefined] = undefined
-    @validator('icon')
+    @field_validator('icon')
     def svg_validator(cls, v):
         if isinstance(v, Undefined):
             return v

@@ -399,14 +399,16 @@ class ObjectInspector(mui.FlexBox):
         frame_name = cur_frame.f_code.co_name
         del frame
         del cur_frame
-        fut = asyncio.run_coroutine_threadsafe(
-            self.tree.set_object(inspecttools.filter_local_vars(local_vars),
-                                 key + f"-{frame_name}"), loop)
         if get_app()._flowapp_thread_id == threading.get_ident():
+            task = asyncio.create_task(self.tree.set_object(inspecttools.filter_local_vars(local_vars),
+                                 key + f"-{frame_name}"))
             # we can't wait fut here
-            return fut
+            return task
         else:
             # we can wait fut here.
+            fut = asyncio.run_coroutine_threadsafe(
+                self.tree.set_object(inspecttools.filter_local_vars(local_vars),
+                                    key + f"-{frame_name}"), loop)
             return fut.result()
 
     def set_object_sync(self,
@@ -418,12 +420,17 @@ class ObjectInspector(mui.FlexBox):
         """
         if loop is None:
             loop = asyncio.get_running_loop()
-        fut = asyncio.run_coroutine_threadsafe(self.set_object(obj, key, expand_level), loop)
         if get_app()._flowapp_thread_id == threading.get_ident():
             # we can't wait fut here
-            return fut
+            task = asyncio.create_task(self.set_object(obj, key, expand_level))
+            # we can't wait fut here
+            return task
+
+            # return fut
         else:
             # we can wait fut here.
+            fut = asyncio.run_coroutine_threadsafe(self.set_object(obj, key, expand_level), loop)
+
             return fut.result()
 
     async def update_tree(self):
