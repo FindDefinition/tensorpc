@@ -167,6 +167,12 @@ class SimpleCanvas(mui.FlexBox):
         if camera is None:
             camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         self.camera = camera
+        # self.ctrl = three.FirstPersonControl().prop(makeDefault=True,
+        #                                             enabled=True, activeLook=True, constrainVertical=False, 
+        #                                             autoForward=False, heightCoef=1, heightMin=0, heightMax=1,
+        #                                             lookVertical=True, lookSpeed=0.005, movementSpeed=1, verticalMax=np.pi, verticalMin=0,)
+        # self.ctrl = three.PointerLockControl().prop(
+        #                                             enabled=True, makeDefault=True)
         self.ctrl = three.CameraControl().prop(makeDefault=True)
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.axis_helper = three.AxesHelper(20)
@@ -369,8 +375,8 @@ class SimpleCanvas(mui.FlexBox):
         # layout: mui.LayoutType = [
         #     self._cfg_panel
         # ]
-        self.register_event_handler(FrontendEventType.Drop,
-                                    self._on_drop)
+        # TODO this should be put on mount and remove on unmount
+        self.event_drop.on(self._on_drop)
         self.prop(
             minHeight=0,
             minWidth=0,
@@ -588,6 +594,7 @@ class SimpleCanvas(mui.FlexBox):
                 if attrs is None:
                     ui = three.Points(limit).prop(encodeMethod=encode_method, encodeScale=encode_scale)
                 else:
+                    assert attr_fields is not None 
                     ui = three.Points(limit).prop(encodeMethod=encode_method, encodeScale=encode_scale, attrs=attrs, attrFields=attr_fields)
             else:
                 ui = three.Points(limit)

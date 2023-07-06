@@ -321,7 +321,9 @@ class EnvmapGroupdProjectionApp:
                                 material="materials.930_plastics"),
                     ]).prop(rotation=(np.pi / 2, 0, 0)),
                     three.Group([
-                        three.Mesh([]).set_override_props_unchecked_dict({
+                        three.Mesh([
+                            three.Wireframe(),
+                        ]).set_override_props_unchecked_dict({
                             "geometry":
                             "nodes.mesh_0.geometry",
                             "material":

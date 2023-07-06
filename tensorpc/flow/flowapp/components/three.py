@@ -1218,67 +1218,68 @@ class OrbitControl(ThreeComponentBase[OrbitControlProps]):
         return self._update_props_base(propcls)
 
 
-@dataclasses.dataclass
-class PointerLockControlProps(Object3dBaseProps):
-    enabled: Union[bool, Undefined] = undefined
-    minPolarAngle: Union[float, Undefined] = undefined
-    maxPolarAngle: Union[float, Undefined] = undefined
+# @dataclasses.dataclass
+# class PointerLockControlProps(Object3dBaseProps):
+#     enabled: Union[bool, Undefined] = undefined
+#     minPolarAngle: Union[float, Undefined] = undefined
+#     maxPolarAngle: Union[float, Undefined] = undefined
+#     makeDefault: Union[bool, Undefined] = undefined
 
 
-class PointerLockControl(ThreeComponentBase[PointerLockControlProps]):
-    def __init__(self,
-                 enabled: Union[bool, Undefined] = undefined,
-                 min_polar_angle: Union[float, Undefined] = undefined,
-                 max_polar_angle: Union[float, Undefined] = undefined) -> None:
-        super().__init__(UIType.ThreePointerLockControl,
-                         PointerLockControlProps)
-        self.props.enabled = enabled
-        self.props.minPolarAngle = min_polar_angle
-        self.props.maxPolarAngle = max_polar_angle
+# class PointerLockControl(ThreeComponentBase[PointerLockControlProps]):
+#     def __init__(self,
+#                  enabled: Union[bool, Undefined] = undefined,
+#                  min_polar_angle: Union[float, Undefined] = undefined,
+#                  max_polar_angle: Union[float, Undefined] = undefined) -> None:
+#         super().__init__(UIType.ThreePointerLockControl,
+#                          PointerLockControlProps)
+#         self.props.enabled = enabled
+#         self.props.minPolarAngle = min_polar_angle
+#         self.props.maxPolarAngle = max_polar_angle
 
-    @property
-    def prop(self):
-        propcls = self.propcls
-        return self._prop_base(propcls, self)
+#     @property
+#     def prop(self):
+#         propcls = self.propcls
+#         return self._prop_base(propcls, self)
 
-    @property
-    def update_event(self):
-        propcls = self.propcls
-        return self._update_props_base(propcls)
-
-
-@dataclasses.dataclass
-class FirstPersonControlProps(ThreeBasicProps):
-    enabled: Union[bool, Undefined] = undefined
-    movementSpeed: Union[float, Undefined] = undefined
-    autoForward: Union[bool, Undefined] = undefined
-    lookSpeed: Union[float, Undefined] = undefined
-    lookVertical: Union[bool, Undefined] = undefined
-    activeLook: Union[bool, Undefined] = undefined
-    heightSpeed: Union[bool, Undefined] = undefined
-    heightCoef: Union[float, Undefined] = undefined
-    heightMin: Union[float, Undefined] = undefined
-    heightMax: Union[float, Undefined] = undefined
-    constrainVertical: Union[bool, Undefined] = undefined
-    verticalMin: Union[float, Undefined] = undefined
-    verticalMax: Union[float, Undefined] = undefined
-    mouseDragOn: Union[bool, Undefined] = undefined
+#     @property
+#     def update_event(self):
+#         propcls = self.propcls
+#         return self._update_props_base(propcls)
 
 
-class FirstPersonControl(ThreeComponentBase[FirstPersonControlProps]):
-    def __init__(self) -> None:
-        super().__init__(UIType.ThreeFirstPersonControl,
-                         FirstPersonControlProps)
+# @dataclasses.dataclass
+# class FirstPersonControlProps(ThreeBasicProps):
+#     enabled: Union[bool, Undefined] = undefined
+#     movementSpeed: Union[float, Undefined] = undefined
+#     autoForward: Union[bool, Undefined] = undefined
+#     lookSpeed: Union[float, Undefined] = undefined
+#     lookVertical: Union[bool, Undefined] = undefined
+#     activeLook: Union[bool, Undefined] = undefined
+#     heightSpeed: Union[bool, Undefined] = undefined
+#     heightCoef: Union[float, Undefined] = undefined
+#     heightMin: Union[float, Undefined] = undefined
+#     heightMax: Union[float, Undefined] = undefined
+#     constrainVertical: Union[bool, Undefined] = undefined
+#     verticalMin: Union[float, Undefined] = undefined
+#     verticalMax: Union[float, Undefined] = undefined
+#     mouseDragOn: Union[bool, Undefined] = undefined
+#     makeDefault: Union[bool, Undefined] = undefined
 
-    @property
-    def prop(self):
-        propcls = self.propcls
-        return self._prop_base(propcls, self)
+# class FirstPersonControl(ThreeComponentBase[FirstPersonControlProps]):
+#     def __init__(self) -> None:
+#         super().__init__(UIType.ThreeFirstPersonControl,
+#                          FirstPersonControlProps)
 
-    @property
-    def update_event(self):
-        propcls = self.propcls
-        return self._update_props_base(propcls)
+#     @property
+#     def prop(self):
+#         propcls = self.propcls
+#         return self._prop_base(propcls, self)
+
+#     @property
+#     def update_event(self):
+#         propcls = self.propcls
+#         return self._update_props_base(propcls)
 
 
 class FlexAutoReflow(ThreeComponentBase[ThreeBasicProps]):
