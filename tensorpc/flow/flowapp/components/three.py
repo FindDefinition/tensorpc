@@ -1448,7 +1448,7 @@ class ThreeCanvasProps(MUIFlexBoxProps):
                                  'bottom-left'], Undefined] = undefined
 
 
-class ThreeCanvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
+class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
     def __init__(self,
                  children: Union[List[ThreeComponentType],
                                  Dict[str, ThreeComponentType]],
@@ -2396,7 +2396,11 @@ MeshChildType: TypeAlias = Union[ThreeMaterialBase, ThreeMaterialPropsBase,
 
 @dataclasses.dataclass
 class PrimitiveMeshProps(Object3dContainerBaseProps):
-    pass
+    # used for events. for example, if you set userdata
+    # in a mesh inside a group container, when you add handler
+    # in group and click mesh, the group will receive
+    # event with userdata of this mesh.
+    userData: Union[Undefined, Any] = undefined
 
 
 @dataclasses.dataclass

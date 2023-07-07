@@ -54,7 +54,7 @@ from ..core import (AppComponentCore, AppEvent, AppEventType, BasicProps,
                     _get_obj_def_path, MatchCase)
 from tensorpc.flow.constants import TENSORPC_ANYLAYOUT_FUNC_NAME
 if TYPE_CHECKING:
-    from .three import ThreeCanvas
+    from .three import Canvas
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
 CORO_NONE = Union[Coroutine[None, None, None], None]

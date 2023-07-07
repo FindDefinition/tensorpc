@@ -375,7 +375,7 @@ class SampleThreeApp(EditableApp):
         mesh = three.MeshV1(three.BoxGeometry(), three.MeshBasicMaterial())
         mesh.set_pointer_callback(
             on_click=three.EventHandler(lambda x: print(x)))
-        self.canvas = three.ThreeCanvas({
+        self.canvas = three.Canvas({
             "cam": cam,
             "points": self.points,
             "lines": self.lines,
@@ -484,7 +484,7 @@ class SampleThreePointsApp(EditableApp):
         cam.prop(position=(0, 0, 20), up=(0, 0, 1))
         self.ctrl = three.CameraControl().prop(damping_factor=1.0)
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
-        self.canvas = three.ThreeCanvas({
+        self.canvas = three.Canvas({
             "cam": cam,
             "points": self.points,
             "ctrl": self.ctrl,
@@ -625,7 +625,7 @@ class SampleThreeHudApp(EditableApp):
         }).prop(render_priority=1,
                 flexDirection="row",
                 justifyContent="flex-start")
-        self.canvas = three.ThreeCanvas({
+        self.canvas = three.Canvas({
             "cam":
             cam,
             "points":
@@ -726,7 +726,7 @@ class SampleThree2DApp(EditableApp):
                         hover_line_color="blue",
                         hover_line_width=2)
 
-        self.canvas = three.ThreeCanvas({
+        self.canvas = three.Canvas({
             "cam":
             cam,
             "ctrl":

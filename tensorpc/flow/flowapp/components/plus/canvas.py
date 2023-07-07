@@ -213,7 +213,7 @@ class SimpleCanvas(mui.FlexBox):
         # if with_grid:
         #     canvas_layout.append(infgrid)
         self._ctrl_container = mui.Fragment([])
-        self.canvas = three.ThreeCanvas(canvas_layout).prop(
+        self.canvas = three.Canvas(canvas_layout).prop(
             flex=1, allowKeyboardEvent=True)
         if not self._is_transparent:
             self.canvas.prop(threeBackgroundColor="#ffffff")
