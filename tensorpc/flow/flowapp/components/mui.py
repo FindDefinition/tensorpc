@@ -335,7 +335,7 @@ class ListItemTextProps(MUIComponentBaseProps):
 
 class ListItemText(MUIComponentBase[ListItemTextProps]):
 
-    def __init__(self, init: str) -> None:
+    def __init__(self, init: str = "") -> None:
         super().__init__(UIType.ListItemText, ListItemTextProps)
         self.props.value = init
 
@@ -3822,6 +3822,9 @@ class DataGridProps(MUIFlexBoxProps):
     masterDetailUseFetch: Union[Undefined, bool] = undefined
     stickyHeader: Union[Undefined, bool] = undefined
     size: Union[Undefined, Literal["small", "medium"]] = undefined
+    cellEdit: Union[Undefined, bool] = undefined
+    rowSelection: Union[Undefined, bool] = undefined
+    enableFilter: Union[Undefined, bool] = undefined
 
 
 class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):

@@ -1238,14 +1238,14 @@ class DataGridApp:
         #     mui.Divider(orientation="vertical"),
         #     mui.Typography().set_override_props(value="iq"),
         # ])).set_override_props(dataList="nested").prop(flexFlow="column")
-        dgrid = mui.DataGrid(column_defs, rows, master_detail).prop(idKey="id", rowHover=True, virtualized=False)
+        dgrid = mui.DataGrid(column_defs, rows, master_detail).prop(idKey="id", rowHover=True, virtualized=True, enableFilter=True)
         # dgrid.event_fetch_detail.on(self._fetch_detail)
         dgrid.bind_prop(cbox, "protein")
         dgrid.bind_prop(input_cell, "name")
         dgrid.bind_prop(fat_cell, "fat")
 
         return mui.VBox([
-            dgrid.prop(stickyHeader=False, virtualized=False, size="small"),
+            dgrid.prop(stickyHeader=False, virtualized=True, size="small"),
         ]).prop(width="100%", height="100%", overflow="hidden")
 
     def _fetch_detail(self, key: str):
