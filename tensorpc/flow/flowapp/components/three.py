@@ -2402,6 +2402,15 @@ class PrimitiveMeshProps(Object3dContainerBaseProps):
     # event with userdata of this mesh.
     userData: Union[Undefined, Any] = undefined
 
+    # mesh have four state: normal, hover, click (point down), toggled (selected)
+    # each state can have different override props.
+    enableHover: Union[bool, Undefined] = undefined
+    enableClick: Union[bool, Undefined] = undefined
+    enableToggle: Union[bool, Undefined] = undefined
+    hoverOverrideProps: Union[Undefined, Dict[str, Any]] = undefined
+    clickOverrideProps: Union[Undefined, Dict[str, Any]] = undefined
+    toggleOverrideProps: Union[Undefined, Dict[str, Any]] = undefined
+    
 
 @dataclasses.dataclass
 class MeshProps(PrimitiveMeshProps):

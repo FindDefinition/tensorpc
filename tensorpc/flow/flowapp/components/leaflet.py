@@ -132,7 +132,7 @@ class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
         res["zoom"] = self.zoom
         return res
 
-    async def handle_event(self, ev: Event):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         await handle_raw_event(ev, self, just_run=True)
 
     async def fly_to(self,
@@ -288,7 +288,7 @@ class Polyline(MapContainerBase[PolylineProps, MapElementChildType]):
         if callback is not None:
             self.event_change.on(callback)
 
-    async def handle_event(self, ev: Event):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         await handle_standard_event(self, ev)
 
     @property
@@ -364,7 +364,7 @@ class CircleMarker(MapContainerBase[CircleMarkerProps, MapElementChildType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def handle_event(self, ev: Event):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         await handle_standard_event(self, ev)
 
 
@@ -401,5 +401,5 @@ class Marker(MapContainerBase[MarkerProps, MapElementChildType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def handle_event(self, ev: Event):
+    async def handle_event(self, ev: Event, is_sync: bool = False):
         await handle_standard_event(self, ev)
