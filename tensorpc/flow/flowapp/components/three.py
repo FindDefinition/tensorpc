@@ -234,7 +234,11 @@ class Object3dBase(ThreeComponentBase[T_o3d_prop]):
 
 
 class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
-    def __init__(self, base_type: UIType, prop_cls: Type[T_o3d_prop]) -> None:
+    def __init__(self, base_type: UIType, prop_cls: Type[T_o3d_prop], 
+                allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
+        if allowed_events is None:
+            allowed_events = []
+
         super().__init__(base_type, prop_cls, allowed_events=[
             FrontendEventType.Click.value,
             FrontendEventType.DoubleClick.value,
@@ -245,10 +249,7 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
             FrontendEventType.Up.value,
             FrontendEventType.Down.value,
             FrontendEventType.ContextMenu.value,
-            FrontendEventType.Change.value,
-        ])
-        # TODO we should remove event_change here.
-        self.event_change = self._create_event_slot(FrontendEventType.Change)
+        ] + list(allowed_events))
         self.event_double_click = self._create_event_slot(FrontendEventType.DoubleClick)
         self.event_click = self._create_event_slot(FrontendEventType.Click)
         self.event_enter = self._create_event_slot(FrontendEventType.Enter)
@@ -268,8 +269,9 @@ class Object3dContainerBase(ThreeContainerBase[T_o3d_container_prop, T_child]):
                  base_type: UIType,
                  prop_cls: Type[T_o3d_container_prop],
                  children: Dict[str, T_child],
-                 inited: bool = False) -> None:
-        super().__init__(base_type, prop_cls, children, inited)
+                 inited: bool = False,
+                 allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
+        super().__init__(base_type, prop_cls, children, inited, allowed_events)
 
     def update_object3d_event(self,
                               position: Optional[Union[Vector3Type,
@@ -325,8 +327,30 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
                  base_type: UIType,
                  prop_cls: Type[T_o3d_container_prop],
                  children: Dict[str, T_child],
-                 inited: bool = False) -> None:
-        super().__init__(base_type, prop_cls, children, inited)
+                 inited: bool = False,
+                 allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
+        if allowed_events is None:
+            allowed_events = []
+        super().__init__(base_type, prop_cls, children, inited, allowed_events=[
+            FrontendEventType.Click.value,
+            FrontendEventType.DoubleClick.value,
+            FrontendEventType.Enter.value,
+            FrontendEventType.Leave.value,
+            FrontendEventType.Over.value,
+            FrontendEventType.Out.value,
+            FrontendEventType.Up.value,
+            FrontendEventType.Down.value,
+            FrontendEventType.ContextMenu.value,
+        ] + list(allowed_events))
+        self.event_double_click = self._create_event_slot(FrontendEventType.DoubleClick)
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
+        self.event_enter = self._create_event_slot(FrontendEventType.Enter)
+        self.event_leave = self._create_event_slot(FrontendEventType.Leave)
+        self.event_over = self._create_event_slot(FrontendEventType.Over)
+        self.event_out = self._create_event_slot(FrontendEventType.Out)
+        self.event_up = self._create_event_slot(FrontendEventType.Up)
+        self.event_down = self._create_event_slot(FrontendEventType.Down)
+        self.event_context_menu = self._create_event_slot(FrontendEventType.ContextMenu)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync)
@@ -867,7 +891,7 @@ class InfiniteGridHelper(ThreeComponentBase[InfiniteGridHelperProps]):
         return self._update_props_base(propcls)
 
 
-class Group(Object3dContainerBase[Object3dContainerBaseProps,
+class Group(O3dContainerWithEventBase[Object3dContainerBaseProps,
                                   ThreeComponentType]):
     # TODO can/should group accept event?
     def __init__(self,
@@ -1086,6 +1110,7 @@ class CameraUserControlType(enum.Enum):
     SetLookAt = 1
     Reset = 2
     SetCamPoseRaw = 3
+    RotateTo = 4
 
 
 class CameraControl(ThreeComponentBase[CameraControlProps]):
@@ -2401,12 +2426,14 @@ class PrimitiveMeshProps(Object3dContainerBaseProps):
     # in group and click mesh, the group will receive
     # event with userdata of this mesh.
     userData: Union[Undefined, Any] = undefined
-
+    toggled: Union[bool, Undefined] = undefined
     # mesh have four state: normal, hover, click (point down), toggled (selected)
     # each state can have different override props.
     enableHover: Union[bool, Undefined] = undefined
     enableClick: Union[bool, Undefined] = undefined
     enableToggle: Union[bool, Undefined] = undefined
+    # follow https://docs.pmnd.rs/react-three-fiber/api/objects#piercing-into-nested-properties
+    # to set nested props of a mesh.
     hoverOverrideProps: Union[Undefined, Dict[str, Any]] = undefined
     clickOverrideProps: Union[Undefined, Dict[str, Any]] = undefined
     toggleOverrideProps: Union[Undefined, Dict[str, Any]] = undefined
@@ -2419,14 +2446,40 @@ class MeshProps(PrimitiveMeshProps):
     toggleMode: Union[bool, Undefined] = undefined
     toggled: Union[bool, Undefined] = undefined
 
-
 class Mesh(O3dContainerWithEventBase[PrimitiveMeshProps, ThreeComponentType]):
+    """standard three mesh.
+    mesh itself don't have much props, but you can use 
+    dash-case format to set nested object prop:
+    ```Python
+    mesh.set_sx_props({
+        "material-color": "red"
+    })
+    ```
+    this also works for hover/click/toggle override props.
+
+    see https://docs.pmnd.rs/react-three-fiber/api/objects#piercing-into-nested-properties
+    """
     def __init__(self, children: ThreeLayoutType) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-
+        
         super().__init__(UIType.ThreePrimitiveMesh, PrimitiveMeshProps,
-                         children)
+                         children, allowed_events=[
+                            FrontendEventType.Change.value,
+                         ])
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        await handle_standard_event(self,
+                                    ev,
+                                    sync_state_after_change=False,
+                                    is_sync=is_sync)
+        
+    def state_change_callback(
+            self,
+            data: bool,
+            type: ValueType = FrontendEventType.Change.value):
+        self.props.toggled = data
 
     @property
     def prop(self):
@@ -2570,37 +2623,32 @@ class Button(Group):
             radius = min(width, height) * 0.25
         if font_size is None:
             font_size = min(width, height) * 0.5
-        material = MeshBasicMaterialV1()
-        material.prop(color="#393939")
-        mesh = MeshV1(RoundedRectGeometry(width, height, radius), material)
-        mesh.register_event_handler(FrontendEventType.Click.value, callback, stop_propagation=True)
-        self.event_click = self._create_event_slot(FrontendEventType.Click)
-
-        mesh.prop(hoverColor="#222222", clickColor="#009A63")
+        mesh = Mesh([
+            RoundedRectGeometry(width, height, radius),
+            MeshBasicMaterial().prop(color="#393939"),
+        ])
+        # hoverColor="#222222", clickColor="#009A63"
+        mesh.prop(enableHover=True,
+                  hoverOverrideProps={
+                        "material-color": "#222222"
+                  },
+                  enableClick=True,
+                  clickOverrideProps={
+                        "material-color": "#009A63"
+                  })
         self.mesh = mesh
         text = Text(name)
         text.prop(fontSize=font_size,
                   color="white",
-                  position=(0, 0, 0),
+                  position=(0, 0, 0.01),
                   maxWidth=width)
         children = {
             "mesh": mesh,
             "text": text,
         }
+        mesh.event_click.on(callback)
         super().__init__(children)
-        self.name = name
         # self.callback = callback
-
-    def to_dict(self):
-        res = super().to_dict()
-        res["name"] = self.name
-        return res
-
-    async def headless_click(self):
-        uiev = UIEvent(
-            {self._flow_uid: (FrontendEventType.Click.value, self.name)})
-        return await self.put_app_event(
-            AppEvent("", {AppEventType.UIEvent: uiev}))
 
     @property
     def prop(self):

@@ -31,7 +31,7 @@ from tensorpc.core import marker
 from tensorpc.core.httpclient import http_remote_call
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServiceUnit
 import tensorpc
-from tensorpc.flow.flowapp.reload import AppReloadManager
+from tensorpc.flow.flowapp.reload import AppReloadManager, FlowSpecialMethods
 
 from tensorpc.flow.langserv import close_tmux_lang_server, get_tmux_lang_server_info_may_create
 from ..client import MasterMeta
@@ -112,12 +112,11 @@ class FlowApp:
     async def init(self):
         if self.app._force_special_layout_method:
             layout_created = False
-            for meta in self.app_su.serv_metas:
-                if meta.user_app_meta is not None:
-                    if meta.user_app_meta.type == AppFuncType.CreateLayout:
-                        await self.app._app_run_layout_function(
-                            decorator_fn=meta.fn)
-                        layout_created = True
+            special_methods = FlowSpecialMethods(self.app_su.serv_metas)
+            if special_methods.create_layout is not None:
+                await self.app._app_run_layout_function(
+                    decorator_fn=special_methods.create_layout.fn)
+                layout_created = True
             if not layout_created:
                 await self.app._app_run_layout_function()
         else:

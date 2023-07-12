@@ -276,20 +276,19 @@ class Polyline(MapContainerBase[PolylineProps, MapElementChildType]):
         positions: Union[List[Tuple[NumberType, NumberType]],
                          Undefined] = undefined,
         children: Optional[Dict[str, MapElementChildType]] = None,
-        callback: Optional[Callable[
-            [Tuple[NumberType, NumberType, NumberType]], _CORO_NONE]] = None
     ) -> None:
         super().__init__(UIType.LeafletPolyline,
                          PolylineProps,
-                         _children=children)
+                         _children=children,
+                         allowed_events=[
+                                FrontendEventType.Click.value,
+                         ])
         self.props.color = color
         self.props.positions = positions
-        self.event_change = self._create_event_slot(FrontendEventType.Change)
-        if callback is not None:
-            self.event_change.on(callback)
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
-        await handle_standard_event(self, ev)
+        await handle_standard_event(self, ev, is_sync=is_sync)
 
     @property
     def prop(self):

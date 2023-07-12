@@ -1155,7 +1155,7 @@ class Component(Generic[T_base_props, T_child]):
             self._task = None
 
     def set_sx_props(self, sx_props: Dict[str, Any]):
-        self.__sx_props = sx_props
+        self.__sx_props.update(sx_props)
         return self
 
     def to_dict(self):
