@@ -1126,7 +1126,7 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
         # self.props.enableDamping = True
         # self.props.dampingFactor = 1
         self.props.draggingSmoothTime = 0
-        self.props.smoothTime = 0
+        # self.props.smoothTime = 0
         # self.props.minDistance = 1
         # self.props.maxDistance = 100
         self.event_change = self._create_event_slot(FrontendEventType.Change)
@@ -1197,6 +1197,15 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
             self.create_comp_event({
                 "type": CameraUserControlType.Reset.value,
             }))
+    
+    async def rotate_to(self, azimuth: float, polar: float):
+        return await self.send_and_wait(
+            self.create_comp_event({
+                "type": CameraUserControlType.RotateTo.value,
+                "azimuth": azimuth,
+                "polar": polar,
+            }))
+
 
     @staticmethod
     def fov_size_to_intrinsic(fov_angle: float, width: NumberType,
@@ -3287,6 +3296,37 @@ class ContactShadowsProps(Object3dBaseProps):
 class ContactShadows(ThreeComponentBase[ContactShadowsProps]):
     def __init__(self) -> None:
         super().__init__(UIType.ThreeContactShadows, ContactShadowsProps)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class GizmoHelperShadowsProps(ThreeBasicProps):
+    alignment: Union[Literal["top-left", "top-right", "bottom-right", "bottom-left", "bottom-center", "center-right", "center-left", "center-center", "top-center"], Undefined] = undefined
+    margin: Union[Tuple[NumberType, NumberType], Undefined] = undefined
+    renderPriority: Union[int, Undefined] = undefined
+    autoClear: Union[bool, Undefined] = undefined
+    axisColors: Union[Tuple[str, str, str], Undefined] = undefined
+    axisScale: Union[Tuple[NumberType, NumberType, NumberType], Undefined] = undefined
+    labels: Union[Tuple[str, str, str], Undefined] = undefined
+    axisHeadScale: Union[NumberType, Undefined] = undefined
+    labelColor: Union[str, Undefined] = undefined
+    hideNegativeAxes: Union[bool, Undefined] = undefined
+    hideAxisHeads: Union[bool, Undefined] = undefined
+    disabled: Union[bool, Undefined] = undefined
+    font: Union[str, Undefined] = undefined
+
+
+class GizmoHelper(ThreeComponentBase[GizmoHelperShadowsProps]):
+    def __init__(self) -> None:
+        super().__init__(UIType.ThreeGizmoHelper, GizmoHelperShadowsProps)
 
     @property
     def prop(self):

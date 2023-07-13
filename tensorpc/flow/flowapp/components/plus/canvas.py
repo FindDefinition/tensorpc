@@ -208,6 +208,7 @@ class SimpleCanvas(mui.FlexBox):
             # self._screen_shot,
             self._screen_shot_v2,
             self._dynamic_voxels,
+            three.GizmoHelper().prop(alignment="bottom-right"),
             *init_canvas_childs
         ]
         # if with_grid:

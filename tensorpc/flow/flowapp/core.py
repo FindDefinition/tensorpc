@@ -224,6 +224,7 @@ class UIType(enum.IntEnum):
     ThreeURILoaderContext = 0x1040
     ThreeCubeCamera = 0x1041
     ThreeContactShadows = 0x1042
+    ThreeGizmoHelper = 0x1043
 
     ThreeMeshBasicMaterial = 0x1050
     ThreeMeshStandardMaterial = 0x1051

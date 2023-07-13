@@ -322,7 +322,6 @@ class EnvmapGroupdProjectionApp:
                     ]).prop(rotation=(np.pi / 2, 0, 0)),
                     three.Group([
                         three.Mesh([
-                            three.Wireframe(),
                         ]).set_override_props_unchecked_dict({
                             "geometry":
                             "nodes.mesh_0.geometry",
@@ -333,6 +332,12 @@ class EnvmapGroupdProjectionApp:
                         }).set_sx_props({
                             "material-color": "#ffdf71",
                         }),
+                        three.Mesh([
+                            three.MeshBasicMaterial().prop(side=1, color="red")
+                        ]).set_override_props_unchecked_dict({
+                            "geometry":
+                            "nodes.mesh_0.geometry",
+                        }).prop(scale=1.1),
                         three.Mesh([]).set_override_props_unchecked(
                             geometry="nodes.mesh_0_1.geometry",
                             material="materials.930_chromes"),
@@ -423,6 +428,7 @@ class EnvmapGroupdProjectionApp:
 
         self.canvas.canvas.prop(shadows=True)
         res = mui.VBox([
+            mui.Button("dev_rotate", lambda : self.canvas.ctrl.rotate_to(0, 1.57)),
             self.canvas.prop(flex=1),
         ]).prop(minHeight=0,
                 minWidth=0,
