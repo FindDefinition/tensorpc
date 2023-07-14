@@ -53,6 +53,9 @@ CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
 
 ThreeLayoutType: TypeAlias = Union[List["ThreeComponentType"],
                                    Dict[str, "ThreeComponentType"]]
+ThreeEffectType: TypeAlias = Union[List["ThreeEffectBase"],
+                                   Dict[str, "ThreeEffectBase"]]
+
 
 P = ParamSpec('P')
 
@@ -135,6 +138,9 @@ class ThreeComponentBase(Component[T_base_props, "ThreeComponentType"]):
 
 
 class ThreeContainerBase(ContainerBase[T_container_props, T_child]):
+    pass
+
+class ThreeEffectBase(Component[T_base_props, "ThreeComponentType"]):
     pass
 
 
@@ -890,8 +896,12 @@ class InfiniteGridHelper(ThreeComponentBase[InfiniteGridHelperProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+@dataclasses.dataclass
+class GroupProps(Object3dContainerBaseProps):
+    userData: Union[Any, Undefined] = undefined
+    enableSelect: Union[bool, Undefined] = undefined
 
-class Group(O3dContainerWithEventBase[Object3dContainerBaseProps,
+class Group(O3dContainerWithEventBase[GroupProps,
                                   ThreeComponentType]):
     # TODO can/should group accept event?
     def __init__(self,
@@ -900,7 +910,7 @@ class Group(O3dContainerWithEventBase[Object3dContainerBaseProps,
                  inited: bool = False) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ThreeGroup, Object3dContainerBaseProps,
+        super().__init__(UIType.ThreeGroup, GroupProps,
                          children, inited)
 
     @property
@@ -2427,6 +2437,10 @@ class MeshDiscardMaterial(ThreeMaterialBase[MeshDiscardMaterialProps]):
 MeshChildType: TypeAlias = Union[ThreeMaterialBase, ThreeMaterialPropsBase,
                                  ThreeGeometryPropsBase, ThreeGeometryBase]
 
+# @dataclasses.dataclass 
+# class MeshUserData:
+#     enableSelect: Union[bool, Undefined] = undefined
+#     data: Union[Undefined, Any] = undefined
 
 @dataclasses.dataclass
 class PrimitiveMeshProps(Object3dContainerBaseProps):
@@ -2441,12 +2455,16 @@ class PrimitiveMeshProps(Object3dContainerBaseProps):
     enableHover: Union[bool, Undefined] = undefined
     enableClick: Union[bool, Undefined] = undefined
     enableToggle: Union[bool, Undefined] = undefined
+    # you must use select context to enable select.
+    # to enable outline support, you must also put outline
+    # into select context.
+    enableSelect: Union[bool, Undefined] = undefined
     # follow https://docs.pmnd.rs/react-three-fiber/api/objects#piercing-into-nested-properties
     # to set nested props of a mesh.
     hoverOverrideProps: Union[Undefined, Dict[str, Any]] = undefined
     clickOverrideProps: Union[Undefined, Dict[str, Any]] = undefined
     toggleOverrideProps: Union[Undefined, Dict[str, Any]] = undefined
-    
+    selectOverrideProps: Union[Undefined, Dict[str, Any]] = undefined
 
 @dataclasses.dataclass
 class MeshProps(PrimitiveMeshProps):
@@ -2499,6 +2517,7 @@ class Mesh(O3dContainerWithEventBase[PrimitiveMeshProps, ThreeComponentType]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
 
 
 class MeshV1(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
@@ -2625,7 +2644,7 @@ class Button(Group):
                  name: str,
                  width: float,
                  height: float,
-                 callback: Callable[[Any], _CORO_ANY],
+                 callback: Callable[[], _CORO_ANY],
                  radius: Optional[float] = None,
                  font_size: Optional[float] = None) -> None:
         if radius is None:
@@ -3327,6 +3346,201 @@ class GizmoHelperShadowsProps(ThreeBasicProps):
 class GizmoHelper(ThreeComponentBase[GizmoHelperShadowsProps]):
     def __init__(self) -> None:
         super().__init__(UIType.ThreeGizmoHelper, GizmoHelperShadowsProps)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+
+@dataclasses.dataclass
+class SelectionContextProps(ContainerBaseProps):
+    multiple: Union[bool, Undefined] = undefined
+    box: Union[bool, Undefined] = undefined
+    border: Union[str, Undefined] = undefined
+    backgroundColor: Union[str, Undefined] = undefined 
+
+
+class SelectionContext(ThreeContainerBase[SelectionContextProps, ThreeComponentType]):
+    """create a context with template data.
+    default dataKey: "" (empty), this means the data itself is passed to children
+    """
+    def __init__(self, children: Optional[ThreeLayoutType] = None, callback: Optional[Callable[[Any],
+                                          _CORO_NONE]] = None) -> None:
+        if children is None:
+            children = {}
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+
+        super().__init__(UIType.ThreeSelectionContext, SelectionContextProps,
+                         {**children}, allowed_events=[FrontendEventType.Change.value])
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
+        if callback is not None:
+            self.event_change.on(callback)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        await handle_standard_event(self,
+                                    ev,
+                                    sync_state_after_change=False,
+                                    change_status=False,
+                                    is_sync=is_sync)
+
+
+class BlendFunction(enum.IntEnum):
+    SKIP = 0
+    SET = 1
+    ADD = 2
+    ALPHA = 3
+    AVERAGE = 4
+    COLOR = 5
+    COLOR_BURN = 6
+    COLOR_DODGE = 7
+    DARKEN = 8
+    DIFFERENCE = 9
+    DIVIDE = 10
+    DST = 11
+    EXCLUSION = 12
+    HARD_LIGHT = 13
+    HARD_MIX = 14
+    HUE = 15
+    INVERT = 16
+    INVERT_RGB = 17
+    LIGHTEN = 18
+    LINEAR_BURN = 19
+    LINEAR_DODGE = 20
+    LINEAR_LIGHT = 21
+    LUMINOSITY = 22
+    MULTIPLY = 23
+    NEGATION = 24
+    NORMAL = 25
+    OVERLAY = 26
+    PIN_LIGHT = 27
+    REFLECT = 28
+    SATURATION = 29
+    SCREEN = 30
+    SOFT_LIGHT = 31
+    SRC = 32
+    SUBTRACT = 33
+    VIVID_LIGHT = 34
+
+
+@dataclasses.dataclass
+class EffectComposerProps(ContainerBaseProps):
+    enabled: Union[bool, Undefined] = undefined
+    depthBuffer: Union[bool, Undefined] = undefined
+    disableNormalPass: Union[bool, Undefined] = undefined
+    stencilBuffer: Union[bool, Undefined] = undefined
+    autoClear: Union[bool, Undefined] = undefined
+    multisampling: Union[int, Undefined] = undefined
+    resolutionScale: Union[NumberType, Undefined] = undefined
+    renderPriority: Union[int, Undefined] = undefined
+
+
+class EffectComposer(ThreeContainerBase[EffectComposerProps, ThreeEffectBase]):
+    """create a context with template data.
+    default dataKey: "" (empty), this means the data itself is passed to children
+    """
+    def __init__(self, children: ThreeEffectType) -> None:
+        if children is None:
+            children = {}
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+        for v in children.values():
+            assert isinstance(v, ThreeEffectBase), "child of effect composer must be effect."
+        super().__init__(UIType.ThreeEffectComposer, EffectComposerProps,
+                         {**children})
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+
+@dataclasses.dataclass
+class OutlineProps(ThreeBasicProps):
+    selectionLayer: Union[int, Undefined] = undefined
+    edgeStrength: Union[NumberType, Undefined] = undefined
+    pulseSpeed: Union[NumberType, Undefined] = undefined
+    visibleEdgeColor: Union[NumberType, Undefined] = undefined
+    hiddenEdgeColor: Union[NumberType, Undefined] = undefined
+    width: Union[NumberType, Undefined] = undefined
+    height: Union[NumberType, Undefined] = undefined
+    kernelSize: Union[NumberType, Undefined] = undefined
+    blur: Union[bool, Undefined] = undefined
+    xRay: Union[bool, Undefined] = undefined
+    blenderFunction: Union[BlendFunction, Undefined] = undefined
+
+class Outline(ThreeEffectBase[OutlineProps]):
+    def __init__(self) -> None:
+        super().__init__(UIType.ThreeEffectOutline, OutlineProps)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class BloomProps(ThreeBasicProps):
+    luminanceThreshold: Union[NumberType, Undefined] = undefined
+    luminanceSmoothing: Union[NumberType, Undefined] = undefined
+    blendFunction: Union[BlendFunction, Undefined] = undefined
+    intensity: Union[NumberType, Undefined] = undefined
+    resolutionX: Union[NumberType, Undefined] = undefined
+    resolutionY: Union[NumberType, Undefined] = undefined
+    kernelSize: Union[NumberType, Undefined] = undefined
+    mipMap: Union[bool, Undefined] = undefined
+
+class Bloom(ThreeEffectBase[BloomProps]):
+    def __init__(self) -> None:
+        super().__init__(UIType.ThreeEffectBloom, BloomProps)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class DepthOfFieldProps(ThreeBasicProps):
+    focusDistance: Union[NumberType, Undefined] = undefined
+    focalLength: Union[NumberType, Undefined] = undefined
+    bokehScale: Union[NumberType, Undefined] = undefined
+    height: Union[NumberType, Undefined] = undefined
+    width: Union[NumberType, Undefined] = undefined
+    blenderFunction: Union[BlendFunction, Undefined] = undefined
+
+class DepthOfField(ThreeEffectBase[DepthOfFieldProps]):
+    def __init__(self) -> None:
+        super().__init__(UIType.ThreeEffectDepthOfField, DepthOfFieldProps)
 
     @property
     def prop(self):

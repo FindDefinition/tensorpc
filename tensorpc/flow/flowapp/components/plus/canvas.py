@@ -204,7 +204,7 @@ class SimpleCanvas(mui.FlexBox):
             self._dynamic_images,
             self._dynamic_boxes,
             # three.AxesHelper(20),
-            self._dynamic_grid,
+            # self._dynamic_grid,
             # self._screen_shot,
             self._screen_shot_v2,
             self._dynamic_voxels,

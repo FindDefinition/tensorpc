@@ -165,6 +165,7 @@ class UIType(enum.IntEnum):
 
     MASK_THREE = 0x1000
     MASK_THREE_GEOMETRY = 0x0100
+    MASK_THREE_POST_PROCESS = 0x0200
 
     ThreeCanvas = 0x1000
     ThreePoints = 0x1001
@@ -225,6 +226,7 @@ class UIType(enum.IntEnum):
     ThreeCubeCamera = 0x1041
     ThreeContactShadows = 0x1042
     ThreeGizmoHelper = 0x1043
+    ThreeSelectionContext = 0x1044
 
     ThreeMeshBasicMaterial = 0x1050
     ThreeMeshStandardMaterial = 0x1051
@@ -242,6 +244,11 @@ class UIType(enum.IntEnum):
     ThreeSimpleGeometry = 0x1101
     ThreeShape = 0x1102
 
+    ThreeEffectComposer = 0x1200
+    ThreeEffectOutline = 0x1201
+    ThreeEffectBloom = 0x1202
+    ThreeEffectDepthOfField = 0x1203
+    
     MASK_LEAFLET = 0x2000
     LeafletMapContainer = 0x2000
     LeafletTileLayer = 0x2001

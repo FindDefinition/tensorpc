@@ -321,58 +321,65 @@ class EnvmapGroupdProjectionApp:
                                 material="materials.930_plastics"),
                     ]).prop(rotation=(np.pi / 2, 0, 0)),
                     three.Group([
-                        three.Mesh([
-                        ]).set_override_props_unchecked_dict({
-                            "geometry":
-                            "nodes.mesh_0.geometry",
-                            "material":
-                            "materials.paint",
-                            "material-envMap":
-                            "CubeCameraTexture",
-                        }).set_sx_props({
-                            "material-color": "#ffdf71",
-                        }),
-                        three.Mesh([
-                            three.MeshBasicMaterial().prop(side=1, color="red")
-                        ]).set_override_props_unchecked_dict({
-                            "geometry":
-                            "nodes.mesh_0.geometry",
-                        }).prop(scale=1.1),
-                        three.Mesh([]).set_override_props_unchecked(
-                            geometry="nodes.mesh_0_1.geometry",
-                            material="materials.930_chromes"),
-                        three.Mesh([]).set_override_props_unchecked(
-                            geometry="nodes.mesh_0_2.geometry",
-                            material="materials.black"),
-                        three.Mesh([]).set_override_props_unchecked(
-                            geometry="nodes.mesh_0_3.geometry",
-                            material="materials.930_lights"),
-                        three.Mesh([]).set_override_props_unchecked(
-                            geometry="nodes.mesh_0_4.geometry",
-                            material="materials.glass"),
-                        three.Mesh([]).set_override_props_unchecked(
-                            geometry="nodes.mesh_0_5.geometry",
-                            material="materials.930_stickers"),
-                        three.Mesh([]).set_override_props_unchecked(
-                            geometry="nodes.mesh_0_6.geometry",
-                            material="materials.930_plastics").set_sx_props({
-                                "material-polygonOffset":
-                                True,
-                                "material-polygonOffsetFactor":
-                                -10,
+                        three.SelectionContext([
+                            three.EffectComposer([
+                                three.Outline().prop(blur=True, edgeStrength=100, 
+                                                     width=1000, visibleEdgeColor=0xffffff, 
+                                                     hiddenEdgeColor=0xffffff),
+                            ]).prop(autoClear=False, multisampling=0),
+                            three.Mesh([
+                            ]).set_override_props_unchecked_dict({
+                                "geometry":
+                                "nodes.mesh_0.geometry",
+                                "material":
+                                "materials.paint",
+                                "material-envMap":
+                                "CubeCameraTexture",
+                            }).set_sx_props({
+                                "material-color": "#ffdf71",
+                            }).prop(enableSelect=True, selectOverrideProps={
+                                "material-color": "#aadf71",
+                            }, userData={
+                                "RTX": "4090Ti"
                             }),
-                        three.Mesh([]).set_override_props_unchecked(
-                            geometry="nodes.mesh_0_7.geometry",
-                            material="materials.930_lights_refraction"),
-                        three.Mesh([]).set_override_props_unchecked(
-                            geometry="nodes.mesh_0_8.geometry",
-                            material="materials.930_rim"),
-                        three.Mesh([]).set_override_props_unchecked(
-                            geometry="nodes.mesh_0_9.geometry",
-                            material="materials.930_tire"),
+                            three.Mesh([]).set_override_props_unchecked(
+                                geometry="nodes.mesh_0_1.geometry",
+                                material="materials.930_chromes"),
+                            three.Mesh([]).set_override_props_unchecked(
+                                geometry="nodes.mesh_0_2.geometry",
+                                material="materials.black"),
+                            three.Mesh([]).set_override_props_unchecked(
+                                geometry="nodes.mesh_0_3.geometry",
+                                material="materials.930_lights"),
+                            three.Mesh([]).set_override_props_unchecked(
+                                geometry="nodes.mesh_0_4.geometry",
+                                material="materials.glass"),
+                            three.Mesh([]).set_override_props_unchecked(
+                                geometry="nodes.mesh_0_5.geometry",
+                                material="materials.930_stickers"),
+                            three.Mesh([]).set_override_props_unchecked(
+                                geometry="nodes.mesh_0_6.geometry",
+                                material="materials.930_plastics").set_sx_props({
+                                    "material-polygonOffset":
+                                    True,
+                                    "material-polygonOffsetFactor":
+                                    -10,
+                                }),
+                            three.Mesh([]).set_override_props_unchecked(
+                                geometry="nodes.mesh_0_7.geometry",
+                                material="materials.930_lights_refraction"),
+                            three.Mesh([]).set_override_props_unchecked(
+                                geometry="nodes.mesh_0_8.geometry",
+                                material="materials.930_rim"),
+                            three.Mesh([]).set_override_props_unchecked(
+                                geometry="nodes.mesh_0_9.geometry",
+                                material="materials.930_tire"),
+
+                            ], lambda x: print(x)),
+
                     ]).prop(position=(-7.966238, -0.10155, -7.966238),
                             scale=0.000973),
-                ]).prop(position=(0, -1.5, 0))
+                ]).prop(position=(0, -1.5, 0)),
             ]).prop(frames=1, position=(0.0, 1.5, 0), near=0.1,
                     resolution=128),
             three.Group([
@@ -405,9 +412,9 @@ class EnvmapGroupdProjectionApp:
             init_canvas_childs=[
                 # three.Environment
                 # three.AmbientLight(),
-                three.Environment([]).prop(files="tensorpc://old_depot_2k.hdr",
-                                           ground=three.EnvGround(radius=130,
-                                                                  height=32)),
+                # three.Environment([]).prop(files="tensorpc://old_depot_2k.hdr",
+                #                            ground=three.EnvGround(radius=130,
+                #                                                   height=32)),
                 car,
                 three.SpotLight((-80, 200, -100)).prop(angle=1, intensity=1),
                 three.ContactShadows().prop(renderOrder=2,
@@ -603,6 +610,48 @@ async def download_file_Dev(url: str, chunk_size: int = 2**16):
                 break
             chunks.append(chunk)
     return b"".join(chunks)
+
+class App:
+    @mark_create_layout
+    def my_layout(self):
+        cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000).prop(position=(0, 0, 5))
+        canvas = plus.SimpleCanvas(init_canvas_childs=[
+            cam,
+            three.CameraControl().prop(makeDefault=True),
+            three.AmbientLight(),
+            three.PointLight().prop(position=(13, 3, 5),
+                                    castShadow=True,
+                                    color=0xffffff,
+                                    intensity=5),
+            three.Mesh([
+                three.PlaneGeometry(1000, 1000),
+                three.MeshStandardMaterial().prop(color="#f0f0f0"),
+            ]).prop(receiveShadow=True, position=(0.0, 0.0, -2)),
+
+            three.SelectionContext([
+                three.EffectComposer([
+                    three.Outline().prop(blur=True, edgeStrength=100, visibleEdgeColor=0xfff, blenderFunction=three.BlendFunction.ALPHA),
+                ]).prop(autoClear=False),
+
+                three.Mesh([
+                    three.BoxGeometry(),
+                    three.MeshStandardMaterial().prop(color="orange"),
+                ]).prop(enableSelect=True, castShadow=True, position=(0, 0, 0), enableHover=True, hoverOverrideProps={
+                        "material-color": "red"
+                    }, enableClick=True, clickOverrideProps={
+                        "material-color": "blue"
+                    }),
+
+            ]),
+            three.Button("Click Me!", 8, 3, lambda : print("Clicked!")).prop(position=(0, 5, 1)),
+        ])
+        return mui.VBox([
+            canvas.prop(flex=1),
+        ]).prop(minHeight=0,
+                minWidth=0,
+                width="100%",
+                height="100%",
+                overflow="hidden")
 
 
 async def _main():
