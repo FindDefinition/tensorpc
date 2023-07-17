@@ -2443,6 +2443,21 @@ MeshChildType: TypeAlias = Union[ThreeMaterialBase, ThreeMaterialPropsBase,
 #     data: Union[Undefined, Any] = undefined
 
 @dataclasses.dataclass
+class PivotControlsCommonProps:
+    scale: Union[NumberType, Undefined] = undefined
+    lineWidth: Union[NumberType, Undefined] = undefined
+    fixed: Union[bool, Undefined] = undefined
+    anchor: Union[Vector3Type, Undefined] = undefined
+    activeAxes: Union[Tuple[bool, bool, bool], Undefined] = undefined
+    axisColors: Union[Tuple[ValueType, ValueType, ValueType],
+                       Undefined] = undefined
+    hoveredColor: Union[ValueType, Undefined] = undefined
+    depthTest: Union[bool, Undefined] = undefined
+    opacity: Union[float, Undefined] = undefined
+    visible: Union[bool, Undefined] = undefined
+    annotations: Union[bool, Undefined] = undefined
+
+@dataclasses.dataclass
 class PrimitiveMeshProps(Object3dContainerBaseProps):
     # used for events. for example, if you set userdata
     # in a mesh inside a group container, when you add handler
@@ -2466,12 +2481,25 @@ class PrimitiveMeshProps(Object3dContainerBaseProps):
     toggleOverrideProps: Union[Undefined, Dict[str, Any]] = undefined
     selectOverrideProps: Union[Undefined, Dict[str, Any]] = undefined
 
+    enablePivotControl: Union[bool, Undefined] = undefined
+    enablePivotControlOnSelected: Union[bool, Undefined] = undefined
+    pivotControlProps: PivotControlsCommonProps = dataclasses.field(
+        default_factory=PivotControlsCommonProps)
+    pivotDebounce: Union[NumberType, Undefined] = undefined
+
 @dataclasses.dataclass
 class MeshProps(PrimitiveMeshProps):
     hoverColor: Union[str, Undefined] = undefined
     clickColor: Union[str, Undefined] = undefined
     toggleMode: Union[bool, Undefined] = undefined
     toggled: Union[bool, Undefined] = undefined
+
+@dataclasses.dataclass 
+class MeshChangeData:
+    toggled: Union[bool, Undefined] = undefined
+    matrix: Union[Undefined, List[float]] = undefined
+    position: Union[Undefined, Vector3Type] = undefined
+    rotation: Union[Undefined, Vector3Type] = undefined
 
 class Mesh(O3dContainerWithEventBase[PrimitiveMeshProps, ThreeComponentType]):
     """standard three mesh.
@@ -2504,9 +2532,15 @@ class Mesh(O3dContainerWithEventBase[PrimitiveMeshProps, ThreeComponentType]):
         
     def state_change_callback(
             self,
-            data: bool,
+            data: dict,
             type: ValueType = FrontendEventType.Change.value):
-        self.props.toggled = data
+        if "toggled" in data:
+            self.props.toggled = data["toggled"]
+        else:
+            assert "position" in data
+            assert "rotation" in data
+            self.props.position = data["position"]
+            self.props.rotation = data["rotation"]
 
     @property
     def prop(self):
@@ -2751,24 +2785,12 @@ class ToggleButton(Group):
 
 
 @dataclasses.dataclass
-class PivotControlsProps(ContainerBaseProps):
+class PivotControlsProps(ContainerBaseProps, PivotControlsCommonProps):
     offset: Union[Vector3Type, Undefined] = undefined
     rotation: Union[Vector3Type, Undefined] = undefined
 
-    scale: Union[NumberType, Undefined] = undefined
-    lineWidth: Union[NumberType, Undefined] = undefined
-    fixed: Union[bool, Undefined] = undefined
     matrix: Union[List[float], Undefined] = undefined
-    anchor: Union[Vector3Type, Undefined] = undefined
     autoTransform: Union[bool, Undefined] = undefined
-    activeAxes: Union[Tuple[bool, bool, bool], Undefined] = undefined
-    axisColors: Union[Tuple[ValueType, ValueType, ValueType],
-                       Undefined] = undefined
-    hoveredColor: Union[ValueType, Undefined] = undefined
-    depthTest: Union[bool, Undefined] = undefined
-    opacity: Union[float, Undefined] = undefined
-    visible: Union[bool, Undefined] = undefined
-    annotations: Union[bool, Undefined] = undefined
 
 
 class PivotControls(ThreeContainerBase[PivotControlsProps,
@@ -3367,9 +3389,6 @@ class SelectionContextProps(ContainerBaseProps):
 
 
 class SelectionContext(ThreeContainerBase[SelectionContextProps, ThreeComponentType]):
-    """create a context with template data.
-    default dataKey: "" (empty), this means the data itself is passed to children
-    """
     def __init__(self, children: Optional[ThreeLayoutType] = None, callback: Optional[Callable[[Any],
                                           _CORO_NONE]] = None) -> None:
         if children is None:
@@ -3488,7 +3507,7 @@ class OutlineProps(ThreeBasicProps):
     kernelSize: Union[NumberType, Undefined] = undefined
     blur: Union[bool, Undefined] = undefined
     xRay: Union[bool, Undefined] = undefined
-    blenderFunction: Union[BlendFunction, Undefined] = undefined
+    blendFunction: Union[BlendFunction, Undefined] = undefined
 
 class Outline(ThreeEffectBase[OutlineProps]):
     def __init__(self) -> None:
@@ -3536,7 +3555,7 @@ class DepthOfFieldProps(ThreeBasicProps):
     bokehScale: Union[NumberType, Undefined] = undefined
     height: Union[NumberType, Undefined] = undefined
     width: Union[NumberType, Undefined] = undefined
-    blenderFunction: Union[BlendFunction, Undefined] = undefined
+    blendFunction: Union[BlendFunction, Undefined] = undefined
 
 class DepthOfField(ThreeEffectBase[DepthOfFieldProps]):
     def __init__(self) -> None:

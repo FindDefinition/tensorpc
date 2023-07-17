@@ -324,8 +324,8 @@ class EnvmapGroupdProjectionApp:
                         three.SelectionContext([
                             three.EffectComposer([
                                 three.Outline().prop(blur=True, edgeStrength=100, 
-                                                     width=1000, visibleEdgeColor=0xffffff, 
-                                                     hiddenEdgeColor=0xffffff),
+                                                     width=1000, visibleEdgeColor=0xf43f12, 
+                                                     hiddenEdgeColor=0xf43f12),
                             ]).prop(autoClear=False, multisampling=0),
                             three.Mesh([
                             ]).set_override_props_unchecked_dict({
@@ -411,10 +411,10 @@ class EnvmapGroupdProjectionApp:
             cam,
             init_canvas_childs=[
                 # three.Environment
-                # three.AmbientLight(),
-                # three.Environment([]).prop(files="tensorpc://old_depot_2k.hdr",
-                #                            ground=three.EnvGround(radius=130,
-                #                                                   height=32)),
+                three.AmbientLight(),
+                three.Environment([]).prop(files="tensorpc://old_depot_2k.hdr",
+                                           ground=three.EnvGround(radius=130,
+                                                                  height=32)),
                 car,
                 three.SpotLight((-80, 200, -100)).prop(angle=1, intensity=1),
                 three.ContactShadows().prop(renderOrder=2,
@@ -629,22 +629,29 @@ class App:
             ]).prop(receiveShadow=True, position=(0.0, 0.0, -2)),
 
             three.SelectionContext([
-                three.EffectComposer([
-                    three.Outline().prop(blur=True, edgeStrength=100, visibleEdgeColor=0xfff, blenderFunction=three.BlendFunction.ALPHA),
-                ]).prop(autoClear=False),
-
+                            three.EffectComposer([
+                                three.Outline().prop(blur=True, edgeStrength=100, 
+                                                     width=1000, visibleEdgeColor=0xfff, 
+                                                     hiddenEdgeColor=0xfff, blendFunction=three.BlendFunction.ALPHA),
+                            ]).prop(autoClear=False),
                 three.Mesh([
                     three.BoxGeometry(),
-                    three.MeshStandardMaterial().prop(color="orange"),
+                    three.Edges(),
+                    three.MeshStandardMaterial().prop(color="orange", opacity=0.5, transparent=True),
                 ]).prop(enableSelect=True, castShadow=True, position=(0, 0, 0), enableHover=True, hoverOverrideProps={
                         "material-color": "red"
                     }, enableClick=True, clickOverrideProps={
                         "material-color": "blue"
-                    }),
+                    }, 
+                    enablePivotControl=True,
+                    enablePivotControlOnSelected=True,
+                    pivotControlProps=three.PivotControlsCommonProps(depthTest=False)
+                    ),
 
             ]),
             three.Button("Click Me!", 8, 3, lambda : print("Clicked!")).prop(position=(0, 5, 1)),
         ])
+        canvas.canvas.prop(shadows=True)
         return mui.VBox([
             canvas.prop(flex=1),
         ]).prop(minHeight=0,

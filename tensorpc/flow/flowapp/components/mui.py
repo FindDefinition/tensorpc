@@ -3510,6 +3510,7 @@ class ControlNodeType(enum.IntEnum):
     Select = 4
     String = 5
     Folder = 6
+    Vector2 = 7
 
 
 @dataclasses.dataclass
@@ -3523,6 +3524,11 @@ class ControlColorRGB:
 class ControlColorRGBA(ControlColorRGB):
     a: float
 
+@dataclasses.dataclass
+class ControlVector2:
+    x: NumberType
+    y: NumberType
+
 
 @dataclasses.dataclass
 class ControlNode:
@@ -3530,7 +3536,7 @@ class ControlNode:
     name: str
     type: int
     initValue: Union[Undefined, NumberType, str, ControlColorRGB,
-                     ControlColorRGBA] = undefined
+                     ControlColorRGBA, ControlVector2] = undefined
     children: "List[ControlNode]" = dataclasses.field(default_factory=list)
     # for range
     min: Union[Undefined, NumberType] = undefined

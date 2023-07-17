@@ -96,7 +96,7 @@ class ControlItemMeta:
     setter: Callable[[Any], None]
     compare: Callable[[Any], bool]
 
-_BUILTIN_DCLS_TYPE = set([mui.ControlColorRGB, mui.ControlColorRGBA])
+_BUILTIN_DCLS_TYPE = set([mui.ControlColorRGB, mui.ControlColorRGBA, mui.ControlVector2])
 
 def setattr_single(val, obj, name, mapper: Optional[Callable] = None):
     if mapper is not None:
@@ -204,6 +204,19 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                 mapper = lambda x: mui.ControlColorRGB(x["r"], x["g"], x["b"])
             else:
                 mapper = lambda x: mui.ControlColorRGBA(x["r"], x["g"], x["b"], x["a"])
+            setter = partial(setattr_single,
+                                obj=current_obj,
+                                name=f.name,
+                                mapper=mapper)
+            comparer = partial(compare_single,
+                                obj=current_obj,
+                                name=f.name,
+                                mapper=mapper)
+
+        elif ty is mui.ControlVector2:
+            child_node.type = mui.ControlNodeType.Vector2.value
+            child_node.initValue = getattr(current_obj, f.name)
+            mapper = lambda x: mui.ControlVector2(x["x"], x["y"])
             setter = partial(setattr_single,
                                 obj=current_obj,
                                 name=f.name,
