@@ -187,7 +187,7 @@ class WebsocketClientBase(abc.ABC):
                 for chunk in encoder.get_message_chunks(msg_type, req, max_size):
                     assert len(chunk) <= max_size
                     # tasks.append(self.ws.send_bytes(chunk))
-                    async with async_timeout.timeout(5):
+                    async with async_timeout.timeout(10):
                         await self.send_bytes(chunk)
             # if encoder.get_total_array_binary_size() > max_size:
 
@@ -244,6 +244,10 @@ class WebsocketClientBase(abc.ABC):
     @abc.abstractmethod
     async def binary_msg_generator(self) -> AsyncGenerator[WebsocketMsg, None]: ...
 
+@dataclasses.dataclass
+class WebsocketClientPair:
+    recv: WebsocketClientBase
+    send: Optional[WebsocketClientBase]
 
 def create_task(coro):
     if compat.Python3_7AndLater:
@@ -337,6 +341,16 @@ class WebsocketHandler:
                 await client.send_user_error(e, 0)
         # assert not self.event_to_clients and not self.client_to_events
         # pingpong_task = asyncio.create_task(self.send_ping_loop(client))
+        client_uid: Optional[str] = None
+        # To avoid possible hang when send large data to client, we use
+        # two websockets, one for small payload, one for large payload. 
+        # this only enabled we receive websocket config with pair enabled from client.
+
+        # when hang happens, we will receive exception in ws.send or get
+        # message from client. Then we can close the websocket (send), client
+        # should restart a new websocket connection when it detect hang or receive
+        # restart request in backup connection. 
+        client_pair: WebsocketClientPair = WebsocketClientPair(client, None)
         wait_task = asyncio.create_task(
             self.rpc_awaiter(conn_rpc_queue, conn_st_ev))
         try:
@@ -440,7 +454,13 @@ class WebsocketHandler:
                         await client.send([],
                                           msg_type=msg_type,
                                           request_id=req.rpc_id)
-
+                    elif msg_type == core_io.SocketMsgType.SetWebsocketUID:
+                        arg_data = core_io.parse_message_chunks(header, [data])
+                        client_uid = arg_data[0]
+                        assert client_uid is not None 
+                        client_pair = WebsocketClientPair(client, None)
+                        service_core._all_websockets[client_uid] = client_pair
+                        
                     elif msg_type == core_io.SocketMsgType.RPC:
                         arg_data = core_io.parse_message_chunks(header, [data])
                         # TODO if full for some time, drop rpc (raise busy error)

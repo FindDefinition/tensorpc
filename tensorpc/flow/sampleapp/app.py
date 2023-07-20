@@ -941,8 +941,7 @@ class PointCloudApp:
         self.wtfobj = UserObjTree()
 
         self.canvas = plus.SimpleCanvas(cam, self._on_video_save)
-        self.slider = mui.Slider("Slider",
-                                 0,
+        self.slider = mui.Slider(0,
                                  1,
                                  1,
                                  callback=self._on_slider_select)
@@ -1016,7 +1015,9 @@ class PointCloudApp:
         await self.canvas.show_points("key0",
                                       points,
                                       limit=100000,
-                                      colors=colors)
+                                      colors=colors,
+                                      attrs=points,
+                                      attr_fields=["x", "y", "z"])
         # boxes: dims, locs, rots, colors (string list, don't support ndarray currently)
         dims = np.random.uniform(1, 2, size=[5, 3])
         locs = np.random.uniform(-5, 5, size=[5, 3])

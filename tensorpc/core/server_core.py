@@ -11,7 +11,7 @@ import tempfile
 import threading
 import time
 import traceback
-from typing import (Any, AsyncIterator, Callable, Dict, Iterator, List,
+from typing import (TYPE_CHECKING, Any, AsyncIterator, Callable, Dict, Iterator, List,
                     Mapping, Optional, Sequence, Union)
 import dataclasses
 
@@ -24,7 +24,8 @@ from tensorpc.protos_export import rpc_message_pb2 as rpc_msg_pb2
 
 from tensorpc.utils import df_logging
 import contextvars
-
+if TYPE_CHECKING:
+    from tensorpc.core.httpservers.core import WebsocketClientPair
 LOGGER = df_logging.get_logger()
 
 
@@ -161,6 +162,7 @@ class ServiceCore(object):
 
         self._global_context = ServerGlobalContext(self.local_url, is_sync,
                                                    server_meta)
+        self._all_websockets: Dict[str, WebsocketClientPair] = {}
 
     async def _init_async_members(self):
         # in future python versions, asyncio event can't be created if no event loop running.

@@ -363,7 +363,7 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
 
 
 @dataclasses.dataclass(config=PyDanticConfigForNumpy)
-class PointProps(ThreeBasicProps):
+class PointProps(Object3dBaseProps):
     limit: int = 0
     points: Union[np.ndarray, Undefined] = undefined
     colors: Union[np.ndarray, str, Undefined] = undefined
@@ -379,7 +379,7 @@ class PointsControlType(enum.Enum):
     SetColors = 0
 
 
-class Points(ThreeComponentBase[PointProps]):
+class Points(Object3dWithEventBase[PointProps]):
     def __init__(self, limit: int) -> None:
         super().__init__(UIType.ThreePoints, PointProps)
         self.props.points = np.zeros((0, 3), np.float32)

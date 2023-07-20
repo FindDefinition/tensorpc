@@ -170,6 +170,8 @@ class ObjectInspector(mui.FlexBox):
                 FrontendEventType.TreeItemSelect.value, self._on_select)
         self._type_to_handler_object: Dict[Type[Any],
                                            ObjectPreviewHandler] = {}
+        self._current_preview_layout: Optional[mui.FlexBox] = None
+
 
     async def get_object_by_uid(self, uid_list: Union[List[str], str]):
         if isinstance(uid_list, list):
@@ -293,7 +295,16 @@ class ObjectInspector(mui.FlexBox):
                 preview_layout.set_flow_event_context_creator(
                     lambda: root.enter_context(root))
             # preview_layout.event_emitter.remove_listener()
-            self.__install_preview_event_listeners(preview_layout)
+            if self._current_preview_layout is None:
+                get_app()._get_self_as_editable_app()._flowapp_observe(
+                        preview_layout, self._on_preview_layout_reload)
+            else:
+                get_app()._get_self_as_editable_app()._flowapp_remove_observer(
+                        self._current_preview_layout)
+                get_app()._get_self_as_editable_app()._flowapp_observe(
+                        preview_layout, self._on_preview_layout_reload)
+            self._current_preview_layout = preview_layout
+            # self.__install_preview_event_listeners(preview_layout)
             await self.detail_container.set_new_layout([preview_layout])
         else:
             childs = list(self.detail_container._child_comps.values())
@@ -301,27 +312,27 @@ class ObjectInspector(mui.FlexBox):
                 await self.detail_container.set_new_layout([handler])
             await handler.bind(obj, uid)
 
-    def __install_preview_event_listeners(self, layout: mui.FlexBox):
-        # if not layout.event_emitter.listeners(
-        #         FrontendEventType.BeforeUnmount.name):
-        layout.flow_event_emitter.once(
-            FrontendEventType.BeforeUnmount.value, partial(self._on_preview_layout_unmount, layout=layout))
-        # if not layout.event_emitter.listeners(
-        #         FrontendEventType.BeforeMount.name):
-        layout.flow_event_emitter.once(
-            FrontendEventType.BeforeMount.value, partial(self._on_preview_layout_mount, layout=layout))
+    # def __install_preview_event_listeners(self, layout: mui.FlexBox):
+    #     # if not layout.event_emitter.listeners(
+    #     #         FrontendEventType.BeforeUnmount.name):
+    #     layout.flow_event_emitter.once(
+    #         FrontendEventType.BeforeUnmount.value, partial(self._on_preview_layout_unmount, layout=layout))
+    #     # if not layout.event_emitter.listeners(
+    #     #         FrontendEventType.BeforeMount.name):
+    #     layout.flow_event_emitter.once(
+    #         FrontendEventType.BeforeMount.value, partial(self._on_preview_layout_mount, layout=layout))
 
 
-    def _on_preview_layout_mount(self, event: Event, layout: mui.FlexBox):
-        # print("preview layout mount")
-        return get_app()._get_self_as_editable_app()._flowapp_observe(
-                        layout, self._on_preview_layout_reload)
+    # def _on_preview_layout_mount(self, event: Event, layout: mui.FlexBox):
+    #     # print("preview layout mount")
+    #     return get_app()._get_self_as_editable_app()._flowapp_observe(
+    #                     layout, self._on_preview_layout_reload)
     
-    def _on_preview_layout_unmount(self, event: Event, layout: mui.FlexBox):
-        # print("preview layout unmount")
+    # def _on_preview_layout_unmount(self, event: Event, layout: mui.FlexBox):
+    #     # print("preview layout unmount")
 
-        return get_app()._get_self_as_editable_app()._flowapp_remove_observer(
-                        layout)
+    #     return get_app()._get_self_as_editable_app()._flowapp_remove_observer(
+    #                     layout)
 
     async def _on_preview_layout_reload(self, layout: mui.FlexBox,
                                         create_layout: ServFunctionMeta):
@@ -338,12 +349,12 @@ class ObjectInspector(mui.FlexBox):
                     layout._wrapped_obj)
                 layout_flex._wrapped_obj = layout._wrapped_obj
                 layout_flex.set_flow_event_context_creator(layout._flow_event_context_creator)
-                self.__install_preview_event_listeners(layout_flex)
+                # self.__install_preview_event_listeners(layout_flex)
                 await self.detail_container.set_new_layout([layout_flex])
             else:
                 layout_flex = create_layout.get_binded_fn()()
                 layout_flex.set_flow_event_context_creator(layout._flow_event_context_creator)
-                self.__install_preview_event_listeners(layout_flex)
+                # self.__install_preview_event_listeners(layout_flex)
                 await layout.set_new_layout(layout_flex)
             return layout_flex
 

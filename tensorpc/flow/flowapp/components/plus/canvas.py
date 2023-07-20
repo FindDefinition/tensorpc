@@ -612,6 +612,7 @@ class SimpleCanvas(mui.FlexBox):
                                      encode_scale=encode_scale,
                                      attrs=attrs,
                                      attr_fields=attr_fields)
+        return point_ui
 
     async def clear_points(self, clear_keys: Optional[List[str]] = None):
         if clear_keys is None:
