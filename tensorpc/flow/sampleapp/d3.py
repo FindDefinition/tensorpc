@@ -638,17 +638,22 @@ class App:
                     three.BoxGeometry(),
                     three.Edges(),
                     three.MeshStandardMaterial().prop(color="orange", opacity=0.5, transparent=True),
-                ]).prop(enableSelect=True, castShadow=True, position=(0, 0, 0), enableHover=True, hoverOverrideProps={
-                        "material-color": "red"
-                    }, enableClick=True, clickOverrideProps={
-                        "material-color": "blue"
-                    }, 
+                ]).prop(enableSelect=True, castShadow=True, position=(0, 0, 0), enableHover=True, 
                     enablePivotControl=True,
                     enablePivotControlOnSelected=True,
-                    pivotControlProps=three.PivotControlsCommonProps(depthTest=False)
+                    pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
                     ),
 
             ]),
+            three.PivotControls([
+                three.Mesh([
+                    three.BoxGeometry(),
+                    three.Edges(),
+                    three.MeshStandardMaterial().prop(color="orange", opacity=0.5, transparent=True),
+                ]).prop(enableSelect=True, castShadow=True, position=(5, 0, 0)),            
+            ]).prop(anchor=(1, 1, 1), depthTest=False, annotations=True, fixed=True, scale=60),
+            
+
             three.Button("Click Me!", 8, 3, lambda : print("Clicked!")).prop(position=(0, 5, 1)),
         ])
         canvas.canvas.prop(shadows=True)
