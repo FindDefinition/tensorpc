@@ -628,23 +628,23 @@ class App:
                 three.MeshStandardMaterial().prop(color="#f0f0f0"),
             ]).prop(receiveShadow=True, position=(0.0, 0.0, -2)),
 
-            three.SelectionContext([
-                            three.EffectComposer([
-                                three.Outline().prop(blur=True, edgeStrength=100, 
-                                                     width=1000, visibleEdgeColor=0xfff, 
-                                                     hiddenEdgeColor=0xfff, blendFunction=three.BlendFunction.ALPHA),
-                            ]).prop(autoClear=False),
-                three.Mesh([
-                    three.BoxGeometry(),
-                    three.Edges(),
-                    three.MeshStandardMaterial().prop(color="orange", opacity=0.5, transparent=True),
-                ]).prop(enableSelect=True, castShadow=True, position=(0, 0, 0), enableHover=True, 
-                    enablePivotControl=True,
-                    enablePivotControlOnSelected=True,
-                    pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
-                    ),
+            # three.SelectionContext([
+            #                 three.EffectComposer([
+            #                     three.Outline().prop(blur=True, edgeStrength=100, 
+            #                                          width=1000, visibleEdgeColor=0xfff, 
+            #                                          hiddenEdgeColor=0xfff, blendFunction=three.BlendFunction.ALPHA),
+            #                 ]).prop(autoClear=False),
+            #     three.Mesh([
+            #         three.BoxGeometry(),
+            #         three.Edges(),
+            #         three.MeshStandardMaterial().prop(color="orange", opacity=0.5, transparent=True),
+            #     ]).prop(enableSelect=True, castShadow=True, position=(0, 0, 0), enableHover=True, 
+            #         enablePivotControl=True,
+            #         enablePivotControlOnSelected=True,
+            #         pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
+            #         ),
 
-            ]),
+            # ]),
             three.PivotControls([
                 three.Mesh([
                     three.BoxGeometry(),

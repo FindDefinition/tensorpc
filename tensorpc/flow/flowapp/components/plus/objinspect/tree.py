@@ -126,7 +126,10 @@ async def _parse_obj_to_node(obj,
     node.children = tree_children
     node.cnt = len(obj_dict)
     for (k, v), child_node in zip(obj_dict.items(), node.children):
-        if child_node.id in cached_lazy_expand_ids or total_expand_level > 0:
+        should_expand = child_node.id in cached_lazy_expand_ids or total_expand_level > 0
+        if isinstance(v, TreeItem) and v.default_expand():
+            should_expand = True
+        if should_expand:
             await _parse_obj_to_node(v, child_node, checker, cached_lazy_expand_ids,
                                obj_meta_cache, total_expand_level - 1)
 
@@ -157,7 +160,10 @@ async def _get_obj_tree(obj,
         #                                     obj_meta_cache)
         # root_node.cnt = len(obj_dict)
     else:
-        if obj_id in cached_lazy_expand_ids_set or total_expand_level >= 0:
+        should_expand = obj_id in cached_lazy_expand_ids_set or total_expand_level >= 0
+        if isinstance(obj, TreeItem) and obj.default_expand():
+            should_expand = True
+        if should_expand:
             await _parse_obj_to_node(obj, root_node, checker,
                                cached_lazy_expand_ids_set, obj_meta_cache, total_expand_level=total_expand_level)
 

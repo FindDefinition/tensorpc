@@ -261,7 +261,7 @@ class App:
         self._flowapp_special_eemitter: AsyncIOEventEmitter[
             AppSpecialEventType, Any] = AsyncIOEventEmitter()
         self._flowapp_thread_id = threading.get_ident()
-        self._flowapp_enable_exception_inspect: bool = True
+        self._flowapp_enable_exception_inspect: bool = False
 
         self.code_editor = AppEditor("", "python", self._queue)
         self._app_dynamic_cls: Optional[ReloadableDynamicClass] = None

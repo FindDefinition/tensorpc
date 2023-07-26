@@ -45,6 +45,9 @@ class UserObjTreeProtocol(Protocol):
         ...
 
     
+    def default_expand(self) -> bool:
+        ...
+
     def update_tree(self) -> None:
         ...
 
@@ -91,17 +94,27 @@ class UserObjTree:
         finally:
             OBJ_TREE_CONTEXT_VAR.reset(token)
 
-    def find(self, obj_type: Type[T]) -> T:
-        """find a child object of current context node by type of obj.
-        if not exist, raise an error.
-        """
-        return find(obj_type)
+    
+    def default_expand(self) -> bool:
+        return True
 
-    def find_may_exist(self, obj_type: Type[T]) -> Optional[T]:
-        """find a child object of current context node by type of obj.
+    def find_may_exist(self, obj_type: Type[T], validator: Optional[Callable[[T], bool]] = None) -> Optional[T]:
+        """find a child object of self node by type of obj.
         if not exist, return None.
         """
-        return find_may_exist(obj_type)
+        if _check_node(self, obj_type, validator):
+            return self # type: ignore
+
+        return find_tree_child_item_may_exist(self, obj_type, UserObjTree, validator)
+
+    def find(self, obj_type: Type[T], validator: Optional[Callable[[T], bool]] = None) -> T:
+        """find a child object of self by type of obj.
+        if not exist, raise an error.
+        """
+        if _check_node(self, obj_type, validator):
+            return self # type: ignore
+
+        return find_tree_child_item(self, obj_type, UserObjTree, validator)
     
     def update_tree(self):
         # TODO if we run in executor, we need to get loop in main thread.

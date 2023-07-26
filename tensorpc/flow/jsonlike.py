@@ -605,4 +605,5 @@ class TreeItem(abc.ABC):
     async def handle_child_rename(self, child_key: str, newname: str) -> Optional[bool]:
         return None
 
-
+    def default_expand(self) -> bool:
+        return True
