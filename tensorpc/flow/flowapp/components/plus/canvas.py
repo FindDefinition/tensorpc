@@ -22,7 +22,7 @@ import numpy as np
 from tensorpc.flow import marker
 from tensorpc.flow.flowapp.appcore import find_component_by_uid_with_type_check
 from tensorpc.flow.flowapp.components import mui, three
-from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
+from tensorpc.flow.flowapp.components.plus.config import ConfigPanel, ConfigPanelV2
 from tensorpc.flow.flowapp.core import FrontendEventType
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 from tensorpc.flow.flowapp import colors
@@ -119,7 +119,7 @@ class BoxCfg:
 
 @dataclasses.dataclass
 class GlobalCfg:
-    background: mui.ControlColorRGB
+    background: mui.ControlColorRGBA
     enable_perf: bool = dataclasses.field(
         default=False,
         metadata=ConfigPanel.base_meta(alias="Enable Perf"))
@@ -179,7 +179,7 @@ class SimpleCanvas(mui.FlexBox):
         self.infgrid = infgrid
         self._is_transparent = transparent_canvas
         self._dynamic_grid = three.Group([infgrid, self.axis_helper])
-        gcfg = GlobalCfg(mui.ControlColorRGB(255, 255, 255))
+        gcfg = GlobalCfg(mui.ControlColorRGBA(255, 255, 255, 1))
         self.gcfg = gcfg
         self.cfg = CanvasGlobalCfg(PointCfg(), BoxCfg(), gcfg, CameraCfg())
         self._dynamic_pcs = three.Group({})
@@ -239,13 +239,15 @@ class SimpleCanvas(mui.FlexBox):
         self.init_add_layout([*self._layout_func()])
 
     def __get_cfg_panel(self):
-        _cfg_panel = ConfigPanel(self.cfg, self._on_cfg_change)
+        _cfg_panel = ConfigPanelV2(self.cfg, self._on_cfg_change)
         _cfg_panel.prop(border="1px solid",
                              borderColor="gray",
-                             collapsed=True,
-                             title="configs",
+                             backgroundColor="white",
+                            #  collapsed=True,
+                            #  title="configs",
                              marginLeft="5px",
-                             maxHeight="400px")
+                             width="400px",
+                             height="300px")
         return _cfg_panel
 
     async def _on_screen_shot_finish(self, img_and_data: Tuple[str, Any]):

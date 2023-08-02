@@ -9,7 +9,7 @@ from tensorpc.core.serviceunit import ObservedFunction
 from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.components import mui
 from tensorpc.flow.flowapp.components.plus.canvas import SimpleCanvas
-from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
+from tensorpc.flow.flowapp.components.plus.config import ConfigPanelV2
 
 from ..common import CommonQualNames
 from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler, DataClassesType
@@ -188,6 +188,6 @@ class DataclassesHandler(ObjectPreviewHandler):
     async def bind(self, obj: Any, uid: str):
         # for uncontrolled component, use react_key to force remount.
         # TODO currently no way to update if obj dataclass def is changed with same uid.
-        panel = ConfigPanel(obj).prop(react_key=uid)
+        panel = ConfigPanelV2(obj).prop(reactKey=uid)
         await self.cfg_ctrl_container.set_new_layout([panel])
 

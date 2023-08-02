@@ -1348,7 +1348,9 @@ class CollectionApp:
         """
         self.wtf = mui.DynamicControls(init=nodes, callback=lambda x: print(x))
         self.cfg = WTF(1, 0.5, WTF1(2), "WTF", [])
-        self.wtf2 = plus.ConfigPanel(self.cfg, lambda x, y: print(x, y))
+        self.wtf2 = plus.ConfigPanelV2(self.cfg, lambda x, y: print(x, y))
+        self.wtf3 = plus.ConfigPanel(self.cfg, lambda x, y: print(x, y))
+
         self.locker = ThreadLockerApp()
         # self.dev_0 = Dev()
         appctx.get_app().set_enable_language_server(True)

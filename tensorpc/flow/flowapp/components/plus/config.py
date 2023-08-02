@@ -87,7 +87,7 @@ class InputMeta(ConfigMeta):
 class SliderMeta(ConfigMeta):
     begin: mui.NumberType
     end: mui.NumberType
-    # step: mui.NumberType
+    step: Union[mui.NumberType, mui.Undefined] = mui.undefined
 
 
 @dataclasses.dataclass
@@ -96,7 +96,10 @@ class ControlItemMeta:
     setter: Callable[[Any], None]
     compare: Callable[[Any], bool]
 
-_BUILTIN_DCLS_TYPE = set([mui.ControlColorRGB, mui.ControlColorRGBA, mui.ControlVector2])
+
+_BUILTIN_DCLS_TYPE = set(
+    [mui.ControlColorRGB, mui.ControlColorRGBA, mui.ControlVector2])
+
 
 def setattr_single(val, obj, name, mapper: Optional[Callable] = None):
     if mapper is not None:
@@ -114,6 +117,7 @@ def compare_single(value, obj, name, mapper: Optional[Callable] = None):
         return getattr(obj, name) == mapper(value)
     else:
         return getattr(obj, name) == value
+
 
 def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                            obj_uid_to_meta: Dict[str, ControlItemMeta]):
@@ -179,9 +183,14 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                 child_node.initValue = getattr(current_obj, f.name)
                 child_node.min = meta.begin
                 child_node.max = meta.end
+                child_node.step = meta.step
+                if isinstance(meta.step, mui.Undefined) and ty is int:
+                    child_node.step = 1
             else:
                 child_node.type = mui.ControlNodeType.Number.value
                 child_node.initValue = getattr(current_obj, f.name)
+                if ty is int:
+                    child_node.step = 1
             #     raise NotImplementedError
         elif ty is str:
             # use textfield
@@ -196,35 +205,35 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
             if meta is not None and isinstance(meta, InputMeta):
                 child_node.rows = meta.multiline
 
-
         elif ty is mui.ControlColorRGB or ty is mui.ControlColorRGBA:
             child_node.type = mui.ControlNodeType.Color.value
             child_node.initValue = getattr(current_obj, f.name)
             if ty is mui.ControlColorRGB:
                 mapper = lambda x: mui.ControlColorRGB(x["r"], x["g"], x["b"])
             else:
-                mapper = lambda x: mui.ControlColorRGBA(x["r"], x["g"], x["b"], x["a"])
+                mapper = lambda x: mui.ControlColorRGBA(
+                    x["r"], x["g"], x["b"], x["a"])
             setter = partial(setattr_single,
-                                obj=current_obj,
-                                name=f.name,
-                                mapper=mapper)
+                             obj=current_obj,
+                             name=f.name,
+                             mapper=mapper)
             comparer = partial(compare_single,
-                                obj=current_obj,
-                                name=f.name,
-                                mapper=mapper)
+                               obj=current_obj,
+                               name=f.name,
+                               mapper=mapper)
 
         elif ty is mui.ControlVector2:
             child_node.type = mui.ControlNodeType.Vector2.value
             child_node.initValue = getattr(current_obj, f.name)
             mapper = lambda x: mui.ControlVector2(x["x"], x["y"])
             setter = partial(setattr_single,
-                                obj=current_obj,
-                                name=f.name,
-                                mapper=mapper)
+                             obj=current_obj,
+                             name=f.name,
+                             mapper=mapper)
             comparer = partial(compare_single,
-                                obj=current_obj,
-                                name=f.name,
-                                mapper=mapper)
+                               obj=current_obj,
+                               name=f.name,
+                               mapper=mapper)
         else:
             ty_origin = get_origin(ty)
             # print(ty, ty_origin, type(ty), type(ty_origin))
@@ -247,24 +256,51 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                                  mapper=ty)
 
             else:
+                continue
                 # use textfield with json
                 child_node.type = mui.ControlNodeType.String.value
                 try:
-                    child_node.initValue = json.dumps(getattr(current_obj, f.name))
+                    child_node.initValue = json.dumps(
+                        getattr(current_obj, f.name))
                 except:
                     # ignore field that can't be dumped to json.
-                    continue 
+                    continue
                 if meta is not None and isinstance(meta, InputMeta):
                     child_node.rows = meta.multiline
 
-                setter = partial(setattr_single, obj=current_obj, name=f.name, mapper=json.loads)
+                setter = partial(setattr_single,
+                                 obj=current_obj,
+                                 name=f.name,
+                                 mapper=json.loads)
         res_node.children.append(child_node)
-        obj_uid_to_meta[child_node.id] = ControlItemMeta(getter, setter, comparer)
+        obj_uid_to_meta[child_node.id] = ControlItemMeta(
+            getter, setter, comparer)
     return res_node
 
 
-class ConfigPanel(mui.DynamicControls):
+def control_nodes_v1_to_v2(ctrl_node_v1: mui.ControlNode) -> mui.JsonLikeNode:
+    childs: List[mui.JsonLikeNode] = [
+        control_nodes_v1_to_v2(c) for c in ctrl_node_v1.children
+    ]
+    # print(ctrl_node_v1.initValue, type(ctrl_node_v1.initValue))
+    ctrl_desp = mui.ControlDesp(
+        type=ctrl_node_v1.type,
+        initValue=ctrl_node_v1.initValue,
+        min=ctrl_node_v1.min,
+        max=ctrl_node_v1.max,
+        # step=ctrl_node_v1.step,
+        selects=ctrl_node_v1.selects,
+        rows=ctrl_node_v1.rows)
+    node = mui.JsonLikeNode(id=ctrl_node_v1.id,
+                            name=ctrl_node_v1.name if isinstance(ctrl_node_v1.alias, mui.Undefined) else ctrl_node_v1.alias,
+                            type=mui.JsonLikeType.Object.value,
+                            typeStr="",
+                            children=childs,
+                            userdata=ctrl_desp)
+    return node
 
+
+class ConfigPanel(mui.DynamicControls):
     def __init__(self,
                  config_obj: Any,
                  callback: Optional[Callable[[str, Any],
@@ -283,12 +319,13 @@ class ConfigPanel(mui.DynamicControls):
                                         backend_only=True)
 
     async def callback(self, value: Tuple[str, Any]):
+        print(value)
         uid = value[0]
         cmeta = self._obj_to_ctrl_meta[uid]
         compare_res = cmeta.compare(value[1])
         if not compare_res:
-            # here we need to compare value, emit event iff 
-            # the value is changed. 
+            # here we need to compare value, emit event iff
+            # the value is changed.
             # TODO this is due to limitation of leva control.
             # we may need to write own dynamic control
             # based on tanstack table.
@@ -313,8 +350,11 @@ class ConfigPanel(mui.DynamicControls):
         return {_CONFIG_META_KEY: SwitchMeta(alias)}
 
     @staticmethod
-    def input_meta(multiline: bool, rows: int, font_size: mui.ValueType,
-                   font_family: str, alias: Optional[str] = None):
+    def input_meta(multiline: bool,
+                   rows: int,
+                   font_size: mui.ValueType,
+                   font_family: str,
+                   alias: Optional[str] = None):
         return {
             _CONFIG_META_KEY:
             InputMeta(alias=alias,
@@ -325,5 +365,82 @@ class ConfigPanel(mui.DynamicControls):
         }
 
     @staticmethod
-    def slider_meta(begin: mui.NumberType, end: mui.NumberType, alias: Optional[str] = None):
-        return {_CONFIG_META_KEY: SliderMeta(begin=begin, end=end, alias=alias)}
+    def slider_meta(begin: mui.NumberType,
+                    end: mui.NumberType,
+                    alias: Optional[str] = None):
+        return {
+            _CONFIG_META_KEY: SliderMeta(begin=begin, end=end, alias=alias)
+        }
+
+
+class ConfigPanelV2(mui.SimpleControls):
+    def __init__(self,
+                 config_obj: Any,
+                 callback: Optional[Callable[[str, Any],
+                                             mui._CORO_NONE]] = None):
+        assert dataclasses.is_dataclass(config_obj)
+        # parse config dataclass.
+        self._obj_to_ctrl_meta: Dict[str, ControlItemMeta] = {}
+        node = parse_to_control_nodes(config_obj, config_obj, "",
+                                      self._obj_to_ctrl_meta)
+        super().__init__(init=control_nodes_v1_to_v2(node).children,
+                         callback=self.callback)
+        self.__config_obj = config_obj
+        self.__callback_key = "config_panel_v3_handler"
+        if callback is not None:
+            self.register_event_handler(self.__callback_key,
+                                        callback,
+                                        backend_only=True)
+
+    async def callback(self, value: Tuple[str, Any]):
+        uid = value[0]
+        cmeta = self._obj_to_ctrl_meta[uid]
+        compare_res = cmeta.compare(value[1])
+        if not compare_res:
+            # here we need to compare value, emit event iff
+            # the value is changed.
+            # TODO this is due to limitation of leva control.
+            # we may need to write own dynamic control
+            # based on tanstack table.
+            cmeta.setter(value[1])
+            handlers = self.get_event_handlers(self.__callback_key)
+            if handlers is not None:
+                for handler in handlers.handlers:
+                    coro = handler.cb(uid, cmeta.getter())
+                    if inspect.iscoroutine(coro):
+                        await coro
+
+    @property
+    def config(self):
+        return self.__config_obj
+
+    @staticmethod
+    def base_meta(alias: Optional[str] = None):
+        return {_CONFIG_META_KEY: ConfigMeta(alias)}
+
+    @staticmethod
+    def switch_meta(alias: Optional[str] = None):
+        return {_CONFIG_META_KEY: SwitchMeta(alias)}
+
+    @staticmethod
+    def input_meta(multiline: bool,
+                   rows: int,
+                   font_size: mui.ValueType,
+                   font_family: str,
+                   alias: Optional[str] = None):
+        return {
+            _CONFIG_META_KEY:
+            InputMeta(alias=alias,
+                      multiline=multiline,
+                      rows=rows,
+                      font_size=font_size,
+                      font_family=font_family)
+        }
+
+    @staticmethod
+    def slider_meta(begin: mui.NumberType,
+                    end: mui.NumberType,
+                    alias: Optional[str] = None):
+        return {
+            _CONFIG_META_KEY: SliderMeta(begin=begin, end=end, alias=alias)
+        }

@@ -2328,6 +2328,110 @@ class RangeSlider(MUIComponentBase[RangeSliderProps]):
         return self._update_props_base(propcls)
 
 
+@dataclasses.dataclass
+class BlenderSliderProps(MUIComponentBaseProps):
+    ranges: Tuple[NumberType, NumberType, NumberType] = (0, 1, 0)
+    value: Union[Undefined, NumberType] = undefined
+    defaultValue: Union[Undefined, NumberType] = undefined
+    dragSpeed: Union[Undefined, NumberType] = undefined
+    debounce: Union[Undefined, NumberType] = undefined
+    infSlider: Union[Undefined, bool] = undefined
+    showControlButton: Union[Undefined, bool] = undefined
+    color: Union[Undefined, str] = undefined
+    hoverColor: Union[Undefined, str] = undefined
+    clickColor: Union[Undefined, str] = undefined
+    indicatorColor: Union[Undefined, str] = undefined
+    iconColor: Union[Undefined, str] = undefined
+    fractionDigits: Union[Undefined, int] = undefined
+
+
+class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
+
+    def __init__(self,
+                 begin: NumberType,
+                 end: NumberType,
+                 step: Optional[NumberType] = None,
+                 callback: Optional[Callable[[NumberType], _CORO_NONE]] = None,
+                 init_value: Optional[NumberType] = None) -> None:
+        super().__init__(UIType.BlenderSlider, BlenderSliderProps,
+                         [FrontendEventType.Change.value])
+        if isinstance(begin, int) and isinstance(end, int):
+            if step is None:
+                step = 1
+        assert step is not None, "step must be specified for float type"
+        self.callback = callback
+        assert end >= begin  #  and step <= end - begin
+        self.props.ranges = (begin, end, step)
+        if init_value is None:
+            init_value = begin
+        self.props.value = init_value
+        if callback is not None:
+            self.register_event_handler(FrontendEventType.Change.value,
+                                        callback)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
+
+    @property
+    def value(self):
+        return self.props.value
+
+    def validate_props(self, props: Dict[str, Any]):
+        if "value" in props:
+            value = props["value"]
+            return (value >= self.props.ranges[0]
+                    and value < self.props.ranges[1])
+        return False
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
+        return res
+
+    async def update_ranges(self,
+                            begin: NumberType,
+                            end: NumberType,
+                            step: Optional[NumberType] = None):
+        if step is None:
+            step = self.props.ranges[2]
+        self.props.ranges = (begin, end, step)
+        assert end >= begin and step <= end - begin
+        self.props.value = begin
+        await self.put_app_event(
+            self.create_update_event({
+                "ranges": (begin, end, step),
+                "value": self.props.value
+            }))
+
+    async def update_value(self, value: NumberType):
+        assert value >= self.props.ranges[0] and value <= self.props.ranges[1]
+        await self.put_app_event(self.create_update_event({"value": value}))
+        self.props.value = value
+
+    def state_change_callback(
+            self,
+            value: NumberType,
+            type: ValueType = FrontendEventType.Change.value):
+        self.props.value = value
+
+    async def headless_change(self, value: NumberType):
+        uiev = UIEvent(
+            {self._flow_uid: (FrontendEventType.Change.value, value)})
+        return await self.put_app_event(
+            AppEvent("", {AppEventType.UIEvent: uiev}))
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync=is_sync)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+
 _T = TypeVar("_T")
 
 
@@ -3535,18 +3639,35 @@ class ControlNode:
     id: str
     name: str
     type: int
-    initValue: Union[Undefined, NumberType, str, ControlColorRGB,
+    initValue: Union[Undefined, NumberType, bool, str, ControlColorRGB,
                      ControlColorRGBA, ControlVector2] = undefined
     children: "List[ControlNode]" = dataclasses.field(default_factory=list)
     # for range
     min: Union[Undefined, NumberType] = undefined
     max: Union[Undefined, NumberType] = undefined
+    step: Union[Undefined, NumberType] = undefined
+
     # for select
     selects: Union[Undefined, List[ValueType]] = undefined
     # for string
     rows: Union[Undefined, bool, int] = undefined
 
     alias: Union[Undefined, str] = undefined
+
+
+@dataclasses.dataclass
+class ControlDesp:
+    type: int
+    initValue: Union[Undefined, NumberType, bool, str, ControlColorRGB,
+                     ControlColorRGBA, ControlVector2] = undefined
+    # for range
+    min: Union[Undefined, NumberType] = undefined
+    max: Union[Undefined, NumberType] = undefined
+    step: Union[Undefined, NumberType] = undefined
+    # for select
+    selects: Union[Undefined, List[ValueType]] = undefined
+    # for string
+    rows: Union[Undefined, bool, int] = undefined
 
 
 @dataclasses.dataclass
@@ -3575,6 +3696,44 @@ class DynamicControls(MUIComponentBase[DynamicControlsProps]):
                          allowed_events=[FrontendEventType.Change.value])
         if init is not None:
             self.props.nodes = init
+        if callback is not None:
+            self.register_event_handler(FrontendEventType.Change.value,
+                                        callback)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self,
+                                           ev,
+                                           sync_status_first=False,
+                                           is_sync=is_sync)
+
+@dataclasses.dataclass
+class SimpleControlsProps(MUIFlexBoxProps):
+    tree: List[JsonLikeNode] = dataclasses.field(default_factory=list)
+    contextMenus: Union[Undefined, List[ContextMenuData]] = undefined
+    reactKey: Union[Undefined, str] = undefined
+
+class SimpleControls(MUIComponentBase[SimpleControlsProps]):
+
+    def __init__(self,
+                 callback: Optional[Callable[[Tuple[str, Any]],
+                                             _CORO_NONE]] = None,
+                 init: Optional[List[JsonLikeNode]] = None) -> None:
+        super().__init__(UIType.SimpleControls,
+                         SimpleControlsProps,
+                         allowed_events=[FrontendEventType.Change.value])
+        if init is not None:
+            self.props.tree = init
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)

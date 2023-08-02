@@ -148,6 +148,8 @@ class UIType(enum.IntEnum):
     JsonViewer = 0x34
     ListItemIcon = 0x35
     Link = 0x36
+    BlenderSlider = 0x37
+    SimpleControls = 0x38
 
     # special
     TaskLoop = 0x100
