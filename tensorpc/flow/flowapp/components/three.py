@@ -374,6 +374,7 @@ class PointProps(Object3dBaseProps):
     sizes: Union[np.ndarray, Undefined] = undefined
     encodeMethod: Union[Literal["none", "int16"], Undefined] = undefined 
     encodeScale: Union[NumberType, Undefined] = undefined
+    enableBvh: Union[bool, Undefined] = undefined
 
 class PointsControlType(enum.Enum):
     SetColors = 0
@@ -3009,7 +3010,7 @@ class BufferMeshProps(Object3dContainerBaseProps):
 class BufferMeshUpdate(DataClassWithUndefined):
     data: np.ndarray
     offset: Union[int, Undefined] = undefined
-    newCount: Union[int, Undefined] = undefined
+    # newCount: Union[int, Undefined] = undefined
 
 
 class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
@@ -3069,7 +3070,8 @@ class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
     async def update_buffers(self,
                              updates: Dict[str, BufferMeshUpdate],
                              update_bound: bool = False,
-                             new_index: Optional[np.ndarray] = None):
+                             new_index: Optional[np.ndarray] = None,
+                             new_count: Optional[int] = None):
         """
         Args: 
             updates: contains the updates for each buffer, the key must be in initialBuffers.
@@ -3079,11 +3081,16 @@ class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
         """
         if isinstance(self.initial_index, Undefined):
             assert new_index is None, "new_index must be None"
+        assert not isinstance(self.props.limit, Undefined)
         updates_dict = {}
         for k, v in updates.items():
             assert k in self.initial_buffers, "key not found"
             if v.data.dtype == np.float16 or v.data == np.float64:
                 v.data = v.data.astype(np.float32)
+            offset = v.offset 
+            if isinstance(offset, Undefined):
+                offset = 0
+            assert offset + v.data.shape[0] <= self.props.limit, "update size exceeds limit"
             updates_dict[k] = v.get_dict()
         res = {
             "type": BufferMeshControlType.UpdateBuffers.value,
@@ -3092,6 +3099,9 @@ class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
         }
         if new_index is not None:
             res["newIndex"] = new_index
+        if new_count is not None:
+            assert self.props.limit >= new_count
+            res["newCount"] = new_count
         return await self.send_and_wait(self.create_comp_event(res))
 
 

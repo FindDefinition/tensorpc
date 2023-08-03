@@ -48,14 +48,14 @@ class UserObjTreeProtocol(Protocol):
     def default_expand(self) -> bool:
         ...
 
-    def update_tree(self) -> None:
-        ...
+    # def update_tree(self) -> None:
+    #     ...
 
-    async def update_tree_async(self) -> None:
-        ...
+    # async def update_tree_async(self) -> None:
+    #     ...
 
-    def attach_update_tree_callback(self, func: Callable[[], Union[Coroutine[None, None, None], None]]):
-        ...
+    # def attach_update_tree_callback(self, func: Callable[[], Union[Coroutine[None, None, None], None]]):
+    #     ...
 
 class ObjTreeContext:
 
@@ -73,6 +73,13 @@ OBJ_TREE_CONTEXT_VAR: contextvars.ContextVar[
 def get_objtree_context() -> Optional[ObjTreeContextProtocol]:
     return OBJ_TREE_CONTEXT_VAR.get()
 
+def enter_obj_tree_context(node: UserObjTreeProtocol) -> Generator["ObjTreeContextProtocol", None, None]:
+    ctx = ObjTreeContext(node)
+    token = OBJ_TREE_CONTEXT_VAR.set(ctx)
+    try:
+        yield ctx
+    finally:
+        OBJ_TREE_CONTEXT_VAR.reset(token)
 
 class UserObjTree:
 

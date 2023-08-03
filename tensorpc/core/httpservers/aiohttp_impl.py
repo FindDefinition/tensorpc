@@ -10,6 +10,7 @@ from aiohttp import web
 
 from tensorpc.core import core_io, defs
 import ssl
+from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.constants import TENSORPC_API_FILE_DOWNLOAD, TENSORPC_API_FILE_UPLOAD
 from tensorpc.core.server_core import ProtobufServiceCore, ServiceCore, ServerMeta
 from pathlib import Path
@@ -53,11 +54,15 @@ async def _cancel(task):
 
 class AiohttpWebsocketClient(WebsocketClientBase):
     def __init__(self,
+                 id: str,
                  ws: web.WebSocketResponse,
                  serv_id_to_name: Dict[int, str],
                  uid: Optional[int] = None):
-        super().__init__(serv_id_to_name, uid)
+        super().__init__(id, serv_id_to_name, uid)
         self.ws = ws
+
+    async def close(self):
+        return await self.ws.close()
 
     def get_msg_max_size(self) -> int: 
         return self.ws._max_msg_size
@@ -69,41 +74,25 @@ class AiohttpWebsocketClient(WebsocketClientBase):
     def get_client_id(self) -> int: 
         return id(self.ws)
 
-    async def binary_msg_generator(self) -> AsyncGenerator[WebsocketMsg, None]: 
+    async def binary_msg_generator(self, shutdown_ev: asyncio.Event) -> AsyncGenerator[WebsocketMsg, None]: 
         # while True:
-        #     # msg = await self.ws.receive()
-        #     # if msg.type == aiohttp.WSMsgType.BINARY:
-        #     #     yield WebsocketMsg(msg.data, WebsocketMsgType.Binary)
-        #     # elif msg.type == aiohttp.WSMsgType.TEXT:
-        #     #     yield WebsocketMsg(msg.data, WebsocketMsgType.Text)
-        #     # elif msg.type == aiohttp.WSMsgType.ERROR:
-        #     #     raise Exception("websocket connection closed with exception %s" %
-        #     #                     self.ws.exception())
-        #     await self._allow_recv_event.wait()
-        #     async with self._lock:
+        #     recv_task = asyncio.create_task(self.ws.receive(), name="recv_task")
+        #     st_task = asyncio.create_task(shutdown_ev.wait(), name="shutdown_task")
+        #     done, pending = await asyncio.wait([recv_task, st_task], return_when=asyncio.FIRST_COMPLETED)
+        #     if st_task in done:
+        #         # cancel recv task 
+        #         await cancel_task(recv_task)
+        #         break
+        #     else:
+        #         msg = recv_task.result()
+        #         if msg.type == aiohttp.WSMsgType.BINARY:
+        #             yield WebsocketMsg(msg.data, WebsocketMsgType.Binary)
+        #         elif msg.type == aiohttp.WSMsgType.TEXT:
+        #             yield WebsocketMsg(msg.data, WebsocketMsgType.Text)
+        #         elif msg.type == aiohttp.WSMsgType.ERROR:
+        #             raise Exception("websocket connection closed with exception %s" %
+        #                             self.ws.exception())
         #         recv_task = asyncio.create_task(self.ws.receive(), name="recv_task")
-        #         ev_task = asyncio.create_task(self._recv_cancel_event.wait(), name="ev_task")
-        #         done, pending = await asyncio.wait([recv_task, ev_task], return_when=asyncio.FIRST_COMPLETED)
-        #         if ev_task in done:
-        #             # cancel recv task 
-                    
-        #             print("cancel recv task")
-        #             await _cancel(recv_task)
-        #             # self._recv_cancel_event.set()
-        #             # ev_task = asyncio.create_task(self._recv_cancel_event.wait(), name="ev_task")
-
-        #         else:
-        #             msg = recv_task.result()
-        #             if msg.type == aiohttp.WSMsgType.BINARY:
-        #                 yield WebsocketMsg(msg.data, WebsocketMsgType.Binary)
-        #             elif msg.type == aiohttp.WSMsgType.TEXT:
-        #                 yield WebsocketMsg(msg.data, WebsocketMsgType.Text)
-        #             elif msg.type == aiohttp.WSMsgType.ERROR:
-        #                 raise Exception("websocket connection closed with exception %s" %
-        #                                 self.ws.exception())
-        #     # recv_task = asyncio.create_task(self.ws.receive(), name="recv_task")
-
-        #         # msg = await self.ws.receive()
         async for msg in self.ws:
             if msg.type == aiohttp.WSMsgType.BINARY:
                 yield WebsocketMsg(msg.data, WebsocketMsgType.Binary)
@@ -115,14 +104,26 @@ class AiohttpWebsocketClient(WebsocketClientBase):
 
 class AiohttpWebsocketHandler(WebsocketHandler):
     async def handle_new_connection_aiohttp(self, request):
-        print("NEW CONN", request)
+        client_id = request.match_info.get('client_id')
+        print("NEW CONN", client_id, request)
         service_core = self.service_core
         ws = web.WebSocketResponse()
         await ws.prepare(request)
-        client = AiohttpWebsocketClient(
+        client = AiohttpWebsocketClient(client_id, 
             ws, service_core.service_units.get_service_id_to_name())
-        return await self.handle_new_connection(client)
+        await self.handle_new_connection(client, client_id)
+        return ws
 
+    async def handle_new_backup_connection_aiohttp(self, request):
+        client_id = request.match_info.get('client_id')
+        print("NEW BACKUP CONN", client_id, request)
+        service_core = self.service_core
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        client = AiohttpWebsocketClient(client_id, 
+            ws, service_core.service_units.get_service_id_to_name())
+        await self.handle_new_connection(client, client_id, True)
+        return ws
 
 class HttpService:
 
@@ -263,13 +264,14 @@ async def serve_app(app,
 async def serve_service_core_task(server_core: ProtobufServiceCore,
                                   port=50052,
                                   rpc_name="/api/rpc",
-                                  ws_name="/api/ws",
+                                  ws_name="/api/ws/{client_id}",
                                   is_sync: bool = False,
                                   rpc_pickle_name: str = "/api/rpc_pickle",
-                                  client_max_size: int = 16 * 1024**2,
+                                  client_max_size: int = 4 * 1024**2,
                                   standalone: bool = True,
                                   ssl_key_path: str = "",
-                                  ssl_crt_path: str = ""):
+                                  ssl_crt_path: str = "",
+                                  ws_backup_name="/api/ws_backup/{client_id}"):
     # client_max_size 4MB is enough for most image upload.
     http_service = HttpService(server_core)
     ctx = contextlib.nullcontext()
@@ -289,6 +291,8 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
         app.router.add_get(TENSORPC_API_FILE_DOWNLOAD, http_service.resource_download_call)
 
         app.router.add_get(ws_name, ws_service.handle_new_connection_aiohttp)
+        app.router.add_get(ws_backup_name, ws_service.handle_new_backup_connection_aiohttp)
+
         ssl_context = None
         if ssl_key_path != "" and ssl_key_path != "":
             ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)

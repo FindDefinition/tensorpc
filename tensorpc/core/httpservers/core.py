@@ -54,6 +54,7 @@ class WebsocketClientBase(abc.ABC):
     # TODO peer client use a async queue instead of recv because
     # aiohttp don't allow parallel recv
     def __init__(self,
+                 id: str,
                  serv_id_to_name: Dict[int, str],
                  uid: Optional[int] = None):
         self._uid = uid  # type: Optional[int]
@@ -66,6 +67,13 @@ class WebsocketClientBase(abc.ABC):
         self._recv_task: Optional[asyncio.Task] = None
         self._allow_recv_event = asyncio.Event()
         self._allow_recv_event.set()
+        self.id = id
+        self.is_backup: bool = False
+        self._large_data_ws: Optional["WebsocketClientBase"] = None
+        self.hang_shutdown_event = asyncio.Event()
+
+    @abc.abstractmethod
+    async def close(self): ...
 
     @abc.abstractmethod
     def get_msg_max_size(self) -> int: ...
@@ -101,7 +109,8 @@ class WebsocketClientBase(abc.ABC):
                    service_key: str = "",
                    request_id: int = 0,
                    is_json: bool = False,
-                   dynamic_key: str = ""):
+                   dynamic_key: str = "",
+                   prefer_large_data: bool = False):
         """data must not be encoded.
         """
         if self._uid is not None:
@@ -124,16 +133,29 @@ class WebsocketClientBase(abc.ABC):
         # max_size = 1024 * 1024
         # TODO reslove "8192"
         encoder = core_io.SocketMessageEncoder(data, skeleton_size_limit=max_size - 8192)
+        use_large_data_ws = prefer_large_data and self._large_data_ws is not None
         try:
             for chunk in encoder.get_message_chunks(msg_type, req, max_size):
                 assert len(chunk) <= max_size
                 async with async_timeout.timeout(5):
-                    await self.send_bytes(chunk)
+                    if use_large_data_ws:
+                        assert self._large_data_ws is not None 
+                        await self._large_data_ws.send_bytes(chunk)
+                    else:
+                        await self.send_bytes(chunk)
         except ConnectionResetError:
             print("CLIENT SEND ERROR, RETURN")
         except:
-            print("CLIENT SEND TIMEOUT ERROR", )
-            raise
+            # use main ws to send client reset msg to frontend
+            if use_large_data_ws:
+                print("LARGE CLIENT SEND TIMEOUT ERROR. data will be dropped, client should reset large-data-ws")
+                assert self._large_data_ws is not None 
+                await self._large_data_ws.close()
+                return await self.send_bytes(
+                    core_io.json_only_encode({}, core_io.SocketMsgType.ResetLargeDataClient, req))
+            else:
+                print("CLIENT SEND TIMEOUT ERROR", )
+                raise 
         finally:
             return 
 
@@ -242,12 +264,8 @@ class WebsocketClientBase(abc.ABC):
                                          request_id)
 
     @abc.abstractmethod
-    async def binary_msg_generator(self) -> AsyncGenerator[WebsocketMsg, None]: ...
+    async def binary_msg_generator(self, shutdown_ev: asyncio.Event) -> AsyncGenerator[WebsocketMsg, None]: ...
 
-@dataclasses.dataclass
-class WebsocketClientPair:
-    recv: WebsocketClientBase
-    send: Optional[WebsocketClientBase]
 
 def create_task(coro):
     if compat.Python3_7AndLater:
@@ -279,6 +297,7 @@ class WebsocketHandler:
         )
         self.event_to_clients: Dict[str, Set[WebsocketClientBase]] = {}
         self.client_to_events: Dict[WebsocketClientBase, Set[str]] = {}
+        self.client_id_to_client: Dict[str, WebsocketClientBase] = {}
 
         self._serv_id_to_name = service_core.service_units.get_service_id_to_name(
         )
@@ -328,8 +347,8 @@ class WebsocketHandler:
             rid = await client.send_ping()
             print("sent ping", rid)
 
-    async def handle_new_connection(self, client: WebsocketClientBase):
-        print("NEW CONN")
+    async def handle_new_connection(self, client: WebsocketClientBase, client_id: str, is_backup: bool = False):
+        print(f"NEW CONN {client.id}, is backup: ", is_backup)
         service_core = self.service_core
         conn_st_ev = asyncio.Event()
         # wait at most 100 rpcs
@@ -341,7 +360,6 @@ class WebsocketHandler:
                 await client.send_user_error(e, 0)
         # assert not self.event_to_clients and not self.client_to_events
         # pingpong_task = asyncio.create_task(self.send_ping_loop(client))
-        client_uid: Optional[str] = None
         # To avoid possible hang when send large data to client, we use
         # two websockets, one for small payload, one for large payload. 
         # this only enabled we receive websocket config with pair enabled from client.
@@ -350,7 +368,23 @@ class WebsocketHandler:
         # message from client. Then we can close the websocket (send), client
         # should restart a new websocket connection when it detect hang or receive
         # restart request in backup connection. 
-        client_pair: WebsocketClientPair = WebsocketClientPair(client, None)
+        if not is_backup:
+            if client_id not in self.client_id_to_client:
+                self.client_id_to_client[client_id] = client
+            else:
+                client_prev = self.client_id_to_client[client_id]
+                assert client_prev.is_backup 
+                self.client_id_to_client[client_id] = client 
+                client.is_backup = False 
+                client._large_data_ws = client_prev
+        else:
+            if client_id in self.client_id_to_client:
+                client_main = self.client_id_to_client[client_id]
+                client_main._large_data_ws = client
+            else:
+                client.is_backup = True
+                self.client_id_to_client[client_id] = client
+
         wait_task = asyncio.create_task(
             self.rpc_awaiter(conn_rpc_queue, conn_st_ev))
         try:
@@ -361,7 +395,7 @@ class WebsocketHandler:
                               is_json=True)
             # TODO we should wait shutdown here
             # TODO handle send error
-            async for ws_msg in client.binary_msg_generator():
+            async for ws_msg in client.binary_msg_generator(client.hang_shutdown_event):
                 if ws_msg.type == WebsocketMsgType.Binary:
                     data = ws_msg.data
                     try:
@@ -454,12 +488,6 @@ class WebsocketHandler:
                         await client.send([],
                                           msg_type=msg_type,
                                           request_id=req.rpc_id)
-                    elif msg_type == core_io.SocketMsgType.SetWebsocketUID:
-                        arg_data = core_io.parse_message_chunks(header, [data])
-                        client_uid = arg_data[0]
-                        assert client_uid is not None 
-                        client_pair = WebsocketClientPair(client, None)
-                        service_core._all_websockets[client_uid] = client_pair
                         
                     elif msg_type == core_io.SocketMsgType.RPC:
                         arg_data = core_io.parse_message_chunks(header, [data])
@@ -515,7 +543,16 @@ class WebsocketHandler:
                     await _cancel(task)
                 except:
                     break
-        print("CONN", "disconnected.")
+        if client_id in self.client_id_to_client:
+            client_may_main = self.client_id_to_client[client_id]
+            if is_backup:
+                if client_may_main.is_backup:
+                    self.client_id_to_client.pop(client_id)
+                else:
+                    client_may_main._large_data_ws = None 
+            else:
+                self.client_id_to_client.pop(client_id)
+        print(f"CONN {client_id} (is_backup={is_backup}) disconnected.")
 
     async def rpc_awaiter(self, rpc_queue: "asyncio.Queue[asyncio.Task]",
                           shutdown_ev: asyncio.Event):
@@ -656,7 +693,8 @@ class WebsocketHandler:
                                                 msg_type=msg_type,
                                                 request_id=rpc_id,
                                                 is_json=exc is not None,
-                                                dynamic_key=dykey))
+                                                dynamic_key=dykey,
+                                                prefer_large_data=True))
                                 sending_tasks.append((task, ev_str))
                     else:
 
@@ -682,7 +720,8 @@ class WebsocketHandler:
                                             msg_type=msg_type,
                                             request_id=rpc_id,
                                             is_json=exc is not None,
-                                            dynamic_key=dynamic_key))
+                                            dynamic_key=dynamic_key,
+                                            prefer_large_data=True))
                             sending_tasks.append((task, ev_str))
             # we must cancel task AFTER clear _delete_events
             for task in task_to_be_canceled:

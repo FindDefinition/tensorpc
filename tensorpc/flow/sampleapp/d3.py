@@ -190,10 +190,10 @@ class BufferMeshDevApp:
 
                 # ]),
                 # three.Environment
-                three.Environment([
-                    three.AmbientLight(),
-                ]).prop(files="tensorpc://old_depot_2k.hdr",
-                        ground=three.EnvGround(radius=130, height=32)),
+                # three.Environment([
+                #     three.AmbientLight(),
+                # ]).prop(files="tensorpc://old_depot_2k.hdr",
+                #         ground=three.EnvGround(radius=130, height=32)),
                 # three.PerformanceMonitor(),
                 three.Sky().prop(sunPosition=(1, 1, 1),
                                  distance=450000,

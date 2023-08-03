@@ -10,6 +10,7 @@ from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optiona
 
 from tensorpc.core import core_io, defs
 import ssl
+from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.server_core import ProtobufServiceCore, ServiceCore, ServerMeta
 from pathlib import Path
 from tensorpc.protos_export import remote_object_pb2
@@ -27,13 +28,17 @@ from .core import WebsocketClientBase, WebsocketMsg, WebsocketMsgType, Websocket
 class BlacksheepWebsocketClient(WebsocketClientBase):
 
     def __init__(self,
+                id: str,
                  ws: WebSocket,
                  serv_id_to_name: Dict[int, str],
                  uid: Optional[int] = None,
                  client_max_size: int = -1):
-        super().__init__(serv_id_to_name, uid)
+        super().__init__(id, serv_id_to_name, uid)
         self.ws = ws
         self.client_max_size = client_max_size
+
+    async def close(self):
+        return await self.ws.close()
 
     def get_msg_max_size(self) -> int:
         if self.client_max_size == -1:
@@ -47,10 +52,22 @@ class BlacksheepWebsocketClient(WebsocketClientBase):
     def get_client_id(self) -> int:
         return id(self.ws)
 
-    async def binary_msg_generator(self) -> AsyncGenerator[WebsocketMsg, None]:
+    async def binary_msg_generator(self, shutdown_ev: asyncio.Event) -> AsyncGenerator[WebsocketMsg, None]:
         while True:
             msg = await self.ws.receive_bytes()
             yield WebsocketMsg(msg, WebsocketMsgType.Binary)
+
+            # recv_task = asyncio.create_task(self.ws.receive_bytes(), name="recv_task")
+            # st_task = asyncio.create_task(shutdown_ev.wait(), name="shutdown_task")
+            # done, pending = await asyncio.wait([recv_task, st_task], return_when=asyncio.FIRST_COMPLETED)
+            # if st_task in done:
+            #     # cancel recv task 
+            #     await cancel_task(recv_task)
+            #     break
+            # else:
+            #     msg = recv_task.result()
+            #     yield WebsocketMsg(msg, WebsocketMsgType.Binary)
+            #     recv_task = asyncio.create_task(self.ws.receive_bytes(), name="recv_task")
 
 
 class BlacksheepWebsocketHandler(WebsocketHandler):
@@ -58,14 +75,23 @@ class BlacksheepWebsocketHandler(WebsocketHandler):
         super().__init__(service_core)
         self.client_max_size = client_max_size
 
-    async def handle_new_connection_blacksheep(self, request: WebSocket):
-        print("NEW CONN", request)
+    async def handle_new_connection_blacksheep(self, request: WebSocket, client_id: str):
+        print("NEW CONN", client_id, request)
         service_core = self.service_core
         await request.accept()
-        client = BlacksheepWebsocketClient(
+        client = BlacksheepWebsocketClient(client_id, 
             request, service_core.service_units.get_service_id_to_name(), 
             client_max_size=self.client_max_size)
-        return await self.handle_new_connection(client)
+        return await self.handle_new_connection(client, client_id)
+
+    async def handle_new_backup_connection_blacksheep(self, request: WebSocket, client_id: str):
+        print("NEW CONN", client_id, request)
+        service_core = self.service_core
+        await request.accept()
+        client = BlacksheepWebsocketClient(client_id, 
+            request, service_core.service_units.get_service_id_to_name(), 
+            client_max_size=self.client_max_size)
+        return await self.handle_new_connection(client, client_id, True)
 
 
 class HttpService:
@@ -157,13 +183,14 @@ async def serve_app(serv: uvicorn.Server,
 async def serve_service_core_task(server_core: ProtobufServiceCore,
                                   port=50052,
                                   rpc_name="/api/rpc",
-                                  ws_name="/api/ws",
+                                  ws_name="/api/ws/{client_id}",
                                   is_sync: bool = False,
                                   rpc_pickle_name: str = "/api/rpc_pickle",
-                                  client_max_size: int = 16 * 1024**2,
+                                  client_max_size: int = 4 * 1024**2,
                                   standalone: bool = True,
                                   ssl_key_path: str = "",
-                                  ssl_crt_path: str = ""):
+                                  ssl_crt_path: str = "",
+                                  ws_backup_name="/api/ws_backup/{client_id}"):
     http_service = HttpService(server_core)
     ctx = contextlib.nullcontext()
     if standalone:
@@ -188,8 +215,12 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
             return await http_service.file_upload_call(request)
 
         @app.router.ws(ws_name)
-        async def _handle_new_connection(request):
-            return await ws_service.handle_new_connection_blacksheep(request)
+        async def _handle_new_connection(request, client_id):
+            return await ws_service.handle_new_connection_blacksheep(request, client_id)
+
+        @app.router.ws(ws_backup_name)
+        async def _handle_new_backup_connection(request, client_id):
+            return await ws_service.handle_new_backup_connection_blacksheep(request, client_id)
 
         config = uvicorn.Config(app,
                                 port=port,

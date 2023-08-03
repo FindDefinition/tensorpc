@@ -823,7 +823,7 @@ class WTF:
     i: int = dataclasses.field(default=1,
                                metadata=ConfigPanel.slider_meta(0, 10))
     j: TestEnumInt = TestEnumInt.C
-
+    vn: mui.ControlVectorN = mui.ControlVectorN([1, 0, 2])
 
 class SampleConfigApp(EditableApp):
     def __init__(self) -> None:

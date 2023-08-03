@@ -1054,7 +1054,7 @@ class Component(Generic[T_base_props, T_child]):
         return _EmitterEventSlot(event_type_value, self._flow_event_emitter)
 
     @property
-    def flow_event_emitter(self) -> AsyncIOEventEmitter[ValueType, Event]:
+    def flow_event_emitter(self) -> AsyncIOEventEmitter[EventDataType, Event]:
         return self._flow_event_emitter
 
     def get_special_methods(self, reload_mgr: AppReloadManager):

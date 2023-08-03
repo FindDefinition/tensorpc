@@ -98,7 +98,7 @@ class ControlItemMeta:
 
 
 _BUILTIN_DCLS_TYPE = set(
-    [mui.ControlColorRGB, mui.ControlColorRGBA, mui.ControlVector2])
+    [mui.ControlColorRGB, mui.ControlColorRGBA, mui.ControlVector2, mui.ControlVectorN])
 
 
 def setattr_single(val, obj, name, mapper: Optional[Callable] = None):
@@ -107,6 +107,11 @@ def setattr_single(val, obj, name, mapper: Optional[Callable] = None):
     else:
         setattr(obj, name, val)
 
+def setattr_vector_n(val, obj, name):
+    # val: [axis, value]
+    val_prev = getattr(obj, name).data.copy()
+    val_prev[val[0]] = val[1]
+    setattr(obj, name, mui.ControlVectorN(val_prev))
 
 def getattr_single(obj, name):
     return getattr(obj, name)
@@ -118,6 +123,9 @@ def compare_single(value, obj, name, mapper: Optional[Callable] = None):
     else:
         return getattr(obj, name) == value
 
+def compare_vector_n(value, obj, name):
+    # val: [axis, value]
+    return getattr(obj, name).data[value[0]] == value[1]
 
 def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                            obj_uid_to_meta: Dict[str, ControlItemMeta]):
@@ -234,6 +242,16 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                                obj=current_obj,
                                name=f.name,
                                mapper=mapper)
+        elif ty is mui.ControlVectorN:
+            child_node.type = mui.ControlNodeType.VectorN.value
+            child_node.count = len(getattr(current_obj, f.name).data)
+            child_node.initValue = getattr(current_obj, f.name)
+            setter = partial(setattr_vector_n,
+                             obj=current_obj,
+                             name=f.name)
+            comparer = partial(compare_vector_n,
+                               obj=current_obj,
+                               name=f.name)
         else:
             ty_origin = get_origin(ty)
             # print(ty, ty_origin, type(ty), type(ty_origin))
@@ -288,9 +306,10 @@ def control_nodes_v1_to_v2(ctrl_node_v1: mui.ControlNode) -> mui.JsonLikeNode:
         initValue=ctrl_node_v1.initValue,
         min=ctrl_node_v1.min,
         max=ctrl_node_v1.max,
-        # step=ctrl_node_v1.step,
+        step=ctrl_node_v1.step,
         selects=ctrl_node_v1.selects,
-        rows=ctrl_node_v1.rows)
+        rows=ctrl_node_v1.rows,
+        count=ctrl_node_v1.count)
     node = mui.JsonLikeNode(id=ctrl_node_v1.id,
                             name=ctrl_node_v1.name if isinstance(ctrl_node_v1.alias, mui.Undefined) else ctrl_node_v1.alias,
                             type=mui.JsonLikeType.Object.value,

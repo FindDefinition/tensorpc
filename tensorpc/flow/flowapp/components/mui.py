@@ -3615,6 +3615,7 @@ class ControlNodeType(enum.IntEnum):
     String = 5
     Folder = 6
     Vector2 = 7
+    VectorN = 8
 
 
 @dataclasses.dataclass
@@ -3633,14 +3634,18 @@ class ControlVector2:
     x: NumberType
     y: NumberType
 
+@dataclasses.dataclass
+class ControlVectorN:
+    data: List[NumberType]
+
 
 @dataclasses.dataclass
 class ControlNode:
     id: str
     name: str
     type: int
-    initValue: Union[Undefined, NumberType, bool, str, ControlColorRGB,
-                     ControlColorRGBA, ControlVector2] = undefined
+    initValue: Union[Undefined, NumberType, bool, str,
+                     ControlColorRGBA, ControlVector2, ControlVectorN] = undefined
     children: "List[ControlNode]" = dataclasses.field(default_factory=list)
     # for range
     min: Union[Undefined, NumberType] = undefined
@@ -3653,13 +3658,15 @@ class ControlNode:
     rows: Union[Undefined, bool, int] = undefined
 
     alias: Union[Undefined, str] = undefined
+    # for vectorN
+    count: Union[Undefined, int] = undefined
 
 
 @dataclasses.dataclass
 class ControlDesp:
     type: int
-    initValue: Union[Undefined, NumberType, bool, str, ControlColorRGB,
-                     ControlColorRGBA, ControlVector2] = undefined
+    initValue: Union[Undefined, NumberType, bool, str,
+                     ControlColorRGBA, ControlVector2, ControlVectorN] = undefined
     # for range
     min: Union[Undefined, NumberType] = undefined
     max: Union[Undefined, NumberType] = undefined
@@ -3668,6 +3675,8 @@ class ControlDesp:
     selects: Union[Undefined, List[ValueType]] = undefined
     # for string
     rows: Union[Undefined, bool, int] = undefined
+    # for vectorN
+    count: Union[Undefined, int] = undefined
 
 
 @dataclasses.dataclass

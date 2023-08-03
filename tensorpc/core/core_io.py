@@ -696,8 +696,7 @@ class SocketMsgType(Enum):
 
     Ping = 0x0a
     Pong = 0x0b
-    SetWebsocketUID = 0x0c
-    RPCLarge = 0x0d
+    ResetLargeDataClient = 0x0c
 
     EventError = 0x10
     RPCError = 0x20
