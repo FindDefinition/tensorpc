@@ -130,19 +130,25 @@ class WebsocketClientBase(abc.ABC):
             return await self.send_bytes(
                 core_io.json_only_encode(data, msg_type, req))
         max_size = self.get_msg_max_size() - 128
+        send_large_chunk_size_thresh = 65536
         # max_size = 1024 * 1024
         # TODO reslove "8192"
         encoder = core_io.SocketMessageEncoder(data, skeleton_size_limit=max_size - 8192)
-        use_large_data_ws = prefer_large_data and self._large_data_ws is not None
+        use_large_data_ws = False
         try:
+            cnt = 0
             for chunk in encoder.get_message_chunks(msg_type, req, max_size):
+                use_large_data_ws = prefer_large_data and self._large_data_ws is not None and len(chunk) > send_large_chunk_size_thresh
                 assert len(chunk) <= max_size
                 async with async_timeout.timeout(5):
                     if use_large_data_ws:
                         assert self._large_data_ws is not None 
+                        # print("SEND WITH LARGE DATA WS", cnt, max_size)
                         await self._large_data_ws.send_bytes(chunk)
                     else:
+                        # print("SEND WITH MAIN WS")
                         await self.send_bytes(chunk)
+                    cnt += 1
         except ConnectionResetError:
             print("CLIENT SEND ERROR, RETURN")
         except:

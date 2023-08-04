@@ -312,28 +312,6 @@ class ObjectInspector(mui.FlexBox):
                 await self.detail_container.set_new_layout([handler])
             await handler.bind(obj, uid)
 
-    # def __install_preview_event_listeners(self, layout: mui.FlexBox):
-    #     # if not layout.event_emitter.listeners(
-    #     #         FrontendEventType.BeforeUnmount.name):
-    #     layout.flow_event_emitter.once(
-    #         FrontendEventType.BeforeUnmount.value, partial(self._on_preview_layout_unmount, layout=layout))
-    #     # if not layout.event_emitter.listeners(
-    #     #         FrontendEventType.BeforeMount.name):
-    #     layout.flow_event_emitter.once(
-    #         FrontendEventType.BeforeMount.value, partial(self._on_preview_layout_mount, layout=layout))
-
-
-    # def _on_preview_layout_mount(self, event: Event, layout: mui.FlexBox):
-    #     # print("preview layout mount")
-    #     return get_app()._get_self_as_editable_app()._flowapp_observe(
-    #                     layout, self._on_preview_layout_reload)
-    
-    # def _on_preview_layout_unmount(self, event: Event, layout: mui.FlexBox):
-    #     # print("preview layout unmount")
-
-    #     return get_app()._get_self_as_editable_app()._flowapp_remove_observer(
-    #                     layout)
-
     async def _on_preview_layout_reload(self, layout: mui.FlexBox,
                                         create_layout: ServFunctionMeta):
         # print("DO PREVIEW LAYOUT RELOAD", create_layout.user_app_meta)

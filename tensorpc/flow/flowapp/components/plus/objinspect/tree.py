@@ -73,6 +73,20 @@ def _check_is_valid(obj_type, cared_types: Set[Type],
     return valid
 
 
+class TreeExpandController:
+    def __init__(self, cared_types: Optional[Set[Type]] = None,
+                 ignored_types: Optional[Set[Type]] = None, auto_lazy_expand: bool = True) -> None:
+        if cared_types is None:
+            cared_types = set()
+        if ignored_types is None:
+            ignored_types = set()
+        self._cared_types = cared_types
+        self._ignored_types = ignored_types
+        self._auto_lazy_expand = auto_lazy_expand
+        self._cached_lazy_expand_uids: List[str] = []
+        self._cared_dnd_uids: Dict[str, Callable[[str, Any],
+                                                 mui.CORO_NONE]] = {}
+
 def _get_root_tree(obj,
                    checker: Callable[[Type], bool],
                    key: str,
@@ -199,6 +213,7 @@ class DataStorageTreeItem(TreeItem):
                                 userdata=userdata_cpycmd),
             ]
             m.edit = True
+            m.cnt = 1
             # m.iconBtns = [(ButtonType.Delete.value,
             #                         mui.IconType.Delete.value)]
         return {m.last_part(): m for m in metas}

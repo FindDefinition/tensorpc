@@ -246,6 +246,13 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
             child_node.type = mui.ControlNodeType.VectorN.value
             child_node.count = len(getattr(current_obj, f.name).data)
             child_node.initValue = getattr(current_obj, f.name)
+            if isinstance(meta, SliderMeta):
+                child_node.min = meta.begin
+                child_node.max = meta.end
+                child_node.step = meta.step
+            else:
+                child_node.type = mui.ControlNodeType.Number.value
+                child_node.initValue = getattr(current_obj, f.name)
             setter = partial(setattr_vector_n,
                              obj=current_obj,
                              name=f.name)
@@ -459,7 +466,8 @@ class ConfigPanelV2(mui.SimpleControls):
     @staticmethod
     def slider_meta(begin: mui.NumberType,
                     end: mui.NumberType,
+                    step: Union[mui.NumberType, mui.Undefined] = mui.undefined,
                     alias: Optional[str] = None):
         return {
-            _CONFIG_META_KEY: SliderMeta(begin=begin, end=end, alias=alias)
+            _CONFIG_META_KEY: SliderMeta(begin=begin, end=end, step=step, alias=alias)
         }
