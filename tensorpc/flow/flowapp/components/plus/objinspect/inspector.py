@@ -122,7 +122,8 @@ class ObjectInspector(mui.FlexBox):
                  with_detail: bool = True,
                  use_allotment: bool = True,
                  enable_exception_inspect: bool = True,
-                 use_fast_tree: bool = False) -> None:
+                 use_fast_tree: bool = False,
+                 fixed_size: bool = False) -> None:
         self.detail_container = mui.HBox([]).prop(overflow="auto",
                                                   padding="3px")
         if use_allotment:
@@ -134,7 +135,8 @@ class ObjectInspector(mui.FlexBox):
         self.tree = ObjectTree(init,
                                cared_types,
                                ignored_types,
-                               use_fast_tree=use_fast_tree)
+                               use_fast_tree=use_fast_tree,
+                               fixed_size=fixed_size)
         if use_allotment:
             layout: mui.LayoutType = [
                 self.tree.prop(

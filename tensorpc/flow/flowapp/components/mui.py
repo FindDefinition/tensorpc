@@ -3549,7 +3549,7 @@ class JsonLikeTreeProps(MUIFlexBoxProps):
     ignoreRoot: Union[Undefined, bool] = undefined
     useFastTree: Union[Undefined, bool] = undefined
     contextMenus: Union[Undefined, List[ContextMenuData]] = undefined
-
+    fixedSize: Union[Undefined, bool] = undefined
 
 class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
 

@@ -73,7 +73,13 @@ def _check_is_valid(obj_type, cared_types: Set[Type],
     return valid
 
 
-class TreeExpandController:
+class ObjectTreeCore:
+    """
+    expand can be triggered by two kind of events:
+    1. user click expand button
+    2. user provide a uid, and we expand it automatically
+    
+    """
     def __init__(self, cared_types: Optional[Set[Type]] = None,
                  ignored_types: Optional[Set[Type]] = None, auto_lazy_expand: bool = True) -> None:
         if cared_types is None:
@@ -342,10 +348,11 @@ class BasicObjectTree(mui.FlexBox):
                  limit: int = 50,
                  use_fast_tree: bool = False,
                  auto_lazy_expand: bool = True,
-                 init_expand_level: int = 1) -> None:
+                 init_expand_level: int = 1,
+                 fixed_size: bool = False) -> None:
         self.tree = mui.JsonLikeTree()
         super().__init__([
-            self.tree.prop(ignoreRoot=True, useFastTree=use_fast_tree),
+            self.tree.prop(ignoreRoot=True, useFastTree=use_fast_tree, fixedSize=fixed_size),
         ])
         self.prop(overflow="auto")
         self._uid_to_node: Dict[str, mui.JsonLikeNode] = {}
@@ -683,7 +690,8 @@ class ObjectTree(BasicObjectTree):
                  cared_types: Optional[Set[Type]] = None,
                  ignored_types: Optional[Set[Type]] = None,
                  use_fast_tree: bool = False,
-                 limit: int = 50) -> None:
+                 limit: int = 50,
+                 fixed_size: bool = False) -> None:
         self._default_data_storage_nodes: Dict[str, DataStorageTreeItem] = {}
         self._default_obs_funcs = ObservedFunctionTree()
         default_builtins = {
@@ -701,7 +709,7 @@ class ObjectTree(BasicObjectTree):
             _DEFAULT_OBSERVED_FUNC_NAME: self._default_obs_funcs,
         }
         self._data_storage_uid = f"{_ROOT}{GLOBAL_SPLIT}{_DEFAULT_DATA_STORAGE_NAME}"
-        super().__init__(init, cared_types, ignored_types, limit, use_fast_tree)
+        super().__init__(init, cared_types, ignored_types, limit, use_fast_tree, fixed_size=fixed_size)
         self.root.update(default_builtins)
 
     @mark_did_mount

@@ -18,7 +18,7 @@ import contextvars
 import inspect
 from typing import (Any, Callable, Coroutine, Dict, Generator, Iterator, List, Optional, Protocol,
                     Type, TypeVar, Union)
-
+import uuid 
 from typing_extensions import ContextManager
 
 T = TypeVar("T")
@@ -31,7 +31,7 @@ def get_qualname_of_type(klass: Type) -> str:
 
 
 class ObjTreeContextProtocol(Protocol):
-    node: "UserObjTreeProtocol"
+    nodes: Dict[str, "UserObjTreeProtocol"]
 
 
 class UserObjTreeProtocol(Protocol):
@@ -59,8 +59,8 @@ class UserObjTreeProtocol(Protocol):
 
 class ObjTreeContext:
 
-    def __init__(self, node: "UserObjTreeProtocol") -> None:
-        self.node = node
+    def __init__(self) -> None:
+        self.nodes: Dict[str, "UserObjTreeProtocol"] = {}
 
 
 T_treeitem = TypeVar("T_treeitem", bound=UserObjTreeProtocol)
@@ -73,13 +73,13 @@ OBJ_TREE_CONTEXT_VAR: contextvars.ContextVar[
 def get_objtree_context() -> Optional[ObjTreeContextProtocol]:
     return OBJ_TREE_CONTEXT_VAR.get()
 
-def enter_obj_tree_context(node: UserObjTreeProtocol) -> Generator["ObjTreeContextProtocol", None, None]:
-    ctx = ObjTreeContext(node)
-    token = OBJ_TREE_CONTEXT_VAR.set(ctx)
-    try:
-        yield ctx
-    finally:
-        OBJ_TREE_CONTEXT_VAR.reset(token)
+# def enter_obj_tree_context(node: UserObjTreeProtocol) -> Generator["ObjTreeContextProtocol", None, None]:
+#     ctx = ObjTreeContext(node)
+#     token = OBJ_TREE_CONTEXT_VAR.set(ctx)
+#     try:
+#         yield ctx
+#     finally:
+#         OBJ_TREE_CONTEXT_VAR.reset(token)
 
 class UserObjTree:
 
@@ -94,12 +94,19 @@ class UserObjTree:
     def enter_context(
         self, node: "UserObjTreeProtocol"
     ) -> Generator["ObjTreeContextProtocol", None, None]:
-        ctx = ObjTreeContext(node)
-        token = OBJ_TREE_CONTEXT_VAR.set(ctx)
+        ctx = OBJ_TREE_CONTEXT_VAR.get()
+        token: Optional[contextvars.Token] = None
+        if ctx is None:
+            ctx = ObjTreeContext()
+            token = OBJ_TREE_CONTEXT_VAR.set(ctx)
+        key = str(uuid.uuid4())
+        ctx.nodes[key] = node
         try:
             yield ctx
         finally:
-            OBJ_TREE_CONTEXT_VAR.reset(token)
+            ctx.nodes.pop(key)
+            if token is not None:
+                OBJ_TREE_CONTEXT_VAR.reset(token)
 
     
     def default_expand(self) -> bool:
@@ -211,10 +218,16 @@ def find(obj_type: Type[T], validator: Optional[Callable[[T], bool]] = None) -> 
     """
     ctx = get_objtree_context()
     assert ctx is not None
-    if _check_node(ctx.node, obj_type, validator):
-        return ctx.node # type: ignore
+    res: Optional[T] = None
+    for node in ctx.nodes.values():
+        if _check_node(node, obj_type, validator):
+            return node # type: ignore
 
-    return find_tree_child_item(ctx.node, obj_type, UserObjTree, validator)
+        res = find_tree_child_item_may_exist(node, obj_type, UserObjTree, validator)
+        if res is not None:
+            break
+    assert res is not None, f"can't find type {obj_type} in root." 
+    return res 
 
 
 def find_may_exist(obj_type: Type[T], validator: Optional[Callable[[T], bool]] = None) -> Optional[T]:
@@ -222,9 +235,13 @@ def find_may_exist(obj_type: Type[T], validator: Optional[Callable[[T], bool]] =
     if not exist, return None.
     """
     ctx = get_objtree_context()
-    if ctx is None:
-        return None 
-    if _check_node(ctx.node, obj_type, validator):
-        return ctx.node # type: ignore
-    # assert ctx is not None
-    return find_tree_child_item_may_exist(ctx.node, obj_type, UserObjTree, validator)
+    assert ctx is not None
+    res: Optional[T] = None
+    for node in ctx.nodes.values():
+        if _check_node(node, obj_type, validator):
+            return node # type: ignore
+
+        res = find_tree_child_item_may_exist(node, obj_type, UserObjTree, validator)
+        if res is not None:
+            break
+    return res 
