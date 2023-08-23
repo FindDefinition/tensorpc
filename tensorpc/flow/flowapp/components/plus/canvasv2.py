@@ -18,7 +18,18 @@ from tensorpc.utils.registry import HashableSeqRegistryKeyOnly
 from tensorpc.flow.flowapp.components.core import get_tensor_container
 
 # UNKNOWN_VIS_REGISTRY: HashableSeqRegistryKeyOnly[Callable[[Any, str, "SimpleCanvas"], Coroutine[None, None, bool]]] = HashableSeqRegistryKeyOnly()
+"""
+canvas V program api design
 
+def v_program(params):
+
+    return bind_state
+
+V.control(v_program)
+V.bind
+
+
+"""
 
 class ComplexCanvas(mui.FlexBox):
     """

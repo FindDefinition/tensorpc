@@ -59,8 +59,8 @@ class UserObjTreeProtocol(Protocol):
 
 class ObjTreeContext:
 
-    def __init__(self) -> None:
-        self.nodes: Dict[str, "UserObjTreeProtocol"] = {}
+    def __init__(self, nodes: Dict[str, "UserObjTreeProtocol"]) -> None:
+        self.nodes: Dict[str, "UserObjTreeProtocol"] = nodes
 
 
 T_treeitem = TypeVar("T_treeitem", bound=UserObjTreeProtocol)
@@ -94,19 +94,19 @@ class UserObjTree:
     def enter_context(
         self, node: "UserObjTreeProtocol"
     ) -> Generator["ObjTreeContextProtocol", None, None]:
-        ctx = OBJ_TREE_CONTEXT_VAR.get()
+        ctx_prev = OBJ_TREE_CONTEXT_VAR.get()
+        nodes_prev: Dict[str, "UserObjTreeProtocol"] = {}
         token: Optional[contextvars.Token] = None
-        if ctx is None:
-            ctx = ObjTreeContext()
-            token = OBJ_TREE_CONTEXT_VAR.set(ctx)
+        if ctx_prev is not None:
+            nodes_prev = ctx_prev.nodes
         key = str(uuid.uuid4())
-        ctx.nodes[key] = node
+        ctx = ObjTreeContext({key: node, **nodes_prev})
+        token = OBJ_TREE_CONTEXT_VAR.set(ctx)
         try:
             yield ctx
         finally:
-            ctx.nodes.pop(key)
-            if token is not None:
-                OBJ_TREE_CONTEXT_VAR.reset(token)
+            OBJ_TREE_CONTEXT_VAR.reset(token)
+
 
     
     def default_expand(self) -> bool:

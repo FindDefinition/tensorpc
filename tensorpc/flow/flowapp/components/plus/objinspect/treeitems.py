@@ -12,7 +12,7 @@ from tensorpc.flow.jsonlike import (CommonQualNames, ContextMenuData,
 from typing import Any, Callable, Dict, Generic, Hashable, List, Optional, TypeVar, Union, Tuple
 from tensorpc.core import inspecttools
 from tensorpc.flow.marker import mark_create_preview_layout
-from .analysis import parse_obj_dict, GLOBAL_SPLIT, parse_obj_item
+from .analysis import ObjectTreeParser, GLOBAL_SPLIT
 import humanize
 import datetime as dt
 
@@ -89,7 +89,7 @@ class TraceTreeItem(TreeItem):
             id = f"{parent_ns}{GLOBAL_SPLIT}{v.get_uid()}"
             node = v.get_json_like_node(id)
             res[v.get_uid()] = node
-        res_list = parse_obj_dict(self.local_vars, parent_ns, lambda x: True)
+        res_list = await ObjectTreeParser.parse_obj_dict_to_nodes(self.local_vars, parent_ns)
         res.update({x.name: x for x in res_list})
         return res
 

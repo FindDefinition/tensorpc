@@ -117,10 +117,10 @@ class UIType(enum.IntEnum):
     Alert = 0x15
     AccordionSummary = 0x16
     AccordionDetail = 0x17
-    TabContext = 0x18
-    Tab = 0x30
-    TabPanel = 0x1a
-    TabList = 0x1b
+    # TabContext = 0x18
+    # Tab = 0x19
+    # TabPanel = 0x1a
+    # TabList = 0x1b
     Checkbox = 0x1c
     AppBar = 0x1d
     Toolbar = 0x1e

@@ -13,11 +13,13 @@ import logging
 import subprocess
 import threading
 import os
-from typing import List
+from typing import List, Optional
 
 import aiohttp
 from aiohttp import web
 import ssl
+
+from tensorpc.core.asynctools import cancel_task
 
 
 log = logging.getLogger(__name__)
@@ -94,42 +96,62 @@ class AsyncJsonRpcStreamWriter:
 
 
 class LanguageServerHandler:
-    def __init__(self, ls_cmd: List[str]) -> None:
+    def __init__(self, st_ev: asyncio.Event, ls_cmd: List[str]) -> None:
         self.ls_cmd = ls_cmd
+        self._num_conn = 0
+        self._shutdown_delay_task: Optional[asyncio.Task] = None
+        self.st_ev = st_ev
 
     async def handle_ls_open(self, request):
-        print("NEW CONN", request)
-        ws = web.WebSocketResponse()
-        await ws.prepare(request)
-        aproc = await asyncio.create_subprocess_exec(*self.ls_cmd, env=os.environ,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE)
-        assert aproc.stdout is not None 
-        assert aproc.stdin is not None 
+        print("NEW LANGUAGE CLIENT", request)
+        if self._shutdown_delay_task is not None:
+            # cancel task
+            print("CANCEL SHUTDOWN")
+            await cancel_task(self._shutdown_delay_task)
+            self._shutdown_delay_task = None
 
-        # proc = subprocess.Popen(["python", "-m", "tensorpc.cli.pyright_launch", "--stdio"], env=os.environ,
-        #     stdin=subprocess.PIPE,
-        #     stdout=subprocess.PIPE)
-        # Create a writer that formats json messages with the correct LSP headers
-        writer = AsyncJsonRpcStreamWriter(aproc.stdin)
-        reader = AsyncJsonRpcStreamReader(aproc.stdout)
-        async def cosumer(msg):
-            # print("OUTPUT", type(msg), msg)
-            await ws.send_json(msg)
-        task = asyncio.create_task(reader.listen(cosumer))
-        # Create a reader for consuming stdout of the language server. We need to
-        # consume this in another thread
-        async for ws_msg in ws:
-            if ws_msg.type == aiohttp.WSMsgType.TEXT:
-                # print("INPUT", ws_msg.json())  
-                await writer.write(ws_msg.json())
-        
-            elif ws_msg.type == aiohttp.WSMsgType.ERROR:
-                print("ERROR", ws_msg)
-                print("ERROR", ws_msg.data)
-            else:
-                raise NotImplementedError
+        self._num_conn += 1
+        try:
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            aproc = await asyncio.create_subprocess_exec(*self.ls_cmd, env=os.environ,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE)
+            assert aproc.stdout is not None 
+            assert aproc.stdin is not None 
+            # proc = subprocess.Popen(["python", "-m", "tensorpc.cli.pyright_launch", "--stdio"], env=os.environ,
+            #     stdin=subprocess.PIPE,
+            #     stdout=subprocess.PIPE)
+            # Create a writer that formats json messages with the correct LSP headers
+            writer = AsyncJsonRpcStreamWriter(aproc.stdin)
+            reader = AsyncJsonRpcStreamReader(aproc.stdout)
+            async def cosumer(msg):
+                # print("OUTPUT", type(msg), msg)
+                await ws.send_json(msg)
+            task = asyncio.create_task(reader.listen(cosumer))
+            # Create a reader for consuming stdout of the language server. We need to
+            # consume this in another thread
+            async for ws_msg in ws:
+                if ws_msg.type == aiohttp.WSMsgType.TEXT:
+                    # print("INPUT", ws_msg.json())  
+                    await writer.write(ws_msg.json())
+            
+                elif ws_msg.type == aiohttp.WSMsgType.ERROR:
+                    print("ERROR", ws_msg)
+                    print("ERROR", ws_msg.data)
+                else:
+                    raise NotImplementedError
+            print("LANGUAGE CLIENT CONN SHUTDOWN", request)
+        finally:
+            self._num_conn -= 1
+            if self._num_conn == 0:
+                print("SHUTDOWN LANGUAGE SERVER AFTER 1 Minute")
+                self._shutdown_delay_task = asyncio.create_task(self._shutdown_task_delayed(60))
         return ws
+
+    async def _shutdown_task_delayed(self, delay: float):
+        await asyncio.sleep(delay)
+        self.st_ev.set()
 
 async def serve_app(app,
                     port,
@@ -149,7 +171,7 @@ async def serve_ls(port: int,
                     ssl_crt_path: str = ""):
     async_shutdown_ev = asyncio.Event()
     app = web.Application()
-    handler = LanguageServerHandler(ls_cmd)
+    handler = LanguageServerHandler(async_shutdown_ev, ls_cmd)
     app.router.add_get("", handler.handle_ls_open)
     ssl_context = None
     if ssl_key_path != "" and ssl_key_path != "":

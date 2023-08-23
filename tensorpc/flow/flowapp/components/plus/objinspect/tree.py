@@ -29,7 +29,7 @@ from tensorpc.flow.jsonlike import (CommonQualNames, ContextMenuData,
                                     IconButtonData, parse_obj_to_jsonlike, TreeItem)
 from tensorpc.flow.marker import mark_did_mount, mark_will_unmount
 from .controllers import CallbackSlider, ThreadLocker, MarkdownViewer
-from .analysis import GLOBAL_SPLIT, get_obj_dict, parse_obj_item, parse_obj_dict, get_obj_by_uid_trace, get_obj_by_uid
+from .analysis import GLOBAL_SPLIT, ObjectTreeParser# , get_obj_dict, parse_obj_item, parse_obj_dict_to_nodes, get_obj_by_uid_trace, get_obj_by_uid
 
 _DEFAULT_OBJ_NAME = "default"
 
@@ -52,10 +52,6 @@ FOLDER_TYPES = {
     mui.JsonLikeType.ListFolder.value, mui.JsonLikeType.DictFolder.value
 }
 
-_SHOULD_EXPAND_TYPES = {mui.JsonLikeType.List.value, mui.JsonLikeType.Tuple.value,
-                        mui.JsonLikeType.Dict.value, mui.JsonLikeType.Object.value,
-                            mui.JsonLikeType.ListFolder.value, mui.JsonLikeType.DictFolder.value,
-                            mui.JsonLikeType.Layout.value}
 
 class ButtonType(enum.Enum):
     Reload = "reload"
@@ -63,131 +59,96 @@ class ButtonType(enum.Enum):
     Watch = "watch"
     Record = "record"
 
-def _check_is_valid(obj_type, cared_types: Set[Type],
-                    ignored_types: Set[Type]):
-    valid = True
-    if len(cared_types) != 0:
-        valid &= obj_type in cared_types
-    if len(ignored_types) != 0:
-        valid &= obj_type not in ignored_types
-    return valid
+# _SHOULD_EXPAND_TYPES = {mui.JsonLikeType.List.value, mui.JsonLikeType.Tuple.value,
+#                         mui.JsonLikeType.Dict.value, mui.JsonLikeType.Object.value,
+#                             mui.JsonLikeType.ListFolder.value, mui.JsonLikeType.DictFolder.value,
+#                             mui.JsonLikeType.Layout.value}
+
+# def _check_is_valid(obj_type, cared_types: Set[Type],
+#                     ignored_types: Set[Type]):
+#     valid = True
+#     if len(cared_types) != 0:
+#         valid &= obj_type in cared_types
+#     if len(ignored_types) != 0:
+#         valid &= obj_type not in ignored_types
+#     return valid
 
 
-class ObjectTreeCore:
-    """
-    expand can be triggered by two kind of events:
-    1. user click expand button
-    2. user provide a uid, and we expand it automatically
-    
-    """
-    def __init__(self, cared_types: Optional[Set[Type]] = None,
-                 ignored_types: Optional[Set[Type]] = None, auto_lazy_expand: bool = True) -> None:
-        if cared_types is None:
-            cared_types = set()
-        if ignored_types is None:
-            ignored_types = set()
-        self._cared_types = cared_types
-        self._ignored_types = ignored_types
-        self._auto_lazy_expand = auto_lazy_expand
-        self._cached_lazy_expand_uids: List[str] = []
-        self._cared_dnd_uids: Dict[str, Callable[[str, Any],
-                                                 mui.CORO_NONE]] = {}
-
-def _get_root_tree(obj,
-                   checker: Callable[[Type], bool],
-                   key: str,
-                   obj_meta_cache=None):
-    obj_dict = get_obj_dict(obj, checker)
-    root_node = parse_obj_item(obj, key, key, checker, obj_meta_cache)
-    root_node.children = parse_obj_dict(obj_dict, key, checker, obj_meta_cache)
-    for (k, o), c in zip(obj_dict.items(), root_node.children):
-        obj_child_dict = get_obj_dict(o, checker)
-        c.drag = False
-        c.children = parse_obj_dict(obj_child_dict, c.id, checker,
-                                    obj_meta_cache)
-    root_node.cnt = len(obj_dict)
-    return root_node
+# def _get_root_tree(obj,
+#                    checker: Callable[[Type], bool],
+#                    key: str,
+#                    obj_meta_cache=None):
+#     obj_dict = get_obj_dict(obj, checker)
+#     root_node = parse_obj_item(obj, key, key, checker, obj_meta_cache)
+#     root_node.children = parse_obj_dict_to_nodes(obj_dict, key, checker, obj_meta_cache)
+#     for (k, o), c in zip(obj_dict.items(), root_node.children):
+#         obj_child_dict = get_obj_dict(o, checker)
+#         c.drag = False
+#         c.children = parse_obj_dict_to_nodes(obj_child_dict, c.id, checker,
+#                                     obj_meta_cache)
+#     root_node.cnt = len(obj_dict)
+#     return root_node
 
 
-async def _get_root_tree_async(obj,
-                               checker: Callable[[Type], bool],
-                               key: str,
-                               obj_meta_cache=None):
-    obj_dict = get_obj_dict(obj, checker)
-    root_node = parse_obj_item(obj, key, key, checker, obj_meta_cache)
-    root_node.children = parse_obj_dict(obj_dict, key, checker, obj_meta_cache)
-    for (k, o), c in zip(obj_dict.items(), root_node.children):
-        if isinstance(o, TreeItem):
-            obj_child_dict = await o.get_child_desps(c.id)  # type: ignore
-        else:
-            obj_child_dict = get_obj_dict(o, checker)
-        # obj_child_dict = get_obj_dict(o, checker)
-        c.drag = False
-        c.children = parse_obj_dict(obj_child_dict, c.id, checker,
-                                    obj_meta_cache)
-    root_node.cnt = len(obj_dict)
-    return root_node
+# async def _parse_obj_to_node(obj,
+#                        node: mui.JsonLikeNode,
+#                        checker: Callable[[Type], bool],
+#                        cached_lazy_expand_ids: Set[str],
+#                        obj_meta_cache=None,
+#                        total_expand_level: int = 0):
+#     if node.type not in _SHOULD_EXPAND_TYPES:
+#         return 
+#     if isinstance(obj, TreeItem):
+#         obj_dict = await obj.get_child_desps(node.id)  # type: ignore
+#         tree_children = list(obj_dict.values())
+#     else:
+#         obj_dict = get_obj_dict(obj, checker)
+#         tree_children = parse_obj_dict_to_nodes(obj_dict, node.id, checker, obj_meta_cache)
+#     node.children = tree_children
+#     node.cnt = len(obj_dict)
+#     for (k, v), child_node in zip(obj_dict.items(), node.children):
+#         should_expand = child_node.id in cached_lazy_expand_ids or total_expand_level > 0
+#         if isinstance(v, TreeItem) and v.default_expand():
+#             should_expand = True
+#         if should_expand:
+#             await _parse_obj_to_node(v, child_node, checker, cached_lazy_expand_ids,
+#                                obj_meta_cache, total_expand_level - 1)
 
 
-async def _parse_obj_to_node(obj,
-                       node: mui.JsonLikeNode,
-                       checker: Callable[[Type], bool],
-                       cached_lazy_expand_ids: Set[str],
-                       obj_meta_cache=None,
-                       total_expand_level: int = 0):
-    if node.type not in _SHOULD_EXPAND_TYPES:
-        return 
-    if isinstance(obj, TreeItem):
-        obj_dict = await obj.get_child_desps(node.id)  # type: ignore
-        tree_children = list(obj_dict.values())
-    else:
-        obj_dict = get_obj_dict(obj, checker)
-        tree_children = parse_obj_dict(obj_dict, node.id, checker, obj_meta_cache)
-    node.children = tree_children
-    node.cnt = len(obj_dict)
-    for (k, v), child_node in zip(obj_dict.items(), node.children):
-        should_expand = child_node.id in cached_lazy_expand_ids or total_expand_level > 0
-        if isinstance(v, TreeItem) and v.default_expand():
-            should_expand = True
-        if should_expand:
-            await _parse_obj_to_node(v, child_node, checker, cached_lazy_expand_ids,
-                               obj_meta_cache, total_expand_level - 1)
+# async def _get_obj_tree(obj,
+#                   checker: Callable[[Type], bool],
+#                   key: str,
+#                   parent_id: str,
+#                   obj_meta_cache=None,
+#                   cached_lazy_expand_ids: Optional[List[str]] = None,
+#                   total_expand_level: int = 0):
+#     if parent_id == "":
+#         obj_id = key 
+#     else:
+#         obj_id = f"{parent_id}{GLOBAL_SPLIT}{key}"
+#     assert total_expand_level >= 0
+#     root_node = parse_obj_item(obj, key, obj_id, checker, obj_meta_cache)
+#     if cached_lazy_expand_ids is None:
+#         cached_lazy_expand_ids = []
+#     cached_lazy_expand_ids_set = set(cached_lazy_expand_ids)
+#     # TODO determine auto-expand limits
+#     if root_node.type == mui.JsonLikeType.Object.value:
 
+#         await _parse_obj_to_node(obj, root_node, checker, cached_lazy_expand_ids_set,
+#                            obj_meta_cache)
+#         # obj_dict = get_obj_dict(obj, checker)
+#         # root_node.children = parse_obj_dict_to_nodes(obj_dict, obj_id, checker,
+#         #                                     obj_meta_cache)
+#         # root_node.cnt = len(obj_dict)
+#     else:
+#         should_expand = obj_id in cached_lazy_expand_ids_set or total_expand_level >= 0
+#         if isinstance(obj, TreeItem) and obj.default_expand():
+#             should_expand = True
+#         if should_expand:
+#             await _parse_obj_to_node(obj, root_node, checker,
+#                                cached_lazy_expand_ids_set, obj_meta_cache, total_expand_level=total_expand_level)
 
-async def _get_obj_tree(obj,
-                  checker: Callable[[Type], bool],
-                  key: str,
-                  parent_id: str,
-                  obj_meta_cache=None,
-                  cached_lazy_expand_ids: Optional[List[str]] = None,
-                  total_expand_level: int = 0):
-    if parent_id == "":
-        obj_id = key 
-    else:
-        obj_id = f"{parent_id}{GLOBAL_SPLIT}{key}"
-    assert total_expand_level >= 0
-    root_node = parse_obj_item(obj, key, obj_id, checker, obj_meta_cache)
-    if cached_lazy_expand_ids is None:
-        cached_lazy_expand_ids = []
-    cached_lazy_expand_ids_set = set(cached_lazy_expand_ids)
-    # TODO determine auto-expand limits
-    if root_node.type == mui.JsonLikeType.Object.value:
-
-        await _parse_obj_to_node(obj, root_node, checker, cached_lazy_expand_ids_set,
-                           obj_meta_cache)
-        # obj_dict = get_obj_dict(obj, checker)
-        # root_node.children = parse_obj_dict(obj_dict, obj_id, checker,
-        #                                     obj_meta_cache)
-        # root_node.cnt = len(obj_dict)
-    else:
-        should_expand = obj_id in cached_lazy_expand_ids_set or total_expand_level >= 0
-        if isinstance(obj, TreeItem) and obj.default_expand():
-            should_expand = True
-        if should_expand:
-            await _parse_obj_to_node(obj, root_node, checker,
-                               cached_lazy_expand_ids_set, obj_meta_cache, total_expand_level=total_expand_level)
-
-    return root_node
+#     return root_node
 
 
 class DataStorageTreeItem(TreeItem):
@@ -197,11 +158,9 @@ class DataStorageTreeItem(TreeItem):
         self.node_id = node_id
         self.readable_id = readable_id
 
-    async def get_child_desps(self,
-                              parent_ns: str) -> Dict[str, mui.JsonLikeNode]:
+    async def get_child_desps(self) -> Dict[str, mui.JsonLikeNode]:
         metas = await appctx.list_data_storage(self.node_id)
         for m in metas:
-            m.id = f"{parent_ns}{GLOBAL_SPLIT}{m.id}"
             userdata = {
                 "type": ContextMenuType.DataStorageItemDelete.value,
             }
@@ -219,7 +178,7 @@ class DataStorageTreeItem(TreeItem):
                                 userdata=userdata_cpycmd),
             ]
             m.edit = True
-            m.cnt = 1
+            # m.cnt = 1
             # m.iconBtns = [(ButtonType.Delete.value,
             #                         mui.IconType.Delete.value)]
         return {m.last_part(): m for m in metas}
@@ -228,11 +187,11 @@ class DataStorageTreeItem(TreeItem):
         res = await appctx.read_data_storage(key, self.node_id)
         return res
 
-    def get_json_like_node(self, id: str) -> Optional[mui.JsonLikeNode]:
+    def get_json_like_node(self) -> Optional[mui.JsonLikeNode]:
         btns = [
             IconButtonData(ButtonType.Delete.value, mui.IconType.Delete.value)
         ]
-        return mui.JsonLikeNode(id,
+        return mui.JsonLikeNode(self.readable_id,
                                 self.readable_id,
                                 mui.JsonLikeType.Object.value,
                                 typeStr="DataStorageTreeItem",
@@ -276,11 +235,12 @@ class ObservedFunctionTree(TreeItem):
         super().__init__()
         self._watched_funcs: Set[str] = set()
 
-    async def get_child_desps(self,
-                              parent_ns: str) -> Dict[str, mui.JsonLikeNode]:
+    # async def get_childs(self):
+
+    async def get_child_desps(self) -> Dict[str, mui.JsonLikeNode]:
         metas: Dict[str, mui.JsonLikeNode] = {}
         for k, v in appctx.get_app().get_observed_func_registry().items():
-            node = mui.JsonLikeNode(f"{parent_ns}{GLOBAL_SPLIT}{k}", v.name,
+            node = mui.JsonLikeNode(k, v.name,
                                     mui.JsonLikeType.Function.value, alias=v.name)
             node.iconBtns = [
                 IconButtonData(ButtonType.Watch.value,
@@ -302,8 +262,8 @@ class ObservedFunctionTree(TreeItem):
     async def get_child(self, key: str) -> Any:
         return appctx.get_app().get_observed_func_registry()[key]
 
-    def get_json_like_node(self, id: str) -> Optional[mui.JsonLikeNode]:
-        return mui.JsonLikeNode(id,
+    def get_json_like_node(self) -> Optional[mui.JsonLikeNode]:
+        return mui.JsonLikeNode("observedFunc",
                                 "observedFunc",
                                 mui.JsonLikeType.Object.value,
                                 typeStr="ObservedFunctions",
@@ -348,13 +308,14 @@ class BasicObjectTree(mui.FlexBox):
                  limit: int = 50,
                  use_fast_tree: bool = False,
                  auto_lazy_expand: bool = True,
-                 init_expand_level: int = 1,
+                 init_expand_level: int = 2,
                  fixed_size: bool = False) -> None:
         self.tree = mui.JsonLikeTree()
         super().__init__([
             self.tree.prop(ignoreRoot=True, useFastTree=use_fast_tree, fixedSize=fixed_size),
         ])
         self.prop(overflow="auto")
+        self._tree_parser = ObjectTreeParser(cared_types, ignored_types)
         self._uid_to_node: Dict[str, mui.JsonLikeNode] = {}
         if cared_types is None:
             cared_types = set()
@@ -364,7 +325,7 @@ class BasicObjectTree(mui.FlexBox):
         self._ignored_types = ignored_types
         self._obj_meta_cache = {}
         self._auto_lazy_expand = auto_lazy_expand
-        self._cached_lazy_expand_uids: List[str] = []
+        # self._cached_lazy_expand_uids: List[str] = []
         self._cared_dnd_uids: Dict[str, Callable[[str, Any],
                                                  mui.CORO_NONE]] = {}
         self.limit = limit
@@ -397,18 +358,19 @@ class BasicObjectTree(mui.FlexBox):
     async def _on_mount(self):
         # self.tree.props.tree = await _get_root_tree_async(
         #     self.root, self._valid_checker, _ROOT, self._obj_meta_cache)
-        self.tree.props.tree = await _get_obj_tree(
-            self.root, self._valid_checker, _ROOT, "", self._obj_meta_cache, total_expand_level=self.init_expand_level)
-
+        root_node = await self._tree_parser.get_root_tree(self.root, _ROOT, self.init_expand_level)
+        # self.tree.props.tree = await _get_obj_tree(
+        #     self.root, self._valid_checker, _ROOT, "", self._obj_meta_cache, total_expand_level=self.init_expand_level)
+        self.tree.props.tree = root_node
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
 
-    def _checker(self, obj):
-        return _check_is_valid(type(obj), self._cared_types,
-                               self._ignored_types)
+    # def _checker(self, obj):
+    #     return _check_is_valid(type(obj), self._cared_types,
+    #                            self._ignored_types)
 
-    def _valid_checker(self, obj):
-        return True
+    # def _valid_checker(self, obj):
+    #     return True
 
     @property
     def _objinspect_root(self):
@@ -424,9 +386,8 @@ class BasicObjectTree(mui.FlexBox):
             if not tree_node_trace[i].is_folder():
                 real_keys.append(k)
                 real_uids.append(uids[i])
-        return await get_obj_by_uid(self.root,
+        return await self._tree_parser.get_obj_by_uid(self.root,
                                      GLOBAL_SPLIT.join(real_uids),
-                                     self._valid_checker,
                                      real_keys=real_keys)
 
     async def _get_obj_by_uid_trace(self, uid: str,
@@ -439,9 +400,8 @@ class BasicObjectTree(mui.FlexBox):
             if not tree_node_trace[i].is_folder():
                 real_keys.append(k)
                 real_uids.append(uids[i])
-        return await get_obj_by_uid_trace(self.root,
+        return await self._tree_parser.get_obj_by_uid_trace(self.root,
                                            GLOBAL_SPLIT.join(real_uids),
-                                           self._valid_checker,
                                            real_keys=real_keys)
 
     def _register_dnd_uid(self, uid: str, cb: Callable[[str, Any],
@@ -476,8 +436,7 @@ class BasicObjectTree(mui.FlexBox):
 
     async def _on_drag_collect(self, data):
         uid = data["id"]
-        objs, found = await get_obj_by_uid_trace(self.root, uid,
-                                                  self._valid_checker)
+        objs, found = await self._tree_parser.get_obj_by_uid_trace(self.root, uid)
         if not found:
             return None
         tab_id = ""
@@ -502,11 +461,7 @@ class BasicObjectTree(mui.FlexBox):
         node = nodes[-1]
         obj_dict: Dict[Hashable, Any] = {}
         if self._auto_lazy_expand:
-            new_lazy_expand_uids: List[str] = list(
-                filter(lambda n: not n.startswith(uid),
-                       self._cached_lazy_expand_uids))
-            new_lazy_expand_uids.append(uid)
-            self._cached_lazy_expand_uids = new_lazy_expand_uids
+            self._tree_parser.update_lazy_expand_uids(uid)
         if node.type in FOLDER_TYPES:
             assert not isinstance(node.start, mui.Undefined)
             assert not isinstance(node.realId, mui.Undefined)
@@ -521,9 +476,8 @@ class BasicObjectTree(mui.FlexBox):
             else:
                 assert not isinstance(node.keys, mui.Undefined)
                 data = {k: real_obj[k] for k in node.keys.data}
-            obj_dict = get_obj_dict(data, self._checker)
-            tree = parse_obj_dict(obj_dict, node.id, self._checker,
-                                  self._obj_meta_cache)
+            obj_dict = {**(await self._tree_parser.expand_object(data))}
+            tree = await self._tree_parser.parse_obj_dict_to_nodes(obj_dict, node.id)
             node.children = tree
             upd = self.tree.update_event(tree=self._objinspect_root)
             return await self.tree.send_and_wait(upd)
@@ -538,12 +492,14 @@ class BasicObjectTree(mui.FlexBox):
         # if the object is special (extend TreeItem), we use used-defined
         # function instead of analysis it.
         if isinstance(obj, TreeItem):
-            obj_dict = await obj.get_child_desps(uid)  # type: ignore
-            tree = list(obj_dict.values())
+            obj_dict_desp = await obj.get_child_desps()  
+            for k, v in obj_dict_desp.items():
+                v.id = f"{uid}{GLOBAL_SPLIT}{v.id}"
+            obj_dict = {**obj_dict_desp}
+            tree = list(obj_dict_desp.values())
         else:
-            obj_dict = get_obj_dict(obj, self._checker)
-            tree = parse_obj_dict(obj_dict, node.id, self._checker,
-                                self._obj_meta_cache)
+            obj_dict = {**(await self._tree_parser.expand_object(obj))}
+            tree = await self._tree_parser.parse_obj_dict_to_nodes(obj_dict, node.id)
         node.children = tree
         upd = self.tree.update_event(tree=self._objinspect_root)
         return await self.tree.send_and_wait(upd)
@@ -552,8 +508,7 @@ class BasicObjectTree(mui.FlexBox):
         uid = uid_newname[0]
         uid_parts = uid.split(GLOBAL_SPLIT)
 
-        obj_trace, found = await get_obj_by_uid_trace(self.root, uid,
-                                                       self._valid_checker)
+        obj_trace, found = await self._tree_parser.get_obj_by_uid_trace(self.root, uid)
         if not found:
             return
         # if object is TreeItem or parent is TreeItem,
@@ -574,8 +529,7 @@ class BasicObjectTree(mui.FlexBox):
         uid = uid_btn[0]
         uid_parts = uid.split(GLOBAL_SPLIT)
 
-        obj_trace, found = await get_obj_by_uid_trace(self.root, uid,
-                                                       self._valid_checker)
+        obj_trace, found = await self._tree_parser.get_obj_by_uid_trace(self.root, uid)
         if not found:
             return
         obj = obj_trace[-1]
@@ -614,8 +568,8 @@ class BasicObjectTree(mui.FlexBox):
         uid_parts = uid.split(GLOBAL_SPLIT)
         userdata = uid_menuid_data[2]
         if userdata is not None:
-            obj_trace, found = await get_obj_by_uid_trace(
-                self.root, uid, self._valid_checker)
+            obj_trace, found = await self._tree_parser.get_obj_by_uid_trace(
+                self.root, uid)
             if found:
                 obj = obj_trace[-1]
                 # handle tree item first
@@ -641,13 +595,17 @@ class BasicObjectTree(mui.FlexBox):
     def has_object(self, key: str):
         return key in self.root
 
-    async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME, expand_level: int = 0):
+    async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME, expand_level: int = 1):
         key_in_root = key in self.root
         self.root[key] = obj
-        obj_tree = await _get_obj_tree(obj, self._checker, key,
-                                 self.tree.props.tree.id, self._obj_meta_cache,
-                                 self._cached_lazy_expand_uids,
-                                 total_expand_level=expand_level)
+        obj_tree = await self._tree_parser.get_root_tree(obj, key, expand_level, ns=self.tree.props.tree.id)
+
+        # obj_tree = await self._tree_parser.parse_obj_to_tree_node(obj, f"{self.tree.props.tree.id}{GLOBAL_SPLIT}{key}")
+        await self._tree_parser.parse_obj_to_tree(obj, obj_tree, expand_level)
+        # obj_tree = await _get_obj_tree(obj, self._checker, key,
+        #                          self.tree.props.tree.id, self._obj_meta_cache,
+        #                          self._cached_lazy_expand_uids,
+        #                          total_expand_level=expand_level)
         if key_in_root:
             for i, node in enumerate(self.tree.props.tree.children):
                 if node.name == key:
@@ -662,8 +620,7 @@ class BasicObjectTree(mui.FlexBox):
         await self._do_when_tree_updated(obj_tree.id)
 
     async def update_tree(self):
-        self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
-                                              _ROOT, self._obj_meta_cache)
+        self.tree.props.tree = await self._tree_parser.get_root_tree(self.root, _ROOT, self.init_expand_level)
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
         await self._do_when_tree_updated(self.tree.props.tree.id)
@@ -734,13 +691,12 @@ class ObjectTree(BasicObjectTree):
                                     id=n,
                                     icon=mui.IconType.DataObject.value,
                                     userdata=userdata))
+
             self._default_data_storage_nodes[readable_n] = DataStorageTreeItem(
                 n, readable_n)
         # self.tree.props.tree = await _get_root_tree_async(
         #     self.root, self._valid_checker, _ROOT, self._obj_meta_cache)
-        self.tree.props.tree = await _get_obj_tree(
-            self.root, self._valid_checker, _ROOT, "", self._obj_meta_cache, 
-            total_expand_level=self.init_expand_level)
+        self.tree.props.tree = await self._tree_parser.get_root_tree(self.root, _ROOT, self.init_expand_level)
         if context_menus:
             await self.tree.send_and_wait(
                 self.tree.update_event(tree=self.tree.props.tree,

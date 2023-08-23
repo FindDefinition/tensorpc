@@ -39,7 +39,8 @@ P = ParamSpec('P')
 T = TypeVar('T')
 
 
-def _parse_trace_modules(traced_locs: List[Union[str, Path, types.ModuleType]]):
+def _parse_trace_modules(traced_locs: List[Union[str, Path,
+                                                 types.ModuleType]]):
     traced_folders: Set[str] = set()
     for m in traced_locs:
         if isinstance(m, (str, Path)):
@@ -67,7 +68,6 @@ class DefaultHandler(ObjectPreviewHandler):
     """
     TODO if the object support any-layout, add a button to enable it.
     """
-
     def __init__(self) -> None:
         self.tags = mui.FlexBox().prop(flexFlow="row wrap")
         self.title = mui.Typography("").prop(wordBreak="break-word")
@@ -114,7 +114,6 @@ class DefaultHandler(ObjectPreviewHandler):
 
 
 class ObjectInspector(mui.FlexBox):
-
     def __init__(self,
                  init: Optional[Any] = None,
                  cared_types: Optional[Set[Type]] = None,
@@ -124,8 +123,45 @@ class ObjectInspector(mui.FlexBox):
                  enable_exception_inspect: bool = True,
                  use_fast_tree: bool = False,
                  fixed_size: bool = False) -> None:
-        self.detail_container = mui.HBox([]).prop(overflow="auto",
-                                                  padding="3px")
+        self.preview_container = mui.HBox([]).prop(overflow="auto",
+                                                   padding="3px",
+                                                   flex=1,
+                                                   width="100%",
+                                                   height="100%")
+        use_fast_tree = False
+        tab_theme = mui.Theme(
+            components={
+                "MuiTab": {
+                    "styleOverrides": {
+                        "root": {
+                            "padding": "0",
+                            "minWidth": "28px",
+                            "minHeight": "28px",
+                        }
+                    }
+                }
+            })
+        self.detail_container = mui.HBox([
+            mui.ThemeProvider([
+                mui.Tabs([
+                    mui.TabDef("",
+                               "1",
+                               self.preview_container,
+                               icon=mui.IconType.Preview,
+                               tooltip="preview layout of item",
+                               tooltipPlacement="right"),
+                    mui.TabDef("",
+                               "2",
+                               mui.AppTerminal(),
+                               icon=mui.IconType.Terminal,
+                               tooltip="app terminal (read only)",
+                               tooltipPlacement="right"),
+                ]).prop(panelProps=mui.FlexBoxProps(width="100%", padding=0),
+                        orientation="vertical",
+                        borderRight=1,
+                        borderColor='divider')
+            ], tab_theme)
+        ])
         if use_allotment:
             self.detail_container.prop(height="100%")
         else:
@@ -173,7 +209,6 @@ class ObjectInspector(mui.FlexBox):
         self._type_to_handler_object: Dict[Type[Any],
                                            ObjectPreviewHandler] = {}
         self._current_preview_layout: Optional[mui.FlexBox] = None
-
 
     async def get_object_by_uid(self, uid_list: Union[List[str], str]):
         if isinstance(uid_list, list):
@@ -231,7 +266,7 @@ class ObjectInspector(mui.FlexBox):
         nodes = self.tree._objinspect_root._get_node_by_uid_trace(uid)
         node = nodes[-1]
         if node.type in FOLDER_TYPES:
-            await self.detail_container.set_new_layout([])
+            await self.preview_container.set_new_layout([])
             return
         obj, found = await self.tree._get_obj_by_uid_with_folder(uid, nodes)
         if not found:
@@ -281,10 +316,12 @@ class ObjectInspector(mui.FlexBox):
                     if obj_type in ALL_OBJECT_PREVIEW_HANDLERS:
                         handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_type]
                     elif obj_qualname in ALL_OBJECT_PREVIEW_HANDLERS:
-                        handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_qualname]
+                        handler_type = ALL_OBJECT_PREVIEW_HANDLERS[
+                            obj_qualname]
                     elif is_dcls and DataClassesType in ALL_OBJECT_PREVIEW_HANDLERS:
                         modified_obj_type = DataClassesType
-                        handler_type = ALL_OBJECT_PREVIEW_HANDLERS[DataClassesType]
+                        handler_type = ALL_OBJECT_PREVIEW_HANDLERS[
+                            DataClassesType]
                 if handler_type is not None:
                     handler = handler_type()
                 else:
@@ -299,19 +336,19 @@ class ObjectInspector(mui.FlexBox):
             # preview_layout.event_emitter.remove_listener()
             if self._current_preview_layout is None:
                 get_app()._get_self_as_editable_app()._flowapp_observe(
-                        preview_layout, self._on_preview_layout_reload)
+                    preview_layout, self._on_preview_layout_reload)
             else:
                 get_app()._get_self_as_editable_app()._flowapp_remove_observer(
-                        self._current_preview_layout)
+                    self._current_preview_layout)
                 get_app()._get_self_as_editable_app()._flowapp_observe(
-                        preview_layout, self._on_preview_layout_reload)
+                    preview_layout, self._on_preview_layout_reload)
             self._current_preview_layout = preview_layout
             # self.__install_preview_event_listeners(preview_layout)
-            await self.detail_container.set_new_layout([preview_layout])
+            await self.preview_container.set_new_layout([preview_layout])
         else:
-            childs = list(self.detail_container._child_comps.values())
+            childs = list(self.preview_container._child_comps.values())
             if not childs or childs[0] is not handler:
-                await self.detail_container.set_new_layout([handler])
+                await self.preview_container.set_new_layout([handler])
             await handler.bind(obj, uid)
 
     async def _on_preview_layout_reload(self, layout: mui.FlexBox,
@@ -328,19 +365,23 @@ class ObjectInspector(mui.FlexBox):
                 layout_flex._flow_comp_def_path = _get_obj_def_path(
                     layout._wrapped_obj)
                 layout_flex._wrapped_obj = layout._wrapped_obj
-                layout_flex.set_flow_event_context_creator(layout._flow_event_context_creator)
+                layout_flex.set_flow_event_context_creator(
+                    layout._flow_event_context_creator)
                 # self.__install_preview_event_listeners(layout_flex)
-                await self.detail_container.set_new_layout([layout_flex])
+                await self.preview_container.set_new_layout([layout_flex])
             else:
                 layout_flex = create_layout.get_binded_fn()()
-                layout_flex.set_flow_event_context_creator(layout._flow_event_context_creator)
+                layout_flex.set_flow_event_context_creator(
+                    layout._flow_event_context_creator)
                 # self.__install_preview_event_listeners(layout_flex)
                 await layout.set_new_layout(layout_flex)
             return layout_flex
 
-    async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME, expand_level: int = 0):
+    async def set_object(self,
+                         obj,
+                         key: str = _DEFAULT_OBJ_NAME,
+                         expand_level: int = 0):
         await self.tree.set_object(obj, key, expand_level=expand_level)
-
 
     async def update_locals(self,
                             key: str = _DEFAULT_LOCALS_NAME,
@@ -391,15 +432,18 @@ class ObjectInspector(mui.FlexBox):
         del frame
         del cur_frame
         if get_app()._flowapp_thread_id == threading.get_ident():
-            task = asyncio.create_task(self.tree.set_object(inspecttools.filter_local_vars(local_vars),
-                                 key + f"-{frame_name}"))
+            task = asyncio.create_task(
+                self.tree.set_object(
+                    inspecttools.filter_local_vars(local_vars),
+                    key + f"-{frame_name}"))
             # we can't wait fut here
             return task
         else:
             # we can wait fut here.
             fut = asyncio.run_coroutine_threadsafe(
-                self.tree.set_object(inspecttools.filter_local_vars(local_vars),
-                                    key + f"-{frame_name}"), loop)
+                self.tree.set_object(
+                    inspecttools.filter_local_vars(local_vars),
+                    key + f"-{frame_name}"), loop)
             return fut.result()
 
     def set_object_sync(self,
@@ -420,7 +464,8 @@ class ObjectInspector(mui.FlexBox):
             # return fut
         else:
             # we can wait fut here.
-            fut = asyncio.run_coroutine_threadsafe(self.set_object(obj, key, expand_level), loop)
+            fut = asyncio.run_coroutine_threadsafe(
+                self.set_object(obj, key, expand_level), loop)
 
             return fut.result()
 
@@ -516,7 +561,8 @@ class ObjectInspector(mui.FlexBox):
             self.set_object_sync(show_dict, key, loop=loop)
 
     def trace_sync_return(self,
-                          traced_locs: List[Union[str, Path, types.ModuleType]],
+                          traced_locs: List[Union[str, Path,
+                                                  types.ModuleType]],
                           key: str = "trace",
                           traced_types: Optional[Tuple[Type]] = None,
                           traced_names: Optional[Set[str]] = None,

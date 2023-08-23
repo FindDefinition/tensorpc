@@ -580,14 +580,17 @@ def parse_obj_to_jsonlike(obj, name: str, id: str):
 
 class TreeItem(abc.ABC):
     @abc.abstractmethod
-    async def get_child_desps(self, parent_ns: str) -> Dict[str, JsonLikeNode]:
+    async def get_child_desps(self) -> Dict[str, JsonLikeNode]:
         raise NotImplementedError
-    
+
     @abc.abstractmethod
     async def get_child(self, key: str) -> Any:
         raise NotImplementedError
 
-    def get_json_like_node(self, id: str) -> Optional[JsonLikeNode]:
+    def get_json_like_node(self) -> Optional[JsonLikeNode]:
+        """name and id is determined by parent, only root node use name provided
+        by this method.
+        """
         return None 
     
     async def handle_button(self, button_key: str) -> Optional[bool]:

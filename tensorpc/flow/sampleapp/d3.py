@@ -618,11 +618,11 @@ class App:
         canvas = plus.SimpleCanvas(init_canvas_childs=[
             cam,
             three.CameraControl().prop(makeDefault=True),
-            three.AmbientLight(),
+            three.AmbientLight(intensity=3.14),
             three.PointLight().prop(position=(13, 3, 5),
                                     castShadow=True,
                                     color=0xffffff,
-                                    intensity=5),
+                                    intensity=500),
             three.Mesh([
                 three.PlaneGeometry(1000, 1000),
                 three.MeshStandardMaterial().prop(color="#f0f0f0"),

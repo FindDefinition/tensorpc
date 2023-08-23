@@ -33,7 +33,7 @@ import cv2
 import imageio
 import numpy as np
 from faker import Faker
-from typing_extensions import Literal
+from typing_extensions import Annotated, Literal
 
 import tqdm
 import tensorpc
@@ -43,13 +43,14 @@ from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.inspecttools import get_all_members_by_type
 from tensorpc.flow import (App, EditableApp, EditableLayoutApp, leaflet,
                            mark_autorun, mark_create_layout, marker, mui,
-                           plotly, plus, three, UserObjTree, appctx)
+                           plotly, plus, three, UserObjTree, appctx, V)
 from tensorpc.flow.client import AppClient, AsyncAppClient, add_message
 from tensorpc.flow.coretypes import MessageLevel, ScheduleEvent
 from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
                                                   ListItemText,
                                                   MUIComponentType, VBox,
                                                   VList)
+from tensorpc.flow.flowapp.components.plus import typemetas
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from tensorpc.flow.sampleapp.sample_reload_fn import func_support_reload
 from tensorpc.flow.flowapp.objtree import get_objtree_context
@@ -820,10 +821,10 @@ class WTF:
     c: bool = False
     e: str = "RTX"
     h: TestEnum = TestEnum.C
-    i: int = dataclasses.field(default=1,
-                               metadata=ConfigPanel.slider_meta(0, 10))
+    i: V.Annotated[int, V.RangedInt(0, 10)] = 1
     j: TestEnumInt = TestEnumInt.C
     vn: mui.ControlVectorN = mui.ControlVectorN([1, 0, 2])
+    wtf: V.Annotated[float, V.RangedFloat(0, 1, 0.05, "ftw")] = 0.5
 
 class SampleConfigApp(EditableApp):
     def __init__(self) -> None:

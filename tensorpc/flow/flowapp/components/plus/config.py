@@ -18,8 +18,9 @@ from functools import partial
 import json
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union, Generic
 import operator
-from typing_extensions import Literal
+from typing_extensions import Literal, Annotated, get_origin, get_args
 
+from tensorpc.flow.flowapp.components.plus import typemetas
 from tensorpc.flow.flowapp.core import AppEvent
 from .. import mui
 import inspect
@@ -36,18 +37,19 @@ _BASE_TYPES = (
 )
 
 
-def get_args(t: Any) -> Tuple[Any, ...]:
-    return getattr(t, "__args__", None) or ()
-
-
-def get_origin(tp):
-    if tp is Generic:
-        return Generic
-    return getattr(tp, "__origin__", None)
+# def get_args(t: Any) -> Tuple[Any, ...]:
+#     return getattr(t, "__args__", None) or ()
 
 
 _BASE_TYPES = (int, float, bool, str)
 
+def lenient_issubclass(cls: Any, class_or_tuple: Any) -> bool:  # pragma: no cover
+    return isinstance(cls, type) and issubclass(cls, class_or_tuple)
+
+def is_annotated(ann_type: Any) -> bool:
+    # https://github.com/pydantic/pydantic/blob/35144d05c22e2e38fe093c533ff3a05ce9a30116/pydantic/_internal/_typing_extra.py#L99C1-L104C1
+    origin = get_origin(ann_type)
+    return origin is not None and lenient_issubclass(origin, Annotated)
 
 def _check_is_basic_type(tp):
     origin = get_origin(tp)
@@ -87,7 +89,7 @@ class InputMeta(ConfigMeta):
 class SliderMeta(ConfigMeta):
     begin: mui.NumberType
     end: mui.NumberType
-    step: Union[mui.NumberType, mui.Undefined] = mui.undefined
+    step: Optional[mui.NumberType] = None 
 
 
 @dataclasses.dataclass
@@ -143,6 +145,13 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
         if _CONFIG_META_KEY in f.metadata:
             meta = f.metadata[_CONFIG_META_KEY]
         ty = f.type
+        is_anno = is_annotated(ty)
+        ty_origin = get_origin(ty)
+        annotated_metas = None 
+        # print(ty_origin, ty, type(ty))
+        if is_anno:
+            annotated_metas = ty.__metadata__
+            ty = get_args(ty)[0]
         if dataclasses.is_dataclass(ty) and ty not in _BUILTIN_DCLS_TYPE:
             res = parse_to_control_nodes(origin_obj,
                                          getattr(current_obj, f.name),
@@ -157,7 +166,6 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
         comparer = partial(compare_single, obj=current_obj, name=f.name)
         if meta is not None and meta.alias is not None:
             child_node.alias = meta.alias
-
         if ty is bool:
             # use switch
             # if meta is not None:
@@ -186,12 +194,22 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                                  mapper=float)
 
                 # setter = lambda x: setattrV2(current_obj, f.name, float(x))
+            if annotated_metas is not None:
+                for annotated_meta in annotated_metas:
+                    if isinstance(annotated_meta, typemetas.RangedInt):
+                        meta = SliderMeta(annotated_meta.alias, begin=annotated_meta.lo, end=annotated_meta.hi, step=annotated_meta.step) 
+                        break
+                    elif isinstance(annotated_meta, typemetas.RangedFloat):
+                        meta = SliderMeta(annotated_meta.alias, begin=annotated_meta.lo, end=annotated_meta.hi, step=annotated_meta.step) 
+                        break
+
             if isinstance(meta, SliderMeta):
                 child_node.type = mui.ControlNodeType.RangeNumber.value
                 child_node.initValue = getattr(current_obj, f.name)
                 child_node.min = meta.begin
                 child_node.max = meta.end
-                child_node.step = meta.step
+                child_node.alias = mui.undefined if meta.alias is None else meta.alias
+                child_node.step = mui.undefined if meta.step is None else meta.step
                 if isinstance(meta.step, mui.Undefined) and ty is int:
                     child_node.step = 1
             else:
@@ -246,13 +264,22 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
             child_node.type = mui.ControlNodeType.VectorN.value
             child_node.count = len(getattr(current_obj, f.name).data)
             child_node.initValue = getattr(current_obj, f.name)
+            if annotated_metas is not None:
+                for annotated_meta in annotated_metas:
+                    if isinstance(annotated_meta, typemetas.RangedInt):
+                        meta = SliderMeta(annotated_meta.alias, begin=annotated_meta.lo, end=annotated_meta.hi, step=annotated_meta.step) 
+                        break
+                    elif isinstance(annotated_meta, typemetas.RangedFloat):
+                        meta = SliderMeta(annotated_meta.alias, begin=annotated_meta.lo, end=annotated_meta.hi, step=annotated_meta.step) 
+                        break
+            
             if isinstance(meta, SliderMeta):
                 child_node.min = meta.begin
                 child_node.max = meta.end
-                child_node.step = meta.step
-            else:
-                child_node.type = mui.ControlNodeType.Number.value
-                child_node.initValue = getattr(current_obj, f.name)
+                child_node.step = mui.undefined if meta.step is None else meta.step
+            # else:
+            #     child_node.type = mui.ControlNodeType.Number.value
+            #     child_node.initValue = getattr(current_obj, f.name)
             setter = partial(setattr_vector_n,
                              obj=current_obj,
                              name=f.name)
@@ -466,7 +493,7 @@ class ConfigPanelV2(mui.SimpleControls):
     @staticmethod
     def slider_meta(begin: mui.NumberType,
                     end: mui.NumberType,
-                    step: Union[mui.NumberType, mui.Undefined] = mui.undefined,
+                    step: Optional[mui.NumberType] = None,
                     alias: Optional[str] = None):
         return {
             _CONFIG_META_KEY: SliderMeta(begin=begin, end=end, step=step, alias=alias)

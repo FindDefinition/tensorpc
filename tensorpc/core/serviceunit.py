@@ -1148,7 +1148,7 @@ class ServiceUnit(DynamicClass):
             if inspecttools.isclassmethod(v) or inspecttools.isproperty(v):
                 # ignore property and classmethod
                 continue
-            if k.startswith("_"):
+            if k.startswith("__"):
                 # ignore all protected, private and magic methods
                 continue
             serv_key = f"{self.module_key}.{k}"
