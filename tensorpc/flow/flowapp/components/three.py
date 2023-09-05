@@ -21,6 +21,8 @@ import time
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Tuple, Type, TypeVar, Union)
 import urllib.request
+
+from pydantic import field_validator
 from tensorpc import compat
 from tensorpc.core.httpservers.core import JS_MAX_SAFE_INT
 from tensorpc.flow.flowapp.appcore import Event, EventDataType
@@ -161,6 +163,9 @@ T_material_prop = TypeVar("T_material_prop", bound=ThreeMaterialPropsBase)
 T_geometry_prop = TypeVar("T_geometry_prop", bound=ThreeGeometryPropsBase)
 
 ThreeComponentType = Union[ThreeComponentBase, ThreeContainerBase, Fragment]
+
+def is_three_component(obj: Component):
+    return isinstance(obj, (ThreeComponentBase, ThreeContainerBase, Fragment, Canvas))
 
 
 @dataclasses.dataclass
@@ -1491,7 +1496,9 @@ class ThreeCanvasProps(MUIFlexBoxProps):
     enablePerf: Union[bool, Undefined] = undefined
     perfPosition: Union[Literal['top-right', 'top-left', 'bottom-right',
                                  'bottom-left'], Undefined] = undefined
-
+    flat: Union[bool, Undefined] = undefined
+    linear: Union[bool, Undefined] = undefined
+    dpr: Union[Tuple[int, int], Undefined] = undefined
 
 class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
     def __init__(self,
@@ -2230,6 +2237,76 @@ class MeshDiscardMaterialProps(ThreeBasicProps):
     pass
 
 
+class ShaderUniformType(enum.IntEnum):
+    Int32Array = 0
+    Float32Array = 1
+    Matrix4 = 2
+    Matrix3 = 3
+    Quaternion = 4
+    Vector4 = 5
+    Vector3 = 6
+    Vector2 = 7
+    Color = 8
+    Number = 9
+    Boolean = 10
+    Array = 11
+
+
+@dataclasses.dataclass
+class ShaderUniform:
+    name: str
+    type: ShaderUniformType
+    value: Any
+
+@dataclasses.dataclass
+class MeshShaderMaterialProps(ThreeMaterialPropsBase):
+    uniforms: List[ShaderUniform] = dataclasses.field(default_factory=list)
+    vertexShader: str = ""
+    fragmentShader: str = ""
+    timeUniformKey: Union[Undefined, str] = undefined
+
+    @staticmethod
+    def _validator_single_uniform(u: ShaderUniform, value: Any):
+        uv = value
+        assert u.name.isidentifier(), f"uniform name {u.name} must be identifier"
+        if u.type == ShaderUniformType.Int32Array:
+            assert isinstance(uv, np.ndarray) and uv.dtype == np.int32 
+        elif u.type == ShaderUniformType.Float32Array:
+            assert isinstance(uv, np.ndarray) and uv.dtype == np.float32 
+        elif u.type == ShaderUniformType.Matrix4:
+            assert isinstance(uv, np.ndarray) and uv.dtype == np.float32 and uv.shape == (4, 4)
+        elif u.type == ShaderUniformType.Matrix3:
+            assert isinstance(uv, np.ndarray) and uv.dtype == np.float32 and uv.shape == (3, 3)
+        elif u.type == ShaderUniformType.Quaternion:
+            assert isinstance(uv, np.ndarray) and uv.dtype == np.float32 and uv.shape == (4, )
+        elif u.type == ShaderUniformType.Vector4:
+            assert isinstance(uv, np.ndarray) and uv.dtype == np.float32 and uv.shape == (4, )
+        elif u.type == ShaderUniformType.Vector3:
+            assert isinstance(uv, np.ndarray) and uv.dtype == np.float32 and uv.shape == (3, )
+        elif u.type == ShaderUniformType.Vector2:
+            assert isinstance(uv, np.ndarray) and uv.dtype == np.float32 and uv.shape == (2, )
+        elif u.type == ShaderUniformType.Color:
+            assert isinstance(uv, (str, int))
+        elif u.type == ShaderUniformType.Number:
+            assert isinstance(uv, (int, float))
+        elif u.type == ShaderUniformType.Boolean:
+            assert isinstance(uv, (bool))
+        elif u.type == ShaderUniformType.Array:
+            assert isinstance(uv, (list))
+
+    @field_validator('uniforms')
+    def uniform_validator(cls, v: List[ShaderUniform]):
+        for u in v:
+            cls._validator_single_uniform(u, u.value)
+        return v
+
+    @field_validator('timeUniformKey')
+    def time_uniform_key_validator(cls, v):
+        if isinstance(v, Undefined):
+            return v 
+        assert isinstance(v, str) and v.isidentifier(), f"timeUniformKey {v} must be identifier"
+        return v
+
 class MeshBasicMaterialV1(ThreeMaterialBase[MeshBasicMaterialProps]):
     def __init__(self) -> None:
         super().__init__(UIType.ThreeMeshMaterial, MeshBasicMaterialProps)
@@ -2434,6 +2511,35 @@ class MeshDiscardMaterial(ThreeMaterialBase[MeshDiscardMaterialProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+class MeshShaderMaterial(ThreeMaterialBase[MeshShaderMaterialProps]):
+    """don't forget to add some stmt in fragment shader:
+
+    #include <tonemapping_fragment>
+
+    #include <colorspace_fragment>
+    """
+    def __init__(self, ) -> None:
+        super().__init__(UIType.ThreeMeshShaderMaterial,
+                         MeshShaderMaterialProps)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def update_uniform_values(self, uniform_values: Dict[str, Any]):
+        uniform_def_dict = {u.name: u for u in self.props.uniforms}
+        for k, v in uniform_values.items():
+            if k not in uniform_def_dict:
+                raise ValueError(f"uniform {k} not defined")
+            u = uniform_def_dict[k]
+            MeshShaderMaterialProps._validator_single_uniform(u, v)
+        await self.send_and_wait(self.create_update_event(uniform_values))
 
 MeshChildType: TypeAlias = Union[ThreeMaterialBase, ThreeMaterialPropsBase,
                                  ThreeGeometryPropsBase, ThreeGeometryBase]
@@ -3467,6 +3573,13 @@ class BlendFunction(enum.IntEnum):
     SUBTRACT = 33
     VIVID_LIGHT = 34
 
+class ToneMapppingMode(enum.IntEnum):
+    REINHARD = 0
+    REINHARD2 = 1
+    REINHARD2_ADAPTIVE = 2
+    OPTIMIZED_CINEON = 3
+    ACES_FILMIC = 4
+    UNCHARTED2 = 5
 
 @dataclasses.dataclass
 class EffectComposerProps(ContainerBaseProps):
@@ -3479,10 +3592,10 @@ class EffectComposerProps(ContainerBaseProps):
     resolutionScale: Union[NumberType, Undefined] = undefined
     renderPriority: Union[int, Undefined] = undefined
 
-
 class EffectComposer(ThreeContainerBase[EffectComposerProps, ThreeEffectBase]):
-    """create a context with template data.
-    default dataKey: "" (empty), this means the data itself is passed to children
+    """when you use postprocessing, you need to set flat=False in canvas (disable default tonemapping) and 
+    use ToneMapping effect in postprocessing.
+    high-precision frame buffer is enabled by default.
     """
     def __init__(self, children: ThreeEffectType) -> None:
         if children is None:
@@ -3504,6 +3617,33 @@ class EffectComposer(ThreeContainerBase[EffectComposerProps, ThreeEffectBase]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
+@dataclasses.dataclass
+class ToneMappingProps(ThreeBasicProps):
+    blendFunction: Union[BlendFunction, Undefined] = undefined
+    mode: Union[ToneMapppingMode, Undefined] = undefined
+    adaptive: Union[bool, Undefined] = undefined
+    resolution: Union[NumberType, Undefined] = undefined
+    maxLuminance: Union[NumberType, Undefined] = undefined
+    whitePoint: Union[NumberType, Undefined] = undefined
+    middleGrey: Union[NumberType, Undefined] = undefined
+    minLuminance: Union[NumberType, Undefined] = undefined
+    averageLuminance: Union[NumberType, Undefined] = undefined
+    adaptationRate: Union[NumberType, Undefined] = undefined
+
+class ToneMapping(ThreeEffectBase[ToneMappingProps]):
+    def __init__(self) -> None:
+        super().__init__(UIType.ThreeEffectToneMapping, ToneMappingProps)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 @dataclasses.dataclass
 class OutlineProps(ThreeBasicProps):
@@ -3580,3 +3720,27 @@ class DepthOfField(ThreeEffectBase[DepthOfFieldProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class OutlinesProps(ThreeBasicProps):
+    color: Union[Undefined, str] = undefined
+    opacity: Union[Undefined, NumberType] = undefined
+    transparent: Union[Undefined, bool] = undefined
+    thickness: Union[Undefined, NumberType] = undefined
+    angle: Union[Undefined, NumberType] = undefined
+
+
+class Outlines(ThreeComponentBase[OutlinesProps]):
+    def __init__(self) -> None:
+        super().__init__(UIType.ThreeOutlines, OutlinesProps)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+

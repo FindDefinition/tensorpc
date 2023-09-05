@@ -22,4 +22,4 @@ from .flowapp.objtree import UserObjTree
 from .marker import (mark_autorun, mark_create_layout, mark_create_object,
                      mark_create_preview_layout, mark_did_mount,
                      mark_will_unmount)
-from .flowapp.components.plus import vis as V
+from .flowapp.components.plus.vis import vapi as V

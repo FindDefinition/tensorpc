@@ -150,6 +150,8 @@ class UIType(enum.IntEnum):
     Link = 0x36
     BlenderSlider = 0x37
     SimpleControls = 0x38
+    # this component have different state structure.
+    TanstackJsonLikeTreeView = 0x39
 
     # special
     TaskLoop = 0x100
@@ -229,6 +231,7 @@ class UIType(enum.IntEnum):
     ThreeContactShadows = 0x1042
     ThreeGizmoHelper = 0x1043
     ThreeSelectionContext = 0x1044
+    ThreeOutlines = 0x1045
 
     ThreeMeshBasicMaterial = 0x1050
     ThreeMeshStandardMaterial = 0x1051
@@ -243,6 +246,8 @@ class UIType(enum.IntEnum):
     ThreeMeshTransmissionMaterial = 0x105a
     ThreeMeshDiscardMaterial = 0x105b
 
+    ThreeMeshShaderMaterial = 0x105c
+
     ThreeSimpleGeometry = 0x1101
     ThreeShape = 0x1102
 
@@ -250,7 +255,8 @@ class UIType(enum.IntEnum):
     ThreeEffectOutline = 0x1201
     ThreeEffectBloom = 0x1202
     ThreeEffectDepthOfField = 0x1203
-    
+    ThreeEffectToneMapping = 0x1204
+
     MASK_LEAFLET = 0x2000
     LeafletMapContainer = 0x2000
     LeafletTileLayer = 0x2001
@@ -334,12 +340,14 @@ class FrontendEventType(enum.IntEnum):
     SelectNewItem = 26
 
     TreeLazyExpand = 30
-    TreeItemSelect = 31
+    TreeItemSelectChange = 31
+
     TreeItemToggle = 32
     TreeItemFocus = 33
     TreeItemButton = 34
     TreeItemContextMenu = 35
     TreeItemRename = 36
+    TreeItemExpandChange = 37
 
     ComplexLayoutCloseTab = 40
     ComplexLayoutSelectTab = 41
@@ -1376,7 +1384,7 @@ class Component(Generic[T_base_props, T_child]):
         data_no_und = {}
         data_unds = []
         for k, v in data.items():
-            k = snake_to_camel(k)
+            # k = snake_to_camel(k)
             if isinstance(v, Undefined):
                 data_unds.append(k)
             else:

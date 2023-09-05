@@ -353,8 +353,11 @@ class JsonLikeNode:
     edit: Union[Undefined, bool] = undefined
     userdata: Union[Undefined, Any] = undefined
     alias: Union[Undefined, str] = undefined
+    fixedIconBtns: Union[Undefined, List[IconButtonData]] = undefined
 
-    def decode_uid(self, uid: str, split_length: int = 2):
+
+    @staticmethod
+    def decode_uid(uid: str, split_length: int = 2):
         index = uid.find("|")
         lengths = list(map(int, uid[:index].split(",")))
         res: List[str] = []
@@ -365,10 +368,15 @@ class JsonLikeNode:
             start = end + split_length
         return res
 
-    def encode_uid(self, parts: List[str], split: str = "::"):
+    @staticmethod
+    def encode_uid(parts: List[str], split: str = "::"):
         lengths = [str(len(p)) for p in parts]
         lengths_str = f",".join(lengths)
         return f"{lengths_str}|{split.join(parts)}"
+
+    @staticmethod
+    def decode_uid_legacy(uid: str, split: str = "::"):
+        return uid.split(split)
 
     def last_part(self, split: str = "::"):
         return self.id[self.id.rfind(split) + len(split):]

@@ -128,7 +128,6 @@ class ObjectInspector(mui.FlexBox):
                                                    flex=1,
                                                    width="100%",
                                                    height="100%")
-        use_fast_tree = False
         tab_theme = mui.Theme(
             components={
                 "MuiTab": {
@@ -141,6 +140,7 @@ class ObjectInspector(mui.FlexBox):
                     }
                 }
             })
+            
         self.detail_container = mui.HBox([
             mui.ThemeProvider([
                 mui.Tabs([
@@ -205,62 +205,24 @@ class ObjectInspector(mui.FlexBox):
 
         if with_detail:
             self.tree.tree.register_event_handler(
-                FrontendEventType.TreeItemSelect.value, self._on_select)
+                FrontendEventType.TreeItemSelectChange.value, self._on_select)
         self._type_to_handler_object: Dict[Type[Any],
                                            ObjectPreviewHandler] = {}
         self._current_preview_layout: Optional[mui.FlexBox] = None
 
     async def get_object_by_uid(self, uid_list: Union[List[str], str]):
-        if isinstance(uid_list, list):
-            # node id list may empty (TODO don't send event in frontend?)
-            if not uid_list:
-                return None
-            uid = uid_list[0]
-        else:
-            uid = uid_list
-        nodes = self.tree._objinspect_root._get_node_by_uid_trace(uid)
-        node = nodes[-1]
-        if node.type in FOLDER_TYPES:
-            return None
-        if len(nodes) > 1:
-            folder_node = nodes[-2]
-            if folder_node.type in FOLDER_TYPES:
-                assert isinstance(folder_node.realId, str)
-                assert isinstance(folder_node.start, int)
-                real_nodes = self.tree._objinspect_root._get_node_by_uid_trace(
-                    folder_node.realId)
-                real_obj, found = await self.tree._get_obj_by_uid(
-                    folder_node.realId, real_nodes)
-                obj = None
-                if found:
-                    slice_idx = int(node.name)
-                    real_slice = folder_node.start + slice_idx
-                    found = True
-                    if nodes[-2].type == mui.JsonLikeType.ListFolder.value:
-                        obj = real_obj[real_slice]
-                    else:
-                        # dict folder
-                        assert isinstance(folder_node.keys,
-                                          mui.BackendOnlyProp)
-                        key = node.name
-                        if not isinstance(node.get_dict_key(), mui.Undefined):
-                            key = node.get_dict_key()
-                        obj = real_obj[key]
-            else:
-                obj, found = await self.tree._get_obj_by_uid(uid, nodes)
-        else:
-            obj, found = await self.tree._get_obj_by_uid(uid, nodes)
-        if not found:
-            raise ValueError(
-                f"your object {uid} is invalid, may need to reflesh")
-        return obj
+        return await self.tree.get_object_by_uid(uid_list)
 
-    async def _on_select(self, uid_list: Union[List[str], str]):
+    async def _on_select(self, uid_list: Union[List[str], str, Dict[str, bool]]):
         if isinstance(uid_list, list):
             # node id list may empty
             if not uid_list:
                 return
             uid = uid_list[0]
+        elif isinstance(uid_list, dict):
+            if not uid_list:
+                return
+            uid = list(uid_list.keys())[0]
         else:
             uid = uid_list
         nodes = self.tree._objinspect_root._get_node_by_uid_trace(uid)

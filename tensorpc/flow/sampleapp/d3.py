@@ -326,8 +326,10 @@ class EnvmapGroupdProjectionApp:
                                 three.Outline().prop(blur=True, edgeStrength=100, 
                                                      width=1000, visibleEdgeColor=0xf43f12, 
                                                      hiddenEdgeColor=0xf43f12),
+                                three.ToneMapping().prop(mode=three.ToneMapppingMode.ACES_FILMIC),
                             ]).prop(autoClear=False, multisampling=0),
                             three.Mesh([
+                                # three.Outlines().prop(color="blue", thickness=50),
                             ]).set_override_props_unchecked_dict({
                                 "geometry":
                                 "nodes.mesh_0.geometry",
@@ -433,7 +435,7 @@ class EnvmapGroupdProjectionApp:
         appctx.get_app().add_file_resource("old_depot_2k.hdr",
                                            self.old_depot_2k)
 
-        self.canvas.canvas.prop(shadows=True)
+        self.canvas.canvas.prop(shadows=True, flat=True)
         res = mui.VBox([
             mui.Button("dev_rotate", lambda : self.canvas.ctrl.rotate_to(0, 1.57)),
             self.canvas.prop(flex=1),
@@ -618,7 +620,7 @@ class App:
         canvas = plus.SimpleCanvas(init_canvas_childs=[
             cam,
             three.CameraControl().prop(makeDefault=True),
-            three.AmbientLight(intensity=3.14),
+            three.AmbientLight(intensity=0.314),
             three.PointLight().prop(position=(13, 3, 5),
                                     castShadow=True,
                                     color=0xffffff,
@@ -628,35 +630,41 @@ class App:
                 three.MeshStandardMaterial().prop(color="#f0f0f0"),
             ]).prop(receiveShadow=True, position=(0.0, 0.0, -2)),
 
-            # three.SelectionContext([
-            #                 three.EffectComposer([
-            #                     three.Outline().prop(blur=True, edgeStrength=100, 
-            #                                          width=1000, visibleEdgeColor=0xfff, 
-            #                                          hiddenEdgeColor=0xfff, blendFunction=three.BlendFunction.ALPHA),
-            #                 ]).prop(autoClear=False),
-            #     three.Mesh([
-            #         three.BoxGeometry(),
-            #         three.Edges(),
-            #         three.MeshStandardMaterial().prop(color="orange", opacity=0.5, transparent=True),
-            #     ]).prop(enableSelect=True, castShadow=True, position=(0, 0, 0), enableHover=True, 
-            #         enablePivotControl=True,
-            #         enablePivotControlOnSelected=True,
-            #         pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
-            #         ),
+            three.SelectionContext([
 
-            # ]),
+                three.EffectComposer([
+
+                    three.Outline().prop(blur=True, edgeStrength=100, 
+                                            width=1000, visibleEdgeColor=0xfff, 
+                                            hiddenEdgeColor=0xfff, blendFunction=three.BlendFunction.ALPHA),
+                    # three.Bloom(),
+                    # three.GammaCorrection(),
+                    three.ToneMapping().prop(mode=three.ToneMapppingMode.ACES_FILMIC),
+                ]).prop(autoClear=False),
+
+                three.Mesh([
+                    three.BoxGeometry(),
+                    three.Edges(),
+                    three.MeshStandardMaterial().prop(color="orange", transparent=True),
+                ]).prop(enableSelect=True, castShadow=True, position=(0, 0, 0), enableHover=True, 
+                    enablePivotControl=True,
+                    enablePivotControlOnSelected=True,
+                    pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
+                    ),
+
+            ]),
             three.PivotControls([
                 three.Mesh([
                     three.BoxGeometry(),
                     three.Edges(),
-                    three.MeshStandardMaterial().prop(color="orange", opacity=0.5, transparent=True),
+                    three.MeshStandardMaterial().prop(color="orange", transparent=True),
                 ]).prop(enableSelect=True, castShadow=True, position=(5, 0, 0)),            
             ]).prop(anchor=(1, 1, 1), depthTest=False, annotations=True, fixed=True, scale=60),
             
 
             three.Button("Click Me!", 8, 3, lambda : print("Clicked!")).prop(position=(0, 5, 1)),
         ])
-        canvas.canvas.prop(shadows=True)
+        canvas.canvas.prop(shadows=True, flat=True)
         return mui.VBox([
             canvas.prop(flex=1),
         ]).prop(minHeight=0,
@@ -665,6 +673,112 @@ class App:
                 height="100%",
                 overflow="hidden")
 
+class ShaderApp:
+    @mark_create_layout
+    def my_layout(self):
+        cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000).prop(position=(0, 0, 5))
+        self.dev_shader = three.MeshShaderMaterial().prop(
+                    vertexShader="""
+uniform float u_time;
+
+varying float vZ;
+
+void main() {
+  vec4 modelPosition = modelMatrix * vec4(position, 1.0);
+  
+  modelPosition.y += sin(modelPosition.x * 5.0 + u_time * 3.0) * 0.1;
+  modelPosition.y += sin(modelPosition.z * 6.0 + u_time * 2.0) * 0.1;
+  
+  vZ = modelPosition.y;
+
+  vec4 viewPosition = viewMatrix * modelPosition;
+  vec4 projectedPosition = projectionMatrix * viewPosition;
+
+  gl_Position = projectedPosition;
+}
+                    """,
+                    fragmentShader="""
+uniform vec3 u_colorA;
+uniform vec3 u_colorB;
+varying float vZ;
+
+
+void main() {
+  vec3 color = mix(u_colorA, u_colorB, vZ * 2.0 + 0.5); 
+  gl_FragColor = vec4(color, 1.0);
+}
+                    """,
+                    uniforms=[
+                        three.ShaderUniform("u_colorA", three.ShaderUniformType.Color, "#FFE486"),
+                        three.ShaderUniform("u_colorB", three.ShaderUniformType.Color, "#FEB3D9"),
+                    ],
+                    # transparent=False,
+                    timeUniformKey="u_time",
+                )
+        self.dev_shader2 = three.MeshShaderMaterial().prop(
+                    vertexShader="""
+varying vec2 vUv;
+
+void main() {
+  vUv = uv;
+  vec4 modelPosition = modelMatrix * vec4(position, 1.0);
+  vec4 viewPosition = viewMatrix * modelPosition;
+  vec4 projectedPosition = projectionMatrix * viewPosition;
+
+  gl_Position = projectedPosition;
+}
+                    """,
+                    fragmentShader="""
+varying vec2 vUv;
+
+vec3 colorA = vec3(0.912,0.191,0.652);
+vec3 colorB = vec3(1.000,0.777,0.052);
+
+void main() {
+  // "Normalizing" with an arbitrary value
+  // We'll see a cleaner technique later :)   
+  vec2 normalizedPixel = gl_FragCoord.xy/600.0;
+  vec3 color = mix(colorA, colorB, normalizedPixel.x);
+
+  gl_FragColor = vec4(color,1.0);
+  
+}
+                    """,
+                    # transparent=False,
+                )
+
+        canvas = plus.SimpleCanvas(init_canvas_childs=[
+            cam,
+            three.CameraControl().prop(makeDefault=True),
+            three.AmbientLight(intensity=0.314),
+            three.PointLight().prop(position=(13, 3, 5),
+                                    castShadow=True,
+                                    color=0xffffff,
+                                    intensity=500),
+            # three.Mesh([
+            #     three.PlaneGeometry(1000, 1000),
+            #     three.MeshStandardMaterial().prop(color="#f0f0f0"),
+            # ]).prop(receiveShadow=True, position=(0.0, 0.0, -2)),
+
+            three.Mesh([
+                three.PlaneGeometry(1, 1, 16, 16),
+                self.dev_shader2,
+            ]).prop(position=(5, 0, 0), rotation=(-np.pi/2, 0, 0)),
+        ])
+        canvas.canvas.prop(shadows=True)
+        return mui.VBox([
+            canvas.prop(flex=1),
+            mui.BlenderSlider(0, 10, 0.1, self._change_shader_uniform),
+        ]).prop(minHeight=0,
+                minWidth=0,
+                width="100%",
+                height="100%",
+                overflow="hidden")
+
+    async def _change_shader_uniform(self, value):
+        await self.dev_shader.send_and_wait(self.dev_shader.create_update_event({
+            "u_time": value
+        }))
 
 async def _main():
     url = "https://uploads.codesandbox.io/uploads/user/b3e56831-8b98-4fee-b941-0e27f39883ab/or72-porsche-transformed.glb"

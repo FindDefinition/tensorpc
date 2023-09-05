@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import enum
 import inspect
@@ -6,12 +7,12 @@ import types
 from pathlib import Path, PurePath
 from typing import (Any, Callable, Dict, Hashable, Iterable, List, Mapping, Optional,
                     Set, Tuple, Type, Union)
-
+import contextvars
 from tensorpc.core import inspecttools
 from tensorpc.core.serviceunit import ReloadableDynamicClass
 from tensorpc.flow.flowapp.components import mui
 from tensorpc.flow.flowapp.components.plus.objinspect.core import (
-    ALL_OBJECT_LAYOUT_HANDLERS, USER_OBJ_TREE_TYPES, ObjectLayoutCreator)
+    ALL_OBJECT_LAYOUT_HANDLERS, USER_OBJ_TREE_TYPES, CustomTreeItemHandler, ObjectLayoutCreator)
 from tensorpc.flow.flowapp.core import FlowSpecialMethods
 from tensorpc.flow.jsonlike import (IconButtonData, TreeItem,
                                     parse_obj_to_jsonlike)
@@ -42,7 +43,8 @@ class ObjectTreeParser:
     def __init__(self, 
                  cared_types: Optional[Set[Type]] = None,
                  ignored_types: Optional[Set[Type]] = None,
-                 custom_type_expanders: Optional[Dict[Type, Callable[[Any], dict]]] = None):
+                 custom_type_expanders: Optional[Dict[Type, Callable[[Any], dict]]] = None,
+                 custom_tree_item_handler: Optional[CustomTreeItemHandler] = None):
         if cared_types is None:
             cared_types = set()
         if ignored_types is None:
@@ -54,6 +56,7 @@ class ObjectTreeParser:
         if custom_type_expanders is None:
             custom_type_expanders = {}
         self._custom_type_expanders = custom_type_expanders
+        self.custom_tree_item_handler = custom_tree_item_handler
 
     def parseable(self, obj, check_obj: bool = True):
         if not self._check_is_valid(obj) and check_obj:
@@ -109,6 +112,10 @@ class ObjectTreeParser:
         elif isinstance(obj, TreeItem):
             # this is very special, we need to lazy access the child of a treeitem.
             return await obj.get_child_desps() 
+        if self.custom_tree_item_handler is not None:
+            res_tmp = await self.custom_tree_item_handler.get_childs(obj)
+            if res_tmp is not None:
+                return res_tmp
         for k, v in self._custom_type_expanders.items():
             if isinstance(obj, k):
                 return v(obj)
@@ -120,8 +127,7 @@ class ObjectTreeParser:
             res[k] = attr
         return res
 
-    @staticmethod
-    async def parse_obj_to_tree_node(obj, name: str, obj_meta_cache=None):
+    async def parse_obj_to_tree_node(self, obj, name: str, obj_meta_cache=None):
         obj_type = type(obj)
         try:
             isinst = isinstance(obj, TreeItem)
@@ -187,14 +193,17 @@ class ObjectTreeParser:
                                     ])
         return node
 
-    @staticmethod
-    async def parse_obj_dict_to_nodes(obj_dict: Mapping[Any, Any],
+    async def parse_obj_dict_to_nodes(self, obj_dict: Mapping[Any, Any],
                     ns: str, obj_meta_cache=None):
         res_node: List[mui.JsonLikeNode] = []
         for k, v in obj_dict.items():
             str_k = str(k)
-            node = await ObjectTreeParser.parse_obj_to_tree_node(v,
+            node = await self.parse_obj_to_tree_node(v,
                                 str_k, obj_meta_cache)
+            if self.custom_tree_item_handler is not None:
+                node_tmp = self.custom_tree_item_handler.patch_node(v, node)
+                if node_tmp is not None:
+                    node = node_tmp
             node.id = f"{ns}{GLOBAL_SPLIT}{str_k}"
             if not isinstance(k, str):
                 node.dictKey = mui.BackendOnlyProp(k)
@@ -706,3 +715,32 @@ class ObjectTreeParser:
 #         trace, found = await get_obj_by_uid_trace_resursive(
 #             child_obj, parts[1:], real_keys[1:], checker)
 #         return [child_obj] + trace, found
+
+class TreeContext:
+    def __init__(self, parser: ObjectTreeParser, tree: Union[mui.JsonLikeTree, mui.TanstackJsonLikeTree]) -> None:
+        self.parser = parser
+        self.tree = tree
+
+TREE_CONTEXT_VAR: contextvars.ContextVar[
+    Optional[TreeContext]] = contextvars.ContextVar("treectx",
+                                                   default=None)
+
+
+def get_tree_context() -> Optional[TreeContext]:
+    return TREE_CONTEXT_VAR.get()
+
+def get_tree_context_noexcept() -> TreeContext:
+    res = TREE_CONTEXT_VAR.get()
+    assert res is not None 
+    return res 
+
+
+@contextlib.contextmanager
+def enter_tree_conetxt(ctx: TreeContext):
+    """expose tree apis for user defined tree items.
+    """
+    token = TREE_CONTEXT_VAR.set(ctx)
+    try:
+        yield ctx
+    finally:
+        TREE_CONTEXT_VAR.reset(token)

@@ -13,6 +13,8 @@
 # limitations under the License.
 
 from .canvas import SimpleCanvas
+from .vis.canvas import ComplexCanvas
+
 from .config import ConfigPanel, ConfigPanelV2
 from .core import ListSlider
 from .figure import HomogeneousMetricFigure

@@ -197,19 +197,22 @@ class SimpleCanvas(mui.FlexBox):
         if init_canvas_childs is None:
             init_canvas_childs = []
         canvas_layout = [
+
             self.ctrl,
             self.camera,
             self._dynamic_pcs,
             self._dynamic_lines,
             self._dynamic_images,
             self._dynamic_boxes,
-            three.AxesHelper(20),
+            # three.AxesHelper(20),
             self._dynamic_grid,
             # self._screen_shot,
             self._screen_shot_v2,
             self._dynamic_voxels,
-            three.GizmoHelper().prop(alignment="bottom-right"),
-            *init_canvas_childs
+
+            # three.GizmoHelper().prop(alignment="bottom-right", renderPriority=1),
+            *init_canvas_childs,
+
         ]
         # if with_grid:
         #     canvas_layout.append(infgrid)

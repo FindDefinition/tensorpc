@@ -534,6 +534,7 @@ class IconType(enum.IntEnum):
     Done = 37
     Preview = 38
     Build = 39
+    VisibilityOff = 40
 
 
 @dataclasses.dataclass
@@ -3452,26 +3453,41 @@ def _default_json_node():
     return JsonLikeNode("root", "root", JsonLikeType.Object.value, "Object",
                         undefined, 0, [])
 
+class _TreeControlType(enum.IntEnum):
+    UpdateSubTree = 0
+
+
 
 @dataclasses.dataclass
-class JsonLikeTreeProps(MUIFlexBoxProps):
+class JsonLikeTreePropsBase(MUIFlexBoxProps):
     tree: JsonLikeNode = dataclasses.field(default_factory=_default_json_node)
     multiSelect: Union[Undefined, bool] = undefined
-    disabledItemsFocusable: Union[Undefined, bool] = undefined
     disableSelection: Union[Undefined, bool] = undefined
     ignoreRoot: Union[Undefined, bool] = undefined
-    useFastTree: Union[Undefined, bool] = undefined
+    # useFastTree: Union[Undefined, bool] = undefined
     contextMenus: Union[Undefined, List[ContextMenuData]] = undefined
     fixedSize: Union[Undefined, bool] = undefined
 
+@dataclasses.dataclass
+class JsonLikeTreeProps(JsonLikeTreePropsBase):
+    disabledItemsFocusable: Union[Undefined, bool] = undefined
+    rowSelection: List[str] = dataclasses.field(default_factory=list)
+    expanded: List[str] = dataclasses.field(default_factory=list)
 
-class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
-    def __init__(self, tree: Optional[JsonLikeNode] = None) -> None:
+@dataclasses.dataclass
+class TanstackJsonLikeTreeProps(JsonLikeTreePropsBase):
+    rowSelection: Dict[str, bool] = dataclasses.field(default_factory=dict)
+    expanded: Union[bool, Dict[str, bool]] = dataclasses.field(default_factory=dict)
+
+T_tview_base_props = TypeVar("T_tview_base_props", bound=JsonLikeTreePropsBase)
+
+class JsonLikeTreeBase(MUIComponentBase[T_tview_base_props]):
+    def __init__(self, base_type: UIType, prop_cls: Type[T_tview_base_props], tree: Optional[JsonLikeNode] = None) -> None:
         if tree is None:
             tree = _default_json_node()
         tview_events = [
             FrontendEventType.Change.value,
-            FrontendEventType.TreeItemSelect.value,
+            FrontendEventType.TreeItemSelectChange.value,
             FrontendEventType.TreeItemToggle.value,
             FrontendEventType.TreeLazyExpand.value,
             FrontendEventType.TreeItemFocus.value,
@@ -3479,14 +3495,14 @@ class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
             FrontendEventType.TreeItemContextMenu.value,
             FrontendEventType.TreeItemRename.value,
         ]
-        super().__init__(UIType.JsonLikeTreeView,
-                         JsonLikeTreeProps,
+        super().__init__(base_type,
+                         prop_cls,
                          allowed_events=tview_events,
                          json_only=True)
         self.props.tree = tree
 
         self.event_select = self._create_event_slot(
-            FrontendEventType.TreeItemSelect)
+            FrontendEventType.TreeItemSelectChange)
         # selection/expand change
         self.event_change = self._create_event_slot(FrontendEventType.Change)
 
@@ -3508,6 +3524,91 @@ class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
         propcls = self.propcls
         return self._prop_base(propcls, self)
 
+    def _update_subtree_backend_recursive(self, root: JsonLikeNode, node: JsonLikeNode, parts: List[str]):
+        if len(parts) == 1:
+            root.children = list(map(lambda x: node if x.id == node.id else x, root.children))
+            return root
+        root.children = list(map(lambda x: self._update_subtree_backend_recursive(x, node ,parts[1:]) if x.name == parts[0] else x, root.children))
+        return root
+
+    def _update_subtree_backend(self, node: JsonLikeNode):
+        parts = node.decode_uid_legacy(node.id)
+        if len(parts) == 1:
+            if node.id == self.props.tree.id:
+                self.props.tree = node 
+            return 
+        if parts[0] != self.props.tree.name:
+            return 
+            
+        return self._update_subtree_backend_recursive(self.props.tree, node, parts[1:]) 
+
+    async def update_subtree(self, node: JsonLikeNode):
+        self._update_subtree_backend(node)
+        return await self.send_and_wait(
+            self.create_comp_event({
+                "type":
+                _TreeControlType.UpdateSubTree,
+                "tree": node,
+            }))
+
+class JsonLikeTree(JsonLikeTreeBase[JsonLikeTreeProps]):
+    def __init__(self, tree: Optional[JsonLikeNode] = None) -> None:
+        super().__init__(UIType.JsonLikeTreeView,
+                         JsonLikeTreeProps,
+                         tree)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls, json_only=True)
+
+    async def update_tree(self, tree: JsonLikeNode):
+        await self.send_and_wait(self.update_event(tree=tree))
+
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self,
+                                           ev,
+                                           sync_status_first=False,
+                                           change_status=False,
+                                           is_sync=is_sync)
+
+    def state_change_callback(
+            self,
+            value,
+            type: ValueType = FrontendEventType.TreeItemSelectChange.value):
+        # this only triggered when dialog closed, so we always set
+        # open to false.
+        if type == FrontendEventType.TreeItemSelectChange:
+            self.prop(rowSelection=value)
+        elif type == FrontendEventType.TreeItemExpandChange:
+            self.prop(expanded=value)
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["rowSelection"] = self.props.rowSelection
+        res["expanded"] = self.props.expanded
+        return res
+
+    async def select(self, ids: List[str]):
+        await self.send_and_wait(self.update_event(rowSelection=ids))
+
+class TanstackJsonLikeTree(JsonLikeTreeBase[TanstackJsonLikeTreeProps]):
+    def __init__(self, tree: Optional[JsonLikeNode] = None) -> None:
+        super().__init__(UIType.TanstackJsonLikeTreeView,
+                         TanstackJsonLikeTreeProps,
+                         tree)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
     @property
     def update_event(self):
         propcls = self.propcls
@@ -3517,11 +3618,33 @@ class JsonLikeTree(MUIComponentBase[JsonLikeTreeProps]):
         await self.send_and_wait(self.update_event(tree=tree))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
+        # select and expand event may received at the same time,
+        # so we can't change status here.
         return await handle_standard_event(self,
                                            ev,
                                            sync_status_first=False,
+                                           change_status=False,
                                            is_sync=is_sync)
+            
+    def state_change_callback(
+            self,
+            value,
+            type: ValueType = FrontendEventType.TreeItemSelectChange.value):
+        # this only triggered when dialog closed, so we always set
+        # open to false.
+        if type == FrontendEventType.TreeItemSelectChange:
+            self.prop(rowSelection=value)
+        elif type == FrontendEventType.TreeItemExpandChange:
+            self.prop(expanded=value)
 
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["rowSelection"] = self.props.rowSelection
+        res["expanded"] = self.props.expanded
+        return res
+
+    async def select(self, ids: List[str]):
+        await self.send_and_wait(self.update_event(rowSelection={k: True for k in ids}))
 
 class ControlNodeType(enum.IntEnum):
     Number = 0

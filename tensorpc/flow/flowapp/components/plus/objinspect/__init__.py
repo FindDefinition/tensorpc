@@ -7,7 +7,7 @@ from .inspectpanel import InspectPanel
 from .layout import AnyFlexLayout
 from .tree import ObjectTree, TreeDragTarget, BasicObjectTree
 from .controllers import CallbackSlider, ThreadLocker, MarkdownViewer
-
+from .analysis import get_tree_context, get_tree_context_noexcept
 
 def register_obj_preview_handler(cls):
     return ALL_OBJECT_PREVIEW_HANDLERS.register(cls)

@@ -21,10 +21,13 @@ _STATE_CHANGE_EVENTS = set([
     FrontendEventType.Change.value,
     FrontendEventType.InputChange.value,
     FrontendEventType.ModalClose.value,
+    FrontendEventType.TreeItemSelectChange.value,
+    FrontendEventType.TreeItemExpandChange.value,
 ])
 
 _ONEARG_TREE_EVENTS = set([
-    FrontendEventType.TreeItemSelect.value,
+    FrontendEventType.TreeItemSelectChange.value,
+    FrontendEventType.TreeItemExpandChange.value,
     FrontendEventType.TreeItemToggle.value,
     FrontendEventType.TreeLazyExpand.value,
     FrontendEventType.TreeItemFocus.value,
@@ -101,6 +104,7 @@ async def handle_standard_event(comp: Component,
                                 change_status: bool = True):
     """ common event handler
     """
+    # print("WTF", event.type, event.data, comp.props.status)
     if comp.props.status == UIRunStatus.Running.value:
         # msg = create_ignore_usr_msg(comp)
         # await comp.send_and_wait(msg)
@@ -112,8 +116,11 @@ async def handle_standard_event(comp: Component,
             # in Button and IconButton will be disabled.
             sync_status_first = False
             change_status = False
+        # print("WTF2x", event.type, event.data)
 
         if event.type in _STATE_CHANGE_EVENTS:
+            # print("WTF2", event.type, event.data)
+
             handlers = comp.get_event_handlers(event.type)
             sync_state = False
             # for template components, we don't need to sync state.
