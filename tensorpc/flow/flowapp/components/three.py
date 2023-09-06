@@ -2250,6 +2250,7 @@ class ShaderUniformType(enum.IntEnum):
     Number = 9
     Boolean = 10
     Array = 11
+    DataTexture = 12
 
 
 @dataclasses.dataclass
@@ -2293,6 +2294,8 @@ class MeshShaderMaterialProps(ThreeMaterialPropsBase):
             assert isinstance(uv, (bool))
         elif u.type == ShaderUniformType.Array:
             assert isinstance(uv, (list))
+        elif u.type == ShaderUniformType.DataTexture:
+            assert isinstance(uv, np.ndarray) and uv.ndim >= 2 and uv.ndim <= 3
 
     @field_validator('uniforms')
     def uniform_validator(cls, v: List[ShaderUniform]):
@@ -2511,6 +2514,9 @@ class MeshDiscardMaterial(ThreeMaterialBase[MeshDiscardMaterialProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+class _ShaderControlType(enum.IntEnum):
+    UpdateUniform = 0
+
 class MeshShaderMaterial(ThreeMaterialBase[MeshShaderMaterialProps]):
     """don't forget to add some stmt in fragment shader:
 
@@ -2532,14 +2538,27 @@ class MeshShaderMaterial(ThreeMaterialBase[MeshShaderMaterialProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    async def update_uniform_values(self, uniform_values: Dict[str, Any]):
+    def update_uniform_values_event(self, uniform_values: Dict[str, Any]):
         uniform_def_dict = {u.name: u for u in self.props.uniforms}
+        res: List[ShaderUniform] = []
         for k, v in uniform_values.items():
             if k not in uniform_def_dict:
                 raise ValueError(f"uniform {k} not defined")
             u = uniform_def_dict[k]
             MeshShaderMaterialProps._validator_single_uniform(u, v)
-        await self.send_and_wait(self.create_update_event(uniform_values))
+            res.append(ShaderUniform(name=k, type=u.type, value=v))
+        # here we update value of backend. note that value in frontend
+        # won't be updated since it will trigger material recreation.
+        for k, v in uniform_values.items():
+            u = uniform_def_dict[k]
+            u.value = v
+        return self.create_comp_event({
+            "type": _ShaderControlType.UpdateUniform,
+            "uniforms": res
+        })
+
+    async def update_uniform_values(self, uniform_values: Dict[str, Any]):
+        await self.send_and_wait(self.update_uniform_values_event(uniform_values))
 
 MeshChildType: TypeAlias = Union[ThreeMaterialBase, ThreeMaterialPropsBase,
                                  ThreeGeometryPropsBase, ThreeGeometryBase]

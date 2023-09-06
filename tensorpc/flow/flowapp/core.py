@@ -1590,6 +1590,9 @@ class Component(Generic[T_base_props, T_child]):
         if change_status:
             self.props.status = UIRunStatus.Stop.value
             await self.sync_status(sync_state)
+        else:
+            if sync_state:
+                await self.sync_state()
         return res
 
     async def sync_status(self,
