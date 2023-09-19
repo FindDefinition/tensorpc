@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional
 
 import aiohttp
-from tensorpc.flow import mui, three, plus, mark_create_layout, appctx
+from tensorpc.flow import mui, three, plus, mark_create_layout, appctx, V
 import sys
 from tensorpc import PACKAGE_ROOT
 import numpy as np
@@ -91,5 +91,14 @@ class DevApp:
         ])
 
         res.canvas.prop(flat=False, shadows=True)
-        return res 
+        return mui.VBox([
+            res,
+            mui.Button("Click me", self.on_click),
+        ]) 
 
+    async def on_click(self):
+        print("clicked")
+        with V.ctx():
+            with V.group("dev"):
+                V.points("points0", 1000).p(1, 1, 1).p(0, 0, 0).color("red").size(5)
+                V.lines("lines0", 1000).p(2, 2, 2, 3, 4, 3)

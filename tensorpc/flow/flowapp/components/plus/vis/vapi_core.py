@@ -24,14 +24,17 @@ with V.ctx():
 
 """
 
+import asyncio
 import dataclasses
 import inspect
+import threading
 from typing import Any, Callable, Dict, Optional, List, Tuple, Type, TypeVar, Union, get_type_hints
 from typing_extensions import Annotated
 import contextvars
 import contextlib
 from tensorpc.core.dataclass_dispatch import dataclass
 from tensorpc.flow.flowapp import appctx
+from tensorpc.flow.flowapp.appcore import get_app
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanelV2
 from ... import three
 from ...typemetas import (ColorRGB, ColorRGBA, RangedFloat, RangedInt,
@@ -66,6 +69,8 @@ class PointsProxy(CanvasItemProxy):
         self._size: three.NumberType = 3
         self._limit : Optional[int] = None
 
+        self._color: Union[three.Undefined, str] = three.undefined 
+
     def p(self, x: float, y: float, z: float):
         self._points.append((x, y, z))
         return self 
@@ -79,6 +84,10 @@ class PointsProxy(CanvasItemProxy):
     def size(self, size: three.NumberType):
         self._size = size
         return self
+    
+    def color(self, color: Union[three.Undefined, str]):
+        self._color = color 
+        return self
 
     def limit(self, limit: int):
         self._limit = limit
@@ -90,9 +99,9 @@ class PointsProxy(CanvasItemProxy):
         if self._points_arr:
             points_nparray = np.concatenate(self._points_arr + [points_nparray])
         if self._limit is not None:
-            return comp.update_event(limit=self._limit, size=self._size, points=points_nparray)
+            return comp.update_event(limit=self._limit, colors=self._color, size=self._size, points=points_nparray)
         else:
-            return comp.update_event(size=self._size, points=points_nparray)
+            return comp.update_event(size=self._size, colors=self._color, points=points_nparray)
 
 class ColoredPointsProxy(PointsProxy):
     def __init__(self) -> None:
@@ -228,15 +237,25 @@ def enter_v_conetxt(robj: VContext):
         V_CONTEXT_VAR.reset(token)
 
 async def _draw_all_in_vctx(vctx: VContext):
+    print("?", vctx._group_assigns)
+    print(vctx._name_to_group)
     for k, v in vctx._name_to_group.items():
         cfg = get_canvas_item_cfg(v)
+        print(k, cfg )
         if cfg is not None:
             proxy = cfg.proxy
             if proxy is not None:
                 assert isinstance(proxy, GroupProxy)
+                print("???")
                 if cfg.is_vapi:
                     assert not v.is_mounted()
                     v.init_add_layout(proxy.childs)
+                    for c in proxy.childs.values():
+                        c_cfg = get_canvas_item_cfg(c)
+                        assert c_cfg is not None 
+                        c_proxy = c_cfg.proxy
+                        assert c_proxy is not None 
+                        c_proxy.update_event(c)
                 else:
                     await v.update_childs(proxy.childs)
     for container, (group, name) in vctx._group_assigns.items():
@@ -246,7 +265,7 @@ async def _draw_all_in_vctx(vctx: VContext):
     await vctx.canvas.item_tree.update_tree()
 
 @contextlib.contextmanager
-def ctx(canvas: Optional[ComplexCanvas] = None):
+def ctx(canvas: Optional[ComplexCanvas] = None, loop: Optional[asyncio.AbstractEventLoop] = None,):
     if canvas is None:
         canvas = appctx.find_component(ComplexCanvas)
         assert canvas is not None, "you must add complex canvas before using vapi"
@@ -260,10 +279,21 @@ def ctx(canvas: Optional[ComplexCanvas] = None):
     try:
         yield prev_ctx
     finally:
-        if is_first_ctx:
-            # construct components
-            pass 
         V_CONTEXT_VAR.reset(token)
+        if is_first_ctx:
+            if loop is None:
+                loop = asyncio.get_running_loop()
+            if get_app()._flowapp_thread_id == threading.get_ident():
+                # we can't wait fut here
+                task = asyncio.create_task(_draw_all_in_vctx(prev_ctx))
+                # we can't wait fut here
+                return task
+                # return fut
+            else:
+                # we can wait fut here.
+                fut = asyncio.run_coroutine_threadsafe(
+                    _draw_all_in_vctx(prev_ctx), loop)
+                return fut.result()
 
 def get_group_context() -> Optional[GroupProxy]:
     return GROUP_CONTEXT_VAR.get()

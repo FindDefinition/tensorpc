@@ -40,7 +40,7 @@ class CanvasItemCfg:
     detail_layout: Optional[mui.Component] = None
 
 def get_canvas_item_cfg(comp: three.Component) -> Optional[CanvasItemCfg]:
-    if comp._flow_user_data is not None and not isinstance(comp._flow_user_data, CanvasItemCfg):
+    if comp._flow_user_data is not None and isinstance(comp._flow_user_data, CanvasItemCfg):
         return comp._flow_user_data
     return None 
 
