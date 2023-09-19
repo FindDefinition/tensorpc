@@ -33,7 +33,7 @@ import numpy as np
 from PIL import Image as PILImage
 from typing_extensions import Literal, TypeAlias, TypedDict
 from pydantic import field_validator
-
+from .typemetas import Vector3Type
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.defs import FileResource
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
@@ -42,7 +42,7 @@ from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.flowapp.appcore import Event, EventDataType
 from tensorpc.flow.flowapp.components.common import (handle_standard_event)
 from tensorpc.flow.flowapp.reload import AppReloadManager
-from ...jsonlike import JsonLikeType, BackendOnlyProp, ContextMenuData, JsonLikeNode
+from ...jsonlike import JsonLikeType, BackendOnlyProp, ContextMenuData, JsonLikeNode, as_dict_no_undefined
 from .. import colors
 from ..core import (AppComponentCore, AppEvent, AppEventType, BasicProps,
                     Component, ContainerBase, ContainerBaseProps, EventHandler,
@@ -3548,7 +3548,7 @@ class JsonLikeTreeBase(MUIComponentBase[T_tview_base_props]):
             self.create_comp_event({
                 "type":
                 _TreeControlType.UpdateSubTree,
-                "tree": node,
+                "tree": as_dict_no_undefined(node),
             }))
 
 class JsonLikeTree(JsonLikeTreeBase[JsonLikeTreeProps]):
@@ -3649,13 +3649,14 @@ class TanstackJsonLikeTree(JsonLikeTreeBase[TanstackJsonLikeTreeProps]):
 class ControlNodeType(enum.IntEnum):
     Number = 0
     RangeNumber = 1
-    Color = 2
-    Bool = 3
-    Select = 4
-    String = 5
-    Folder = 6
-    Vector2 = 7
-    VectorN = 8
+    Bool = 2
+    Select = 3
+    String = 4
+    Folder = 5
+    Vector2 = 6
+    VectorN = 7
+    ColorRGB = 8
+    ColorRGBA = 9
 
 
 @dataclasses.dataclass
@@ -3669,25 +3670,12 @@ class ControlColorRGB:
 class ControlColorRGBA(ControlColorRGB):
     a: float
 
-
-@dataclasses.dataclass
-class ControlVector2:
-    x: NumberType
-    y: NumberType
-
-
-@dataclasses.dataclass
-class ControlVectorN:
-    data: List[NumberType]
-
-
 @dataclasses.dataclass
 class ControlNode:
     id: str
     name: str
     type: int
-    initValue: Union[Undefined, NumberType, bool, str, ControlColorRGBA,
-                     ControlVector2, ControlVectorN] = undefined
+    initValue: Union[Undefined, NumberType, bool, str, ControlColorRGBA, Vector3Type, List[NumberType]] = undefined
     children: "List[ControlNode]" = dataclasses.field(default_factory=list)
     # for range
     min: Union[Undefined, NumberType] = undefined
@@ -3695,7 +3683,7 @@ class ControlNode:
     step: Union[Undefined, NumberType] = undefined
 
     # for select
-    selects: Union[Undefined, List[ValueType]] = undefined
+    selects: Union[Undefined, List[Tuple[str, ValueType]]] = undefined
     # for string
     rows: Union[Undefined, bool, int] = undefined
 
@@ -3707,18 +3695,18 @@ class ControlNode:
 @dataclasses.dataclass
 class ControlDesp:
     type: int
-    initValue: Union[Undefined, NumberType, bool, str, ControlColorRGBA,
-                     ControlVector2, ControlVectorN] = undefined
+    initValue: Union[Undefined, NumberType, bool, str, ControlColorRGBA, Vector3Type, List[NumberType]] = undefined
     # for range
     min: Union[Undefined, NumberType] = undefined
     max: Union[Undefined, NumberType] = undefined
     step: Union[Undefined, NumberType] = undefined
     # for select
-    selects: Union[Undefined, List[ValueType]] = undefined
+    selects: Union[Undefined, List[Tuple[str, ValueType]]] = undefined
     # for string
     rows: Union[Undefined, bool, int] = undefined
     # for vectorN
     count: Union[Undefined, int] = undefined
+    isInteger: Union[Undefined, bool] = undefined
 
 
 @dataclasses.dataclass

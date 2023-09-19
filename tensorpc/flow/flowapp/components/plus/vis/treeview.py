@@ -7,12 +7,7 @@ from ..objinspect.analysis import get_tree_context_noexcept
 from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
                     Set, Tuple, Type)
 from tensorpc.flow.flowapp.components import mui, three
-import dataclasses
-
-@dataclasses.dataclass
-class CanvasItemCfg:
-    lock: bool = False
-    visible: bool = True
+from .core import CanvasItemCfg, CanvasItemProxy
 
 
 def lock_component(comp: mui.Component):
@@ -47,13 +42,15 @@ class CanvasTreeItemHandler(CustomTreeItemHandler):
                 res.pop()
             if not obj._flow_user_data.visible:
                 res[0].icon = mui.IconType.VisibilityOff
+            if not isinstance(obj, (three.Object3dBase, three.Object3dContainerBase)):
+                res.pop(0)
         return res 
 
     async def get_childs(self, obj: Any) -> Optional[Dict[str, Any]]:
         """if return None, we will use default method to extract childs
         of object.
         """
-        print(obj, isinstance(obj, mui.Component) and three.is_three_component(obj), "WTF")
+        # print(obj, isinstance(obj, mui.Component) and three.is_three_component(obj), "WTF")
         if isinstance(obj, mui.Component) and three.is_three_component(obj):
             if isinstance(obj, mui.ContainerBase):
                 return obj._child_comps
@@ -78,9 +75,10 @@ class CanvasTreeItemHandler(CustomTreeItemHandler):
                 obj._flow_user_data = item_cfg
             if button_id == CanvasButtonType.Visibility.value:
                 item_cfg.visible = not item_cfg.visible
-                if item_cfg.visible:
-                    node.fixedIconBtns = self._get_icon_button(obj)
+                node.fixedIconBtns = self._get_icon_button(obj)
                 await get_tree_context_noexcept().tree.update_subtree(node)
+                if isinstance(obj, (three.Object3dBase, three.Object3dContainerBase)):
+                    await obj.update_object3d(visible=item_cfg.visible)
             elif button_id == CanvasButtonType.Delete.value:
                 pass 
         return None

@@ -89,3 +89,18 @@ class AsyncIOEventEmitter(EventEmitter[KT, Unpack[VTs]]):
 
             fut.add_done_callback(callback)
             self._waiting.add(fut)
+
+    async def _emit_run_async(
+        self,
+        f: Callable,
+        args: Tuple[Unpack[VTs]],
+    ):
+        try:
+            coro: Any = f(*args)
+        except Exception as exc:
+            self.emit_exception(ExceptionParam(exc))
+        else:
+            if iscoroutine(coro):
+                await coro
+            else:
+                return

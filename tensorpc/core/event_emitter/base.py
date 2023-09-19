@@ -2,8 +2,10 @@
 based on pyee implementation: https://github.com/jfhbrook/pyee
 type-safe version with limited feature.
 """
+from asyncio import iscoroutine
 from collections import OrderedDict
 import dataclasses
+import inspect
 from threading import Lock
 from typing import (Any, Callable, Dict, Generic, List, Mapping, Optional, Set,
                     Tuple, TypeVar, Union, cast)
@@ -208,6 +210,17 @@ class EventEmitter(Generic[KT, Unpack[VTs]]):
     ) -> None:
         f(*args)
 
+    async def _emit_run_async(
+        self,
+        f: Callable[[Unpack[VTs]], Any],
+        args: Tuple[Unpack[VTs]],
+    ) -> None:
+        coro = f(*args)
+        if inspect.iscoroutine(coro):
+            return await coro 
+        else:
+            return coro
+
     def event_names(self) -> Set[KT]:
         """Get a set of events that this emitter is listening to."""
         return set(self._events.keys())
@@ -231,6 +244,21 @@ class EventEmitter(Generic[KT, Unpack[VTs]]):
             funcs = list(self._events.get(event, OrderedDict()).values())
         for f in funcs:
             self._emit_run(f, args)
+            handled = True
+
+        return handled
+
+    async def _call_handlers_async(
+        self,
+        event: KT,
+        *args: Unpack[VTs],
+    ) -> bool:
+        handled = False
+
+        with self._lock:
+            funcs = list(self._events.get(event, OrderedDict()).values())
+        for f in funcs:
+            await self._emit_run_async(f, args)
             handled = True
 
         return handled
@@ -275,6 +303,33 @@ class EventEmitter(Generic[KT, Unpack[VTs]]):
         `data('00101001')'`.
         """
         handled = self._call_handlers(event, *args)
+
+        if not handled:
+            self._emit_handle_potential_error(event, args[0] if args else None)
+
+        return handled
+
+    async def emit_async(
+        self,
+        event: KT,
+        *args: Unpack[VTs],
+    ) -> bool:
+        """Emit `event` , passing `*args` and `**kwargs` to each attached
+        function. Returns `True` if any functions are attached to `event`;
+        otherwise returns `False`.
+
+        this function run coroutines in direct way instead of wait them in futures.
+
+        Example:
+
+        ```py
+        await ee.emit_async('data', '00101001')
+        ```
+
+        Assuming `data` is an attached function, this will call
+        `data('00101001')'`.
+        """
+        handled = await self._call_handlers_async(event, *args)
 
         if not handled:
             self._emit_handle_potential_error(event, args[0] if args else None)

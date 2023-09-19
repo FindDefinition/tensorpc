@@ -50,6 +50,9 @@ class WebsocketMsg:
     data: bytes
     type: WebsocketMsgType
 
+class JsonEncodeException(Exception):
+    pass
+
 class WebsocketClientBase(abc.ABC):
     # TODO peer client use a async queue instead of recv because
     # aiohttp don't allow parallel recv
@@ -127,13 +130,22 @@ class WebsocketClientBase(abc.ABC):
                                    rpc_id=request_id,
                                    dynamic_key=dynamic_key)
         if is_json:
-            return await self.send_bytes(
-                core_io.json_only_encode(data, msg_type, req))
+            try:
+                return await self.send_bytes(
+                    core_io.json_only_encode(data, msg_type, req))
+            except Exception as e:
+                traceback.print_exc()
+                raise JsonEncodeException(str(e))
         max_size = self.get_msg_max_size() - 128
         send_large_chunk_size_thresh = 65536
         # max_size = 1024 * 1024
         # TODO reslove "8192"
-        encoder = core_io.SocketMessageEncoder(data, skeleton_size_limit=max_size - 8192)
+        try:
+            encoder = core_io.SocketMessageEncoder(data, skeleton_size_limit=max_size - 8192)
+        except Exception as e:
+            traceback.print_exc()
+            raise JsonEncodeException(str(e))
+
         use_large_data_ws = False
         try:
             cnt = 0
@@ -742,6 +754,8 @@ class WebsocketHandler:
                     # await asyncio.wait([x[0] for x in sending_tasks])
                 except ConnectionResetError:
                     print("Cannot write to closing transport")
+                except JsonEncodeException:
+                    print("encode message to json failed. check your data!")
             for task, ev_str in sending_tasks:
                 exc = task.exception()
                 if exc is not None:

@@ -46,7 +46,6 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
 
 import numpy as np
-import pyee
 import watchdog
 import watchdog.events
 from typing_extensions import ParamSpec

@@ -50,7 +50,7 @@ from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
                                                   ListItemText,
                                                   MUIComponentType, VBox,
                                                   VList)
-from tensorpc.flow.flowapp.components.plus import typemetas
+from tensorpc.flow.flowapp.components import typemetas
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from tensorpc.flow.sampleapp.sample_reload_fn import func_support_reload
 from tensorpc.flow.flowapp.objtree import get_objtree_context
@@ -823,8 +823,10 @@ class WTF:
     h: TestEnum = TestEnum.C
     i: V.Annotated[int, V.RangedInt(0, 10)] = 1
     j: TestEnumInt = TestEnumInt.C
-    vn: mui.ControlVectorN = mui.ControlVectorN([1, 0, 2])
     wtf: V.Annotated[float, V.RangedFloat(0, 1, 0.05, "ftw")] = 0.5
+    wtfcolor: V.Annotated[str, V.ColorRGB()] = "red"
+    v3: three.Vector3Type = (1, 2, 3)
+    v4: V.Annotated[three.Vector3Type, V.Vector3(1.0)] = (1, 2, 3)
 
 class SampleConfigApp(EditableApp):
     def __init__(self) -> None:
@@ -1327,7 +1329,7 @@ class CollectionApp:
         nodes = [
             mui.ControlNode("1",
                             "color",
-                            mui.ControlNodeType.Color.value,
+                            mui.ControlNodeType.ColorRGB.value,
                             initValue="#ffffff")
         ]
         self.code = f"""

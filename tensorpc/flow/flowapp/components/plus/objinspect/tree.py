@@ -294,6 +294,13 @@ class SimpleCanvasCreator(ObjectLayoutCreator):
     def create(self):
         return SimpleCanvas()
 
+class BasicTreeEventType(enum.IntEnum):
+    SelectSingle = 0
+
+@dataclasses.dataclass
+class SelectSingleEvent:
+    nodes: List[mui.JsonLikeNode]
+    objs: Optional[List[Any]] = None
 
 class BasicObjectTree(mui.FlexBox):
     """basic object tree, contains enough features
@@ -355,11 +362,15 @@ class BasicObjectTree(mui.FlexBox):
             FrontendEventType.TreeItemContextMenu.value, self._on_contextmenu)
         self.tree.register_event_handler(
             FrontendEventType.TreeItemRename.value, self._on_rename)
+        self.tree.register_event_handler(
+            FrontendEventType.TreeItemSelectChange.value, self._on_select_single)
 
         self.tree.register_event_handler(FrontendEventType.DragCollect.value,
                                          self._on_drag_collect,
                                          backend_only=True)
         self.default_expand_level = default_expand_level
+
+        self.event_async_select_single = self._create_emitter_event_slot(BasicTreeEventType.SelectSingle)
 
     @mark_did_mount
     async def _on_mount(self):
@@ -463,6 +474,23 @@ class BasicObjectTree(mui.FlexBox):
             return TreeDragTarget(objs[-1], uid, tab_id, self._flow_uid,
                                   lambda: root.enter_context(root))
         return TreeDragTarget(objs[-1], uid, tab_id, self._flow_uid)
+    
+    async def _on_select_single(self, uid_list: Union[List[str], str, Dict[str, bool]]):
+        if isinstance(uid_list, list):
+            # node id list may empty
+            if not uid_list:
+                return
+            uid = uid_list[0]
+        elif isinstance(uid_list, dict):
+            if not uid_list:
+                return
+            uid = list(uid_list.keys())[0]
+        else:
+            uid = uid_list
+        nodes = self._objinspect_root._get_node_by_uid_trace(uid)
+        objs, found = await self._get_obj_by_uid_trace(uid, nodes)
+        return await self.flow_event_emitter.emit_async(BasicTreeEventType.SelectSingle, 
+            mui.Event(BasicTreeEventType.SelectSingle, SelectSingleEvent(nodes, objs if found else None)))
 
     async def _on_expand(self, uid: str):
         with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree)):
@@ -518,96 +546,101 @@ class BasicObjectTree(mui.FlexBox):
             return await self.tree.send_and_wait(upd)
 
     async def _on_rename(self, uid_newname: Tuple[str, str]):
-        uid = uid_newname[0]
-        uid_parts = uid.split(GLOBAL_SPLIT)
+        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree)):
 
-        obj_trace, found = await self._tree_parser.get_obj_by_uid_trace(self.root, uid)
-        if not found:
-            return
-        # if object is TreeItem or parent is TreeItem,
-        # the button/contextmenu event will be handled in TreeItem instead of common
-        # handler.
-        if len(obj_trace) >= 2:
-            parent = obj_trace[-2]
-            if isinstance(parent, TreeItem):
-                nodes = self._objinspect_root._get_node_by_uid_trace(uid)
-                parent_node = nodes[-2]
-                res = await parent.handle_child_rename(uid_parts[-1],
-                                                       uid_newname[1])
-                if res == True:
-                    await self._on_expand(parent_node.id)
+            uid = uid_newname[0]
+            uid_parts = uid.split(GLOBAL_SPLIT)
+
+            obj_trace, found = await self._tree_parser.get_obj_by_uid_trace(self.root, uid)
+            if not found:
                 return
+            # if object is TreeItem or parent is TreeItem,
+            # the button/contextmenu event will be handled in TreeItem instead of common
+            # handler.
+            if len(obj_trace) >= 2:
+                parent = obj_trace[-2]
+                if isinstance(parent, TreeItem):
+                    nodes = self._objinspect_root._get_node_by_uid_trace(uid)
+                    parent_node = nodes[-2]
+                    res = await parent.handle_child_rename(uid_parts[-1],
+                                                        uid_newname[1])
+                    if res == True:
+                        await self._on_expand(parent_node.id)
+                    return
 
     async def _on_custom_button(self, uid_btn: Tuple[str, str]):
-        uid = uid_btn[0]
-        uid_parts = uid.split(GLOBAL_SPLIT)
+        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree)):
 
-        obj_trace, found = await self._tree_parser.get_obj_by_uid_trace(self.root, uid)
-        if not found:
-            return
-        obj = obj_trace[-1]
-        # if object is TreeItem or parent is TreeItem,
-        # the button/contextmenu event will be handled in TreeItem instead of common
-        # handler.
-        if isinstance(obj, TreeItem):
-            res = await obj.handle_button(uid_btn[1])
-            if res == True:
-                # update this node
-                await self._on_expand(uid)
-            return
-        nodes = self._objinspect_root._get_node_by_uid_trace(uid)
-        if len(obj_trace) >= 2:
-            parent = obj_trace[-2]
-            if isinstance(parent, TreeItem):
-                parent_node = nodes[-2]
-                res = await parent.handle_child_button(uid_btn[1],
-                                                       uid_parts[-1])
-                if res == True:
-                    await self._on_expand(parent_node.id)
+            uid = uid_btn[0]
+            uid_parts = uid.split(GLOBAL_SPLIT)
+            obj_trace, found = await self._tree_parser.get_obj_by_uid_trace(self.root, uid)
+            if not found:
                 return
 
-        btn = ButtonType(uid_btn[1])
-        if btn == ButtonType.Reload:
-            metas, is_reload = reload_object_methods(
-                obj, reload_mgr=self.flow_app_comp_core.reload_mgr)
-            if metas is not None:
-                special_methods = FlowSpecialMethods(metas)
-            else:
-                print("reload failed.")
-        if self._tree_parser.custom_tree_item_handler is not None:
-            await self._tree_parser.custom_tree_item_handler.handle_button(obj_trace, nodes, uid_btn[1])
+            obj = obj_trace[-1]
+            # if object is TreeItem or parent is TreeItem,
+            # the button/contextmenu event will be handled in TreeItem instead of common
+            # handler.
+            if isinstance(obj, TreeItem):
+                res = await obj.handle_button(uid_btn[1])
+                if res == True:
+                    # update this node
+                    await self._on_expand(uid)
+                return
+            nodes = self._objinspect_root._get_node_by_uid_trace(uid)
+            if len(obj_trace) >= 2:
+                parent = obj_trace[-2]
+                if isinstance(parent, TreeItem):
+                    parent_node = nodes[-2]
+                    res = await parent.handle_child_button(uid_btn[1],
+                                                        uid_parts[-1])
+                    if res == True:
+                        await self._on_expand(parent_node.id)
+                    return
+
+            if uid_btn[1] == ButtonType.Reload.value:
+                metas, is_reload = reload_object_methods(
+                    obj, reload_mgr=self.flow_app_comp_core.reload_mgr)
+                if metas is not None:
+                    special_methods = FlowSpecialMethods(metas)
+                else:
+                    print("reload failed.")
+            if self._tree_parser.custom_tree_item_handler is not None:
+                await self._tree_parser.custom_tree_item_handler.handle_button(obj_trace, nodes, uid_btn[1])
 
     async def _on_contextmenu(self, uid_menuid_data: Tuple[str, str,
                                                            Optional[Any]]):
-        uid = uid_menuid_data[0]
-        uid_parts = uid.split(GLOBAL_SPLIT)
-        userdata = uid_menuid_data[2]
-        if userdata is not None:
-            obj_trace, found = await self._tree_parser.get_obj_by_uid_trace(
-                self.root, uid)
-            if found:
-                obj = obj_trace[-1]
+        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree)):
 
-                # handle tree item first
-                if isinstance(obj, TreeItem):
-                    res = await obj.handle_context_menu(userdata)
-                    if res == True:
-                        # update this node
-                        await self._on_expand(uid)
-                    return
-                nodes = self._objinspect_root._get_node_by_uid_trace(uid)
-                if len(obj_trace) >= 2:
-                    parent = obj_trace[-2]
-                    parent_node = nodes[-2]
-                    if isinstance(parent, TreeItem):
-                        res = await parent.handle_child_context_menu(
-                            uid_parts[-1], userdata)
+            uid = uid_menuid_data[0]
+            uid_parts = uid.split(GLOBAL_SPLIT)
+            userdata = uid_menuid_data[2]
+            if userdata is not None:
+                obj_trace, found = await self._tree_parser.get_obj_by_uid_trace(
+                    self.root, uid)
+                if found:
+                    obj = obj_trace[-1]
+
+                    # handle tree item first
+                    if isinstance(obj, TreeItem):
+                        res = await obj.handle_context_menu(userdata)
                         if res == True:
                             # update this node
-                            await self._on_expand(parent_node.id)
+                            await self._on_expand(uid)
                         return
-                if self._tree_parser.custom_tree_item_handler is not None:
-                    await self._tree_parser.custom_tree_item_handler.handle_button(obj_trace, nodes, userdata)
+                    nodes = self._objinspect_root._get_node_by_uid_trace(uid)
+                    if len(obj_trace) >= 2:
+                        parent = obj_trace[-2]
+                        parent_node = nodes[-2]
+                        if isinstance(parent, TreeItem):
+                            res = await parent.handle_child_context_menu(
+                                uid_parts[-1], userdata)
+                            if res == True:
+                                # update this node
+                                await self._on_expand(parent_node.id)
+                            return
+                    if self._tree_parser.custom_tree_item_handler is not None:
+                        await self._tree_parser.custom_tree_item_handler.handle_button(obj_trace, nodes, userdata)
 
     def has_object(self, key: str):
         return key in self.root
@@ -641,6 +674,7 @@ class BasicObjectTree(mui.FlexBox):
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
         await self._do_when_tree_updated(self.tree.props.tree.id)
+
 
     async def remove_object(self, key: str):
         key_in_root = key in self.root

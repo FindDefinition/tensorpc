@@ -327,8 +327,9 @@ class EnvmapGroupdProjectionApp:
                                                      width=1000, visibleEdgeColor=0xf43f12, 
                                                      hiddenEdgeColor=0xf43f12),
                                 three.ToneMapping().prop(mode=three.ToneMapppingMode.ACES_FILMIC),
-                            ]).prop(autoClear=False, multisampling=0),
+                            ]).prop(autoClear=True),
                             three.Mesh([
+                                three.MeshPhysicalMaterial(),
                                 # three.Outlines().prop(color="blue", thickness=50),
                             ]).set_override_props_unchecked_dict({
                                 "geometry":
@@ -639,7 +640,7 @@ class App:
                                             hiddenEdgeColor=0xfff, blendFunction=three.BlendFunction.ALPHA),
                     # three.Bloom(),
                     # three.GammaCorrection(),
-                    three.ToneMapping().prop(mode=three.ToneMapppingMode.ACES_FILMIC),
+                    # three.ToneMapping().prop(mode=three.ToneMapppingMode.ACES_FILMIC),
                 ]).prop(autoClear=False),
 
                 three.Mesh([
@@ -648,7 +649,7 @@ class App:
                     three.MeshStandardMaterial().prop(color="orange", transparent=True),
                 ]).prop(enableSelect=True, castShadow=True, position=(0, 0, 0), enableHover=True, 
                     enablePivotControl=True,
-                    enablePivotControlOnSelected=True,
+                    enablePivotOnSelected=True,
                     pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
                     ),
 
@@ -737,8 +738,7 @@ vec3 colorB = vec3(1.000,0.777,0.052);
 void main() {
   // "Normalizing" with an arbitrary value
   // We'll see a cleaner technique later :)   
-  vec2 normalizedPixel = gl_FragCoord.xy/600.0;
-  vec3 color = mix(colorA, colorB, normalizedPixel.x);
+  vec3 color = mix(colorA, colorB, vUv.x);
 
   gl_FragColor = vec4(color,1.0);
   

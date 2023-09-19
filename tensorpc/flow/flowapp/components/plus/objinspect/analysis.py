@@ -340,9 +340,15 @@ class ObjectTreeParser:
             childs = obj.get_childs()
             child_obj = childs[key]
         else:
-            child_obj = self.get_obj_single_attr(obj, key, check_obj=False)
-            if isinstance(obj, mui.Undefined):
-                return obj, False
+            child_obj = mui.undefined
+            if self.custom_tree_item_handler is not None:
+                childs = await self.custom_tree_item_handler.get_childs(obj)
+                if childs is not None:
+                    child_obj = childs[key]
+            if isinstance(child_obj, mui.Undefined):
+                child_obj = self.get_obj_single_attr(obj, key, check_obj=False)
+                if isinstance(obj, mui.Undefined):
+                    return obj, False
         if len(parts) == 1:
             return child_obj, True
         else:
@@ -396,9 +402,15 @@ class ObjectTreeParser:
             childs = obj.get_childs()
             child_obj = childs[key]
         else:
-            child_obj = self.get_obj_single_attr(obj, key, check_obj=False)
-            if isinstance(obj, mui.Undefined):
-                return [obj], False
+            child_obj = mui.undefined
+            if self.custom_tree_item_handler is not None:
+                childs = await self.custom_tree_item_handler.get_childs(obj)
+                if childs is not None:
+                    child_obj = childs[key]
+            if isinstance(child_obj, mui.Undefined):
+                child_obj = self.get_obj_single_attr(obj, key, check_obj=False)
+                if isinstance(obj, mui.Undefined):
+                    return [obj], False
         if len(parts) == 1:
             return [child_obj], True
         else:

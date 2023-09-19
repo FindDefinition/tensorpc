@@ -33,7 +33,6 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
 from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec,
                                Protocol, Self, TypeAlias, TypeVar)
 
-import pyee
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 from pydantic import (
     BaseModel,
@@ -1146,6 +1145,12 @@ class Component(Generic[T_base_props, T_child]):
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         pass
+    
+    def __repr__(self):
+        res = f"{self.__class__.__name__}({self._flow_uid})"
+        if self._flow_user_data is not None:
+            res += f"({self._flow_user_data})"
+        return res 
 
     async def _clear(self):
         # self.uid = ""
@@ -1380,7 +1385,10 @@ class Component(Generic[T_base_props, T_child]):
 
     def create_update_event(self,
                             data: Dict[str, Union[Any, Undefined]],
-                            json_only: bool = False):
+                            json_only: bool = False,
+                            validate: bool = False):
+        if validate:
+            self.__prop_cls(**data)
         data_no_und = {}
         data_unds = []
         for k, v in data.items():
@@ -1711,6 +1719,12 @@ class ContainerBase(Component[T_container_props, T_child]):
         # self.props.childs: List[str] = []
         self.inited = inited
         self._prevent_add_layout = False
+        
+    def __repr__(self):
+        res = super().__repr__()
+        if self._child_comps:
+            res += f"({','.join(self._child_comps.keys())})"
+        return res 
 
     def _get_comp_by_uid(self, uid: str):
         parts = uid.split(".")
@@ -2005,7 +2019,10 @@ class ContainerBase(Component[T_container_props, T_child]):
             comps_frontend_dict, list(detached.keys())), list(
                 attached.values()), list(detached.values())
 
-    async def update_childs(self, layout: Dict[str, Component]):
+    async def update_childs(self, layout: Union[Dict[str, Component],
+                                                 List[Component]]):
+        if isinstance(layout, list):
+            layout = {str(i): v for i, v in enumerate(layout)}
         self.__check_child_structure_is_none()
         new_ev, attached, removed = self.update_childs_locally(layout)
         for deleted in removed:

@@ -1,17 +1,20 @@
 import dataclasses
 import enum
+from functools import partial
 import inspect
 import urllib.request
 from typing import Any, Callable, Coroutine, Dict, Hashable, Iterable, List, Literal, Optional, Set, Tuple, Type, Union
-
+from typing_extensions import Annotated
 import numpy as np
 
 from tensorpc.flow import marker
 from tensorpc.flow.flowapp.appcore import find_component_by_uid_with_type_check
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
-from tensorpc.flow.flowapp.components.plus.objinspect.tree import BasicObjectTree
-from tensorpc.flow.flowapp.core import FrontendEventType
+from tensorpc.flow.flowapp.components.plus.objinspect.tree import BasicObjectTree, SelectSingleEvent
+from .core import get_canvas_item_cfg, get_or_create_canvas_item_cfg
+from tensorpc.flow.flowapp.components.typemetas import RangedFloat
+from tensorpc.flow.flowapp.core import Component, ContainerBase, FrontendEventType
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 from tensorpc.flow.flowapp import colors
 from tensorpc.flow.jsonlike import TreeItem
@@ -20,23 +23,40 @@ from tensorpc.flow.flowapp.components.core import get_tensor_container
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanelV2
 from .treeview import CanvasTreeItemHandler, lock_component
 
+def find_component_trace_by_uid_with_not_exist_parts(comp: Component, uid: str, container_cls: Tuple[Type[ContainerBase], ...] = (ContainerBase,)) -> Tuple[List[Component], List[str], List[str]]:
+    # if comp._flow_uid == uid:
+    #     return [comp], []
+    uid_parts = uid.split(".")
+    # if len(uid_parts) == 0:
+    #     return [comp], []
+    res: List[Component] = []
+    cur_comp = comp 
+    for i, part in enumerate(uid_parts):
+        # first_part = cur_comp._flow_uid.split(".")[0]
+        # if first_part != part:
+        #     return res, uid_parts[i:]
+        if not isinstance(cur_comp, container_cls):
+            return res, uid_parts[i:], uid_parts[:i]
+        if part in cur_comp._child_comps:
+            cur_comp = cur_comp._child_comps[part]
+        else:
+            return res, uid_parts[i:], uid_parts[:i]
+        res.append(cur_comp)
+
+        # if i != len(uid_parts) - 1:
+    return res, [], uid_parts
+
 @dataclasses.dataclass
 class PointCfg:
-    size: float = dataclasses.field(default=3,
-                                    metadata=ConfigPanel.slider_meta(1, 10))
+    size: Annotated[float, RangedFloat(1, 10, 0.1)] = 3
     encode_method: Literal["none", "int16"] = "none"
-    encode_scale: mui.NumberType = dataclasses.field(default=50,
-                                    metadata=ConfigPanel.slider_meta(25, 100))
+    encode_scale: Annotated[float, RangedFloat(25, 100, 0.1)] = 50
 
 @dataclasses.dataclass
 class BoxCfg:
-    edge_width: float = dataclasses.field(default=1,
-                                          metadata=ConfigPanel.slider_meta(
-                                              1, 5))
+    edge_width: Annotated[float, RangedFloat(1, 5, 0.1)] = 1
     add_cross: bool = True
-    opacity: float = dataclasses.field(default=0.2,
-                                          metadata=ConfigPanel.slider_meta(
-                                              0.0, 1.0))
+    opacity: Annotated[float, RangedFloat(0.0, 1.0, 0.01)] = 0.2
 
 
 @dataclasses.dataclass
@@ -84,7 +104,7 @@ class ComplexCanvas(mui.FlexBox):
         * support helpers such as light, camera, etc.
         * support switch to camera view
     """
-    def __init__(self, transparent_canvas: bool = False):
+    def __init__(self, init_canvas_childs: Optional[three.ThreeLayoutType] = None, transparent_canvas: bool = False):
 
         super().__init__()
         self.component_tree = three.Fragment([])
@@ -103,12 +123,12 @@ class ComplexCanvas(mui.FlexBox):
         self._cfg_container = mui.Fragment([])
         self._is_transparent = transparent_canvas
         self._gizmo_helper = three.GizmoHelper().prop(alignment="bottom-right")
-
+        self._cur_detail_layout_uid: Optional[str] = None 
         init_layout = {
             "control": self.ctrl,
             "camera": self.camera,
             "grid": self._dynamic_grid,
-            "screen_shot": self._screen_shot_v2,
+            "screen shot": self._screen_shot_v2,
             "gizmo": self._gizmo_helper,
         }
         for comp in init_layout.values():
@@ -117,7 +137,12 @@ class ComplexCanvas(mui.FlexBox):
         lock_component(self._axis_helper)
         lock_component(self._infgrid)
         lock_component(reserved_group)
-
+        layout: three.ThreeLayoutType = {
+            "reserved": reserved_group,
+        }
+        if init_canvas_childs is not None:
+            layout["init"] = three.Group(init_canvas_childs)
+        self._item_root = three.SelectionContext(layout, self._on_3d_object_select)
         self.prop_container = mui.HBox([]).prop(overflow="auto",
                                                    padding="3px",
                                                    flex=1,
@@ -125,11 +150,12 @@ class ComplexCanvas(mui.FlexBox):
                                                    height="100%")
 
         self.canvas = three.Canvas({
-            "reserved": reserved_group,
+            "root": self._item_root,
         }).prop(
             flex=1, allowKeyboardEvent=True)
         self.custom_tree_handler = CanvasTreeItemHandler()
-        self.item_tree = BasicObjectTree(self.canvas, use_init_as_root=True, custom_tree_handler=self.custom_tree_handler, default_expand_level=1000)
+        self.item_tree = BasicObjectTree(self._item_root, use_init_as_root=True, custom_tree_handler=self.custom_tree_handler, default_expand_level=1000)
+        self.item_tree.event_async_select_single.on(self._on_tree_select)
         self.init_add_layout([*self._layout_func()])
 
     @marker.mark_create_layout
@@ -246,6 +272,7 @@ class ComplexCanvas(mui.FlexBox):
             height="100%",
             overflow="hidden"
         )
+        # self.item_tree.event_
         return [
             canvas_layout.prop(flex=3),
             mui.HBox([
@@ -342,3 +369,77 @@ class ComplexCanvas(mui.FlexBox):
 
     async def _on_reset_cam(self):
         await self.ctrl.reset_camera()
+
+    async def _on_tree_select(self, event: mui.Event):
+        data = event.data 
+        assert isinstance(data, SelectSingleEvent)
+        if data.objs is None:
+            return 
+        obj = data.objs[-1]
+        # print(find_component_trace_by_uid_with_not_exist_parts(self._item_root, "reserved.grid.2"))
+        obj_cfg = get_canvas_item_cfg(obj)
+        if obj_cfg is not None and obj_cfg.detail_layout is not None:
+            await self.prop_container.set_new_layout([obj_cfg.detail_layout])
+            self._cur_detail_layout_uid = data.nodes[-1].id
+        else:
+            if three.is_three_component(obj):
+                panel = ConfigPanelV2(obj.props, partial(self._on_cfg_panel_change, obj=obj), ignored_field_names=set(["status"])).prop(reactKey=data.nodes[-1].id)
+                await self.prop_container.set_new_layout([panel])
+                self._cur_detail_layout_uid = data.nodes[-1].id
+
+    async def set_layout_in_container(self, container_key: str, layout: three.ThreeLayoutType):
+        if isinstance(layout, list):
+            layout = {str(i): v for i, v in enumerate(layout)}
+
+        assert container_key != "" and not container_key.startswith("reserved"), "you can't set layout of canvas and reserved."
+        container_parents, remain_keys, _ = find_component_trace_by_uid_with_not_exist_parts(self._item_root, container_key)
+        if len(remain_keys) == 0:
+            container = container_parents[-1]
+            if isinstance(container, (three.Group, mui.Fragment)):
+                await container.set_new_layout({**layout})
+                await self.item_tree.update_tree()
+
+    async def update_layout_in_container(self, container_key: str, layout: three.ThreeLayoutType):
+        assert not container_key.startswith("reserved"), "you can't update layout of reserved."
+        if isinstance(layout, list):
+            layout = {str(i): v for i, v in enumerate(layout)}
+        container_parents, remain_keys, _ = find_component_trace_by_uid_with_not_exist_parts(self._item_root, container_key)
+        if len(remain_keys) == 0:
+            container = container_parents[-1]
+            if isinstance(container, (three.Group, mui.Fragment)):
+                await container.update_childs({**layout})
+                await self.item_tree.update_tree()
+
+    @staticmethod
+    async def _on_cfg_panel_change(uid: str, value: Any, obj: Component):
+        # TODO support nested change
+        uid_parts = uid.split(".")
+        if len(uid_parts) > 1:
+            return 
+        await obj.send_and_wait(obj.create_update_event({
+            uid: value,
+        }, validate=True))
+
+    def _get_local_uid_of_object(self, uid: str):
+        assert uid.startswith(self._item_root._flow_uid)
+        return uid[len(self._item_root._flow_uid)+1:]
+
+    async def _on_3d_object_select(self, selected: list):
+        if not selected:
+            await self.item_tree.tree.select([])
+            return 
+        assert len(selected) == 1
+        select = selected[0]
+        selected_uid = select["userData"]["uid"]
+        # print(self.item_tree.tree.props.tree)
+        selected_uid_local_uid = self._get_local_uid_of_object(selected_uid)
+
+        container_parents, remain_keys, _ = find_component_trace_by_uid_with_not_exist_parts(self._item_root, selected_uid_local_uid)
+        if len(remain_keys) == 0:
+            obj = container_parents[-1]
+            # we need to convert object component uid to tree node uid.
+            # tree node uid always start with "root"
+            tree_node_uid = f"root::{selected_uid_local_uid.replace('.', '::')}"
+            await self.item_tree.tree.select([tree_node_uid])
+            await self.item_tree._on_select_single(tree_node_uid)
+            # print(selected_uid_local_uid, obj, obj._flow_uid) 
