@@ -24,7 +24,9 @@ with V.ctx():
 
 """
 
-from typing import Callable, Dict, Optional, List, Tuple, Type, TypeVar, Union, get_type_hints
+import dataclasses
+import inspect
+from typing import Any, Callable, Dict, Optional, List, Tuple, Type, TypeVar, Union, get_type_hints
 from typing_extensions import Annotated
 import contextvars
 import contextlib
@@ -176,13 +178,16 @@ class LinesProxy(CanvasItemProxy):
         return _Polygon((x, y, z), True, self)
 
 class VContext:
-    def __init__(self, canvas: ComplexCanvas):
+    def __init__(self, canvas: ComplexCanvas, root: Optional[three.ContainerBase] = None):
         self.stack = []
         self.canvas = canvas
         self.name_stack: List[str] = []
         self.exist_name_stack: List[str] = []
+        if root is None:
+            root = canvas._item_root
+        self.root = root
         self._name_to_group: Dict[str, three.ContainerBase] = {
-            "": canvas._item_root
+            "": root
         }
         self._group_assigns: Dict[three.ContainerBase, Tuple[three.Component, str]] = {}
 
@@ -193,7 +198,7 @@ class VContext:
     @property 
     def current_container(self):
         if not self.name_stack:
-            return self.canvas._item_root
+            return self.root
         else:
             return self._name_to_group[self.current_namespace]
 
@@ -285,7 +290,7 @@ def group(name: str, check_override: bool = False, ):
     # find exist group in canvas
     v_ctx = get_v_context()
     assert v_ctx is not None 
-    canvas = v_ctx.canvas 
+    # canvas = v_ctx.canvas 
     if v_ctx.name_stack:
         uid = f"{v_ctx.current_namespace}.{name}"
     else:
@@ -293,7 +298,7 @@ def group(name: str, check_override: bool = False, ):
     if uid in v_ctx._name_to_group:
         group = v_ctx._name_to_group[uid]
     else:
-        trace, remain, consumed = find_component_trace_by_uid_with_not_exist_parts(canvas._item_root, uid, _CARED_CONTAINERS)
+        trace, remain, consumed = find_component_trace_by_uid_with_not_exist_parts(v_ctx.root, uid, _CARED_CONTAINERS)
         # find first vapi-created group
         for i, comp in enumerate(trace):
             cfg = get_canvas_item_cfg(comp)
@@ -305,7 +310,7 @@ def group(name: str, check_override: bool = False, ):
                 break
         # fill existed group to ctx
         # print(trace, remain, consumed)
-        trace.insert(0, canvas._item_root)
+        trace.insert(0, v_ctx.root)
         for i in range(len(consumed)):
             cur_name = ".".join(consumed[:i + 1])
             if cur_name not in v_ctx._name_to_group:
@@ -406,9 +411,10 @@ def lines(name: str, limit: int):
 
 
 def program(name: str, func: Callable):
-    raise NotImplementedError
+    # raise NotImplementedError
     group = three.Group([])
     func_dcls = annotated_function_to_dataclass(func)
+    func_dcls_obj = func_dcls()
     v_ctx = get_v_context()
     assert v_ctx is not None 
     cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
@@ -417,7 +423,18 @@ def program(name: str, func: Callable):
     assert isinstance(proxy, GroupProxy)
     proxy.childs[name] = group
     pcfg = get_or_create_canvas_item_cfg(group, True)
-    # async def callback
-    pcfg.detail_layout = ConfigPanelV2(func_dcls)
+    async def callback(uid: str, value: Any):
+        if "." in uid:
+            return 
+        setattr(func_dcls_obj, uid, value)
+        vctx_program = VContext(v_ctx.canvas, group)
+        with enter_v_conetxt(vctx_program):
+            kwargs = {}
+            for field in dataclasses.fields(func_dcls_obj):
+                kwargs[field.name] = getattr(func_dcls_obj, field.name)
+            res = func(**kwargs)
+            if inspect.iscoroutine(res):
+                await res 
+    pcfg.detail_layout = ConfigPanelV2(func_dcls_obj, callback)
     return
 
