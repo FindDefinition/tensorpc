@@ -795,11 +795,11 @@ class Boxes2D(Object3dWithEventBase[Boxes2DProps]):
 class BoundingBoxProps(Object3dBaseProps, InteractableProps):
     dimension: Union[Vector3Type, Undefined] = undefined
     edgeWidth: Union[float, Undefined] = undefined
-    edgeColor: Union[str, Undefined] = undefined
-    emissive: Union[str, Undefined] = undefined
-    color: Annotated[Union[str, Undefined], typemetas.ColorRGB()] = undefined
-    opacity: Annotated[Union[NumberType, Undefined], typemetas.CommonObject(default=1.0)] = undefined
-    edgeOpacity: Union[float, Undefined] = undefined
+    edgeColor: Annotated[Union[str, int, Undefined], typemetas.ColorRGB()] = undefined
+    emissive: Annotated[Union[str, int, Undefined], typemetas.ColorRGB()] = undefined
+    color: Annotated[Union[str, int, Undefined], typemetas.ColorRGB()] = undefined
+    opacity: Annotated[Union[NumberType, Undefined], typemetas.CommonObject(default=0.3)] = undefined
+    edgeOpacity: Annotated[Union[NumberType, Undefined], typemetas.CommonObject(default=0.5)] = undefined
     checked: bool = False
     addCross: bool = True
 
@@ -1192,6 +1192,7 @@ class CameraUserControlType(enum.Enum):
     Reset = 2
     SetCamPoseRaw = 3
     RotateTo = 4
+    LookAtObject = 5
 
 
 class CameraControl(ThreeComponentBase[CameraControlProps]):
@@ -1278,7 +1279,15 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
             self.create_comp_event({
                 "type": CameraUserControlType.Reset.value,
             }))
+
+    async def lookat_object(self, obj_uid: str):
+        return await self.send_and_wait(
+            self.create_comp_event({
+                "type": CameraUserControlType.LookAtObject.value,
+                "objectName": obj_uid,
+            }))
     
+
     async def rotate_to(self, azimuth: float, polar: float):
         return await self.send_and_wait(
             self.create_comp_event({
@@ -1729,8 +1738,8 @@ class Html(Object3dContainerBase[HtmlProps, MUIComponentType]):
 class TextProps(Object3dBaseProps):
     value: str = ""
     characters: Union[str, Undefined] = undefined
-    color: Annotated[Union[str, Undefined], typemetas.ColorRGB()] = undefined
-    fontSize: Union[NumberType, Undefined] = undefined
+    color: Annotated[Union[str, int, Undefined], typemetas.ColorRGB(default="white")] = undefined
+    fontSize: Annotated[Union[NumberType, Undefined], typemetas.RangedFloat(0.1, 20, 0.02, default=1)] = undefined
     maxWidth: Union[NumberType, Undefined] = undefined
     lineHeight: Union[NumberType, Undefined] = undefined
     letterSpacing: Union[NumberType, Undefined] = undefined

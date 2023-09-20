@@ -36,29 +36,34 @@ from tensorpc.core.dataclass_dispatch import dataclass
 from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.appcore import get_app
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanelV2
+from tensorpc.flow.flowapp.core import AppEvent
 from ... import three
 from ...typemetas import (ColorRGB, ColorRGBA, RangedFloat, RangedInt,
-                          RangedVector3, Vector3, annotated_function_to_dataclass)
+                          RangedVector3, Vector3,
+                          annotated_function_to_dataclass)
 from .canvas import ComplexCanvas, find_component_trace_by_uid_with_not_exist_parts
 from .core import CanvasItemCfg, CanvasItemProxy
-import numpy as np 
+import numpy as np
 from tensorpc.utils.uniquename import UniqueNamePool
 from .core import get_canvas_item_cfg, get_or_create_canvas_item_cfg
+
 
 class ContainerProxy(CanvasItemProxy):
     pass
 
+
 class GroupProxy(ContainerProxy):
     def __init__(self, uid: str) -> None:
-        super().__init__() 
-        self.uid = uid 
+        super().__init__()
+        self.uid = uid
 
         self.childs: Dict[str, three.Component] = {}
 
-        self._namepool = UniqueNamePool()
+        self.namepool = UniqueNamePool()
 
     def __repr__(self) -> str:
         return f"<GroupProxy {self.uid}>"
+
 
 class PointsProxy(CanvasItemProxy):
     def __init__(self) -> None:
@@ -67,13 +72,13 @@ class PointsProxy(CanvasItemProxy):
         self._points_arr: List[np.ndarray] = []
 
         self._size: three.NumberType = 3
-        self._limit : Optional[int] = None
+        self._limit: Optional[int] = None
 
-        self._color: Union[three.Undefined, str] = three.undefined 
+        self._color: Union[three.Undefined, str] = three.undefined
 
     def p(self, x: float, y: float, z: float):
         self._points.append((x, y, z))
-        return self 
+        return self
 
     def array(self, data: np.ndarray):
         if data.dtype != np.float32:
@@ -84,9 +89,9 @@ class PointsProxy(CanvasItemProxy):
     def size(self, size: three.NumberType):
         self._size = size
         return self
-    
+
     def color(self, color: Union[three.Undefined, str]):
-        self._color = color 
+        self._color = color
         return self
 
     def limit(self, limit: int):
@@ -97,11 +102,18 @@ class PointsProxy(CanvasItemProxy):
         # TODO global config
         points_nparray = np.array(self._points, dtype=np.float32)
         if self._points_arr:
-            points_nparray = np.concatenate(self._points_arr + [points_nparray])
+            points_nparray = np.concatenate(self._points_arr +
+                                            [points_nparray])
         if self._limit is not None:
-            return comp.update_event(limit=self._limit, colors=self._color, size=self._size, points=points_nparray)
+            return comp.update_event(limit=self._limit,
+                                     colors=self._color,
+                                     size=self._size,
+                                     points=points_nparray)
         else:
-            return comp.update_event(size=self._size, colors=self._color, points=points_nparray)
+            return comp.update_event(size=self._size,
+                                     colors=self._color,
+                                     points=points_nparray)
+
 
 class ColoredPointsProxy(PointsProxy):
     def __init__(self) -> None:
@@ -112,7 +124,7 @@ class ColoredPointsProxy(PointsProxy):
     def p(self, x: float, y: float, z: float, r: int, g: int, b: int):
         self._points.append((x, y, z))
         self._point_colors.append((r, g, b))
-        return self 
+        return self
 
     def array(self, points: np.ndarray, colors: np.ndarray):
         if points.dtype != np.float32:
@@ -126,15 +138,24 @@ class ColoredPointsProxy(PointsProxy):
         points_nparray = np.array(self._points, dtype=np.float32)
         colors_nparray = np.array(self._point_colors, dtype=np.uint8)
         if self._points_arr:
-            points_nparray = np.concatenate(self._points_arr + [points_nparray])
-            colors_nparray = np.concatenate(self._point_colors_arr + [colors_nparray])
+            points_nparray = np.concatenate(self._points_arr +
+                                            [points_nparray])
+            colors_nparray = np.concatenate(self._point_colors_arr +
+                                            [colors_nparray])
         if self._limit is not None:
-            return comp.update_event(limit=self._limit, size=self._size, points=points_nparray, colors=colors_nparray)
+            return comp.update_event(limit=self._limit,
+                                     size=self._size,
+                                     points=points_nparray,
+                                     colors=colors_nparray)
         else:
-            return comp.update_event(size=self._size, points=points_nparray, colors=colors_nparray)
+            return comp.update_event(size=self._size,
+                                     points=points_nparray,
+                                     colors=colors_nparray)
+
 
 class _Polygon:
-    def __init__(self, start: three.Vector3Type, closed: bool, line_proxy: "LinesProxy") -> None:
+    def __init__(self, start: three.Vector3Type, closed: bool,
+                 line_proxy: "LinesProxy") -> None:
         self.line_proxy = line_proxy
         self.closed = closed
         self.start = start
@@ -144,21 +165,24 @@ class _Polygon:
         self.start = (x, y, z)
         return self
 
+
 class LinesProxy(CanvasItemProxy):
     def __init__(self) -> None:
         super().__init__()
-        self._point_pairs: List[Tuple[three.Vector3Type, three.Vector3Type]] = []
+        self._point_pairs: List[Tuple[three.Vector3Type,
+                                      three.Vector3Type]] = []
         self._width: three.NumberType = 1
-        self._limit : Optional[int] = None
+        self._limit: Optional[int] = None
         self._lines_arr: List[np.ndarray] = []
 
     def limit(self, limit: int):
         self._limit = limit
         return self
 
-    def p(self, x1: float, y1: float, z1: float, x2: float, y2: float, z2: float):
+    def p(self, x1: float, y1: float, z1: float, x2: float, y2: float,
+          z2: float):
         self._point_pairs.append(((x1, y1, z1), (x2, y2, z2)))
-        return self 
+        return self
 
     def array(self, data: np.ndarray):
         if data.dtype != np.float32:
@@ -176,7 +200,9 @@ class LinesProxy(CanvasItemProxy):
         if self._lines_arr:
             lines_array = np.concatenate(self._lines_arr + [lines_array])
         if self._limit is not None:
-            return comp.update_event(limit=self._limit, lineWidth=self._width, lines=lines_array)
+            return comp.update_event(limit=self._limit,
+                                     lineWidth=self._width,
+                                     lines=lines_array)
         else:
             return comp.update_event(lineWidth=self._width, lines=lines_array)
 
@@ -186,8 +212,43 @@ class LinesProxy(CanvasItemProxy):
     def closed_polygon(self, x: float, y: float, z: float):
         return _Polygon((x, y, z), True, self)
 
+
+class BoundingBoxProxy(CanvasItemProxy):
+    def __init__(self, pos: Union[three.Vector3Type, three.Undefined], dims: three.Vector3Type,
+                 rots: Union[three.Vector3Type, three.Undefined]) -> None:
+        super().__init__()
+        self._pos: Union[three.Vector3Type, three.Undefined] = pos
+        self._dims: Union[three.Vector3Type, three.Undefined] = dims
+        self._rots: Union[three.Vector3Type, three.Undefined] = rots
+        self._opacity: Union[three.NumberType,
+                             three.Undefined] = three.undefined
+        self._edge_color: Union[str, int, three.Undefined] = three.undefined
+        self._color: Union[str, int, three.Undefined] = three.undefined
+        self._emissive: Union[str, int, three.Undefined] = three.undefined
+
+    def update_event(self, comp: three.BoundingBox):
+        return comp.update_event(enableSelect=True, position=self._pos, 
+            dimension=self._dims, rotation=self._rots,
+            opacity=self._opacity, edgeColor=self._edge_color, color=self._color,
+            emissive=self._emissive)
+
+class TextProxy(CanvasItemProxy):
+    def __init__(self, text: str, pos: Union[three.Vector3Type, three.Undefined],
+                 rots: Union[three.Vector3Type, three.Undefined]) -> None:
+        super().__init__()
+        self._text = text
+        self._pos: Union[three.Vector3Type, three.Undefined] = pos
+        self._rots: Union[three.Vector3Type, three.Undefined] = rots
+        self._color: Union[str, int, three.Undefined] = three.undefined
+
+    def update_event(self, comp: three.Text):
+        return comp.update_event(value=self._text, position=self._pos, 
+            rotation=self._rots, color=self._color)
+
 class VContext:
-    def __init__(self, canvas: ComplexCanvas, root: Optional[three.ContainerBase] = None):
+    def __init__(self,
+                 canvas: ComplexCanvas,
+                 root: Optional[three.ContainerBase] = None):
         self.stack = []
         self.canvas = canvas
         self.name_stack: List[str] = []
@@ -195,16 +256,15 @@ class VContext:
         if root is None:
             root = canvas._item_root
         self.root = root
-        self._name_to_group: Dict[str, three.ContainerBase] = {
-            "": root
-        }
-        self._group_assigns: Dict[three.ContainerBase, Tuple[three.Component, str]] = {}
+        self._name_to_group: Dict[str, three.ContainerBase] = {"": root}
+        self._group_assigns: Dict[three.ContainerBase, Tuple[three.Component,
+                                                             str]] = {}
 
-    @property 
+    @property
     def current_namespace(self):
         return ".".join(self.name_stack)
 
-    @property 
+    @property
     def current_container(self):
         if not self.name_stack:
             return self.root
@@ -214,15 +274,16 @@ class VContext:
     def extract_group_assigns(self):
         """group created by vapi will be recreated in each vctx.
         """
-        pass 
+        pass
+
 
 V_CONTEXT_VAR: contextvars.ContextVar[
-    Optional[VContext]] = contextvars.ContextVar("v_context",
-                                                   default=None)
+    Optional[VContext]] = contextvars.ContextVar("v_context", default=None)
 
 GROUP_CONTEXT_VAR: contextvars.ContextVar[
     Optional[GroupProxy]] = contextvars.ContextVar("group_context",
                                                    default=None)
+
 
 def get_v_context() -> Optional[VContext]:
     return V_CONTEXT_VAR.get()
@@ -236,67 +297,89 @@ def enter_v_conetxt(robj: VContext):
     finally:
         V_CONTEXT_VAR.reset(token)
 
-async def _draw_all_in_vctx(vctx: VContext):
-    print("?", vctx._group_assigns)
-    print(vctx._name_to_group)
+
+async def _draw_all_in_vctx(vctx: VContext,
+                            detail_update_prefix: Optional[str] = None,
+                            app_event: Optional[AppEvent] = None):
+    # print("?", vctx._group_assigns)
+    # print(vctx._name_to_group)
     for k, v in vctx._name_to_group.items():
         cfg = get_canvas_item_cfg(v)
-        print(k, cfg )
+        # print(k, cfg )
         if cfg is not None:
             proxy = cfg.proxy
             if proxy is not None:
                 assert isinstance(proxy, GroupProxy)
-                print("???")
-                if cfg.is_vapi:
-                    assert not v.is_mounted()
+                # print("???")
+                if cfg.is_vapi and v is not vctx.root:
+                    assert not v.is_mounted(), f"{type(v)}"
                     v.init_add_layout(proxy.childs)
                     for c in proxy.childs.values():
                         c_cfg = get_canvas_item_cfg(c)
-                        assert c_cfg is not None 
+                        assert c_cfg is not None
                         c_proxy = c_cfg.proxy
-                        assert c_proxy is not None 
+                        assert c_proxy is not None
+                        # TODO
                         c_proxy.update_event(c)
                 else:
+                    # print(proxy.childs)
+                    for c in proxy.childs.values():
+                        c_cfg = get_canvas_item_cfg(c)
+                        assert c_cfg is not None
+                        c_proxy = c_cfg.proxy
+                        assert c_proxy is not None
+                        # TODO
+                        c_proxy.update_event(c)
                     await v.update_childs(proxy.childs)
     for container, (group, name) in vctx._group_assigns.items():
-        await container.update_childs({
-            name: group
-        })
-    await vctx.canvas.item_tree.update_tree()
+        assert isinstance(group, three.Group)
+        # print(group._child_comps)
+        await container.update_childs({name: group})
+    await vctx.canvas.item_tree.update_tree(wait=False)
+    if detail_update_prefix is not None:
+        await vctx.canvas.update_detail_layout(detail_update_prefix)
+    if app_event is not None:
+        await vctx.canvas.send_and_wait(app_event)
 
-@contextlib.contextmanager
-def ctx(canvas: Optional[ComplexCanvas] = None, loop: Optional[asyncio.AbstractEventLoop] = None,):
-    if canvas is None:
-        canvas = appctx.find_component(ComplexCanvas)
-        assert canvas is not None, "you must add complex canvas before using vapi"
-    
-    prev_ctx = get_v_context()
-    is_first_ctx = False
-    if prev_ctx is None:
-        is_first_ctx = True
-        prev_ctx = VContext(canvas)
-    token = V_CONTEXT_VAR.set(prev_ctx)
-    try:
-        yield prev_ctx
-    finally:
-        V_CONTEXT_VAR.reset(token)
-        if is_first_ctx:
-            if loop is None:
-                loop = asyncio.get_running_loop()
-            if get_app()._flowapp_thread_id == threading.get_ident():
-                # we can't wait fut here
-                task = asyncio.create_task(_draw_all_in_vctx(prev_ctx))
-                # we can't wait fut here
-                return task
-                # return fut
-            else:
-                # we can wait fut here.
-                fut = asyncio.run_coroutine_threadsafe(
-                    _draw_all_in_vctx(prev_ctx), loop)
-                return fut.result()
+
+# @contextlib.contextmanager
+# def ctx(
+#     canvas: Optional[ComplexCanvas] = None,
+#     loop: Optional[asyncio.AbstractEventLoop] = None,
+# ):
+#     if canvas is None:
+#         canvas = appctx.find_component(ComplexCanvas)
+#         assert canvas is not None, "you must add complex canvas before using vapi"
+
+#     prev_ctx = get_v_context()
+#     is_first_ctx = False
+#     if prev_ctx is None:
+#         is_first_ctx = True
+#         prev_ctx = VContext(canvas)
+#     token = V_CONTEXT_VAR.set(prev_ctx)
+#     try:
+#         yield prev_ctx
+#     finally:
+#         V_CONTEXT_VAR.reset(token)
+#         if is_first_ctx:
+#             if loop is None:
+#                 loop = asyncio.get_running_loop()
+#             if get_app()._flowapp_thread_id == threading.get_ident():
+#                 # we can't wait fut here
+#                 task = asyncio.create_task(_draw_all_in_vctx(prev_ctx))
+#                 # we can't wait fut here
+#                 return task
+#                 # return fut
+#             else:
+#                 # we can wait fut here.
+#                 fut = asyncio.run_coroutine_threadsafe(
+#                     _draw_all_in_vctx(prev_ctx), loop)
+#                 return fut.result()
+
 
 def get_group_context() -> Optional[GroupProxy]:
     return GROUP_CONTEXT_VAR.get()
+
 
 @contextlib.contextmanager
 def enter_group_context(robj: GroupProxy):
@@ -306,21 +389,39 @@ def enter_group_context(robj: GroupProxy):
     finally:
         GROUP_CONTEXT_VAR.reset(token)
 
-_CARED_CONTAINERS  =  (three.Group, three.Fragment, three.Hud)
+
+_CARED_CONTAINERS = (three.Group, three.Fragment, three.Hud)
 
 T_container = TypeVar("T_container", bound=three.ContainerBase)
 T_container_proxy = TypeVar("T_container_proxy", bound=three.ContainerBase)
 
+
 @contextlib.contextmanager
-def group(name: str, check_override: bool = False, ):
+def group(name: str,
+          pos: Optional[three.Vector3Type] = None,
+          rot: Optional[three.Vector3Type] = None,
+          canvas: Optional[ComplexCanvas] = None,
+          loop: Optional[asyncio.AbstractEventLoop] = None):
+    if canvas is None:
+        canvas = appctx.find_component(ComplexCanvas)
+        assert canvas is not None, "you must add complex canvas before using vapi"
+
     name_parts = name.split(".")
     assert name_parts[0] != "reserved" and name != ""
     for p in name_parts:
         assert p, "group name can not be empty"
     # find exist group in canvas
     v_ctx = get_v_context()
-    assert v_ctx is not None 
-    # canvas = v_ctx.canvas 
+    is_first_ctx = False
+    token = None
+    if v_ctx is None:
+        is_first_ctx = True
+        v_ctx = VContext(canvas)
+        token = V_CONTEXT_VAR.set(v_ctx)
+
+    # v_ctx = get_v_context()
+    # assert v_ctx is not None
+    # canvas = v_ctx.canvas
     if v_ctx.name_stack:
         uid = f"{v_ctx.current_namespace}.{name}"
     else:
@@ -328,7 +429,8 @@ def group(name: str, check_override: bool = False, ):
     if uid in v_ctx._name_to_group:
         group = v_ctx._name_to_group[uid]
     else:
-        trace, remain, consumed = find_component_trace_by_uid_with_not_exist_parts(v_ctx.root, uid, _CARED_CONTAINERS)
+        trace, remain, consumed = find_component_trace_by_uid_with_not_exist_parts(
+            v_ctx.root, uid, _CARED_CONTAINERS)
         # find first vapi-created group
         for i, comp in enumerate(trace):
             cfg = get_canvas_item_cfg(comp)
@@ -338,6 +440,8 @@ def group(name: str, check_override: bool = False, ):
                 consumed = consumed[:i]
                 remain = consumed_remain + remain
                 break
+        # print(v_ctx, name, remain, consumed)
+
         # fill existed group to ctx
         # print(trace, remain, consumed)
         trace.insert(0, v_ctx.root)
@@ -366,16 +470,18 @@ def group(name: str, check_override: bool = False, ):
         # check is remain tracked in vctx
         remain_copy = remain.copy()
         for remain_part in remain_copy:
-            cur_name = f"{comsumed_name}.{remain_part}"
+            if comsumed_name == "":
+                cur_name = remain_part
+            else:
+                cur_name = f"{comsumed_name}.{remain_part}"
             if cur_name in v_ctx._name_to_group:
                 remain.pop(0)
                 trace.append(v_ctx._name_to_group[cur_name])
-        
         # found component, check is container first
         # handle remain
         group = trace[-1]
         if remain:
-            g = three.Group([]) 
+            g = three.Group([])
             group_to_yield = g
             v_ctx._name_to_group[uid] = g
             item_cfg = get_or_create_canvas_item_cfg(g, True)
@@ -397,11 +503,18 @@ def group(name: str, check_override: bool = False, ):
                     v_ctx._group_assigns[group] = (g, remain[0])
                     # v_ctx._name_to_group[uid] = g
             group = group_to_yield
-        
+
         # group = three.Group([])
         # v_ctx._name_to_group[uid] = group
     # print(v_ctx._name_to_group)
     # print(v_ctx._group_assigns)
+    ev = AppEvent("", {})
+    if isinstance(group, three.Group):
+        if pos is not None:
+            ev += group.update_event(position=pos)
+        if rot is not None:
+            ev += group.update_event(rotation=rot)
+
     item_cfg = get_or_create_canvas_item_cfg(group)
     if item_cfg.proxy is None:
         item_cfg.proxy = GroupProxy(uid)
@@ -411,34 +524,88 @@ def group(name: str, check_override: bool = False, ):
     finally:
         for i in range(len(name_parts)):
             v_ctx.name_stack.pop()
+        if is_first_ctx:
+            assert token is not None
+            V_CONTEXT_VAR.reset(token)
+            if loop is None:
+                loop = asyncio.get_running_loop()
+            if get_app()._flowapp_thread_id == threading.get_ident():
+                # we can't wait fut here
+                task = asyncio.create_task(_draw_all_in_vctx(v_ctx, ".*", ev))
+                # we can't wait fut here
+                return task
+                # return fut
+            else:
+                # we can wait fut here.
+                fut = asyncio.run_coroutine_threadsafe(
+                    _draw_all_in_vctx(v_ctx, ".*", ev), loop)
+                return fut.result()
 
 
 def points(name: str, limit: int):
     point = three.Points(limit)
     v_ctx = get_v_context()
-    assert v_ctx is not None 
+    assert v_ctx is not None
     cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
-    proxy = cfg.proxy 
-    assert proxy is not None 
+    proxy = cfg.proxy
+    assert proxy is not None
     assert isinstance(proxy, GroupProxy)
     proxy.childs[name] = point
     pcfg = get_or_create_canvas_item_cfg(point, True)
     pcfg.proxy = PointsProxy()
     return pcfg.proxy
 
+
 def lines(name: str, limit: int):
     point = three.Segments(limit)
     v_ctx = get_v_context()
-    assert v_ctx is not None 
+    assert v_ctx is not None
     cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
-    proxy = cfg.proxy 
-    assert proxy is not None 
+    proxy = cfg.proxy
+    assert proxy is not None
     assert isinstance(proxy, GroupProxy)
     proxy.childs[name] = point
     pcfg = get_or_create_canvas_item_cfg(point, True)
     pcfg.proxy = LinesProxy()
     return pcfg.proxy
 
+def bounding_box(dim: three.Vector3Type, rot: Optional[three.Vector3Type] = None, pos: Optional[three.Vector3Type] = None, name: Optional[str] = None):
+    obj = three.BoundingBox(dim)
+    if rot is not None:
+        obj.prop(rotation=rot)
+    if pos is not None:
+        obj.prop(position=pos)
+    v_ctx = get_v_context()
+    assert v_ctx is not None
+    cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
+    proxy = cfg.proxy
+    assert proxy is not None
+    assert isinstance(proxy, GroupProxy)
+    if name is None:
+        name = proxy.namepool("box")
+    proxy.childs[name] = obj
+    pcfg = get_or_create_canvas_item_cfg(obj, True)
+    pcfg.proxy = BoundingBoxProxy(three.undefined if pos is None else pos, dim, three.undefined if rot is None else rot)
+    return pcfg.proxy
+
+def text(text: str, rot: Optional[three.Vector3Type] = None, pos: Optional[three.Vector3Type] = None, name: Optional[str] = None):
+    obj = three.Text(text)
+    if rot is not None:
+        obj.prop(rotation=rot)
+    if pos is not None:
+        obj.prop(position=pos)
+    v_ctx = get_v_context()
+    assert v_ctx is not None
+    cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
+    proxy = cfg.proxy
+    assert proxy is not None
+    assert isinstance(proxy, GroupProxy)
+    if name is None:
+        name = proxy.namepool("text")
+    proxy.childs[name] = obj
+    pcfg = get_or_create_canvas_item_cfg(obj, True)
+    pcfg.proxy = TextProxy(text, three.undefined if pos is None else pos, three.undefined if rot is None else rot)
+    return pcfg.proxy
 
 def program(name: str, func: Callable):
     # raise NotImplementedError
@@ -446,25 +613,30 @@ def program(name: str, func: Callable):
     func_dcls = annotated_function_to_dataclass(func)
     func_dcls_obj = func_dcls()
     v_ctx = get_v_context()
-    assert v_ctx is not None 
+    assert v_ctx is not None
     cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
-    proxy = cfg.proxy 
-    assert proxy is not None 
+    proxy = cfg.proxy
+    assert proxy is not None
     assert isinstance(proxy, GroupProxy)
     proxy.childs[name] = group
     pcfg = get_or_create_canvas_item_cfg(group, True)
-    async def callback(uid: str, value: Any):
-        if "." in uid:
-            return 
-        setattr(func_dcls_obj, uid, value)
-        vctx_program = VContext(v_ctx.canvas, group)
-        with enter_v_conetxt(vctx_program):
-            kwargs = {}
-            for field in dataclasses.fields(func_dcls_obj):
-                kwargs[field.name] = getattr(func_dcls_obj, field.name)
-            res = func(**kwargs)
-            if inspect.iscoroutine(res):
-                await res 
-    pcfg.detail_layout = ConfigPanelV2(func_dcls_obj, callback)
-    return
 
+    async def callback(uid: str, value: Any):
+        # print(uid, value)
+        if "." in uid:
+            return
+        if group.is_mounted():
+            setattr(func_dcls_obj, uid, value)
+            vctx_program = VContext(v_ctx.canvas, group)
+            with enter_v_conetxt(vctx_program):
+                kwargs = {}
+                for field in dataclasses.fields(func_dcls_obj):
+                    kwargs[field.name] = getattr(func_dcls_obj, field.name)
+                res = func(**kwargs)
+                if inspect.iscoroutine(res):
+                    await res
+            await _draw_all_in_vctx(vctx_program, rf"{group._flow_uid}\..*")
+
+    pcfg.detail_layout = ConfigPanelV2(func_dcls_obj, callback)
+    pcfg.proxy = GroupProxy("")
+    return

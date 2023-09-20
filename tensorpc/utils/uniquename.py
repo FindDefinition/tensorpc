@@ -15,7 +15,7 @@
 from typing import Set
 
 
-def _make_unique_name(unique_set, name, max_count=10000):
+def _make_unique_name(unique_set, name, max_count=10000) -> str:
     if name not in unique_set:
         unique_set.add(name)
         return name

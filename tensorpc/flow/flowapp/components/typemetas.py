@@ -1,5 +1,5 @@
 import inspect
-from typing import Callable, List, Optional, Tuple, Any
+from typing import Callable, List, Optional, Tuple, Any, Union
 from typing_extensions import Annotated
 from tensorpc.core.dataclass_dispatch import dataclass
 from typing_extensions import TypeAlias, get_type_hints
@@ -16,6 +16,7 @@ class RangedInt:
     hi: int
     step: Optional[int] = None
     alias: Optional[str] = None 
+    default: Optional[int] = None
 
 @dataclass
 class RangedFloat:
@@ -23,14 +24,17 @@ class RangedFloat:
     hi: float
     step: Optional[float] = None
     alias: Optional[str] = None 
+    default: Optional[float] = None
 
 @dataclass
 class ColorRGB:
     value_is_string: bool = True
+    default: Optional[Union[int, str]] = None
 
 @dataclass
 class ColorRGBA:
     value_is_string: bool = True
+    default: Optional[Union[int, str]] = None
 
 @dataclass
 class RangedVector3:

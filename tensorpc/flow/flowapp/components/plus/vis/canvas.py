@@ -2,6 +2,7 @@ import dataclasses
 import enum
 from functools import partial
 import inspect
+import re
 import urllib.request
 from typing import Any, Callable, Coroutine, Dict, Hashable, Iterable, List, Literal, Optional, Set, Tuple, Type, Union
 from typing_extensions import Annotated
@@ -148,6 +149,12 @@ class ComplexCanvas(mui.FlexBox):
                                                    flex=1,
                                                    width="100%",
                                                    height="100%")
+        self.tdata_container = mui.HBox([]).prop(overflow="auto",
+                                                   padding="3px",
+                                                   flex=1,
+                                                   width="100%",
+                                                   height="100%")
+
 
         self.canvas = three.Canvas({
             "root": self._item_root,
@@ -253,6 +260,12 @@ class ComplexCanvas(mui.FlexBox):
                                tooltipPlacement="right"),
                     mui.TabDef("",
                                "2",
+                               self.tdata_container,
+                               icon=mui.IconType.DataObject,
+                               tooltip="Data Table For Group",
+                               tooltipPlacement="right"),
+                    mui.TabDef("",
+                               "3",
                                mui.AppTerminal(),
                                icon=mui.IconType.Terminal,
                                tooltip="app terminal (read only)",
@@ -370,6 +383,43 @@ class ComplexCanvas(mui.FlexBox):
     async def _on_reset_cam(self):
         await self.ctrl.reset_camera()
 
+    def _extract_tdata_from_group(self, group: three.ContainerBase):
+        common_keys = set()
+        data_items = []
+        for key, obj in group._child_comps.items():
+            obj_cfg = get_canvas_item_cfg(obj)
+            if obj_cfg is not None and obj_cfg.proxy is not None:
+                tdata = obj_cfg.proxy._tdata
+                if tdata is not None:
+                    common_keys.update(tdata.keys())
+                    data_items.append({
+                        "id": key,
+                        **tdata
+                    })
+        return common_keys, data_items
+
+    async def _on_group_select_object(self, ev: mui.Event, group: three.ContainerBase):
+        if not isinstance(ev.keys, mui.Undefined):
+            obj_local_id = ev.keys[0]
+            if obj_local_id in group._child_comps:
+                await self.ctrl.lookat_object(group._child_comps[obj_local_id]._flow_uid)
+
+
+    def _extract_table_from_group(self, group: three.ContainerBase):
+        common_keys, data_items = self._extract_tdata_from_group(group)
+        if len(common_keys) == 0:
+            return None
+
+        btn = mui.IconButton(mui.IconType.Visibility).prop(size="small", iconFontSize="14px")
+        btn.event_click.on_standard(partial(self._on_group_select_object, group=group)).configure(True)
+        column_defs: List[mui.DataGrid.ColumnDef] = [
+            mui.DataGrid.ColumnDef("vis", cell=btn, width=30)
+        ]
+        for k in common_keys:
+            column_defs.append(mui.DataGrid.ColumnDef(k, accessorKey=k))
+        dgrid = mui.DataGrid(column_defs, data_items).prop(idKey="id", rowHover=True, virtualized=True, enableFilter=True, size="small")
+        return dgrid
+
     async def _on_tree_select(self, event: mui.Event):
         data = event.data 
         assert isinstance(data, SelectSingleEvent)
@@ -386,6 +436,39 @@ class ComplexCanvas(mui.FlexBox):
                 panel = ConfigPanelV2(obj.props, partial(self._on_cfg_panel_change, obj=obj), ignored_field_names=set(["status"])).prop(reactKey=data.nodes[-1].id)
                 await self.prop_container.set_new_layout([panel])
                 self._cur_detail_layout_uid = data.nodes[-1].id
+            else:
+                await self.prop_container.set_new_layout([])
+                self._cur_detail_layout_uid = None
+
+        if isinstance(obj, three.ContainerBase):
+            table = self._extract_table_from_group(obj)
+            if table is not None:
+                await self.tdata_container.set_new_layout([table])
+            else:
+                await self.tdata_container.set_new_layout([])
+        else:
+            await self.tdata_container.set_new_layout([])
+
+    async def update_detail_layout(self, regex: str):
+        # TODO when we upgrade tree, we must check if the current selected node is still valid.
+        if self._cur_detail_layout_uid is not None:
+            reg = re.compile(regex)
+            # print(prefix, self._cur_detail_layout_uid)
+            local_uid = self._convert_tree_node_uid_to_local_uid(self._cur_detail_layout_uid)
+            if reg.match(local_uid) is not None:
+                container_parents, remain_keys, _ = find_component_trace_by_uid_with_not_exist_parts(self._item_root, local_uid)
+                if len(remain_keys) == 0:
+                    obj = container_parents[-1]
+                    obj_cfg = get_canvas_item_cfg(obj)
+                    if obj_cfg is not None and obj_cfg.detail_layout is not None:
+                        await self.prop_container.set_new_layout([obj_cfg.detail_layout])
+                    else:
+                        if three.is_three_component(obj):
+                            panel = ConfigPanelV2(obj.props, partial(self._on_cfg_panel_change, obj=obj), ignored_field_names=set(["status"])).prop(reactKey=self._cur_detail_layout_uid)
+                            await self.prop_container.set_new_layout([panel])
+                else:
+                    await self.prop_container.set_new_layout([])
+        pass 
 
     async def set_layout_in_container(self, container_key: str, layout: three.ThreeLayoutType):
         if isinstance(layout, list):
@@ -423,6 +506,10 @@ class ComplexCanvas(mui.FlexBox):
     def _get_local_uid_of_object(self, uid: str):
         assert uid.startswith(self._item_root._flow_uid)
         return uid[len(self._item_root._flow_uid)+1:]
+
+    def _convert_tree_node_uid_to_local_uid(self, uid: str):
+        assert uid.startswith("root::")
+        return uid[len("root::"):].replace("::", ".")
 
     async def _on_3d_object_select(self, selected: list):
         if not selected:

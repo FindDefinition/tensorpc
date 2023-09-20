@@ -3,7 +3,7 @@ from tensorpc.flow.flowapp.components.plus.vis.canvas import ComplexCanvas
 
 def main():
     canvas = ComplexCanvas()
-    with V.ctx(canvas):
+    with V.group("haha", canvas=canvas):
         with V.group("wtf.rtx"):
             pass 
 

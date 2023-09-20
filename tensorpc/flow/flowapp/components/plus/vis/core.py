@@ -1,5 +1,6 @@
 
-from typing import Any, Optional
+import json
+from typing import Any, Dict, Optional
 from tensorpc.core.dataclass_dispatch import dataclass
 from pydantic_core import PydanticCustomError, core_schema
 from pydantic import (
@@ -12,7 +13,12 @@ class CanvasItemProxy:
     def __init__(self) -> None:
         super().__init__()
         self._detail_layout: Optional[mui.FlexBox] = None
-    
+
+        self._tdata: Optional[Dict[str, Any]] = None
+
+    def update_event(self, comp: three.Component):
+        pass 
+
     def detail_layout(self, layout: mui.FlexBox):
         self._detail_layout = layout
         return self
@@ -29,6 +35,12 @@ class CanvasItemProxy:
         if not isinstance(v, CanvasItemProxy):
             raise TypeError('CanvasItemProxy required')
         return v
+
+    def tdata(self, data: Dict[str, Any]):
+        # make sure data is json serializable
+        json.dumps(data)
+        self._tdata = data
+        return self
 
 @dataclass
 class CanvasItemCfg:

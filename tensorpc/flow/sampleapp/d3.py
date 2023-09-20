@@ -324,12 +324,12 @@ class EnvmapGroupdProjectionApp:
                         three.SelectionContext([
                             three.EffectComposer([
                                 three.Outline().prop(blur=True, edgeStrength=100, 
-                                                     width=1000, visibleEdgeColor=0xf43f12, 
-                                                     hiddenEdgeColor=0xf43f12),
+                                                    width=2000, visibleEdgeColor=0xfff, 
+                                                    hiddenEdgeColor=0xfff, blendFunction=three.BlendFunction.ALPHA),
                                 three.ToneMapping().prop(mode=three.ToneMapppingMode.ACES_FILMIC),
-                            ]).prop(autoClear=True),
+                            ]).prop(autoClear=False),
                             three.Mesh([
-                                three.MeshPhysicalMaterial(),
+                                # three.MeshPhysicalMaterial(),
                                 # three.Outlines().prop(color="blue", thickness=50),
                             ]).set_override_props_unchecked_dict({
                                 "geometry":

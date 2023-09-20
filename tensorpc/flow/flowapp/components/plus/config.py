@@ -24,6 +24,7 @@ from tensorpc.flow.flowapp.components import typemetas
 from tensorpc.flow.flowapp.core import AppEvent
 from .. import mui, three
 import inspect
+
 T = TypeVar("T")
 
 _CONFIG_META_KEY = "_tensorpc_config_panel_meta"
@@ -35,20 +36,22 @@ _BASE_TYPES = (
     str,
 )
 
-
 # def get_args(t: Any) -> Tuple[Any, ...]:
 #     return getattr(t, "__args__", None) or ()
 
-
 _BASE_TYPES = (int, float, bool, str, mui.Undefined)
 
-def lenient_issubclass(cls: Any, class_or_tuple: Any) -> bool:  # pragma: no cover
+
+def lenient_issubclass(cls: Any,
+                       class_or_tuple: Any) -> bool:  # pragma: no cover
     return isinstance(cls, type) and issubclass(cls, class_or_tuple)
+
 
 def is_annotated(ann_type: Any) -> bool:
     # https://github.com/pydantic/pydantic/blob/35144d05c22e2e38fe093c533ff3a05ce9a30116/pydantic/_internal/_typing_extra.py#L99C1-L104C1
     origin = get_origin(ann_type)
     return origin is not None and lenient_issubclass(origin, Annotated)
+
 
 def _check_is_basic_type(tp):
     origin = get_origin(tp)
@@ -88,7 +91,7 @@ class InputMeta(ConfigMeta):
 class SliderMeta(ConfigMeta):
     begin: mui.NumberType
     end: mui.NumberType
-    step: Optional[mui.NumberType] = None 
+    step: Optional[mui.NumberType] = None
 
 
 @dataclasses.dataclass
@@ -98,8 +101,7 @@ class ControlItemMeta:
     compare: Callable[[Any], bool]
 
 
-_BUILTIN_DCLS_TYPE = set(
-    [mui.ControlColorRGB, mui.ControlColorRGBA])
+_BUILTIN_DCLS_TYPE = set([mui.ControlColorRGB, mui.ControlColorRGBA])
 
 
 def setattr_single(val, obj, name, mapper: Optional[Callable] = None):
@@ -108,13 +110,19 @@ def setattr_single(val, obj, name, mapper: Optional[Callable] = None):
     else:
         setattr(obj, name, val)
 
+
 # def setattr_vector_n(val, obj, name):
 #     # val: [axis, value]
 #     val_prev = getattr(obj, name).data.copy()
 #     val_prev[val[0]] = val[1]
 #     setattr(obj, name, mui.ControlVectorN(val_prev))
 
-def setattr_vector_n_tuple(val, obj, name, count: int, default: Optional[Tuple] = None):
+
+def setattr_vector_n_tuple(val,
+                           obj,
+                           name,
+                           count: int,
+                           default: Optional[Tuple] = None):
     # val: [axis, value]
     prev_val = getattr(obj, name)
     if isinstance(prev_val, mui.Undefined):
@@ -126,8 +134,10 @@ def setattr_vector_n_tuple(val, obj, name, count: int, default: Optional[Tuple] 
     val_prev[val[0]] = val[1]
     setattr(obj, name, tuple(val_prev))
 
+
 def getattr_single(obj, name):
     return getattr(obj, name)
+
 
 def compare_single(value, obj, name, mapper: Optional[Callable] = None):
     if mapper is not None:
@@ -135,18 +145,22 @@ def compare_single(value, obj, name, mapper: Optional[Callable] = None):
     else:
         return getattr(obj, name) == value
 
+
 def compare_vector_n(value, obj, name):
     # val: [axis, value]
     return getattr(obj, name).data[value[0]] == value[1]
+
 
 def compare_vector_n_tuple(value, obj, name):
     # val: [axis, value]
     val = getattr(obj, name)
     if isinstance(val, mui.Undefined):
-        return False 
+        return False
     return getattr(obj, name)[value[0]] == value[1]
 
-def _parse_base_type(ty: Type, current_obj, field_name: str, child_node: mui.ControlNode) -> Optional[ControlItemMeta]:
+
+def _parse_base_type(ty: Type, current_obj, field_name: str,
+                     child_node: mui.ControlNode) -> Optional[ControlItemMeta]:
     getter = partial(getattr_single, obj=current_obj, name=field_name)
     comparer = partial(compare_single, obj=current_obj, name=field_name)
     if ty is bool:
@@ -156,25 +170,25 @@ def _parse_base_type(ty: Type, current_obj, field_name: str, child_node: mui.Con
         child_node.type = mui.ControlNodeType.Bool.value
         child_node.initValue = getattr(current_obj, field_name)
         setter = partial(setattr_single,
-                            obj=current_obj,
-                            name=field_name,
-                            mapper=bool)
+                         obj=current_obj,
+                         name=field_name,
+                         mapper=bool)
         # setter = lambda x: setattrV2(current_obj, f.name, bool(x))
 
     elif ty is int or ty is float:
         # use textfield with number type
         if ty is int:
             setter = partial(setattr_single,
-                                obj=current_obj,
-                                name=field_name,
-                                mapper=int)
+                             obj=current_obj,
+                             name=field_name,
+                             mapper=int)
 
             # setter = lambda x: setattrV2(current_obj, f.name, int(x))
         else:
             setter = partial(setattr_single,
-                                obj=current_obj,
-                                name=field_name,
-                                mapper=float)
+                             obj=current_obj,
+                             name=field_name,
+                             mapper=float)
 
             # setter = lambda x: setattrV2(current_obj, f.name, float(x))
         child_node.type = mui.ControlNodeType.Number.value
@@ -185,9 +199,9 @@ def _parse_base_type(ty: Type, current_obj, field_name: str, child_node: mui.Con
     elif ty is str:
         # use textfield
         setter = partial(setattr_single,
-                            obj=current_obj,
-                            name=field_name,
-                            mapper=str)
+                         obj=current_obj,
+                         name=field_name,
+                         mapper=str)
 
         # setter = lambda x: setattr(current_obj, f.name, str(x))
         child_node.type = mui.ControlNodeType.String.value
@@ -201,16 +215,16 @@ def _parse_base_type(ty: Type, current_obj, field_name: str, child_node: mui.Con
         if ty is mui.ControlColorRGB:
             mapper = lambda x: mui.ControlColorRGB(x["r"], x["g"], x["b"])
         else:
-            mapper = lambda x: mui.ControlColorRGBA(
-                x["r"], x["g"], x["b"], x["a"])
+            mapper = lambda x: mui.ControlColorRGBA(x["r"], x["g"], x["b"], x[
+                "a"])
         setter = partial(setattr_single,
-                            obj=current_obj,
-                            name=field_name,
-                            mapper=mapper)
+                         obj=current_obj,
+                         name=field_name,
+                         mapper=mapper)
         comparer = partial(compare_single,
-                            obj=current_obj,
-                            name=field_name,
-                            mapper=mapper)
+                           obj=current_obj,
+                           name=field_name,
+                           mapper=mapper)
     else:
         ty_origin = get_origin(ty)
         # print(ty, ty_origin, type(ty), type(ty_origin))
@@ -221,8 +235,7 @@ def _parse_base_type(ty: Type, current_obj, field_name: str, child_node: mui.Con
             # setter = lambda x: setattr(current_obj, f.name, x)
             setter = partial(setattr_single, obj=current_obj, name=field_name)
 
-        elif ty_origin is None and issubclass(ty,
-                                                (enum.Enum, enum.IntEnum)):
+        elif ty_origin is None and issubclass(ty, (enum.Enum, enum.IntEnum)):
             child_node.type = mui.ControlNodeType.Select.value
             item = getattr(current_obj, field_name)
             if not isinstance(item, mui.Undefined):
@@ -231,35 +244,55 @@ def _parse_base_type(ty: Type, current_obj, field_name: str, child_node: mui.Con
             # setter = lambda x: setattr(current_obj, f.name, ty(x))
             # print(ty, child_node.selects)
             setter = partial(setattr_single,
-                                obj=current_obj,
-                                name=field_name,
-                                mapper=ty)
+                             obj=current_obj,
+                             name=field_name,
+                             mapper=ty)
         elif ty_origin is Union:
             # handle "Union[..., Undefined]" in component props
             union_args = get_args(ty)
             if mui.Undefined in union_args:
-                union_args = tuple(x for x in union_args if x is not mui.Undefined)
+                union_args = tuple(x for x in union_args
+                                   if x is not mui.Undefined)
             if len(union_args) == 1:
-                return _parse_base_type(union_args[0], current_obj, field_name, child_node)
+                return _parse_base_type(union_args[0], current_obj, field_name,
+                                        child_node)
             else:
                 # handle NumberType and ValueType in component props
                 union_args_set = set(union_args)
                 if union_args_set == set([int, float]):
                     # number type
                     # use float type
-                    return _parse_base_type(float, current_obj, field_name, child_node)
+                    return _parse_base_type(float, current_obj, field_name,
+                                            child_node)
                 elif union_args_set == set([int, float, str]):
-                    # value type 
+                    # value type
                     # use str type
-                    return _parse_base_type(str, current_obj, field_name, child_node)
-            return None 
+                    return _parse_base_type(str, current_obj, field_name,
+                                            child_node)
+            return None
         else:
-            return None 
+            return None
 
     return ControlItemMeta(getter, setter, comparer)
 
-def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
-                           obj_uid_to_meta: Dict[str, ControlItemMeta], ignored_field_names: Optional[Set[str]] = None):
+
+def _check_union_is_valid_subset_ignore_undefined(ty, ty_origin,
+                                                  target_set: Set[Type]):
+    if ty_origin is Union:
+        # handle "Union[..., Undefined]" in component props
+        union_args = get_args(ty)
+        if mui.Undefined in union_args:
+            union_args = tuple(x for x in union_args if x is not mui.Undefined)
+        union_args_set = set(union_args)
+        return union_args_set.issubset(target_set)
+    return False
+
+
+def parse_to_control_nodes(origin_obj,
+                           current_obj,
+                           current_name: str,
+                           obj_uid_to_meta: Dict[str, ControlItemMeta],
+                           ignored_field_names: Optional[Set[str]] = None):
     res_node = mui.ControlNode(id=current_name,
                                name=current_name.split(".")[-1],
                                type=mui.ControlNodeType.Folder.value)
@@ -267,7 +300,7 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
         ignored_field_names = set()
     for f in dataclasses.fields(current_obj):
         if f.name in ignored_field_names:
-            continue 
+            continue
         next_name = f.name
         if current_name:
             next_name = current_name + "." + f.name
@@ -280,12 +313,13 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
         ty = f.type
         is_anno = is_annotated(ty)
         # ty_origin = get_origin(ty)
-        annotated_metas = None 
-        # print(ty_origin, ty, type(ty))
+        annotated_metas = None
         if is_anno:
             annotated_metas = ty.__metadata__
             ty = get_args(ty)[0]
         ty_origin = get_origin(ty)
+        # if f.name == "fontSize":
+        #     print(f.name, ty_origin, ty, type(ty), not _check_is_basic_type(ty) and ty not in _BUILTIN_DCLS_TYPE, annotated_metas)
 
         if dataclasses.is_dataclass(ty) and ty not in _BUILTIN_DCLS_TYPE:
             res = parse_to_control_nodes(origin_obj,
@@ -304,20 +338,29 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
         # check anno meta first
         if annotated_metas is not None:
             first_anno_meta = annotated_metas[0]
-            if isinstance(first_anno_meta, (typemetas.ColorRGB, typemetas.ColorRGBA)):
+            if isinstance(first_anno_meta,
+                          (typemetas.ColorRGB, typemetas.ColorRGBA)):
                 if isinstance(first_anno_meta, typemetas.ColorRGB):
                     child_node.type = mui.ControlNodeType.ColorRGB.value
                 else:
                     child_node.type = mui.ControlNodeType.ColorRGBA.value
-                child_node.initValue = getattr(current_obj, f.name)
+                val = getattr(current_obj, f.name)
+                if not isinstance(val, mui.Undefined):
+                    child_node.initValue = val
+                else:
+                    if first_anno_meta.default is not None:
+                        child_node.initValue = first_anno_meta.default
+                # child_node.initValue = getattr(current_obj, f.name)
                 ty_valid_color = ty is str or ty is mui.ValueType
                 if ty_origin is Union:
                     # handle "Union[..., Undefined]" in component props
                     union_args = get_args(ty)
                     if mui.Undefined in union_args:
-                        union_args = tuple(x for x in union_args if x is not mui.Undefined)
+                        union_args = tuple(x for x in union_args
+                                           if x is not mui.Undefined)
                     if len(union_args) == 1:
-                        ty_valid_color = union_args[0] is str or union_args[0] is int
+                        ty_valid_color = union_args[0] is str or union_args[
+                            0] is int
                     else:
                         # handle NumberType and ValueType in component props
                         union_args_set = set(union_args)
@@ -325,22 +368,24 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                     # print(ty, ty_origin, ty_valid_color, "RTX")
                 if ty_valid_color:
                     if first_anno_meta.value_is_string:
-                        mapper = lambda x: "#{:02X}{:02X}{:02X}".format(x["r"], x["g"], x["b"])
+                        mapper = lambda x: "#{:02X}{:02X}{:02X}".format(
+                            x["r"], x["g"], x["b"])
                     else:
                         mapper = lambda x: x["r"] << 16 | x["g"] << 8 | x["b"]
                     setter = partial(setattr_single,
-                                    obj=current_obj,
-                                    name=f.name,
-                                    mapper=mapper)
+                                     obj=current_obj,
+                                     name=f.name,
+                                     mapper=mapper)
                     comparer = partial(compare_single,
-                                    obj=current_obj,
-                                    name=f.name,
-                                    mapper=mapper)
+                                       obj=current_obj,
+                                       name=f.name,
+                                       mapper=mapper)
                     res_node.children.append(child_node)
                     obj_uid_to_meta[child_node.id] = ControlItemMeta(
                         getter, setter, comparer)
-                    continue 
-            elif isinstance(first_anno_meta, (typemetas.RangedVector3, typemetas.Vector3)):
+                    continue
+            elif isinstance(first_anno_meta,
+                            (typemetas.RangedVector3, typemetas.Vector3)):
                 child_node.type = mui.ControlNodeType.VectorN.value
                 child_node.count = 3
                 val = getattr(current_obj, f.name)
@@ -359,22 +404,29 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                 child_node.alias = mui.undefined if first_anno_meta.alias is None else first_anno_meta.alias
 
                 setter = partial(setattr_vector_n_tuple,
-                                obj=current_obj,
-                                name=f.name,
-                                count=child_node.count,
-                                default=first_anno_meta.default)
+                                 obj=current_obj,
+                                 name=f.name,
+                                 count=child_node.count,
+                                 default=first_anno_meta.default)
                 comparer = partial(compare_vector_n_tuple,
-                                obj=current_obj,
-                                name=f.name)
+                                   obj=current_obj,
+                                   name=f.name)
                 res_node.children.append(child_node)
                 obj_uid_to_meta[child_node.id] = ControlItemMeta(
                     getter, setter, comparer)
-                continue 
-            elif isinstance(first_anno_meta, (typemetas.RangedInt, typemetas.RangedFloat)) and (ty is int or ty is float):
+                continue
+            elif (isinstance(first_anno_meta,
+                             (typemetas.RangedInt, typemetas.RangedFloat))
+                  and _check_union_is_valid_subset_ignore_undefined(
+                      ty, ty_origin, set([int, float]))):
                 res = _parse_base_type(ty, current_obj, f.name, child_node)
                 if res is not None:
                     child_node.type = mui.ControlNodeType.RangeNumber.value
-                    child_node.initValue = getattr(current_obj, f.name)
+                    if first_anno_meta.default is not None:
+                        child_node.initValue = first_anno_meta.default
+                    else:
+                        val = getattr(current_obj, f.name)
+                        child_node.initValue = val
                     child_node.min = first_anno_meta.lo
                     child_node.max = first_anno_meta.hi
                     child_node.alias = mui.undefined if first_anno_meta.alias is None else first_anno_meta.alias
@@ -383,7 +435,7 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                         child_node.step = 1
                     res_node.children.append(child_node)
                     obj_uid_to_meta[child_node.id] = res
-                    continue 
+                    continue
             elif isinstance(first_anno_meta, (typemetas.CommonObject)):
                 res = _parse_base_type(ty, current_obj, f.name, child_node)
                 if res is not None:
@@ -393,14 +445,14 @@ def parse_to_control_nodes(origin_obj, current_obj, current_name: str,
                         child_node.initValue = first_anno_meta.default
                     res_node.children.append(child_node)
                     obj_uid_to_meta[child_node.id] = res
-                    continue 
+                    continue
 
         # type don't have anno meta, or invalid meta, use base types
         res = _parse_base_type(ty, current_obj, f.name, child_node)
         if res is not None:
             res_node.children.append(child_node)
             obj_uid_to_meta[child_node.id] = res
-            continue 
+            continue
 
     return res_node
 
@@ -409,21 +461,22 @@ def control_nodes_v1_to_v2(ctrl_node_v1: mui.ControlNode) -> mui.JsonLikeNode:
     childs: List[mui.JsonLikeNode] = [
         control_nodes_v1_to_v2(c) for c in ctrl_node_v1.children
     ]
-    ctrl_desp = mui.ControlDesp(
-        type=ctrl_node_v1.type,
-        initValue=ctrl_node_v1.initValue,
-        min=ctrl_node_v1.min,
-        max=ctrl_node_v1.max,
-        step=ctrl_node_v1.step,
-        selects=ctrl_node_v1.selects,
-        rows=ctrl_node_v1.rows,
-        count=ctrl_node_v1.count)
-    node = mui.JsonLikeNode(id=ctrl_node_v1.id,
-                            name=ctrl_node_v1.name if isinstance(ctrl_node_v1.alias, mui.Undefined) else ctrl_node_v1.alias,
-                            type=mui.JsonLikeType.Object.value,
-                            typeStr="",
-                            children=childs,
-                            userdata=ctrl_desp)
+    ctrl_desp = mui.ControlDesp(type=ctrl_node_v1.type,
+                                initValue=ctrl_node_v1.initValue,
+                                min=ctrl_node_v1.min,
+                                max=ctrl_node_v1.max,
+                                step=ctrl_node_v1.step,
+                                selects=ctrl_node_v1.selects,
+                                rows=ctrl_node_v1.rows,
+                                count=ctrl_node_v1.count)
+    node = mui.JsonLikeNode(
+        id=ctrl_node_v1.id,
+        name=ctrl_node_v1.name if isinstance(
+            ctrl_node_v1.alias, mui.Undefined) else ctrl_node_v1.alias,
+        type=mui.JsonLikeType.Object.value,
+        typeStr="",
+        children=childs,
+        userdata=ctrl_desp)
     return node
 
 
@@ -509,7 +562,9 @@ class ConfigPanelV2(mui.SimpleControls):
         assert dataclasses.is_dataclass(config_obj)
         # parse config dataclass.
         self._obj_to_ctrl_meta: Dict[str, ControlItemMeta] = {}
-        node = parse_to_control_nodes(config_obj, config_obj, "",
+        node = parse_to_control_nodes(config_obj,
+                                      config_obj,
+                                      "",
                                       self._obj_to_ctrl_meta,
                                       ignored_field_names=ignored_field_names)
         super().__init__(init=control_nodes_v1_to_v2(node).children,
@@ -572,5 +627,6 @@ class ConfigPanelV2(mui.SimpleControls):
                     step: Optional[mui.NumberType] = None,
                     alias: Optional[str] = None):
         return {
-            _CONFIG_META_KEY: SliderMeta(begin=begin, end=end, step=step, alias=alias)
+            _CONFIG_META_KEY:
+            SliderMeta(begin=begin, end=end, step=step, alias=alias)
         }

@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+import random
 from typing import Optional
 
 import aiohttp
@@ -90,7 +91,7 @@ class DevApp:
 
         ])
 
-        res.canvas.prop(flat=False, shadows=True)
+        res.canvas.prop(flat=True, shadows=True)
         return mui.VBox([
             res,
             mui.Button("Click me", self.on_click),
@@ -98,7 +99,21 @@ class DevApp:
 
     async def on_click(self):
         print("clicked")
-        with V.ctx():
-            with V.group("dev"):
-                V.points("points0", 1000).p(1, 1, 1).p(0, 0, 0).color("red").size(5)
-                V.lines("lines0", 1000).p(2, 2, 2, 3, 4, 3)
+        # with V.ctx():
+        with V.group("dev"):
+            V.points("points0", 1000).p(1, 1, 1).p(0, 0, 0).color("red").size(5)
+            V.lines("lines0", 1000).p(2, 2, 2, 3, 4, 3)
+            def wtfrtx(a: V.Annotated[float, V.RangedFloat(0, 10, 0.1)] = 5):
+                V.points('points0', 1000).p(a, a, a).color("blue").size(5)
+            V.program("wtfrtx", wtfrtx)
+
+            with V.group("box0", (1, 3, 1)):
+                V.bounding_box((1, 1, 1))
+                V.text("WTF")
+            with V.group("box_with_table", (0, 0, 3)):
+                for i in range(5):
+                    tdata = {
+                        "score": random.random(),
+                        "name": f"test{i}",
+                    }
+                    V.bounding_box((1, 1, 1), pos=(0, i * 1.5, 0)).tdata(tdata)

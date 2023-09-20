@@ -1,6 +1,7 @@
 import dataclasses
 import enum
 import inspect
+import time
 import traceback
 import types
 from functools import partial
@@ -668,13 +669,22 @@ class BasicObjectTree(mui.FlexBox):
             self.tree.update_event(tree=self.tree.props.tree))
         await self._do_when_tree_updated(obj_tree.id)
 
-    async def update_tree(self):
+    async def update_tree(self, wait: bool = True):
+        t = time.time()
         with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree)):
             self.tree.props.tree = await self._tree_parser.get_root_tree(self.root, _ROOT, self.default_expand_level)
+        # print(0, time.time() - t)
         await self.tree.send_and_wait(
-            self.tree.update_event(tree=self.tree.props.tree))
-        await self._do_when_tree_updated(self.tree.props.tree.id)
+            self.tree.update_event(tree=self.tree.props.tree), wait=wait)
+        # print(1, time.time() - t)
 
+        await self._do_when_tree_updated(self.tree.props.tree.id)
+        # print(2, time.time() - t)
+
+    async def update_tree_event(self):
+        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree)):
+            self.tree.props.tree = await self._tree_parser.get_root_tree(self.root, _ROOT, self.default_expand_level)
+        return self.tree.update_event(tree=self.tree.props.tree)
 
     async def remove_object(self, key: str):
         key_in_root = key in self.root
