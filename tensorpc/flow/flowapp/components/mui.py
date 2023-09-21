@@ -32,7 +32,7 @@ from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterable,
 import numpy as np
 from PIL import Image as PILImage
 from typing_extensions import Literal, TypeAlias, TypedDict
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from .typemetas import Vector3Type
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.defs import FileResource
@@ -2638,7 +2638,11 @@ class TypographyProps(MUIComponentBaseProps):
     variant: Union[_TypographyVarient, Undefined] = undefined
     paragraph: Union[bool, Undefined] = undefined
     muiColor: Union[_StdColorNoDefault, Undefined] = undefined
-    value: str = ""
+    value: Union[str, NumberType] = ""
+    # if value is number, will apply this to number
+    # we check fixed first, then precision
+    fixedDigits: Union[Undefined, int] = undefined
+    precisionDigits: Union[Undefined, int] = undefined
 
 
 @dataclasses.dataclass
@@ -2697,12 +2701,12 @@ class Link(MUIComponentBase[LinkProps]):
 
 
 class Typography(MUIComponentBase[TypographyProps]):
-    def __init__(self, init: str = "") -> None:
+    def __init__(self, init: Union[str, NumberType] = "") -> None:
         super().__init__(UIType.Typography, TypographyProps)
         self.props.value = init
 
-    async def write(self, content: str):
-        assert isinstance(content, str)
+    async def write(self, content: Union[str, NumberType]):
+        assert isinstance(content, (str, int, float))
         self.props.value = content
         await self.put_app_event(
             self.create_update_event({"value": self.props.value}))
@@ -3106,7 +3110,8 @@ class AllotmentProps(MUIFlexBoxProps):
 
 
 @dataclasses.dataclass
-class AllotmentPaneProps(MUIFlexBoxProps):
+class AllotmentPaneDef:
+    component: Component
     maxSize: Union[NumberType, Undefined] = undefined
     minSize: Union[NumberType, Undefined] = undefined
     priority: Union[NumberType, Undefined] = undefined
@@ -3116,9 +3121,13 @@ class AllotmentPaneProps(MUIFlexBoxProps):
 
 
 class Allotment(MUIContainerBase[AllotmentProps, MUIComponentType]):
-    def __init__(self, children: LayoutType) -> None:
-        if isinstance(children, list):
-            children = {str(i): v for i, v in enumerate(children)}
+    @dataclasses.dataclass
+    class ChildDef:
+        paneDefs: List["AllotmentPaneDef"]
+    def __init__(self, children: Union[LayoutType, "Allotment.ChildDef"]) -> None:
+        if not isinstance(children, Allotment.ChildDef):
+            if isinstance(children, list):
+                children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.Allotment, AllotmentProps, children, False)
 
     @property
@@ -3132,22 +3141,22 @@ class Allotment(MUIContainerBase[AllotmentProps, MUIComponentType]):
         return self._update_props_base(propcls)
 
 
-class AllotmentPane(MUIContainerBase[AllotmentPaneProps, MUIComponentType]):
-    def __init__(self, children: LayoutType) -> None:
-        if isinstance(children, list):
-            children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.AllotmentPane, AllotmentPaneProps, children,
-                         False)
+# class AllotmentPane(MUIContainerBase[AllotmentPaneProps, MUIComponentType]):
+#     def __init__(self, children: LayoutType) -> None:
+#         if isinstance(children, list):
+#             children = {str(i): v for i, v in enumerate(children)}
+#         super().__init__(UIType.AllotmentPane, AllotmentPaneProps, children,
+#                          False)
 
-    @property
-    def prop(self):
-        propcls = self.propcls
-        return self._prop_base(propcls, self)
+#     @property
+#     def prop(self):
+#         propcls = self.propcls
+#         return self._prop_base(propcls, self)
 
-    @property
-    def update_event(self):
-        propcls = self.propcls
-        return self._update_props_base(propcls)
+#     @property
+#     def update_event(self):
+#         propcls = self.propcls
+#         return self._update_props_base(propcls)
 
 
 @dataclasses.dataclass
@@ -3995,6 +4004,9 @@ class DataGridColumnSpecialType(enum.IntEnum):
 
 @dataclasses.dataclass
 class DataGridColumnDef:
+    """id resolution order: id -> accessorKey -> header
+    accessorKey resolution order: accessorKey -> header
+    """
     header: Union[Undefined, str] = undefined
     accessorKey: Union[Undefined, str] = undefined
     cell: Union[Undefined, Component] = undefined
@@ -4009,6 +4021,23 @@ class DataGridColumnDef:
     width: Union[Undefined, int] = undefined
     editCell: Union[Undefined, Component] = undefined
 
+    def _id_resolution(self):
+        id_resolu = self.id 
+        if isinstance(self.id, Undefined):
+            if isinstance(self.accessorKey, Undefined):
+                assert not isinstance(self.header, Undefined) and self.header != "", "you must provide a id or accessorKey if header is undefined or empty"
+                id_resolu = self.header
+            else:
+                id_resolu = self.accessorKey
+        else:
+            id_resolu = self.id 
+        return id_resolu
+
+    @model_validator(mode="after")
+    def _check_id_header_accesskey_valid(self) -> "DataGridColumnDef":
+        id_resolu = self._id_resolution()
+        assert id_resolu != "", "id can't be empty"
+        return self
 
 @dataclasses.dataclass
 class DataGridProps(MUIFlexBoxProps):
@@ -4028,6 +4057,7 @@ class DataGridProps(MUIFlexBoxProps):
     cellEdit: Union[Undefined, bool] = undefined
     rowSelection: Union[Undefined, bool] = undefined
     enableFilter: Union[Undefined, bool] = undefined
+    fullWidth: Union[Undefined, bool] = undefined
 
 
 class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
@@ -4044,6 +4074,15 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         columnDefs: List[DataGridColumnDef]
         masterDetail: Union[Undefined, Component] = undefined
 
+        @field_validator('columnDefs')
+        def column_def_validator(cls, v: List[DataGridColumnDef]):
+            id_set: Set[str] = set()
+            for cdef in v:
+                id_resolu = cdef._id_resolution()
+                assert id_resolu not in id_set, f"duplicate id {id_resolu}"
+                id_set.add(id_resolu)
+            return v
+        
     ColumnDef: TypeAlias = DataGridColumnDef
 
     def __init__(

@@ -133,7 +133,7 @@ class UIType(enum.IntEnum):
     IconButton = 0x26
     JsonLikeTreeView = 0x27
     Allotment = 0x28
-    AllotmentPane = 0x29
+    # AllotmentPane = 0x29
     FlexLayout = 0x2a
     DynamicControls = 0x2b
     MonacoEditor = 0x2c

@@ -1227,7 +1227,7 @@ class DataGridApp:
             mui.DataGrid.ColumnDef("fat", accessorKey="fat", editCell=fat_cell),
             mui.DataGrid.ColumnDef("carbs", accessorKey="carbs"),
             mui.DataGrid.ColumnDef("protein", accessorKey="protein", align="right", cell=cbox),
-            mui.DataGrid.ColumnDef("actions", cell=btn),
+            mui.DataGrid.ColumnDef("btn", cell=btn),
         ]
         master_detail = mui.JsonViewer().set_override_props(data=".")
         master_detail = mui.VBox([
@@ -1249,7 +1249,7 @@ class DataGridApp:
         dgrid.bind_prop(fat_cell, "fat")
 
         return mui.VBox([
-            dgrid.prop(stickyHeader=False, virtualized=False, size="small"),
+            dgrid.prop(stickyHeader=False, virtualized=True, size="small"),
         ]).prop(width="100%", height="100%", overflow="hidden")
 
     def _fetch_detail(self, key: str):
