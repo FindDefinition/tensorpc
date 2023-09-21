@@ -795,9 +795,9 @@ class Boxes2D(Object3dWithEventBase[Boxes2DProps]):
 class BoundingBoxProps(Object3dBaseProps, InteractableProps):
     dimension: Union[Vector3Type, Undefined] = undefined
     edgeWidth: Union[float, Undefined] = undefined
-    edgeColor: Annotated[Union[str, int, Undefined], typemetas.ColorRGB()] = undefined
-    emissive: Annotated[Union[str, int, Undefined], typemetas.ColorRGB()] = undefined
-    color: Annotated[Union[str, int, Undefined], typemetas.ColorRGB()] = undefined
+    edgeColor: Annotated[Union[str, int, Undefined], typemetas.ColorRGB(default="green")] = undefined
+    emissive: Annotated[Union[str, int, Undefined], typemetas.ColorRGB(default="red")] = undefined
+    color: Annotated[Union[str, int, Undefined], typemetas.ColorRGB(default="red")] = undefined
     opacity: Annotated[Union[NumberType, Undefined], typemetas.CommonObject(default=0.3)] = undefined
     edgeOpacity: Annotated[Union[NumberType, Undefined], typemetas.CommonObject(default=0.5)] = undefined
     checked: bool = False
@@ -811,7 +811,7 @@ class BoundingBox(Object3dWithEventBase[BoundingBoxProps]):
                  edge_color: str = "green",
                  emissive: str = "red",
                  color: str = "red",
-                 opacity: float = 0.2,
+                 opacity: float = 0.3,
                  edge_opacity: float = 0.5) -> None:
         super().__init__(UIType.ThreeBoundingBox, BoundingBoxProps)
         self.props.dimension = dimension

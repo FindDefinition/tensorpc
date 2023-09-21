@@ -376,7 +376,7 @@ class FrontendEventType(enum.IntEnum):
 UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
     UIType.DataGrid, UIType.MatchCase,
     UIType.DataFlexBox,
-    UIType.Tabs,
+    UIType.Tabs, UIType.Allotment
 }
 
 class AppDraggableType(enum.Enum):
@@ -1991,6 +1991,15 @@ class ContainerBase(Component[T_container_props, T_child]):
             self.create_delete_comp_event(list(detached_uid_to_comp.keys())))
         await self._run_special_methods([],
                                         list(detached_uid_to_comp.values()))
+
+    def update_childs_complex_event(self):
+        update_msg: Dict[str, Any] = {}
+        update_msg["childsComplex"] = asdict_no_deepcopy(self._child_structure, dict_factory=_undefined_comp_dict_factory)
+        update_ev = self.create_update_event(update_msg)
+        return update_ev
+    
+    async def update_childs_complex(self):
+        await self.send_and_wait(self.update_childs_complex_event())
 
     def update_childs_locally(self, layout: Dict[str, Component]):
         self.__check_child_structure_is_none()

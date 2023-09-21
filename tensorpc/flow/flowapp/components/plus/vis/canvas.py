@@ -164,6 +164,12 @@ class ComplexCanvas(mui.FlexBox):
                                                  flex=1,
                                                  width="100%",
                                                  height="100%")
+        self.tdata_container_v2 = mui.HBox([
+        ]).prop(overflow="auto",
+                    padding="3px",
+                    flex=1,
+                    width="100%",
+                    height="100%")
 
         self.canvas = three.Canvas({
             "root": self._item_root,
@@ -177,6 +183,9 @@ class ComplexCanvas(mui.FlexBox):
             use_fast_tree=True)
         self.item_tree.event_async_select_single.on(self._on_tree_select)
         self.init_add_layout([*self._layout_func()])
+
+    def _get_tdata_container_pane(self, tdata_table: mui.DataGrid):
+        return mui.Allotment.Pane(tdata_table, preferredSize=1)
 
     @marker.mark_create_layout
     def _layout_func(self):
@@ -211,6 +220,13 @@ class ComplexCanvas(mui.FlexBox):
                                          selected=False,
                                          size="small",
                                          tooltip="Enable Config Panel",
+                                         tooltipPlacement="right"),
+                    mui.ToggleButton("enableTData",
+                                     icon=mui.IconType.DataArray,
+                                     callback=self._on_enable_tdata_pane).prop(
+                                         selected=False,
+                                         size="small",
+                                         tooltip="Enable Data Grid Pane",
                                          tooltipPlacement="right"),
 
                     # mui.IconButton(mui.IconType.Clear,
@@ -300,9 +316,15 @@ class ComplexCanvas(mui.FlexBox):
                   height="100%",
                   overflow="hidden")
         # self.item_tree.event_
+        self.tdata_container_v2_pane = mui.Allotment.Pane(self.tdata_container_v2, 
+            preferredSize="25%", visible=False)
+        self._canvas_spitter = mui.Allotment(mui.Allotment.ChildDef([
+            mui.Allotment.Pane(canvas_layout, preferredSize="75%"),
+            self.tdata_container_v2_pane,
+        ])).prop(vertical=True, proportionalLayout=True)
         return [
             mui.Allotment([
-                canvas_layout.prop(flex=3),
+                self._canvas_spitter,
                 mui.HBox([
                     mui.Allotment([
                         self.item_tree.prop(width="100%", height="100%"),
@@ -326,6 +348,10 @@ class ComplexCanvas(mui.FlexBox):
                 [self._infgrid, self._axis_helper])
         else:
             await self._dynamic_grid.set_new_layout([])
+
+    async def _on_enable_tdata_pane(self, selected):
+        self.tdata_container_v2_pane.visible = selected 
+        await self._canvas_spitter.update_childs_complex()
 
     async def _on_enable_cfg_panel(self, selected):
         if selected:
@@ -424,7 +450,8 @@ class ComplexCanvas(mui.FlexBox):
             return None
 
         btn = mui.IconButton(mui.IconType.Visibility).prop(size="small",
-                                                           iconFontSize="14px")
+                                                            # fontSize="14px",
+                                                           iconFontSize="13px")
         btn.event_click.on_standard(
             partial(self._on_group_select_object, group=group)).configure(True)
         column_defs: List[mui.DataGrid.ColumnDef] = [
@@ -432,7 +459,7 @@ class ComplexCanvas(mui.FlexBox):
         ]
         # key_to_typo: Dict[str, mui.Typography] = {}
         for k in common_keys:
-            typo = mui.Typography().prop(precisionDigits=4).set_override_props(
+            typo = mui.Typography().prop(precisionDigits=4, fontSize="14px").set_override_props(
                 value=k)
             column_defs.append(
                 mui.DataGrid.ColumnDef(k, accessorKey=k, cell=typo))
@@ -474,11 +501,11 @@ class ComplexCanvas(mui.FlexBox):
         if isinstance(obj, three.ContainerBase):
             table = self._extract_table_from_group(obj)
             if table is not None:
-                await self.tdata_container.set_new_layout([table])
+                await self.tdata_container_v2.set_new_layout([table])
             else:
-                await self.tdata_container.set_new_layout([])
+                await self.tdata_container_v2.set_new_layout([])
         else:
-            await self.tdata_container.set_new_layout([])
+            await self.tdata_container_v2.set_new_layout([])
 
     async def update_detail_layout(self, regex: str):
         # TODO when we upgrade tree, we must check if the current selected node is still valid.
@@ -558,7 +585,6 @@ class ComplexCanvas(mui.FlexBox):
         return uid[len("root::"):].replace("::", ".")
 
     async def _on_3d_object_select(self, selected: list):
-        print("WTF", len(selected))
         if not selected:
             await self.item_tree.tree.select([])
             return
