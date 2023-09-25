@@ -3109,21 +3109,20 @@ class AllotmentProps(MUIFlexBoxProps):
     vertical: Union[bool, Undefined] = undefined
 
 
-@dataclasses.dataclass
-class AllotmentPaneDef:
-    component: Component
-    maxSize: Union[NumberType, Undefined] = undefined
-    minSize: Union[NumberType, Undefined] = undefined
-    priority: Union[NumberType, Undefined] = undefined
-    preferredSize: Union[ValueType, Undefined] = undefined
-    snap: Union[bool, Undefined] = undefined
-    visible: Union[bool, Undefined] = undefined
-
-
 class Allotment(MUIContainerBase[AllotmentProps, MUIComponentType]):
     @dataclasses.dataclass
+    class Pane:
+        component: Component
+        maxSize: Union[NumberType, Undefined] = undefined
+        minSize: Union[NumberType, Undefined] = undefined
+        priority: Union[NumberType, Undefined] = undefined
+        preferredSize: Union[ValueType, Undefined] = undefined
+        snap: Union[bool, Undefined] = undefined
+        visible: Union[bool, Undefined] = undefined
+
+    @dataclasses.dataclass
     class ChildDef:
-        paneDefs: List["AllotmentPaneDef"]
+        paneDefs: List["Allotment.Pane"]
     def __init__(self, children: Union[LayoutType, "Allotment.ChildDef"]) -> None:
         if not isinstance(children, Allotment.ChildDef):
             if isinstance(children, list):

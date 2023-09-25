@@ -49,7 +49,7 @@ REQUIRED = [
     "libtmux",
     "humanize",
     "pyright",
-    "pydantic>=2.0,<3.0",
+    "pydantic>=2.3,<3.0",
 ]
 
 # What packages are optional?
