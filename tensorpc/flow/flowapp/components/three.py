@@ -996,8 +996,15 @@ class Group(O3dContainerWithEventBase[GroupProps,
 
 
 @dataclasses.dataclass
-class ImageProps(Object3dBaseProps):
+class ImageProps(Object3dBaseProps, InteractableProps):
     image: bytes = dataclasses.field(default_factory=bytes)
+    segments: Union[NumberType, Undefined] = undefined
+    color: Annotated[Union[str, int, Undefined], typemetas.ColorRGB()] = undefined
+    zoom: Union[NumberType, Undefined] = undefined
+    grayscale: Union[NumberType, Undefined] = undefined
+    toneMapped: Union[bool, Undefined] = undefined
+    transparent: Union[bool, Undefined] = undefined
+    opacity: Union[NumberType, Undefined] = undefined
 
 
 class Image(Object3dWithEventBase[ImageProps]):

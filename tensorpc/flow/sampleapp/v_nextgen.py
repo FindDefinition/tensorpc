@@ -106,12 +106,13 @@ class DevApp:
             def wtfrtx(a: V.Annotated[float, V.RangedFloat(0, 10, 0.1)] = 5):
                 V.points('points0', 1000).p(a, a, a).color("blue").size(5)
             V.program("wtfrtx", wtfrtx)
-
+            random_img = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+            V.image(random_img, pos=(5, 5, 2))
             with V.group("box0", (1, 3, 1)):
                 V.bounding_box((1, 1, 1))
                 V.text("WTF")
             with V.group("box_with_table", (0, 0, 3)):
-                for i in range(5):
+                for i in range(random.randint(3, 7)):
                     tdata = {
                         "score": random.random(),
                         "name": f"test{i}",

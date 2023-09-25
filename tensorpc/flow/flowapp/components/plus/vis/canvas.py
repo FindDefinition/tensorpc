@@ -489,15 +489,18 @@ class ComplexCanvas(mui.FlexBox):
         # print(find_component_trace_by_uid_with_not_exist_parts(self._item_root, "reserved.grid.2"))
         obj_cfg = get_canvas_item_cfg(obj)
         if obj_cfg is not None and obj_cfg.detail_layout is not None:
-            await self.prop_container.set_new_layout([obj_cfg.detail_layout])
-            self._cur_detail_layout_uid = data.nodes[-1].id
-            self._cur_detail_layout_object_id = id(obj)
-        else:
-            if three.is_three_component(obj):
-                panel = self._get_default_detail_layout(obj).prop(reactKey=data.nodes[-1].id)
-                await self.prop_container.set_new_layout([panel])
+            if obj._flow_uid is not None:
+
+                await self.prop_container.set_new_layout([obj_cfg.detail_layout])
                 self._cur_detail_layout_uid = data.nodes[-1].id
                 self._cur_detail_layout_object_id = id(obj)
+        else:
+            if three.is_three_component(obj):
+                if obj._flow_uid is not None:
+                    panel = self._get_default_detail_layout(obj).prop(reactKey=data.nodes[-1].id)
+                    self._cur_detail_layout_uid = data.nodes[-1].id
+                    self._cur_detail_layout_object_id = obj._flow_uid
+                    await self.prop_container.set_new_layout([panel])
 
             else:
                 await self.prop_container.set_new_layout([])
@@ -507,7 +510,10 @@ class ComplexCanvas(mui.FlexBox):
         if isinstance(obj, three.ContainerBase):
             table = self._extract_table_from_group(obj)
             if table is not None:
-                await self.tdata_container_v2.set_new_layout([table])
+                if obj._flow_uid is not None:
+                    self._cur_table_uid = data.nodes[-1].id
+                    self._cur_table_object_id = obj._flow_uid
+                    await self.tdata_container_v2.set_new_layout([table])
             else:
                 await self.tdata_container_v2.set_new_layout([])
         else:

@@ -119,6 +119,7 @@ class TypeMeta:
     module_key: str
     local_key: str
     is_path: bool
+    is_in_memory: bool = False
 
     @property
     def module_id(self):
@@ -138,7 +139,9 @@ class TypeMeta:
             module_dict = module.__dict__
             return module_dict, module
         else:
-            if in_memory_fs is not None:
+            if self.is_in_memory:
+                assert in_memory_fs is not None
+            if in_memory_fs is not None and self.is_in_memory:
                 standard_module = in_memory_fs.load_in_memory_module(self.module_key)
             else:
                 mod_name = Path(self.module_key).stem + "_" + uuid.uuid4().hex
@@ -179,6 +182,7 @@ def get_obj_type_meta(obj_type) -> Optional[TypeMeta]:
     qualname = get_qualname_of_type(obj_type)
     spec = importlib.util.find_spec(qualname.split(".")[0])
     is_standard_module = True
+    is_in_memory = False
     module_path = ""
     if spec is None or spec.origin is None:
         is_standard_module = False
@@ -186,6 +190,7 @@ def get_obj_type_meta(obj_type) -> Optional[TypeMeta]:
             path = inspect.getfile(obj_type)
             if path.startswith(f"<{TENSORPC_FILE_NAME_PREFIX}"):
                 module_path = path
+                is_in_memory = True 
             else:
                 module_path_p = Path(path).resolve()
                 module_path = str(module_path_p)
@@ -194,6 +199,7 @@ def get_obj_type_meta(obj_type) -> Optional[TypeMeta]:
             type_path = obj_type.__module__
             if type_path.startswith(f"<{TENSORPC_FILE_NAME_PREFIX}"):
                 module_path = type_path
+                is_in_memory = True 
             else:
                 return None
     # assert spec is not None 
@@ -234,4 +240,4 @@ def get_obj_type_meta(obj_type) -> Optional[TypeMeta]:
     if not is_standard_module:
         module_import_path = module_path
     return TypeMeta(module_import_path, local_import_path,
-                    not is_standard_module)
+                    not is_standard_module, is_in_memory)

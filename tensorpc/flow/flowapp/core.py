@@ -1105,10 +1105,10 @@ class Component(Generic[T_base_props, T_child]):
     def _detach(self) -> dict:
         self._flow_reference_count -= 1
         if self._flow_reference_count == 0:
+            self.flow_event_emitter.emit(FrontendEventType.BeforeUnmount.value, Event(FrontendEventType.BeforeUnmount.value, None))
             res_uid = self._flow_uid
             self._flow_uid = ""
             self._flow_comp_core = None
-            self.flow_event_emitter.emit(FrontendEventType.BeforeUnmount.value, Event(FrontendEventType.BeforeUnmount.value, None))
             return {res_uid: self}
         return {}
 

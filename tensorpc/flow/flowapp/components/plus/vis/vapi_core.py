@@ -38,7 +38,7 @@ from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.appcore import get_app
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanelV2
 from tensorpc.flow.flowapp.core import AppEvent
-from ... import three
+from ... import three, mui
 from ...typemetas import (ColorRGB, ColorRGBA, RangedFloat, RangedInt,
                           RangedVector3, Vector3,
                           annotated_function_to_dataclass)
@@ -245,6 +245,25 @@ class TextProxy(CanvasItemProxy):
     def update_event(self, comp: three.Text):
         return comp.update_event(value=self._text, position=self._pos, 
             rotation=self._rots, color=self._color)
+
+class ImageProxy(CanvasItemProxy):
+    def __init__(self, img: np.ndarray, pos: Union[three.Vector3Type, three.Undefined],
+                 rots: Union[three.Vector3Type, three.Undefined]) -> None:
+        super().__init__()
+        self._img = img
+        self._pos: Union[three.Vector3Type, three.Undefined] = pos
+        self._rots: Union[three.Vector3Type, three.Undefined] = rots
+        self._color: Union[str, int, three.Undefined] = three.undefined
+
+        self._scale: Union[float, three.Undefined] = three.undefined
+
+    def update_event(self, comp: three.Image):
+        return comp.update_event(image=mui.Image.encode_image_bytes(self._img), position=self._pos, 
+            rotation=self._rots, color=self._color, scale=self._scale, enableSelect=True)
+
+    def scale(self, scale: float):
+        self._scale = scale
+        return self
 
 class VContext:
     def __init__(self,
@@ -483,6 +502,8 @@ def group(name: str,
         group = trace[-1]
         if remain:
             g = three.Group([])
+            _install_obj_event_handlers(g, v_ctx.canvas)
+
             group_to_yield = g
             v_ctx._name_to_group[uid] = g
             item_cfg = get_or_create_canvas_item_cfg(g, True)
@@ -492,6 +513,8 @@ def group(name: str,
             for i, remain_part in enumerate(remain[::-1]):
                 if i != len(remain) - 1:
                     new_g = three.Group([])
+                    _install_obj_event_handlers(new_g, v_ctx.canvas)
+
                     cur_uid = cur_uid[:len(cur_uid) - len(remain_part) - 1]
                     # if i == 0:
                     #     assert cur_uid == uid, f"{cur_uid} != {uid}"
@@ -542,31 +565,39 @@ def group(name: str,
                     _draw_all_in_vctx(v_ctx, ".*", ev), loop)
                 return fut.result()
 
-async def _uninstall_detail_when_unmount(ev: three.Event, obj: three.ThreeComponentBase, canvas: ComplexCanvas):
-    object_pyid = id(obj)
+async def _uninstall_detail_when_unmount(ev: three.Event, obj: three.Component, canvas: ComplexCanvas):
+    object_pyid = obj._flow_uid
     cur_detail_obj_pyid = canvas._cur_detail_layout_object_id
     if object_pyid == cur_detail_obj_pyid:
         await canvas._uninstall_detail_layout() 
 
-async def _install_detail_before_mount(ev: three.Event, obj: three.ThreeComponentBase, canvas: ComplexCanvas):
-    object_pyid = id(obj)
+async def _install_detail_before_mount(ev: three.Event, obj: three.Component, canvas: ComplexCanvas):
+    object_pyid = obj._flow_uid
     cur_detail_obj_pyid = canvas._cur_detail_layout_object_id
     if object_pyid == cur_detail_obj_pyid:
         await canvas._install_detail_layout(obj) 
 
-async def _uninstall_table_when_unmount(ev: three.Event, obj: three.ThreeComponentBase, canvas: ComplexCanvas):
-    object_pyid = id(obj)
+async def _uninstall_table_when_unmount(ev: three.Event, obj: three.Component, canvas: ComplexCanvas):
+    object_pyid = obj._flow_uid
     cur_detail_obj_pyid = canvas._cur_table_object_id
     if object_pyid == cur_detail_obj_pyid:
         await canvas._uninstall_table_layout() 
 
-async def _install_table_before_mount(ev: three.Event, obj: three.ThreeComponentBase, canvas: ComplexCanvas):
-    object_pyid = id(obj)
+async def _install_table_before_mount(ev: three.Event, obj: three.Component, canvas: ComplexCanvas):
+    object_pyid = obj._flow_uid
     cur_detail_obj_pyid = canvas._cur_table_object_id
     if object_pyid == cur_detail_obj_pyid:
         await canvas._install_table_layout(obj) 
 
-def _create_vapi_three_obj_pcfg(obj: three.ThreeComponentBase, name: Optional[str], default_name_prefix: str):
+def _install_obj_event_handlers(obj: three.Component, canvas: ComplexCanvas):
+    if isinstance(obj, three.Group):
+        obj.event_before_mount.on(partial(_install_table_before_mount, obj=obj, canvas=canvas))
+        obj.event_before_unmount.on(partial(_uninstall_table_when_unmount, obj=obj, canvas=canvas))
+    obj.event_before_mount.on(partial(_install_detail_before_mount, obj=obj, canvas=canvas))
+    obj.event_before_unmount.on(partial(_uninstall_detail_when_unmount, obj=obj, canvas=canvas))
+
+
+def _create_vapi_three_obj_pcfg(obj: three.Component, name: Optional[str], default_name_prefix: str):
     v_ctx = get_v_context()
     assert v_ctx is not None
     cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
@@ -576,11 +607,7 @@ def _create_vapi_three_obj_pcfg(obj: three.ThreeComponentBase, name: Optional[st
     if name is None:
         name = proxy.namepool(default_name_prefix)
     proxy.childs[name] = obj
-    if isinstance(obj, three.Group):
-        obj.event_before_mount.on(partial(_install_table_before_mount, obj=obj, canvas=v_ctx.canvas))
-        obj.event_before_unmount.on(partial(_uninstall_table_when_unmount, obj=obj, canvas=v_ctx.canvas))
-    obj.event_before_mount.on(partial(_install_detail_before_mount, obj=obj, canvas=v_ctx.canvas))
-    obj.event_before_unmount.on(partial(_uninstall_detail_when_unmount, obj=obj, canvas=v_ctx.canvas))
+    _install_obj_event_handlers(obj, v_ctx.canvas)
     pcfg = get_or_create_canvas_item_cfg(obj, True)
     return pcfg
 
@@ -614,6 +641,17 @@ def text(text: str, rot: Optional[three.Vector3Type] = None, pos: Optional[three
         obj.prop(position=pos)
     pcfg = _create_vapi_three_obj_pcfg(obj, name, "text")
     pcfg.proxy = TextProxy(text, three.undefined if pos is None else pos, three.undefined if rot is None else rot)
+    return pcfg.proxy
+
+def image(img: np.ndarray, rot: Optional[three.Vector3Type] = None, pos: Optional[three.Vector3Type] = None, name: Optional[str] = None):
+    assert img.dtype == np.uint8 and (img.ndim == 3 or img.ndim == 2)
+    obj = three.Image()
+    if rot is not None:
+        obj.prop(rotation=rot)
+    if pos is not None:
+        obj.prop(position=pos)
+    pcfg = _create_vapi_three_obj_pcfg(obj, name, "img")
+    pcfg.proxy = ImageProxy(img, three.undefined if pos is None else pos, three.undefined if rot is None else rot)
     return pcfg.proxy
 
 def program(name: str, func: Callable):
