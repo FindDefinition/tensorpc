@@ -523,7 +523,7 @@ class ComplexCanvas(mui.FlexBox):
         async with self._lock:
             self._cur_table_object_id = None
             self._cur_table_uid = None
-            await self.tdata_container.set_new_layout([])
+            await self.tdata_container_v2.set_new_layout([])
 
     def _get_default_detail_layout(self, obj: three.Component):
         panel = ConfigPanelV2(obj.props,
@@ -544,6 +544,16 @@ class ComplexCanvas(mui.FlexBox):
                 if three.is_three_component(obj):
                     panel = self._get_default_detail_layout(obj).prop(reactKey=self._cur_detail_layout_uid)
                     await self.prop_container.set_new_layout([panel])
+    
+    async def _install_table_layout(self, obj: three.Component):
+        if isinstance(obj, three.ContainerBase):
+            table = self._extract_table_from_group(obj)
+            if table is not None:
+                await self.tdata_container_v2.set_new_layout([table])
+            else:
+                await self.tdata_container_v2.set_new_layout([])
+        else:
+            await self.tdata_container_v2.set_new_layout([])
 
     async def update_detail_layout(self, regex: str):
         # TODO when we upgrade tree, we must check if the current selected node is still valid.

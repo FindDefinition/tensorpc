@@ -26,6 +26,7 @@ with V.ctx():
 
 import asyncio
 import dataclasses
+from functools import partial
 import inspect
 import threading
 from typing import Any, Callable, Dict, Optional, List, Tuple, Type, TypeVar, Union, get_type_hints
@@ -541,17 +542,29 @@ def group(name: str,
                     _draw_all_in_vctx(v_ctx, ".*", ev), loop)
                 return fut.result()
 
-async def _uninstall_detail_when_unmount(obj: three.ThreeComponentBase, canvas: ComplexCanvas):
+async def _uninstall_detail_when_unmount(ev: three.Event, obj: three.ThreeComponentBase, canvas: ComplexCanvas):
     object_pyid = id(obj)
     cur_detail_obj_pyid = canvas._cur_detail_layout_object_id
     if object_pyid == cur_detail_obj_pyid:
         await canvas._uninstall_detail_layout() 
 
-async def _install_detail_before_mount(obj: three.ThreeComponentBase, canvas: ComplexCanvas):
+async def _install_detail_before_mount(ev: three.Event, obj: three.ThreeComponentBase, canvas: ComplexCanvas):
     object_pyid = id(obj)
     cur_detail_obj_pyid = canvas._cur_detail_layout_object_id
     if object_pyid == cur_detail_obj_pyid:
         await canvas._install_detail_layout(obj) 
+
+async def _uninstall_table_when_unmount(ev: three.Event, obj: three.ThreeComponentBase, canvas: ComplexCanvas):
+    object_pyid = id(obj)
+    cur_detail_obj_pyid = canvas._cur_table_object_id
+    if object_pyid == cur_detail_obj_pyid:
+        await canvas._uninstall_table_layout() 
+
+async def _install_table_before_mount(ev: three.Event, obj: three.ThreeComponentBase, canvas: ComplexCanvas):
+    object_pyid = id(obj)
+    cur_detail_obj_pyid = canvas._cur_table_object_id
+    if object_pyid == cur_detail_obj_pyid:
+        await canvas._install_table_layout(obj) 
 
 def _create_vapi_three_obj_pcfg(obj: three.ThreeComponentBase, name: Optional[str], default_name_prefix: str):
     v_ctx = get_v_context()
@@ -563,6 +576,11 @@ def _create_vapi_three_obj_pcfg(obj: three.ThreeComponentBase, name: Optional[st
     if name is None:
         name = proxy.namepool(default_name_prefix)
     proxy.childs[name] = obj
+    if isinstance(obj, three.Group):
+        obj.event_before_mount.on(partial(_install_table_before_mount, obj=obj, canvas=v_ctx.canvas))
+        obj.event_before_unmount.on(partial(_uninstall_table_when_unmount, obj=obj, canvas=v_ctx.canvas))
+    obj.event_before_mount.on(partial(_install_detail_before_mount, obj=obj, canvas=v_ctx.canvas))
+    obj.event_before_unmount.on(partial(_uninstall_detail_when_unmount, obj=obj, canvas=v_ctx.canvas))
     pcfg = get_or_create_canvas_item_cfg(obj, True)
     return pcfg
 
