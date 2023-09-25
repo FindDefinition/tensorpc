@@ -1,3 +1,4 @@
+import asyncio
 import dataclasses
 import enum
 from functools import partial
@@ -134,6 +135,11 @@ class ComplexCanvas(mui.FlexBox):
         self._is_transparent = transparent_canvas
         self._gizmo_helper = three.GizmoHelper().prop(alignment="bottom-right")
         self._cur_detail_layout_uid: Optional[str] = None
+        self._cur_detail_layout_object_id: Optional[int] = None
+
+        self._cur_table_uid: Optional[str] = None
+        self._cur_table_object_id: Optional[int] = None
+
         init_layout = {
             "control": self.ctrl,
             "camera": self.camera,
@@ -141,6 +147,7 @@ class ComplexCanvas(mui.FlexBox):
             "screen shot": self._screen_shot_v2,
             "gizmo": self._gizmo_helper,
         }
+        self._lock = asyncio.Lock()
         for comp in init_layout.values():
             lock_component(comp)
         reserved_group = three.Group(init_layout)
@@ -457,19 +464,18 @@ class ComplexCanvas(mui.FlexBox):
         if obj_cfg is not None and obj_cfg.detail_layout is not None:
             await self.prop_container.set_new_layout([obj_cfg.detail_layout])
             self._cur_detail_layout_uid = data.nodes[-1].id
+            self._cur_detail_layout_object_id = id(obj)
         else:
             if three.is_three_component(obj):
-                panel = ConfigPanelV2(obj.props,
-                                      partial(self._on_cfg_panel_change,
-                                              obj=obj),
-                                      ignored_field_names=set([
-                                          "status"
-                                      ])).prop(reactKey=data.nodes[-1].id)
+                panel = self._get_default_detail_layout(obj).prop(reactKey=data.nodes[-1].id)
                 await self.prop_container.set_new_layout([panel])
                 self._cur_detail_layout_uid = data.nodes[-1].id
+                self._cur_detail_layout_object_id = id(obj)
+
             else:
                 await self.prop_container.set_new_layout([])
                 self._cur_detail_layout_uid = None
+                self._cur_detail_layout_object_id = None
 
         if isinstance(obj, three.ContainerBase):
             table = self._extract_table_from_group(obj)
@@ -479,6 +485,38 @@ class ComplexCanvas(mui.FlexBox):
                 await self.tdata_container.set_new_layout([])
         else:
             await self.tdata_container.set_new_layout([])
+
+    async def _uninstall_detail_layout(self):
+        async with self._lock:
+            self._cur_detail_layout_uid = None
+            self._cur_detail_layout_object_id = None
+            await self.prop_container.set_new_layout([])
+
+    async def _uninstall_table_layout(self):
+        async with self._lock:
+            self._cur_table_object_id = None
+            self._cur_table_uid = None
+            await self.tdata_container.set_new_layout([])
+
+    def _get_default_detail_layout(self, obj: three.Component):
+        panel = ConfigPanelV2(obj.props,
+                                partial(self._on_cfg_panel_change,
+                                        obj=obj),
+                                ignored_field_names=set([
+                                    "status"
+                                ]))
+        return panel
+
+    async def _install_detail_layout(self, obj: three.Component):
+        if self._cur_detail_layout_uid is not None:
+            obj_cfg = get_canvas_item_cfg(obj)
+            if obj_cfg is not None and obj_cfg.detail_layout is not None:
+                await self.prop_container.set_new_layout(
+                    [obj_cfg.detail_layout])
+            else:
+                if three.is_three_component(obj):
+                    panel = self._get_default_detail_layout(obj).prop(reactKey=self._cur_detail_layout_uid)
+                    await self.prop_container.set_new_layout([panel])
 
     async def update_detail_layout(self, regex: str):
         # TODO when we upgrade tree, we must check if the current selected node is still valid.
@@ -492,22 +530,9 @@ class ComplexCanvas(mui.FlexBox):
                     self._item_root, local_uid)
                 if len(remain_keys) == 0:
                     obj = container_parents[-1]
-                    obj_cfg = get_canvas_item_cfg(obj)
-                    if obj_cfg is not None and obj_cfg.detail_layout is not None:
-                        await self.prop_container.set_new_layout(
-                            [obj_cfg.detail_layout])
-                    else:
-                        if three.is_three_component(obj):
-                            panel = ConfigPanelV2(
-                                obj.props,
-                                partial(self._on_cfg_panel_change, obj=obj),
-                                ignored_field_names=set([
-                                    "status"
-                                ])).prop(reactKey=self._cur_detail_layout_uid)
-                            await self.prop_container.set_new_layout([panel])
+                    await self._install_detail_layout(obj)
                 else:
                     await self.prop_container.set_new_layout([])
-        pass
 
     async def set_layout_in_container(self, container_key: str,
                                       layout: three.ThreeLayoutType):

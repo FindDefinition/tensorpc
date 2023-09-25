@@ -541,31 +541,40 @@ def group(name: str,
                     _draw_all_in_vctx(v_ctx, ".*", ev), loop)
                 return fut.result()
 
+async def _uninstall_detail_when_unmount(obj: three.ThreeComponentBase, canvas: ComplexCanvas):
+    object_pyid = id(obj)
+    cur_detail_obj_pyid = canvas._cur_detail_layout_object_id
+    if object_pyid == cur_detail_obj_pyid:
+        await canvas._uninstall_detail_layout() 
+
+async def _install_detail_before_mount(obj: three.ThreeComponentBase, canvas: ComplexCanvas):
+    object_pyid = id(obj)
+    cur_detail_obj_pyid = canvas._cur_detail_layout_object_id
+    if object_pyid == cur_detail_obj_pyid:
+        await canvas._install_detail_layout(obj) 
+
+def _create_vapi_three_obj_pcfg(obj: three.ThreeComponentBase, name: Optional[str], default_name_prefix: str):
+    v_ctx = get_v_context()
+    assert v_ctx is not None
+    cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
+    proxy = cfg.proxy
+    assert proxy is not None
+    assert isinstance(proxy, GroupProxy)
+    if name is None:
+        name = proxy.namepool(default_name_prefix)
+    proxy.childs[name] = obj
+    pcfg = get_or_create_canvas_item_cfg(obj, True)
+    return pcfg
 
 def points(name: str, limit: int):
     point = three.Points(limit)
-    v_ctx = get_v_context()
-    assert v_ctx is not None
-    cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
-    proxy = cfg.proxy
-    assert proxy is not None
-    assert isinstance(proxy, GroupProxy)
-    proxy.childs[name] = point
-    pcfg = get_or_create_canvas_item_cfg(point, True)
+    pcfg = _create_vapi_three_obj_pcfg(point, name, "points")
     pcfg.proxy = PointsProxy()
     return pcfg.proxy
 
-
 def lines(name: str, limit: int):
     point = three.Segments(limit)
-    v_ctx = get_v_context()
-    assert v_ctx is not None
-    cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
-    proxy = cfg.proxy
-    assert proxy is not None
-    assert isinstance(proxy, GroupProxy)
-    proxy.childs[name] = point
-    pcfg = get_or_create_canvas_item_cfg(point, True)
+    pcfg = _create_vapi_three_obj_pcfg(point, name, "lines")
     pcfg.proxy = LinesProxy()
     return pcfg.proxy
 
@@ -575,16 +584,7 @@ def bounding_box(dim: three.Vector3Type, rot: Optional[three.Vector3Type] = None
         obj.prop(rotation=rot)
     if pos is not None:
         obj.prop(position=pos)
-    v_ctx = get_v_context()
-    assert v_ctx is not None
-    cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
-    proxy = cfg.proxy
-    assert proxy is not None
-    assert isinstance(proxy, GroupProxy)
-    if name is None:
-        name = proxy.namepool("box")
-    proxy.childs[name] = obj
-    pcfg = get_or_create_canvas_item_cfg(obj, True)
+    pcfg = _create_vapi_three_obj_pcfg(obj, name, "box")
     pcfg.proxy = BoundingBoxProxy(three.undefined if pos is None else pos, dim, three.undefined if rot is None else rot)
     return pcfg.proxy
 
@@ -594,16 +594,7 @@ def text(text: str, rot: Optional[three.Vector3Type] = None, pos: Optional[three
         obj.prop(rotation=rot)
     if pos is not None:
         obj.prop(position=pos)
-    v_ctx = get_v_context()
-    assert v_ctx is not None
-    cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
-    proxy = cfg.proxy
-    assert proxy is not None
-    assert isinstance(proxy, GroupProxy)
-    if name is None:
-        name = proxy.namepool("text")
-    proxy.childs[name] = obj
-    pcfg = get_or_create_canvas_item_cfg(obj, True)
+    pcfg = _create_vapi_three_obj_pcfg(obj, name, "text")
     pcfg.proxy = TextProxy(text, three.undefined if pos is None else pos, three.undefined if rot is None else rot)
     return pcfg.proxy
 
