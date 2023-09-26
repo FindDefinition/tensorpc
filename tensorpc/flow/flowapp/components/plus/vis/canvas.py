@@ -14,7 +14,7 @@ from tensorpc.flow.flowapp.appcore import find_component_by_uid_with_type_check
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from tensorpc.flow.flowapp.components.plus.objinspect.tree import BasicObjectTree, SelectSingleEvent
-from .core import get_canvas_item_cfg, get_or_create_canvas_item_cfg
+from .core import UNKNOWN_KEY_SPLIT, UNKNOWN_VIS_KEY, get_canvas_item_cfg, get_or_create_canvas_item_cfg
 from tensorpc.flow.flowapp.components.typemetas import RangedFloat
 from tensorpc.flow.flowapp.core import Component, ContainerBase, FrontendEventType
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
@@ -24,7 +24,79 @@ from tensorpc.utils.registry import HashableSeqRegistryKeyOnly
 from tensorpc.flow.flowapp.components.core import get_tensor_container
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanelV2
 from .treeview import CanvasTreeItemHandler, lock_component
+from tensorpc.utils.registry import HashableSeqRegistryKeyOnly
+from .core import is_reserved_name
 
+UNKNOWN_VIS_REGISTRY: HashableSeqRegistryKeyOnly[Callable[[Any, str, "ComplexCanvas"], Coroutine[None, None, bool]]] = HashableSeqRegistryKeyOnly()
+
+def _count_child_type(container: three.ContainerBase, obj_type: Type[three.Component]):
+    res = 0
+    for v in container._child_comps.values():
+        if isinstance(v, obj_type):
+            res += 1
+    return res
+
+def _try_cast_to_point_cloud(obj: Any):
+    tc = get_tensor_container(obj)
+    if tc is None:
+        return None 
+
+    ndim = obj.ndim
+    if ndim == 2:
+        dtype = tc.dtype
+        if dtype == np.float32 or dtype == np.float16 or dtype == np.float64:
+            num_ft = obj.shape[1]
+            if num_ft >= 3 and num_ft <= 4:
+                return tc.numpy()
+    return None
+
+
+def _try_cast_to_box3d(obj: Any):
+    tc = get_tensor_container(obj)
+    if tc is None:
+        return None 
+    ndim = obj.ndim
+    if ndim == 2:
+        dtype = tc.dtype
+        if dtype == np.float32 or dtype == np.float16 or dtype == np.float64:
+            num_ft = obj.shape[1]
+            if num_ft == 7:
+                return tc.numpy()
+    return None
+
+
+def _try_cast_to_lines(obj: Any):
+    tc = get_tensor_container(obj)
+    if tc is None:
+        return None 
+    ndim = obj.ndim
+    if ndim == 3:
+        dtype = tc.dtype
+        if dtype == np.float32 or dtype == np.float16 or dtype == np.float64:
+            if obj.shape[1] == 2 and obj.shape[2] == 3:
+                return tc.numpy()
+    return None
+
+
+def _try_cast_to_image(obj: Any):
+    tc = get_tensor_container(obj)
+    if tc is None:
+        return None 
+    ndim = obj.ndim
+    valid = False
+    is_rgba = False
+    if ndim == 2:
+        valid = tc.dtype == np.uint8
+    elif ndim == 3:
+        valid = tc.dtype == np.uint8 and (obj.shape[2] == 3
+                                           or obj.shape[2] == 4)
+        is_rgba = obj.shape[2] == 4
+    if valid:
+        res = tc.numpy()
+        if is_rgba and res is not None:
+            res = res[..., :3]
+        return res
+    return None
 
 def find_component_trace_by_uid_with_not_exist_parts(
     comp: Component,
@@ -135,10 +207,13 @@ class ComplexCanvas(mui.FlexBox):
         self._is_transparent = transparent_canvas
         self._gizmo_helper = three.GizmoHelper().prop(alignment="bottom-right")
         self._cur_detail_layout_uid: Optional[str] = None
-        self._cur_detail_layout_object_id: Optional[int] = None
+        self._cur_detail_layout_object_id: Optional[str] = None
 
         self._cur_table_uid: Optional[str] = None
-        self._cur_table_object_id: Optional[int] = None
+        self._cur_table_object_id: Optional[str] = None
+        self._dnd_trees: Set[str] = set()
+
+        self._random_colors: Dict[str, str] = {}
 
         init_layout = {
             "control": self.ctrl,
@@ -190,6 +265,9 @@ class ComplexCanvas(mui.FlexBox):
             use_fast_tree=True)
         self.item_tree.event_async_select_single.on(self._on_tree_select)
         self.init_add_layout([*self._layout_func()])
+        self.prop(droppable=True,
+                border="4px solid transparent",
+                    sxOverDrop={"border": "4px solid green"},)
 
     def _get_tdata_container_pane(self, tdata_table: mui.DataGrid):
         return mui.Allotment.Pane(tdata_table, preferredSize=1)
@@ -329,6 +407,8 @@ class ComplexCanvas(mui.FlexBox):
             mui.Allotment.Pane(canvas_layout, preferredSize="75%"),
             self.tdata_container_v2_pane,
         ])).prop(vertical=True, proportionalLayout=True)
+        self.event_drop.on(self._on_drop)
+
         return [
             mui.Allotment([
                 self._canvas_spitter,
@@ -486,38 +566,35 @@ class ComplexCanvas(mui.FlexBox):
         if data.objs is None:
             return
         obj = data.objs[-1]
-        # print(find_component_trace_by_uid_with_not_exist_parts(self._item_root, "reserved.grid.2"))
-        obj_cfg = get_canvas_item_cfg(obj)
-        if obj_cfg is not None and obj_cfg.detail_layout is not None:
-            if obj._flow_uid is not None:
-
-                await self.prop_container.set_new_layout([obj_cfg.detail_layout])
-                self._cur_detail_layout_uid = data.nodes[-1].id
-                self._cur_detail_layout_object_id = id(obj)
-        else:
-            if three.is_three_component(obj):
+        if isinstance(obj, three.Component) and obj.is_mounted():
+            # print(find_component_trace_by_uid_with_not_exist_parts(self._item_root, "reserved.grid.2"))
+            obj_cfg = get_canvas_item_cfg(obj)
+            if obj_cfg is not None and obj_cfg.detail_layout is not None:
                 if obj._flow_uid is not None:
-                    panel = self._get_default_detail_layout(obj).prop(reactKey=data.nodes[-1].id)
+
+                    await self.prop_container.set_new_layout([obj_cfg.detail_layout])
                     self._cur_detail_layout_uid = data.nodes[-1].id
                     self._cur_detail_layout_object_id = obj._flow_uid
-                    await self.prop_container.set_new_layout([panel])
-
             else:
-                await self.prop_container.set_new_layout([])
-                self._cur_detail_layout_uid = None
-                self._cur_detail_layout_object_id = None
+                if three.is_three_component(obj):
+                    if obj._flow_uid is not None:
+                        panel = self._get_default_detail_layout(obj).prop(reactKey=data.nodes[-1].id)
+                        self._cur_detail_layout_uid = data.nodes[-1].id
+                        self._cur_detail_layout_object_id = obj._flow_uid
+                        await self.prop_container.set_new_layout([panel])
 
-        if isinstance(obj, three.ContainerBase):
-            table = self._extract_table_from_group(obj)
-            if table is not None:
-                if obj._flow_uid is not None:
-                    self._cur_table_uid = data.nodes[-1].id
-                    self._cur_table_object_id = obj._flow_uid
-                    await self.tdata_container_v2.set_new_layout([table])
-            else:
-                await self.tdata_container_v2.set_new_layout([])
-        else:
-            await self.tdata_container_v2.set_new_layout([])
+                else:
+                    await self.prop_container.set_new_layout([])
+                    self._cur_detail_layout_uid = None
+                    self._cur_detail_layout_object_id = None
+
+            if isinstance(obj, three.ContainerBase):
+                table = self._extract_table_from_group(obj)
+                if table is not None:
+                    if obj._flow_uid is not None:
+                        self._cur_table_uid = data.nodes[-1].id
+                        self._cur_table_object_id = obj._flow_uid
+                        await self.tdata_container_v2.set_new_layout([table])
 
     async def _uninstall_detail_layout(self):
         async with self._lock:
@@ -582,8 +659,7 @@ class ComplexCanvas(mui.FlexBox):
         if isinstance(layout, list):
             layout = {str(i): v for i, v in enumerate(layout)}
 
-        assert container_key != "" and not container_key.startswith(
-            "reserved"), "you can't set layout of canvas and reserved."
+        assert container_key != "" and not is_reserved_name(container_key), "you can't set layout of canvas and reserved."
         container_parents, remain_keys, _ = find_component_trace_by_uid_with_not_exist_parts(
             self._item_root, container_key)
         if len(remain_keys) == 0:
@@ -594,8 +670,7 @@ class ComplexCanvas(mui.FlexBox):
 
     async def update_layout_in_container(self, container_key: str,
                                          layout: three.ThreeLayoutType):
-        assert not container_key.startswith(
-            "reserved"), "you can't update layout of reserved."
+        assert container_key != "" and not is_reserved_name(container_key), "you can't update layout of reserved."
         if isinstance(layout, list):
             layout = {str(i): v for i, v in enumerate(layout)}
         container_parents, remain_keys, _ = find_component_trace_by_uid_with_not_exist_parts(
@@ -645,3 +720,98 @@ class ComplexCanvas(mui.FlexBox):
             await self.item_tree.tree.select([tree_node_uid])
             await self.item_tree._on_select_single(tree_node_uid)
             # print(selected_uid_local_uid, obj, obj._flow_uid)
+
+
+    async def _unknown_visualization(self, tree_id: str, obj: Any, ignore_registry: bool = False):
+        from . import vapi_core as V
+        obj_type = type(obj)
+        if obj_type in UNKNOWN_VIS_REGISTRY and not ignore_registry:
+            handlers = UNKNOWN_VIS_REGISTRY[obj_type]
+            for handler in handlers:
+                res = await handler(obj, tree_id, self)
+                if res == True:
+                    return True 
+        tree_id_replaced = tree_id.replace(".", UNKNOWN_KEY_SPLIT)
+        if UNKNOWN_VIS_KEY in self._item_root._child_comps:
+            unk_container = self._item_root._child_comps[UNKNOWN_VIS_KEY]
+            assert isinstance(unk_container, three.Group)
+        else:
+            unk_container = three.Group([])
+            await self._item_root.update_childs({
+                UNKNOWN_VIS_KEY: unk_container
+            })
+            cfg = get_or_create_canvas_item_cfg(unk_container)
+            cfg.proxy = V.GroupProxy("")
+        vctx_unk = V.VContext(self, unk_container)
+        pc_obj = _try_cast_to_point_cloud(obj)
+        if pc_obj is not None:
+            if tree_id_replaced in self._random_colors:
+                pick = self._random_colors[tree_id_replaced]
+            else:
+                random_colors = colors.RANDOM_COLORS_FOR_UI
+                pick = random_colors[_count_child_type(unk_container, three.Points) %
+                                    len(random_colors)]
+                self._random_colors[tree_id_replaced] = pick
+            print("?????????")
+            with V.enter_v_conetxt(V.VContext(self, unk_container)):
+
+                points = V.points(tree_id_replaced, pc_obj.shape[0]).array(pc_obj.astype(np.float32))
+                if pc_obj.shape[1] == 3:
+                    points.color(pick)
+                
+            await V._draw_all_in_vctx(vctx_unk, rf"{unk_container._flow_uid}\..*")
+            return True
+        img_obj = _try_cast_to_image(obj)
+        if img_obj is not None:
+            with V.enter_v_conetxt(V.VContext(self, unk_container)):
+                V.image(img_obj, name=tree_id_replaced)
+            await V._draw_all_in_vctx(vctx_unk, rf"{unk_container._flow_uid}\..*")
+            return True
+        b3d_obj = _try_cast_to_box3d(obj)
+        if b3d_obj is not None:
+            if tree_id in self._random_colors:
+                pick = self._random_colors[tree_id]
+            else:
+                random_colors = colors.RANDOM_COLORS_FOR_UI
+                pick = random_colors[_count_child_type(unk_container, three.BoundingBox) %
+                                    len(random_colors)]
+                self._random_colors[tree_id] = pick
+            with V.enter_v_conetxt(V.VContext(self, unk_container)):
+
+                with V.group(tree_id_replaced):
+                    for box in b3d_obj:
+                        V.bounding_box(box[3:6], (0, 0, box[6]), box[:3]).color(pick)
+            await V._draw_all_in_vctx(vctx_unk, rf"{unk_container._flow_uid}\..*")
+            return True
+        line_obj = _try_cast_to_lines(obj)
+        if line_obj is not None:
+            if tree_id in self._random_colors:
+                pick = self._random_colors[tree_id]
+            else:
+                random_colors = colors.RANDOM_COLORS_FOR_UI
+                pick = random_colors[_count_child_type(unk_container, three.Segments) %
+                                    len(random_colors)]
+                self._random_colors[tree_id] = pick
+            with V.enter_v_conetxt(V.VContext(self, unk_container)):
+
+                points = V.lines(tree_id_replaced, line_obj.shape[0]).array(line_obj.astype(np.float32))
+
+            await V._draw_all_in_vctx(vctx_unk, rf"{unk_container._flow_uid}\..*")
+            return True
+        return False
+    
+    async def _on_drop(self, data):
+        from tensorpc.flow.flowapp.components.plus import BasicObjectTree
+        if isinstance(data, TreeDragTarget):
+            obj = data.obj
+            success = await self._unknown_visualization(data.tree_id, obj)
+            if success:
+                # register to tree
+                tree = find_component_by_uid_with_type_check(data.source_comp_uid, BasicObjectTree)
+                if tree is not None:
+                    tree._register_dnd_uid(data.tree_id,
+                                           self._dnd_cb)
+                    self._dnd_trees.add(data.source_comp_uid)
+
+    async def _dnd_cb(self, uid: str, data: Any):
+        await self._unknown_visualization(uid, data)

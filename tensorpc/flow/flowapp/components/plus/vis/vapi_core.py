@@ -29,6 +29,7 @@ import dataclasses
 from functools import partial
 import inspect
 import threading
+import traceback
 from typing import Any, Callable, Dict, Optional, List, Tuple, Type, TypeVar, Union, get_type_hints
 from typing_extensions import Annotated
 import contextvars
@@ -43,7 +44,7 @@ from ...typemetas import (ColorRGB, ColorRGBA, RangedFloat, RangedInt,
                           RangedVector3, Vector3,
                           annotated_function_to_dataclass)
 from .canvas import ComplexCanvas, find_component_trace_by_uid_with_not_exist_parts
-from .core import CanvasItemCfg, CanvasItemProxy
+from .core import CanvasItemCfg, CanvasItemProxy, is_reserved_name
 import numpy as np
 from tensorpc.utils.uniquename import UniqueNamePool
 from .core import get_canvas_item_cfg, get_or_create_canvas_item_cfg
@@ -101,7 +102,7 @@ class PointsProxy(CanvasItemProxy):
 
     def update_event(self, comp: three.Points):
         # TODO global config
-        points_nparray = np.array(self._points, dtype=np.float32)
+        points_nparray = np.array(self._points, dtype=np.float32).reshape(-1, 3)
         if self._points_arr:
             points_nparray = np.concatenate(self._points_arr +
                                             [points_nparray])
@@ -175,9 +176,13 @@ class LinesProxy(CanvasItemProxy):
         self._width: three.NumberType = 1
         self._limit: Optional[int] = None
         self._lines_arr: List[np.ndarray] = []
+        self._color: Union[three.Undefined, str] = three.undefined
 
     def limit(self, limit: int):
         self._limit = limit
+        return self
+    def color(self, color: Union[three.Undefined, str]):
+        self._color = color
         return self
 
     def p(self, x1: float, y1: float, z1: float, x2: float, y2: float,
@@ -203,9 +208,10 @@ class LinesProxy(CanvasItemProxy):
         if self._limit is not None:
             return comp.update_event(limit=self._limit,
                                      lineWidth=self._width,
-                                     lines=lines_array)
+                                     lines=lines_array,
+                                     color=self._color)
         else:
-            return comp.update_event(lineWidth=self._width, lines=lines_array)
+            return comp.update_event(color=self._color, lineWidth=self._width, lines=lines_array)
 
     def polygon(self, x: float, y: float, z: float, closed: bool = False):
         return _Polygon((x, y, z), closed, self)
@@ -232,6 +238,10 @@ class BoundingBoxProxy(CanvasItemProxy):
             dimension=self._dims, rotation=self._rots,
             opacity=self._opacity, edgeColor=self._edge_color, color=self._color,
             emissive=self._emissive)
+    
+    def color(self, color: Union[three.Undefined, str]):
+        self._color = color
+        return self
 
 class TextProxy(CanvasItemProxy):
     def __init__(self, text: str, pos: Union[three.Vector3Type, three.Undefined],
@@ -427,7 +437,6 @@ def group(name: str,
         assert canvas is not None, "you must add complex canvas before using vapi"
 
     name_parts = name.split(".")
-    assert name_parts[0] != "reserved" and name != ""
     for p in name_parts:
         assert p, "group name can not be empty"
     # find exist group in canvas
@@ -435,6 +444,7 @@ def group(name: str,
     is_first_ctx = False
     token = None
     if v_ctx is None:
+        assert not is_reserved_name(name), f"{name} should not be reserved name"
         is_first_ctx = True
         v_ctx = VContext(canvas)
         token = V_CONTEXT_VAR.set(v_ctx)

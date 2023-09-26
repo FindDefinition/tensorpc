@@ -8,6 +8,13 @@ from pydantic import (
 )
 from ... import mui, three
 
+UNKNOWN_VIS_KEY = "unknown_vis"
+UNKNOWN_KEY_SPLIT = "!!%"
+RESERVED_NAMES = set([UNKNOWN_VIS_KEY, "reserved"])
+
+def is_reserved_name(name: str):
+    parts = name.split(".")
+    return parts[0] in RESERVED_NAMES
 
 class CanvasItemProxy:
     def __init__(self) -> None:

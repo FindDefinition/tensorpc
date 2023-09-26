@@ -92,6 +92,7 @@ class DevApp:
         ])
 
         res.canvas.prop(flat=True, shadows=True)
+        self.canvas = res
         return mui.VBox([
             res,
             mui.Button("Click me", self.on_click),
@@ -118,3 +119,6 @@ class DevApp:
                         "name": f"test{i}",
                     }
                     V.bounding_box((1, 1, 1), pos=(0, i * 1.5, 0)).tdata(tdata)
+            points = np.random.uniform(-1, 1, size=[1000, 3]).astype(np.float32)
+
+        await self.canvas._unknown_visualization("foo.bar", points)
