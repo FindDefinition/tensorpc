@@ -191,7 +191,7 @@ class ComplexCanvas(mui.FlexBox):
 
         super().__init__()
         self.component_tree = three.Fragment([])
-        self.camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
+        self.camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000, position=(1, 1, 10), )
 
         self.ctrl = three.CameraControl().prop(makeDefault=True)
         self.background_img = mui.Image()
@@ -205,7 +205,7 @@ class ComplexCanvas(mui.FlexBox):
         self._dynamic_grid = three.Group([self._infgrid, self._axis_helper])
         self._cfg_container = mui.Fragment([])
         self._is_transparent = transparent_canvas
-        self._gizmo_helper = three.GizmoHelper().prop(alignment="bottom-right")
+        self._gizmo_helper = three.GizmoHelper().prop(alignment="bottom-right", renderPriority=2)
         self._cur_detail_layout_uid: Optional[str] = None
         self._cur_detail_layout_object_id: Optional[str] = None
 
@@ -216,8 +216,7 @@ class ComplexCanvas(mui.FlexBox):
         self._random_colors: Dict[str, str] = {}
 
         init_layout = {
-            "control": self.ctrl,
-            "camera": self.camera,
+            # "camera": self.camera,
             "grid": self._dynamic_grid,
             "screen shot": self._screen_shot_v2,
             "gizmo": self._gizmo_helper,
@@ -255,6 +254,8 @@ class ComplexCanvas(mui.FlexBox):
 
         self.canvas = three.Canvas({
             "root": self._item_root,
+            "camera": self.camera,
+            "control": self.ctrl,
         }).prop(flex=1, allowKeyboardEvent=True)
         self.custom_tree_handler = CanvasTreeItemHandler()
         self.item_tree = BasicObjectTree(

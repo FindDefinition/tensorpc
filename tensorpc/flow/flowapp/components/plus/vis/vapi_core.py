@@ -261,6 +261,7 @@ class ImageProxy(CanvasItemProxy):
                  rots: Union[three.Vector3Type, three.Undefined]) -> None:
         super().__init__()
         self._img = img
+        assert img.dtype == np.uint8
         self._pos: Union[three.Vector3Type, three.Undefined] = pos
         self._rots: Union[three.Vector3Type, three.Undefined] = rots
         self._color: Union[str, int, three.Undefined] = three.undefined
@@ -268,8 +269,24 @@ class ImageProxy(CanvasItemProxy):
         self._scale: Union[float, three.Undefined] = three.undefined
 
     def update_event(self, comp: three.Image):
-        return comp.update_event(image=mui.Image.encode_image_bytes(self._img), position=self._pos, 
-            rotation=self._rots, color=self._color, scale=self._scale, enableSelect=True)
+        # TODO currently use texture loader (webimage) in frontend cause problem,
+        # so we use data texture for now.
+        use_datatex = True
+        img = self._img
+        if use_datatex:
+            if img.ndim == 3 and img.shape[-1] == 3:
+                img = np.concatenate([img, np.full((*img.shape[:-1], 1), 255, dtype=np.uint8)], axis=-1)
+            elif img.ndim == 2:
+                # gray to rgba
+                img = img.reshape((*img.shape, 1))
+                img = np.tile(img, (1, 1, 3))
+                img = np.concatenate([img, np.full((*img.shape[:-1], 1), 255, dtype=np.uint8)], axis=-1)
+
+            return comp.update_event(image=img, position=self._pos, 
+                rotation=self._rots, color=self._color, scale=self._scale, enableSelect=True)
+        else:
+            return comp.update_event(image=mui.Image.encode_image_bytes(img), position=self._pos, 
+                rotation=self._rots, color=self._color, scale=self._scale, enableSelect=True)
 
     def scale(self, scale: float):
         self._scale = scale

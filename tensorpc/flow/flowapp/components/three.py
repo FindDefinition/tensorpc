@@ -995,9 +995,9 @@ class Group(O3dContainerWithEventBase[GroupProps,
         return self._update_props_base(propcls)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(config=PyDanticConfigForNumpy)
 class ImageProps(Object3dBaseProps, InteractableProps):
-    image: bytes = dataclasses.field(default_factory=bytes)
+    image: Union[np.ndarray, str, bytes] = dataclasses.field(default_factory=str)
     segments: Union[NumberType, Undefined] = undefined
     color: Annotated[Union[str, int, Undefined], typemetas.ColorRGB()] = undefined
     zoom: Union[NumberType, Undefined] = undefined

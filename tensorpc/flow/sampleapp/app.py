@@ -1038,7 +1038,9 @@ class PointCloudApp:
                                                     3]).astype(np.uint8)
 
         await self.canvas.show_voxels("vox0", pcs, pc_colors, voxel_size, 1000)
+        random_img = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
 
+        await self.canvas.show_image("img0", random_img, (0, 0, 0), (0, 0, 0), 3)
 
 class PlotApp:
     @mark_create_layout

@@ -283,6 +283,15 @@ class Image(MUIComponentBase[ImageProps]):
         return b"data:image/" + suffix.encode(
             "utf-8") + b";base64," + b64_bytes
 
+    @staticmethod
+    def encode_image_string(img: np.ndarray, format: str = "JPEG"):
+        pil_img = PILImage.fromarray(img)
+        buffered = io.BytesIO()
+        pil_img.save(buffered, format=format)
+        b64_bytes = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        suffix = _PIL_FORMAT_TO_SUFFIX[format]
+        return "data:image/" + suffix + ";base64," + b64_bytes
+
     async def show(self,
                    image: np.ndarray,
                    format: str = "JPEG",

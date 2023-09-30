@@ -56,7 +56,7 @@ class DevApp:
             three.Mesh([
                 three.PlaneGeometry(1000, 1000),
                 three.MeshStandardMaterial().prop(color="#f0f0f0"),
-            ]).prop(receiveShadow=True, position=(0.0, 0.0, 0)),
+            ]).prop(receiveShadow=True, position=(0.0, 0.0, -0.1)),
 
             three.AmbientLight(intensity=0.314, color=0xffffff),
             three.PointLight().prop(position=(2, 2, 2),
@@ -94,13 +94,21 @@ class DevApp:
         res.canvas.prop(flat=True, shadows=True)
         self.canvas = res
         return mui.VBox([
-            res,
             mui.Button("Click me", self.on_click),
+
+            res,
         ]) 
 
     async def on_click(self):
         print("clicked")
         # with V.ctx():
+        random_img = np.random.randint(0, 255, (100, 100, 4), dtype=np.uint8)
+        random_img[:, :, -1] = 255
+        # await self.canvas.canvas.update_childs([
+        #     three.Group([
+        #         three.Image().prop(image=random_img)
+        #     ])
+        # ])
         with V.group("dev"):
             V.points("points0", 1000).p(1, 1, 1).p(0, 0, 0).color("red").size(5)
             V.lines("lines0", 1000).p(2, 2, 2, 3, 4, 3)
@@ -121,4 +129,5 @@ class DevApp:
                     V.bounding_box((1, 1, 1), pos=(0, i * 1.5, 0)).tdata(tdata)
             points = np.random.uniform(-1, 1, size=[1000, 3]).astype(np.float32)
 
-        await self.canvas._unknown_visualization("foo.bar", points)
+        # await self.canvas._unknown_visualization("foo.bar", points)
+
