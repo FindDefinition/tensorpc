@@ -41,3 +41,11 @@ class TextureWrappingMode(enum.IntEnum):
     RepeatWrapping = 0
     ClampToEdgeWrapping = 1
     MirroredRepeatWrapping = 2
+    
+class TextureFilterType(enum.IntEnum):
+    NearestFilter = 0
+    NearestMipmapNearestFilter = 1
+    NearestMipmapLinearFilter = 2
+    LinearFilter = 3
+    LinearMipmapNearestFilter = 4
+    LinearMipmapLinearFilter = 5
