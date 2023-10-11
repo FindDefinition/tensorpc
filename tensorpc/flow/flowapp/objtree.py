@@ -16,19 +16,13 @@ import asyncio
 import contextlib
 import contextvars
 import inspect
-from typing import (Any, Callable, Coroutine, Dict, Generator, Iterator, List, Optional, Protocol,
+from typing import (Any, Callable, Coroutine, Dict, Generator, Iterator, List, Optional, Protocol, Set,
                     Type, TypeVar, Union)
 import uuid 
 from typing_extensions import ContextManager
+from tensorpc.core.moduleid import get_qualname_of_type, get_mro_qualnames_of_type
 
 T = TypeVar("T")
-
-def get_qualname_of_type(klass: Type) -> str:
-    module = klass.__module__
-    if module == 'builtins':
-        return klass.__qualname__  # avoid outputs like 'builtins.str'
-    return module + '.' + klass.__qualname__
-
 
 class ObjTreeContextProtocol(Protocol):
     nodes: Dict[str, "UserObjTreeProtocol"]
@@ -147,14 +141,14 @@ class UserObjTree:
 def find_tree_child_item_may_exist(root: UserObjTreeProtocol, obj_type: Type[T],
                                    node_type: Type[T_treeitem], 
                                    validator: Optional[Callable[[T], bool]] = None) -> Optional[T]:
-    obj_type_qname = get_qualname_of_type(obj_type)
+    obj_type_qnames = get_mro_qualnames_of_type(obj_type)
 
     childs_dict = root.get_childs()
     res_foreach: List[UserObjTreeProtocol] = []
 
     for k, v in childs_dict.items():
         v_type_qname = get_qualname_of_type(type(v))
-        if v_type_qname == obj_type_qname:
+        if v_type_qname in obj_type_qnames:
             if validator is None or (validator is not None and validator(v)): # type: ignore
                 return v # type: ignore
         if isinstance(v, node_type):
@@ -176,10 +170,10 @@ def _get_tree_child_items_recursive(root: UserObjTreeProtocol, obj_type: Type[T]
     res: List[T] = []
     # we use qualname to compare type, because type may be different
     # when we reload module which is quite often in GUI.
-    obj_type_qname = get_qualname_of_type(obj_type)
+    obj_type_qnames = get_mro_qualnames_of_type(obj_type)
     for k, v in childs_dict.items():
         v_type_qname = get_qualname_of_type(type(v))
-        if v_type_qname == obj_type_qname:
+        if v_type_qname in obj_type_qnames:
             if validator is None or (validator is not None and validator(v)): # type: ignore
                 res.append(v) # type: ignore
         elif isinstance(v, node_type):
@@ -187,10 +181,10 @@ def _get_tree_child_items_recursive(root: UserObjTreeProtocol, obj_type: Type[T]
     return res
 
 def _check_node(node: UserObjTreeProtocol, obj_type: Type[T], validator: Optional[Callable[[T], bool]] = None):
-    obj_type_qname = get_qualname_of_type(obj_type)
+    obj_type_qnames = get_mro_qualnames_of_type(obj_type)
     # check root
     v_type_qname = get_qualname_of_type(type(node))
-    if v_type_qname == obj_type_qname:
+    if v_type_qname in obj_type_qnames:
         if validator is None or (validator is not None and validator(node)): # type: ignore
             return True
     return False

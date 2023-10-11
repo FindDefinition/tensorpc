@@ -669,13 +669,21 @@ class BasicObjectTree(mui.FlexBox):
             self.tree.update_event(tree=self.tree.props.tree))
         await self._do_when_tree_updated(obj_tree.id)
 
-    async def update_tree(self, wait: bool = True):
+    async def update_tree(self, wait: bool = True, update_tree: bool = True, update_iff_change: bool = False):
         t = time.time()
         with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree)):
-            self.tree.props.tree = await self._tree_parser.get_root_tree(self.root, _ROOT, self.default_expand_level)
+            new_tree = await self._tree_parser.get_root_tree(self.root, _ROOT, self.default_expand_level)
         # print(0, time.time() - t)
-        await self.tree.send_and_wait(
-            self.tree.update_event(tree=self.tree.props.tree), wait=wait)
+        if update_tree:
+            if update_iff_change:
+                # send tree to frontend is greatly slower than compare.
+                if new_tree != self.tree.props.tree:
+                    await self.tree.send_and_wait(
+                        self.tree.update_event(tree=new_tree), wait=wait)
+            else:
+                await self.tree.send_and_wait(
+                    self.tree.update_event(tree=new_tree), wait=wait)
+            self.tree.props.tree = new_tree
         # print(1, time.time() - t)
 
         await self._do_when_tree_updated(self.tree.props.tree.id)

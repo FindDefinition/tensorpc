@@ -34,6 +34,10 @@ def get_qualname_of_type(klass: Type) -> str:
         return klass.__qualname__  # avoid outputs like 'builtins.str'
     return module + '.' + klass.__qualname__
 
+def get_mro_qualnames_of_type(klass: Type) -> Set[str]:
+    mros = inspect.getmro(klass)
+    return set(get_qualname_of_type(mro) for mro in mros)
+
 def is_lambda(obj: Callable):
     if not inspect.isfunction(obj) and not inspect.ismethod(obj):
         return False
@@ -47,18 +51,20 @@ def is_valid_function(obj: Callable):
 def get_function_qualname(obj: Callable):
     return obj.__qualname__
 
-
-_ClassInfo: TypeAlias = Tuple[type, ...]
+if sys.version_info >= (3, 10):
+    _ClassInfo: TypeAlias = type | types.UnionType | tuple["_ClassInfo", ...]
+else:
+    _ClassInfo: TypeAlias = Union[type, Tuple["_ClassInfo", ...]] 
 
 def loose_isinstance(obj, _class_or_tuple: _ClassInfo):
     """for reloaded code, the type of obj may be different from the type of the class in the current module.
     """
-    obj_qname = get_qualname_of_type(type(obj))
+    obj_qnames = get_mro_qualnames_of_type(type(obj))
     if not isinstance(_class_or_tuple, (list, tuple)):
         _class_or_tuple = (_class_or_tuple,)
 
     for c in _class_or_tuple:
-        if get_qualname_of_type(c) == obj_qname:
+        if get_qualname_of_type(c) in obj_qnames:
             return True 
     return False 
 

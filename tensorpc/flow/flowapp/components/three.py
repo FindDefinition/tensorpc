@@ -106,7 +106,7 @@ class Side(enum.Enum):
     DoubleSide = 2
 
 
-SideType: TypeAlias = Literal[0, 1, 2]
+# SideType: TypeAlias = Literal[0, 1, 2]
 
 
 class MeshMaterialType(enum.Enum):
@@ -120,6 +120,10 @@ class MeshMaterialType(enum.Enum):
     Standard = 7
     Toon = 8
 
+class SideType(enum.IntEnum):
+    Front = 0
+    Back = 1
+    Double = 2
 
 @dataclasses.dataclass
 class ThreeMaterialPropsBase(ThreeBasicProps):
@@ -222,7 +226,8 @@ class Object3dBaseProps(ThreeBasicProps):
     visible: Annotated[Union[bool, Undefined], typemetas.CommonObject(default=True)] = undefined
     receiveShadow: Union[bool, Undefined] = undefined
     castShadow: Union[bool, Undefined] = undefined
-    renderOrder: Union[NumberType, Undefined] = undefined
+    renderOrder: Union[int, Undefined] = undefined
+    layers: Annotated[Union[int, Undefined], typemetas.RangedInt(0, 31, 1, default=0)] = undefined
 
 
 @dataclasses.dataclass
@@ -977,12 +982,11 @@ class Group(O3dContainerWithEventBase[GroupProps,
     # TODO can/should group accept event?
     def __init__(self,
                  children: Union[Dict[str, ThreeComponentType],
-                                 List[ThreeComponentType]],
-                 inited: bool = False) -> None:
+                                 List[ThreeComponentType]]) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ThreeGroup, GroupProps,
-                         children, inited)
+                         children)
 
     @property
     def prop(self):
@@ -1580,6 +1584,7 @@ class ThreeCanvasProps(MUIFlexBoxProps):
     flat: Union[bool, Undefined] = undefined
     linear: Union[bool, Undefined] = undefined
     dpr: Union[Tuple[int, int], Undefined] = undefined
+    raycastLayerMask: Union[int, Undefined] = undefined
 
 class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
     def __init__(self,

@@ -3707,6 +3707,7 @@ class ControlNode:
     alias: Union[Undefined, str] = undefined
     # for vectorN
     count: Union[Undefined, int] = undefined
+    isInteger: Union[Undefined, bool] = undefined
 
 
 @dataclasses.dataclass

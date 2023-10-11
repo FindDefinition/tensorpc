@@ -11,6 +11,37 @@ import numpy as np
 
 from tensorpc.flow.marker import mark_did_mount
 from tensorpc import prim
+from tensorpc.flow.flowapp.objtree import UserObjTree
+from tensorpc.flow import observe_function
+
+class TestNodeNode0(UserObjTree):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def func(self, a, b):
+        V.points("points0", 1000).p(a, b, 1).color("red").size(5)
+        V.mdprint("## hello world")
+        V.mdprint("## hello world")
+        V.mdprint("## hello world")
+        V.mdprint("## hello world")
+        V.mdprint("## hello world")
+        V.mdprint("## hello world")
+        V.mdprint("## hello world")
+        V.mdprint("## hello world")
+        V.mdprint("## hello world")
+
+class TestNodeRoot(UserObjTree):
+    def __init__(self) -> None:
+        super().__init__()
+        self.node0 = TestNodeNode0()
+        self._childs["node0"] = self.node0
+
+    def func(self, a, b):
+        with V.group("dev"):
+            V.bounding_box((a, b, 2))
+            self.node0.func(a, b)
+            V.mdprint("## hello world")
+
 class DevApp:
 
     @mark_create_layout
@@ -43,7 +74,8 @@ class DevApp:
         #     three.BoundingBox((1 ,1 ,1)).prop(position=(3, 3, 3),
         #     enableSelect=True, enableSelectOutline=False),
         # ])
-
+        root = TestNodeRoot()
+        self.root = root
         res = plus.ComplexCanvas([
             three.EffectComposer([
                 three.Outline().prop(blur=True, edgeStrength=100, 
@@ -89,15 +121,21 @@ class DevApp:
                 pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
                 ),
 
-        ])
+        ], init_tree_root=root, init_tree_child_accessor=lambda x: x.get_childs())
 
         res.canvas.prop(flat=True, shadows=True)
         self.canvas = res
         return mui.VBox([
-            mui.Button("Click me", self.on_click),
+            mui.HBox([
+                mui.Button("Test V", self.on_click),
+                mui.Button("Test Tree", self.on_test_tree)
+            ]),
 
             res,
         ]) 
+    
+    async def on_test_tree(self):
+        self.root.func(3, 4)
 
     async def on_click(self):
         print("clicked")

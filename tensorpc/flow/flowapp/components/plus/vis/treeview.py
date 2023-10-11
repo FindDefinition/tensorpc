@@ -62,6 +62,11 @@ class CanvasTreeItemHandler(CustomTreeItemHandler):
         """
         if isinstance(obj, mui.Component) and three.is_three_component(obj):
             # buttons: visibility, delete
+            if isinstance(obj._flow_user_data, CanvasItemCfg):
+                if obj._flow_user_data.type_str_override is not None:
+                    node.typeStr = obj._flow_user_data.type_str_override
+                if obj._flow_user_data.alias is not None:
+                    node.alias = obj._flow_user_data.alias
             node.fixedIconBtns = self._get_icon_button(obj)
         return None 
 

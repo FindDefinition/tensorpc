@@ -51,6 +51,11 @@ class Undefined:
             raise TypeError('undefined required')
         return v
 
+    def __eq__(self, o: object) -> bool:
+        return isinstance(o, Undefined)
+    
+    def __ne__(self, o: object) -> bool:
+        return not isinstance(o, Undefined)
 
 class BackendOnlyProp(Generic[T]):
     """when wrap a property with this class, it will be ignored when serializing to frontend
@@ -75,6 +80,19 @@ class BackendOnlyProp(Generic[T]):
         if not isinstance(v, BackendOnlyProp):
             raise TypeError('BackendOnlyProp required')
         return cls(v.data)
+    
+    def __eq__(self, o: object) -> bool:
+        if isinstance(o, BackendOnlyProp):
+            return o.data == self.data
+        else:
+            return o == self.data
+    
+    def __ne__(self, o: object) -> bool:
+        if isinstance(o, BackendOnlyProp):
+            return o.data != self.data
+        else:
+            return o != self.data
+
 
 # DON'T MODIFY THIS VALUE!!!
 undefined = Undefined()
@@ -317,13 +335,13 @@ def _div_up(x: int, y: int):
 
 _FOLDER_TYPES = {JsonLikeType.ListFolder.value, JsonLikeType.DictFolder.value}
 
-@dataclasses.dataclass
+@dataclasses.dataclass(eq=True)
 class IconButtonData:
     id: ValueType
     icon: int
     tooltip: Union[Undefined, str] = undefined
 
-@dataclasses.dataclass
+@dataclasses.dataclass(eq=True)
 class ContextMenuData:
     title: str
     id: Union[Undefined, ValueType] = undefined
@@ -331,7 +349,7 @@ class ContextMenuData:
     userdata: Union[Undefined, Any] = undefined
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(eq=True)
 class JsonLikeNode:
     id: str
     # must be id.split(SPLIT)[-1] for child of list/dict
@@ -354,7 +372,6 @@ class JsonLikeNode:
     userdata: Union[Undefined, Any] = undefined
     alias: Union[Undefined, str] = undefined
     fixedIconBtns: Union[Undefined, List[IconButtonData]] = undefined
-
 
     @staticmethod
     def decode_uid(uid: str, split_length: int = 2):

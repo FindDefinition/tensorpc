@@ -194,6 +194,8 @@ def _parse_base_type(ty: Type, current_obj, field_name: str,
         child_node.type = mui.ControlNodeType.Number.value
         child_node.initValue = getattr(current_obj, field_name)
         if ty is int:
+            child_node.isInteger = True
+        if ty is int:
             child_node.step = 1
         #     raise NotImplementedError
     elif ty is str:
@@ -285,7 +287,7 @@ def _check_union_is_valid_subset_ignore_undefined(ty, ty_origin,
             union_args = tuple(x for x in union_args if x is not mui.Undefined)
         union_args_set = set(union_args)
         return union_args_set.issubset(target_set)
-    return False
+    return ty in target_set
 
 
 def parse_to_control_nodes(origin_obj,
@@ -318,7 +320,7 @@ def parse_to_control_nodes(origin_obj,
             annotated_metas = ty.__metadata__
             ty = get_args(ty)[0]
         ty_origin = get_origin(ty)
-        # if f.name == "fontSize":
+        # if f.name == "a":
         #     print(f.name, ty_origin, ty, type(ty), not _check_is_basic_type(ty) and ty not in _BUILTIN_DCLS_TYPE, annotated_metas)
 
         if dataclasses.is_dataclass(ty) and ty not in _BUILTIN_DCLS_TYPE:
@@ -423,12 +425,11 @@ def parse_to_control_nodes(origin_obj,
                 if res is not None:
                     child_node.type = mui.ControlNodeType.RangeNumber.value
                     if first_anno_meta.default is not None:
-                        child_node.initValue = first_anno_meta.default
-                    else:
-                        val = getattr(current_obj, f.name)
-                        child_node.initValue = val
+                        if isinstance(child_node.initValue, mui.Undefined):
+                            child_node.initValue = first_anno_meta.default
                     child_node.min = first_anno_meta.lo
                     child_node.max = first_anno_meta.hi
+                    child_node.isInteger = isinstance(first_anno_meta, typemetas.RangedInt)
                     child_node.alias = mui.undefined if first_anno_meta.alias is None else first_anno_meta.alias
                     child_node.step = mui.undefined if first_anno_meta.step is None else first_anno_meta.step
                     if first_anno_meta.step is None and ty is int:
@@ -442,7 +443,8 @@ def parse_to_control_nodes(origin_obj,
                     if first_anno_meta.alias is not None:
                         child_node.alias = first_anno_meta.alias
                     if first_anno_meta.default is not None:
-                        child_node.initValue = first_anno_meta.default
+                        if isinstance(child_node.initValue, mui.Undefined):
+                            child_node.initValue = first_anno_meta.default
                     res_node.children.append(child_node)
                     obj_uid_to_meta[child_node.id] = res
                     continue
@@ -468,7 +470,8 @@ def control_nodes_v1_to_v2(ctrl_node_v1: mui.ControlNode) -> mui.JsonLikeNode:
                                 step=ctrl_node_v1.step,
                                 selects=ctrl_node_v1.selects,
                                 rows=ctrl_node_v1.rows,
-                                count=ctrl_node_v1.count)
+                                count=ctrl_node_v1.count,
+                                isInteger=ctrl_node_v1.isInteger)
     node = mui.JsonLikeNode(
         id=ctrl_node_v1.id,
         name=ctrl_node_v1.name if isinstance(
@@ -499,7 +502,6 @@ class ConfigPanel(mui.DynamicControls):
                                         backend_only=True)
 
     async def callback(self, value: Tuple[str, Any]):
-        print(value)
         uid = value[0]
         cmeta = self._obj_to_ctrl_meta[uid]
         compare_res = cmeta.compare(value[1])

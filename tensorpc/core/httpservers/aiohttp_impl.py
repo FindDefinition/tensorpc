@@ -281,7 +281,7 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
         if standalone:
             await server_core._init_async_members()
         ws_service = AiohttpWebsocketHandler(server_core)
-        print("???????", client_max_size)
+        # print("???????", client_max_size)
         app = web.Application(client_max_size=client_max_size)
         # TODO should we create a global client session for all http call in server?
         loop_task = asyncio.create_task(ws_service.event_provide_executor())

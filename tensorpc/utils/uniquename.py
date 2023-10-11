@@ -41,3 +41,6 @@ class UniqueNamePool:
 
     def pop(self, key: str):
         self.unique_set.remove(key)
+
+    def clear(self):
+        self.unique_set.clear()

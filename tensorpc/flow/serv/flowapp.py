@@ -55,7 +55,8 @@ class FlowApp:
                  headless: bool = False,
                  external_argv: Optional[List[str]] = None) -> None:
         # print(module_name, config)
-        print("external_argv", external_argv)
+        if external_argv is not None:
+            print("external_argv", external_argv)
         self.module_name = module_name
         self.config = config
         self.shutdown_ev = asyncio.Event()

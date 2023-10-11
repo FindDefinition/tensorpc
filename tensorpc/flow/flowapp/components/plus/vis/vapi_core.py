@@ -25,46 +25,34 @@ with V.ctx():
 """
 
 import asyncio
+import builtins
 import dataclasses
 from functools import partial
 import inspect
+import io
 import threading
 import traceback
-from typing import Any, Callable, Dict, Optional, List, Tuple, Type, TypeVar, Union, get_type_hints
-from typing_extensions import Annotated
+from typing import IO, Any, AnyStr, Callable, Dict, Optional, List, Tuple, Type, TypeVar, Union, get_type_hints
+from typing_extensions import Annotated, Literal
 import contextvars
 import contextlib
 from tensorpc.core.dataclass_dispatch import dataclass
+from tensorpc.flow.client import is_inside_app_session
 from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.appcore import get_app
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanelV2
 from tensorpc.flow.flowapp.core import AppEvent
+from tensorpc.utils.typeutils import take_annotation_from
 from ... import three, mui
 from ...typemetas import (ColorRGB, ColorRGBA, RangedFloat, RangedInt,
                           RangedVector3, Vector3,
                           annotated_function_to_dataclass)
 from .canvas import ComplexCanvas, find_component_trace_by_uid_with_not_exist_parts
-from .core import CanvasItemCfg, CanvasItemProxy, is_reserved_name
+from .core import CanvasItemCfg, CanvasItemProxy, is_reserved_name, VContext
 import numpy as np
-from tensorpc.utils.uniquename import UniqueNamePool
-from .core import get_canvas_item_cfg, get_or_create_canvas_item_cfg
+from .core import get_canvas_item_cfg, get_or_create_canvas_item_cfg, ContainerProxy, GroupProxy
 
 
-class ContainerProxy(CanvasItemProxy):
-    pass
-
-
-class GroupProxy(ContainerProxy):
-    def __init__(self, uid: str) -> None:
-        super().__init__()
-        self.uid = uid
-
-        self.childs: Dict[str, three.Component] = {}
-
-        self.namepool = UniqueNamePool()
-
-    def __repr__(self) -> str:
-        return f"<GroupProxy {self.uid}>"
 
 
 class PointsProxy(CanvasItemProxy):
@@ -292,37 +280,6 @@ class ImageProxy(CanvasItemProxy):
         self._scale = scale
         return self
 
-class VContext:
-    def __init__(self,
-                 canvas: ComplexCanvas,
-                 root: Optional[three.ContainerBase] = None):
-        self.stack = []
-        self.canvas = canvas
-        self.name_stack: List[str] = []
-        self.exist_name_stack: List[str] = []
-        if root is None:
-            root = canvas._item_root
-        self.root = root
-        self._name_to_group: Dict[str, three.ContainerBase] = {"": root}
-        self._group_assigns: Dict[three.ContainerBase, Tuple[three.Component,
-                                                             str]] = {}
-
-    @property
-    def current_namespace(self):
-        return ".".join(self.name_stack)
-
-    @property
-    def current_container(self):
-        if not self.name_stack:
-            return self.root
-        else:
-            return self._name_to_group[self.current_namespace]
-
-    def extract_group_assigns(self):
-        """group created by vapi will be recreated in each vctx.
-        """
-        pass
-
 
 V_CONTEXT_VAR: contextvars.ContextVar[
     Optional[VContext]] = contextvars.ContextVar("v_context", default=None)
@@ -347,9 +304,11 @@ def enter_v_conetxt(robj: VContext):
 
 async def _draw_all_in_vctx(vctx: VContext,
                             detail_update_prefix: Optional[str] = None,
-                            app_event: Optional[AppEvent] = None):
+                            app_event: Optional[AppEvent] = None,
+                            update_iff_change: bool = False):
     # print("?", vctx._group_assigns)
     # print(vctx._name_to_group)
+    vctx.canvas._tree_collect_in_vctx()
     for k, v in vctx._name_to_group.items():
         cfg = get_canvas_item_cfg(v)
         # print(k, cfg )
@@ -357,32 +316,26 @@ async def _draw_all_in_vctx(vctx: VContext,
             proxy = cfg.proxy
             if proxy is not None:
                 assert isinstance(proxy, GroupProxy)
-                # print("???")
+                for c in proxy.childs.values():
+                    c_cfg = get_canvas_item_cfg(c)
+                    assert c_cfg is not None
+                    c_proxy = c_cfg.proxy
+                    assert c_proxy is not None
+                    # TODO
+                    c_proxy.update_event(c)
                 if cfg.is_vapi and v is not vctx.root:
                     assert not v.is_mounted(), f"{type(v)}"
                     v.init_add_layout(proxy.childs)
-                    for c in proxy.childs.values():
-                        c_cfg = get_canvas_item_cfg(c)
-                        assert c_cfg is not None
-                        c_proxy = c_cfg.proxy
-                        assert c_proxy is not None
-                        # TODO
-                        c_proxy.update_event(c)
                 else:
-                    # print(proxy.childs)
-                    for c in proxy.childs.values():
-                        c_cfg = get_canvas_item_cfg(c)
-                        assert c_cfg is not None
-                        c_proxy = c_cfg.proxy
-                        assert c_proxy is not None
-                        # TODO
-                        c_proxy.update_event(c)
                     await v.update_childs(proxy.childs)
+                proxy.childs.clear()
     for container, (group, name) in vctx._group_assigns.items():
         assert isinstance(group, three.Group)
         # print(group._child_comps)
         await container.update_childs({name: group})
-    await vctx.canvas.item_tree.update_tree(wait=False)
+    await vctx.canvas._show_visible_groups_of_objtree()
+
+    await vctx.canvas.item_tree.update_tree(wait=False, update_iff_change=update_iff_change)
     if detail_update_prefix is not None:
         await vctx.canvas.update_detail_layout(detail_update_prefix)
     if app_event is not None:
@@ -459,13 +412,24 @@ def group(name: str,
     # find exist group in canvas
     v_ctx = get_v_context()
     is_first_ctx = False
+    is_objtree_ctx = False
     token = None
     if v_ctx is None:
-        assert not is_reserved_name(name), f"{name} should not be reserved name"
         is_first_ctx = True
+    # we need to increase frame cnt due to contextmanager
+    obj_self = _find_frame_self(_frame_cnt=2 + 1)
+    if obj_self is not None:
+        if obj_self in canvas._user_obj_tree_item_to_meta:
+            v_ctx = canvas._user_obj_tree_item_to_meta[obj_self].vctx
+            v_ctx.canvas = canvas
+            is_objtree_ctx = True
+    if v_ctx is None:
+        assert not is_reserved_name(name), f"{name} should not be reserved name"
         v_ctx = VContext(canvas)
+    #     token = V_CONTEXT_VAR.set(v_ctx)
+    # else:
+    if is_first_ctx:
         token = V_CONTEXT_VAR.set(v_ctx)
-
     # v_ctx = get_v_context()
     # assert v_ctx is not None
     # canvas = v_ctx.canvas
@@ -576,21 +540,21 @@ def group(name: str,
         for i in range(len(name_parts)):
             v_ctx.name_stack.pop()
         if is_first_ctx:
-            assert token is not None
-            V_CONTEXT_VAR.reset(token)
+            if token is not None:
+                V_CONTEXT_VAR.reset(token)
             if loop is None:
                 loop = asyncio.get_running_loop()
             if get_app()._flowapp_thread_id == threading.get_ident():
                 # we can't wait fut here
                 task = asyncio.create_task(_draw_all_in_vctx(v_ctx, ".*", ev))
                 # we can't wait fut here
-                return task
+                # return task
                 # return fut
             else:
                 # we can wait fut here.
                 fut = asyncio.run_coroutine_threadsafe(
                     _draw_all_in_vctx(v_ctx, ".*", ev), loop)
-                return fut.result()
+                fut.result()
 
 async def _uninstall_detail_when_unmount(ev: three.Event, obj: three.Component, canvas: ComplexCanvas):
     object_pyid = obj._flow_uid
@@ -623,10 +587,30 @@ def _install_obj_event_handlers(obj: three.Component, canvas: ComplexCanvas):
     obj.event_before_mount.on(partial(_install_detail_before_mount, obj=obj, canvas=canvas))
     obj.event_before_unmount.on(partial(_uninstall_detail_when_unmount, obj=obj, canvas=canvas))
 
-
-def _create_vapi_three_obj_pcfg(obj: three.Component, name: Optional[str], default_name_prefix: str):
+def _find_frame_self(*, _frame_cnt: int=1):
+    cur_frame = inspect.currentframe()
+    assert cur_frame is not None
+    frame = cur_frame
+    while _frame_cnt > 0:
+        frame = cur_frame.f_back
+        assert frame is not None
+        cur_frame = frame
+        _frame_cnt -= 1
+    local_vars = cur_frame.f_locals
+    if "self" in local_vars:
+        obj = local_vars["self"]
+        return obj
+    return None 
+ 
+def _create_vapi_three_obj_pcfg(obj: three.Component, name: Optional[str], default_name_prefix: str, *, _frame_cnt: int=1):
     v_ctx = get_v_context()
     assert v_ctx is not None
+    if v_ctx.canvas._user_obj_tree_item_to_meta:
+        # write to standalone vctx for tree item
+        obj_self = _find_frame_self(_frame_cnt=_frame_cnt + 1)
+        if obj_self is not None:
+            if obj_self in v_ctx.canvas._user_obj_tree_item_to_meta:
+                v_ctx = v_ctx.canvas._user_obj_tree_item_to_meta[obj_self].vctx
     cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
     proxy = cfg.proxy
     assert proxy is not None
@@ -640,13 +624,13 @@ def _create_vapi_three_obj_pcfg(obj: three.Component, name: Optional[str], defau
 
 def points(name: str, limit: int):
     point = three.Points(limit)
-    pcfg = _create_vapi_three_obj_pcfg(point, name, "points")
+    pcfg = _create_vapi_three_obj_pcfg(point, name, "points", _frame_cnt=2)
     pcfg.proxy = PointsProxy()
     return pcfg.proxy
 
 def lines(name: str, limit: int):
     point = three.Segments(limit)
-    pcfg = _create_vapi_three_obj_pcfg(point, name, "lines")
+    pcfg = _create_vapi_three_obj_pcfg(point, name, "lines", _frame_cnt=2)
     pcfg.proxy = LinesProxy()
     return pcfg.proxy
 
@@ -656,7 +640,7 @@ def bounding_box(dim: three.Vector3Type, rot: Optional[three.Vector3Type] = None
         obj.prop(rotation=rot)
     if pos is not None:
         obj.prop(position=pos)
-    pcfg = _create_vapi_three_obj_pcfg(obj, name, "box")
+    pcfg = _create_vapi_three_obj_pcfg(obj, name, "box", _frame_cnt=2)
     pcfg.proxy = BoundingBoxProxy(three.undefined if pos is None else pos, dim, three.undefined if rot is None else rot)
     return pcfg.proxy
 
@@ -666,7 +650,7 @@ def text(text: str, rot: Optional[three.Vector3Type] = None, pos: Optional[three
         obj.prop(rotation=rot)
     if pos is not None:
         obj.prop(position=pos)
-    pcfg = _create_vapi_three_obj_pcfg(obj, name, "text")
+    pcfg = _create_vapi_three_obj_pcfg(obj, name, "text", _frame_cnt=2)
     pcfg.proxy = TextProxy(text, three.undefined if pos is None else pos, three.undefined if rot is None else rot)
     return pcfg.proxy
 
@@ -677,7 +661,7 @@ def image(img: np.ndarray, rot: Optional[three.Vector3Type] = None, pos: Optiona
         obj.prop(rotation=rot)
     if pos is not None:
         obj.prop(position=pos)
-    pcfg = _create_vapi_three_obj_pcfg(obj, name, "img")
+    pcfg = _create_vapi_three_obj_pcfg(obj, name, "img", _frame_cnt=2)
     pcfg.proxy = ImageProxy(img, three.undefined if pos is None else pos, three.undefined if rot is None else rot)
     return pcfg.proxy
 
@@ -688,6 +672,12 @@ def program(name: str, func: Callable):
     func_dcls_obj = func_dcls()
     v_ctx = get_v_context()
     assert v_ctx is not None
+    if v_ctx.canvas._user_obj_tree_item_to_meta:
+        # write to standalone vctx for tree item
+        obj_self = _find_frame_self(_frame_cnt=2)
+        if obj_self is not None:
+            if obj_self in v_ctx.canvas._user_obj_tree_item_to_meta:
+                v_ctx = v_ctx.canvas._user_obj_tree_item_to_meta[obj_self].vctx
     cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
     proxy = cfg.proxy
     assert proxy is not None
@@ -709,8 +699,28 @@ def program(name: str, func: Callable):
                 res = func(**kwargs)
                 if inspect.iscoroutine(res):
                     await res
-            await _draw_all_in_vctx(vctx_program, rf"{group._flow_uid}\..*")
+            # we need to update tree iff tree change because update tree is very slow.
+            await _draw_all_in_vctx(vctx_program, rf"{group._flow_uid}\..*", update_iff_change=True)
 
     pcfg.detail_layout = ConfigPanelV2(func_dcls_obj, callback)
     pcfg.proxy = GroupProxy("")
     return
+
+def mdprint( *values: object,
+    sep: Optional[str] = " ",
+    end: Optional[str] = "\n",
+    file: Optional[IO[str]] = None,
+    flush: bool = False):
+    if is_inside_app_session():
+        v_ctx = get_v_context()
+        if v_ctx is not None and v_ctx.canvas._user_obj_tree_item_to_meta:
+            # write to standalone vctx for tree item
+            obj_self = _find_frame_self(_frame_cnt=2)
+            if obj_self is not None:
+                if obj_self in v_ctx.canvas._user_obj_tree_item_to_meta:
+                    meta = v_ctx.canvas._user_obj_tree_item_to_meta[obj_self]
+                    ss = io.StringIO()
+                    builtins.print(*values, sep=sep, end=end, file=ss, flush=flush)
+                    meta.md_prints.append(ss.getvalue())
+
+    return builtins.print(*values, sep=sep, end=end, file=file, flush=flush)
