@@ -26,6 +26,7 @@ from pydantic import field_validator
 from tensorpc import compat
 from tensorpc.core.httpservers.core import JS_MAX_SAFE_INT
 from tensorpc.flow.flowapp.appcore import Event, EventDataType
+from tensorpc.flow.flowapp.components.threecore import TextureFormat, TextureMappingType, TextureType, TextureWrappingMode
 from tensorpc.flow.jsonlike import DataClassWithUndefined
 from typing_extensions import Literal
 
@@ -2324,8 +2325,8 @@ class MeshDiscardMaterialProps(ThreeBasicProps):
 
 
 class ShaderUniformType(enum.IntEnum):
-    Int32Array = 0
-    Float32Array = 1
+    # Int32Array = 0
+    # Float32Array = 1
     Matrix4 = 2
     Matrix3 = 3
     Quaternion = 4
@@ -2337,13 +2338,37 @@ class ShaderUniformType(enum.IntEnum):
     Boolean = 10
     Array = 11
     DataTexture = 12
-
+    DataArrayTexture = 13
+    Data3DTexture = 14
 
 @dataclasses.dataclass
 class ShaderUniform:
     name: str
     type: ShaderUniformType
     value: Any
+
+@dataclasses.dataclass
+class DataTexture:
+    data: np.ndarray 
+    texType: Union[TextureType, Undefined] = undefined 
+    format: Union[TextureFormat, Undefined] = undefined
+    mapping: Union[TextureMappingType, Undefined] = undefined
+    wrapS: Union[TextureWrappingMode, Undefined] = undefined
+    wrapT: Union[TextureWrappingMode, Undefined] = undefined
+
+    @field_validator('data')
+    def uniform_data_validator(cls, v: np.ndarray):
+        assert isinstance(v, np.ndarray) and v.dtype == np.uint8 and v.ndim == 3 and v.shape[2] == 4, f"uniform data must be [H, W, 4] RGBA uint8 array"
+        return v
+
+# type TextureValue = {
+#     data: np.NdArray
+#     texType?: TextureType
+#     format?: TextureFormat
+#     mapping?: TextureMappingType
+#     wrapS?: TextureWrappingMode
+#     wrapT?: TextureWrappingMode
+# }
 
 @dataclasses.dataclass
 class MeshShaderMaterialProps(ThreeMaterialPropsBase):
@@ -2356,11 +2381,7 @@ class MeshShaderMaterialProps(ThreeMaterialPropsBase):
     def _validator_single_uniform(u: ShaderUniform, value: Any):
         uv = value
         assert u.name.isidentifier(), f"uniform name {u.name} must be identifier"
-        if u.type == ShaderUniformType.Int32Array:
-            assert isinstance(uv, np.ndarray) and uv.dtype == np.int32 
-        elif u.type == ShaderUniformType.Float32Array:
-            assert isinstance(uv, np.ndarray) and uv.dtype == np.float32 
-        elif u.type == ShaderUniformType.Matrix4:
+        if u.type == ShaderUniformType.Matrix4:
             assert isinstance(uv, np.ndarray) and uv.dtype == np.float32 and uv.shape == (4, 4)
         elif u.type == ShaderUniformType.Matrix3:
             assert isinstance(uv, np.ndarray) and uv.dtype == np.float32 and uv.shape == (3, 3)
@@ -2381,7 +2402,7 @@ class MeshShaderMaterialProps(ThreeMaterialPropsBase):
         elif u.type == ShaderUniformType.Array:
             assert isinstance(uv, (list))
         elif u.type == ShaderUniformType.DataTexture:
-            assert isinstance(uv, np.ndarray) and uv.ndim >= 2 and uv.ndim <= 3
+            assert isinstance(uv, DataTexture)
 
     @field_validator('uniforms')
     def uniform_validator(cls, v: List[ShaderUniform]):
