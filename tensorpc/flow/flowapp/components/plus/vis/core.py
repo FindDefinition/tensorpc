@@ -6,6 +6,7 @@ from pydantic_core import PydanticCustomError, core_schema
 from pydantic import (
     GetCoreSchemaHandler,
 )
+from tensorpc.flow.jsonlike import JsonLikeNode
 from ... import mui, three
 if TYPE_CHECKING:
     from .canvas import ComplexCanvas
@@ -62,6 +63,7 @@ class CanvasItemCfg:
     detail_layout: Optional[mui.Component] = None
     type_str_override: Optional[str] = None
     alias: Optional[str] = None
+    node: Optional[JsonLikeNode] = None
 
 def get_canvas_item_cfg(comp: three.Component) -> Optional[CanvasItemCfg]:
     if comp._flow_user_data is not None and isinstance(comp._flow_user_data, CanvasItemCfg):

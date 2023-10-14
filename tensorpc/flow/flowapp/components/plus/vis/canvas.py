@@ -375,6 +375,7 @@ class ComplexCanvas(mui.FlexBox):
 
     async def _gv_cards_callback(self, checked: bool, group: three.Group):
         if group.is_mounted():
+            # TODO sync tree visible state
             await group.send_and_wait(
                 group.update_event(visible=checked))
 
@@ -841,12 +842,17 @@ class ComplexCanvas(mui.FlexBox):
                 await container.update_childs({**layout})
                 await self.item_tree.update_tree()
 
-    @staticmethod
-    async def _on_cfg_panel_change(uid: str, value: Any, obj: Component):
+    async def _on_cfg_panel_change(self, uid: str, value: Any, obj: Component):
         # TODO support nested change
         uid_parts = uid.split(".")
         if len(uid_parts) > 1:
             return
+        if "visible" == uid:
+            cfg = get_canvas_item_cfg(obj)
+            if cfg is not None and cfg.node is not None:
+                cfg.visible = not cfg.visible
+                cfg.node.fixedIconBtns = self.custom_tree_handler._get_icon_button(obj)
+                await self.item_tree.tree.update_subtree(cfg.node)
         await obj.send_and_wait(
             obj.create_update_event({
                 uid: value,

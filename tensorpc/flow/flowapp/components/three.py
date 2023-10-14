@@ -2347,7 +2347,7 @@ class ShaderUniform:
     type: ShaderUniformType
     value: Any
 
-@dataclasses.dataclass
+@dataclasses.dataclass(config=PyDanticConfigForNumpy)
 class DataTexture:
     data: np.ndarray 
     texType: Union[TextureType, Undefined] = undefined 
