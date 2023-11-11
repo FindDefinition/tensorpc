@@ -16,7 +16,7 @@ from .canvas import SimpleCanvas
 from .vis.canvas import ComplexCanvas
 
 from .config import ConfigPanel, ConfigPanelV2
-from .core import ListSlider
+from .core import ListSlider, BlenderListSlider
 from .figure import HomogeneousMetricFigure
 from .monitor import ComputeResourceMonitor
 from .objinspect import (AnyFlexLayout, BasicObjectTree, CallbackSlider,

@@ -141,11 +141,13 @@ class FlowApp:
             AppEvent("", init_event))
         if self.external_argv is not None:
             with enter_app_conetxt(self.app):
+                print("??????????????????????????", self.external_argv)
                 self._external_argv_task = asyncio.create_task(appctx.run_in_executor_with_exception_inspect(partial(self._run_app_script, argv=self.external_argv),))
 
     def _run_app_script(self, argv: List[str]):
         argv_bkp = sys.argv
         sys.argv = argv
+        print("???", argv)
         try:
             run_path(argv[0], run_name="__main__")
         finally:

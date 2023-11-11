@@ -16,7 +16,7 @@ import asyncio
 import contextlib
 import contextvars
 import inspect
-from typing import (Any, Callable, Coroutine, Dict, Generator, Iterator, List, Optional, Protocol, Set,
+from typing import (Any, Callable, Coroutine, Dict, Generator, Iterator, List, Optional, Protocol, Set, Tuple,
                     Type, TypeVar, Union)
 import uuid 
 from typing_extensions import ContextManager
@@ -239,3 +239,21 @@ def find_may_exist(obj_type: Type[T], validator: Optional[Callable[[T], bool]] =
         if res is not None:
             break
     return res 
+
+def _apply_tree_child_items_recursive(root: UserObjTree, name_parts: Tuple[str, ...], apply_fn: Callable[[Tuple[str, ...], Any], None]) -> None:
+    childs_dict = root.get_childs()
+    for k, v in childs_dict.items():
+        if isinstance(v, UserObjTree):
+            apply_fn((*name_parts, k), v)
+            _apply_tree_child_items_recursive(v, (*name_parts, k), apply_fn)
+        else:
+            apply_fn((*name_parts, k), v)
+
+def apply_tree_child_items(root: UserObjTree, apply_fn: Callable[[Tuple[str, ...], Any], None]) -> None:
+    childs_dict = root.get_childs()
+    for k, v in childs_dict.items():
+        if isinstance(v, UserObjTree):
+            apply_fn((k,), v)
+            _apply_tree_child_items_recursive(v, (k,), apply_fn)
+        else:
+            apply_fn((k,), v)

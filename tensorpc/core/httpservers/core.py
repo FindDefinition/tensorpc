@@ -145,7 +145,7 @@ class WebsocketClientBase(abc.ABC):
         except Exception as e:
             traceback.print_exc()
             raise JsonEncodeException(str(e))
-
+        assert self._large_data_ws is not self
         use_large_data_ws = False
         try:
             cnt = 0
@@ -168,12 +168,22 @@ class WebsocketClientBase(abc.ABC):
             if use_large_data_ws:
                 print("LARGE CLIENT SEND TIMEOUT ERROR. data will be dropped, client should reset large-data-ws")
                 assert self._large_data_ws is not None 
-                await self._large_data_ws.close()
-                return await self.send_bytes(
+                print("LARGE CLIENT USE BACKUP TO SEND.")
+                await self.send_bytes(
                     core_io.json_only_encode({}, core_io.SocketMsgType.ResetLargeDataClient, req))
+                print("LARGE CLIENT Closing....")
+                async with async_timeout.timeout(5):
+                    await self._large_data_ws.close()
+                print("LARGE CLIENT Closed.")
+
             else:
                 print("CLIENT SEND TIMEOUT ERROR", )
-                raise 
+                assert self._large_data_ws is not None 
+                await self._large_data_ws.send_bytes(
+                    core_io.json_only_encode({}, core_io.SocketMsgType.ResetLargeDataClient, req))
+                print("CLIENT SEND TIMEOUT ERROR 2", )
+                return
+                # raise 
         finally:
             return 
 

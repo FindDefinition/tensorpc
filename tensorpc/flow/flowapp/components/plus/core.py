@@ -53,3 +53,38 @@ class ListSlider(mui.Slider, Generic[T]):
                 if inspect.iscoroutine(coro):
                     await coro
 
+class BlenderListSlider(mui.BlenderSlider, Generic[T]):
+    """a slider that used for list.
+    """
+
+    def __init__(self,
+                 callback: Callable[[T], mui._CORO_NONE],
+                 init: Optional[List[T]] = None,
+                 label: Union[str, mui.Undefined] = mui.undefined) -> None:
+        if init is None:
+            init = []
+        super().__init__(0, max(1, len(init) - 1), 1, self._callback, label)
+        # save callback to standard flow event handlers to enable reload for user callback
+        self.__callback_key = "list_slider_ev_handler"
+        self.register_event_handler(self.__callback_key,
+                                    callback,
+                                    backend_only=True)
+        self.obj_list: List[T] = init
+        self.prop(fractionDigits=0)
+
+    async def update_list(self, objs: List[T]):
+        self.obj_list = objs
+        await self.update_ranges(0, len(objs) - 1, 1)
+
+    async def _callback(self, value: mui.NumberType):
+        handlers = self.get_event_handlers(self.__callback_key)
+        if handlers is not None:
+            index = int(value)
+            if index >= len(self.obj_list):
+                return
+            obj = self.obj_list[index]
+            for handler in handlers.handlers:
+                coro = handler.cb(obj)
+                if inspect.iscoroutine(coro):
+                    await coro
+

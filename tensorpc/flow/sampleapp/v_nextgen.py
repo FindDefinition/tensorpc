@@ -85,41 +85,41 @@ class DevApp:
                 # three.GammaCorrection(),
                 three.ToneMapping().prop(mode=three.ToneMapppingMode.ACES_FILMIC),
             ]).prop(autoClear=False),
-            three.Mesh([
-                three.PlaneGeometry(1000, 1000),
-                three.MeshStandardMaterial().prop(color="#f0f0f0"),
-            ]).prop(receiveShadow=True, position=(0.0, 0.0, -0.1)),
+            # three.Mesh([
+            #     three.PlaneGeometry(1000, 1000),
+            #     three.MeshStandardMaterial().prop(color="#f0f0f0"),
+            # ]).prop(receiveShadow=True, position=(0.0, 0.0, -0.1)),
 
-            three.AmbientLight(intensity=0.314, color=0xffffff),
-            three.PointLight().prop(position=(2, 2, 2),
-                                    castShadow=True,
-                                    color=0xffffff,
-                                    intensity=31.14,
-                                    helperSize=0.3),
-            three.Mesh([
-                three.BoxGeometry(),
-                three.MeshStandardMaterial().prop(color="orange", transparent=True),
-            ]).prop(enableSelect=True, castShadow=True, position=(-2, 1, 1), enableHover=True, 
-                enablePivotControl=True,
-                enablePivotOnSelected=True,
-                pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
-                ),
-            three.Mesh([
-                three.BoxGeometry(),
-                three.MeshStandardMaterial().prop(color="orange", transparent=True),
-            ]).prop(enableSelect=True, castShadow=True, position=(-2, 3, 1), enableHover=True, 
-                enablePivotControl=True,
-                enablePivotOnSelected=True,
-                pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
-                ),
-            three.Mesh([
-                three.BoxGeometry(),
-                three.MeshStandardMaterial().prop(color="orange", transparent=True),
-            ]).prop(enableSelect=True, castShadow=True, position=(-2, 5, 1), enableHover=True, 
-                enablePivotControl=True,
-                enablePivotOnSelected=True,
-                pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
-                ),
+            # three.AmbientLight(intensity=0.314, color=0xffffff),
+            # three.PointLight().prop(position=(2, 2, 2),
+            #                         castShadow=True,
+            #                         color=0xffffff,
+            #                         intensity=31.14,
+            #                         helperSize=0.3),
+            # three.Mesh([
+            #     three.BoxGeometry(),
+            #     three.MeshStandardMaterial().prop(color="orange", transparent=True),
+            # ]).prop(enableSelect=True, castShadow=True, position=(-2, 1, 1), enableHover=True, 
+            #     enablePivotControl=True,
+            #     enablePivotOnSelected=True,
+            #     pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
+            #     ),
+            # three.Mesh([
+            #     three.BoxGeometry(),
+            #     three.MeshStandardMaterial().prop(color="orange", transparent=True),
+            # ]).prop(enableSelect=True, castShadow=True, position=(-2, 3, 1), enableHover=True, 
+            #     enablePivotControl=True,
+            #     enablePivotOnSelected=True,
+            #     pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
+            #     ),
+            # three.Mesh([
+            #     three.BoxGeometry(),
+            #     three.MeshStandardMaterial().prop(color="orange", transparent=True),
+            # ]).prop(enableSelect=True, castShadow=True, position=(-2, 5, 1), enableHover=True, 
+            #     enablePivotControl=True,
+            #     enablePivotOnSelected=True,
+            #     pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
+            #     ),
 
         ], init_tree_root=root, init_tree_child_accessor=lambda x: x.get_childs())
 

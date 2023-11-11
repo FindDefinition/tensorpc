@@ -2457,7 +2457,11 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
                  raw_update: bool = False) -> None:
         super().__init__(UIType.TaskLoop, TaskLoopProps)
         self.props.label = label
-        self.loop_callbcak = loop_callbcak
+        # self.loop_callbcak = loop_callbcak
+        self.__callback_key = "list_slider_ev_handler"
+        self.register_event_handler(self.__callback_key,
+                                    loop_callbcak,
+                                    backend_only=True)
 
         self.props.progresses = [0.0]
         self.stack_count = 0
@@ -2555,9 +2559,12 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
         data = ev.data
         if data == TaskLoopEvent.Start.value:
             if self.props.status == UIRunStatus.Stop.value:
-                if self.loop_callbcak is not None:
-                    self._task = asyncio.create_task(
-                        self.run_callback(self.loop_callbcak))
+                handlers = self.get_event_handlers(self.__callback_key)
+                if handlers is not None:
+                    for handler in handlers.handlers:
+                        coro = handler.cb()
+                        if inspect.iscoroutine(coro):
+                            await coro
             else:
                 print("IGNORE TaskLoop EVENT", self.props.status)
         elif data == TaskLoopEvent.Pause.value:

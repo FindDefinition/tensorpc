@@ -123,7 +123,7 @@ async def run_in_executor_with_exception_inspect(func: Callable[P, T],
     comp = find_component(plus.ObjectInspector)
     if comp is None:
         return await asyncio.get_running_loop().run_in_executor(
-            func, *args, **kwargs)  # type: ignore
+            None, _run_func_with_app, get_app(), func, *args, **kwargs)  # type: ignore
     assert comp is not None, "you must add inspector to your UI to use exception inspect"
     return await comp.run_in_executor_with_exception_inspect(
         _run_func_with_app, get_app(), func, *args, **kwargs)

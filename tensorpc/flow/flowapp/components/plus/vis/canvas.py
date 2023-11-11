@@ -225,6 +225,7 @@ class ComplexCanvas(mui.FlexBox):
             far=1000,
             position=(1, 1, 10),
         )
+        self.camera.prop(layers=1 | (1 << 31))
 
         self.ctrl = three.CameraControl().prop(makeDefault=True)
         self.background_img = mui.Image()
@@ -289,6 +290,8 @@ class ComplexCanvas(mui.FlexBox):
             layout["init"] = three.Group(init_canvas_childs)
         self._item_root = three.SelectionContext(layout,
                                                  self._on_3d_object_select)
+        # self._item_root = three.Group(layout)
+
         self.prop_container = mui.HBox([]).prop(overflow="auto",
                                                 padding="3px",
                                                 flex=1,

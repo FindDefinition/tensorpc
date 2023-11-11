@@ -11,7 +11,7 @@ from aiohttp import web
 from tensorpc.core import core_io, defs
 import ssl
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.core.constants import TENSORPC_API_FILE_DOWNLOAD, TENSORPC_API_FILE_UPLOAD
+from tensorpc.core.constants import TENSORPC_API_FILE_DOWNLOAD, TENSORPC_API_FILE_UPLOAD, TENSORPC_FETCH_STATUS
 from tensorpc.core.server_core import ProtobufServiceCore, ServiceCore, ServerMeta
 from pathlib import Path
 from tensorpc.protos_export import remote_object_pb2
@@ -150,6 +150,20 @@ class HttpService:
         res = web.Response(body=byte, headers=headers)
         return res
     
+    async def fetch_status(self, request: web.Request):
+        status = {
+            "status": "ok",
+        }
+        # TODO better headers
+        headers = {
+            'Access-Control-Allow-Origin': '*',
+            # 'Access-Control-Allow-Headers': '*',
+            # 'Access-Control-Allow-Method': 'POST',
+        }
+        res = web.json_response(status, headers=headers)
+        return res
+    
+
     async def resource_download_call(self, request: web.Request):
         params = request.rel_url.query
         node_uid = params.get('nodeUid')
@@ -290,6 +304,7 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
                             http_service.remote_pickle_call_http)
         app.router.add_post(TENSORPC_API_FILE_UPLOAD, http_service.file_upload_call)
         app.router.add_get(TENSORPC_API_FILE_DOWNLOAD, http_service.resource_download_call)
+        app.router.add_get(TENSORPC_FETCH_STATUS, http_service.fetch_status)
 
         app.router.add_get(ws_name, ws_service.handle_new_connection_aiohttp)
         app.router.add_get(ws_backup_name, ws_service.handle_new_backup_connection_aiohttp)

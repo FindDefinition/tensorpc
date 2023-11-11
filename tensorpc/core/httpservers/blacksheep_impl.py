@@ -11,6 +11,7 @@ from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optiona
 from tensorpc.core import core_io, defs
 import ssl
 from tensorpc.core.asynctools import cancel_task
+from tensorpc.core.constants import TENSORPC_API_FILE_UPLOAD, TENSORPC_FETCH_STATUS
 from tensorpc.core.server_core import ProtobufServiceCore, ServiceCore, ServerMeta
 from pathlib import Path
 from tensorpc.protos_export import remote_object_pb2
@@ -98,6 +99,18 @@ class HttpService:
 
     def __init__(self, service_core: ProtobufServiceCore):
         self.service_core = service_core
+
+    async def fetch_status(self, request: web.Request):
+        status = {
+            "status": "ok",
+        }
+        res = web.Response(
+            status=200,
+            content=web.JSONContent(status),
+        )
+        res.add_header(b'Access-Control-Allow-Origin', b'*')
+        return res
+    
 
     async def remote_json_call_http(self,
                                     request: web.Request) -> web.Response:
@@ -210,9 +223,13 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
         async def _handle_rpc_pkl(request):
             return await http_service.remote_pickle_call_http(request)
 
-        @app.router.post("/api/rpc_file")
+        @app.router.post(TENSORPC_API_FILE_UPLOAD)
         async def _handle_rpc_file(request):
             return await http_service.file_upload_call(request)
+        
+        @app.router.get(TENSORPC_FETCH_STATUS)
+        async def _fetch_status(request):
+            return await http_service.fetch_status(request)
 
         @app.router.ws(ws_name)
         async def _handle_new_connection(request, client_id):

@@ -63,6 +63,7 @@ class PointsProxy(CanvasItemProxy):
 
         self._size: three.NumberType = 3
         self._limit: Optional[int] = None
+        self._layer: Union[three.Undefined, int] = 31 # disable raycast by default
 
         self._color: Union[three.Undefined, str] = three.undefined
 
@@ -74,6 +75,10 @@ class PointsProxy(CanvasItemProxy):
         if data.dtype != np.float32:
             data = data.astype(np.float32)
         self._points_arr.append(data)
+        return self
+
+    def raycast_layer(self, layer: int):
+        self._layer = layer
         return self
 
     def size(self, size: three.NumberType):
@@ -98,10 +103,12 @@ class PointsProxy(CanvasItemProxy):
             return comp.update_event(limit=self._limit,
                                      colors=self._color,
                                      size=self._size,
+                                     layers=self._layer,
                                      points=points_nparray)
         else:
             return comp.update_event(size=self._size,
                                      colors=self._color,
+                                     layers=self._layer,
                                      points=points_nparray)
 
 
@@ -542,9 +549,13 @@ def group(name: str,
         if is_first_ctx:
             if token is not None:
                 V_CONTEXT_VAR.reset(token)
+            app = get_app()
+
+            if loop is None:
+                loop = app._loop
             if loop is None:
                 loop = asyncio.get_running_loop()
-            if get_app()._flowapp_thread_id == threading.get_ident():
+            if app._flowapp_thread_id == threading.get_ident():
                 # we can't wait fut here
                 task = asyncio.create_task(_draw_all_in_vctx(v_ctx, ".*", ev))
                 # we can't wait fut here
