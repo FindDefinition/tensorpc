@@ -28,7 +28,8 @@ FlexLayoutInitType: TypeAlias = Union[List[Union[mui.FlexLayout.Row,
                                                      mui.FlexLayout.TabSet]],
                                           mui.FlexLayout.Row,
                                           mui.FlexLayout.TabSet,
-                                          mui.FlexLayout.Tab]
+                                          mui.FlexLayout.Tab, mui.FlexLayout.HBox,
+                                          mui.FlexLayout.VBox, mui.MUIComponentType]
 class AnyFlexLayout(mui.FlexLayout):
 
     def __init__(self,
@@ -105,7 +106,7 @@ class AnyFlexLayout(mui.FlexLayout):
                             assert type(obj) == handler_cls and isinstance(
                                 wrapped_obj, mui.FlexBox)
                         else:
-                            raise ValueError("this shouldn't happen")
+                            raise ValueError("this shouldn't happen", obj, type(obj))
                 else:
                     wrapped_obj = obj
             wrapped_obj.set_flow_event_context_creator(target.context_creator)

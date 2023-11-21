@@ -54,13 +54,15 @@ from watchdog.observers.api import ObservedWatch
 
 from tensorpc import simple_chunk_call_async
 from tensorpc.autossh.coretypes import SSHTarget
-from tensorpc.constants import PACKAGE_ROOT, TENSORPC_FLOW_FUNC_META_KEY
+from tensorpc.constants import PACKAGE_ROOT, TENSORPC_FILE_NAME_PREFIX, TENSORPC_FLOW_FUNC_META_KEY, TENSORPC_OBSERVED_FUNCTION_ATTR
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.defs import FileResource
+from tensorpc.core.funcid import remove_common_indent_from_code
 from tensorpc.core.inspecttools import get_all_members_by_type
 from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
                                     is_tensorpc_dynamic_path,
                                     is_valid_function, loose_isinstance)
+from tensorpc.core.rprint_dispatch import rprint
 from tensorpc.core.serviceunit import (ObjectReloadManager,
                                        ObservedFunctionRegistryProtocol,
                                        ReloadableDynamicClass,
@@ -329,6 +331,7 @@ class App:
     def set_observed_func_registry(self,
                                    registry: ObservedFunctionRegistryProtocol):
         self._flowapp_observed_func_registry = registry
+        self._flow_reload_manager.update_observed_registry(registry)
 
     def register_app_special_event_handler(self, type: AppSpecialEventType,
                                            handler: Callable[[Any],
@@ -1263,7 +1266,7 @@ class EditableApp(App):
         # print(changes)
         if changes is None:
             return
-        print(f"[WatchDog]{path}")
+        rprint(f"<watchdog> {path}")
         new, change, _ = changes
         # for x in changes:
         #     print(x.keys())
@@ -1314,8 +1317,8 @@ class EditableApp(App):
                                         is_callback_change = True
                                         break
                             # print("is_callback_change", is_callback_change)
-                        for m in changed_metas:
-                            print(m.qualname, "CHANGED")
+                        # for m in changed_metas:
+                        #     print(m.qualname, "CHANGED")
                         # do reload, run special methods
                         flow_special_for_check = FlowSpecialMethods(changed_metas)
                         do_reload = flow_special_for_check.contains_special_method(
@@ -1364,7 +1367,7 @@ class EditableApp(App):
                                 # if is leaf type, reload all meta, otherwise only reload meta saved initally.
                                 if is_reload and obmeta.is_leaf:
                                     obmeta.metas = updated_metas
-                                print("CHANGED USER OBJ", len(obmetas))
+                                # print("CHANGED USER OBJ", len(obmetas))
                                 changed_metas = [
                                     m for m in updated_metas
                                     if m.qualname in change
@@ -1446,15 +1449,33 @@ class EditableApp(App):
                 observed_func_changed = ob_registry.observed_func_changed(
                     resolved_path, change)
                 if observed_func_changed:
+                    # this handler only handle one file, so we only need to reload once.
                     first_func_qname_pair = ob_registry.get_path_to_qname(
                     )[resolved_path][0]
                     entry = ob_registry[first_func_qname_pair[0]]
+                    entry_func_unwrap = inspect.unwrap(entry.current_func)
                     reload_res = self._flow_reload_manager.reload_type(
-                        inspect.unwrap(entry.current_func))
+                        entry_func_unwrap)
                     if not is_reload:
                         is_reload = reload_res.is_reload
                     # for qname in observed_func_changed:
                     with _enter_app_conetxt(self):
+                        for qname in observed_func_changed:
+                            entry = ob_registry[qname]
+                            if len(entry.autorun_block_symbol) == 0:
+                                if entry.autorun_when_changed:
+                                    await self._run_autorun(entry.current_func)
+                            else:
+                                if entry.first_changed_block_idx < len(entry.body_code_blocks):
+                                    first_changed_block_idx = entry.first_changed_block_idx
+                                    if not entry.autorun_locals:
+                                        first_changed_block_idx = 0
+                                    code_to_run = "\n".join(entry.body_code_blocks[first_changed_block_idx:])
+                                    code_to_run = remove_common_indent_from_code(code_to_run)
+                                    code_locals = entry.autorun_locals
+                                    func_globals = entry.current_func.__globals__
+                                    code_comp = compile(code_to_run, f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-{entry.qualname}>", "exec")
+                                    exec(code_comp, func_globals, code_locals)
                         self._flowapp_special_eemitter.emit(
                             AppSpecialEventType.ObservedFunctionChange,
                             observed_func_changed)
@@ -1500,7 +1521,7 @@ class EditableApp(App):
 
         if isinstance(ev, watchdog.events.FileModifiedEvent):
             dcls = self._get_app_dynamic_cls()
-            print("WATCHDOG", ev)
+            rprint("<watchdog>", ev)
             with self._watch_lock:
                 if self._flowapp_code_mgr is None or self._loop is None:
                     return

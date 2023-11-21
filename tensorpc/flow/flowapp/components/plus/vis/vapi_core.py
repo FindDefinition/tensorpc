@@ -172,6 +172,7 @@ class LinesProxy(CanvasItemProxy):
         self._limit: Optional[int] = None
         self._lines_arr: List[np.ndarray] = []
         self._color: Union[three.Undefined, str] = three.undefined
+        self._layer: Union[three.Undefined, int] = 31 # disable raycast by default
 
     def limit(self, limit: int):
         self._limit = limit
@@ -195,18 +196,23 @@ class LinesProxy(CanvasItemProxy):
     def width(self, width: three.NumberType):
         self._width = width
         return self
+    
+    def raycast_layer(self, layer: int):
+        self._layer = layer
+        return self
 
     def update_event(self, comp: three.Segments):
-        lines_array = np.array(self._point_pairs, dtype=np.float32)
+        lines_array = np.array(self._point_pairs, dtype=np.float32).reshape(-1, 2, 3)
         if self._lines_arr:
             lines_array = np.concatenate(self._lines_arr + [lines_array])
         if self._limit is not None:
             return comp.update_event(limit=self._limit,
                                      lineWidth=self._width,
                                      lines=lines_array,
+                                     layers=self._layer,
                                      color=self._color)
         else:
-            return comp.update_event(color=self._color, lineWidth=self._width, lines=lines_array)
+            return comp.update_event(color=self._color, layers=self._layer, lineWidth=self._width, lines=lines_array)
 
     def polygon(self, x: float, y: float, z: float, closed: bool = False):
         return _Polygon((x, y, z), closed, self)
@@ -327,9 +333,8 @@ async def _draw_all_in_vctx(vctx: VContext,
                     c_cfg = get_canvas_item_cfg(c)
                     assert c_cfg is not None
                     c_proxy = c_cfg.proxy
-                    assert c_proxy is not None
-                    # TODO
-                    c_proxy.update_event(c)
+                    if c_proxy is not None:
+                        c_proxy.update_event(c)
                 if cfg.is_vapi and v is not vctx.root:
                     assert not v.is_mounted(), f"{type(v)}"
                     v.init_add_layout(proxy.childs)
@@ -675,6 +680,10 @@ def image(img: np.ndarray, rot: Optional[three.Vector3Type] = None, pos: Optiona
     pcfg = _create_vapi_three_obj_pcfg(obj, name, "img", _frame_cnt=2)
     pcfg.proxy = ImageProxy(img, three.undefined if pos is None else pos, three.undefined if rot is None else rot)
     return pcfg.proxy
+
+def three_ui(comp: three.ThreeComponentType, name: Optional[str] = None):
+    _create_vapi_three_obj_pcfg(comp, name, "obj3d", _frame_cnt=2)
+    return 
 
 def program(name: str, func: Callable):
     # raise NotImplementedError

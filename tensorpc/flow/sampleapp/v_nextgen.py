@@ -149,12 +149,13 @@ class DevApp:
         # ])
         with V.group("dev"):
             V.points("points0", 1000).p(1, 1, 1).p(0, 0, 0).color("red").size(5)
-            V.lines("lines0", 1000).p(2, 2, 2, 3, 4, 3)
+            V.lines("lines0", 1000).p(2, 2, 2, 5, 5, 5).color("blue")
             def wtfrtx(a: V.Annotated[float, V.RangedFloat(0, 10, 0.1)] = 5):
                 V.points('points0', 1000).p(a, a, a).color("blue").size(5)
             V.program("wtfrtx", wtfrtx)
             random_img = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
             V.image(random_img, pos=(5, 5, 2))
+            V.three_ui(three.BoundingBox((1, 1, 1)).prop(position=(9, 9, 3),))
             with V.group("box0", (1, 3, 1)):
                 V.bounding_box((1, 1, 1))
                 V.text("WTF")

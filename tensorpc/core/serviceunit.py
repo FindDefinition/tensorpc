@@ -24,10 +24,13 @@ from tensorpc.constants import (TENSORPC_FLOW_FUNC_META_KEY,
                                 TENSORPC_FUNC_META_KEY, TENSORPC_SPLIT)
 from tensorpc.core import inspecttools
 from typing import Protocol
-from tensorpc.core.funcid import (get_toplevel_class_node,
+from tensorpc.core.funcid import (determine_code_common_indent, get_body_blocks_from_code, get_toplevel_class_node,
                                   get_toplevel_func_node)
 from tensorpc.core.moduleid import TypeMeta, get_obj_type_meta, get_qualname_of_type, InMemoryFS, is_tensorpc_dynamic_path
 from functools import wraps
+
+from tensorpc.constants import TENSORPC_OBSERVED_FUNCTION_ATTR
+from tensorpc.core.rprint_dispatch import rprint
 
 
 class ParamType(Enum):
@@ -86,13 +89,15 @@ class AppFuncType(Enum):
     RunInExecutor = "RunInExecutor"
     ComponentDidMount = "ComponentDidMount"
     ComponentWillUnmount = "ComponentWillUnmount"
+    Effect = "Effect"
 
 
 class AppFunctionMeta:
 
-    def __init__(self, type: AppFuncType, name: str = "") -> None:
+    def __init__(self, type: AppFuncType, name: str = "", data: Optional[Any] = None) -> None:
         self.type = type
         self.name = name
+        self.data = data
 
     def to_dict(self):
         return {"type": self.type.value, "name": self.name}
@@ -196,7 +201,12 @@ class ObservedFunctionProtocol(Protocol):
     path: str
     enable_args_record: bool = False
     recorded_data: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None
-
+    autorun_when_changed: bool = False
+    autorun_block_symbol: str = ""
+    autorun_locals: dict = {}
+    body_code_blocks: List[str] = []
+    first_changed_block_idx: int = 0
+    userdata: Optional[Any] = None
     def run_function_with_record(self) -> Any:
         ...
 
@@ -211,7 +221,12 @@ class ObservedFunction:
     path: str
     enable_args_record: bool = False
     recorded_data: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None
-
+    autorun_when_changed: bool = False
+    autorun_block_symbol: str = ""
+    autorun_locals: dict = dataclasses.field(default_factory=dict)
+    body_code_blocks: List[str] = dataclasses.field(default_factory=list)
+    first_changed_block_idx: int = 0
+    userdata: Optional[Any] = None
     def run_function_with_record(self):
         assert self.recorded_data is not None
         return self.current_func(*self.recorded_data[0],
@@ -223,8 +238,8 @@ class ObservedFunctionRegistryProtocol(Protocol):
     def is_enabled(self) -> bool:
         ...
 
-    def register(self, func=None) -> Any:
-        ...
+    # def register(self, func=None) -> Any:
+    #     ...
 
     def __contains__(self, key: str) -> bool:
         ...
@@ -271,29 +286,53 @@ class ObservedFunctionRegistry:
     def get_path_to_qname(self):
         return self.path_to_qname
 
-    def register(self, func=None):
-
+    def register(self, func=None, autorun_when_changed: bool = False, userdata: Optional[Any] = None, autorun_block_symbol: str = ""):
         def wrapper(func):
             if not self.is_enabled():
                 return func
+            func_unwrap = inspect.unwrap(func)
+
+            is_static = isinstance(func_unwrap, staticmethod)
+            if is_static:
+                raise NotImplementedError("you must register before staticmethod apply")
             try:
-                path = inspect.getfile(inspect.unwrap(func))
+                path = inspect.getfile(func_unwrap)
                 path = str(Path(path).resolve())
             except:
                 raise ValueError(f"can't get file path of function, {func}")
-
+            code = inspect.getsource(func_unwrap)
+            body_code_blocks = get_body_blocks_from_code(code, autorun_block_symbol)
             # TODO check func is a function
-            qname = get_qualname_of_type(func)
-            func_sig = inspect.signature(func)
+            qname = get_qualname_of_type(func_unwrap)
+            func_sig = inspect.signature(func_unwrap)
+            if autorun_when_changed:
+                # check all parameters has default
+                for p in func_sig.parameters.values():
+                    if p.default is inspect.Parameter.empty:
+                        raise ValueError(
+                            f"can't autorun when changed because parameter "
+                            f"{p.name} of function {func} has no default value. "
+                            f"autorun observed function must not be a member function."
+                        )
             if qname in self.global_dict:
+                # compare blocks between old and new
+                first_changed_block_idx = len(body_code_blocks)
+                for i in range(len(body_code_blocks)):
+                    if i >= len(self.global_dict[qname].body_code_blocks) or body_code_blocks[i] != self.global_dict[qname].body_code_blocks[i]:
+                        first_changed_block_idx = i
+                        break
                 self.global_dict[qname].current_func = func
                 self.global_dict[qname].current_sig = func_sig
+                self.global_dict[qname].first_changed_block_idx = first_changed_block_idx
+                self.global_dict[qname].body_code_blocks = body_code_blocks
             else:
                 if path not in self.path_to_qname:
                     self.path_to_qname[path] = []
-                self.path_to_qname[path].append((qname, func.__qualname__))
+                self.path_to_qname[path].append((qname, func_unwrap.__qualname__))
                 self.global_dict[qname] = ObservedFunction(
-                    func.__name__, qname, func, func, func_sig, path)
+                    func_unwrap.__name__, qname, func, func, func_sig, path, 
+                    autorun_when_changed=autorun_when_changed, userdata=userdata,
+                    body_code_blocks=body_code_blocks)
 
             @wraps(func)
             def wrapped_func(*args, **kwargs):
@@ -305,7 +344,7 @@ class ObservedFunctionRegistry:
                     return entry.current_func(*args, **kwargs)
                 else:
                     return func(*args, **kwargs)
-
+            setattr(wrapped_func, TENSORPC_OBSERVED_FUNCTION_ATTR, True)
             return wrapped_func
 
         if func is None:
@@ -533,6 +572,9 @@ class ObjectReloadManager:
     def _is_memory_fs_path(self, path: str):
         return path in self.in_memory_fs
 
+    def update_observed_registry(self, observed_registry: ObservedFunctionRegistryProtocol):
+        self.observed_registry = observed_registry
+
     def check_file_cache(self, path: str):
         if path not in self.file_cache:
             return
@@ -618,7 +660,7 @@ class ObjectReloadManager:
         because we want to use importlib.import_module
         if possible instead of reload from raw path.
         """
-        print("PREPARE RELOAD", type)
+        rprint("<ObjectReloadManager> prepare load", type)
         try:
             uid = self.get_type_unique_id(type)
         except:
@@ -647,8 +689,7 @@ class ObjectReloadManager:
                 new_type_method_meta_cache[t] = vv
         self.type_method_meta_cache = new_type_method_meta_cache
         # do reload
-        print("DO RELOAD", type)
-
+        rprint("<ObjectReloadManager> do load", type)
         res = meta.get_reloaded_module(self.in_memory_fs)
         if res is None:
             raise ValueError("can't reload this type", type)
@@ -657,14 +698,17 @@ class ObjectReloadManager:
         # type_cache_entry = TypeCacheEntry(new_type, res[1], res[0])
         # self.type_cache[type] = type_cache_entry
         self._update_file_cache(path)
-        if self.observed_registry is not None:
-            resolved_path = path
-            if resolved_path in self.observed_registry.get_path_to_qname():
-                qnames = self.observed_registry.get_path_to_qname()
-                for qname in qnames:
-                    new_func = TypeMeta.get_local_type_from_module_dict_qualname(
-                        qname, res[0])
-                    self.observed_registry.reload_func(qname, new_func)
+        # if self.observed_registry is not None:
+        #     resolved_path = path
+        #     if resolved_path in self.observed_registry.get_path_to_qname():
+        #         qnames = self.observed_registry.get_path_to_qname()[resolved_path]
+        #         for _, local_qname in qnames:
+        #             new_func = TypeMeta.get_local_type_from_module_dict_qualname(
+        #                 local_qname, res[0])
+        #             if isinstance(new_func, staticmethod):
+        #                 new_func = new_func.__func__
+        #             new_func_unwrap = inspect.unwrap(new_func, stop=lambda fn: not hasattr(fn, TENSORPC_OBSERVED_FUNCTION_ATTR))
+                    # self.observed_registry.reload_func(local_qname, new_func_unwrap)
         return ObjectReloadResultWithType(self.module_cache[path], True,
                                           self.file_cache[path], meta)
 
@@ -956,7 +1000,6 @@ class ReloadableDynamicClass(DynamicClass):
             app_meta: Optional[AppFunctionMeta] = None
             if hasattr(v_static, TENSORPC_FLOW_FUNC_META_KEY):
                 app_meta = getattr(v_static, TENSORPC_FLOW_FUNC_META_KEY)
-
             v_sig = inspect.signature(v)
             serv_meta = ServFunctionMeta(v,
                                          k,

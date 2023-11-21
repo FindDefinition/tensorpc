@@ -259,10 +259,16 @@ async def _run_zeroarg_func(cb: Callable):
 
 class AppObservedFunctionRegistry(ObservedFunctionRegistry):    
     def is_enabled(self):
-        return not self.is_frozen and is_inside_app()
+        return not self.is_frozen and is_inside_app_session()
     
 ALL_OBSERVED_FUNCTIONS: ObservedFunctionRegistryProtocol = AppObservedFunctionRegistry()
 
 def observe_function(func: Callable):
     return ALL_OBSERVED_FUNCTIONS.register(func)
 
+
+def observe_autorun_function(func: Callable):
+    return ALL_OBSERVED_FUNCTIONS.register(func, autorun_when_changed=True)
+
+def observe_autorun_script(func: Callable):
+    return ALL_OBSERVED_FUNCTIONS.register(func, autorun_when_changed=True, autorun_block_symbol=r"#%%")

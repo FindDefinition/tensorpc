@@ -599,6 +599,7 @@ class SegmentsProps(ThreeBasicProps):
     color: Annotated[Union[str, Undefined], typemetas.ColorRGB()] = undefined
     transparent: Union[bool, Undefined] = undefined
     opacity: Annotated[Union[NumberType, Undefined], typemetas.CommonObject(default=1.0)] = undefined
+    layers: Annotated[Union[int, Undefined], typemetas.RangedInt(0, 31, 1, default=0)] = undefined
 
     @staticmethod 
     def lines_validator(v: np.ndarray):

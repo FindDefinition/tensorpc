@@ -2,11 +2,12 @@ import contextlib
 import dataclasses
 import enum
 import inspect
+from re import T
 import traceback
 import types
 from pathlib import Path, PurePath
 from typing import (Any, Callable, Dict, Hashable, Iterable, List, Mapping, Optional,
-                    Set, Tuple, Type, Union)
+                    Set, Tuple, Type, TypeVar, Union)
 import contextvars
 from tensorpc.core import inspecttools
 from tensorpc.core.serviceunit import ReloadableDynamicClass
@@ -728,10 +729,17 @@ class ObjectTreeParser:
 #             child_obj, parts[1:], real_keys[1:], checker)
 #         return [child_obj] + trace, found
 
+T = TypeVar("T")
+
 class TreeContext:
-    def __init__(self, parser: ObjectTreeParser, tree: Union[mui.JsonLikeTree, mui.TanstackJsonLikeTree]) -> None:
+    def __init__(self, parser: ObjectTreeParser, tree: Union[mui.JsonLikeTree, mui.TanstackJsonLikeTree], tree_instance: Any) -> None:
         self.parser = parser
         self.tree = tree
+        self._tree_instance = tree_instance
+
+    def get_tree_instance(self, tree_type: Type[T]) -> T:
+        assert isinstance(self._tree_instance, tree_type)
+        return self._tree_instance
 
 TREE_CONTEXT_VAR: contextvars.ContextVar[
     Optional[TreeContext]] = contextvars.ContextVar("treectx",

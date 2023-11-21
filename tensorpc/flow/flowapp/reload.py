@@ -9,7 +9,7 @@ from tensorpc.core.serviceunit import (AppFuncType, AppFunctionMeta, ObjectReloa
                                        ObservedFunctionRegistryProtocol,
                                        ReloadableDynamicClass,
                                        ServFunctionMeta)
-from tensorpc.flow.constants import (TENSORPC_ANYLAYOUT_FUNC_NAME,
+from tensorpc.flow.constants import (TENSORPC_ANYLAYOUT_EFFECT_FUNC_NAME, TENSORPC_ANYLAYOUT_FUNC_NAME,
                                      TENSORPC_ANYLAYOUT_PREVIEW_FUNC_NAME,
                                      TENSORPC_LEGACY_LAYOUT_FUNC_NAME)
 
@@ -20,6 +20,8 @@ class FlowSpecialMethods:
     def __init__(self, metas: List[ServFunctionMeta]) -> None:
         self.create_layout: Optional[ServFunctionMeta] = None
         self.auto_runs: List[ServFunctionMeta] = []
+        self.effects: List[ServFunctionMeta] = []
+
         self.did_mount: Optional[ServFunctionMeta] = None
         self.will_unmount: Optional[ServFunctionMeta] = None
         self.create_object: Optional[ServFunctionMeta] = None
@@ -45,6 +47,12 @@ class FlowSpecialMethods:
                 # handle legacy name-based layout function
                 if m.user_app_meta is None:
                     m.user_app_meta = AppFunctionMeta(AppFuncType.CreatePreviewLayout)
+            elif m.name == TENSORPC_ANYLAYOUT_EFFECT_FUNC_NAME:
+                self.create_preview_layout = m
+                # handle legacy name-based layout function
+                if m.user_app_meta is None:
+                    m.user_app_meta = AppFunctionMeta(AppFuncType.Effect)
+                    self.effects.append(m)
 
             elif m.user_app_meta is not None:
                 if m.user_app_meta.type == AppFuncType.CreateLayout:
@@ -59,6 +67,8 @@ class FlowSpecialMethods:
                     self.create_preview_layout = m
                 elif m.user_app_meta.type == AppFuncType.AutoRun:
                     self.auto_runs.append(m)
+                elif m.user_app_meta.type == AppFuncType.Effect:
+                    self.effects.append(m)
 
     def contains_special_method(self):
         res =  self.create_layout is not None
@@ -67,6 +77,7 @@ class FlowSpecialMethods:
         res |= self.create_object is not None
         res |= self.create_preview_layout is not None
         res |= bool(self.auto_runs)
+        res |= bool(self.effects)
         return res 
     
     def collect_all_special_meta(self):
@@ -75,6 +86,9 @@ class FlowSpecialMethods:
             res.append(self.create_layout)
         for r in self.auto_runs:
             res.append(r)
+        for r in self.effects:
+            res.append(r)
+
         if self.did_mount is not None:
             res.append(self.did_mount)
         if self.will_unmount is not None:
@@ -101,6 +115,8 @@ class FlowSpecialMethods:
             self.create_object.bind(obj)
         if self.create_preview_layout is not None:
             self.create_preview_layout.bind(obj)
+        for r in self.effects:
+            r.bind(obj)
 
 
 def reload_object_methods(
@@ -177,7 +193,7 @@ class AppReloadManager(ObjectReloadManager):
         obj_type = type(obj)
         if obj_type in self.obj_layout_meta_cache:
             return self.obj_layout_meta_cache[obj_type].is_anylayout
-        new_metas = self.query_type_method_meta(obj_type)
+        new_metas = self.query_type_method_meta(obj_type, include_base=True)
         flow_special = FlowSpecialMethods(new_metas)
         self.obj_layout_meta_cache[obj_type] = AppObjectMeta(
             flow_special.create_layout is not None)

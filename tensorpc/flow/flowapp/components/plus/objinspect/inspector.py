@@ -156,7 +156,7 @@ class ObjectInspector(mui.FlexBox):
                                icon=mui.IconType.Terminal,
                                tooltip="app terminal (read only)",
                                tooltipPlacement="right"),
-                ]).prop(panelProps=mui.FlexBoxProps(width="100%", padding=0),
+                ], init_value="2").prop(panelProps=mui.FlexBoxProps(width="100%", padding=0),
                         orientation="vertical",
                         borderRight=1,
                         borderColor='divider')

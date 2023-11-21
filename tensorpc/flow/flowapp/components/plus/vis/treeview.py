@@ -32,6 +32,7 @@ class CanvasButtonType(enum.Enum):
     Delete = "delete"
 
 class CanvasTreeItemHandler(CustomTreeItemHandler):
+
     def _get_icon_button(self, obj: mui.Component) -> List[IconButtonData]:
         res = [
             IconButtonData(CanvasButtonType.Visibility.value, mui.IconType.Visibility, "toggle visibility"),
@@ -90,7 +91,12 @@ class CanvasTreeItemHandler(CustomTreeItemHandler):
                 if isinstance(obj, (three.Object3dBase, three.Object3dContainerBase)):
                     await obj.update_object3d(visible=item_cfg.visible)
             elif button_id == CanvasButtonType.Delete.value:
-                pass 
+                if len(obj_trace) > 1 and not item_cfg.lock:
+                    obj_container = obj_trace[-2]
+                    if isinstance(obj_container, mui.ContainerBase):
+                        await obj_container.remove_childs_by_keys([node.name])
+                        await get_tree_context_noexcept().get_tree_instance(BasicObjectTree).update_tree()
+                        return True
         return None
     
     async def handle_context_menu(self, obj_trace: List[Any], node_trace: List[mui.JsonLikeNode], userdata: Dict[str, Any]) -> Optional[bool]:

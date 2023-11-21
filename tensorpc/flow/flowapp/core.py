@@ -71,7 +71,8 @@ class DataclassType(Protocol):
 ALL_APP_EVENTS = HashableRegistry()
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
-_CORO_ANY: TypeAlias = Union[Coroutine[Any, None, None], Any]
+
+_CORO_ANY: TypeAlias = Union[Coroutine[None, None, Any], Any]
 
 
 class NoDefault:
@@ -1021,6 +1022,9 @@ class Component(Generic[T_base_props, T_child]):
         # json_only, this scan will be skipped.
         self._flow_json_only = json_only
 
+        self._flow_effects: List[Callable[[], Union[Callable[[], Any], None, Coroutine[None, None, Union[Callable[[], Any], None]]]]] = []
+        self._flow_unmount_effect_objects: List[Callable[[], _CORO_NONE]] = []
+
         self._flow_event_context_creator: Optional[Callable[
             [], ContextManager]] = None
         # flow event handlers is used for frontend events
@@ -1031,6 +1035,9 @@ class Component(Generic[T_base_props, T_child]):
         self.event_before_mount = self._create_emitter_event_slot(FrontendEventType.BeforeMount)
         self.event_before_unmount = self._create_emitter_event_slot(FrontendEventType.BeforeUnmount)
     
+    def use_effect(self, effect: Callable[[], Optional[Callable[[], Any]]]):
+        self._flow_effects.append(effect)
+
     @classmethod
     def __get_pydantic_core_schema__(cls, _source_type: Any, _handler: GetCoreSchemaHandler):
         return core_schema.no_info_after_validator_function(
@@ -1473,12 +1480,12 @@ class Component(Generic[T_base_props, T_child]):
 
 
     async def run_callback(self,
-                           cb: Callable[[], _CORO_NONE],
+                           cb: Callable[[], _CORO_ANY],
                            sync_state: bool = False,
                            sync_status_first: bool = False,
                            res_callback: Optional[Callable[[Any],
-                                                           _CORO_NONE]] = None,
-                           change_status: bool = True):
+                                                           _CORO_ANY]] = None,
+                           change_status: bool = True) -> Optional[Any]:
         """
         Runs the given callback function and handles its result and potential exceptions.
 
@@ -1925,6 +1932,16 @@ class ContainerBase(Component[T_container_props, T_child]):
                     special_methods.did_mount.get_binded_fn(),
                     sync_status_first=False,
                     change_status=False)
+            # run effects 
+            effects = attach._flow_effects
+            for effect in effects:
+                res = await self.run_callback(
+                    effect,
+                    sync_status_first=False,
+                    change_status=False)
+                if res is not None:
+                    # res is effect
+                    attach._flow_unmount_effect_objects.append(res)
         for deleted in detached:
             special_methods = deleted.get_special_methods(reload_mgr)
             if special_methods.will_unmount is not None:
@@ -1932,7 +1949,12 @@ class ContainerBase(Component[T_container_props, T_child]):
                     special_methods.will_unmount.get_binded_fn(),
                     sync_status_first=False,
                     change_status=False)
-
+            for unmount_effect in deleted._flow_unmount_effect_objects:
+                await self.run_callback(
+                    unmount_effect,
+                    sync_status_first=False,
+                    change_status=False)
+    
     def set_new_layout_locally(self, layout: Union[Dict[str, Component], T_child_structure]):
         detached_uid_to_comp = self._detach_child()
         if isinstance(layout, dict):

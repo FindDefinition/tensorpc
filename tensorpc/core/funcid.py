@@ -158,3 +158,48 @@ def get_attribute_name_parts(node):
 
 def get_attribute_name(node):
     return ".".join(get_attribute_name_parts(node))
+
+def determine_code_common_indent(code: str):
+    lines = code.split("\n")
+    indent = None
+    for line in lines:
+        if line.strip() == "":
+            continue
+        line_indent = len(line) - len(line.lstrip())
+        if indent is None:
+            indent = line_indent
+        else:
+            indent = min(indent, line_indent)
+    return indent
+
+def remove_common_indent_from_code(code: str):
+    common_indent = determine_code_common_indent(code)
+    code_without_indent = "\n".join(
+        [l[common_indent:] for l in code.split("\n")])
+    return code_without_indent
+
+def get_body_blocks_from_code(code: str, autorun_block_symbol: str = ""):
+    code = remove_common_indent_from_code(code)
+    tree = ast.parse(code)
+    func_node = get_toplevel_func_node(tree)[0][0]
+    body_start = func_node.body[0].lineno
+    body_code_lines = code.split("\n")[body_start - 1:]
+    # if a line start with '#%%', it's a block splitter.
+
+    if autorun_block_symbol != "":
+        body_code_blocks = []
+        current_block = []
+        for line in body_code_lines:
+            if line.strip().startswith(autorun_block_symbol):
+                body_code_blocks.append("\n".join(current_block))
+                current_block = []
+            else:
+                current_block.append(line)
+        if len(current_block) > 0:
+            body_code_blocks.append("\n".join(current_block))
+        # body_code_blocks = [b.strip() for b in body_code_blocks if b.strip() != ""]
+    else:
+        body_code = "\n".join(body_code_lines)
+        body_code_blocks = [body_code]
+
+    return body_code_blocks

@@ -46,6 +46,7 @@ from tensorpc.flow import (App, EditableApp, EditableLayoutApp, leaflet,
                            plotly, plus, three, UserObjTree, appctx, V)
 from tensorpc.flow.client import AppClient, AsyncAppClient, add_message
 from tensorpc.flow.coretypes import MessageLevel, ScheduleEvent
+from tensorpc.flow.flowapp.appcore import observe_autorun_function, observe_function, observe_autorun_script
 from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
                                                   ListItemText,
                                                   MUIComponentType, VBox,
@@ -1021,6 +1022,12 @@ class PointCloudApp:
                                       colors=colors,
                                       attrs=points,
                                       attr_fields=["x", "y", "z"])
+        lines = np.random.uniform(-10, 10, size=[1000, 2, 3]).astype(np.float32)
+        
+        await self.canvas.show_lines("lkey0",
+                                      lines,
+                                      limit=800000)
+
         # boxes: dims, locs, rots, colors (string list, don't support ndarray currently)
         dims = np.random.uniform(1, 2, size=[5, 3])
         locs = np.random.uniform(-5, 5, size=[5, 3])
@@ -1372,9 +1379,10 @@ class CollectionApp:
                                                 overflow="hidden"),
                 mui.HBox([
                     plus.AnyFlexLayout(
-                        mui.FlexLayout.TabSet([
-                            mui.FlexLayout.Tab(self.sm),
-                        ])),
+                        mui.FlexLayout.VBox([self.sm, mui.FlexLayout.HBox([
+                            mui.Markdown("1"),
+                            mui.Markdown("2"),
+                        ])])),
                 ]).prop(width="100%", height="100%", overflow="hidden")
             ]).prop(defaultSizes=[1, 3], width="100%", height="100%")
         ]).prop(flexFlow="row nowrap")
@@ -1384,10 +1392,22 @@ class CollectionApp:
     @mark_autorun
     async def _autorun_dev(self):
         
-        raise NotImplementedError
-        # self.dev_0.dev()
+
+        return await self._autorun_dev2()
 
 
+    @staticmethod
+    @observe_autorun_function
+    async def _autorun_dev2():
+        print("X2ss25sad")
+
+    @staticmethod
+    @observe_autorun_script
+    async def _autorun_dev3():
+        print("BLOCK0 asasff WTF")
+        a = 5
+        #%% block split
+        print("BLOCK2s asfasf asf")
 
 class SchedulerTest:
     @mark_create_layout

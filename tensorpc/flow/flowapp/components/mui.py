@@ -1625,6 +1625,11 @@ class SwitchBase(MUIComponentBase[SwitchProps]):
         res = super().get_sync_props()
         res["checked"] = self.props.checked
         return res
+    
+    def bind_obj_prop(self, obj: Any, prop: str):
+        self.prop(checked=getattr(obj, prop))
+        self.event_change.on(lambda checked: setattr(obj, prop, checked))
+        return self
 
     @property
     def checked(self):
@@ -3205,8 +3210,11 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
             for c in children:
                 if isinstance(c, FlexLayout.Tab):
                     new_children.append(FlexLayout.TabSet([c]))
-                else:
+                elif isinstance(c, (FlexLayout.TabSet, FlexLayout.Row)):
                     new_children.append(c)
+                else:
+                    assert not isinstance(c, (FlexLayout.HBox, FlexLayout.VBox))
+                    new_children.append(FlexLayout.TabSet([c]))
             self.children = new_children
             self.weight = weight
 
@@ -3296,11 +3304,71 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
             self.children = children
             self.weight = weight
 
+    @staticmethod
+    def _parse_init_children_recursive(children: Union[MUIComponentType, 
+                                             "FlexLayout.HBox", "FlexLayout.VBox",
+                              "FlexLayout.Row", "FlexLayout.TabSet",
+                              "FlexLayout.Tab"], level: int = 0):
+        if not isinstance(children, (FlexLayout.HBox, FlexLayout.VBox)):
+            return children
+        if level % 2 == 0:
+            # row 
+            if isinstance(children, FlexLayout.HBox):
+                new_children = []
+                for c in children.children:
+                    new_children.append(FlexLayout._parse_init_children_recursive(c, level + 1))
+                return FlexLayout.Row(new_children, children.weight)
+            else:
+                new_children = []
+                for c in children.children:
+                    new_children.append(FlexLayout._parse_init_children_recursive(c, level + 2))
+                return FlexLayout.Row([FlexLayout.Row(new_children)], children.weight)
+        else:
+            # tabset
+            if isinstance(children, FlexLayout.VBox):
+                new_children = []
+                for c in children.children:
+                    new_children.append(FlexLayout._parse_init_children_recursive(c, level + 1))
+                return FlexLayout.Row(new_children, children.weight)
+            else:
+                new_children = []
+                for c in children.children:
+                    new_children.append(FlexLayout._parse_init_children_recursive(c, level + 2))
+                return FlexLayout.Row([FlexLayout.Row(new_children)], children.weight)
+            
+    @staticmethod
+    def _parse_init_children(children: Union["FlexLayout.HBox", "FlexLayout.VBox"], level: int = 0):
+        if level % 2 == 0:
+            # row 
+            if isinstance(children, FlexLayout.HBox):
+                new_children = []
+                for c in children.children:
+                    new_children.append(FlexLayout._parse_init_children_recursive(c, level + 1))
+                return FlexLayout.Row(new_children, children.weight)
+            else:
+                new_children = []
+                for c in children.children:
+                    new_children.append(FlexLayout._parse_init_children_recursive(c, level + 2))
+                return FlexLayout.Row([FlexLayout.Row(new_children)], children.weight)
+        else:
+            # tabset
+            if isinstance(children, FlexLayout.VBox):
+                new_children = []
+                for c in children.children:
+                    new_children.append(FlexLayout._parse_init_children_recursive(c, level + 1))
+                return FlexLayout.Row(new_children, children.weight)
+            else:
+                new_children = []
+                for c in children.children:
+                    new_children.append(FlexLayout._parse_init_children_recursive(c, level + 2))
+                return FlexLayout.Row([FlexLayout.Row(new_children)], children.weight)
+
     def __init__(
         self, children: Union[List[Union["FlexLayout.Row",
                                          "FlexLayout.TabSet"]],
                               "FlexLayout.Row", "FlexLayout.TabSet",
-                              "FlexLayout.Tab"]
+                              "FlexLayout.Tab", "FlexLayout.HBox",
+                              "FlexLayout.VBox", MUIComponentType]
     ) -> None:
         events = [
             FrontendEventType.ComplexLayoutCloseTab,
@@ -3317,8 +3385,13 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
         elif isinstance(children, FlexLayout.Tab):
             self._init_children_row = FlexLayout.Row(
                 [FlexLayout.TabSet([children])])
+        elif isinstance(children, (FlexLayout.HBox, FlexLayout.VBox)):
+            self._init_children_row = FlexLayout._parse_init_children(children)
+        elif isinstance(children, list):
+            self._init_children_row = FlexLayout._parse_init_children(FlexLayout.HBox([*children]))
         else:
-            self._init_children_row = self.Row(children)
+            self._init_children_row = FlexLayout.Row(
+                [FlexLayout.TabSet([children])])
         comp_children = self._init_children_row.get_components()
         # we must generate uuid here because tab in FlexLayout need to have same id with component uid
         comp_children_dict = {str(uuid.uuid4()): v for v in comp_children}

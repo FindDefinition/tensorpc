@@ -16,7 +16,7 @@ from tensorpc.core.moduleid import loose_isinstance
 
 from . import constants, marker
 from .flowapp import App, EditableApp, EditableLayoutApp, appctx
-from .flowapp.appcore import observe_function
+from .flowapp.appcore import observe_function, AppSpecialEventType
 from .flowapp.components import leaflet, mui, plotly, plus, three
 from .flowapp.objtree import UserObjTree
 from .marker import (mark_autorun, mark_create_layout, mark_create_object,
