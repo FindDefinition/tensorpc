@@ -1647,6 +1647,8 @@ class Flow:
                 flow_data = json.load(f)
             self.flow_dict[flow_path.stem] = FlowGraph(flow_data,
                                                        flow_path.stem)
+            
+        self._prev_ssh_q_task: Optional[asyncio.Task[Event]] = None
 
     def _get_node_desp(self, graph_id: str, node_id: str):
         assert graph_id in self.flow_dict, f"can't find graph {graph_id}"
@@ -2002,7 +2004,28 @@ class Flow:
     async def command_node_event(self):
         # TODO add a rate limit for terminal events
         # uid: {graph_id}@{node_id}
+        # flush cache every time_limit_rate second
+        time_limit_rate = 0.05
+        event_caches: List[Tuple[str, Any]] = []
+        last_send_timestamp_ns = time.time_ns()
+        # if self._prev_ssh_q_task is None:
+        #     self._prev_ssh_q_task = asyncio.create_task(self._ssh_q.get())
         while True:
+            # sshq_task = self._prev_ssh_q_task
+            # (done, pending) = await asyncio.wait([
+            #     sshq_task,
+            # ], timeout=time_limit_rate, return_when=asyncio.FIRST_COMPLETED)
+            # if sshq_task not in done:
+            #     # sshq_task.cancel()
+            #     # await sshq_task
+            #     if event_caches:
+            #         # print("SEND CACHES", len(event_caches))
+            #         return prim.DynamicEvents(event_caches)
+            #     else:
+            #         continue
+            # self._prev_ssh_q_task = asyncio.create_task(self._ssh_q.get())
+            # event = sshq_task.result()
+            cur_timestamp = time.time_ns()
             event = await self._ssh_q.get()
             uid = event.uid
             # print(event, f"uid={uid}", self.selected_node_uid)
@@ -2021,6 +2044,8 @@ class Flow:
                 if isinstance(node, CommandNode):
                     if node._start_record_stdout:
                         node._current_line_events.append(event)
+                # print("C1")
+
                 continue
 
             if isinstance(event, RawEvent):
@@ -2030,6 +2055,7 @@ class Flow:
                 # terminal frontend closing.
                 node.push_raw_event(event)
                 if uid != self.selected_node_uid:
+                    # print("C0")
                     continue
 
             elif isinstance(event, (CommandEvent)):
@@ -2068,6 +2094,12 @@ class Flow:
                     print(event)
                 await node.shutdown()
                 print(node.readable_id, "DISCONNECTED.")
+            # event_caches.append((uid, event.to_dict()))
+
+            # if cur_timestamp - last_send_timestamp_ns > time_limit_rate * 1000000000:
+            #     print("SEND CACHES", len(event_caches))
+            #     return prim.DynamicEvents(event_caches)
+            # print("APPEND CACHE", uid, event.to_dict())
             return prim.DynamicEvent(uid, event.to_dict())
 
     def update_node_status(self, graph_id: str, node_id: str, content: Any):

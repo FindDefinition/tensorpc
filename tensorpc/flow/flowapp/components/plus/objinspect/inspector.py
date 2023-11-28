@@ -20,9 +20,10 @@ from tensorpc.core.inspecttools import get_members
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.core.tracer import FrameResult, TraceType, Tracer
-from tensorpc.flow.flowapp.appcore import Event, get_app
+from tensorpc.flow.flowapp.appcore import Event, get_app, get_editable_app
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.components.plus.objinspect.treeitems import TraceTreeItem, parse_frame_result_to_trace_item
+from tensorpc.flow.flowapp.components.plus.reload_utils import preview_layout_reload
 from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType, _get_obj_def_path
 from tensorpc.flow.flowapp.objtree import UserObjTreeProtocol
 
@@ -166,7 +167,7 @@ class ObjectInspector(mui.FlexBox):
             self.detail_container.prop(height="100%")
         else:
             self.detail_container.prop(flex=1)
-        self._cached_preview_layouts: Dict[str, mui.FlexBox] = {}
+        self._cached_preview_layouts: Dict[str, Tuple[mui.FlexBox, int]] = {}
         self.enable_exception_inspect = enable_exception_inspect
         self.with_detail = with_detail
         self.tree = ObjectTree(init,
@@ -263,8 +264,11 @@ class ObjectInspector(mui.FlexBox):
             special_methods = FlowSpecialMethods(metas)
             if special_methods.create_preview_layout is not None:
                 if uid in self._cached_preview_layouts:
-                    preview_layout = self._cached_preview_layouts[uid]
-                else:
+                    preview_layout, obj_id = self._cached_preview_layouts[uid]
+                    if obj_id != id(obj):
+                        preview_layout = None
+                        self._cached_preview_layouts.pop(uid)
+                if preview_layout is None:
                     if root is None:
                         preview_layout = mui.flex_preview_wrapper(
                             obj, metas, self.flow_app_comp_core.reload_mgr)
@@ -301,15 +305,15 @@ class ObjectInspector(mui.FlexBox):
                     lambda: root.enter_context(root))
             # preview_layout.event_emitter.remove_listener()
             if self._current_preview_layout is None:
-                get_app()._get_self_as_editable_app()._flowapp_observe(
-                    preview_layout, partial(self._on_preview_layout_reload, uid=uid))
+                get_editable_app().observe_layout(
+                    preview_layout, partial(self._on_preview_layout_reload, uid=uid, obj_id=id(obj)))
             else:
-                get_app()._get_self_as_editable_app()._flowapp_remove_observer(
-                    self._current_preview_layout)
-                get_app()._get_self_as_editable_app()._flowapp_observe(
-                    preview_layout, partial(self._on_preview_layout_reload, uid=uid))
+                # get_app()._get_self_as_editable_app()._flowapp_remove_observer(
+                #     self._current_preview_layout)
+                get_editable_app().observe_layout(
+                    preview_layout, partial(self._on_preview_layout_reload, uid=uid, obj_id=id(obj)))
             self._current_preview_layout = preview_layout
-            self._cached_preview_layouts[uid] = preview_layout
+            self._cached_preview_layouts[uid] = (preview_layout, id(obj))
 
             # self.__install_preview_event_listeners(preview_layout)
             await self.preview_container.set_new_layout([preview_layout])
@@ -320,30 +324,11 @@ class ObjectInspector(mui.FlexBox):
             await handler.bind(obj, uid)
 
     async def _on_preview_layout_reload(self, layout: mui.FlexBox,
-                                        create_layout: ServFunctionMeta, uid: str):
-        # print("DO PREVIEW LAYOUT RELOAD", create_layout.user_app_meta)
-        if create_layout.user_app_meta is not None and create_layout.user_app_meta.type == AppFuncType.CreatePreviewLayout:
-            if layout._wrapped_obj is not None:
-                # print("DO PREVIEW LAYOUT RELOAD 2")
-
-                layout_flex = create_layout.get_binded_fn()()
-                assert isinstance(
-                    layout_flex, mui.FlexBox
-                ), f"create_layout must return a flexbox when use anylayout"
-                layout_flex._flow_comp_def_path = _get_obj_def_path(
-                    layout._wrapped_obj)
-                layout_flex._wrapped_obj = layout._wrapped_obj
-                layout_flex.set_flow_event_context_creator(
-                    layout._flow_event_context_creator)
-                # self.__install_preview_event_listeners(layout_flex)
-                await self.preview_container.set_new_layout([layout_flex])
-            else:
-                layout_flex = create_layout.get_binded_fn()()
-                layout_flex.set_flow_event_context_creator(
-                    layout._flow_event_context_creator)
-                # self.__install_preview_event_listeners(layout_flex)
-                await layout.set_new_layout(layout_flex)
-            self._cached_preview_layouts[uid] = layout_flex
+                                        create_layout: ServFunctionMeta, uid: str, obj_id: int):
+        layout_flex = await preview_layout_reload(lambda x: self.preview_container.set_new_layout([x]), layout, create_layout)
+        if layout_flex is not None:
+            get_editable_app().observe_layout(layout_flex, partial(self._on_preview_layout_reload, uid=uid, obj_id=obj_id))
+            self._cached_preview_layouts[uid] = (layout_flex, obj_id)
             return layout_flex
 
     async def set_object(self,

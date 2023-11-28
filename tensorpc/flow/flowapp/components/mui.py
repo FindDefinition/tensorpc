@@ -201,6 +201,7 @@ class MUIFlexBoxWithDndProps(MUIFlexBoxProps):
     dragData: Union[Dict[str, Any], Undefined] = undefined
     dragInChild: Union[bool, Undefined] = undefined
     takeDragRef: Union[bool, Undefined] = undefined
+    className: Union[str, Undefined] = undefined
 
     @field_validator('sxOverDrop')
     def sx_over_drop_validator(cls, v: Union[Dict[str, Any], Undefined]):
@@ -2353,6 +2354,7 @@ class BlenderSliderProps(MUIComponentBaseProps):
     indicatorColor: Union[Undefined, str] = undefined
     iconColor: Union[Undefined, str] = undefined
     fractionDigits: Union[Undefined, int] = undefined
+    isInteger: Union[Undefined, bool] = undefined
 
 
 class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
@@ -2464,9 +2466,10 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
         self.props.label = label
         # self.loop_callbcak = loop_callbcak
         self.__callback_key = "list_slider_ev_handler"
-        self.register_event_handler(self.__callback_key,
-                                    loop_callbcak,
-                                    backend_only=True)
+        if loop_callbcak is not None:
+            self.register_event_handler(self.__callback_key,
+                                        loop_callbcak,
+                                        backend_only=True)
 
         self.props.progresses = [0.0]
         self.stack_count = 0
@@ -4325,3 +4328,60 @@ def flex_preview_wrapper(obj: Any,
     raise ValueError(
         f"wrapped object must define a zero-arg function with @marker.mark_create_preview_layout and return a flexbox"
     )
+
+
+@dataclasses.dataclass
+class GridItemProps:
+    i: str
+    x: int
+    y: int
+    w: int
+    h: int
+    minW: Union[Undefined, int] = undefined
+    maxW: Union[Undefined, int] = undefined
+    minH: Union[Undefined, int] = undefined
+    maxH: Union[Undefined, int] = undefined
+    static: Union[Undefined, bool] = undefined
+    isDraggable: Union[Undefined, bool] = undefined
+    isResizable: Union[Undefined, bool] = undefined
+    resizeHandles: Union[Undefined, List[Literal[ 
+        "s", "w", "e", "n", "sw", "nw", "se", "ne"]]] = undefined
+    isBounded: Union[Undefined, bool] = undefined
+
+@dataclasses.dataclass
+class GridLayoutProps(MUIFlexBoxProps):
+    width: Union[Undefined, int] = undefined
+    autoSize: Union[bool, Undefined] = undefined
+    cols: Union[Undefined, int] = undefined
+    draggableHandle: Union[Undefined, str] = undefined
+    rowHeight: Union[Undefined, int] = undefined
+
+@dataclasses.dataclass
+class GridItem:
+    component: Component
+    name: str 
+    props: GridItemProps
+    flexProps: Union[Undefined, MUIFlexBoxProps] = undefined 
+
+class GridLayout(MUIContainerBase[GridLayoutProps, MUIComponentType]):
+    # TODO we need to take ref of child, so we use complex layout here.
+    @dataclasses.dataclass
+    class ChildDef:
+        childs: List[GridItem]
+
+    GridItem: TypeAlias = GridItem
+
+    def __init__(self,
+                 children: List[GridItem]) -> None:
+        super().__init__(UIType.GridLayout, GridLayoutProps, GridLayout.ChildDef(children))
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+

@@ -59,18 +59,17 @@ class BlenderListSlider(mui.BlenderSlider, Generic[T]):
 
     def __init__(self,
                  callback: Callable[[T], mui._CORO_NONE],
-                 init: Optional[List[T]] = None,
-                 label: Union[str, mui.Undefined] = mui.undefined) -> None:
+                 init: Optional[List[T]] = None) -> None:
         if init is None:
             init = []
-        super().__init__(0, max(1, len(init) - 1), 1, self._callback, label)
+        super().__init__(0, max(1, len(init) - 1), 1, self._callback)
         # save callback to standard flow event handlers to enable reload for user callback
         self.__callback_key = "list_slider_ev_handler"
         self.register_event_handler(self.__callback_key,
                                     callback,
                                     backend_only=True)
         self.obj_list: List[T] = init
-        self.prop(fractionDigits=0)
+        self.prop(fractionDigits=0, isInteger=True)
 
     async def update_list(self, objs: List[T]):
         self.obj_list = objs

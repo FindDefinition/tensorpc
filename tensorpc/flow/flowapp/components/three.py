@@ -2703,7 +2703,7 @@ class Mesh(O3dContainerWithEventBase[PrimitiveMeshProps, ThreeComponentType]):
     mesh itself don't have much props, but you can use 
     dash-case format to set nested object prop:
     ```Python
-    mesh.set_sx_props({
+    mesh.update_sx_props({
         "material-color": "red"
     })
     ```

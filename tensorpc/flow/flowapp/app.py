@@ -69,7 +69,7 @@ from tensorpc.core.serviceunit import (ObjectReloadManager,
                                        ServFunctionMeta, ServiceUnit,
                                        SimpleCodeManager, get_qualname_to_code)
 from tensorpc.flow.client import MasterMeta
-from tensorpc.flow.constants import TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT
+from tensorpc.flow.constants import TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
 from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem
 from tensorpc.flow.flowapp.components.plus.objinspect.inspector import get_exception_frame_stack
 from tensorpc.flow.flowapp.components.plus.objinspect.treeitems import TraceTreeItem
@@ -100,6 +100,8 @@ from .core import (AppComponentCore, AppEditorEvent, AppEditorEventType,
                    UIRunStatus, UIType, UIUpdateEvent, Undefined, UserMessage,
                    ValueType, undefined)
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
+
+
 
 ALL_APP_EVENTS = HashableRegistry()
 P = ParamSpec('P')
@@ -188,20 +190,42 @@ T = TypeVar("T")
 @dataclasses.dataclass
 class _LayoutObserveMeta:
     # one type (base class) may related to multiple layouts
-    layouts: List[Union[mui.FlexBox, "App"]]
+    layouts: Dict[Union[mui.FlexBox, "App"], Optional[Callable[[mui.FlexBox, ServFunctionMeta],
+                                Coroutine[None, None, Optional[mui.FlexBox]]]]]
     qualname_prefix: str
     # if type is None, it means they are defined in global scope.
     type: Type
     is_leaf: bool
     metas: List[ServFunctionMeta]
-    callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta],
-                                Coroutine[None, None, Optional[mui.FlexBox]]]]
+    # callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta],
+    #                             Coroutine[None, None, Optional[mui.FlexBox]]]]
 
 
 @dataclasses.dataclass
 class _WatchDogWatchEntry:
     obmetas: Dict[ObjectReloadManager.TypeUID, _LayoutObserveMeta]
     watch: Optional[ObservedWatch]
+
+class _FlowAppObserveContext:
+    def __init__(self) -> None:
+        self._removed_layouts: List[mui.FlexBox] = []
+        self._added_layouts_and_cbs: Dict[mui.FlexBox, Optional[Callable[[mui.FlexBox, ServFunctionMeta],
+                                    Coroutine]]] = {}
+        self._reloaded_layout_pairs: List[Tuple[mui.FlexBox, mui.FlexBox]] = []
+
+_FLOWAPP_OBSERVE_CONTEXT: contextvars.ContextVar[
+    Optional[_FlowAppObserveContext]] = contextvars.ContextVar("_FLOWAPP_OBSERVE_CONTEXT", default=None)
+
+def _get_flowapp_observe_context():
+    return _FLOWAPP_OBSERVE_CONTEXT.get()
+
+@contextlib.contextmanager
+def _enter_flowapp_observe_context(ctx: _FlowAppObserveContext):
+    token = _FLOWAPP_OBSERVE_CONTEXT.set(ctx)
+    try:
+        yield ctx
+    finally:
+        _FLOWAPP_OBSERVE_CONTEXT.reset(token)
 
 
 class App:
@@ -705,6 +729,15 @@ class App:
                         special_methods.did_mount.get_binded_fn(),
                         sync_status_first=False,
                         change_status=False)
+                for k, effects in v.effects._flow_effects.items():
+                    for effect in effects:
+                        res = await v.run_callback(
+                            effect,
+                            sync_status_first=False,
+                            change_status=False)
+                        if res is not None:
+                            # res is effect
+                            v.effects._flow_unmounted_effects[k].append(res)
 
     def app_terminate(self):
         """override this to init app after server stop
@@ -1086,10 +1119,11 @@ class EditableApp(App):
         self._protect_app_observe_call: bool = False
 
     @contextlib.contextmanager
-    def _flowapp_protect_app_observe_call(self):
+    def _flowapp_protect_app_observe_call(self, ctx: _FlowAppObserveContext):
         try:
             self._protect_app_observe_call = True
-            yield
+            with _enter_flowapp_observe_context(ctx) as ctx:
+                yield ctx
         finally:
             self._protect_app_observe_call = False
 
@@ -1109,9 +1143,9 @@ class EditableApp(App):
             if meta_item.type is not None:
                 # TODO should we ignore global functions?
                 qualname_prefix = meta_type_uid[1]
-                obmeta = _LayoutObserveMeta([self], qualname_prefix,
+                obmeta = _LayoutObserveMeta({self: None}, qualname_prefix,
                                             meta_item.type, meta_item.is_leaf,
-                                            meta_item.metas, None)
+                                            meta_item.metas)
                 obentry.obmetas[meta_type_uid] = obmeta
         # obentry = _WatchDogWatchEntry(
         #     [_LayoutObserveMeta(self, qualname_prefix, metas, None)], None)
@@ -1148,11 +1182,31 @@ class EditableApp(App):
         self._loop = asyncio.get_running_loop()
         self._watch_lock = threading.Lock()
 
+    def __observe_layout_effect(self, obj: mui.FlexBox, callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta],
+                                    Coroutine]] = None):
+        self._flowapp_observe(obj, callback)
+        return partial(self._flowapp_remove_observer, obj)
+
+    def observe_layout(
+        self,
+        obj: mui.FlexBox,
+        callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta],
+                                    Coroutine]] = None):
+        if not obj.effects.has_effect_key(TENSORPC_FLOW_EFFECTS_OBSERVE):
+            # already observed
+            obj.effects.use_effect(partial(self.__observe_layout_effect, obj, callback), key=TENSORPC_FLOW_EFFECTS_OBSERVE)
+            if obj.is_mounted():
+                self._flowapp_observe(obj, callback)
+
     def _flowapp_observe(
         self,
         obj: mui.FlexBox,
         callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta],
                                     Coroutine]] = None):
+        ctx = _get_flowapp_observe_context()
+        if ctx is not None:
+            ctx._added_layouts_and_cbs[obj] = callback
+            return
         # TODO better error msg if app editable not enabled
         path = obj._flow_comp_def_path
         assert self._protect_app_observe_call is False, "you can't call observe inside observe reload callback"
@@ -1179,16 +1233,20 @@ class EditableApp(App):
         for meta_type_uid, meta_item in metas_dict.items():
             if meta_item.type is not None:
                 if meta_type_uid in obentry.obmetas:
-                    obentry.obmetas[meta_type_uid].layouts.append(obj)
+                    obentry.obmetas[meta_type_uid].layouts[obj] = callback
                 else:
                     qualname_prefix = meta_type_uid[1]
-                    obmeta = _LayoutObserveMeta([obj], qualname_prefix,
+                    obmeta = _LayoutObserveMeta({obj: callback}, qualname_prefix,
                                                 meta_item.type,
                                                 meta_item.is_leaf,
-                                                meta_item.metas, callback)
+                                                meta_item.metas)
                     obentry.obmetas[meta_type_uid] = obmeta
 
     def _flowapp_remove_observer(self, obj: mui.FlexBox):
+        ctx = _get_flowapp_observe_context()
+        if ctx is not None:
+            ctx._removed_layouts.append(obj)
+            return
         path = obj._flow_comp_def_path
         assert path != "" and self._watchdog_observer is not None
         path_resolved = self._flow_reload_manager._resolve_path_may_in_memory(
@@ -1201,7 +1259,7 @@ class EditableApp(App):
             types_to_remove: List[ObjectReloadManager.TypeUID] = []
             for k, v in obentry.obmetas.items():
                 if obj in v.layouts:
-                    v.layouts.remove(obj)
+                    v.layouts.pop(obj)
                 if len(v.layouts) == 0:
                     types_to_remove.append(k)
             for k in types_to_remove:
@@ -1263,19 +1321,18 @@ class EditableApp(App):
             # ast parse error
             traceback.print_exc()
             return
-        # print(changes)
         if changes is None:
             return
         rprint(f"<watchdog> {path}")
         new, change, _ = changes
-        # for x in changes:
-        #     print(x.keys())
         new_data = self._flowapp_code_mgr.get_code(resolved_path)
         is_reload = False
         is_callback_change = False
         callbacks_of_this_file: Optional[List[_CompReloadMeta]] = None
-        with self._flowapp_protect_app_observe_call():
-            try:
+        observe_ctx = _FlowAppObserveContext()
+        try:
+            with self._flowapp_protect_app_observe_call(observe_ctx):
+
                 if resolved_path in self._flowapp_change_observers:
                     obmetas = self._flowapp_change_observers[
                         resolved_path].obmetas.copy()
@@ -1326,7 +1383,8 @@ class EditableApp(App):
                         # print("do_reload", do_reload)
                         if not do_reload:
                             continue
-                        for i, layout in enumerate(obmeta.layouts):
+                        # rprint(obmeta.layouts)
+                        for i, (layout, layout_reload_cb) in enumerate(obmeta.layouts.items()):
                             changed_user_obj = None
 
                             if layout is self:
@@ -1423,23 +1481,25 @@ class EditableApp(App):
                                                 reload=True,
                                                 decorator_fn=fn)
                                         else:
-                                            if obmeta.callback is not None:
+                                            if layout_reload_cb is not None:
                                                 # handle layout in callback
-                                                new_layout = await obmeta.callback(
+                                                new_layout = await layout_reload_cb(
                                                     layout,
                                                     flow_special.create_layout)
-                                                if new_layout is not None:
-                                                    obmeta.layouts[i] = new_layout
+                                                # if new_layout is not None:
+                                                    # obmeta.layouts[i] = new_layout
+                                                    # observe_ctx._reloaded_layout_pairs.append((layout, new_layout))
                                             # dynamic layout
                                     if flow_special.create_preview_layout:
                                         if not isinstance(layout, App):
-                                            if obmeta.callback is not None:
+                                            if layout_reload_cb is not None:
                                                 # handle layout in callback
-                                                new_layout = await obmeta.callback(
+                                                new_layout = await layout_reload_cb(
                                                     layout, flow_special.
                                                     create_preview_layout)
-                                                if new_layout is not None:
-                                                    obmeta.layouts[i] = new_layout
+                                                # if new_layout is not None:
+                                                    # obmeta.layouts[i] = new_layout
+                                                    # observe_ctx._reloaded_layout_pairs.append((layout, new_layout))
                                     for auto_run in flow_special.auto_runs:
                                         if auto_run is not None:
                                             await self._run_autorun(
@@ -1499,10 +1559,19 @@ class EditableApp(App):
                             if new_method is not None:
                                 handler.cb = new_method
 
-            except:
-                # watchdog thread can't fail
-                traceback.print_exc()
-                return
+        except:
+            # watchdog thread can't fail
+            traceback.print_exc()
+            return
+        finally:
+            # for pair in observe_ctx._reloaded_layout_pairs:
+            #     observe_ctx._removed_layouts.remove(pair[0])
+            #     observe_ctx._added_layouts_and_cbs.pop(pair[1])
+            for layout in observe_ctx._removed_layouts:
+                self._flowapp_remove_observer(layout)
+            for layout, cb in observe_ctx._added_layouts_and_cbs.items():
+                self._flowapp_observe(layout, cb)
+            return 
 
     def _watchdog_on_modified(self, ev: _WATCHDOG_MODIFY_EVENT_TYPES):
         # which event trigger reload?

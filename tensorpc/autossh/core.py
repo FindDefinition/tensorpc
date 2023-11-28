@@ -28,6 +28,7 @@ from tensorpc.autossh.constants import TENSORPC_ASYNCSSH_PROXY
 from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.compat import InWindows
 from tensorpc.constants import PACKAGE_ROOT, TENSORPC_READUNTIL
+from tensorpc.core.rprint_dispatch import rprint
 
 # 7-bit C1 ANSI sequences
 ANSI_ESCAPE_REGEX = re.compile(
@@ -80,6 +81,22 @@ class CommandEventType(enum.Enum):
     UPDATE_CWD = "P"
     CONTINUATION_START = "F"
     CONTINUATION_END = "G"
+
+class CommandEventParseState(enum.IntEnum):
+    VscPromptStart = 0 # reached when we encounter \033
+    # VscCmdIdReached = 1 # reached when we encounter \]784;
+    VscCmdCodeABCFG = 2 # reached when we encounter A/B/C/F/G
+    VscCmdCodeD = 3 # reached when we encounter D
+    VscCmdCodeE = 4 # reached when we encounter E
+    VscCmdCodeP = 5 # reached when we encounter P
+    VscPromptEnd = 100 # reached when we encounter \007, idle state
+
+
+class CommandParseSpecialCharactors:
+    Start = b"\033"
+    StartAll = b"\033]784;"
+
+    End = b"\007"
 
 
 _DEFAULT_SEPARATORS = rb"(?:\r\n)|(?:\n)|(?:\r)|(?:\033\]784;[ABPCEFGD](?:;(.*?))?\007)"
@@ -391,6 +408,7 @@ class PeerSSHClient:
         try:
             # print(separators)
             res = await reader.readuntil(self._vsc_re)
+            # print("READ RES", res)
             is_eof = reader.at_eof()
             return ReadResult(res, is_eof, False)
         except asyncio.IncompleteReadError as exc:
@@ -595,6 +613,8 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
                             exc = recv_buf.pop(0)
 
                             if isinstance(exc, SoftEOFReceived):
+                                print("RTX2")
+
                                 return buf
                             else:
                                 raise cast(Exception, exc)
@@ -615,7 +635,7 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
 
                         if not recv_buf[0]:
                             recv_buf.pop(0)
-
+                        print("RTX")
                         self._maybe_resume_reading()
                         return buf
 
@@ -627,9 +647,296 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
                     self._recv_buf_len -= buflen
                     self._maybe_resume_reading()
                     raise asyncio.IncompleteReadError(cast(bytes, buf), None)
-
+                print("WTF")
                 await self._block_read(datatype)
 
+class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
+    def __init__(self) -> None:
+        super().__init__()
+        self.callback: Optional[Callable[[Event], Awaitable[None]]] = None
+        self.uid = ""
+
+        self.state = CommandEventParseState.VscPromptEnd # idle
+
+    def data_received(self, data: bytes, datatype) -> None:
+        res = super().data_received(data, datatype)
+        if self.callback is not None:
+            ts = time.time_ns()
+            res_str = data
+            loop = asyncio.get_running_loop()
+            asyncio.run_coroutine_threadsafe(
+                self.callback(RawEvent(ts, res_str, False, self.uid)), loop)
+        return res
+
+    async def readuntil(self, separator: object,
+                        datatype: asyncssh.DataType) -> AnyStr:
+        """Read data from the channel until a separator is seen"""
+
+        if not separator:
+            raise ValueError('Separator cannot be empty')
+
+        buf = cast(AnyStr, '' if self._encoding else b'')
+        recv_buf = self._recv_buf[datatype]
+        is_re = False
+        if isinstance(separator, re.Pattern):
+            seplen = len(separator.pattern)
+            is_re = True
+            pat = separator
+        else:
+            if separator is asyncsshss._NEWLINE:
+                seplen = 1
+                separators = cast(AnyStr, '\n' if self._encoding else b'\n')
+            elif isinstance(separator, (bytes, str)):
+                seplen = len(separator)
+                separators = re.escape(cast(AnyStr, separator))
+            else:
+                bar = cast(AnyStr, '|' if self._encoding else b'|')
+                seplist = list(cast(Iterable[AnyStr], separator))
+                seplen = max(len(sep) for sep in seplist)
+                separators = bar.join(re.escape(sep) for sep in seplist)
+
+            pat = re.compile(separators)
+        curbuf = 0
+        buflen = 0
+        async with self._read_locks[datatype]:
+            while True:
+                while curbuf < len(recv_buf):
+                    if isinstance(recv_buf[curbuf], Exception):
+                        if buf:
+                            recv_buf[:curbuf] = []
+                            self._recv_buf_len -= buflen
+                            raise asyncio.IncompleteReadError(
+                                cast(bytes, buf), None)
+                        else:
+                            exc = recv_buf.pop(0)
+
+                            if isinstance(exc, SoftEOFReceived):
+                                return buf
+                            else:
+                                raise cast(Exception, exc)
+
+                    newbuf = cast(AnyStr, recv_buf[curbuf])
+                    buf += newbuf
+                    start = 0
+                    # rprint(self.state, buf)
+                    idx_start_all = buf.find(CommandParseSpecialCharactors.StartAll)
+                    idx_start = buf.find(CommandParseSpecialCharactors.Start)
+                    # ensure if buf start is partial, we should wait for all possible string available.
+                    if idx_start != -1:
+                        if len(buf) - start >= len(CommandParseSpecialCharactors.StartAll):
+                            if idx_start_all == -1:
+                                idx_start = -1
+                    idx_end = buf.find(CommandParseSpecialCharactors.End)
+                    if idx_start_all != -1 and idx_end != -1:
+                        if idx_start_all < idx_end:
+                            match = pat.search(buf, start)
+                            if match:
+                                idx = match.end()
+                                recv_buf[:curbuf] = []
+                                recv_buf[0] = buf[idx:]
+                                buf = buf[:idx]
+                                self._recv_buf_len -= idx
+
+                                if not recv_buf[0]:
+                                    recv_buf.pop(0)
+                                self._maybe_resume_reading()
+                                return buf
+                        else:
+                            idx = idx_start_all
+                            recv_buf[:curbuf] = []
+                            recv_buf[0] = buf[idx:]
+                            buf = buf[:idx]
+                            self._recv_buf_len -= idx
+                            if not recv_buf[0]:
+                                recv_buf.pop(0)
+                            self._maybe_resume_reading()
+                            return buf
+                    elif idx_start_all == -1 and idx_end != -1:
+                        idx = idx_end + 1
+                        recv_buf[:curbuf] = []
+                        recv_buf[0] = buf[idx:]
+                        buf = buf[:idx]
+                        self._recv_buf_len -= idx
+                        if not recv_buf[0]:
+                            recv_buf.pop(0)
+                        self._maybe_resume_reading()
+                        return buf
+                    elif idx_start_all != -1 and idx_end == -1:
+                        if idx_start_all != 0:
+                            idx = idx_start_all
+                            recv_buf[:curbuf] = []
+                            recv_buf[0] = buf[idx:]
+                            buf = buf[:idx]
+                            self._recv_buf_len -= idx
+                            if not recv_buf[0]:
+                                recv_buf.pop(0)
+                            self._maybe_resume_reading()
+                            return buf
+                    else:
+                        idx = buf.find(b"\n")
+                        idx_r_buf = buf.rfind(b"\r")
+                        if idx != -1:
+                            idx += 1
+                            recv_buf[:curbuf] = []
+                            recv_buf[0] = buf[idx:]
+                            buf = buf[:idx]
+                            self._recv_buf_len -= idx
+                            if not recv_buf[0]:
+                                recv_buf.pop(0)
+                            self._maybe_resume_reading()
+                            return buf
+                        if idx_r_buf >= 4000:
+                            idx = idx_r_buf + 1
+                            recv_buf[:curbuf] = []
+                            recv_buf[0] = buf[idx:]
+                            buf = buf[:idx]
+                            self._recv_buf_len -= idx
+                            if not recv_buf[0]:
+                                recv_buf.pop(0)
+                            self._maybe_resume_reading()
+                            return buf
+
+
+                    # if self.state == CommandEventParseState.VscPromptEnd:
+                    #     idx = buf.find(CommandParseSpecialCharactors.Start)
+                    #     if idx != -1:
+                    #         # clear buf before start
+                    #         self.state = CommandEventParseState.VscPromptStart
+                    #         recv_buf[:curbuf] = []
+                    #         recv_buf[0] = buf[idx:]
+                    #         buf = buf[:idx]
+                    #         self._recv_buf_len -= idx
+                    #         if not recv_buf[0]:
+                    #             recv_buf.pop(0)
+                    #         self._maybe_resume_reading()
+                    #         return buf
+                    #     else:
+                    #         # find \n, return first line
+                    #         idx = buf.find(b"\n")
+                    #     if idx != -1:
+                    #         idx += 1
+                    #         recv_buf[:curbuf] = []
+                    #         recv_buf[0] = buf[idx:]
+                    #         buf = buf[:idx]
+                    #         self._recv_buf_len -= idx
+                    #         if not recv_buf[0]:
+                    #             recv_buf.pop(0)
+                    #         self._maybe_resume_reading()
+                    #         return buf
+                    # elif self.state == CommandEventParseState.VscPromptStart:
+                    #     # we know buf start with \033, the following should be \]784;
+                    #     # if wrong, back to VscPromptEnd
+                    #     if len(buf) >= 7:
+                    #         cmd_code = buf[6]
+                    #         if buf[1:6] == b"]784;" and cmd_code in b"ABPCEFGD":
+                    #             if cmd_code == b"D":
+                    #                 self.state = CommandEventParseState.VscCmdCodeD
+                    #             elif cmd_code == b"E":
+                    #                 self.state = CommandEventParseState.VscCmdCodeE
+                    #             elif cmd_code == b"P":
+                    #                 self.state = CommandEventParseState.VscCmdCodeP
+                    #             else:
+                    #                 self.state = CommandEventParseState.VscCmdCodeABCFG
+                    #         else:
+                    #             self.state = CommandEventParseState.VscPromptEnd
+                    #             idx = buf.find(b"\n")
+                    #             if idx != -1:
+                    #                 idx += 1
+                    #                 recv_buf[:curbuf] = []
+                    #                 recv_buf[0] = buf[idx:]
+                    #                 buf = buf[:idx]
+                    #                 self._recv_buf_len -= idx
+                    #                 if not recv_buf[0]:
+                    #                     recv_buf.pop(0)
+                    #                 self._maybe_resume_reading()
+                    #                 return buf
+                    # elif self.state == CommandEventParseState.VscCmdCodeABCFG:
+                    #     # wait for \007
+                    #     if len(buf) >= 8:
+                    #         self.state = CommandEventParseState.VscPromptEnd
+                    #         # for ABCFG, we always return buffer even if it's wrong,
+                    #         # user should parse and handle it.
+                    #         idx = 8
+                    #         recv_buf[:curbuf] = []
+                    #         recv_buf[0] = buf[idx:]
+                    #         buf = buf[:idx]
+                    #         self._recv_buf_len -= idx
+                    #         if not recv_buf[0]:
+                    #             recv_buf.pop(0)
+                    #         self._maybe_resume_reading()
+                    #         return buf
+                    # elif self.state == CommandEventParseState.VscCmdCodeD or self.state == CommandEventParseState.VscCmdCodeP or self.state == CommandEventParseState.VscCmdCodeE:
+                    #     if len(buf) >= 8:
+                    #         if buf[7] != b";":
+                    #             self.state = CommandEventParseState.VscPromptEnd
+                    #             idx = 8
+                    #             recv_buf[:curbuf] = []
+                    #             recv_buf[0] = buf[idx:]
+                    #             buf = buf[:idx]
+                    #             self._recv_buf_len -= idx
+                    #             if not recv_buf[0]:
+                    #                 recv_buf.pop(0)
+                    #             self._maybe_resume_reading()
+                    #             return buf
+                    #         else:
+                    #             # find \007 in remain. if not found, find \033, if found,
+                    #             # back to VscPromptEnd
+                    #             idx = buf.find(CommandParseSpecialCharactors.End, 8)
+                    #             idx_start = buf.find(CommandParseSpecialCharactors.Start, 8)
+                    #             if idx_start != 1:
+                    #                 if idx_start < idx:
+                    #                     self.state = CommandEventParseState.VscPromptEnd
+                    #                     idx = idx_start
+                    #                     recv_buf[:curbuf] = []
+                    #                     recv_buf[0] = buf[idx:]
+                    #                     buf = buf[:idx]
+                    #                     self._recv_buf_len -= idx
+                    #                     if not recv_buf[0]:
+                    #                         recv_buf.pop(0)
+                    #                     self._maybe_resume_reading()
+                    #                     return buf
+                    #             if idx != -1:
+                    #                 self.state = CommandEventParseState.VscPromptEnd
+                    #                 idx += 1
+                    #                 recv_buf[:curbuf] = []
+                    #                 recv_buf[0] = buf[idx:]
+                    #                 buf = buf[:idx]
+                    #                 self._recv_buf_len -= idx
+                    #                 if not recv_buf[0]:
+                    #                     recv_buf.pop(0)
+                    #                 self._maybe_resume_reading()
+                    #                 return buf
+                    # else:
+                    #     raise NotImplementedError
+                    # rprint("AFTER", self.state, buf)
+
+                    # match = pat.search(buf, start)
+                    # if len(buf) >= 1970493 and len(buf) <= 1980493:
+                    #     print(buf)
+                    # print("RE", time.time() - t, len(buf), start, match)
+                    # if match:
+                    #     idx = match.end()
+                    #     recv_buf[:curbuf] = []
+                    #     recv_buf[0] = buf[idx:]
+                    #     buf = buf[:idx]
+                    #     self._recv_buf_len -= idx
+
+                    #     if not recv_buf[0]:
+                    #         recv_buf.pop(0)
+
+                    #     self._maybe_resume_reading()
+                    #     return buf
+
+                    buflen += len(newbuf)
+                    curbuf += 1
+
+                if self._read_paused or self._eof_received:
+                    recv_buf[:curbuf] = []
+                    self._recv_buf_len -= buflen
+                    self._maybe_resume_reading()
+                    raise asyncio.IncompleteReadError(cast(bytes, buf), None)
+
+                await self._block_read(datatype)
 
 class SSHClient:
     def __init__(self,
@@ -786,7 +1093,7 @@ class SSHClient:
                         client_ip_callback(stdout_content)
                 # assert self.encoding is None
                 chan, session = await conn.create_session(
-                    MySSHClientStreamSession,
+                    VscodeStyleSSHClientStreamSession,
                     "bash --init-file ~/.tensorpc_hooks-bash.sh",
                     request_pty="force",
                     encoding=self.encoding)  # type: ignore

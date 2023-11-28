@@ -97,7 +97,7 @@ class BufferMeshApp:
                                           target_position=(0, 20, 0),
                                           color=0xffffff,
                                           intensity=5).prop(castShadow=True)
-        dirlight.set_sx_props({
+        dirlight.update_sx_props({
             "shadow-mapSize-height": 2048,
             "shadow-mapSize-width": 2048,
             # "shadow-camera-near": 0.5,
@@ -338,7 +338,7 @@ class EnvmapGroupdProjectionApp:
                                 "materials.paint",
                                 "material-envMap":
                                 "CubeCameraTexture",
-                            }).set_sx_props({
+                            }).update_sx_props({
                                 "material-color": "#ffdf71",
                             }).prop(enableSelect=True, selectOverrideProps={
                                 "material-color": "#aadf71",
@@ -362,7 +362,7 @@ class EnvmapGroupdProjectionApp:
                                 material="materials.930_stickers"),
                             three.Mesh([]).set_override_props_unchecked(
                                 geometry="nodes.mesh_0_6.geometry",
-                                material="materials.930_plastics").set_sx_props({
+                                material="materials.930_plastics").update_sx_props({
                                     "material-polygonOffset":
                                     True,
                                     "material-polygonOffsetFactor":
@@ -388,7 +388,7 @@ class EnvmapGroupdProjectionApp:
             three.Group([
                 three.Mesh([]).set_override_props_unchecked(
                     geometry="nodes.mesh_2.geometry",
-                    material="materials.plate").set_sx_props({
+                    material="materials.plate").update_sx_props({
                         "material-roughness":
                         1,
                     }),
@@ -397,7 +397,7 @@ class EnvmapGroupdProjectionApp:
                     material="materials.DefaultMaterial"),
                 three.Mesh([]).set_override_props_unchecked(
                     geometry="nodes.mesh_2_2.geometry",
-                    material=r"materials.Material\.001").set_sx_props({
+                    material=r"materials.Material\.001").update_sx_props({
                         "material-depthWrite":
                         False,
                         "material-opacity":
@@ -407,7 +407,7 @@ class EnvmapGroupdProjectionApp:
         ])
         car = three.URILoaderContext(
             three.URILoaderType.GLTF, "tensorpc://porsche-transformed.glb", [
-                car_group.prop(position=(-8, 0, -2), scale=20).set_sx_props(
+                car_group.prop(position=(-8, 0, -2), scale=20).update_sx_props(
                     {"rotation-y": -np.pi / 4}),
             ])
         self.canvas = plus.SimpleCanvas(

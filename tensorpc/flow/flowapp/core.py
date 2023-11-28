@@ -152,6 +152,7 @@ class UIType(enum.IntEnum):
     SimpleControls = 0x38
     # this component have different state structure.
     TanstackJsonLikeTreeView = 0x39
+    GridLayout = 0x40
 
     # special
     TaskLoop = 0x100
@@ -377,7 +378,8 @@ class FrontendEventType(enum.IntEnum):
 UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
     UIType.DataGrid, UIType.MatchCase,
     UIType.DataFlexBox,
-    UIType.Tabs, UIType.Allotment
+    UIType.Tabs, UIType.Allotment,
+    UIType.GridLayout,
 }
 
 class AppDraggableType(enum.Enum):
@@ -988,6 +990,26 @@ class _EmitterEventSlot:
     
 T_child_structure = TypeVar("T_child_structure", default=Any, bound=DataclassType)
 
+class _ComponentEffects:
+    def __init__(self) -> None:
+        self._flow_effects: Dict[str, List[Callable[[], Union[Callable[[], Any], None, Coroutine[None, None, Union[Callable[[], Any], None]]]]]] = {}
+        self._flow_unmounted_effects: Dict[str, List[Callable[[], _CORO_NONE]]] = {}
+
+    def use_effect(self, effect: Callable[[], Optional[Callable[[], Any]]], key: str = ""):
+        if key not in self._flow_effects:
+            self._flow_effects[key] = []
+            self._flow_unmounted_effects[key] = []
+
+        self._flow_effects[key].append(effect)
+
+    def has_effect_key(self, key: str):
+        return key in self._flow_effects
+    
+    def remove_effect_key(self, key: str):
+        self._flow_effects.pop(key)
+        self._flow_unmounted_effects.pop(key)
+
+
 class Component(Generic[T_base_props, T_child]):
 
     def __init__(self,
@@ -1022,7 +1044,7 @@ class Component(Generic[T_base_props, T_child]):
         # json_only, this scan will be skipped.
         self._flow_json_only = json_only
 
-        self._flow_effects: List[Callable[[], Union[Callable[[], Any], None, Coroutine[None, None, Union[Callable[[], Any], None]]]]] = []
+        self.effects = _ComponentEffects()
         self._flow_unmount_effect_objects: List[Callable[[], _CORO_NONE]] = []
 
         self._flow_event_context_creator: Optional[Callable[
@@ -1035,8 +1057,8 @@ class Component(Generic[T_base_props, T_child]):
         self.event_before_mount = self._create_emitter_event_slot(FrontendEventType.BeforeMount)
         self.event_before_unmount = self._create_emitter_event_slot(FrontendEventType.BeforeUnmount)
     
-    def use_effect(self, effect: Callable[[], Optional[Callable[[], Any]]]):
-        self._flow_effects.append(effect)
+    def use_effect(self, effect: Callable[[], Optional[Callable[[], Any]]], key: str = ""):
+        return self.effects.use_effect(effect, key)
 
     @classmethod
     def __get_pydantic_core_schema__(cls, _source_type: Any, _handler: GetCoreSchemaHandler):
@@ -1184,9 +1206,12 @@ class Component(Generic[T_base_props, T_child]):
                 traceback.print_exc()
             self._task = None
 
-    def set_sx_props(self, sx_props: Dict[str, Any]):
+    def update_sx_props(self, sx_props: Dict[str, Any]):
         self.__sx_props.update(sx_props)
         return self
+    
+    def get_sx_props(self):
+        return self.__sx_props
 
     def to_dict(self):
         """undefined will be removed here.
@@ -1195,7 +1220,7 @@ class Component(Generic[T_base_props, T_child]):
         """
         props = self.get_props()
         props, und = split_props_to_undefined(props)
-        props.update(self.__sx_props)
+        props.update(as_dict_no_undefined(self.__sx_props))
         res = {
             "uid": self._flow_uid,
             "type": self._flow_comp_type.value,
@@ -1925,6 +1950,20 @@ class ContainerBase(Component[T_container_props, T_child]):
         if reload_mgr is None:
             reload_mgr = self.flow_app_comp_core.reload_mgr
 
+        for deleted in detached:
+            special_methods = deleted.get_special_methods(reload_mgr)
+            if special_methods.will_unmount is not None:
+                await self.run_callback(
+                    special_methods.will_unmount.get_binded_fn(),
+                    sync_status_first=False,
+                    change_status=False)
+            for k, unmount_effects in deleted.effects._flow_unmounted_effects.items():
+                for unmount_effect in unmount_effects:
+                    await self.run_callback(
+                        unmount_effect,
+                        sync_status_first=False,
+                        change_status=False)
+                unmount_effects.clear()
         for attach in attached:
             special_methods = attach.get_special_methods(reload_mgr)
             if special_methods.did_mount is not None:
@@ -1933,28 +1972,16 @@ class ContainerBase(Component[T_container_props, T_child]):
                     sync_status_first=False,
                     change_status=False)
             # run effects 
-            effects = attach._flow_effects
-            for effect in effects:
-                res = await self.run_callback(
-                    effect,
-                    sync_status_first=False,
-                    change_status=False)
-                if res is not None:
-                    # res is effect
-                    attach._flow_unmount_effect_objects.append(res)
-        for deleted in detached:
-            special_methods = deleted.get_special_methods(reload_mgr)
-            if special_methods.will_unmount is not None:
-                await self.run_callback(
-                    special_methods.will_unmount.get_binded_fn(),
-                    sync_status_first=False,
-                    change_status=False)
-            for unmount_effect in deleted._flow_unmount_effect_objects:
-                await self.run_callback(
-                    unmount_effect,
-                    sync_status_first=False,
-                    change_status=False)
-    
+            for k, effects in attach.effects._flow_effects.items():
+                for effect in effects:
+                    res = await self.run_callback(
+                        effect,
+                        sync_status_first=False,
+                        change_status=False)
+                    if res is not None:
+                        # res is effect
+                        attach.effects._flow_unmounted_effects[k].append(res)
+
     def set_new_layout_locally(self, layout: Union[Dict[str, Component], T_child_structure]):
         detached_uid_to_comp = self._detach_child()
         if isinstance(layout, dict):

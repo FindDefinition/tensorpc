@@ -55,6 +55,7 @@ from tensorpc.flow.flowapp.components import typemetas
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from tensorpc.flow.sampleapp.sample_reload_fn import func_support_reload
 from tensorpc.flow.flowapp.objtree import get_objtree_context
+from tensorpc.flow.sampleapp.sample_preview import TestPreview0
 
 class SampleApp(App):
     def __init__(self) -> None:
@@ -951,7 +952,7 @@ class PointCloudApp:
                                  callback=self._on_slider_select)
 
         res = mui.VBox([
-            mui.Markdown("PointCloud **:red[App]** :dog: :+1: :green[$\\sqrt{2}$]").prop(padding="10px", katex=True, emoji=True),
+            mui.Markdown("PointCloud **:red[App]** :dog: :+1: :green[$\\sqrt{3}$]").prop(padding="10px", katex=True, emoji=True),
             mui.Input("hello world"),
             mui.HBox([
                 mui.Button("Change Slider Range",
@@ -1324,6 +1325,7 @@ class CollectionApp:
         self.monitor = plus.ComputeResourceMonitor()
         self.example_draggable_pc = np.random.uniform(-3, 3, size=[1000, 3])
         self.example_3d_canvas = PointCloudApp()
+        self.example_preview_layout = TestPreview0()
         self.example_object_inspector = ObjectInspectApp()
         self.example_pyplot = PlotApp()
         self.example_auto_complete = AutoComputeApp()
@@ -1516,6 +1518,42 @@ class CameraBenchmarkApp:
             t = time.time()
             # await asyncio.sleep(0)
             # print(dura, dura_encode, dura_cv, len(img_str), frame.shape)
+
+class TestNodeNode0(UserObjTree):
+    def __init__(self) -> None:
+        super().__init__()
+
+    @marker.mark_create_preview_layout
+    def layout_func(self):
+        return mui.VBox([
+            mui.Button("WTF"),
+            mui.Markdown("## 6")
+        ])
+
+class TestNodeRoot(UserObjTree):
+    def __init__(self) -> None:
+        super().__init__()
+        self.node0 = TestNodeNode0()
+        self._childs["node0"] = self.node0
+
+    @marker.mark_create_preview_layout
+    def layout_func(self):
+        return mui.VBox([
+            mui.Button("ROOT"),
+            mui.Markdown("## ROOT132")
+        ])
+
+class GridPreviewLayoutApp:
+    @mark_create_layout
+    def my_layout(self):
+        root = TestNodeRoot()
+        reload_mgr = appctx.get_reload_manager()
+
+        return mui.HBox([plus.GridPreviewLayout({
+            "root": root,
+            "root.node0": root.get_childs()["node0"]
+        })]).prop(width="100%")
+
 
 if __name__ == "__main__":
     import time

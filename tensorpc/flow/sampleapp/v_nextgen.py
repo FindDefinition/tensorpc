@@ -4,7 +4,7 @@ import random
 from typing import Optional
 
 import aiohttp
-from tensorpc.flow import mui, three, plus, mark_create_layout, appctx, V
+from tensorpc.flow import mui, three, plus, mark_create_layout, appctx, V, mark_create_preview_layout
 import sys
 from tensorpc import PACKAGE_ROOT
 import numpy as np
@@ -15,8 +15,9 @@ from tensorpc.flow.flowapp.objtree import UserObjTree
 from tensorpc.flow import observe_function
 
 class TestNodeNode0(UserObjTree):
-    def __init__(self) -> None:
+    def __init__(self, uid: str = "0") -> None:
         super().__init__()
+        self.uid = uid
 
     def func(self, a, b):
         V.points("points0", 1000).p(a, b, 1).color("red").size(5)
@@ -30,17 +31,35 @@ class TestNodeNode0(UserObjTree):
         V.mdprint("## hello world")
         V.mdprint("## hello world")
 
+    @mark_create_preview_layout
+    def layout_func(self):
+        return mui.VBox([
+            mui.Button("HAHAHA"),
+            mui.Markdown(f"## Z{self.uid}")
+        ])
+
+
 class TestNodeRoot(UserObjTree):
     def __init__(self) -> None:
         super().__init__()
-        self.node0 = TestNodeNode0()
+        self.node0 = TestNodeNode0("0")
         self._childs["node0"] = self.node0
+        self._childs["node1"] = TestNodeNode0("1")
+        self._childs["node2"] = TestNodeNode0("2")
+        self._childs["node3"] = TestNodeNode0("3")
 
     def func(self, a, b):
         with V.group("dev"):
             V.bounding_box((a, b, 2))
             self.node0.func(a, b)
             V.mdprint("## hello world")
+
+    @mark_create_preview_layout
+    def layout_func(self):
+        return mui.VBox([
+            mui.Button("ROOT"),
+            mui.Markdown("## ROOT132")
+        ])
 
 class DevApp:
 
@@ -148,7 +167,12 @@ class DevApp:
         #     ])
         # ])
         with V.group("dev"):
+            points = np.random.uniform(-1, 1, size=[1000000, 3]).astype(np.float32)
+            colors = np.random.uniform(0, 255, size=[1000]).astype(np.uint8)
+
             V.points("points0", 1000).p(1, 1, 1).p(0, 0, 0).color("red").size(5)
+            V.points("points1", 1000000).array(points).size(5)
+
             V.lines("lines0", 1000).p(2, 2, 2, 5, 5, 5).color("blue")
             def wtfrtx(a: V.Annotated[float, V.RangedFloat(0, 10, 0.1)] = 5):
                 V.points('points0', 1000).p(a, a, a).color("blue").size(5)
