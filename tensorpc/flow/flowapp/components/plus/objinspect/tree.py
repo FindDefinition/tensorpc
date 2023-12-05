@@ -18,7 +18,7 @@ from tensorpc.flow.flowapp.components.plus.canvas import SimpleCanvas
 from tensorpc.flow.flowapp.components.plus.collection import SimpleFileReader, ScriptExecutor
 from tensorpc.flow.flowapp.components.plus.monitor import \
     ComputeResourceMonitor
-from tensorpc.flow.flowapp.components.plus.objinspect.core import (
+from tensorpc.flow.flowapp.components.plus.core import (
     ALL_OBJECT_LAYOUT_HANDLERS, ALL_OBJECT_PREVIEW_HANDLERS,
     USER_OBJ_TREE_TYPES, ContextMenuType, CustomTreeItemHandler, ObjectLayoutCreator,
     ObjectLayoutHandler)

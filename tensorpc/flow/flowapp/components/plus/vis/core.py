@@ -27,12 +27,12 @@ class CanvasItemProxy:
 
         self._tdata: Optional[Dict[str, Any]] = None
 
-    def update_event(self, comp: three.Component):
-        pass 
+    # def update_event(self, comp: three.Component):
+    #     pass 
 
-    def detail_layout(self, layout: mui.FlexBox):
-        self._detail_layout = layout
-        return self
+    # def detail_layout(self, layout: mui.FlexBox):
+    #     self._detail_layout = layout
+    #     return self
 
     @classmethod
     def __get_pydantic_core_schema__(cls, _source_type: Any, _handler: GetCoreSchemaHandler):
@@ -47,11 +47,11 @@ class CanvasItemProxy:
             raise TypeError('CanvasItemProxy required')
         return v
 
-    def tdata(self, data: Dict[str, Any]):
-        # make sure data is json serializable
-        json.dumps(data)
-        self._tdata = data
-        return self
+    # def tdata(self, data: Dict[str, Any]):
+    #     # make sure data is json serializable
+    #     json.dumps(data)
+    #     self._tdata = data
+    #     return self
 
 @dataclass
 class CanvasItemCfg:
@@ -64,6 +64,7 @@ class CanvasItemCfg:
     type_str_override: Optional[str] = None
     alias: Optional[str] = None
     node: Optional[JsonLikeNode] = None
+    tdata: Optional[Dict[str, Any]] = None
 
 def get_canvas_item_cfg(comp: three.Component) -> Optional[CanvasItemCfg]:
     if comp._flow_user_data is not None and isinstance(comp._flow_user_data, CanvasItemCfg):
@@ -187,3 +188,8 @@ class CanvasUserTreeItem:
     childs: Dict[str, three.ThreeComponentBase] = field(default_factory=dict)
 
     md_prints: List[str] = field(default_factory=list)
+
+
+class _VapiObjects:
+    def prepare_vapi_props(self) -> None:
+        raise NotImplementedError

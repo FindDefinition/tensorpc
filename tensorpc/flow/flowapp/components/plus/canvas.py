@@ -209,6 +209,7 @@ class SimpleCanvas(mui.FlexBox):
             # self._screen_shot,
             self._screen_shot_v2,
             self._dynamic_voxels,
+            self._dynamic_custom_objs,
 
             # three.GizmoHelper().prop(alignment="bottom-right", renderPriority=1),
             *init_canvas_childs,
@@ -294,7 +295,7 @@ class SimpleCanvas(mui.FlexBox):
             all_childs = self._dynamic_boxes._get_uid_to_comp_dict()
             for v in all_childs.values():
                 if isinstance(v, three.BoundingBox):
-                    ev += v.update_event(add_cross=value)
+                    ev += v.update_event(addCross=value)
             await self.send_and_wait(ev)
         elif uid == "camera.keyboard_mode":
             if value == CamCtrlKeyboardMode.Helicopter:
@@ -687,23 +688,33 @@ class SimpleCanvas(mui.FlexBox):
     async def show_voxels(self,
                          key: str,
                          centers: np.ndarray,
-                         colors: np.ndarray,
+                         colors: Union[np.ndarray, str],
                          size: float,
                          limit: int):
         if key not in self._voxels_dict:
-            ui = three.VoxelMesh(centers, size, limit, [
-                three.MeshBasicMaterial().prop(vertexColors=True),
-            ], colors=colors)
+            # ui = three.VoxelMesh(centers, size, limit, [
+            #     three.MeshStandardMaterial().prop(vertexColors=isinstance(colors, np.ndarray), color=colors if isinstance(colors, str) else mui.undefined),
+            # ], colors=colors if isinstance(colors, np.ndarray) else mui.undefined)
+            ui = three.InstancedMesh(centers, limit, [
+                three.BoxGeometry(size, size, size),
+                three.MeshStandardMaterial().prop(vertexColors=False, color=colors if isinstance(colors, str) else mui.undefined),
+            ], colors=colors if isinstance(colors, np.ndarray) else mui.undefined)
             self._voxels_dict[key] = ui
             await self._dynamic_voxels.update_childs({key: ui})
             return 
         ui = self._voxels_dict[key]
         limit_prev = ui.props.limit
         assert not isinstance(limit_prev, mui.Undefined)
-        if limit <= limit_prev:
-            await ui.send_and_wait(ui.update_event(size=size, colors=colors, centers=centers))
+        if isinstance(ui, three.InstancedMesh):
+            if limit <= limit_prev:
+                await ui.send_and_wait(ui.update_event(size=size, colors=colors, transforms=centers))
+            else:
+                await ui.send_and_wait(ui.update_event(size=size, colors=colors, transforms=centers, limit=limit))
         else:
-            await ui.send_and_wait(ui.update_event(size=size, colors=colors, centers=centers, limit=limit))
+            if limit <= limit_prev:
+                await ui.send_and_wait(ui.update_event(size=size, colors=colors, centers=centers))
+            else:
+                await ui.send_and_wait(ui.update_event(size=size, colors=colors, centers=centers, limit=limit))
 
     async def clear_all_voxels(self):
         # TODO currently no way to clear lines without unmount

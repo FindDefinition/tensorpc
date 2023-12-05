@@ -545,6 +545,8 @@ class IconType(enum.IntEnum):
     Preview = 38
     Build = 39
     VisibilityOff = 40
+    ManageAccounts = 41
+    AccountCircle = 42
 
 
 @dataclasses.dataclass
@@ -3183,11 +3185,18 @@ class Allotment(MUIContainerBase[AllotmentProps, MUIComponentType]):
 
 
 @dataclasses.dataclass
+class FlexLayoutFontProps:
+    size: Union[str, Undefined] = undefined
+    family: Union[str, Undefined] = undefined
+    style: Union[str, Undefined] = undefined
+    weight: Union[str, Undefined] = undefined
+
+@dataclasses.dataclass
 class FlexLayoutProps(ContainerBaseProps):
     modelJson: Union[Any, Undefined] = undefined
     # model change save debounce.
     debounce: Union[NumberType, Undefined] = undefined
-
+    font: Union[FlexLayoutFontProps, Undefined] = undefined
 
 class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
     """TODO currently we can't programatically configure FlexLayout

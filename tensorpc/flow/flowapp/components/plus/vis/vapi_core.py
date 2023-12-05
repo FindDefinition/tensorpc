@@ -48,24 +48,17 @@ from ...typemetas import (ColorRGB, ColorRGBA, RangedFloat, RangedInt,
                           RangedVector3, Vector3,
                           annotated_function_to_dataclass)
 from .canvas import ComplexCanvas, find_component_trace_by_uid_with_not_exist_parts
-from .core import CanvasItemCfg, CanvasItemProxy, is_reserved_name, VContext
+from .core import CanvasItemCfg, CanvasItemProxy, is_reserved_name, VContext, _VapiObjects
 import numpy as np
 from .core import get_canvas_item_cfg, get_or_create_canvas_item_cfg, ContainerProxy, GroupProxy
 
 
 
-
-class PointsProxy(CanvasItemProxy):
-    def __init__(self) -> None:
-        super().__init__()
+class Points(three.Points, _VapiObjects):
+    def __init__(self, limit: int) -> None:
+        super().__init__(limit)
         self._points: List[three.Vector3Type] = []
         self._points_arr: List[np.ndarray] = []
-
-        self._size: three.NumberType = 3
-        self._limit: Optional[int] = None
-        self._layer: Union[three.Undefined, int] = 31 # disable raycast by default
-
-        self._color: Union[three.Undefined, str] = three.undefined
 
     def p(self, x: float, y: float, z: float):
         self._points.append((x, y, z))
@@ -76,83 +69,20 @@ class PointsProxy(CanvasItemProxy):
             data = data.astype(np.float32)
         self._points_arr.append(data)
         return self
-
-    def raycast_layer(self, layer: int):
-        self._layer = layer
-        return self
-
-    def size(self, size: three.NumberType):
-        self._size = size
-        return self
-
-    def color(self, color: Union[three.Undefined, str]):
-        self._color = color
-        return self
-
-    def limit(self, limit: int):
-        self._limit = limit
-        return self
-
-    def update_event(self, comp: three.Points):
+    
+    def prepare_vapi_props(self):
         # TODO global config
         points_nparray = np.array(self._points, dtype=np.float32).reshape(-1, 3)
         if self._points_arr:
             points_nparray = np.concatenate(self._points_arr +
                                             [points_nparray])
-        if self._limit is not None:
-            return comp.update_event(limit=self._limit,
-                                     colors=self._color,
-                                     size=self._size,
-                                     layers=self._layer,
-                                     points=points_nparray)
-        else:
-            return comp.update_event(size=self._size,
-                                     colors=self._color,
-                                     layers=self._layer,
-                                     points=points_nparray)
+        self.prop(points=points_nparray)
 
-
-class ColoredPointsProxy(PointsProxy):
-    def __init__(self) -> None:
-        super().__init__()
-        self._point_colors: List[Tuple[int, int, int]] = []
-        self._point_colors_arr: List[np.ndarray] = []
-
-    def p(self, x: float, y: float, z: float, r: int, g: int, b: int):
-        self._points.append((x, y, z))
-        self._point_colors.append((r, g, b))
-        return self
-
-    def array(self, points: np.ndarray, colors: np.ndarray):
-        if points.dtype != np.float32:
-            points = points.astype(np.float32)
-        three.Points._check_colors(colors, points)
-        self._points_arr.append(points)
-        self._point_colors_arr.append(colors)
-        return self
-
-    def update_event(self, comp: three.Points):
-        points_nparray = np.array(self._points, dtype=np.float32)
-        colors_nparray = np.array(self._point_colors, dtype=np.uint8)
-        if self._points_arr:
-            points_nparray = np.concatenate(self._points_arr +
-                                            [points_nparray])
-            colors_nparray = np.concatenate(self._point_colors_arr +
-                                            [colors_nparray])
-        if self._limit is not None:
-            return comp.update_event(limit=self._limit,
-                                     size=self._size,
-                                     points=points_nparray,
-                                     colors=colors_nparray)
-        else:
-            return comp.update_event(size=self._size,
-                                     points=points_nparray,
-                                     colors=colors_nparray)
 
 
 class _Polygon:
     def __init__(self, start: three.Vector3Type, closed: bool,
-                 line_proxy: "LinesProxy") -> None:
+                 line_proxy: "Lines") -> None:
         self.line_proxy = line_proxy
         self.closed = closed
         self.start = start
@@ -162,24 +92,14 @@ class _Polygon:
         self.start = (x, y, z)
         return self
 
-
-class LinesProxy(CanvasItemProxy):
-    def __init__(self) -> None:
-        super().__init__()
+class Lines(three.Segments, _VapiObjects):
+    def __init__(self, limit: int,
+                 line_width: float = 1.0,
+                 color: Union[str, mui.Undefined] = mui.undefined) -> None:
+        super().__init__(limit, line_width, color)
         self._point_pairs: List[Tuple[three.Vector3Type,
                                       three.Vector3Type]] = []
-        self._width: three.NumberType = 1
-        self._limit: Optional[int] = None
         self._lines_arr: List[np.ndarray] = []
-        self._color: Union[three.Undefined, str] = three.undefined
-        self._layer: Union[three.Undefined, int] = 31 # disable raycast by default
-
-    def limit(self, limit: int):
-        self._limit = limit
-        return self
-    def color(self, color: Union[three.Undefined, str]):
-        self._color = color
-        return self
 
     def p(self, x1: float, y1: float, z1: float, x2: float, y2: float,
           z2: float):
@@ -193,26 +113,11 @@ class LinesProxy(CanvasItemProxy):
         self._lines_arr.append(data)
         return self
 
-    def width(self, width: three.NumberType):
-        self._width = width
-        return self
-    
-    def raycast_layer(self, layer: int):
-        self._layer = layer
-        return self
-
-    def update_event(self, comp: three.Segments):
+    def prepare_vapi_props(self):
         lines_array = np.array(self._point_pairs, dtype=np.float32).reshape(-1, 2, 3)
         if self._lines_arr:
             lines_array = np.concatenate(self._lines_arr + [lines_array])
-        if self._limit is not None:
-            return comp.update_event(limit=self._limit,
-                                     lineWidth=self._width,
-                                     lines=lines_array,
-                                     layers=self._layer,
-                                     color=self._color)
-        else:
-            return comp.update_event(color=self._color, layers=self._layer, lineWidth=self._width, lines=lines_array)
+        self.prop(lines=lines_array)
 
     def polygon(self, x: float, y: float, z: float, closed: bool = False):
         return _Polygon((x, y, z), closed, self)
@@ -221,58 +126,21 @@ class LinesProxy(CanvasItemProxy):
         return _Polygon((x, y, z), True, self)
 
 
-class BoundingBoxProxy(CanvasItemProxy):
-    def __init__(self, pos: Union[three.Vector3Type, three.Undefined], dims: three.Vector3Type,
-                 rots: Union[three.Vector3Type, three.Undefined]) -> None:
-        super().__init__()
-        self._pos: Union[three.Vector3Type, three.Undefined] = pos
-        self._dims: Union[three.Vector3Type, three.Undefined] = dims
-        self._rots: Union[three.Vector3Type, three.Undefined] = rots
-        self._opacity: Union[three.NumberType,
-                             three.Undefined] = three.undefined
-        self._edge_color: Union[str, int, three.Undefined] = three.undefined
-        self._color: Union[str, int, three.Undefined] = three.undefined
-        self._emissive: Union[str, int, three.Undefined] = three.undefined
-
-    def update_event(self, comp: three.BoundingBox):
-        return comp.update_event(enableSelect=True, position=self._pos, 
-            dimension=self._dims, rotation=self._rots,
-            opacity=self._opacity, edgeColor=self._edge_color, color=self._color,
-            emissive=self._emissive)
+class BoundingBox(three.BoundingBox, _VapiObjects):
+    def prepare_vapi_props(self):
+        self.prop(enableSelect=True)
     
-    def color(self, color: Union[three.Undefined, str]):
-        self._color = color
-        return self
 
-class TextProxy(CanvasItemProxy):
-    def __init__(self, text: str, pos: Union[three.Vector3Type, three.Undefined],
-                 rots: Union[three.Vector3Type, three.Undefined]) -> None:
-        super().__init__()
-        self._text = text
-        self._pos: Union[three.Vector3Type, three.Undefined] = pos
-        self._rots: Union[three.Vector3Type, three.Undefined] = rots
-        self._color: Union[str, int, three.Undefined] = three.undefined
-
-    def update_event(self, comp: three.Text):
-        return comp.update_event(value=self._text, position=self._pos, 
-            rotation=self._rots, color=self._color)
-
-class ImageProxy(CanvasItemProxy):
-    def __init__(self, img: np.ndarray, pos: Union[three.Vector3Type, three.Undefined],
-                 rots: Union[three.Vector3Type, three.Undefined]) -> None:
+class Image(three.Image, _VapiObjects):
+    def __init__(self, img: np.ndarray) -> None:
         super().__init__()
         self._img = img
         assert img.dtype == np.uint8
-        self._pos: Union[three.Vector3Type, three.Undefined] = pos
-        self._rots: Union[three.Vector3Type, three.Undefined] = rots
-        self._color: Union[str, int, three.Undefined] = three.undefined
 
-        self._scale: Union[float, three.Undefined] = three.undefined
-
-    def update_event(self, comp: three.Image):
+    def prepare_vapi_props(self):
         # TODO currently use texture loader (webimage) in frontend cause problem,
         # so we use data texture for now.
-        use_datatex = True
+        use_datatex = False
         img = self._img
         if use_datatex:
             if img.ndim == 3 and img.shape[-1] == 3:
@@ -282,16 +150,9 @@ class ImageProxy(CanvasItemProxy):
                 img = img.reshape((*img.shape, 1))
                 img = np.tile(img, (1, 1, 3))
                 img = np.concatenate([img, np.full((*img.shape[:-1], 1), 255, dtype=np.uint8)], axis=-1)
-
-            return comp.update_event(image=img, position=self._pos, 
-                rotation=self._rots, color=self._color, scale=self._scale, enableSelect=True)
+            self.prop(image=img, enableSelect=True)
         else:
-            return comp.update_event(image=mui.Image.encode_image_bytes(img), position=self._pos, 
-                rotation=self._rots, color=self._color, scale=self._scale, enableSelect=True)
-
-    def scale(self, scale: float):
-        self._scale = scale
-        return self
+            self.prop(image=mui.Image.encode_image_bytes(img), enableSelect=True)
 
 
 V_CONTEXT_VAR: contextvars.ContextVar[
@@ -319,8 +180,9 @@ async def _draw_all_in_vctx(vctx: VContext,
                             detail_update_prefix: Optional[str] = None,
                             app_event: Optional[AppEvent] = None,
                             update_iff_change: bool = False):
-    # print("?", vctx._group_assigns)
-    # print(vctx._name_to_group)
+    # import rich 
+    # rich.print("?", vctx._group_assigns)
+    # rich.print(vctx._name_to_group)
     vctx.canvas._tree_collect_in_vctx()
     for k, v in vctx._name_to_group.items():
         cfg = get_canvas_item_cfg(v)
@@ -332,19 +194,24 @@ async def _draw_all_in_vctx(vctx: VContext,
                 for c in proxy.childs.values():
                     c_cfg = get_canvas_item_cfg(c)
                     assert c_cfg is not None
-                    c_proxy = c_cfg.proxy
-                    if c_proxy is not None:
-                        c_proxy.update_event(c)
+                    # c_proxy = c_cfg.proxy
+                    if isinstance(c, _VapiObjects):
+                        c.prepare_vapi_props()
+                    # if c_proxy is not None:
+                    #     c_proxy.update_event(c)
                 if cfg.is_vapi and v is not vctx.root:
                     assert not v.is_mounted(), f"{type(v)}"
                     v.init_add_layout(proxy.childs)
+                    # rich.print(k, cfg.is_vapi, proxy.childs)
+
                 else:
                     await v.update_childs(proxy.childs)
                 proxy.childs.clear()
     for container, (group, name) in vctx._group_assigns.items():
         assert isinstance(group, three.Group)
-        # print(group._child_comps)
-        await container.update_childs({name: group})
+        # print(group)
+        if container.is_mounted():
+            await container.update_childs({name: group})
     await vctx.canvas._show_visible_groups_of_objtree()
 
     await vctx.canvas.item_tree.update_tree(wait=False, update_iff_change=update_iff_change)
@@ -455,6 +322,7 @@ def group(name: str,
         trace, remain, consumed = find_component_trace_by_uid_with_not_exist_parts(
             v_ctx.root, uid, _CARED_CONTAINERS)
         # find first vapi-created group
+        # print(remain, consumed, uid)
         for i, comp in enumerate(trace):
             cfg = get_canvas_item_cfg(comp)
             if cfg is not None and cfg.is_vapi:
@@ -463,7 +331,7 @@ def group(name: str,
                 consumed = consumed[:i]
                 remain = consumed_remain + remain
                 break
-        # print(v_ctx, name, remain, consumed)
+        # print(2, v_ctx, name, remain, consumed)
 
         # fill existed group to ctx
         # print(trace, remain, consumed)
@@ -527,7 +395,12 @@ def group(name: str,
                     item_cfg.proxy.childs[remain_part] = new_g
                     g = new_g
                 else:
-                    v_ctx._group_assigns[group] = (g, remain[0])
+                    if not group.is_mounted():
+                        item_cfg = get_or_create_canvas_item_cfg(group, True)
+                        assert isinstance(item_cfg.proxy, GroupProxy)
+                        item_cfg.proxy.childs[remain_part] = g
+                    else:
+                        v_ctx._group_assigns[group] = (g, remain[0])
                     # v_ctx._name_to_group[uid] = g
             group = group_to_yield
 
@@ -639,26 +512,26 @@ def _create_vapi_three_obj_pcfg(obj: three.Component, name: Optional[str], defau
     return pcfg
 
 def points(name: str, limit: int):
-    point = three.Points(limit)
+    point = Points(limit)
     pcfg = _create_vapi_three_obj_pcfg(point, name, "points", _frame_cnt=2)
-    pcfg.proxy = PointsProxy()
-    return pcfg.proxy
+    pcfg.proxy = CanvasItemProxy()
+    return point
 
 def lines(name: str, limit: int):
-    point = three.Segments(limit)
+    point = Lines(limit)
     pcfg = _create_vapi_three_obj_pcfg(point, name, "lines", _frame_cnt=2)
-    pcfg.proxy = LinesProxy()
-    return pcfg.proxy
+    pcfg.proxy = CanvasItemProxy()
+    return point
 
 def bounding_box(dim: three.Vector3Type, rot: Optional[three.Vector3Type] = None, pos: Optional[three.Vector3Type] = None, name: Optional[str] = None):
-    obj = three.BoundingBox(dim)
+    obj = BoundingBox(dim)
     if rot is not None:
         obj.prop(rotation=rot)
     if pos is not None:
         obj.prop(position=pos)
     pcfg = _create_vapi_three_obj_pcfg(obj, name, "box", _frame_cnt=2)
-    pcfg.proxy = BoundingBoxProxy(three.undefined if pos is None else pos, dim, three.undefined if rot is None else rot)
-    return pcfg.proxy
+    pcfg.proxy = CanvasItemProxy()
+    return obj
 
 def text(text: str, rot: Optional[three.Vector3Type] = None, pos: Optional[three.Vector3Type] = None, name: Optional[str] = None):
     obj = three.Text(text)
@@ -667,23 +540,31 @@ def text(text: str, rot: Optional[three.Vector3Type] = None, pos: Optional[three
     if pos is not None:
         obj.prop(position=pos)
     pcfg = _create_vapi_three_obj_pcfg(obj, name, "text", _frame_cnt=2)
-    pcfg.proxy = TextProxy(text, three.undefined if pos is None else pos, three.undefined if rot is None else rot)
-    return pcfg.proxy
+    pcfg.proxy = CanvasItemProxy()
+    return obj
 
 def image(img: np.ndarray, rot: Optional[three.Vector3Type] = None, pos: Optional[three.Vector3Type] = None, name: Optional[str] = None):
     assert img.dtype == np.uint8 and (img.ndim == 3 or img.ndim == 2)
-    obj = three.Image()
+    obj = Image(img)
     if rot is not None:
         obj.prop(rotation=rot)
     if pos is not None:
         obj.prop(position=pos)
     pcfg = _create_vapi_three_obj_pcfg(obj, name, "img", _frame_cnt=2)
-    pcfg.proxy = ImageProxy(img, three.undefined if pos is None else pos, three.undefined if rot is None else rot)
+    pcfg.proxy = CanvasItemProxy()
     return pcfg.proxy
 
 def three_ui(comp: three.ThreeComponentType, name: Optional[str] = None):
     _create_vapi_three_obj_pcfg(comp, name, "obj3d", _frame_cnt=2)
     return 
+
+def set_tdata(obj: three.Component, tdata: Dict[str, Any]):
+    cfg = get_or_create_canvas_item_cfg(obj)
+    cfg.tdata = tdata
+
+def set_detail_layout(obj: three.Component, layout: mui.FlexBox):
+    cfg = get_or_create_canvas_item_cfg(obj)
+    cfg.detail_layout = layout
 
 def program(name: str, func: Callable):
     # raise NotImplementedError

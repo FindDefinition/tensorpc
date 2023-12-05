@@ -182,7 +182,7 @@ class BufferMeshDevApp:
                 three.MeshStandardMaterial().prop(),
             ],
             colors=random_pc_colors).prop()
-        self.voxel_mesh = voxel_mesh
+        self.voxel_mesh = instanced_voxel_mesh
         self.canvas = plus.SimpleCanvas(
             cam,
             init_canvas_childs=[
@@ -234,6 +234,8 @@ class BufferMeshDevApp:
         res = mui.VBox([
             mui.Button("750 Points", self._on_btn_750),
             mui.Button("250 Points", self._on_btn_250),
+            mui.Button("Random Voxels", self._on_random_voxels),
+
             self.canvas.prop(flex=1),
         ]).prop(minHeight=0,
                 minWidth=0,
@@ -278,6 +280,18 @@ class BufferMeshDevApp:
                                          self.voxel_size,
                                          colors=pc_colors))
 
+
+    async def _on_random_voxels(self):
+        voxel_size = 0.1
+
+        initial_num_pts = np.random.randint(1, 70)
+        random_pcs = np.random.randint(1, 20, size=[initial_num_pts, 3]) * voxel_size + 5
+        random_pc_colors = np.random.uniform(0,
+                                             255,
+                                             size=[random_pcs.shape[0],
+                                                   3]).astype(np.uint8)
+
+        await self.canvas.show_voxels("random_voxels", random_pcs.astype(np.float32), random_pc_colors, 0.1, 1000)
 
 async def download_file(url: str, chunk_size: int = 2**16):
     sess = prim.get_http_client_session()

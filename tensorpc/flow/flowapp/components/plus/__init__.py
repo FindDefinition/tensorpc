@@ -16,16 +16,16 @@ from .canvas import SimpleCanvas
 from .vis.canvas import ComplexCanvas
 from .grid_preview_layout import GridPreviewLayout
 from .config import ConfigPanel, ConfigPanelV2
-from .core import ListSlider, BlenderListSlider
+from .sliders import ListSlider, BlenderListSlider
 from .figure import HomogeneousMetricFigure
 from .monitor import ComputeResourceMonitor
+from .core import register_obj_preview_handler, register_obj_layout_handler
 from .objinspect import (AnyFlexLayout, BasicObjectTree, CallbackSlider,
                          InspectPanel, ObjectInspector, ObjectLayoutHandler,
                          ObjectPreviewHandler, TreeDragTarget, ThreadLocker,
-                         register_obj_layout_handler,
-                         register_obj_preview_handler,
                          register_user_obj_tree_type, MarkdownViewer)
 from .options import CommonOptions
 from .scriptmgr import ScriptManager
 from .scheduler import TmuxScheduler, Task, SSHTarget
 from .tutorials import AppInMemory, MarkdownTutorial
+from . import handlers as _handlers

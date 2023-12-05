@@ -17,7 +17,7 @@ from tensorpc.flow.flowapp.appcore import (AppSpecialEventType,
                                            create_reload_metas, get_app,
                                            get_reload_manager)
 from tensorpc.flow.flowapp.components import mui, plus, three
-from tensorpc.flow.flowapp.components.plus.objinspect.core import (
+from tensorpc.flow.flowapp.components.plus.core import (
     ALL_OBJECT_LAYOUT_HANDLERS, ObjectLayoutCreator)
 from tensorpc.flow.flowapp.core import (AppEditorFrontendEvent,
                                         FlowSpecialMethods, FrontendEventType,
@@ -54,6 +54,7 @@ class AnyFlexLayout(mui.FlexLayout):
         self.use_app_editor = use_app_editor
         # self._layout_to_watchdog: Dict[str, Tuple[]]
         self._current_bind_code_id = None
+        self.prop(font=mui.FlexLayoutFontProps(size="14px"))
 
     async def _handle_reload_layout(self, layout: mui.FlexBox,
                                     create_layout: ServFunctionMeta,

@@ -11,7 +11,7 @@ from typing_extensions import ParamSpec
 
 from tensorpc.flow.flowapp.appcore import (enter_app_conetxt, find_component,
                                            get_app)
-from tensorpc.flow.flowapp.components import plus
+from tensorpc.flow.flowapp.components import plus, mui
 
 P = ParamSpec('P')
 
@@ -171,3 +171,18 @@ def has_object(key: str):
         return False
     assert comp is not None, "you must add inspector to your UI"
     return comp.tree.has_object(key)
+
+def set_custom_layout_sync(layout: mui.FlexBox):
+    comp = find_component(plus.ObjectInspector)
+    if comp is None:
+        return
+    assert comp is not None, "you must add inspector to your UI"
+    return comp.set_custom_layout_sync(loop=get_app()._loop,
+                                    layout=layout)
+
+async def set_custom_layout(layout: mui.FlexBox):
+    comp = find_component(plus.ObjectInspector)
+    if comp is None:
+        return
+    assert comp is not None, "you must add inspector to your UI"
+    return await comp.set_custom_layout(layout=layout)

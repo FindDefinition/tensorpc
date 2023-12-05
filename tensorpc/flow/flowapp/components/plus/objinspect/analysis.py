@@ -12,7 +12,7 @@ import contextvars
 from tensorpc.core import inspecttools
 from tensorpc.core.serviceunit import ReloadableDynamicClass
 from tensorpc.flow.flowapp.components import mui
-from tensorpc.flow.flowapp.components.plus.objinspect.core import (
+from tensorpc.flow.flowapp.components.plus.core import (
     ALL_OBJECT_LAYOUT_HANDLERS, USER_OBJ_TREE_TYPES, CustomTreeItemHandler, ObjectLayoutCreator)
 from tensorpc.flow.flowapp.core import FlowSpecialMethods
 from tensorpc.flow.jsonlike import (IconButtonData, TreeItem,

@@ -26,8 +26,8 @@ from tensorpc.flow.flowapp.components.plus.objinspect.treeitems import TraceTree
 from tensorpc.flow.flowapp.components.plus.reload_utils import preview_layout_reload
 from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType, _get_obj_def_path
 from tensorpc.flow.flowapp.objtree import UserObjTreeProtocol
-
-from .core import (ALL_OBJECT_PREVIEW_HANDLERS, USER_OBJ_TREE_TYPES,
+from ..handlers.common import DefaultHandler
+from ..core import (ALL_OBJECT_PREVIEW_HANDLERS, USER_OBJ_TREE_TYPES,
                    ObjectPreviewHandler, DataClassesType)
 from .tree import _DEFAULT_OBJ_NAME, FOLDER_TYPES, ObjectTree
 from tensorpc.core import inspecttools
@@ -65,55 +65,6 @@ def get_exception_frame_stack() -> Dict[str, TraceTreeItem]:
     return frame_stacks
 
 
-class DefaultHandler(ObjectPreviewHandler):
-    """
-    TODO if the object support any-layout, add a button to enable it.
-    """
-    def __init__(self) -> None:
-        self.tags = mui.FlexBox().prop(flexFlow="row wrap")
-        self.title = mui.Typography("").prop(wordBreak="break-word")
-        self.path = mui.Typography("").prop(wordBreak="break-word")
-
-        self.data_print = mui.Typography("").prop(fontFamily="monospace",
-                                                  fontSize="12px",
-                                                  wordBreak="break-word")
-        layout = [
-            self.title.prop(fontSize="14px", fontFamily="monospace"),
-            self.path.prop(fontSize="14px", fontFamily="monospace"),
-            self.tags,
-            mui.Divider().prop(padding="3px"),
-            mui.HBox([
-                mui.Button("print", self._on_print),
-            ]),
-            self.data_print,
-        ]
-
-        super().__init__(layout)
-        self.prop(flexDirection="column")
-        self.obj: Any = np.zeros([1])
-
-    async def _on_print(self):
-        string = str(self.obj)
-        if len(string) > _MAX_STRING_IN_DETAIL:
-            string = string[:_MAX_STRING_IN_DETAIL] + "..."
-        await self.data_print.write(string)
-
-    async def bind(self, obj: Any, uid: str):
-        # bind np object, update all metadata
-        self.obj = obj
-        ev = self.data_print.update_event(value="")
-        ev += self.title.update_event(value=get_qualname_of_type(type(obj)))
-        try:
-            sf = inspect.getsourcefile(type(obj))
-        except TypeError:
-            sf = None
-        if sf is None:
-            sf = ""
-        ev += self.path.update_event(value=sf)
-        await self.send_and_wait(ev)
-        # await self.tags.set_new_layout([*tags])
-
-
 class ObjectInspector(mui.FlexBox):
     def __init__(self,
                  init: Optional[Any] = None,
@@ -129,6 +80,12 @@ class ObjectInspector(mui.FlexBox):
                                                    flex=1,
                                                    width="100%",
                                                    height="100%")
+        self.fast_layout_container = mui.HBox([]).prop(overflow="auto",
+                                                   padding="3px",
+                                                   flex=1,
+                                                   width="100%",
+                                                   height="100%")
+
         tab_theme = mui.Theme(
             components={
                 "MuiTab": {
@@ -157,6 +114,13 @@ class ObjectInspector(mui.FlexBox):
                                icon=mui.IconType.Terminal,
                                tooltip="app terminal (read only)",
                                tooltipPlacement="right"),
+                    mui.TabDef("",
+                               "3",
+                               self.fast_layout_container,
+                               icon=mui.IconType.ManageAccounts,
+                               tooltip="custom layout (appctx.inspector.set_custom_layout_sync)",
+                               tooltipPlacement="right"),
+
                 ], init_value="2").prop(panelProps=mui.FlexBoxProps(width="100%", padding=0),
                         orientation="vertical",
                         borderRight=1,
@@ -260,7 +224,7 @@ class ObjectInspector(mui.FlexBox):
             handler = self._type_to_handler_object[DataClassesType]
         else:
             metas = self.flow_app_comp_core.reload_mgr.query_type_method_meta(
-                obj_type, True)
+                obj_type, True, include_base=True)
             special_methods = FlowSpecialMethods(metas)
             if special_methods.create_preview_layout is not None:
                 if uid in self._cached_preview_layouts:
@@ -421,6 +385,30 @@ class ObjectInspector(mui.FlexBox):
             fut = asyncio.run_coroutine_threadsafe(
                 self.set_object(obj, key, expand_level), loop)
 
+            return fut.result()
+        
+    async def set_custom_layout(self,
+                        layout: mui.FlexBox):
+        """set object in sync manner, usually used on non-sync code via appctx.
+        """
+        await self.fast_layout_container.set_new_layout([layout])
+
+
+    def set_custom_layout_sync(self,
+                        layout: mui.FlexBox,
+                        loop: Optional[asyncio.AbstractEventLoop] = None):
+        """set object in sync manner, usually used on non-sync code via appctx.
+        """
+        if loop is None:
+            loop = asyncio.get_running_loop()
+        if get_app()._flowapp_thread_id == threading.get_ident():
+            # we can't wait fut here
+            task = asyncio.create_task(self.set_custom_layout(layout))
+            return task
+        else:
+            # we can wait fut here.
+            fut = asyncio.run_coroutine_threadsafe(
+                self.set_custom_layout(layout), loop)
             return fut.result()
 
     async def update_tree(self):

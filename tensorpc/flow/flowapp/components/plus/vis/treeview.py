@@ -1,7 +1,7 @@
 import enum
 from tensorpc.flow.jsonlike import IconButtonData
 from ..objinspect.tree import BasicObjectTree
-from ..objinspect.core import CustomTreeItemHandler
+from ..core import CustomTreeItemHandler
 from ..objinspect.analysis import get_tree_context_noexcept
 
 from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,

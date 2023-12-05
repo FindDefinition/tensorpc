@@ -1,89 +1,120 @@
-# Copyright 2023 Yan Yan
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+"""
+## CustomTreeItemHandler vs TreeItem vs UserObjTree
 
-from typing import Callable, Optional, List, Dict, TypeVar, Generic, Union
-from tensorpc.flow.flowapp.components import mui, three, plus
+* Tree Item To Node
+
+CustomTreeItemHandler: full control
+
+TreeItem: full control
+
+UserObjTree: none
+
+* child of obj
+
+CustomTreeItemHandler: full control
+
+TreeItem: full control
+
+UserObjTree: only support sync
+
+* Event Handling
+
+CustomTreeItemHandler: full control
+
+TreeItem: control self and direct child
+
+UserObjTree: none
+"""
+
+
+import abc
+import enum
 import inspect
+import types
+from functools import partial
+from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
+                    Set, Tuple, Type)
 
-T = TypeVar("T")
+import numpy as np
+
+from tensorpc.core.inspecttools import get_members
+from tensorpc.flow.flowapp.components import mui
+from tensorpc.core.moduleid import get_qualname_of_type
+from tensorpc.flow.flowapp.objtree import UserObjTree, UserObjTreeProtocol
+from tensorpc.flow.jsonlike import JsonLikeNode
+from tensorpc.utils.registry import HashableRegistryKeyOnly
+
+USER_OBJ_TREE_TYPES: Set[Any] = {UserObjTree}
+
+def register_user_obj_tree_type(type):
+    USER_OBJ_TREE_TYPES.add(type)
+
+class ObjectPreviewHandler(mui.FlexBox):
+    @abc.abstractmethod
+    async def bind(self, obj: Any, uid: str):
+        pass
 
 
-class ListSlider(mui.Slider, Generic[T]):
-    """a slider that used for list.
+class ObjectLayoutHandler(mui.FlexBox):
+
+    @classmethod
+    def from_object(cls, obj) -> mui.FlexBox:
+        raise NotImplementedError
+
+
+class ObjectLayoutCreator(abc.ABC):
+
+    @abc.abstractmethod
+    def create(self) -> mui.FlexBox:
+        raise NotImplementedError
+
+ALL_OBJECT_PREVIEW_HANDLERS: HashableRegistryKeyOnly[Type[ObjectPreviewHandler]] = HashableRegistryKeyOnly()
+
+ALL_OBJECT_LAYOUT_HANDLERS: HashableRegistryKeyOnly[Type[ObjectLayoutHandler]] = HashableRegistryKeyOnly()
+
+ALL_OBJECT_LAYOUT_CREATORS: HashableRegistryKeyOnly[Type[ObjectLayoutCreator]] = HashableRegistryKeyOnly()
+
+class ContextMenuType(enum.Enum):
+    DataStorageStore = 0
+    DataStorageItemDelete = 1
+    DataStorageItemCommand = 2
+
+    CopyReadItemCode = 3
+
+class DataClassesType:
+    """a placeholder that used for custom handlers.
+    user need to register this type to make sure
+    handler is used if object is dataclass.
     """
+    pass
 
-    def __init__(self,
-                 callback: Callable[[T], mui._CORO_NONE],
-                 init: Optional[List[T]] = None,
-                 label: Union[str, mui.Undefined] = mui.undefined) -> None:
-        if init is None:
-            init = []
-        super().__init__(0, max(1, len(init) - 1), 1, self._callback, label)
-        # save callback to standard flow event handlers to enable reload for user callback
-        self.__callback_key = "list_slider_ev_handler"
-        self.register_event_handler(self.__callback_key,
-                                    callback,
-                                    backend_only=True)
-        self.obj_list: List[T] = init
 
-    async def update_list(self, objs: List[T]):
-        self.obj_list = objs
-        await self.update_ranges(0, len(objs) - 1, 1)
-
-    async def _callback(self, value: mui.NumberType):
-        handlers = self.get_event_handlers(self.__callback_key)
-        if handlers is not None:
-            index = int(value)
-            if index >= len(self.obj_list):
-                return
-            obj = self.obj_list[index]
-            for handler in handlers.handlers:
-                coro = handler.cb(obj)
-                if inspect.iscoroutine(coro):
-                    await coro
-
-class BlenderListSlider(mui.BlenderSlider, Generic[T]):
-    """a slider that used for list.
+class CustomTreeItemHandler(abc.ABC):
     """
+    TODO should we use lazy load in TreeItem?
+    """
+    @abc.abstractmethod
+    async def get_childs(self, obj: Any) -> Optional[Dict[str, Any]]:
+        """if return None, we will use default method to extract childs
+        of object.
+        """
+        raise NotImplementedError
+    
+    @abc.abstractmethod
+    def patch_node(self, obj: Any, node: JsonLikeNode) -> Optional[JsonLikeNode]:
+        """modify/patch node created from `parse_obj_to_tree_node`
+        """
+    
+    async def handle_button(self, obj_trace: List[Any], node_trace: List[JsonLikeNode], button_id: str) -> Optional[bool]:
+        return None
+    
+    async def handle_context_menu(self, obj_trace: List[Any], node_trace: List[JsonLikeNode], userdata: Dict[str, Any]) -> Optional[bool]:
+        return None
 
-    def __init__(self,
-                 callback: Callable[[T], mui._CORO_NONE],
-                 init: Optional[List[T]] = None) -> None:
-        if init is None:
-            init = []
-        super().__init__(0, max(1, len(init) - 1), 1, self._callback)
-        # save callback to standard flow event handlers to enable reload for user callback
-        self.__callback_key = "list_slider_ev_handler"
-        self.register_event_handler(self.__callback_key,
-                                    callback,
-                                    backend_only=True)
-        self.obj_list: List[T] = init
-        self.prop(fractionDigits=0, isInteger=True)
 
-    async def update_list(self, objs: List[T]):
-        self.obj_list = objs
-        await self.update_ranges(0, len(objs) - 1, 1)
+def register_obj_preview_handler(cls):
+    return ALL_OBJECT_PREVIEW_HANDLERS.register(cls)
 
-    async def _callback(self, value: mui.NumberType):
-        handlers = self.get_event_handlers(self.__callback_key)
-        if handlers is not None:
-            index = int(value)
-            if index >= len(self.obj_list):
-                return
-            obj = self.obj_list[index]
-            for handler in handlers.handlers:
-                coro = handler.cb(obj)
-                if inspect.iscoroutine(coro):
-                    await coro
 
+def register_obj_layout_handler(cls):
+    return ALL_OBJECT_LAYOUT_HANDLERS.register(cls)

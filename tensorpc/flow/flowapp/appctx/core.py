@@ -15,6 +15,7 @@
 import asyncio
 import contextlib
 from functools import partial
+import threading
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
 
@@ -128,3 +129,17 @@ async def run_in_executor_with_exception_inspect(func: Callable[P, T],
     return await comp.run_in_executor_with_exception_inspect(
         _run_func_with_app, get_app(), func, *args, **kwargs)
 
+def run_coro_sync(coro: Coroutine) -> Any:
+    loop = get_app()._loop
+    assert loop is not None
+    if get_app()._flowapp_thread_id == threading.get_ident():
+        # we can't wait fut here
+        task = asyncio.create_task(coro)
+        # we can't wait fut here
+        return task
+        # return fut
+    else:
+        # we can wait fut here.
+        fut = asyncio.run_coroutine_threadsafe(
+            coro, loop)
+        return fut.result()

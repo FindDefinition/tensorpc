@@ -1,3 +1,4 @@
+import inspect
 from pathlib import PosixPath, WindowsPath
 import traceback
 from typing import Any, Dict
@@ -12,9 +13,11 @@ from tensorpc.flow.flowapp.components.plus.canvas import SimpleCanvas
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanelV2
 
 from ..common import CommonQualNames
-from .core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler, DataClassesType
-from .treeitems import TraceTreeItem
+from ..core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler, DataClassesType
+
+
 monospace_14px = dict(fontFamily="monospace", fontSize="14px")
+_MAX_STRING_IN_DETAIL = 10000
 
 
 @ALL_OBJECT_PREVIEW_HANDLERS.register(np.ndarray)
@@ -191,3 +194,49 @@ class DataclassesHandler(ObjectPreviewHandler):
         panel = ConfigPanelV2(obj).prop(reactKey=uid)
         await self.cfg_ctrl_container.set_new_layout([panel])
 
+class DefaultHandler(ObjectPreviewHandler):
+    """
+    TODO if the object support any-layout, add a button to enable it.
+    """
+    def __init__(self) -> None:
+        self.tags = mui.FlexBox().prop(flexFlow="row wrap")
+        self.title = mui.Typography("").prop(wordBreak="break-word")
+        self.path = mui.Typography("").prop(wordBreak="break-word")
+
+        self.data_print = mui.Typography("").prop(fontFamily="monospace",
+                                                  fontSize="12px",
+                                                  wordBreak="break-word")
+        layout = [
+            self.title.prop(fontSize="14px", fontFamily="monospace"),
+            self.path.prop(fontSize="14px", fontFamily="monospace"),
+            self.tags,
+            mui.Divider().prop(padding="3px"),
+            mui.HBox([
+                mui.Button("print", self._on_print),
+            ]),
+            self.data_print,
+        ]
+
+        super().__init__(layout)
+        self.prop(flexDirection="column")
+        self.obj: Any = np.zeros([1])
+
+    async def _on_print(self):
+        string = str(self.obj)
+        if len(string) > _MAX_STRING_IN_DETAIL:
+            string = string[:_MAX_STRING_IN_DETAIL] + "..."
+        await self.data_print.write(string)
+
+    async def bind(self, obj: Any, uid: str):
+        # bind np object, update all metadata
+        self.obj = obj
+        ev = self.data_print.update_event(value="")
+        ev += self.title.update_event(value=get_qualname_of_type(type(obj)))
+        try:
+            sf = inspect.getsourcefile(type(obj))
+        except TypeError:
+            sf = None
+        if sf is None:
+            sf = ""
+        ev += self.path.update_event(value=sf)
+        await self.send_and_wait(ev)

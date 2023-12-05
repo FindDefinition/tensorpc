@@ -16,7 +16,7 @@ from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from tensorpc.flow.flowapp.components.plus.grid_preview_layout import GridPreviewLayout
 from tensorpc.flow.flowapp.components.plus.objinspect.tree import BasicObjectTree, SelectSingleEvent
-from .core import UNKNOWN_KEY_SPLIT, UNKNOWN_VIS_KEY, UserTreeItemCard, VContext, get_canvas_item_cfg, get_or_create_canvas_item_cfg
+from .core import UNKNOWN_KEY_SPLIT, UNKNOWN_VIS_KEY, UserTreeItemCard, VContext, get_canvas_item_cfg, get_or_create_canvas_item_cfg, _VapiObjects
 from tensorpc.flow.flowapp.components.typemetas import RangedFloat
 from tensorpc.flow.flowapp.core import Component, ContainerBase, FrontendEventType
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
@@ -253,11 +253,9 @@ class ComplexCanvas(mui.FlexBox):
 
         self._random_colors: Dict[str, str] = {}
         self._user_obj_tree_group = three.Group([])
-        self.treeitem_container = mui.HBox([]).prop(overflow="hidden",
-                                                    flex=1,
-                                                    width="100%",
-                                                    height="100%")
-        self.gv_layout: Union[mui.FlexBox, mui.Markdown] = mui.Markdown("## Unused")
+        self.gv_layout: mui.FlexBox = mui.HBox([
+                mui.Markdown("## Unused")
+            ]).prop(width="100%", height="100%", overflow="auto")
         self.flatted_tree_nodes: Dict[Tuple[str, ...], Any] = {}
         if init_tree_root is not None and init_tree_child_accessor is not None:
             flatted_tree_nodes = _extrace_all_tree_item_via_accessor(
@@ -266,10 +264,10 @@ class ComplexCanvas(mui.FlexBox):
             groups, self._user_obj_tree_item_to_meta = self._get_tree_cards_and_groups(
                 flatted_tree_nodes)
             self._user_obj_tree_group.init_add_layout({**groups})
-            self.treeitem_container.init_add_layout({
-                UNKNOWN_KEY_SPLIT.join(v.key): v.card
-                for k, v in self._user_obj_tree_item_to_meta.items()
-            })
+            # self.treeitem_container.init_add_layout({
+            #     UNKNOWN_KEY_SPLIT.join(v.key): v.card
+            #     for k, v in self._user_obj_tree_item_to_meta.items()
+            # })
             self.gv_layout = mui.HBox([
                 GridPreviewLayout({".".join(k): v for k, v in flatted_tree_nodes.items()}, init_tree_root).prop(flex=1)
             ]).prop(width="100%", height="100%", overflow="auto")
@@ -333,6 +331,18 @@ class ComplexCanvas(mui.FlexBox):
             border="4px solid transparent",
             sxOverDrop={"border": "4px solid green"},
         )
+    async def set_new_tree_root(self, tree_root: Any,
+        tree_child_accessor: Callable[[Any], Dict[str, Any]]):
+        flatted_tree_nodes = _extrace_all_tree_item_via_accessor(
+                tree_root, tree_child_accessor, "root")
+        self.flatted_tree_nodes = flatted_tree_nodes
+        groups, self._user_obj_tree_item_to_meta = self._get_tree_cards_and_groups(
+
+            flatted_tree_nodes)
+        await self._user_obj_tree_group.set_new_layout({**groups})
+        await self.gv_layout.set_new_layout([
+            GridPreviewLayout({".".join(k): v for k, v in flatted_tree_nodes.items()}, tree_root).prop(flex=1)
+        ])
 
     def _tree_collect_in_vctx(self):
         for k1, meta in self._user_obj_tree_item_to_meta.items():
@@ -350,7 +360,8 @@ class ComplexCanvas(mui.FlexBox):
                             c_proxy = c_cfg.proxy
                             assert c_proxy is not None
                             # TODO
-                            c_proxy.update_event(c)
+                            if isinstance(c, _VapiObjects):
+                                c.prepare_vapi_props()
                         if v is not meta.vctx.root:
                             assert not v.is_mounted(), f"{type(v)}"
                             v.init_add_layout(proxy.childs)
@@ -451,7 +462,7 @@ class ComplexCanvas(mui.FlexBox):
                     mui.ToggleButton("enableTData",
                                      icon=mui.IconType.DataArray,
                                      callback=self._on_enable_tdata_pane).prop(
-                                         selected=False,
+                                         selected=len(self.flatted_tree_nodes) > 0,
                                          size="small",
                                          tooltip="Enable Data Grid Pane",
                                          tooltipPlacement="right"),
@@ -542,25 +553,17 @@ class ComplexCanvas(mui.FlexBox):
                 mui.Tabs([
                     mui.TabDef("",
                                "1",
-                               self.treeitem_container,
-                               icon=mui.IconType.Preview,
-                               tooltip="Common Prop of Item",
-                               tooltipPlacement="right"),
-                    mui.TabDef("",
-                               "2",
                                self.tdata_container_v2,
                                icon=mui.IconType.DataObject,
                                tooltip="Data Table For Group",
                                tooltipPlacement="right"),
                     mui.TabDef("",
-                               "3",
+                               "2",
                                self.gv_layout,
                                icon=mui.IconType.Menu,
                                tooltip="Preview Grid of tree",
                                tooltipPlacement="right"),
-
-
-                ], "3").prop(panelProps=mui.FlexBoxProps(width="100%", padding=0),
+                ], "2").prop(panelProps=mui.FlexBoxProps(width="100%", padding=0),
                         orientation="vertical",
                         borderRight=1,
                         borderColor='divider')
@@ -575,11 +578,11 @@ class ComplexCanvas(mui.FlexBox):
                   overflow="hidden")
         # self.item_tree.event_
         self.tdata_container_v2_pane = mui.Allotment.Pane(bottom_container,
-                                                          preferredSize="33%",
-                                                          visible=False)
+                                                          preferredSize="40%",
+                                                          visible=len(self.flatted_tree_nodes) > 0)
         self._canvas_spitter = mui.Allotment(
             mui.Allotment.ChildDef([
-                mui.Allotment.Pane(canvas_layout, preferredSize="66%"),
+                mui.Allotment.Pane(canvas_layout, preferredSize="60%"),
                 self.tdata_container_v2_pane,
             ])).prop(vertical=True, proportionalLayout=True)
         self.event_drop.on(self._on_drop)
@@ -941,7 +944,7 @@ class ComplexCanvas(mui.FlexBox):
                 points = V.points(tree_id_replaced, pc_obj.shape[0]).array(
                     pc_obj.astype(np.float32))
                 if pc_obj.shape[1] == 3:
-                    points.color(pick)
+                    points.prop(colors=pick)
 
             await V._draw_all_in_vctx(vctx_unk,
                                       rf"{unk_container._flow_uid}\..*")
@@ -967,7 +970,7 @@ class ComplexCanvas(mui.FlexBox):
                 with V.group(tree_id_replaced):
                     for box in b3d_obj:
                         V.bounding_box(box[3:6], (0, 0, box[6]),
-                                       box[:3]).color(pick)
+                                       box[:3]).prop(color=pick)
             await V._draw_all_in_vctx(vctx_unk,
                                       rf"{unk_container._flow_uid}\..*")
             return True

@@ -1411,6 +1411,17 @@ class CollectionApp:
         #%% block split
         print("BLOCK2s asfasf asf")
 
+    @staticmethod
+    @observe_autorun_script
+    def _autorun_dev4():
+        print("BLOCK0 asasff WTF")
+        appctx.inspector.set_custom_layout_sync(mui.VBox([
+            mui.Markdown("## :red[WTF2]"),
+        ]))
+        a = 5
+        #%% block split
+        print("BLOCK2s asfasf asf")
+
 class SchedulerTest:
     @mark_create_layout
     def my_layout(self):
