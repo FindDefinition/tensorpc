@@ -67,17 +67,19 @@ class CanvasItemCfg:
     tdata: Optional[Dict[str, Any]] = None
 
 def get_canvas_item_cfg(comp: three.Component) -> Optional[CanvasItemCfg]:
-    if comp._flow_user_data is not None and isinstance(comp._flow_user_data, CanvasItemCfg):
-        return comp._flow_user_data
+    res = comp.find_user_meta_by_type(CanvasItemCfg)
+    if res is not None:
+        return res
     return None 
 
 def get_or_create_canvas_item_cfg(comp: three.Component, is_vapi: Optional[bool] = None):
-    if comp._flow_user_data is None:
-        comp._flow_user_data = CanvasItemCfg()
-    assert isinstance(comp._flow_user_data, CanvasItemCfg)
+    res = comp.find_user_meta_by_type(CanvasItemCfg)
+    if res is None:
+        res = CanvasItemCfg()
+        comp._flow_user_datas.append(res)
     if is_vapi is not None:
-        comp._flow_user_data.is_vapi = is_vapi
-    return comp._flow_user_data
+        res.is_vapi = is_vapi
+    return res
 
 
 class VContext:

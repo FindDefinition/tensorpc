@@ -28,6 +28,7 @@ UserObjTree: none
 
 
 import abc
+import dataclasses
 import enum
 import inspect
 import types
@@ -44,6 +45,12 @@ from tensorpc.flow.flowapp.objtree import UserObjTree, UserObjTreeProtocol
 from tensorpc.flow.jsonlike import JsonLikeNode
 from tensorpc.utils.registry import HashableRegistryKeyOnly
 
+@dataclasses.dataclass
+class ObjectGridLayoutItem:
+    width: float  = 1.0
+    height: float = 1.0
+    priority: int = 0
+
 USER_OBJ_TREE_TYPES: Set[Any] = {UserObjTree}
 
 def register_user_obj_tree_type(type):
@@ -55,12 +62,13 @@ class ObjectPreviewHandler(mui.FlexBox):
         pass
 
 
-class ObjectLayoutHandler(mui.FlexBox):
+class ObjectLayoutHandler(object):
 
-    @classmethod
-    def from_object(cls, obj) -> mui.FlexBox:
+    def create_layout(self, obj: Any) -> mui.FlexBox:
         raise NotImplementedError
 
+    def get_grid_layout_item(self) -> ObjectGridLayoutItem:
+        return ObjectGridLayoutItem(1.0, 1.0)
 
 class ObjectLayoutCreator(abc.ABC):
 
@@ -118,3 +126,5 @@ def register_obj_preview_handler(cls):
 
 def register_obj_layout_handler(cls):
     return ALL_OBJECT_LAYOUT_HANDLERS.register(cls)
+
+

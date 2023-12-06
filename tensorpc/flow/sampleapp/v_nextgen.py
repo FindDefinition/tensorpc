@@ -1,13 +1,14 @@
 import asyncio
 from pathlib import Path
 import random
-from typing import Optional
+from typing import Optional, Tuple
 
 import aiohttp
 from tensorpc.flow import mui, three, plus, mark_create_layout, appctx, V, mark_create_preview_layout
 import sys
 from tensorpc import PACKAGE_ROOT
 import numpy as np
+from tensorpc.flow.flowapp.components.plus.core import ObjectGridLayoutItem
 
 from tensorpc.flow.marker import mark_did_mount
 from tensorpc import prim
@@ -15,9 +16,10 @@ from tensorpc.flow.flowapp.objtree import UserObjTree
 from tensorpc.flow import observe_function
 
 class TestNodeNode0(UserObjTree):
-    def __init__(self, uid: str = "0") -> None:
+    def __init__(self, wh: Tuple[float, float], uid: str = "0") -> None:
         super().__init__()
         self.uid = uid
+        self.wh = wh
 
     def func(self, a, b):
         V.points("points0", 1000).p(a, b, 1).color("red").size(5)
@@ -33,20 +35,25 @@ class TestNodeNode0(UserObjTree):
 
     @mark_create_preview_layout
     def layout_func(self):
-        return mui.VBox([
-            mui.Button("HAHAHA"),
-            mui.Markdown(f"## Z{self.uid}")
+        res = mui.VBox([
+            mui.Markdown(f"{self.uid}|`{self.wh}`")
         ])
+        res.set_user_meta_by_type(ObjectGridLayoutItem(self.wh[0], self.wh[1]))
+        return res 
 
 
 class TestNodeRoot(UserObjTree):
     def __init__(self) -> None:
         super().__init__()
-        self.node0 = TestNodeNode0("0")
-        self._childs["node0"] = self.node0
-        self._childs["node1"] = TestNodeNode0("1")
-        self._childs["node2"] = TestNodeNode0("2")
-        self._childs["node3"] = TestNodeNode0("3")
+        self.node0 = TestNodeNode0((0.5, 0.5), "0")
+        for i in range(20):
+            random_w = 1.0
+            random_h = np.random.randint(1, 3) * 2 / 4
+
+            self._childs[f"node{i}"] = TestNodeNode0((random_w, random_h), str(i))
+        # self._childs["node1"] = TestNodeNode0("1")
+        # self._childs["node2"] = TestNodeNode0("2")
+        # self._childs["node3"] = TestNodeNode0("3")
 
     def func(self, a, b):
         with V.group("dev"):
@@ -178,8 +185,8 @@ class DevApp:
             def wtfrtx(a: V.Annotated[float, V.RangedFloat(0, 10, 0.1)] = 5):
                 V.points('points0', 1000).p(a, a, a).prop(colors="blue", size=5)
             V.program("wtfrtx", wtfrtx)
-            random_img = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
-            V.image(random_img, pos=(5, 5, 2))
+            random_img = np.random.randint(0, 255, (128 * 16, 128 * 16, 3), dtype=np.uint8)
+            V.image(random_img, pos=(5, 5, 2), use_datatex=True)
             V.three_ui(three.BoundingBox((1, 1, 1)).prop(position=(9, 9, 3),))
             V.text("WTF1").prop(color="red")
             with V.group("box_with_table", (0, 0, 3)):

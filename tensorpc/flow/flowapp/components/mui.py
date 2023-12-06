@@ -2961,7 +2961,7 @@ class Chip(MUIComponentBase[ChipProps]):
 
 
 def get_control_value(comp: Union[Input, Switch, RadioGroup, Select,
-                                  MultipleSelect, Slider]):
+                                  MultipleSelect, Slider, BlenderSlider]):
     if isinstance(comp, Input):
         return comp.value
     elif isinstance(comp, Switch):
@@ -2972,7 +2972,7 @@ def get_control_value(comp: Union[Input, Switch, RadioGroup, Select,
         return comp.value
     elif isinstance(comp, MultipleSelect):
         return comp.values
-    elif isinstance(comp, Slider):
+    elif isinstance(comp, (Slider, BlenderSlider)):
         return comp.value
     else:
         raise NotImplementedError("not a control ui")
@@ -4076,7 +4076,7 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps,
         need to handle change event in nested template container
         by yourself.
         """
-        if isinstance(comp, (Slider, _InputBaseComponent)):
+        if isinstance(comp, (Slider, BlenderSlider, _InputBaseComponent)):
             comp.props.value = undefined
             # assert isinstance(comp.value, Undefined), "slider and input must be uncontrolled."
         # TODO only support subset of all components
@@ -4259,7 +4259,7 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
     def bind_prop(self, comp: Component, prop_name: str):
         """bind a data prop with control component. no type check.
         """
-        if isinstance(comp, (Slider, _InputBaseComponent)):
+        if isinstance(comp, (Slider, BlenderSlider, _InputBaseComponent)):
             comp.props.value = undefined
             # assert isinstance(comp.props.value, Undefined), "slider and input must be uncontrolled."
         if FrontendEventType.Change.value in comp._flow_allowed_events:

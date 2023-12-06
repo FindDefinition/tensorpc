@@ -133,6 +133,18 @@ class TensorHandler(ObjectPreviewHandler):
                 mui.Chip("non-contiguous").prop(color="warning",
                                                 size="small",
                                                 clickable=False))
+        hasnan = np.isnan(obj).any()
+        hasinf = np.isinf(obj).any()
+        if hasnan:
+            tags.append(
+                mui.Chip("nan").prop(color="error",
+                                    size="small",
+                                    clickable=False))
+        if hasinf:
+            tags.append(
+                mui.Chip("inf").prop(color="error",
+                                    size="small",
+                                    clickable=False))
         await self.tags.set_new_layout([*tags])
 
 

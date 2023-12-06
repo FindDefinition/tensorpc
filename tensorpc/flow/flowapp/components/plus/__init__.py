@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from .core import register_obj_preview_handler, register_obj_layout_handler, ObjectGridLayoutItem
 from .canvas import SimpleCanvas
 from .vis.canvas import ComplexCanvas
 from .grid_preview_layout import GridPreviewLayout
@@ -19,7 +20,6 @@ from .config import ConfigPanel, ConfigPanelV2
 from .sliders import ListSlider, BlenderListSlider
 from .figure import HomogeneousMetricFigure
 from .monitor import ComputeResourceMonitor
-from .core import register_obj_preview_handler, register_obj_layout_handler
 from .objinspect import (AnyFlexLayout, BasicObjectTree, CallbackSlider,
                          InspectPanel, ObjectInspector, ObjectLayoutHandler,
                          ObjectPreviewHandler, TreeDragTarget, ThreadLocker,

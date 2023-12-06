@@ -226,7 +226,7 @@ def _div_up(a, b):
 def to_protobuf_stream(data_list: List[Any],
                        func_key,
                        flags: int,
-                       chunk_size=32 * 1024):
+                       chunk_size=64 * 1024):
     if not isinstance(data_list, list):
         raise ValueError("input must be a list")
     streams = []
@@ -256,15 +256,15 @@ def to_protobuf_stream(data_list: List[Any],
 
         else:
             raise NotImplementedError
-
         # data = ref_buf.data
         num_chunk = _div_up(length, chunk_size)
         if num_chunk == 0:
             num_chunk = 1  # avoid empty string raise error
+
         bufs = []
         for i in range(num_chunk):
             if isinstance(arg, np.ndarray) and data_bytes is None:
-                arg_view = arg.view(np.uint8)
+                arg_view = arg.view(np.uint8).reshape(-1)
                 buf = rpc_message_pb2.RemoteCallStream(
                     num_chunk=num_chunk,
                     chunk_id=i,
@@ -289,7 +289,6 @@ def to_protobuf_stream(data_list: List[Any],
                     shape=[],
                     flags=flags,
                 )
-
             bufs.append(buf)
         assert len(bufs) > 0
         bufs[0].shape[:] = shape

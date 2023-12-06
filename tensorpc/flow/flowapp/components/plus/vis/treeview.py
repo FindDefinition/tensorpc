@@ -11,19 +11,21 @@ from .core import CanvasItemCfg, CanvasItemProxy
 
 
 def lock_component(comp: mui.Component):
-    if comp._flow_user_data is not None:
-        assert isinstance(comp._flow_user_data, CanvasItemCfg)
-        comp._flow_user_data.lock = True 
+    user_meta = comp.find_user_meta_by_type(CanvasItemCfg)
+    if user_meta is not None:
+        user_meta.lock = True 
     else:
-        comp._flow_user_data = CanvasItemCfg(lock=True)
+        user_meta = CanvasItemCfg(lock=True)
+        comp._flow_user_datas.append(user_meta)
     return comp
 
 def set_component_visible(comp: mui.Component, visible: bool):
-    if comp._flow_user_data is not None:
-        assert isinstance(comp._flow_user_data, CanvasItemCfg)
-        comp._flow_user_data.visible = visible 
+    user_meta = comp.find_user_meta_by_type(CanvasItemCfg)
+    if user_meta is not None:
+        user_meta.visible = visible 
     else:
-        comp._flow_user_data = CanvasItemCfg(visible=visible)
+        user_meta = CanvasItemCfg(visible=visible)
+        comp._flow_user_datas.append(user_meta)
     return comp
 
 
@@ -38,10 +40,11 @@ class CanvasTreeItemHandler(CustomTreeItemHandler):
             IconButtonData(CanvasButtonType.Visibility.value, mui.IconType.Visibility, "toggle visibility"),
             IconButtonData(CanvasButtonType.Delete.value, mui.IconType.Delete, "toggle visibility"),
         ]
-        if isinstance(obj._flow_user_data, CanvasItemCfg):
-            if obj._flow_user_data.lock:
+        user_meta = obj.find_user_meta_by_type(CanvasItemCfg)
+        if user_meta is not None:
+            if user_meta.lock:
                 res.pop()
-            if not obj._flow_user_data.visible:
+            if not user_meta.visible:
                 res[0].icon = mui.IconType.VisibilityOff
             if not isinstance(obj, (three.Object3dBase, three.Object3dContainerBase)):
                 res.pop(0)
@@ -63,16 +66,16 @@ class CanvasTreeItemHandler(CustomTreeItemHandler):
         """
         if isinstance(obj, mui.Component) and three.is_three_component(obj):
             # buttons: visibility, delete
-            if obj._flow_user_data is None:
-                item_cfg = CanvasItemCfg()
-                obj._flow_user_data = item_cfg
-            if isinstance(obj._flow_user_data, CanvasItemCfg):
-                if obj._flow_user_data.type_str_override is not None:
-                    node.typeStr = obj._flow_user_data.type_str_override
-                if obj._flow_user_data.alias is not None:
-                    node.alias = obj._flow_user_data.alias
-                obj._flow_user_data.node = node
-                
+            user_meta = obj.find_user_meta_by_type(CanvasItemCfg)
+            if user_meta is None:
+                user_meta = CanvasItemCfg()
+                obj._flow_user_datas.append(user_meta)
+            if isinstance(user_meta, CanvasItemCfg):
+                if user_meta.type_str_override is not None:
+                    node.typeStr = user_meta.type_str_override
+                if user_meta.alias is not None:
+                    node.alias = user_meta.alias
+                user_meta.node = node
             node.fixedIconBtns = self._get_icon_button(obj)
         return None 
 
@@ -80,10 +83,10 @@ class CanvasTreeItemHandler(CustomTreeItemHandler):
         obj = obj_trace[-1]
         node = node_trace[-1]
         if isinstance(obj, mui.Component):
-            item_cfg = obj._flow_user_data
+            item_cfg = obj.find_user_meta_by_type(CanvasItemCfg)
             if item_cfg is None:
                 item_cfg = CanvasItemCfg()
-                obj._flow_user_data = item_cfg
+                obj._flow_user_datas.append(item_cfg)
             if button_id == CanvasButtonType.Visibility.value:
                 item_cfg.visible = not item_cfg.visible
                 node.fixedIconBtns = self._get_icon_button(obj)

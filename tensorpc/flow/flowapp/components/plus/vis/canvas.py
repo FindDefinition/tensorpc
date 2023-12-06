@@ -249,7 +249,7 @@ class ComplexCanvas(mui.FlexBox):
         self._cur_table_object_id: Optional[str] = None
         self._dnd_trees: Set[str] = set()
 
-        self._user_obj_tree_item_to_meta: Dict[Any, CanvasUserTreeItem] = {}
+        self._user_obj_tree_item_to_meta: Dict[int, CanvasUserTreeItem] = {}
 
         self._random_colors: Dict[str, str] = {}
         self._user_obj_tree_group = three.Group([])
@@ -406,7 +406,7 @@ class ComplexCanvas(mui.FlexBox):
         flatted_tree_items.sort(key=lambda x: x[0])
         # 1. get flatted group for each item
         groups: Dict[str, three.Group] = {}
-        obj_to_item_meta: Dict[Any, CanvasUserTreeItem] = {}
+        obj_to_item_meta: Dict[int, CanvasUserTreeItem] = {}
         for k, v in flatted_tree_items:
             k_str = UNKNOWN_KEY_SPLIT.join(k)
             group = three.Group([])
@@ -418,7 +418,7 @@ class ComplexCanvas(mui.FlexBox):
             cfg.alias = k[-1]
             cfg.is_vapi = False
             vctx = VContext(self, group)
-            obj_to_item_meta[v] = CanvasUserTreeItem(k, 
+            obj_to_item_meta[id(v)] = CanvasUserTreeItem(k, 
                 vctx, UserTreeItemCard(k[-1], cfg.type_str_override, partial(self._gv_cards_callback, group=group)))
         return groups, obj_to_item_meta
 
@@ -1008,3 +1008,26 @@ class ComplexCanvas(mui.FlexBox):
 
     async def _dnd_cb(self, uid: str, data: Any):
         await self._unknown_visualization(uid, data)
+        
+    async def register_cam_control_event_handler(self,
+                                           handler: Callable[[Any],
+                                                             mui.CORO_NONE],
+                                           throttle: int = 100,
+                                           debounce: Optional[int] = None):
+        self.ctrl.event_change.on(handler).configure(throttle=throttle,
+                                         debounce=debounce)
+        await self.ctrl.sync_used_events()
+
+    async def clear_cam_control_event_handler(self):
+        self.ctrl.remove_event_handlers(self.ctrl.event_change.event_type)
+        await self.ctrl.sync_used_events()
+
+    
+    async def set_transparent(self, is_transparent: bool):
+        if is_transparent:
+            await self.canvas.send_and_wait(
+                self.canvas.update_event(threeBackgroundColor=mui.undefined))
+        else:
+            await self.canvas.send_and_wait(
+                self.canvas.update_event(threeBackgroundColor="#ffffff"))
+

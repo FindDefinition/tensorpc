@@ -132,15 +132,16 @@ class BoundingBox(three.BoundingBox, _VapiObjects):
     
 
 class Image(three.Image, _VapiObjects):
-    def __init__(self, img: np.ndarray) -> None:
+    def __init__(self, img: np.ndarray, use_datatex: bool = False) -> None:
         super().__init__()
         self._img = img
+        self._use_datatex = use_datatex
         assert img.dtype == np.uint8
 
     def prepare_vapi_props(self):
         # TODO currently use texture loader (webimage) in frontend cause problem,
         # so we use data texture for now.
-        use_datatex = False
+        use_datatex = self._use_datatex
         img = self._img
         if use_datatex:
             if img.ndim == 3 and img.shape[-1] == 3:
@@ -543,16 +544,16 @@ def text(text: str, rot: Optional[three.Vector3Type] = None, pos: Optional[three
     pcfg.proxy = CanvasItemProxy()
     return obj
 
-def image(img: np.ndarray, rot: Optional[three.Vector3Type] = None, pos: Optional[three.Vector3Type] = None, name: Optional[str] = None):
+def image(img: np.ndarray, rot: Optional[three.Vector3Type] = None, pos: Optional[three.Vector3Type] = None, name: Optional[str] = None, use_datatex: bool = False):
     assert img.dtype == np.uint8 and (img.ndim == 3 or img.ndim == 2)
-    obj = Image(img)
+    obj = Image(img, use_datatex)
     if rot is not None:
         obj.prop(rotation=rot)
     if pos is not None:
         obj.prop(position=pos)
     pcfg = _create_vapi_three_obj_pcfg(obj, name, "img", _frame_cnt=2)
     pcfg.proxy = CanvasItemProxy()
-    return pcfg.proxy
+    return obj
 
 def three_ui(comp: three.ThreeComponentType, name: Optional[str] = None):
     _create_vapi_three_obj_pcfg(comp, name, "obj3d", _frame_cnt=2)

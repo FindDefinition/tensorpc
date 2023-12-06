@@ -896,7 +896,7 @@ class ContainerBaseProps(BasicProps):
 
 T_base_props = TypeVar("T_base_props", bound=BasicProps)
 T_container_props = TypeVar("T_container_props", bound=ContainerBaseProps)
-
+T = TypeVar("T")
 P = ParamSpec('P')
 T3 = TypeVar('T3')
 
@@ -1035,7 +1035,7 @@ class Component(Generic[T_base_props, T_child]):
         self._flow_allowed_events: Set[EventDataType] = set([FrontendEventType.BeforeMount.value, FrontendEventType.BeforeUnmount.value])
         if allowed_events is not None:
             self._flow_allowed_events.update(allowed_events)
-        self._flow_user_data: Any = None
+        self._flow_user_datas: List[Any] = []
         self._flow_comp_def_path = _get_obj_def_path(self)
         self._flow_reference_count = 0
         # tensorpc will scan your prop dict to find
@@ -1177,9 +1177,24 @@ class Component(Generic[T_base_props, T_child]):
     
     def __repr__(self):
         res = f"{self.__class__.__name__}({self._flow_uid})"
-        if self._flow_user_data is not None:
-            res += f"({self._flow_user_data})"
+        # if self._flow_user_data is not None:
+        #     res += f"({self._flow_user_data})"
         return res 
+
+    def find_user_meta_by_type(self, type: Type[T]) -> Optional[T]:
+        for x in self._flow_user_datas:
+            if isinstance(x, type):
+                return x
+        return None 
+    
+    def set_user_meta_by_type(self, obj: Any):
+        obj_type = type(obj)
+        for i, x in self._flow_user_datas:
+            if isinstance(x, obj_type):
+                self._flow_user_datas[i] = obj
+                return self
+        self._flow_user_datas.append(obj)
+        return self
 
     async def _clear(self):
         # self.uid = ""
