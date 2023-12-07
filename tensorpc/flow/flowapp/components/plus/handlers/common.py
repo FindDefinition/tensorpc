@@ -92,20 +92,31 @@ class TensorHandler(ObjectPreviewHandler):
         device = None
         dtype = obj.dtype
         is_contig = False
+        hasnan = False
+        hasinf = False
+
         if isinstance(obj, np.ndarray):
             is_contig = obj.flags['C_CONTIGUOUS']
             device = "cpu"
+            hasnan = np.isnan(obj).any().item()
+            hasinf = np.isinf(obj).any().item()
         elif get_qualname_of_type(type(obj)) == CommonQualNames.TorchTensor:
+            import torch
             qualname = "torch.Tensor"
             device = obj.device.type
             is_contig = obj.is_contiguous()
-        
+            hasnan = torch.isnan(obj).any().item()
+            hasinf = torch.isinf(obj).any().item()
+
         elif get_qualname_of_type(type(obj)) == CommonQualNames.TVTensor:
             from cumm.dtypes import get_dtype_from_tvdtype
             qualname = "tv.Tensor"
             device = "cpu" if obj.device == -1 else "cuda"
             is_contig = obj.is_contiguous()
             dtype = get_dtype_from_tvdtype(obj.dtype)
+            obj_cpu = obj.cpu().numpy()
+            hasnan = np.isnan(obj_cpu).any().item()
+            hasinf = np.isinf(obj_cpu).any().item()
         else:
             raise NotImplementedError
         self.obj = obj
@@ -133,8 +144,6 @@ class TensorHandler(ObjectPreviewHandler):
                 mui.Chip("non-contiguous").prop(color="warning",
                                                 size="small",
                                                 clickable=False))
-        hasnan = np.isnan(obj).any()
-        hasinf = np.isinf(obj).any()
         if hasnan:
             tags.append(
                 mui.Chip("nan").prop(color="error",

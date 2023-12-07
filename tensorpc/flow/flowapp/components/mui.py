@@ -3074,6 +3074,7 @@ class TabDef:
     tooltip: Union[str, Undefined] = undefined
     tooltipPlacement: Union[_TooltipPlacement, Undefined] = undefined
     tooltipMultiline: Union[bool, Undefined] = undefined
+    labelComponent: Union[Component, Undefined] = undefined
 
 
 class Tabs(MUIContainerBase[TabsProps, MUIComponentType]):
@@ -3601,7 +3602,7 @@ class JsonLikeTreeBase(MUIComponentBase[T_tview_base_props]):
             FrontendEventType.TreeLazyExpand.value,
             FrontendEventType.TreeItemFocus.value,
             FrontendEventType.TreeItemButton.value,
-            FrontendEventType.TreeItemContextMenu.value,
+            FrontendEventType.ContextMenuSelect.value,
             FrontendEventType.TreeItemRename.value,
         ]
         super().__init__(base_type,
@@ -3624,7 +3625,7 @@ class JsonLikeTreeBase(MUIComponentBase[T_tview_base_props]):
         self.event_icon_button = self._create_event_slot(
             FrontendEventType.TreeItemButton)
         self.event_context_menu = self._create_event_slot(
-            FrontendEventType.TreeItemContextMenu)
+            FrontendEventType.ContextMenuSelect)
         self.event_rename = self._create_event_slot(
             FrontendEventType.TreeItemRename)
 
@@ -4394,3 +4395,60 @@ class GridLayout(MUIContainerBase[GridLayoutProps, MUIComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+@dataclasses.dataclass
+class Anchor:
+    vertical: Literal["top", "center", "bottom"]
+    horizontal: Literal["left", "center", "right"]
+
+@dataclasses.dataclass
+class MenuListProps(MUIFlexBoxProps):
+    dense: Union[Undefined, bool] = undefined
+    disablePadding: Union[Undefined, bool] = undefined
+    paperProps: Union[Undefined, PaperProps] = undefined
+    boxProps: Union[Undefined, MUIFlexBoxProps] = undefined
+    triggerMethod: Union[Undefined, Literal["click", "contextmenu"]] = undefined
+    anchorOrigin: Union[Undefined, Anchor] = undefined
+    transformOrigin: Union[Undefined, Anchor] = undefined
+
+@dataclasses.dataclass
+class MenuItem:
+    id: str
+    label: str
+    icon: Union[Undefined, str] = undefined
+    inset: Union[Undefined, bool] = undefined
+    iconSize: Union[Undefined, Literal["inherit", "large", "medium", "small"]] = undefined
+    iconFontSize: Union[Undefined, NumberType, str] = undefined
+    divider: Union[Undefined, bool] = undefined
+    autoFocus: Union[Undefined, bool] = undefined
+    disableAutoFocusItem: Union[Undefined, bool] = undefined
+
+class MenuList(MUIContainerBase[MenuListProps, MUIComponentType]):
+    @dataclasses.dataclass
+    class ChildDef:
+        menuItems: List[MenuItem]
+        component: Component
+
+    def __init__(self,
+                 items: List[MenuItem],
+                 child: Component,
+                 callback: Optional[Callable[[str], _CORO_NONE]] = None) -> None:
+        super().__init__(UIType.MenuList, MenuListProps, MenuList.ChildDef(items, child), 
+                        allowed_events=[FrontendEventType.ContextMenuSelect.value])
+        if callback is not None:
+            self.register_event_handler(FrontendEventType.ContextMenuSelect.value,
+                                        callback,
+                                        simple_event=True)
+        self.event_contextmenu_select = self._create_event_slot(FrontendEventType.ContextMenuSelect)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync=is_sync)

@@ -360,7 +360,7 @@ class BasicObjectTree(mui.FlexBox):
         self.tree.register_event_handler(
             FrontendEventType.TreeItemButton.value, self._on_custom_button)
         self.tree.register_event_handler(
-            FrontendEventType.TreeItemContextMenu.value, self._on_contextmenu)
+            FrontendEventType.ContextMenuSelect.value, self._on_contextmenu)
         self.tree.register_event_handler(
             FrontendEventType.TreeItemRename.value, self._on_rename)
         self.tree.register_event_handler(

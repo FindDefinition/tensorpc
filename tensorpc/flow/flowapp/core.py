@@ -152,6 +152,7 @@ class UIType(enum.IntEnum):
     SimpleControls = 0x38
     # this component have different state structure.
     TanstackJsonLikeTreeView = 0x39
+    MenuList = 0x3a
     GridLayout = 0x40
 
     # special
@@ -339,6 +340,8 @@ class FrontendEventType(enum.IntEnum):
     Drag = 24
     Drop = 25
     SelectNewItem = 26
+    ContextMenuSelect = 28
+
 
     TreeLazyExpand = 30
     TreeItemSelectChange = 31
@@ -346,7 +349,6 @@ class FrontendEventType(enum.IntEnum):
     TreeItemToggle = 32
     TreeItemFocus = 33
     TreeItemButton = 34
-    TreeItemContextMenu = 35
     TreeItemRename = 36
     TreeItemExpandChange = 37
 
@@ -380,6 +382,7 @@ UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
     UIType.DataFlexBox,
     UIType.Tabs, UIType.Allotment,
     UIType.GridLayout,
+    UIType.MenuList,
 }
 
 class AppDraggableType(enum.Enum):
@@ -995,7 +998,7 @@ class _ComponentEffects:
         self._flow_effects: Dict[str, List[Callable[[], Union[Callable[[], Any], None, Coroutine[None, None, Union[Callable[[], Any], None]]]]]] = {}
         self._flow_unmounted_effects: Dict[str, List[Callable[[], _CORO_NONE]]] = {}
 
-    def use_effect(self, effect: Callable[[], Optional[Callable[[], Any]]], key: str = ""):
+    def use_effect(self, effect: Callable[[], Union[Optional[Callable[[], Any]], Coroutine[None, None, Optional[Callable[[], Any]]]]], key: str = ""):
         if key not in self._flow_effects:
             self._flow_effects[key] = []
             self._flow_unmounted_effects[key] = []
@@ -1057,7 +1060,7 @@ class Component(Generic[T_base_props, T_child]):
         self.event_before_mount = self._create_emitter_event_slot(FrontendEventType.BeforeMount)
         self.event_before_unmount = self._create_emitter_event_slot(FrontendEventType.BeforeUnmount)
     
-    def use_effect(self, effect: Callable[[], Optional[Callable[[], Any]]], key: str = ""):
+    def use_effect(self, effect: Callable[[], Union[Optional[Callable[[], Any]], Coroutine[None, None, Optional[Callable[[], Any]]]]], key: str = ""):
         return self.effects.use_effect(effect, key)
 
     @classmethod
