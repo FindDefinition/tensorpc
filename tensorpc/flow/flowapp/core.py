@@ -1073,7 +1073,7 @@ class Component(Generic[T_base_props, T_child]):
     @classmethod
     def validate(cls, v):
         if not isinstance(v, Component):
-            raise TypeError('Component required')
+            raise ValueError('Component required')
         return v
 
     def _create_event_slot(self, event_type: Union[FrontendEventType, EventDataType]):

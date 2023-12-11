@@ -8,7 +8,7 @@ from tensorpc.flow import mui, three, plus, mark_create_layout, appctx, V, mark_
 import sys
 from tensorpc import PACKAGE_ROOT
 import numpy as np
-from tensorpc.flow.flowapp.components.plus.core import ObjectGridLayoutItem
+from tensorpc.flow.flowapp.components.plus.core import ObjectGridItemConfig
 
 from tensorpc.flow.marker import mark_did_mount
 from tensorpc import prim
@@ -38,7 +38,7 @@ class TestNodeNode0(UserObjTree):
         res = mui.VBox([
             mui.Markdown(f"{self.uid}|`{self.wh}`")
         ])
-        res.set_user_meta_by_type(ObjectGridLayoutItem(self.wh[0], self.wh[1]))
+        res.set_user_meta_by_type(ObjectGridItemConfig(self.wh[0], self.wh[1]))
         return res 
 
 
@@ -154,14 +154,23 @@ class DevApp:
         return mui.VBox([
             mui.HBox([
                 mui.Button("Test V", self.on_click),
-                mui.Button("Test Tree", self.on_test_tree)
+                mui.Button("Test Tree", self.on_test_tree),
+                mui.Button("Test custom layout", self.on_custom_gv_layout),
             ]),
-
             res,
         ]) 
     
     async def on_test_tree(self):
         self.root.func(3, 4)
+
+    async def on_custom_gv_layout(self):
+        items = {}
+        for k in range(3):
+            half = random.random() > 0.5
+            items[f"name{k}"] = mui.FlexBox([
+                mui.Markdown(f"## hello world {k}"),
+            ]).set_user_meta_by_type(ObjectGridItemConfig(1, 0.5 if half else 1))
+        await self.canvas.set_new_grid_items(items, False)
 
     async def on_click(self):
         print("clicked")

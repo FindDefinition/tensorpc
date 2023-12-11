@@ -44,7 +44,7 @@ class CanvasItemProxy:
     @classmethod
     def validate(cls, v):
         if not isinstance(v, CanvasItemProxy):
-            raise TypeError('CanvasItemProxy required')
+            raise ValueError('CanvasItemProxy required')
         return v
 
     # def tdata(self, data: Dict[str, Any]):
@@ -127,7 +127,7 @@ class VContext:
     @classmethod
     def validate(cls, v):
         if not isinstance(v, VContext):
-            raise TypeError('VContext required')
+            raise ValueError('VContext required')
         return v
 
 

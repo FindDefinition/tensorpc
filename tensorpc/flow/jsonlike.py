@@ -48,7 +48,7 @@ class Undefined:
     @classmethod
     def validate(cls, v):
         if not isinstance(v, Undefined):
-            raise TypeError('undefined required')
+            raise ValueError('undefined required, but get', type(v))
         return v
 
     def __eq__(self, o: object) -> bool:
@@ -78,7 +78,7 @@ class BackendOnlyProp(Generic[T]):
     @classmethod
     def validate(cls, v):
         if not isinstance(v, BackendOnlyProp):
-            raise TypeError('BackendOnlyProp required')
+            raise ValueError('BackendOnlyProp required')
         return cls(v.data)
     
     def __eq__(self, o: object) -> bool:

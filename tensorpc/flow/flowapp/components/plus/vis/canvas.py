@@ -216,7 +216,8 @@ class ComplexCanvas(mui.FlexBox):
         transparent_canvas: bool = False,
         init_tree_root: Optional[Any] = None,
         init_tree_child_accessor: Optional[Callable[[Any], Dict[str,
-                                                                Any]]] = None):
+                                                                Any]]] = None,
+        key: str = "canvas"):
 
         super().__init__()
         self.component_tree = three.Fragment([])
@@ -253,9 +254,13 @@ class ComplexCanvas(mui.FlexBox):
 
         self._random_colors: Dict[str, str] = {}
         self._user_obj_tree_group = three.Group([])
-        self.gv_layout: mui.FlexBox = mui.HBox([
-                mui.Markdown("## Unused")
-            ]).prop(width="100%", height="100%", overflow="auto")
+        # self.gv_tree_layout: mui.FlexBox = mui.HBox([
+        #         mui.Markdown("## Unused")
+        #     ]).prop(width="100%", height="100%", overflow="auto")
+        self.gv_tree_layout: GridPreviewLayout = GridPreviewLayout({}, None).prop(flex=1, height="100%", width="100%", overflow="auto")
+        self.gv_locals_layout: GridPreviewLayout = GridPreviewLayout({}, None).prop(flex=1, height="100%", width="100%", overflow="auto")
+        self.gv_custom_layout: GridPreviewLayout = GridPreviewLayout({}, None).prop(flex=1, height="100%", width="100%", overflow="auto")
+
         self.flatted_tree_nodes: Dict[Tuple[str, ...], Any] = {}
         if init_tree_root is not None and init_tree_child_accessor is not None:
             flatted_tree_nodes = _extrace_all_tree_item_via_accessor(
@@ -268,9 +273,7 @@ class ComplexCanvas(mui.FlexBox):
             #     UNKNOWN_KEY_SPLIT.join(v.key): v.card
             #     for k, v in self._user_obj_tree_item_to_meta.items()
             # })
-            self.gv_layout = mui.HBox([
-                GridPreviewLayout({".".join(k): v for k, v in flatted_tree_nodes.items()}, init_tree_root).prop(flex=1)
-            ]).prop(width="100%", height="100%", overflow="auto")
+            self.gv_tree_layout = GridPreviewLayout({".".join(k): v for k, v in flatted_tree_nodes.items()}, init_tree_root).prop(flex=1, height="100%", width="100%", overflow="auto")
 
         init_layout = {
             # "camera": self.camera,
@@ -295,7 +298,7 @@ class ComplexCanvas(mui.FlexBox):
         self._item_root = three.SelectionContext(layout,
                                                  self._on_3d_object_select)
         # self._item_root = three.Group(layout)
-
+        self.key = key
         self.prop_container = mui.HBox([]).prop(overflow="auto",
                                                 padding="3px",
                                                 flex=1,
@@ -340,9 +343,32 @@ class ComplexCanvas(mui.FlexBox):
 
             flatted_tree_nodes)
         await self._user_obj_tree_group.set_new_layout({**groups})
-        await self.gv_layout.set_new_layout([
-            GridPreviewLayout({".".join(k): v for k, v in flatted_tree_nodes.items()}, tree_root).prop(flex=1)
-        ])
+        self.gv_tree_layout.set_tree_root(tree_root)
+        await self.gv_tree_layout.set_new_items({".".join(k): v for k, v in flatted_tree_nodes.items()})
+
+    async def set_new_grid_items(self, items: Dict[str, Any], is_local: bool):
+        if is_local:
+            await self.gv_locals_layout.set_new_items(items)
+        else:
+            await self.gv_custom_layout.set_new_items(items)
+
+    async def update_grid_items(self, items: Dict[str, Any], is_local: bool):
+        if is_local:
+            await self.gv_locals_layout.update_items(items)
+        else:
+            await self.gv_custom_layout.update_items(items)
+
+    async def delete_grid_items(self, items: List[str], is_local: bool):
+        if is_local:
+            await self.gv_locals_layout.delete_items(items)
+        else:
+            await self.gv_custom_layout.delete_items(items)
+
+    async def clear_grid(self, is_local: bool):
+        if is_local:
+            await self.gv_locals_layout.clear_items()
+        else:
+            await self.gv_custom_layout.clear_items()
 
     def _tree_collect_in_vctx(self):
         for k1, meta in self._user_obj_tree_item_to_meta.items():
@@ -559,9 +585,21 @@ class ComplexCanvas(mui.FlexBox):
                                tooltipPlacement="right"),
                     mui.TabDef("",
                                "2",
-                               self.gv_layout,
+                               self.gv_tree_layout,
                                icon=mui.IconType.Menu,
                                tooltip="Preview Grid of tree",
+                               tooltipPlacement="right"),
+                    mui.TabDef("",
+                               "3",
+                               self.gv_locals_layout,
+                               icon=mui.IconType.DataArray,
+                               tooltip="Frame Locals Grid",
+                               tooltipPlacement="right"),
+                    mui.TabDef("",
+                               "4",
+                               self.gv_custom_layout,
+                               icon=mui.IconType.Dataset,
+                               tooltip="Custom Grid",
                                tooltipPlacement="right"),
                 ], "2").prop(panelProps=mui.FlexBoxProps(width="100%", padding=0),
                         orientation="vertical",

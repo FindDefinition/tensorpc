@@ -4362,7 +4362,7 @@ class GridItemProps:
 class GridLayoutProps(MUIFlexBoxProps):
     width: Union[Undefined, int] = undefined
     autoSize: Union[bool, Undefined] = undefined
-    cols: Union[Undefined, int] = undefined
+    cols: Union[int, Undefined] = undefined
     draggableHandle: Union[Undefined, str] = undefined
     rowHeight: Union[Undefined, int] = undefined
 
@@ -4374,7 +4374,7 @@ class GridItem:
     flexProps: Union[Undefined, MUIFlexBoxProps] = undefined 
 
 class GridLayout(MUIContainerBase[GridLayoutProps, MUIComponentType]):
-    # TODO we need to take ref of child, so we use complex layout here.
+    # we need to take ref of child, so we must use complex layout here.
     @dataclasses.dataclass
     class ChildDef:
         childs: List[GridItem]

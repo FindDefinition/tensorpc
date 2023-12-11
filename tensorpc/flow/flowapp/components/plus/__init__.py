@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .core import register_obj_preview_handler, register_obj_layout_handler, ObjectGridLayoutItem
+from .core import register_obj_preview_handler, register_obj_layout_handler, ObjectGridItemConfig
+from .grid_preview_layout import GridPreviewLayout
+
 from .canvas import SimpleCanvas
 from .vis.canvas import ComplexCanvas
-from .grid_preview_layout import GridPreviewLayout
 from .config import ConfigPanel, ConfigPanelV2
 from .sliders import ListSlider, BlenderListSlider
 from .figure import HomogeneousMetricFigure

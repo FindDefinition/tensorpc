@@ -4,16 +4,20 @@ import asyncio
 import contextlib
 from functools import partial
 import inspect
-from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
+from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
 
 from typing_extensions import ParamSpec
 
 from tensorpc.flow.flowapp.appcore import (enter_app_conetxt, find_component,
                                            get_app)
-from tensorpc.flow.flowapp.components import plus
 from tensorpc.utils.uniquename import UniqueNamePool
-def get_simple_canvas(key: Optional[str] = None) -> plus.SimpleCanvas:
+if TYPE_CHECKING:
+    from tensorpc.flow.flowapp.components.plus import ComplexCanvas, SimpleCanvas
+
+
+def get_simple_canvas(key: Optional[str] = None) -> "SimpleCanvas":
+    from tensorpc.flow.flowapp.components import plus
     if key is not None:
         comp = find_component(plus.SimpleCanvas, lambda x: x.key == key)
     else:
@@ -23,6 +27,7 @@ def get_simple_canvas(key: Optional[str] = None) -> plus.SimpleCanvas:
 
 
 def get_simple_canvas_may_exist(key: Optional[str] = None):
+    from tensorpc.flow.flowapp.components import plus
     """for conditional visualization
     """
     if key is not None:
@@ -51,3 +56,22 @@ async def unknown_visualization_temp_objs(*objs, vis_root_id: str = "", canvas_k
             uid = f"{vis_root_id}.{uid}"
         await canvas._unknown_visualization(uid, o)
 
+def get_canvas(key: Optional[str] = None) -> "ComplexCanvas":
+    from tensorpc.flow.flowapp.components import plus
+    if key is not None:
+        comp = find_component(plus.ComplexCanvas, lambda x: x.key == key)
+    else:
+        comp = find_component(plus.ComplexCanvas)
+    assert comp is not None, "you must add simple canvas to your UI"
+    return comp
+
+
+def get_canvas_may_exist(key: Optional[str] = None):
+    from tensorpc.flow.flowapp.components import plus
+    """for conditional visualization
+    """
+    if key is not None:
+        comp = find_component(plus.ComplexCanvas, lambda x: x.key == key)
+    else:
+        comp = find_component(plus.ComplexCanvas)
+    return comp

@@ -46,10 +46,16 @@ from tensorpc.flow.jsonlike import JsonLikeNode
 from tensorpc.utils.registry import HashableRegistryKeyOnly
 
 @dataclasses.dataclass
-class ObjectGridLayoutItem:
+class ObjectGridItemConfig:
     width: float  = 1.0
     height: float = 1.0
     priority: int = 0
+
+    # used for internal layout only
+    x: int = 0
+    y: int = 0
+    w: int = 0
+    h: int = 0
 
 USER_OBJ_TREE_TYPES: Set[Any] = {UserObjTree}
 
@@ -67,8 +73,8 @@ class ObjectLayoutHandler(object):
     def create_layout(self, obj: Any) -> mui.FlexBox:
         raise NotImplementedError
 
-    def get_grid_layout_item(self) -> ObjectGridLayoutItem:
-        return ObjectGridLayoutItem(1.0, 1.0)
+    def get_grid_layout_item(self) -> ObjectGridItemConfig:
+        return ObjectGridItemConfig(1.0, 1.0)
 
 class ObjectLayoutCreator(abc.ABC):
 
