@@ -2482,14 +2482,15 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
 
     async def task_loop(self,
                         it: Union[Iterable[_T], AsyncIterable[_T]],
-                        total: int = -1) -> AsyncGenerator[_T, None]:
+                        total: int = -1,
+                        start: int = -1) -> AsyncGenerator[_T, None]:
         if self._raw_update:
             raise ValueError(
                 "when raw update enabled, you can't use this function")
         if isinstance(it, list):
             total = len(it)
         try:
-            cnt = 0
+            cnt = 0 if start < 0 else start
             t = time.time()
             dura = 0.0
             if self.stack_count > 0:
@@ -2562,6 +2563,14 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
         })
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
+    
+    async def headless_stop(self):
+        uiev = UIEvent({
+            self._flow_uid:
+            (FrontendEventType.Change.value, TaskLoopEvent.Stop.value)
+        })
+        return await self.put_app_event(
+            AppEvent("", {AppEventType.UIEvent: uiev}))
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         if self._raw_update:
@@ -2571,10 +2580,11 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
             if self.props.status == UIRunStatus.Stop.value:
                 handlers = self.get_event_handlers(self.__callback_key)
                 if handlers is not None:
-                    for handler in handlers.handlers:
-                        coro = handler.cb()
-                        if inspect.iscoroutine(coro):
-                            await coro
+                    self._task = asyncio.create_task(
+                        self.run_callbacks(handlers.get_bind_event_handlers_noarg(ev),
+                                        True,
+                                        sync_status_first=True, change_status=True))
+                    self.props.status = UIRunStatus.Running.value
             else:
                 print("IGNORE TaskLoop EVENT", self.props.status)
         elif data == TaskLoopEvent.Pause.value:
@@ -2590,10 +2600,17 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
         elif data == TaskLoopEvent.Stop.value:
             if self.props.status == UIRunStatus.Running.value:
                 await cancel_task(self._task)
+                self.props.status = UIRunStatus.Stop.value
+            elif self.props.status == UIRunStatus.Pause.value:
+                self.pause_event.set()
+                await cancel_task(self._task)
+                self.props.status = UIRunStatus.Stop.value
             else:
                 print("IGNORE TaskLoop EVENT", self.props.status)
         else:
             raise NotImplementedError
+        await self.sync_status(True)
+
 
     @property
     def prop(self):

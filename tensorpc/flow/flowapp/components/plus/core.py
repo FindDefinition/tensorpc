@@ -45,6 +45,14 @@ from tensorpc.flow.flowapp.objtree import UserObjTree, UserObjTreeProtocol
 from tensorpc.flow.jsonlike import JsonLikeNode
 from tensorpc.utils.registry import HashableRegistryKeyOnly
 
+
+class PriorityCommon(enum.IntEnum):
+    Lowest = 0
+    Low = 20
+    Normal = 40
+    High = 60
+    Highest = 80
+
 @dataclasses.dataclass
 class ObjectGridItemConfig:
     width: float  = 1.0
@@ -68,12 +76,12 @@ class ObjectPreviewHandler(mui.FlexBox):
         pass
 
 
-class ObjectLayoutHandler(object):
-
+class ObjectLayoutHandler(abc.ABC):
+    @abc.abstractmethod
     def create_layout(self, obj: Any) -> mui.FlexBox:
         raise NotImplementedError
 
-    def get_grid_layout_item(self) -> ObjectGridItemConfig:
+    def get_grid_layout_item(self, obj: Any) -> ObjectGridItemConfig:
         return ObjectGridItemConfig(1.0, 1.0)
 
 class ObjectLayoutCreator(abc.ABC):
@@ -82,9 +90,17 @@ class ObjectLayoutCreator(abc.ABC):
     def create(self) -> mui.FlexBox:
         raise NotImplementedError
 
+class ObjectLayoutHandlerRegistry(HashableRegistryKeyOnly[Type[ObjectLayoutHandler]]):
+    def check_type_exists(self, type: Type) -> bool:
+        qname = get_qualname_of_type(type)
+        if type in self:
+            return True 
+        return qname in self
+ 
+
 ALL_OBJECT_PREVIEW_HANDLERS: HashableRegistryKeyOnly[Type[ObjectPreviewHandler]] = HashableRegistryKeyOnly()
 
-ALL_OBJECT_LAYOUT_HANDLERS: HashableRegistryKeyOnly[Type[ObjectLayoutHandler]] = HashableRegistryKeyOnly()
+ALL_OBJECT_LAYOUT_HANDLERS: ObjectLayoutHandlerRegistry = ObjectLayoutHandlerRegistry()
 
 ALL_OBJECT_LAYOUT_CREATORS: HashableRegistryKeyOnly[Type[ObjectLayoutCreator]] = HashableRegistryKeyOnly()
 

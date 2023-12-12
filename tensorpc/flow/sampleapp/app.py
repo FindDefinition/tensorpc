@@ -92,13 +92,9 @@ class SampleApp(App):
             self.img_ui,
             "taskloop":
             self.task_loop,
-            "slider":
-            mui.Slider("Slider", 0, 100, 1, self.on_slider_change),
             "select":
             mui.Select("Select", [("One", 0), ("Two", 1)],
                        self.on_select_change),
-            "rg":
-            mui.RadioGroup(["Option1", "Option2"], True, self.on_radio),
         })
         self.img_path = ""
         self.set_init_window_size([480, 640])
@@ -169,6 +165,8 @@ class SampleApp(App):
 
         print("TASK START!!!")
         async for item in self.task_loop.task_loop(range(5), total=5):
+            if item == 3:
+                raise ValueError("debug error")
             async for item in self.task_loop.task_loop(range(20), total=20):
                 await asyncio.sleep(0.05)
         print("TASK END!!!")

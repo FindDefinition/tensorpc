@@ -571,7 +571,6 @@ class BasicObjectTree(mui.FlexBox):
 
     async def _on_custom_button(self, uid_btn: Tuple[str, str]):
         with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree, self)):
-
             uid = uid_btn[0]
             uid_parts = uid.split(GLOBAL_SPLIT)
             obj_trace, found = await self._tree_parser.get_obj_by_uid_trace(self.root, uid)

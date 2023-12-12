@@ -136,22 +136,22 @@ class TensorHandler(ObjectPreviewHandler):
             tags.append(mui.Chip(device).prop(size="small", clickable=False))
         if is_contig:
             tags.append(
-                mui.Chip("contiguous").prop(color="success",
+                mui.Chip("contiguous").prop(muiColor="success",
                                             size="small",
                                             clickable=False))
         else:
             tags.append(
-                mui.Chip("non-contiguous").prop(color="warning",
+                mui.Chip("non-contiguous").prop(muiColor="warning",
                                                 size="small",
                                                 clickable=False))
         if hasnan:
             tags.append(
-                mui.Chip("nan").prop(color="error",
+                mui.Chip("nan").prop(muiColor="error",
                                     size="small",
                                     clickable=False))
         if hasinf:
             tags.append(
-                mui.Chip("inf").prop(color="error",
+                mui.Chip("inf").prop(muiColor="error",
                                     size="small",
                                     clickable=False))
         await self.tags.set_new_layout([*tags])

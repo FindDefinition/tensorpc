@@ -12,7 +12,7 @@ from tensorpc.flow.flowapp.components.plus.core import ObjectGridItemConfig
 
 from tensorpc.flow.marker import mark_did_mount
 from tensorpc import prim
-from tensorpc.flow.flowapp.objtree import UserObjTree
+from tensorpc.flow.flowapp.objtree import UserObjTree, find
 from tensorpc.flow import observe_function
 
 class TestNodeNode0(UserObjTree):
@@ -22,16 +22,7 @@ class TestNodeNode0(UserObjTree):
         self.wh = wh
 
     def func(self, a, b):
-        V.points("points0", 1000).p(a, b, 1).color("red").size(5)
-        V.mdprint("## hello world")
-        V.mdprint("## hello world")
-        V.mdprint("## hello world")
-        V.mdprint("## hello world")
-        V.mdprint("## hello world")
-        V.mdprint("## hello world")
-        V.mdprint("## hello world")
-        V.mdprint("## hello world")
-        V.mdprint("## hello world")
+        V.points("points0", 1000).p(a, b, 1).prop(colors="red", size=5)
 
     @mark_create_preview_layout
     def layout_func(self):
@@ -58,107 +49,50 @@ class TestNodeRoot(UserObjTree):
     def func(self, a, b):
         with V.group("dev"):
             V.bounding_box((a, b, 2))
-            self.node0.func(a, b)
-            V.mdprint("## hello world")
+            self._childs[f"node{0}"].func(a, b)
+
+    async def on_task_loop(self):
+        async for x in self.task_loop.task_loop(list(range(10))):
+            await asyncio.sleep(0.1)
+            print(find(TestNodeNode0))
+
 
     @mark_create_preview_layout
     def layout_func(self):
+        self.task_loop = mui.TaskLoop("dev", self.on_task_loop)
         return mui.VBox([
             mui.Button("ROOT"),
-            mui.Markdown("## ROOT132")
+            mui.Markdown("## ROOT132"),
+            self.task_loop,
         ])
 
 class DevApp:
 
     @mark_create_layout
     def my_layout(self):
-
-        # res = plus.ComplexCanvas([
-        #     three.EffectComposer([
-        #         three.Outline().prop(blur=True, edgeStrength=100, 
-        #                                 width=1000, visibleEdgeColor=0xfff, 
-        #                                 hiddenEdgeColor=0xfff, blendFunction=three.BlendFunction.ALPHA),
-        #         # three.Bloom(),
-        #         # three.GammaCorrection(),
-        #         three.ToneMapping().prop(mode=three.ToneMapppingMode.ACES_FILMIC),
-        #     ]).prop(autoClear=False),
-
-        #     three.AmbientLight(intensity=0.314),
-        #     three.PointLight().prop(position=(13, 3, 5),
-        #                             castShadow=True,
-        #                             color=0xffffff,
-        #                             intensity=500),
-        #     three.Mesh([
-        #         three.BoxGeometry(),
-        #         three.Edges(),
-        #         three.MeshStandardMaterial().prop(color="orange", transparent=True),
-        #     ]).prop(enableSelect=True, castShadow=True, position=(0, 0, 0), enableHover=True, 
-        #         enablePivotControl=True,
-        #         enablePivotOnSelected=True,
-        #         pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
-        #         ),
-        #     three.BoundingBox((1 ,1 ,1)).prop(position=(3, 3, 3),
-        #     enableSelect=True, enableSelectOutline=False),
-        # ])
         root = TestNodeRoot()
         self.root = root
-        res = plus.ComplexCanvas([
+        canvas = plus.ComplexCanvas([
             three.EffectComposer([
                 three.Outline().prop(blur=True, edgeStrength=100, 
                                     width=2000, visibleEdgeColor=0xfff, 
                                     hiddenEdgeColor=0xfff, blendFunction=three.BlendFunction.ALPHA),
-                # three.Bloom(),
-                # three.GammaCorrection(),
                 three.ToneMapping().prop(mode=three.ToneMapppingMode.ACES_FILMIC),
             ]).prop(autoClear=False),
-            # three.Mesh([
-            #     three.PlaneGeometry(1000, 1000),
-            #     three.MeshStandardMaterial().prop(color="#f0f0f0"),
-            # ]).prop(receiveShadow=True, position=(0.0, 0.0, -0.1)),
-
-            # three.AmbientLight(intensity=0.314, color=0xffffff),
-            # three.PointLight().prop(position=(2, 2, 2),
-            #                         castShadow=True,
-            #                         color=0xffffff,
-            #                         intensity=31.14,
-            #                         helperSize=0.3),
-            # three.Mesh([
-            #     three.BoxGeometry(),
-            #     three.MeshStandardMaterial().prop(color="orange", transparent=True),
-            # ]).prop(enableSelect=True, castShadow=True, position=(-2, 1, 1), enableHover=True, 
-            #     enablePivotControl=True,
-            #     enablePivotOnSelected=True,
-            #     pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
-            #     ),
-            # three.Mesh([
-            #     three.BoxGeometry(),
-            #     three.MeshStandardMaterial().prop(color="orange", transparent=True),
-            # ]).prop(enableSelect=True, castShadow=True, position=(-2, 3, 1), enableHover=True, 
-            #     enablePivotControl=True,
-            #     enablePivotOnSelected=True,
-            #     pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
-            #     ),
-            # three.Mesh([
-            #     three.BoxGeometry(),
-            #     three.MeshStandardMaterial().prop(color="orange", transparent=True),
-            # ]).prop(enableSelect=True, castShadow=True, position=(-2, 5, 1), enableHover=True, 
-            #     enablePivotControl=True,
-            #     enablePivotOnSelected=True,
-            #     pivotControlProps=three.PivotControlsCommonProps(depthTest=False, annotations=True, anchor=(0, 0, 0))
-            #     ),
-
         ], init_tree_root=root, init_tree_child_accessor=lambda x: x.get_childs())
-
-        res.canvas.prop(flat=True, shadows=True)
-        self.canvas = res
+        canvas.canvas.prop(flat=True, shadows=True)
+        self.canvas = canvas
+        self.random_img = np.random.randint(0, 255, (128 * 16, 128 * 16, 3), dtype=np.uint8)
         return mui.VBox([
             mui.HBox([
                 mui.Button("Test V", self.on_click),
                 mui.Button("Test Tree", self.on_test_tree),
                 mui.Button("Test custom layout", self.on_custom_gv_layout),
+                mui.Button("Test gv locals", self.on_gv_locals_layout),
+
             ]),
-            res,
-        ]) 
+            plus.InspectPanel(self, canvas).prop(width="100%", height="100%"),
+        ])
     
     async def on_test_tree(self):
         self.root.func(3, 4)
@@ -215,3 +149,8 @@ class DevApp:
 
         # await self.canvas._unknown_visualization("foo.bar", points)
 
+    async def on_gv_locals_layout(self):
+        a = np.array([1, 2, 3])
+        b = np.array([1, np.nan, 3])
+        c = np.zeros([1, 3, 224, 224], np.int64)
+        await self.canvas.update_locals()

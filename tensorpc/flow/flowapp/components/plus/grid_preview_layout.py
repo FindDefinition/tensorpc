@@ -20,44 +20,21 @@ from tensorpc.flow.flowapp.components.plus.core import (
 from typing import List, Tuple
 
 
-def layout_rectangles(
-        rectangles: List[Tuple[int, int]],
-        bounding_width: int) -> List[Tuple[int, int, Tuple[int, int]]]:
-    # Sort rectangles by height
-    rectangles.sort(key=lambda r: r[1], reverse=True)
-
-    # Initialize variables
-    x, y, row_height, layout = 0, 0, 0, []
-
-    # Layout rectangles
-    for rectangle in rectangles:
-        width, height = rectangle
-
-        # If rectangle doesn't fit in current row, start a new row
-        if x + width > bounding_width:
-            x = 0
-            y += row_height
-            row_height = 0
-
-        # Place rectangle
-        layout.append((x, y, rectangle))
-        x += width
-        row_height = max(row_height, height)
-
-    return layout
-
 
 def layout_rectangles_with_priority(
         rectangles: List[Tuple[int, int, int]],
         bounding_width: int) -> List[Tuple[int, int, Tuple[int, int]]]:
+    # author: copilot
     # Sort rectangles by height
-    rectangles.sort(key=lambda r: (r[1], r[2]), reverse=True)
+    rectangles_with_index = [(i, x) for i, x in enumerate(rectangles)]
+    rectangles_with_index.sort(key=lambda r: (r[1][1], r[1][2]), reverse=True)
 
     # Initialize variables
-    x, y, row_height, layout = 0, 0, 0, []
+    x, y, row_height = 0, 0, 0
+    layout: List[Tuple[int, int, Tuple[int, int]]] = [(0, 0, (0, 0)) for _ in range(len(rectangles))]
 
     # Layout rectangles
-    for rectangle in rectangles:
+    for i, rectangle in rectangles_with_index:
         width, height, _ = rectangle
 
         # If rectangle doesn't fit in current row, start a new row
@@ -67,7 +44,8 @@ def layout_rectangles_with_priority(
             row_height = 0
 
         # Place rectangle
-        layout.append((x, y, rectangle))
+        layout[i] = (x, y, (width, height))
+        # layout.append((x, y, rectangle))
         x += width
         row_height = max(row_height, height)
 
@@ -118,7 +96,8 @@ class GridPreviewLayout(mui.FlexBox):
                  tree_root: Optional[UserObjTreeProtocol] = None,
                  max_cols: int = 4,
                  width_rate: int = 4,
-                 height_rate: int = 4) -> None:
+                 height_rate: int = 4,
+                 use_typename_as_title: bool = False) -> None:
         self._init_children = init_children
         self._tree_root = tree_root
         self._type_to_handler_object: Dict[Type[Any], ObjectLayoutHandler] = {}
@@ -127,8 +106,19 @@ class GridPreviewLayout(mui.FlexBox):
         self.width_rate = width_rate
         self.height_rate = height_rate
         self.grid_items: List[_GridLayoutedItem] = []
+        self.use_typename_as_title = use_typename_as_title
         super().__init__()
         self.init_add_layout([*self._layout_func()])
+
+    def _check_type_support_preview(self, type: Type) -> bool:
+        if type in self._type_to_handler_object:
+            return True
+        reload_mgr = self.flow_app_comp_core.reload_mgr
+        metas = reload_mgr.query_type_method_meta(type, True, True)
+        special_methods = FlowSpecialMethods(metas)
+        if special_methods.create_preview_layout is not None:
+            return True 
+        return ALL_OBJECT_LAYOUT_HANDLERS.check_type_exists(type)
 
     def _parse_obj_to_grid_item(self, obj: Any):
         from tensorpc.flow.flowapp import appctx
@@ -143,7 +133,7 @@ class GridPreviewLayout(mui.FlexBox):
         reload_mgr = appctx.get_reload_manager()
         is_dcls = dataclasses.is_dataclass(obj)
         preview_layout: Optional[mui.FlexBox] = None
-        metas = reload_mgr.query_type_method_meta(obj_type, True)
+        metas = reload_mgr.query_type_method_meta(obj_type, True, True)
         special_methods = FlowSpecialMethods(metas)
         handler: Optional[ObjectLayoutHandler] = None
         if obj_type in self._type_to_handler_object:
@@ -182,7 +172,7 @@ class GridPreviewLayout(mui.FlexBox):
             return _GridLayoutItem(obj, preview_layout, preview_grid_item, True)
         elif handler is not None:
             layout = handler.create_layout(obj)
-            item = handler.get_grid_layout_item()
+            item = handler.get_grid_layout_item(obj)
             assert isinstance(
                 layout,
                 mui.FlexBox), "you must return a mui Flexbox in create_layout"
@@ -219,13 +209,13 @@ class GridPreviewLayout(mui.FlexBox):
             item.item_cfg.w = layout_w
             item.item_cfg.h = layout_h
 
-    def _grid_layout_items_to_ui_items(self, name_to_grid_items: Dict[str, _GridLayoutItem]):
+    def _grid_layout_items_to_ui_items(self, name_to_grid_items: Dict[str, _GridLayoutItem], use_typename_as_title: bool):
         grid_items: List[_GridLayoutedItem] = []
         for name, grid_layout_item in name_to_grid_items.items():
             obj = grid_layout_item.obj
             obj_type = type(obj)
             obj_type_name = obj_type.__name__
-            container = GridPreviewContainer(grid_layout_item.layout, obj_type_name)
+            container = GridPreviewContainer(grid_layout_item.layout, obj_type_name if use_typename_as_title else name)
             if grid_layout_item.is_preview_layout:
                 get_editable_app().observe_layout(
                     grid_layout_item.layout,
@@ -256,7 +246,7 @@ class GridPreviewLayout(mui.FlexBox):
                 continue
             name_to_grid_item[name] = grid_item
         self._layout_items_inplace(name_to_grid_item)
-        grid_items: List[_GridLayoutedItem] = self._grid_layout_items_to_ui_items(name_to_grid_item)
+        grid_items: List[_GridLayoutedItem] = self._grid_layout_items_to_ui_items(name_to_grid_item, self.use_typename_as_title)
         # res.init_add_layout([
         #     mui.GridLayout(preview_layouts_v2).prop(flex=1, cols=12, draggableHandle=".grid-layout-drag-handle", rowHeight=300)
         # ])
@@ -287,6 +277,8 @@ class GridPreviewLayout(mui.FlexBox):
 
     def set_tree_root(self, tree_root: UserObjTreeProtocol):
         self._tree_root = tree_root
+        self.set_flow_event_context_creator(
+            lambda: tree_root.enter_context(tree_root))
 
     async def set_new_items(self, item: Dict[str, Any]):
         name_to_grid_item: Dict[str, _GridLayoutItem] = {}
@@ -296,7 +288,7 @@ class GridPreviewLayout(mui.FlexBox):
                 continue
             name_to_grid_item[name] = grid_item
         self._layout_items_inplace(name_to_grid_item)
-        grid_items: List[_GridLayoutedItem] = self._grid_layout_items_to_ui_items(name_to_grid_item)
+        grid_items: List[_GridLayoutedItem] = self._grid_layout_items_to_ui_items(name_to_grid_item, self.use_typename_as_title)
         self.grid_items = grid_items
         cols = self.width_rate * self.max_cols
         await self.set_new_layout([mui.GridLayout([x.grid_item for x in grid_items]).prop(
@@ -318,7 +310,7 @@ class GridPreviewLayout(mui.FlexBox):
                 name_to_prev_layouted_items.pop(name)
         name_to_grid_item.update({x.grid_item.name: x.layout_item for x in name_to_prev_layouted_items.values()})
         self._layout_items_inplace(name_to_grid_item)
-        grid_items: List[_GridLayoutedItem] = self._grid_layout_items_to_ui_items(name_to_grid_item)
+        grid_items: List[_GridLayoutedItem] = self._grid_layout_items_to_ui_items(name_to_grid_item, self.use_typename_as_title)
         cols = self.width_rate * self.max_cols
         await self.set_new_layout([mui.GridLayout([x.grid_item for x in grid_items]).prop(
                 flex=1,
@@ -335,7 +327,7 @@ class GridPreviewLayout(mui.FlexBox):
                 name_to_prev_layouted_items.pop(name)
         name_to_grid_item.update({x.grid_item.name: x.layout_item for x in name_to_prev_layouted_items.values()})
         self._layout_items_inplace(name_to_grid_item)
-        grid_items: List[_GridLayoutedItem] = self._grid_layout_items_to_ui_items(name_to_grid_item)
+        grid_items: List[_GridLayoutedItem] = self._grid_layout_items_to_ui_items(name_to_grid_item, self.use_typename_as_title)
         cols = self.width_rate * self.max_cols
         await self.set_new_layout([mui.GridLayout([x.grid_item for x in grid_items]).prop(
                 flex=1,

@@ -4,6 +4,7 @@ import enum
 from functools import partial
 import inspect
 import re
+import threading
 import urllib.request
 from typing import Any, Callable, Coroutine, Dict, Hashable, Iterable, List, Literal, Optional, Set, Tuple, Type, Union
 from typing_extensions import Annotated
@@ -14,13 +15,14 @@ from tensorpc.flow import marker
 from tensorpc.flow.flowapp.appcore import find_component_by_uid_with_type_check
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
+from tensorpc.flow.flowapp.components.plus.core import ALL_OBJECT_LAYOUT_HANDLERS
 from tensorpc.flow.flowapp.components.plus.grid_preview_layout import GridPreviewLayout
 from tensorpc.flow.flowapp.components.plus.objinspect.tree import BasicObjectTree, SelectSingleEvent
 from .core import UNKNOWN_KEY_SPLIT, UNKNOWN_VIS_KEY, UserTreeItemCard, VContext, get_canvas_item_cfg, get_or_create_canvas_item_cfg, _VapiObjects
 from tensorpc.flow.flowapp.components.typemetas import RangedFloat
 from tensorpc.flow.flowapp.core import Component, ContainerBase, FrontendEventType
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
-from tensorpc.flow.flowapp import colors
+from tensorpc.flow.flowapp import appctx, colors
 from tensorpc.flow.jsonlike import TreeItem
 from tensorpc.utils.registry import HashableSeqRegistryKeyOnly
 from tensorpc.flow.flowapp.components.core import get_tensor_container
@@ -211,13 +213,14 @@ class ComplexCanvas(mui.FlexBox):
     """
 
     def __init__(
-        self,
-        init_canvas_childs: Optional[three.ThreeLayoutType] = None,
-        transparent_canvas: bool = False,
-        init_tree_root: Optional[Any] = None,
-        init_tree_child_accessor: Optional[Callable[[Any], Dict[str,
-                                                                Any]]] = None,
-        key: str = "canvas"):
+            self,
+            init_canvas_childs: Optional[three.ThreeLayoutType] = None,
+            transparent_canvas: bool = False,
+            init_tree_root: Optional[Any] = None,
+            init_tree_child_accessor: Optional[Callable[[Any],
+                                                        Dict[str,
+                                                             Any]]] = None,
+            key: str = "canvas"):
 
         super().__init__()
         self.component_tree = three.Fragment([])
@@ -257,9 +260,21 @@ class ComplexCanvas(mui.FlexBox):
         # self.gv_tree_layout: mui.FlexBox = mui.HBox([
         #         mui.Markdown("## Unused")
         #     ]).prop(width="100%", height="100%", overflow="auto")
-        self.gv_tree_layout: GridPreviewLayout = GridPreviewLayout({}, None).prop(flex=1, height="100%", width="100%", overflow="auto")
-        self.gv_locals_layout: GridPreviewLayout = GridPreviewLayout({}, None).prop(flex=1, height="100%", width="100%", overflow="auto")
-        self.gv_custom_layout: GridPreviewLayout = GridPreviewLayout({}, None).prop(flex=1, height="100%", width="100%", overflow="auto")
+        self.gv_tree_layout: GridPreviewLayout = GridPreviewLayout(
+            {}, None, use_typename_as_title=True).prop(flex=1,
+                                                       height="100%",
+                                                       width="100%",
+                                                       overflow="auto")
+        self.gv_locals_layout: GridPreviewLayout = GridPreviewLayout(
+            {}, None).prop(flex=1,
+                           height="100%",
+                           width="100%",
+                           overflow="auto")
+        self.gv_custom_layout: GridPreviewLayout = GridPreviewLayout(
+            {}, None).prop(flex=1,
+                           height="100%",
+                           width="100%",
+                           overflow="auto")
 
         self.flatted_tree_nodes: Dict[Tuple[str, ...], Any] = {}
         if init_tree_root is not None and init_tree_child_accessor is not None:
@@ -273,7 +288,16 @@ class ComplexCanvas(mui.FlexBox):
             #     UNKNOWN_KEY_SPLIT.join(v.key): v.card
             #     for k, v in self._user_obj_tree_item_to_meta.items()
             # })
-            self.gv_tree_layout = GridPreviewLayout({".".join(k): v for k, v in flatted_tree_nodes.items()}, init_tree_root).prop(flex=1, height="100%", width="100%", overflow="auto")
+            self.gv_tree_layout = GridPreviewLayout(
+                {
+                    ".".join(k): v
+                    for k, v in flatted_tree_nodes.items()
+                },
+                init_tree_root,
+                use_typename_as_title=True).prop(flex=1,
+                                                 height="100%",
+                                                 width="100%",
+                                                 overflow="auto")
 
         init_layout = {
             # "camera": self.camera,
@@ -334,17 +358,21 @@ class ComplexCanvas(mui.FlexBox):
             border="4px solid transparent",
             sxOverDrop={"border": "4px solid green"},
         )
+
     async def set_new_tree_root(self, tree_root: Any,
-        tree_child_accessor: Callable[[Any], Dict[str, Any]]):
+                                tree_child_accessor: Callable[[Any],
+                                                              Dict[str, Any]]):
         flatted_tree_nodes = _extrace_all_tree_item_via_accessor(
-                tree_root, tree_child_accessor, "root")
+            tree_root, tree_child_accessor, "root")
         self.flatted_tree_nodes = flatted_tree_nodes
         groups, self._user_obj_tree_item_to_meta = self._get_tree_cards_and_groups(
-
             flatted_tree_nodes)
         await self._user_obj_tree_group.set_new_layout({**groups})
         self.gv_tree_layout.set_tree_root(tree_root)
-        await self.gv_tree_layout.set_new_items({".".join(k): v for k, v in flatted_tree_nodes.items()})
+        await self.gv_tree_layout.set_new_items({
+            ".".join(k): v
+            for k, v in flatted_tree_nodes.items()
+        })
 
     async def set_new_grid_items(self, items: Dict[str, Any], is_local: bool):
         if is_local:
@@ -422,8 +450,7 @@ class ComplexCanvas(mui.FlexBox):
     async def _gv_cards_callback(self, checked: bool, group: three.Group):
         if group.is_mounted():
             # TODO sync tree visible state
-            await group.send_and_wait(
-                group.update_event(visible=checked))
+            await group.send_and_wait(group.update_event(visible=checked))
 
     def _get_tree_cards_and_groups(self, flatted_tree: Dict[Tuple[str, ...],
                                                             Any]):
@@ -444,8 +471,11 @@ class ComplexCanvas(mui.FlexBox):
             cfg.alias = k[-1]
             cfg.is_vapi = False
             vctx = VContext(self, group)
-            obj_to_item_meta[id(v)] = CanvasUserTreeItem(k, 
-                vctx, UserTreeItemCard(k[-1], cfg.type_str_override, partial(self._gv_cards_callback, group=group)))
+            obj_to_item_meta[id(v)] = CanvasUserTreeItem(
+                k, vctx,
+                UserTreeItemCard(k[-1], cfg.type_str_override,
+                                 partial(self._gv_cards_callback,
+                                         group=group)))
         return groups, obj_to_item_meta
 
     def _get_tdata_container_pane(self, tdata_table: mui.DataGrid):
@@ -459,7 +489,8 @@ class ComplexCanvas(mui.FlexBox):
                        f"SpaceBar: ascend camera\n"
                        f"use dolly (wheel) to\n"
                        f"simulate first-persion")
-
+        bottom_pane_visible = len(self.flatted_tree_nodes)> 0
+        bottom_pane_visible = True
         canvas_layout = mui.HBox([
             self.canvas.prop(zIndex=1),
             mui.HBox([
@@ -488,7 +519,7 @@ class ComplexCanvas(mui.FlexBox):
                     mui.ToggleButton("enableTData",
                                      icon=mui.IconType.DataArray,
                                      callback=self._on_enable_tdata_pane).prop(
-                                         selected=len(self.flatted_tree_nodes) > 0,
+                                         selected=bottom_pane_visible,
                                          size="small",
                                          tooltip="Enable Data Grid Pane",
                                          tooltipPlacement="right"),
@@ -573,7 +604,7 @@ class ComplexCanvas(mui.FlexBox):
                         borderColor='divider')
             ], tab_theme)
         ]).prop(height="100%")
-        
+
         bottom_container = mui.HBox([
             mui.ThemeProvider([
                 mui.Tabs([
@@ -601,10 +632,11 @@ class ComplexCanvas(mui.FlexBox):
                                icon=mui.IconType.Dataset,
                                tooltip="Custom Grid",
                                tooltipPlacement="right"),
-                ], "2").prop(panelProps=mui.FlexBoxProps(width="100%", padding=0),
-                        orientation="vertical",
-                        borderRight=1,
-                        borderColor='divider')
+                ], "2").prop(panelProps=mui.FlexBoxProps(width="100%",
+                                                         padding=0),
+                             orientation="vertical",
+                             borderRight=1,
+                             borderColor='divider')
             ], tab_theme)
         ]).prop(height="100%", width="100%")
 
@@ -615,9 +647,10 @@ class ComplexCanvas(mui.FlexBox):
                   height="100%",
                   overflow="hidden")
         # self.item_tree.event_
-        self.tdata_container_v2_pane = mui.Allotment.Pane(bottom_container,
-                                                          preferredSize="40%",
-                                                          visible=len(self.flatted_tree_nodes) > 0)
+        self.tdata_container_v2_pane = mui.Allotment.Pane(
+            bottom_container,
+            preferredSize="40%",
+            visible=bottom_pane_visible)
         self._canvas_spitter = mui.Allotment(
             mui.Allotment.ChildDef([
                 mui.Allotment.Pane(canvas_layout, preferredSize="60%"),
@@ -910,7 +943,8 @@ class ComplexCanvas(mui.FlexBox):
             cfg = get_canvas_item_cfg(obj)
             if cfg is not None and cfg.node is not None:
                 cfg.visible = not cfg.visible
-                cfg.node.fixedIconBtns = self.custom_tree_handler._get_icon_button(obj)
+                cfg.node.fixedIconBtns = self.custom_tree_handler._get_icon_button(
+                    obj)
                 await self.item_tree.tree.update_subtree(cfg.node)
         await obj.send_and_wait(
             obj.create_update_event({
@@ -990,7 +1024,7 @@ class ComplexCanvas(mui.FlexBox):
         img_obj = _try_cast_to_image(obj)
         if img_obj is not None:
             with V.enter_v_conetxt(V.VContext(self, unk_container)):
-                V.image(img_obj, name=tree_id_replaced)
+                V.image(img_obj, name=tree_id_replaced, pos=(0, 0, 0.1)).prop(scale=(3, 3, 3))
             await V._draw_all_in_vctx(vctx_unk,
                                       rf"{unk_container._flow_uid}\..*")
             return True
@@ -1035,32 +1069,33 @@ class ComplexCanvas(mui.FlexBox):
         from tensorpc.flow.flowapp.components.plus import BasicObjectTree
         if isinstance(data, TreeDragTarget):
             obj = data.obj
-            success = await self._unknown_visualization(data.tree_id, obj)
+            tree_id_replaced = data.tree_id.replace("::", "__")
+
+            success = await self._unknown_visualization(tree_id_replaced, obj)
             if success:
                 # register to tree
                 tree = find_component_by_uid_with_type_check(
                     data.source_comp_uid, BasicObjectTree)
                 if tree is not None:
-                    tree._register_dnd_uid(data.tree_id, self._dnd_cb)
+                    tree._register_dnd_uid(tree_id_replaced, self._dnd_cb)
                     self._dnd_trees.add(data.source_comp_uid)
 
     async def _dnd_cb(self, uid: str, data: Any):
         await self._unknown_visualization(uid, data)
-        
-    async def register_cam_control_event_handler(self,
-                                           handler: Callable[[Any],
-                                                             mui.CORO_NONE],
-                                           throttle: int = 100,
-                                           debounce: Optional[int] = None):
+
+    async def register_cam_control_event_handler(
+            self,
+            handler: Callable[[Any], mui.CORO_NONE],
+            throttle: int = 100,
+            debounce: Optional[int] = None):
         self.ctrl.event_change.on(handler).configure(throttle=throttle,
-                                         debounce=debounce)
+                                                     debounce=debounce)
         await self.ctrl.sync_used_events()
 
     async def clear_cam_control_event_handler(self):
         self.ctrl.remove_event_handlers(self.ctrl.event_change.event_type)
         await self.ctrl.sync_used_events()
 
-    
     async def set_transparent(self, is_transparent: bool):
         if is_transparent:
             await self.canvas.send_and_wait(
@@ -1069,3 +1104,67 @@ class ComplexCanvas(mui.FlexBox):
             await self.canvas.send_and_wait(
                 self.canvas.update_event(threeBackgroundColor="#ffffff"))
 
+    async def update_locals(self,
+                            *,
+                            _frame_cnt: int = 1,
+                            exclude_self: bool = False):
+        cur_frame = inspect.currentframe()
+        assert cur_frame is not None
+        frame = cur_frame
+        while _frame_cnt > 0:
+            frame = cur_frame.f_back
+            assert frame is not None
+            cur_frame = frame
+            _frame_cnt -= 1
+        # del frame
+        local_vars = cur_frame.f_locals.copy()
+        if exclude_self:
+            local_vars.pop("self", None)
+        del frame
+        del cur_frame
+        new_local_vars = {}
+        for k, v in local_vars.items():
+            if self.gv_locals_layout._check_type_support_preview(type(v)):
+                new_local_vars[k] = v
+        await self.gv_locals_layout.set_new_items(new_local_vars)
+
+    def update_locals_sync(self,
+                           *,
+                           _frame_cnt: int = 1,
+                           loop: Optional[asyncio.AbstractEventLoop] = None,
+                           exclude_self: bool = False):
+        """update locals in sync manner, usually used on non-sync code via appctx.
+        """
+        if loop is None:
+            loop = asyncio.get_running_loop()
+        cur_frame = inspect.currentframe()
+        assert cur_frame is not None
+        frame = cur_frame
+        while _frame_cnt > 0:
+            frame = cur_frame.f_back
+            assert frame is not None
+            cur_frame = frame
+            _frame_cnt -= 1
+        # del frame
+        local_vars = cur_frame.f_locals.copy()
+        if exclude_self:
+            local_vars.pop("self", None)
+        del frame
+        del cur_frame
+        new_local_vars = {}
+        for k, v in local_vars.items():
+            if self.gv_locals_layout._check_type_support_preview(type(v)):
+                new_local_vars[k] = v
+        if appctx.get_app()._flowapp_thread_id == threading.get_ident():
+            task = asyncio.create_task(
+                self.gv_locals_layout.set_new_items(new_local_vars))
+            # we can't wait fut here
+            return task
+        else:
+            # we can wait fut here.
+            fut = asyncio.run_coroutine_threadsafe(
+                self.gv_locals_layout.set_new_items(new_local_vars), loop)
+            return fut.result()
+        
+    async def set_background_image(self, image: np.ndarray):
+        await self.background_img.show(image)

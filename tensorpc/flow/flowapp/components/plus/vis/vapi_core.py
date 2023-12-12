@@ -299,8 +299,9 @@ def group(name: str,
     # we need to increase frame cnt due to contextmanager
     obj_self = _find_frame_self(_frame_cnt=2 + 1)
     if obj_self is not None:
-        if obj_self in canvas._user_obj_tree_item_to_meta:
-            v_ctx = canvas._user_obj_tree_item_to_meta[obj_self].vctx
+        obj_self_id = id(obj_self)
+        if obj_self_id in canvas._user_obj_tree_item_to_meta:
+            v_ctx = canvas._user_obj_tree_item_to_meta[obj_self_id].vctx
             v_ctx.canvas = canvas
             is_objtree_ctx = True
     if v_ctx is None:
@@ -499,8 +500,8 @@ def _create_vapi_three_obj_pcfg(obj: three.Component, name: Optional[str], defau
         # write to standalone vctx for tree item
         obj_self = _find_frame_self(_frame_cnt=_frame_cnt + 1)
         if obj_self is not None:
-            if obj_self in v_ctx.canvas._user_obj_tree_item_to_meta:
-                v_ctx = v_ctx.canvas._user_obj_tree_item_to_meta[obj_self].vctx
+            if id(obj_self) in v_ctx.canvas._user_obj_tree_item_to_meta:
+                v_ctx = v_ctx.canvas._user_obj_tree_item_to_meta[id(obj_self)].vctx
     cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
     proxy = cfg.proxy
     assert proxy is not None
