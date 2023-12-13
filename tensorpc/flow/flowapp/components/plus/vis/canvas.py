@@ -6,7 +6,7 @@ import inspect
 import re
 import threading
 import urllib.request
-from typing import Any, Callable, Coroutine, Dict, Hashable, Iterable, List, Literal, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Coroutine, Dict, Hashable, Iterable, List, Literal, Optional, Set, Tuple, Type, TypeVar, Union
 from typing_extensions import Annotated
 import numpy as np
 from tensorpc.core.moduleid import get_qualname_of_type
@@ -35,7 +35,7 @@ UNKNOWN_VIS_REGISTRY: HashableSeqRegistryKeyOnly[
     Callable[[Any, str, "ComplexCanvas"],
              Coroutine[None, None, bool]]] = HashableSeqRegistryKeyOnly()
 
-
+T = TypeVar("T")
 def _count_child_type(container: three.ContainerBase,
                       obj_type: Type[three.Component]):
     res = 0
@@ -359,8 +359,8 @@ class ComplexCanvas(mui.FlexBox):
             sxOverDrop={"border": "4px solid green"},
         )
 
-    async def set_new_tree_root(self, tree_root: Any,
-                                tree_child_accessor: Callable[[Any],
+    async def set_new_tree_root(self, tree_root: T,
+                                tree_child_accessor: Callable[[T],
                                                               Dict[str, Any]]):
         flatted_tree_nodes = _extrace_all_tree_item_via_accessor(
             tree_root, tree_child_accessor, "root")

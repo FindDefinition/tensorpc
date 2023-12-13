@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import abc
 import asyncio
 import base64
 import bisect
@@ -770,21 +771,21 @@ class EnvNode(Node):
     def value(self):
         return self.node_data["value"]
 
-
-@ALL_NODES.register
-class DataStorageNode(Node):
+class DataStorageNodeBase(abc.ABC):
     """storage: 
     """
 
-    def __init__(self,
-                 flow_data: Dict[str, bytes],
-                 graph_id: str = "") -> None:
-        super().__init__(flow_data, graph_id, True)
+    def __init__(self) -> None:
         self.stored_data: Dict[str, StorageDataItem] = {}
 
-    @property
-    def in_memory_limit_bytes(self):
-        return self.node_data["inMemoryLimit"] * 1024 * 1024
+    @abc.abstractmethod
+    def get_node_id(self) -> str:
+        raise NotImplementedError
+    
+    @abc.abstractmethod
+    def get_in_memory_limit(self) -> int:
+        raise NotImplementedError
+
 
     def get_data_attrs(self):
         items = self.get_item_metas()
@@ -800,33 +801,33 @@ class DataStorageNode(Node):
 
     def get_items(self):
         res: List[str] = []
-        if not (FLOW_FOLDER_DATA_PATH / self.id).exists():
+        if not (FLOW_FOLDER_DATA_PATH / self.get_node_id()).exists():
             return res
-        for p in (FLOW_FOLDER_DATA_PATH / self.id).glob("*.pkl"):
+        for p in (FLOW_FOLDER_DATA_PATH / self.get_node_id()).glob("*.pkl"):
             if (p.parent / f"{p.stem}.json").exists():
                 res.append(p.stem)
         return res
 
     def get_item_metas(self):
         res: List[str] = []
-        if not (FLOW_FOLDER_DATA_PATH / self.id).exists():
+        if not (FLOW_FOLDER_DATA_PATH / self.get_node_id()).exists():
             return res
-        for p in (FLOW_FOLDER_DATA_PATH / self.id).glob("*.json"):
+        for p in (FLOW_FOLDER_DATA_PATH / self.get_node_id()).glob("*.json"):
             if (p.parent / f"{p.stem}.pkl").exists():
                 res.append(p.stem)
         return res
 
     def get_save_path(self, key: str):
-        root = FLOW_FOLDER_DATA_PATH / self.id
+        root = FLOW_FOLDER_DATA_PATH / self.get_node_id()
         if not root.exists():
             root.mkdir(mode=0o755, parents=True)
-        return FLOW_FOLDER_DATA_PATH / self.id / f"{key}.pkl"
+        return FLOW_FOLDER_DATA_PATH / self.get_node_id() / f"{key}.pkl"
 
     def get_meta_path(self, key: str):
-        root = FLOW_FOLDER_DATA_PATH / self.id
+        root = FLOW_FOLDER_DATA_PATH / self.get_node_id()
         if not root.exists():
             root.mkdir(mode=0o755, parents=True)
-        return FLOW_FOLDER_DATA_PATH / self.id / f"{key}.json"
+        return FLOW_FOLDER_DATA_PATH / self.get_node_id() / f"{key}.json"
 
     def save_data(self, key: str, data: bytes, meta: JsonLikeNode,
                   timestamp: int):
@@ -839,7 +840,7 @@ class DataStorageNode(Node):
             pickle.dump(item.data, f)
         with self.get_meta_path(key).open("w") as f:
             json.dump(item.get_meta_dict(), f)
-        if len(data) <= self.in_memory_limit_bytes:
+        if len(data) <= self.get_in_memory_limit():
             self.stored_data[key] = item
         else:
             self.stored_data[key] = StorageDataItem(bytes(), meta)
@@ -857,7 +858,6 @@ class DataStorageNode(Node):
     
 
     def remove_data(self, key: Optional[str]):
-        print("DELETE", key)
         if key is None:
             items = self.get_items()
             for k in items:
@@ -911,7 +911,7 @@ class DataStorageNode(Node):
             with path.open("rb") as f:
                 data: bytes = pickle.load(f)
                 data_item = StorageDataItem(data, meta)
-                if len(data) <= self.in_memory_limit_bytes:
+                if len(data) <= self.get_in_memory_limit():
                     self.stored_data[key] = data_item
                 else:
                     self.stored_data[key] = StorageDataItem(
@@ -926,6 +926,27 @@ class DataStorageNode(Node):
         if self.need_update(key, timestamp):
             return self.read_data(key)
         return None
+
+@ALL_NODES.register
+class DataStorageNode(Node, DataStorageNodeBase):
+    """storage: 
+    """
+
+    def __init__(self,
+                 flow_data: Dict[str, bytes],
+                 graph_id: str = "") -> None:
+        Node.__init__(self, flow_data, graph_id, True)
+        DataStorageNodeBase.__init__(self)
+
+    def get_node_id(self) -> str:
+        return self.id
+
+    def get_in_memory_limit(self) -> int:
+        return self.node_data["inMemoryLimit"] * 1024 * 1024
+
+    @property
+    def in_memory_limit_bytes(self):
+        return self.get_in_memory_limit()
 
     def on_delete(self):
         if (FLOW_FOLDER_DATA_PATH / self.id).exists():
@@ -1066,10 +1087,11 @@ class CommandNode(NodeWithSSHBase):
 
 
 @ALL_NODES.register
-class AppNode(CommandNode):
+class AppNode(CommandNode, DataStorageNodeBase):
 
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
-        super().__init__(flow_data, graph_id)
+        Node.__init__(self, flow_data, graph_id)
+        DataStorageNodeBase.__init__(self)
         self.grpc_port = -1
         self.http_port = -1
         self.fwd_grpc_port = -1
@@ -1078,6 +1100,13 @@ class AppNode(CommandNode):
         self.fwd_lang_server_port = -1
 
         self.state: Optional[dict] = None
+
+    def get_node_id(self) -> str:
+        return self.id
+
+    def get_in_memory_limit(self) -> int:
+        # TODO add to node data
+        return 10 * 1024 * 1024
 
     @property
     def module_name(self):
@@ -2522,7 +2551,7 @@ class Flow:
     async def query_data_items(self, graph_id: str, node_id: str):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
-        assert isinstance(node, DataStorageNode)
+        assert isinstance(node, DataStorageNodeBase)
         return node.get_items()
     
     async def query_all_data_node_ids(self, graph_id: str):
@@ -2539,10 +2568,11 @@ class Flow:
                                    timestamp: int):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
-        assert isinstance(node, DataStorageNode)
+        assert isinstance(node, DataStorageNodeBase)
         res = node.save_data(key, data, meta, timestamp)
-        await self._user_ev_q.put(
-            (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
+        if isinstance(node, DataStorageNode):
+            await self._user_ev_q.put(
+                (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
         return res
 
     async def read_data_from_storage(self,
@@ -2552,7 +2582,7 @@ class Flow:
                                      timestamp: Optional[int] = None):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
-        assert isinstance(node, DataStorageNode)
+        assert isinstance(node, DataStorageNodeBase)
         if timestamp is not None:
             return node.read_data_if_need_update(key, timestamp)
         else:
@@ -2561,25 +2591,27 @@ class Flow:
     async def query_data_attrs(self, graph_id: str, node_id: str):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
-        assert isinstance(node, DataStorageNode)
+        assert isinstance(node, DataStorageNodeBase)
         return node.get_data_attrs()
     
     async def delete_datastorage_data(self, graph_id: str, node_id: str, key: Optional[str]):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
-        assert isinstance(node, DataStorageNode)
+        assert isinstance(node, DataStorageNodeBase)
         res = node.remove_data(key)
-        await self._user_ev_q.put(
-            (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
+        if isinstance(node, DataStorageNode):
+            await self._user_ev_q.put(
+                (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
         return res 
     
     async def rename_datastorage_data(self, graph_id: str, node_id: str, key: str, newname: str):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
-        assert isinstance(node, DataStorageNode)
+        assert isinstance(node, DataStorageNodeBase)
         res = node.rename_data(key, newname)
-        await self._user_ev_q.put(
-            (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
+        if isinstance(node, DataStorageNode):
+            await self._user_ev_q.put(
+                (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
         return res 
 
     async def get_ssh_node_data(self, graph_id: str, node_id: str):

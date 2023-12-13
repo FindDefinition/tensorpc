@@ -63,14 +63,17 @@ class ScriptManager(mui.FlexBox):
 
     def __init__(
         self,
-        storage_node_rid: str,
-        graph_id: Optional[str] = None,
+        storage_node_rid: Optional[str] = None,
+        graph_id: Optional[str] = None
     ):
+        """when storage_node_rid is None, use app node storage, else use the specified node storage
+        """
         super().__init__()
-
-        self._storage_node_rid = storage_node_rid
+        if storage_node_rid is None:
+            storage_node_rid = MasterMeta().node_id
         if graph_id is None:
             graph_id = MasterMeta().graph_id
+        self._storage_node_rid = storage_node_rid
 
         self._graph_id = graph_id
         self.code_editor = mui.MonacoEditor("", "python",
@@ -178,7 +181,7 @@ class ScriptManager(mui.FlexBox):
                                                   self._storage_node_rid, self._graph_id)
             assert isinstance(item, Script)
             item.lang = value
-            await appctx.save_data_storage(label, self._storage_node_rid, item, self._graph_id)
+            await appctx.save_data_storage(label, item, self._storage_node_rid, self._graph_id)
 
     async def _on_editor_save(self, value: str):
         if self.scripts.value is not None:
@@ -187,7 +190,7 @@ class ScriptManager(mui.FlexBox):
                                                   self._storage_node_rid, self._graph_id)
             assert isinstance(item, Script)
             item.code = value
-            await appctx.save_data_storage(label, self._storage_node_rid, item, self._graph_id)
+            await appctx.save_data_storage(label, item, self._storage_node_rid, self._graph_id)
             if self._enable_save_watch.checked:
                 await self._run_button.headless_click()
 
@@ -208,8 +211,8 @@ class ScriptManager(mui.FlexBox):
             code_lines.append("asyncio.get_running_loop().create_task(main())")
             code_lines.append("")
         script = Script(new_item_name, "\n".join(code_lines), lang)
-        await appctx.save_data_storage(new_item_name, self._storage_node_rid,
-                                       script, self._graph_id)
+        await appctx.save_data_storage(new_item_name, script, self._storage_node_rid,
+                                       self._graph_id)
         await self.send_and_wait(
             self.code_editor.update_event(
                 language=_LANG_TO_VSCODE_MAPPING[lang],

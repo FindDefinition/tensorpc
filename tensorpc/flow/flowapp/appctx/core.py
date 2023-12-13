@@ -45,8 +45,8 @@ def thread_locker_wait_sync(*, _frame_cnt: int = 2):
 
 
 async def save_data_storage(key: str,
-                            node_id: str,
                             data: Any,
+                            node_id: Optional[str] = None,
                             graph_id: Optional[str] = None,
                             in_memory_limit: int = 100):
     app = get_app()
@@ -54,7 +54,7 @@ async def save_data_storage(key: str,
 
 
 async def read_data_storage(key: str,
-                            node_id: str,
+                            node_id: Optional[str] = None,
                             graph_id: Optional[str] = None,
                             in_memory_limit: int = 100) -> Any:
     app = get_app()
@@ -62,7 +62,7 @@ async def read_data_storage(key: str,
 
 
 async def remove_data_storage(key: Optional[str],
-                              node_id: str,
+                              node_id: Optional[str] = None,
                               graph_id: Optional[str] = None) -> Any:
     app = get_app()
     return await app.remove_data_storage_item(key, node_id, graph_id)
@@ -70,7 +70,7 @@ async def remove_data_storage(key: Optional[str],
 
 async def rename_data_storage_item(key: str,
                                    newname: str,
-                                   node_id: str,
+                                   node_id: Optional[str] = None,
                                    graph_id: Optional[str] = None) -> Any:
     app = get_app()
     return await app.rename_data_storage_item(key, newname, node_id, graph_id)

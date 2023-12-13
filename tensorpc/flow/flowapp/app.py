@@ -386,15 +386,16 @@ class App:
 
     async def save_data_storage(self,
                                 key: str,
-                                node_id: str,
                                 data: Any,
+                                node_id: Optional[str] = None,
                                 graph_id: Optional[str] = None,
                                 in_memory_limit: int = 1000):
         data_enc = pickle.dumps(data)
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
             graph_id = self.__flowapp_master_meta.graph_id
-
+        if node_id is None:
+            node_id = self.__flowapp_master_meta.node_id
         meta = parse_obj_to_jsonlike(data, key, key)
         in_memory_limit_bytes = in_memory_limit * 1024 * 1024
         meta.userdata = {
@@ -413,13 +414,15 @@ class App:
 
     async def read_data_storage(self,
                                 key: str,
-                                node_id: str,
+                                node_id: Optional[str] = None,
                                 graph_id: Optional[str] = None,
                                 in_memory_limit: int = 100):
         meta = self.__flowapp_master_meta
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
             graph_id = self.__flowapp_master_meta.graph_id
+        if node_id is None:
+            node_id = self.__flowapp_master_meta.node_id
         if key in self.__flowapp_storage_cache:
             item_may_invalid = self.__flowapp_storage_cache[key]
             res = await simple_chunk_call_async(meta.grpc_url,
@@ -442,12 +445,14 @@ class App:
 
     async def remove_data_storage_item(self,
                                        key: Optional[str],
-                                       node_id: str,
+                                       node_id: Optional[str] = None,
                                        graph_id: Optional[str] = None):
         meta = self.__flowapp_master_meta
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
             graph_id = self.__flowapp_master_meta.graph_id
+        if node_id is None:
+            node_id = self.__flowapp_master_meta.node_id
         await simple_chunk_call_async(meta.grpc_url,
                                       serv_names.FLOW_DATA_DELETE_ITEM,
                                       graph_id, node_id, key)
@@ -460,12 +465,14 @@ class App:
     async def rename_data_storage_item(self,
                                        key: str,
                                        newname: str,
-                                       node_id: str,
+                                       node_id: Optional[str] = None,
                                        graph_id: Optional[str] = None):
         meta = self.__flowapp_master_meta
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
             graph_id = self.__flowapp_master_meta.graph_id
+        if node_id is None:
+            node_id = self.__flowapp_master_meta.node_id
         await simple_chunk_call_async(meta.grpc_url,
                                       serv_names.FLOW_DATA_RENAME_ITEM,
                                       graph_id, node_id, key, newname)
@@ -475,12 +482,14 @@ class App:
                 self.__flowapp_storage_cache[newname] = item
 
     async def list_data_storage(self,
-                                node_id: str,
+                                node_id: Optional[str] = None,
                                 graph_id: Optional[str] = None):
         meta = self.__flowapp_master_meta
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
             graph_id = self.__flowapp_master_meta.graph_id
+        if node_id is None:
+            node_id = self.__flowapp_master_meta.node_id
         res: List[dict] = await simple_chunk_call_async(
             meta.grpc_url, serv_names.FLOW_DATA_LIST_ITEM_METAS, graph_id,
             node_id)
@@ -1332,7 +1341,6 @@ class EditableApp(App):
         observe_ctx = _FlowAppObserveContext()
         try:
             with self._flowapp_protect_app_observe_call(observe_ctx):
-
                 if resolved_path in self._flowapp_change_observers:
                     obmetas = self._flowapp_change_observers[
                         resolved_path].obmetas.copy()
