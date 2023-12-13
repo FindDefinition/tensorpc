@@ -16,6 +16,8 @@ from tensorpc.flow.flowapp.appcore import AppSpecialEventType
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.components.plus.canvas import SimpleCanvas
 from tensorpc.flow.flowapp.components.plus.collection import SimpleFileReader, ScriptExecutor
+from tensorpc.flow.flowapp.components.plus.scriptmgr import ScriptManager
+
 from tensorpc.flow.flowapp.components.plus.monitor import \
     ComputeResourceMonitor
 from tensorpc.flow.flowapp.components.plus.core import (
@@ -839,6 +841,7 @@ class ObjectTree(BasicObjectTree):
         self._default_obs_funcs = ObservedFunctionTree()
         default_builtins = {
             _DEFAULT_BUILTINS_NAME: {
+                "script": ScriptManager(),
                 "monitor": ComputeResourceMonitor(),
                 "appTerminal": mui.AppTerminal(),
                 "simpleCanvas": SimpleCanvasCreator(),

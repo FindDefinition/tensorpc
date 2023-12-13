@@ -1090,7 +1090,7 @@ class CommandNode(NodeWithSSHBase):
 class AppNode(CommandNode, DataStorageNodeBase):
 
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
-        Node.__init__(self, flow_data, graph_id)
+        CommandNode.__init__(self, flow_data, graph_id)
         DataStorageNodeBase.__init__(self)
         self.grpc_port = -1
         self.http_port = -1
