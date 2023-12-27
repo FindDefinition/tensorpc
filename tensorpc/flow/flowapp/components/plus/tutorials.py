@@ -15,6 +15,11 @@ from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 from tensorpc.flow.marker import mark_did_mount, mark_will_unmount
 from tensorpc.flow.flowapp.core import (_get_obj_def_path)
+import yaml
+
+@dataclasses.dataclass
+class MarkdownMetadata:
+    type: Optional[Literal["Canvas", "Notebook"]] = None
 
 @dataclasses.dataclass
 class MarkdownBlock:
@@ -25,6 +30,18 @@ def _parse_markdown_very_trivial(content: str):
     """this function only check ```Python ``` block, then split
     markdown into several markdown blocks and code blocks.
     """
+    # find comment firstly
+    comment_prefix = "<!--"
+    comment_suffix = "-->"
+    comment_start = content.find(comment_prefix)
+    comment_end = content.find(comment_suffix, comment_start + len(comment_prefix))
+    metadata = MarkdownMetadata()
+    if comment_start != -1 and comment_end != -1:
+        yaml_str = content[comment_start + len(comment_prefix):comment_end]
+        yaml_data = yaml.safe_load(yaml_str)
+        metadata = MarkdownMetadata(**yaml_data)
+        # remove comment
+        content = content[:comment_start] + content[comment_end + len(comment_suffix):]
     res_blocks: List[MarkdownBlock] = []
     remain_code_index = 0
     code_block_prefix = "```Python"
@@ -41,7 +58,7 @@ def _parse_markdown_very_trivial(content: str):
         res_blocks.append(MarkdownBlock(content[remain_code_index:code_block_start], "markdown"))
         res_blocks.append(MarkdownBlock(content[code_block_start + len(code_block_prefix):code_block_end], "code"))
         remain_code_index = code_block_end + len(code_block_suffix)
-    return res_blocks
+    return res_blocks, metadata
 
 
 class AppInMemory(mui.FlexBox):
@@ -110,20 +127,62 @@ class AppInMemory(mui.FlexBox):
         reload_mgr.in_memory_fs.modify_file(self.path, value)
         await appctx.get_editable_app()._reload_object_with_new_code(self.path, value)
 
-class MarkdownTutorial(mui.VirtualizedBox):
+class CodeBlock(mui.FlexBox):
+    """app with editor (app must be anylayout)
+    """
+    # @dataclasses.dataclass
+    class Config:
+        is_horizontal: bool = True
+        height: Union[mui.ValueType, mui.Undefined] = mui.undefined
+
+    def __init__(self, code: str):
+        self.editor = mui.MonacoEditor(code, "python", "").prop(minWidth=0, minHeight=0)
+        self.code = code 
+        super().__init__([
+            mui.Button("run", self._on_run),
+            self.editor.prop(flex=1),
+        ])
+        self._layout_for_reload: Optional[mui.FlexBox] = None
+        self.prop(flexFlow="column")
+        self.editor.event_editor_save.on(self._on_editor_save)
+
+    async def _on_editor_save(self, value: str):
+        self.code = value 
+
+    async def _on_run(self):
+        code_comp = compile(self.code, f"", "exec")
+        exec(code_comp)
+
+class MarkdownTutorial(mui.FlexBox):
     """ this component parse markdowns in a very simple way, don't use it in production, it's only for tutorials.
     """
     def __init__(self, md_content: str, path_uid: str):
-        res_blocks = _parse_markdown_very_trivial(md_content)
+        res_blocks, metadata = _parse_markdown_very_trivial(md_content)
         layout: mui.LayoutType = []
-        for i, block in enumerate(res_blocks):
-            if block.type == "markdown":
-                if block.content.strip() == "":
-                    continue
-                layout.append(mui.Markdown(block.content))
-            elif block.type == "code":
-
-                layout.append(AppInMemory(f"{path_uid}-{i}", block.content.lstrip()).prop(minHeight="400px", padding="10px"))
+        if metadata.type == "Canvas":
+            from tensorpc.flow import plus 
+            complex_canvas = plus.ComplexCanvas(init_enable_grid=False).prop(width="100%", flex=1)
+            blocks: mui.LayoutType = []
+            for i, block in enumerate(res_blocks):
+                if block.type == "markdown":
+                    if block.content.strip() == "":
+                        continue
+                    blocks.append(mui.Markdown(block.content))
+                elif block.type == "code":
+                    blocks.append(CodeBlock(block.content.lstrip()).prop(height="200px", padding="10px"))
+            book = mui.VirtualizedBox(blocks).prop(overflow="auto", flex=1)
+            layout = [complex_canvas, book]
+        else:
+            blocks: mui.LayoutType = []
+            for i, block in enumerate(res_blocks):
+                if block.type == "markdown":
+                    if block.content.strip() == "":
+                        continue
+                    blocks.append(mui.Markdown(block.content))
+                elif block.type == "code":
+                    blocks.append(AppInMemory(f"{path_uid}-{i}", block.content.lstrip()).prop(minHeight="400px", padding="10px"))
+            book = mui.VirtualizedBox(blocks)
+            layout = [book]
         super().__init__(layout)
-        self.prop(flexFlow="column", padding="10px")
+        self.prop(flexFlow="column nowrap", padding="10px", overflow="hidden", minHeight=0, minWidth=0, height="100%", width="100%")
 

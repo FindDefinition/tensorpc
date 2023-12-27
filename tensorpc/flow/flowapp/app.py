@@ -271,8 +271,7 @@ class App:
 
             self._is_external_root = True
         else:
-            root = mui.FlexBox(inited=True,
-                               uid=_ROOT,
+            root = mui.FlexBox(uid=_ROOT,
                                app_comp_core=self._flow_app_comp_core)
             root.prop(flexFlow=flex_flow)
             if external_wrapped_obj is not None:

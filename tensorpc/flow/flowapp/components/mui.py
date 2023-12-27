@@ -826,12 +826,10 @@ class ButtonGroupProps(MUIFlexBoxProps):
 
 class ButtonGroup(MUIContainerBase[ButtonGroupProps, Button]):
     def __init__(self,
-                 children: Union[List[Button], Dict[str, Button]],
-                 inited: bool = False) -> None:
+                 children: Union[List[Button], Dict[str, Button]]) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ButtonGroup, ButtonGroupProps, children,
-                         inited)
+        super().__init__(UIType.ButtonGroup, ButtonGroupProps, children)
         for v in children.values():
             assert isinstance(v, Button), "all childs must be button"
 
@@ -944,12 +942,11 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
                  callback: Optional[
                      Callable[[Optional[Union[ValueType, List[ValueType]]]],
                               _CORO_NONE]] = None,
-                 value: Optional[Union[ValueType, List[ValueType]]] = None,
-                 inited: bool = False) -> None:
+                 value: Optional[Union[ValueType, List[ValueType]]] = None) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ToggleButtonGroup, ToggleButtonGroupProps,
-                         children, inited, [FrontendEventType.Change.value])
+                         children, allowed_events=[FrontendEventType.Change.value])
         values_set: Set[ValueType] = set()
         for v in children.values():
             assert isinstance(v,
@@ -1044,11 +1041,11 @@ class AccordionSummaryProps(MUIFlexBoxProps):
 
 class AccordionDetails(MUIContainerBase[AccordionDetailsProps,
                                         MUIComponentType]):
-    def __init__(self, children: LayoutType, inited: bool = False) -> None:
+    def __init__(self, children: LayoutType) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.AccordionDetail, AccordionDetailsProps,
-                         children, inited)
+                         children)
 
     @property
     def prop(self):
@@ -1058,11 +1055,11 @@ class AccordionDetails(MUIContainerBase[AccordionDetailsProps,
 
 class AccordionSummary(MUIContainerBase[AccordionSummaryProps,
                                         MUIComponentType]):
-    def __init__(self, children: LayoutType, inited: bool = False) -> None:
+    def __init__(self, children: LayoutType) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.AccordionSummary, AccordionSummaryProps,
-                         children, inited)
+                         children)
 
     @property
     def prop(self):
@@ -1082,8 +1079,7 @@ class Accordion(MUIContainerBase[AccordionProps, Union[AccordionDetails,
                                                        AccordionSummary]]):
     def __init__(self,
                  summary: AccordionSummary,
-                 details: Optional[AccordionDetails] = None,
-                 inited: bool = False) -> None:
+                 details: Optional[AccordionDetails] = None) -> None:
         children: Dict[str, Union[AccordionDetails, AccordionSummary]] = {
             "summary": summary
         }
@@ -1093,7 +1089,7 @@ class Accordion(MUIContainerBase[AccordionProps, Union[AccordionDetails,
             assert isinstance(
                 v, (AccordionSummary,
                     AccordionDetails)), "all childs must be summary or detail"
-        super().__init__(UIType.Accordion, AccordionProps, children, inited)
+        super().__init__(UIType.Accordion, AccordionProps, children)
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -1172,7 +1168,6 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
     def __init__(self,
                  children: Optional[LayoutType] = None,
                  base_type: UIType = UIType.FlexBox,
-                 inited: bool = False,
                  uid: str = "",
                  app_comp_core: Optional[AppComponentCore] = None,
                  wrapped_obj: Optional[Any] = None) -> None:
@@ -1181,7 +1176,6 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
         super().__init__(base_type,
                          MUIFlexBoxWithDndProps,
                          children,
-                         inited,
                          uid=uid,
                          app_comp_core=app_comp_core,
                          allowed_events=[
@@ -1613,12 +1607,13 @@ class SwitchBase(MUIComponentBase[SwitchProps]):
             self,
             label: Union[str, Undefined],
             base_type: UIType,
-            callback: Optional[Callable[[bool], _CORO_NONE]] = None) -> None:
+            callback: Optional[Callable[[bool], _CORO_NONE]] = None,
+            init_value: bool = False) -> None:
         super().__init__(base_type, SwitchProps,
                          [FrontendEventType.Change.value])
         if not isinstance(label, Undefined):
             self.props.label = label
-        self.props.checked = False
+        self.props.checked = init_value
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
@@ -1671,16 +1666,18 @@ class Switch(SwitchBase):
     def __init__(
             self,
             label: Union[str, Undefined] = undefined,
-            callback: Optional[Callable[[bool], _CORO_NONE]] = None) -> None:
-        super().__init__(label, UIType.Switch, callback)
+            callback: Optional[Callable[[bool], _CORO_NONE]] = None,
+            init_value: bool = False) -> None:
+        super().__init__(label, UIType.Switch, callback, init_value)
 
 
 class Checkbox(SwitchBase):
     def __init__(
             self,
             label: Union[str, Undefined] = undefined,
-            callback: Optional[Callable[[bool], _CORO_NONE]] = None) -> None:
-        super().__init__(label, UIType.Checkbox, callback)
+            callback: Optional[Callable[[bool], _CORO_NONE]] = None,
+            init_value: bool = False) -> None:
+        super().__init__(label, UIType.Checkbox, callback, init_value)
 
 
 # @dataclasses.dataclass
@@ -2829,11 +2826,10 @@ class PaperProps(MUIFlexBoxProps):
 
 class Paper(MUIContainerBase[PaperProps, MUIComponentType]):
     def __init__(self,
-                 children: Optional[LayoutType] = None,
-                 inited: bool = False) -> None:
+                 children: Optional[LayoutType] = None) -> None:
         if children is not None and isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.Paper, PaperProps, children, inited)
+        super().__init__(UIType.Paper, PaperProps, children)
 
     @property
     def prop(self):
@@ -2854,9 +2850,8 @@ class FormControlProps(MUIFlexBoxProps):
 
 class FormControl(MUIContainerBase[FormControlProps, MUIComponentType]):
     def __init__(self,
-                 children: Dict[str, MUIComponentType],
-                 inited: bool = False) -> None:
-        super().__init__(UIType.Paper, FormControlProps, children, inited)
+                 children: Dict[str, MUIComponentType]) -> None:
+        super().__init__(UIType.Paper, FormControlProps, children)
 
     @property
     def prop(self):
@@ -3934,19 +3929,13 @@ class VirtualizedBox(MUIContainerBase[MUIVirtualizedBoxProps,
     list of data with same UI components.
     """
     def __init__(self,
-                 children: Optional[LayoutType] = None,
-                 inited: bool = False,
-                 uid: str = "",
-                 app_comp_core: Optional[AppComponentCore] = None) -> None:
+                 children: Optional[LayoutType] = None) -> None:
         if children is not None and isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.VirtualizedBox,
                          MUIVirtualizedBoxProps,
                          children,
-                         inited,
-                         uid=uid,
-                         app_comp_core=app_comp_core,
-                         allowed_events=[])
+                         allowed_events=ALL_POINTER_EVENTS)
         self.event_click = self._create_event_slot(FrontendEventType.Click)
         self.event_double_click = self._create_event_slot(
             FrontendEventType.DoubleClick)
@@ -4003,16 +3992,10 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps,
         component: Component
 
     def __init__(self,
-                 children: Component,
-                 inited: bool = False,
-                 uid: str = "",
-                 app_comp_core: Optional[AppComponentCore] = None) -> None:
+                 children: Component) -> None:
         super().__init__(UIType.DataFlexBox,
                          MUIDataFlexBoxWithDndProps,
                          DataFlexBox.ChildDef(children),
-                         inited,
-                         uid=uid,
-                         app_comp_core=app_comp_core,
                          allowed_events=[
                              FrontendEventType.Drop.value,
                              FrontendEventType.DragCollect.value
@@ -4430,7 +4413,7 @@ class MenuListProps(MUIFlexBoxProps):
 @dataclasses.dataclass
 class MenuItem:
     id: str
-    label: str
+    label: Union[Undefined, str] = undefined
     icon: Union[Undefined, str] = undefined
     inset: Union[Undefined, bool] = undefined
     iconSize: Union[Undefined, Literal["inherit", "large", "medium", "small"]] = undefined

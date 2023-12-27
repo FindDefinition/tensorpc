@@ -59,12 +59,22 @@ class Points(three.Points, _VapiObjects):
         super().__init__(limit)
         self._points: List[three.Vector3Type] = []
         self._points_arr: List[np.ndarray] = []
+        self.prop(layers=31)
+    
+    @property
+    def _count(self):
+        return len(self._points) + sum([arr.shape[0] for arr in self._points_arr])
 
     def p(self, x: float, y: float, z: float):
+        assert self._count + 1 <= self.props.limit, f"points count exceed limit {self.props.limit}"
         self._points.append((x, y, z))
         return self
 
     def array(self, data: np.ndarray):
+        assert data.ndim == 2 and data.shape[1] in [3, 4], "points dim must be 3 or 4 (with intensity)"
+        assert self._count + data.shape[0] <= self.props.limit, f"points count exceed limit {self.props.limit}"
+        if self._points_arr:
+            assert data.shape[1] == self._points_arr[0].shape[1], "points dim must be same as first array"
         if data.dtype != np.float32:
             data = data.astype(np.float32)
         self._points_arr.append(data)
@@ -74,10 +84,58 @@ class Points(three.Points, _VapiObjects):
         # TODO global config
         points_nparray = np.array(self._points, dtype=np.float32).reshape(-1, 3)
         if self._points_arr:
+            has_intensity = self._points_arr[0].shape[1] == 4
+            if has_intensity:
+                points_nparray = np.concatenate([points_nparray, np.full((points_nparray.shape[0], 1), 255.0, dtype=np.float32)], axis=-1)
             points_nparray = np.concatenate(self._points_arr +
                                             [points_nparray])
         self.prop(points=points_nparray)
 
+class ColoredPoints(three.Points, _VapiObjects):
+    def __init__(self, limit: int) -> None:
+        super().__init__(limit)
+        self._points: List[three.Vector3Type] = []
+        self._colors: List[Tuple[int, int, int]] = []
+
+        self._points_arr: List[np.ndarray] = []
+        self._colors_arr: List[np.ndarray] = []
+
+    @property
+    def _count(self):
+        return len(self._points) + sum([arr.shape[0] for arr in self._points_arr])
+
+    def p(self, x: float, y: float, z: float, r: int, g: int, b: int):
+        assert r >= 0 and r <= 255
+        assert g >= 0 and g <= 255
+        assert b >= 0 and b <= 255
+        assert self._count + 1 <= self.props.limit, f"points count exceed limit {self.props.limit}"
+        self._points.append((x, y, z))
+        self._colors.append((r, g, b))
+        return self
+
+    def array(self, data: np.ndarray, color: np.ndarray):
+        assert color.dtype == np.uint8, "color must be uint8 array"
+        assert data.ndim == 2 and data.shape[1] == 3, "points with color dim must be 3"
+        assert color.ndim == 2 and color.shape[1] == 3, "points with color dim must be 3"
+        assert self._count + data.shape[0] <= self.props.limit, f"points count exceed limit {self.props.limit}"
+        if self._points_arr:
+            assert data.shape[1] == self._points_arr[0].shape[1], "points dim must be same as first array"
+        if data.dtype != np.float32:
+            data = data.astype(np.float32)
+        self._points_arr.append(data)
+        self._colors_arr.append(color)
+        return self
+    
+    def prepare_vapi_props(self):
+        # TODO global config
+        points_nparray = np.array(self._points, dtype=np.float32).reshape(-1, 3)
+        color_nparray = np.array(self._colors, dtype=np.uint8).reshape(-1, 3)
+        if self._points_arr:
+            points_nparray = np.concatenate(self._points_arr +
+                                            [points_nparray])
+            color_nparray = np.concatenate(self._colors_arr +
+                                            [color_nparray])
+        self.prop(points=points_nparray, colors=color_nparray)
 
 
 class _Polygon:
@@ -100,13 +158,20 @@ class Lines(three.Segments, _VapiObjects):
         self._point_pairs: List[Tuple[three.Vector3Type,
                                       three.Vector3Type]] = []
         self._lines_arr: List[np.ndarray] = []
+        self.prop(layers=31)
+
+    @property
+    def _count(self):
+        return len(self._point_pairs) + sum([arr.shape[0] for arr in self._lines_arr])
 
     def p(self, x1: float, y1: float, z1: float, x2: float, y2: float,
           z2: float):
+        assert self._count + 1 <= self.props.limit, f"lines count exceed limit {self.props.limit}"
         self._point_pairs.append(((x1, y1, z1), (x2, y2, z2)))
         return self
 
     def array(self, data: np.ndarray):
+        assert self._count + data.shape[0] <= self.props.limit, f"lines count exceed limit {self.props.limit}"
         if data.dtype != np.float32:
             data = data.astype(np.float32)
         three.SegmentsProps.lines_validator(data)
@@ -125,11 +190,9 @@ class Lines(three.Segments, _VapiObjects):
     def closed_polygon(self, x: float, y: float, z: float):
         return _Polygon((x, y, z), True, self)
 
-
 class BoundingBox(three.BoundingBox, _VapiObjects):
     def prepare_vapi_props(self):
         self.prop(enableSelect=True)
-    
 
 class Image(three.Image, _VapiObjects):
     def __init__(self, img: np.ndarray, use_datatex: bool = False) -> None:
@@ -215,7 +278,7 @@ async def _draw_all_in_vctx(vctx: VContext,
             await container.update_childs({name: group})
     await vctx.canvas._show_visible_groups_of_objtree()
 
-    await vctx.canvas.item_tree.update_tree(wait=False, update_iff_change=update_iff_change)
+    await vctx.canvas.item_tree.update_tree(wait=True, update_iff_change=update_iff_change)
     if detail_update_prefix is not None:
         await vctx.canvas.update_detail_layout(detail_update_prefix)
     if app_event is not None:
@@ -519,6 +582,12 @@ def points(name: str, limit: int):
     pcfg.proxy = CanvasItemProxy()
     return point
 
+def colored_points(name: str, limit: int):
+    point = ColoredPoints(limit)
+    pcfg = _create_vapi_three_obj_pcfg(point, name, "points", _frame_cnt=2)
+    pcfg.proxy = CanvasItemProxy()
+    return point
+
 def lines(name: str, limit: int):
     point = Lines(limit)
     pcfg = _create_vapi_three_obj_pcfg(point, name, "lines", _frame_cnt=2)
@@ -608,22 +677,3 @@ def program(name: str, func: Callable):
     pcfg.detail_layout = ConfigPanelV2(func_dcls_obj, callback)
     pcfg.proxy = GroupProxy("")
     return
-
-def mdprint( *values: object,
-    sep: Optional[str] = " ",
-    end: Optional[str] = "\n",
-    file: Optional[IO[str]] = None,
-    flush: bool = False):
-    if is_inside_app_session():
-        v_ctx = get_v_context()
-        if v_ctx is not None and v_ctx.canvas._user_obj_tree_item_to_meta:
-            # write to standalone vctx for tree item
-            obj_self = _find_frame_self(_frame_cnt=2)
-            if obj_self is not None:
-                if obj_self in v_ctx.canvas._user_obj_tree_item_to_meta:
-                    meta = v_ctx.canvas._user_obj_tree_item_to_meta[obj_self]
-                    ss = io.StringIO()
-                    builtins.print(*values, sep=sep, end=end, file=ss, flush=flush)
-                    meta.md_prints.append(ss.getvalue())
-
-    return builtins.print(*values, sep=sep, end=end, file=file, flush=flush)

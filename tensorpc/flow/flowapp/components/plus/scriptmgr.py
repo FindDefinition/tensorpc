@@ -64,7 +64,8 @@ class ScriptManager(mui.FlexBox):
     def __init__(
         self,
         storage_node_rid: Optional[str] = None,
-        graph_id: Optional[str] = None
+        graph_id: Optional[str] = None,
+        init_python_script: Optional[str] = None
     ):
         """when storage_node_rid is None, use app node storage, else use the specified node storage
         """
@@ -109,6 +110,7 @@ class ScriptManager(mui.FlexBox):
             ]).prop(alignItems="center"),
             self.code_editor,
         ])
+        self._init_python_script = init_python_script
         self.prop(flex=1,
                   flexDirection="column",
                   width="100%",
@@ -133,6 +135,11 @@ class ScriptManager(mui.FlexBox):
         if options:
             await self.scripts.update_options(options, 0)
             await self._on_script_select(options[0])
+        else:
+            if self._init_python_script is not None:
+                await self._on_new_script({
+                        "label": "example",
+                    }, init_str=self._init_python_script)
 
     async def _on_run_script(self):
         if self.scripts.value is not None:
@@ -194,7 +201,7 @@ class ScriptManager(mui.FlexBox):
             if self._enable_save_watch.checked:
                 await self._run_button.headless_click()
 
-    async def _on_new_script(self, value):
+    async def _on_new_script(self, value, init_str: Optional[str] = None):
 
         new_item_name = value["label"]
         await self.scripts.update_options([*self.scripts.props.options, value],
@@ -206,6 +213,10 @@ class ScriptManager(mui.FlexBox):
             code_lines.append("from tensorpc.flow import appctx")
             code_lines.append("import asyncio")
             code_lines.append("async def main():")
+            if init_str is not None:
+                init_str_lines = init_str.splitlines()
+                init_str_lines = [" " * 4 + line for line in init_str_lines]
+                code_lines.extend(init_str_lines)
             code_lines.append("    pass")
             code_lines.append("")
             code_lines.append("asyncio.get_running_loop().create_task(main())")

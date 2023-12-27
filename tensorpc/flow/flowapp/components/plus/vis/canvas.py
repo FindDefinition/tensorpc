@@ -27,6 +27,8 @@ from tensorpc.flow.jsonlike import TreeItem
 from tensorpc.utils.registry import HashableSeqRegistryKeyOnly
 from tensorpc.flow.flowapp.components.core import get_tensor_container
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanelV2
+from tensorpc.flow.flowapp.components.plus.scriptmgr import ScriptManager
+
 from .treeview import CanvasTreeItemHandler, lock_component
 from tensorpc.utils.registry import HashableSeqRegistryKeyOnly
 from .core import is_reserved_name, CanvasUserTreeItem, GroupProxy
@@ -36,6 +38,8 @@ UNKNOWN_VIS_REGISTRY: HashableSeqRegistryKeyOnly[
              Coroutine[None, None, bool]]] = HashableSeqRegistryKeyOnly()
 
 T = TypeVar("T")
+
+
 def _count_child_type(container: three.ContainerBase,
                       obj_type: Type[three.Component]):
     res = 0
@@ -202,6 +206,17 @@ def _extrace_all_tree_item_via_accessor(
     return res
 
 
+_EXAMPLE_SCRIPT = f"""
+from tensorpc.flow import V
+import numpy as np 
+with V.group("example"):
+    V.text("hello world!!!").prop(color="red")
+    points = np.random.uniform(-5, 5, size=[1000, 3]).astype(np.float32)
+    V.points("point_key", limit=5000).array(points)
+    box = V.bounding_box((3, 1, 1), pos=(0, 3, 0))
+"""
+
+
 class ComplexCanvas(mui.FlexBox):
     """
     a blender-like canvas
@@ -220,7 +235,9 @@ class ComplexCanvas(mui.FlexBox):
             init_tree_child_accessor: Optional[Callable[[Any],
                                                         Dict[str,
                                                              Any]]] = None,
-            key: str = "canvas"):
+            key: str = "canvas",
+            custom_effect: Optional[three.EffectComposer] = None,
+            init_enable_grid: bool = True):
 
         super().__init__()
         self.component_tree = three.Fragment([])
@@ -228,8 +245,9 @@ class ComplexCanvas(mui.FlexBox):
             fov=75,
             near=0.1,
             far=1000,
-            position=(1, 1, 10),
+            # position=(1, 1, 10),
         )
+        self._init_enable_grid = init_enable_grid
         self.camera.prop(layers=1 | (1 << 31))
 
         self.ctrl = three.CameraControl().prop(makeDefault=True)
@@ -298,6 +316,17 @@ class ComplexCanvas(mui.FlexBox):
                                                  height="100%",
                                                  width="100%",
                                                  overflow="auto")
+        if custom_effect is None:
+            custom_effect = three.EffectComposer([
+                three.Outline().prop(blur=True,
+                                     edgeStrength=100,
+                                     width=2000,
+                                     visibleEdgeColor=0xfff,
+                                     hiddenEdgeColor=0xfff,
+                                     blendFunction=three.BlendFunction.ALPHA),
+                three.ToneMapping().prop(
+                    mode=three.ToneMapppingMode.ACES_FILMIC),
+            ]).prop(autoClear=False)
 
         init_layout = {
             # "camera": self.camera,
@@ -305,6 +334,7 @@ class ComplexCanvas(mui.FlexBox):
             "screen shot": self._screen_shot_v2,
             "gizmo": self._gizmo_helper,
             "utree": self._user_obj_tree_group,
+            "effects": custom_effect,
         }
         self._lock = asyncio.Lock()
         for comp in init_layout.values():
@@ -319,6 +349,7 @@ class ComplexCanvas(mui.FlexBox):
         self.reserved_group = reserved_group
         if init_canvas_childs is not None:
             layout["init"] = three.Group(init_canvas_childs)
+        self._init_layout = layout
         self._item_root = three.SelectionContext(layout,
                                                  self._on_3d_object_select)
         # self._item_root = three.Group(layout)
@@ -343,7 +374,7 @@ class ComplexCanvas(mui.FlexBox):
             "root": self._item_root,
             "camera": self.camera,
             "control": self.ctrl,
-        }).prop(flex=1, allowKeyboardEvent=True)
+        }).prop(flex=1, allowKeyboardEvent=True, flat=True, shadows=True)
         self.custom_tree_handler = CanvasTreeItemHandler()
         self.item_tree = BasicObjectTree(
             self._item_root,
@@ -360,8 +391,8 @@ class ComplexCanvas(mui.FlexBox):
         )
 
     async def set_new_tree_root(self, tree_root: T,
-                                tree_child_accessor: Callable[[T],
-                                                              Dict[str, Any]]):
+                                tree_child_accessor: Callable[[T], Dict[str,
+                                                                        Any]]):
         flatted_tree_nodes = _extrace_all_tree_item_via_accessor(
             tree_root, tree_child_accessor, "root")
         self.flatted_tree_nodes = flatted_tree_nodes
@@ -489,8 +520,8 @@ class ComplexCanvas(mui.FlexBox):
                        f"SpaceBar: ascend camera\n"
                        f"use dolly (wheel) to\n"
                        f"simulate first-persion")
-        bottom_pane_visible = len(self.flatted_tree_nodes)> 0
-        bottom_pane_visible = True
+        bottom_pane_visible = len(self.flatted_tree_nodes) > 0
+        bottom_pane_visible = self._init_enable_grid
         canvas_layout = mui.HBox([
             self.canvas.prop(zIndex=1),
             mui.HBox([
@@ -523,30 +554,27 @@ class ComplexCanvas(mui.FlexBox):
                                          size="small",
                                          tooltip="Enable Data Grid Pane",
                                          tooltipPlacement="right"),
-
-                    # mui.IconButton(mui.IconType.Clear,
-                    #                callback=self._on_clear).prop(
-                    #                    tooltip="Clear",
-                    #                    tooltipPlacement="right"),
+                    mui.IconButton(mui.IconType.Clear,
+                                   callback=self.clear).prop(
+                                       tooltip="Clear",
+                                       tooltipPlacement="right"),
                     mui.IconButton(mui.IconType.Refresh,
                                    callback=self._on_reset_cam).prop(
                                        tooltip="Reset Camera",
                                        tooltipPlacement="right"),
-                ]),
+                ]).prop(backgroundColor="lavender", borderRadius="4px"),
                 # self._cfg_panel,
                 self._cfg_container,
             ]).prop(position="absolute",
                     top=3,
                     left=3,
-                    zIndex=5,
-                    maxHeight="10%"),
-            mui.IconButton(mui.IconType.Help,
-                           lambda: None).prop(tooltip=help_string,
-                                              position="absolute",
-                                              tooltipMultiline=True,
-                                              top=3,
-                                              right=3,
-                                              zIndex=5),
+                    zIndex=5),
+            mui.HBox([
+                mui.IconButton(mui.IconType.Help, lambda: None).prop(
+                    tooltip=help_string,
+                    tooltipMultiline=True,
+                ),
+            ]).prop(top=3, position="absolute", right=3, zIndex=5),
             self.background_img.prop(position="absolute",
                                      top=0,
                                      left=0,
@@ -632,6 +660,13 @@ class ComplexCanvas(mui.FlexBox):
                                icon=mui.IconType.Dataset,
                                tooltip="Custom Grid",
                                tooltipPlacement="right"),
+                    mui.TabDef(
+                        "",
+                        "5",
+                        ScriptManager(init_python_script=_EXAMPLE_SCRIPT),
+                        icon=mui.IconType.Code,
+                        tooltip="python script playground",
+                        tooltipPlacement="right"),
                 ], "2").prop(panelProps=mui.FlexBoxProps(width="100%",
                                                          padding=0),
                              orientation="vertical",
@@ -648,9 +683,7 @@ class ComplexCanvas(mui.FlexBox):
                   overflow="hidden")
         # self.item_tree.event_
         self.tdata_container_v2_pane = mui.Allotment.Pane(
-            bottom_container,
-            preferredSize="40%",
-            visible=bottom_pane_visible)
+            bottom_container, preferredSize="40%", visible=bottom_pane_visible)
         self._canvas_spitter = mui.Allotment(
             mui.Allotment.ChildDef([
                 mui.Allotment.Pane(canvas_layout, preferredSize="60%"),
@@ -777,6 +810,10 @@ class ComplexCanvas(mui.FlexBox):
             if obj_local_id in group._child_comps:
                 await self.ctrl.lookat_object(
                     group._child_comps[obj_local_id]._flow_uid)
+
+    async def clear(self):
+        await self._item_root.set_new_layout({**self._init_layout})
+        await self.item_tree.update_tree()
 
     def _extract_table_from_group(self, group: three.ContainerBase):
         common_keys, data_items = self._extract_tdata_from_group(group)
@@ -1024,7 +1061,8 @@ class ComplexCanvas(mui.FlexBox):
         img_obj = _try_cast_to_image(obj)
         if img_obj is not None:
             with V.enter_v_conetxt(V.VContext(self, unk_container)):
-                V.image(img_obj, name=tree_id_replaced, pos=(0, 0, 0.1)).prop(scale=(3, 3, 3))
+                V.image(img_obj, name=tree_id_replaced,
+                        pos=(0, 0, 0.1)).prop(scale=(3, 3, 3))
             await V._draw_all_in_vctx(vctx_unk,
                                       rf"{unk_container._flow_uid}\..*")
             return True
@@ -1165,6 +1203,6 @@ class ComplexCanvas(mui.FlexBox):
             fut = asyncio.run_coroutine_threadsafe(
                 self.gv_locals_layout.set_new_items(new_local_vars), loop)
             return fut.result()
-        
+
     async def set_background_image(self, image: np.ndarray):
         await self.background_img.show(image)

@@ -2591,7 +2591,7 @@ class Flow:
     async def query_data_attrs(self, graph_id: str, node_id: str):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
-        assert isinstance(node, DataStorageNodeBase)
+        assert isinstance(node, DataStorageNodeBase), f"{type(node)}"
         return node.get_data_attrs()
     
     async def delete_datastorage_data(self, graph_id: str, node_id: str, key: Optional[str]):

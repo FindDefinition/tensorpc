@@ -50,7 +50,7 @@ async def save_data_storage(key: str,
                             graph_id: Optional[str] = None,
                             in_memory_limit: int = 100):
     app = get_app()
-    await app.save_data_storage(key, node_id, data, graph_id, in_memory_limit)
+    await app.save_data_storage(key, data, node_id, graph_id, in_memory_limit)
 
 
 async def read_data_storage(key: str,

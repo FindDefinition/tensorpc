@@ -98,9 +98,9 @@ class ObjectLayoutHandlerRegistry(HashableRegistryKeyOnly[Type[ObjectLayoutHandl
         return qname in self
  
 
-ALL_OBJECT_PREVIEW_HANDLERS: HashableRegistryKeyOnly[Type[ObjectPreviewHandler]] = HashableRegistryKeyOnly()
+ALL_OBJECT_PREVIEW_HANDLERS: HashableRegistryKeyOnly[Type[ObjectPreviewHandler]] = HashableRegistryKeyOnly(allow_duplicate=True)
 
-ALL_OBJECT_LAYOUT_HANDLERS: ObjectLayoutHandlerRegistry = ObjectLayoutHandlerRegistry()
+ALL_OBJECT_LAYOUT_HANDLERS: ObjectLayoutHandlerRegistry = ObjectLayoutHandlerRegistry(allow_duplicate=True)
 
 ALL_OBJECT_LAYOUT_CREATORS: HashableRegistryKeyOnly[Type[ObjectLayoutCreator]] = HashableRegistryKeyOnly()
 

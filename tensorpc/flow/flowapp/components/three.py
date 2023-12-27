@@ -330,9 +330,8 @@ class Object3dContainerBase(ThreeContainerBase[T_o3d_container_prop, T_child]):
                  base_type: UIType,
                  prop_cls: Type[T_o3d_container_prop],
                  children: Dict[str, T_child],
-                 inited: bool = False,
                  allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
-        super().__init__(base_type, prop_cls, children, inited, allowed_events)
+        super().__init__(base_type, prop_cls, children, allowed_events=allowed_events)
 
     def update_object3d_event(self,
                               position: Optional[Union[Vector3Type,
@@ -388,11 +387,10 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
                  base_type: UIType,
                  prop_cls: Type[T_o3d_container_prop],
                  children: Dict[str, T_child],
-                 inited: bool = False,
                  allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
         if allowed_events is None:
             allowed_events = []
-        super().__init__(base_type, prop_cls, children, inited, allowed_events=[
+        super().__init__(base_type, prop_cls, children, allowed_events=[
             FrontendEventType.Click.value,
             FrontendEventType.DoubleClick.value,
             FrontendEventType.Enter.value,
@@ -1592,12 +1590,11 @@ class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
     def __init__(self,
                  children: Union[List[ThreeComponentType],
                                  Dict[str, ThreeComponentType]],
-                 background: Union[str, Undefined] = undefined,
-                 inited: bool = False) -> None:
+                 background: Union[str, Undefined] = undefined) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ThreeCanvas, ThreeCanvasProps,
-                         children, inited)
+                         children)
         self.props.threeBackgroundColor = background
 
     @property
@@ -1653,10 +1650,9 @@ class ThreeFlexProps(R3FlexPropsBase, ContainerBaseProps):
 
 class Flex(ThreeContainerBase[ThreeFlexProps, ThreeComponentType]):
     def __init__(self,
-                 children: Dict[str, ThreeComponentType],
-                 inited: bool = False) -> None:
+                 children: Dict[str, ThreeComponentType]) -> None:
         super().__init__(UIType.ThreeFlex, ThreeFlexProps,
-                         children, inited)
+                         children)
 
     @property
     def prop(self):
@@ -1676,10 +1672,9 @@ class ThreeFlexItemBoxProps(R3FlexPropsBase, ContainerBaseProps):
 
 class ItemBox(ThreeContainerBase[ThreeFlexItemBoxProps, ThreeComponentType]):
     def __init__(self,
-                 children: Dict[str, ThreeComponentType],
-                 inited: bool = False) -> None:
+                 children: Dict[str, ThreeComponentType]) -> None:
         super().__init__(UIType.ThreeFlexItemBox, ThreeFlexItemBoxProps,
-                         children, inited)
+                         children)
 
     @property
     def prop(self):
@@ -1732,10 +1727,8 @@ class Html(Object3dContainerBase[HtmlProps, MUIComponentType]):
     TODO reject invalid component
     """
     def __init__(self,
-                 children: Dict[str, MUIComponentType],
-                 inited: bool = False) -> None:
-        super().__init__(UIType.ThreeHtml, HtmlProps, children,
-                         inited)
+                 children: Dict[str, MUIComponentType]) -> None:
+        super().__init__(UIType.ThreeHtml, HtmlProps, children)
 
     @property
     def prop(self):
@@ -1850,63 +1843,6 @@ class Line(Object3dWithEventBase[LineProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
-
-
-class ArrowXYMeasure(Group):
-    def __init__(self,
-                 p1: Tuple[NumberType, NumberType],
-                 p2: Tuple[NumberType, NumberType],
-                 label: str,
-                 label_size: float,
-                 arrow_width: float,
-                 arrow_height: float,
-                 opacity: float = 1,
-                 color: Optional[str] = None):
-        p1n = np.array(p1)
-        p2n = np.array(p2)
-        if color is None:
-            color = "black"
-        transparent = opacity < 1
-        unified_p = (p1n + p2n) / 2
-        p1u = p1n - unified_p
-        p2u = p2n - unified_p
-        rot_yaw = np.arctan2(p1u[1], p1u[0])
-        length = np.linalg.norm(p1u)
-        assert length - label_size / 2 - arrow_height > 0, "your arrow too short"
-        points = [
-            (label_size / 2, 0, 0),
-            (length, 0, 0),
-            (length - arrow_height, arrow_width / 2, 0),
-            (length - arrow_height, -arrow_width / 2, 0),
-            (length, 0, 0),
-        ]
-
-        positions = (unified_p[0], unified_p[1], 0)
-        rots = (0, 0, rot_yaw)
-        rots2 = (0, 0, rot_yaw + np.pi)
-
-        self.arrow0 = Line(points).prop(position=positions,
-                                        rotation=rots,
-                                        transparent=transparent,
-                                        opacity=opacity,
-                                        color=color)
-        self.arrow1 = Line(points).prop(position=positions,
-                                        rotation=rots2,
-                                        transparent=transparent,
-                                        opacity=opacity,
-                                        color=color)
-        self.text = Text(label).prop(fontSize=label_size,
-                                     position=positions,
-                                     color=color,
-                                     strokeOpacity=opacity,
-                                     fillOpacity=opacity)
-        layout = {
-            "a0": self.arrow0,
-            "a1": self.arrow1,
-            "t": self.text,
-        }
-        super().__init__(layout)
-
 
 class GeometryType(enum.Enum):
     Box = 0
@@ -2754,8 +2690,7 @@ class Mesh(O3dContainerWithEventBase[PrimitiveMeshProps, ThreeComponentType]):
 class MeshV1(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
     def __init__(self,
                  geometry: ThreeGeometryBase,
-                 material: ThreeMaterialBase,
-                 inited: bool = False) -> None:
+                 material: ThreeMaterialBase) -> None:
         self.geometry = geometry
         assert isinstance(geometry, ThreeGeometryBase)
         assert isinstance(material, ThreeMaterialBase)
@@ -2765,8 +2700,7 @@ class MeshV1(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
             "geometry": geometry,
             "material": material,
         }
-        super().__init__(UIType.ThreeMesh, MeshProps, children,
-                         inited)
+        super().__init__(UIType.ThreeMesh, MeshProps, children)
         self.props.toggled = False
 
     def get_sync_props(self) -> Dict[str, Any]:
@@ -2805,10 +2739,8 @@ class HudProps(ThreeFlexProps):
 class Hud(ThreeContainerBase[HudProps, ThreeComponentType]):
     # TODO can/should group accept event?
     def __init__(self,
-                 children: Dict[str, ThreeComponentType],
-                 inited: bool = False) -> None:
-        super().__init__(UIType.ThreeHud, HudProps, children,
-                         inited)
+                 children: Dict[str, ThreeComponentType]) -> None:
+        super().__init__(UIType.ThreeHud, HudProps, children)
 
     @property
     def prop(self):
