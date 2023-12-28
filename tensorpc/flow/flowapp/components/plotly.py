@@ -14,6 +14,7 @@
 
 import asyncio
 import base64
+import enum
 import tensorpc.core.dataclass_dispatch as dataclasses
 from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Dict, Iterable,
                     List, Optional, Tuple, Type, TypeVar, Union)
@@ -23,7 +24,7 @@ from tensorpc.flow.flowapp.components.common import (handle_standard_event)
 from typing_extensions import Literal, TypeAlias
 
 from ..core import (AppEvent, AppEventType, BasicProps, Component,
-                    ContainerBase, NumberType, T_child, TaskLoopEvent, UIEvent,
+                    ContainerBase, FrontendEventType, NumberType, T_child, TaskLoopEvent, UIEvent,
                     UIRunStatus, UIType, Undefined, undefined,
                     as_dict_no_undefined)
 from .mui import MUIComponentBase
@@ -38,8 +39,9 @@ class Font:
 
 @dataclasses.dataclass
 class Marker:
-    color: Union[Undefined, str] = undefined
-    size: Union[Undefined, NumberType] = undefined
+    color: Union[Undefined, str, List[str]] = undefined
+    size: Union[Undefined, NumberType, List[NumberType]] = undefined
+    opacity: Union[Undefined, NumberType, List[NumberType]] = undefined
 
 
 @dataclasses.dataclass
@@ -53,15 +55,18 @@ class Line:
 
 @dataclasses.dataclass
 class Trace:
-    x: List[NumberType]
-    y: List[NumberType]
-    type: Literal["scatter", "scattergl", "bar", "image"]
-    mode: Literal["markers", "lines", "lines+markers"]
+    x: Union[Undefined, List[Union[NumberType, str]]] = undefined
+    y: Union[Undefined, List[Union[NumberType, str]]] = undefined
+    z: Union[Undefined, List[Union[NumberType, str]]] = undefined
+    text: Union[Undefined, str, List[str]] = undefined
+    type: Union[Undefined, Literal["scatter", "scattergl", "bar", "image"]] = undefined
+    mode: Union[Undefined, Literal["markers", "lines", "lines+markers"]] = undefined
     visible: Union[Undefined, bool] = undefined
     name: Union[Undefined, str] = undefined
     line: Union[Undefined, Line] = undefined
     marker: Union[Undefined, Marker] = undefined
-
+    values: Union[Undefined, List[Union[NumberType, str]]] = undefined
+    labels: Union[Undefined, List[Union[NumberType, str]]] = undefined
 
 @dataclasses.dataclass
 class Margin:
@@ -152,11 +157,31 @@ class PlotlyProps(BasicProps):
     layout: Layout = dataclasses.field(default_factory=Layout)
 
 
+class ChartControlType(enum.IntEnum):
+    ExtendData = 0
+    ClearData = 1
+    UpdateTrace = 2
+
+@dataclasses.dataclass
+class PlotlyTraceDataUpdate:
+    traceUpdateIndex: int 
+    traceUpdateMaximumNumber: Union[Undefined, int] = undefined
+    x: Union[Undefined, List[Union[NumberType, str]]] = undefined
+    y: Union[Undefined, List[Union[NumberType, str]]] = undefined
+    z: Union[Undefined, List[Union[NumberType, str]]] = undefined
+    text: Union[Undefined, List[str]] = undefined
+    markerSize: Union[Undefined, List[NumberType]] = undefined
+    markerColor: Union[Undefined, List[str]] = undefined
+    markerOpacity: Union[Undefined, List[NumberType]] = undefined
+    values: Union[Undefined, List[Union[NumberType, str]]] = undefined
+    labels: Union[Undefined, List[Union[NumberType, str]]] = undefined
+
 class Plotly(MUIComponentBase[PlotlyProps]):
     """see https://plotly.com/javascript/ for documentation"""
 
     def __init__(self) -> None:
-        super().__init__(UIType.Plotly, PlotlyProps)
+        super().__init__(UIType.Plotly, PlotlyProps, allowed_events=[FrontendEventType.Click])
+        self.event_click = self._create_event_slot(FrontendEventType.Click)
 
     async def show_raw(self, data: List[Trace], layout: Layout):
         self.props.data = data
@@ -185,3 +210,36 @@ class Plotly(MUIComponentBase[PlotlyProps]):
                       margin=Margin(l=0, r=0, b=0, t=0),
                       xaxis=Axis(automargin=True),
                       yaxis=Axis(automargin=True))
+
+    async def extend_data(self, updates: List[PlotlyTraceDataUpdate]):
+        ev = self.create_comp_event({
+            "type": ChartControlType.ExtendData.value,
+            "updates": [as_dict_no_undefined(u) for u in updates],
+        })
+        data = self.props.data 
+        for update in updates:
+            if update.traceUpdateIndex >= len(data) or update.traceUpdateIndex < 0:
+                continue 
+            trace = data[update.traceUpdateIndex]
+            if not isinstance(update.x, Undefined) and not isinstance(trace.x, Undefined):
+                trace.x.extend(update.x)
+            if not isinstance(update.y, Undefined) and not isinstance(trace.y, Undefined):
+                trace.y.extend(update.y)
+            if not isinstance(update.z, Undefined) and not isinstance(trace.z, Undefined):
+                trace.z.extend(update.z)
+            if not isinstance(update.text, Undefined) and not isinstance(trace.text, Undefined) and isinstance(trace.text, list):
+                trace.text.extend(update.text)
+            if not isinstance(update.markerSize, Undefined) and not isinstance(trace.marker, Undefined) and isinstance(trace.marker, Marker):
+                if isinstance(trace.marker.size, list):
+                    trace.marker.size.extend(update.markerSize)
+            if not isinstance(update.markerColor, Undefined) and not isinstance(trace.marker, Undefined) and isinstance(trace.marker, Marker):
+                if isinstance(trace.marker.color, list):
+                    trace.marker.color.extend(update.markerColor)
+            if not isinstance(update.markerOpacity, Undefined) and not isinstance(trace.marker, Undefined) and isinstance(trace.marker, Marker):
+                if isinstance(trace.marker.opacity, list):
+                    trace.marker.opacity.extend(update.markerOpacity)
+            if not isinstance(update.values, Undefined) and not isinstance(trace.values, Undefined):
+                trace.values.extend(update.values)
+            if not isinstance(update.labels, Undefined) and not isinstance(trace.labels, Undefined):
+                trace.labels.extend(update.labels)
+        await self.send_and_wait(ev)
