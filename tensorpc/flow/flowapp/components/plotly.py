@@ -20,6 +20,7 @@ from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Dict, Iterable,
                     List, Optional, Tuple, Type, TypeVar, Union)
 
 from tensorpc.core.asynctools import cancel_task
+from tensorpc.flow.flowapp.appcore import Event
 from tensorpc.flow.flowapp.components.common import (handle_standard_event)
 from typing_extensions import Literal, TypeAlias
 
@@ -165,7 +166,7 @@ class ChartControlType(enum.IntEnum):
 @dataclasses.dataclass
 class PlotlyTraceDataUpdate:
     traceUpdateIndex: int 
-    traceUpdateMaximumNumber: Union[Undefined, int] = undefined
+    dataMaxCount: Union[Undefined, int] = undefined
     x: Union[Undefined, List[Union[NumberType, str]]] = undefined
     y: Union[Undefined, List[Union[NumberType, str]]] = undefined
     z: Union[Undefined, List[Union[NumberType, str]]] = undefined
@@ -193,6 +194,14 @@ class Plotly(MUIComponentBase[PlotlyProps]):
         res["data"] = self.props.data
         res["layout"] = self.props.layout
         return res
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self,
+                                           ev,
+                                           sync_status_first=False,
+                                           sync_state_after_change=False,
+                                           is_sync=is_sync,
+                                           change_status=False)
 
     @property
     def prop(self):
