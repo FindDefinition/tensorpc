@@ -405,25 +405,25 @@ class ComplexCanvas(mui.FlexBox):
             for k, v in flatted_tree_nodes.items()
         })
 
-    async def set_new_grid_items(self, items: Dict[str, Any], is_local: bool):
+    async def set_new_grid_items(self, items: Dict[str, Any], is_local: bool = False):
         if is_local:
             await self.gv_locals_layout.set_new_items(items)
         else:
             await self.gv_custom_layout.set_new_items(items)
 
-    async def update_grid_items(self, items: Dict[str, Any], is_local: bool):
+    async def update_grid_items(self, items: Dict[str, Any], is_local: bool = False):
         if is_local:
             await self.gv_locals_layout.update_items(items)
         else:
             await self.gv_custom_layout.update_items(items)
 
-    async def delete_grid_items(self, items: List[str], is_local: bool):
+    async def delete_grid_items(self, items: List[str], is_local: bool = False):
         if is_local:
             await self.gv_locals_layout.delete_items(items)
         else:
             await self.gv_custom_layout.delete_items(items)
 
-    async def clear_grid(self, is_local: bool):
+    async def clear_grid(self, is_local: bool = False):
         if is_local:
             await self.gv_locals_layout.clear_items()
         else:

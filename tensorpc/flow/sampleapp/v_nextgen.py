@@ -111,12 +111,12 @@ class DevApp:
         #     ])
         # ])
         with V.group("dev"):
-            points = np.random.uniform(-50, 50, size=[10000000, 3]).astype(np.float32)
+            points = np.random.uniform(-50, 50, size=[1000, 3]).astype(np.float32)
             colors = np.random.uniform(0, 255, size=[1000]).astype(np.uint8)
             points[:, 0] -= 20
 
             # V.points("points0", 1000).p(1, 1, 1).p(0, 0, 0).color("red").size(5)
-            V.points("points1X", 10000000).array(points) # .size(5)
+            V.points("points1X", 1000).array(points) # .size(5)
 
             V.lines("lines0", 1000).p(2, 2, 2, 5, 5, 5).prop(color="blue")
             def wtfrtx(a: V.Annotated[float, V.RangedFloat(0, 10, 0.1)] = 5):

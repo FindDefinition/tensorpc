@@ -89,7 +89,7 @@ class HomogeneousMetricFigure(FlexBox):
             if trace_id not in self._trace_dict:
                 self._trace_dict[trace_id] = {}
             if k not in self._trace_dict[trace_id]:
-                new_trace = plotly.Trace([], [],
+                new_trace = plotly.Trace([], [], [],
                                          "scatter",
                                          "lines",
                                          line=plotly.Line(color=color),

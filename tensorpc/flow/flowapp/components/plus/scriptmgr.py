@@ -142,6 +142,7 @@ class ScriptManager(mui.FlexBox):
                     }, init_str=self._init_python_script)
 
     async def _on_run_script(self):
+        await self.code_editor.save()
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
             item = await appctx.read_data_storage(label,

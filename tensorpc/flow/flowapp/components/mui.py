@@ -1539,6 +1539,9 @@ class MonacoEditorProps(MUIComponentBaseProps):
     debounce: Union[NumberType, Undefined] = undefined
     lspPort: Union[int, Undefined] = undefined
 
+class _MonacoEditorControlType(enum.IntEnum):
+    SetLineNumber = 0
+    Save = 1
 
 class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
     def __init__(self, value: str, language: str, path: str) -> None:
@@ -1591,6 +1594,18 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+    async def set_line_number(self, lineno: int):
+        ev = self.create_comp_event({
+            "type": int(_MonacoEditorControlType.SetLineNumber),
+            "value": lineno,
+        })
+        await self.send_and_wait(ev)
+
+    async def save(self):
+        ev = self.create_comp_event({
+            "type": int(_MonacoEditorControlType.Save),
+        })
+        await self.send_and_wait(ev)
 
 @dataclasses.dataclass
 class SwitchProps(MUIComponentBaseProps):
@@ -3670,7 +3685,7 @@ class JsonLikeTreeBase(MUIComponentBase[T_tview_base_props]):
             self.create_comp_event({
                 "type":
                 _TreeControlType.UpdateSubTree,
-                "tree": as_dict_no_undefined(node),
+                "tree": node,
             }))
 
 class JsonLikeTree(JsonLikeTreeBase[JsonLikeTreeProps]):

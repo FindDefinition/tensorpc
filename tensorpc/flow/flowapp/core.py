@@ -1476,7 +1476,7 @@ class Component(Generic[T_base_props, T_child]):
         """create component control event for
         backend -> frontend direct communication
         """
-        ev = ComponentEvent({self._flow_uid: data})
+        ev = ComponentEvent({self._flow_uid: as_dict_no_undefined(data)})
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.ComponentEvent: ev})
 
