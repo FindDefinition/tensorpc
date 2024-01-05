@@ -133,8 +133,9 @@ class TypeMeta:
 
     def get_reloaded_module(self, in_memory_fs: Optional[InMemoryFS] = None):
         if not self.is_path:
+            module = sys.modules.get(self.module_key, None)
             # use importlib to reload module
-            module = importlib.import_module(self.module_key)
+            # module = importlib.import_module(self.module_key)
             if module is None:
                 return None
             try:
