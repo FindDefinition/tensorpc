@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from functools import partial
 import math
 from typing import Any, Callable, Coroutine, Dict, Hashable, Iterable, List, Literal, Optional, Set, Tuple, Type, Union
@@ -266,9 +267,14 @@ class GridPreviewLayout(mui.FlexBox):
                                         create_layout: ServFunctionMeta,
                                         container: GridPreviewContainer):
         # print("DO PREVIEW LAYOUT RELOAD", create_layout.user_app_meta)
-        layout_flex = await preview_layout_reload(
-            lambda x: container.update_childs({"layout": x}), layout,
-            create_layout)
+        ctx = nullcontext()
+        if self._tree_root is not None:
+            ctx = self._tree_root.enter_context(
+                    self._tree_root)
+        with ctx:
+            layout_flex = await preview_layout_reload(
+                lambda x: container.update_childs({"layout": x}), layout,
+                create_layout)
         if layout_flex is not None:
             get_editable_app().observe_layout(
                 layout_flex,

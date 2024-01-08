@@ -96,21 +96,6 @@ class Annotation:
 
 
 @dataclasses.dataclass
-class Legend:
-    x: Union[Undefined, NumberType] = undefined
-    y: Union[Undefined, NumberType] = undefined
-    xanchor: Union[Undefined, Literal["left", "auto", "right",
-                                      "center"]] = undefined
-    yanchor: Union[Undefined, Literal["top", "auto", "middle",
-                                      "bottom"]] = undefined
-    title: Union[Undefined, str] = undefined
-    showgrid: Union[Undefined, bool] = undefined
-    zeroline: Union[Undefined, bool] = undefined
-    showline: Union[Undefined, bool] = undefined
-    font: Union[Undefined, Font] = undefined
-
-
-@dataclasses.dataclass
 class Axis:
     title: Union[Undefined, str] = undefined
     showgrid: Union[Undefined, bool] = undefined
@@ -131,6 +116,33 @@ class Axis:
     domain: Union[Undefined, List[NumberType]] = undefined
 
 @dataclasses.dataclass
+class LegendTitle:
+    text: Union[Undefined, str] = undefined
+    font: Union[Undefined, Font] = undefined
+    side: Union[Undefined, Literal["top", "left", "top left"]] = undefined
+
+@dataclasses.dataclass
+class Legend:
+    borderwidth: Union[Undefined, NumberType] = undefined
+    groupclick: Union[Undefined, Literal["toggleitem", "togglegroup"]] = undefined
+    grouptitlefont: Union[Undefined, Font] = undefined
+    itemclick: Union[Undefined, Literal["toggle", "toggleothers", False]] = undefined
+    itemdoubleclick: Union[Undefined, Literal["toggle", "toggleothers", False]] = undefined
+    itemsizing: Union[Undefined, Literal["trace", "constant"]] = undefined
+    itemwidth: Union[Undefined, NumberType] = undefined
+    orientation: Union[Undefined, Literal["v", "h"]] = undefined
+    title: Union[Undefined, LegendTitle] = undefined
+    tracegroupgap: Union[Undefined, NumberType] = undefined
+    traceorder: Union[Undefined, Literal["grouped", "normal", "reversed", "reversed+grouped"]] = undefined
+    uirevision: Union[Undefined, NumberType, str] = undefined
+    uid: Union[Undefined, str] = undefined
+    valign: Union[Undefined, Literal["top", "middle", "bottom"]] = undefined
+    x: Union[Undefined, NumberType] = undefined
+    xanchor: Union[Undefined, Literal["auto", "left", "center", "right"]] = undefined
+    y: Union[Undefined, NumberType] = undefined
+    yanchor: Union[Undefined, Literal["auto", "top", "middle", "bottom"]] = undefined
+
+@dataclasses.dataclass
 class Layout:
     title: Union[Undefined, str] = undefined
     width: Union[Undefined, NumberType] = undefined
@@ -149,6 +161,7 @@ class Layout:
                             "drawopenpath", "drawline", "drawrect",
                             "drawcircle", "orbit", "turntable",
                             False]] = undefined
+    legend: Union[Undefined, Legend] = undefined
     xaxis: Union[Undefined, Axis] = undefined
     yaxis: Union[Undefined, Axis] = undefined
     xaxis2: Union[Undefined, Axis] = undefined

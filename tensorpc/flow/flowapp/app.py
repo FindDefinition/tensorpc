@@ -1205,6 +1205,8 @@ class EditableApp(App):
             obj.effects.use_effect(partial(self.__observe_layout_effect, obj, callback), key=TENSORPC_FLOW_EFFECTS_OBSERVE)
             if obj.is_mounted():
                 self._flowapp_observe(obj, callback)
+                # TODO better code
+                obj.effects._flow_unmounted_effects[TENSORPC_FLOW_EFFECTS_OBSERVE].append(partial(self._flowapp_remove_observer, obj))
 
     def _flowapp_observe(
         self,
@@ -1571,9 +1573,11 @@ class EditableApp(App):
             traceback.print_exc()
             return
         finally:
+            # print("START MODIFY OMBETA")
             # for pair in observe_ctx._reloaded_layout_pairs:
             #     observe_ctx._removed_layouts.remove(pair[0])
             #     observe_ctx._added_layouts_and_cbs.pop(pair[1])
+            # print(len(observe_ctx._removed_layouts), len(observe_ctx._added_layouts_and_cbs))
             for layout in observe_ctx._removed_layouts:
                 self._flowapp_remove_observer(layout)
             for layout, cb in observe_ctx._added_layouts_and_cbs.items():
