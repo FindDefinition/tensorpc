@@ -181,7 +181,7 @@ def _asdict_flatten_field_only(obj, dict_factory, parent_key: str = '', sep: str
             result.append((new_key, obj_child))
     return dict_factory(result)
 
-def asdict_no_deepcopy(obj, *, dict_factory: Callable[[List[Tuple[str, Any]]], Dict[str, Any]]=dict):
+def asdict_no_deepcopy(obj, *, dict_factory: Callable[[List[Tuple[str, Any]]], Dict[str, Any]]=dict, obj_factory: Optional[Callable[[Any], Any]]=None):
     """Return the fields of a dataclass instance as a new dictionary mapping
     field names to field values.
 
@@ -202,14 +202,14 @@ def asdict_no_deepcopy(obj, *, dict_factory: Callable[[List[Tuple[str, Any]]], D
     """
     if not dataclasses.is_dataclass(obj):
         raise TypeError("asdict() should be called on dataclass instances")
-    return _asdict_inner(obj, dict_factory)
+    return _asdict_inner(obj, dict_factory, obj_factory)
 
 
-def _asdict_inner(obj, dict_factory):
+def _asdict_inner(obj, dict_factory, obj_factory=None):
     if dataclasses.is_dataclass(obj):
         result = []
         for f in dataclasses.fields(obj):
-            value = _asdict_inner(getattr(obj, f.name), dict_factory)
+            value = _asdict_inner(getattr(obj, f.name), dict_factory, obj_factory)
             result.append((f.name, value))
         return dict_factory(result)
     elif isinstance(obj, tuple) and hasattr(obj, '_fields'):
@@ -232,17 +232,19 @@ def _asdict_inner(obj, dict_factory):
         #   namedtuples, we could no longer call asdict() on a data
         #   structure where a namedtuple was used as a dict key.
 
-        return type(obj)(*[_asdict_inner(v, dict_factory) for v in obj])
+        return type(obj)(*[_asdict_inner(v, dict_factory, obj_factory) for v in obj])
     elif isinstance(obj, (list, tuple)):
         # Assume we can create an object of this type by passing in a
         # generator (which is not true for namedtuples, handled
         # above).
-        return type(obj)(_asdict_inner(v, dict_factory) for v in obj)
+        return type(obj)(_asdict_inner(v, dict_factory, obj_factory) for v in obj)
     elif isinstance(obj, dict):
-        return type(obj)((_asdict_inner(k, dict_factory),
-                          _asdict_inner(v, dict_factory))
+        return type(obj)((_asdict_inner(k, dict_factory, obj_factory),
+                          _asdict_inner(v, dict_factory, obj_factory))
                          for k, v in obj.items())
     else:
+        if obj_factory is not None:
+            obj = obj_factory(obj)
         return obj
 
 @dataclasses.dataclass

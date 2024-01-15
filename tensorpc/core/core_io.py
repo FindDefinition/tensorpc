@@ -765,10 +765,12 @@ class SocketMessageEncoder:
                 self._total_size += len(arr)
                 self._arr_metadata.append((BYTES_JSONARRAY_CODE, [len(arr)]))
         self._ser_skeleton = json.dumps(self.get_skeleton())
+        # print(self._ser_skeleton)
         if len(self._ser_skeleton) > skeleton_size_limit:
             data_skeleton_pack = msgpack.packb(self.data_skeleton)
             assert data_skeleton_pack is not None
             self.arrays.append(data_skeleton_pack)
+            self._total_size += len(data_skeleton_pack)
             self._arr_metadata.append((BYTES_SKELETON_CODE, [len(data_skeleton_pack)]))
             self.data_skeleton = {}
             self._ser_skeleton = json.dumps(self.get_skeleton())

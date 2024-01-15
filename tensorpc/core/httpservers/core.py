@@ -182,6 +182,7 @@ class WebsocketClientBase(abc.ABC):
                 await self._large_data_ws.send_bytes(
                     core_io.json_only_encode({}, core_io.SocketMsgType.ResetLargeDataClient, req))
                 print("CLIENT SEND TIMEOUT ERROR 2", )
+                traceback.print_exc()
                 return
                 # raise 
         finally:

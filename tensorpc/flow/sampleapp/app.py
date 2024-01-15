@@ -1220,7 +1220,7 @@ class DataGridApp:
 
     @marker.mark_create_layout
     def my_layout(self):
-        rows = list(self.create_many_datas(1000))
+        rows = list(self.create_many_datas(100))
         btn = mui.Button("Edit").prop(loading=False)
         btn.event_click.on_standard(lambda x: print(x.keys)).configure(True)
         cbox = mui.Checkbox("")
@@ -1243,14 +1243,28 @@ class DataGridApp:
             mui.DataGrid([
                 mui.DataGrid.ColumnDef("id", accessorKey="id"),
                 mui.DataGrid.ColumnDef("iq", accessorKey="iq"),
-            ]).prop(idKey="id", rowHover=True, stickyHeader=False, virtualized=False, size="small").set_override_props(dataList="nested")
+            ]).prop(idKey="id", rowHover=True, stickyHeader=False, virtualized=False, size="small", enableFilter=False).set_override_props(dataList="nested")
         ]).prop(width="100%", alignItems="center")
         # master_detail = mui.DataFlexBox(mui.HBox([
         #     mui.Typography().set_override_props(value="id"),
         #     mui.Divider(orientation="vertical"),
         #     mui.Typography().set_override_props(value="iq"),
         # ])).set_override_props(dataList="nested").prop(flexFlow="column")
-        dgrid = mui.DataGrid(column_defs, rows, master_detail).prop(idKey="id", rowHover=True, virtualized=True, enableFilter=True)
+        btn = mui.Button("NAME!")
+        md_root = mui.Markdown("")
+        btn.event_click.on(lambda: md_root.write("FOOT!"))
+
+        dgrid = mui.DataGrid(column_defs, rows, master_detail, customHeaders=[
+            mui.MatchCase([
+                mui.MatchCase.Case("name", btn),
+                mui.MatchCase.Case(mui.undefined, mui.Typography("Other H!")),
+            ]).set_override_props(condition="condition")
+        ], customFooters=[
+            mui.MatchCase([
+                mui.MatchCase.Case("name", md_root),
+                mui.MatchCase.Case(mui.undefined, mui.Typography("Other F!")),
+            ]).set_override_props(condition="condition")
+        ]).prop(idKey="id", rowHover=True, virtualized=True, enableFilter=True)
         # dgrid.event_fetch_detail.on(self._fetch_detail)
         dgrid.bind_prop(cbox, "protein")
         dgrid.bind_prop(input_cell, "name")
@@ -1263,7 +1277,54 @@ class DataGridApp:
     def _fetch_detail(self, key: str):
         print("WTF", key)
         return {"key": key}
-    
+
+class NumpyDataGridProxy(mui.DataGridProxy):
+    def __init__(self, obj: np.ndarray):
+        assert obj.ndim == 2
+        self.obj = obj
+        default_data = {f"{c}": 0 for c in range(obj.shape[1])}
+        super().__init__(numRows=obj.shape[0], numColumns=obj.shape[1], defaultData=default_data)
+
+    async def fetch_data(self, start: int, end: int):
+        print("fetch", start, end)
+        subarr = self.obj[start:end]
+        data_list: List[Dict[str, Any]] = []
+        for row in range(subarr.shape[0]):
+            col = {f"{c}": subarr[row, c] for c in range(subarr.shape[1])}
+            col["id"] = str(start + row)
+            data_list.append(col)
+        return data_list
+
+    def fetch_data_sync(self, start: int, end: int):
+        print("fetch", start, end)
+
+        subarr = self.obj[start:end]
+        data_list: List[Dict[str, Any]] = []
+        for row in range(subarr.shape[0]):
+            col = {f"{c}": subarr[row, c] for c in range(subarr.shape[1])}
+            col["id"] = str(start + row)
+            data_list.append(col)
+        return data_list
+
+class DataGridProxyApp:    
+    @marker.mark_create_layout
+    def my_layout(self):
+        arr = np.random.uniform(0, 1, size=[1000, 3])
+        data_list: List[Dict[str, Any]] = []
+        for row in range(arr.shape[0]):
+            col = {f"{c}": arr[row, c] for c in range(arr.shape[1])}
+            col["id"] = str(row)
+            data_list.append(col)
+
+        column_defs = [
+            mui.DataGrid.ColumnDef(id=f"{c}") for c in range(arr.shape[1])
+        ]
+        dgrid = mui.DataGrid(column_defs, NumpyDataGridProxy(arr)).prop(idKey="id", rowHover=True, virtualized=True, enableFilter=True)
+        return mui.VBox([
+            dgrid.prop(stickyHeader=False, virtualized=True, size="small"),
+        ]).prop(width="100%", height="100%", overflow="hidden")
+
+
 class TutorialApp:
     @marker.mark_create_layout
     def my_layout(self):

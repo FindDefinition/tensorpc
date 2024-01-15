@@ -250,9 +250,9 @@ class Plotly(MUIComponentBase[PlotlyProps]):
         return self._update_props_base(propcls)
 
     @staticmethod
-    def layout_no_margin():
+    def layout_no_margin(margin: int = 0):
         return Layout(autosize=True,
-                      margin=Margin(l=0, r=0, b=0, t=0),
+                      margin=Margin(l=margin, r=margin, b=margin, t=margin),
                       xaxis=Axis(automargin=True),
                       yaxis=Axis(automargin=True))
 

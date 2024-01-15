@@ -807,10 +807,10 @@ class App:
         }
         if self._dialog_z_index is not None:
             res["zIndex"] = self._dialog_z_index
-        if with_code_editor:
-            res.update({
-                "codeEditor": self.code_editor.get_state(),
-            })
+        # if with_code_editor:
+        #     res.update({
+        #         "codeEditor": self.code_editor.get_state(),
+        #     })
         # node_layout = self.app_create_node_layout()
         # if node_layout is not None:
         #     res["nodeLayout"] = mui.layout_unify(node_layout)

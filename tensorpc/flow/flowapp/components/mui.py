@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import abc
 import asyncio
 import base64
 import copy
@@ -4156,11 +4157,32 @@ class DataGridColumnDef:
         assert id_resolu != "", "id can't be empty"
         return self
 
+
+@dataclasses.dataclass
+class DataGridProxy(abc.ABC):
+    numRows: int 
+    numColumns: int 
+    defaultData: Dict[str, Any]
+    currentRange: Tuple[int, int] = (0, 0)
+    currentDataList: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
+    
+    @abc.abstractmethod
+    async def fetch_data(self, start: int, end: int) -> List[Dict[str, Any]]:
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def fetch_data_sync(self, start: int, end: int) -> List[Dict[str, Any]]:
+        raise NotImplementedError
+
+
 @dataclasses.dataclass
 class DataGridProps(MUIFlexBoxProps):
+    # proxy + lazy load for large dataset. only available with virtualization.
     # we can't put DataGridColumnDef here because
     # it may contain component.
-    dataList: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
+    # WARNING when you use data proxy, id is set by us, not user, 
+    # it will be str(index) of your data list proxy.
+    dataList: Union[List[Dict[str, Any]], DataGridProxy] = dataclasses.field(default_factory=list)
     idKey: Union[Undefined, str] = undefined
     rowHover: Union[Undefined, bool] = undefined
     virtualized: Union[Undefined, bool] = undefined
@@ -4176,6 +4198,13 @@ class DataGridProps(MUIFlexBoxProps):
     enableFilter: Union[Undefined, bool] = undefined
     fullWidth: Union[Undefined, bool] = undefined
 
+    @model_validator(mode='after')
+    def _validator_post_root(self) -> 'DataGridProps':
+        if isinstance(self.dataList, DataGridProxy):
+            assert self.virtualized, "proxy mode only works with virtualized mode"
+            assert self.dataList.numRows > 0 and self.dataList.numColumns > 0, "proxy mode must provide valid numRows and numColumns"
+        return self
+
 
 class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
     """data grid, it takes list of data (dict) and render them
@@ -4190,7 +4219,10 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
     class ChildDef:
         columnDefs: List[DataGridColumnDef]
         masterDetail: Union[Undefined, Component] = undefined
-
+        # one component for each header.
+        # use mui.MatchCase to select real component by id.
+        customHeaders: Union[Undefined, List[MatchCase]] = undefined
+        customFooters: Union[Undefined, List[MatchCase]] = undefined
         @field_validator('columnDefs')
         def column_def_validator(cls, v: List[DataGridColumnDef]):
             id_set: Set[str] = set()
@@ -4205,15 +4237,19 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
     def __init__(
             self,
             column_def: List[DataGridColumnDef],
-            init_data_list: Optional[List[Dict[str, Any]]] = None,
-            master_detail: Union[Undefined, Component] = undefined) -> None:
+            init_data_list: Optional[Union[List[Dict[str, Any]], DataGridProxy]] = None,
+            master_detail: Union[Undefined, Component] = undefined,
+            customHeaders: Union[Undefined, List[MatchCase]] = undefined,
+            customFooters: Union[Undefined, List[MatchCase]] = undefined) -> None:
         super().__init__(UIType.DataGrid,
                          DataGridProps,
-                         DataGrid.ChildDef(column_def, master_detail),
+                         DataGrid.ChildDef(column_def, master_detail, customHeaders, customFooters),
                          False,
                          allowed_events=[
                              FrontendEventType.DataGridFetchDetail.value,
-                             FrontendEventType.DataGridRowSelection.value
+                             FrontendEventType.DataGridRowSelection.value,
+                             FrontendEventType.DataGridRowRangeChanged.value,
+                             FrontendEventType.DataGridProxyLazyLoadRange.value,
                          ])
         # TODO check set_new_layout argument, it must be DataGrid.ChildDef
         if init_data_list is not None:
@@ -4225,6 +4261,40 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         # backend events
         self.event_item_changed = self._create_emitter_event_slot(
             FrontendEventType.DataItemChange)
+        self.event_proxy_lazy_load = self._create_event_slot(
+            FrontendEventType.DataGridProxyLazyLoadRange)
+
+        self.event_before_mount.on(self._proxy_init)
+        self.event_proxy_lazy_load.on(self._data_lazy_load)
+
+    def _proxy_init(self, event: Event):
+        datalist = self.props.dataList
+        idKey = "id"
+        if not isinstance(self.props.idKey, Undefined):
+            idKey = self.props.idKey
+        if isinstance(datalist, DataGridProxy):
+            length = datalist.numRows
+            # fetch at least 10 item first
+            init_data = datalist.fetch_data_sync(0, min(length, 10))
+            for i, item in enumerate(init_data):
+                item[idKey] = str(i)
+            datalist.currentDataList = init_data
+            datalist.currentRange = (0, len(init_data))
+            # print(datalist)
+
+    async def _data_lazy_load(self, range: Tuple[int, int]):
+        datalist = self.props.dataList
+        idKey = "id"
+        if not isinstance(self.props.idKey, Undefined):
+            idKey = self.props.idKey
+        if isinstance(datalist, DataGridProxy):
+            data = await datalist.fetch_data(range[0], range[1])
+            for i, item in enumerate(data):
+                item[idKey] = str(i + range[0])
+            datalist.currentDataList = data
+            datalist.currentRange = range
+            await self.send_and_wait(self.update_event(dataList=data))
+            return data
 
     @property
     def prop(self):
@@ -4243,6 +4313,7 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         return await self.update_datas_in_index([DataUpdate(index, updates)])
 
     async def update_datas_in_index(self, updates: List[DataUpdate]):
+        assert not isinstance(self.props.dataList, DataGridProxy), "can't update data in proxy mode"
         for du in updates:
             self.props.dataList[du.index].update(du.update)
         return await self.send_and_wait(
@@ -4256,6 +4327,7 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
             }))
 
     async def _comp_bind_update_data(self, event: Event, prop_name: str):
+        assert not isinstance(self.props.dataList, DataGridProxy), "can't update data in proxy mode"
         key = event.keys
         indexes = event.indexes
         # print(event, prop_name)

@@ -38,6 +38,7 @@ from pydantic import (
     BaseModel,
     GetCoreSchemaHandler,
     GetJsonSchemaHandler,
+    TypeAdapter,
     ValidationError,
 )
 from pydantic_core import PydanticCustomError, core_schema
@@ -372,6 +373,8 @@ class FrontendEventType(enum.IntEnum):
     DataGridRowSelection = 70
     DataGridFetchDetail = 71
     DataGridFetchInf = 72
+    DataGridRowRangeChanged = 73
+    DataGridProxyLazyLoadRange = 74
 
     PlotlyClickData = 100
     PlotlyClickAnnotation = 101
@@ -1152,10 +1155,12 @@ class Component(Generic[T_base_props, T_child]):
         this function is used to provide intellisense result for all props.
         """
         def wrapper(*args: P.args, **kwargs: P.kwargs):
-            # do validation by pydantic first
-            self.__prop_cls(**kwargs)
+            # do validation on changed props only
+            # self.__prop_cls(**kwargs)
             for k, v in kwargs.items():
                 setattr(self.__props, k, v)
+            # do validation for all props (call model validator)
+            TypeAdapter(self.__prop_cls).validate_python(self.__props)
             return this
 
         return wrapper
@@ -1167,10 +1172,12 @@ class Component(Generic[T_base_props, T_child]):
         this function is used to provide intellisense result for all props.
         """
         def wrapper(*args: P.args, **kwargs: P.kwargs):
-            # do validation by pydantic first
-            self.__prop_cls(**kwargs)
+            # do validation on changed props only
+            # self.__prop_cls(**kwargs)
             for k, v in kwargs.items():
                 setattr(self.__props, k, v)
+            # do validation for all props (call model validator)
+            TypeAdapter(self.__prop_cls).validate_python(self.__props)
             return self.create_update_event(kwargs, json_only)
 
         return wrapper
@@ -1729,6 +1736,11 @@ def _undefined_comp_dict_factory(x: List[Tuple[str, Any]]):
             res[k] = v
     return res
 
+def _undefined_comp_obj_factory(x: Any):
+    if isinstance(x, Component):
+        return x._flow_uid
+    return x
+
 
 class ContainerBase(Component[T_container_props, T_child]):
 
@@ -1957,7 +1969,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         state = super().get_props()
         state["childs"] = [self[n]._flow_uid for n in self._child_comps]
         if self._child_structure is not None:
-            state["childsComplex"] = asdict_no_deepcopy(self._child_structure, dict_factory=_undefined_comp_dict_factory)
+            state["childsComplex"] = asdict_no_deepcopy(self._child_structure, dict_factory=_undefined_comp_dict_factory, obj_factory=_undefined_comp_obj_factory)
         return state
 
     async def _run_special_methods(
@@ -2028,7 +2040,7 @@ class ContainerBase(Component[T_container_props, T_child]):
             "childs": child_uids
         }
         if self._child_structure is not None:
-            update_msg["childsComplex"] = asdict_no_deepcopy(self._child_structure, dict_factory=_undefined_comp_dict_factory)
+            update_msg["childsComplex"] = asdict_no_deepcopy(self._child_structure, dict_factory=_undefined_comp_dict_factory, obj_factory=_undefined_comp_obj_factory)
         update_ev = self.create_update_event(update_msg)
         return update_ev + self.create_update_comp_event(
             comps_frontend_dict, list(detached_uid_to_comp.keys())), list(
@@ -2061,7 +2073,7 @@ class ContainerBase(Component[T_container_props, T_child]):
 
     def update_childs_complex_event(self):
         update_msg: Dict[str, Any] = {}
-        update_msg["childsComplex"] = asdict_no_deepcopy(self._child_structure, dict_factory=_undefined_comp_dict_factory)
+        update_msg["childsComplex"] = asdict_no_deepcopy(self._child_structure, dict_factory=_undefined_comp_dict_factory, obj_factory=_undefined_comp_obj_factory)
         update_ev = self.create_update_event(update_msg)
         return update_ev
     
@@ -2089,7 +2101,7 @@ class ContainerBase(Component[T_container_props, T_child]):
             "childs": child_uids
         }
         if self._child_structure is not None:
-            update_msg["childsComplex"] = asdict_no_deepcopy(self._child_structure, dict_factory=_undefined_comp_dict_factory)
+            update_msg["childsComplex"] = asdict_no_deepcopy(self._child_structure, dict_factory=_undefined_comp_dict_factory, obj_factory=_undefined_comp_obj_factory)
         update_ev = self.create_update_event(update_msg)
         return update_ev + self.create_update_comp_event(
             comps_frontend_dict, list(detached.keys())), list(

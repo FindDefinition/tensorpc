@@ -459,9 +459,9 @@ def parse_to_control_nodes(origin_obj,
     return res_node
 
 
-def control_nodes_v1_to_v2(ctrl_node_v1: mui.ControlNode) -> mui.JsonLikeNode:
+def control_nodes_v1_to_v2(ctrl_node_v1: mui.ControlNode, uid_to_json_like_node: Dict[str, mui.JsonLikeNode]) -> mui.JsonLikeNode:
     childs: List[mui.JsonLikeNode] = [
-        control_nodes_v1_to_v2(c) for c in ctrl_node_v1.children
+        control_nodes_v1_to_v2(c, uid_to_json_like_node) for c in ctrl_node_v1.children
     ]
     ctrl_desp = mui.ControlDesp(type=ctrl_node_v1.type,
                                 initValue=ctrl_node_v1.initValue,
@@ -480,6 +480,7 @@ def control_nodes_v1_to_v2(ctrl_node_v1: mui.ControlNode) -> mui.JsonLikeNode:
         typeStr="",
         children=childs,
         userdata=ctrl_desp)
+    uid_to_json_like_node[node.id] = node
     return node
 
 
@@ -564,12 +565,13 @@ class ConfigPanelV2(mui.SimpleControls):
         assert dataclasses.is_dataclass(config_obj)
         # parse config dataclass.
         self._obj_to_ctrl_meta: Dict[str, ControlItemMeta] = {}
+        self.uid_to_json_like_node: Dict[str, mui.JsonLikeNode] = {}
         node = parse_to_control_nodes(config_obj,
                                       config_obj,
                                       "",
                                       self._obj_to_ctrl_meta,
                                       ignored_field_names=ignored_field_names)
-        super().__init__(init=control_nodes_v1_to_v2(node).children,
+        super().__init__(init=control_nodes_v1_to_v2(node, self.uid_to_json_like_node).children,
                          callback=self.callback)
         self.__config_obj = config_obj
         self.__callback_key = "config_panel_v3_handler"
@@ -588,7 +590,11 @@ class ConfigPanelV2(mui.SimpleControls):
             # TODO this is due to limitation of leva control.
             # we may need to write own dynamic control
             # based on tanstack table.
+            assert uid in self.uid_to_json_like_node
+            userdata = self.uid_to_json_like_node[uid].userdata
+            assert isinstance(userdata, mui.ControlDesp)
             cmeta.setter(value[1])
+            userdata.initValue = value[1]
             handlers = self.get_event_handlers(self.__callback_key)
             if handlers is not None:
                 for handler in handlers.handlers:

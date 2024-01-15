@@ -24,6 +24,8 @@ class PythonAnalysisConfig:
     useLibraryCodeForTypes: Union[bool, Undefined] = undefined
     pythonPath: Union[str, Undefined] = undefined
     venvPath: Union[str, Undefined] = undefined
+    include: Union[List[str], Undefined] = undefined
+    exclude: Union[List[str], Undefined] = undefined
 
 @dataclasses.dataclass
 class PythonConfig:

@@ -80,6 +80,7 @@ class AsyncJsonRpcStreamWriter:
             if self._wfile.is_closing():
                 return
             try:
+                # print("OUT", message)
                 body = json.dumps(message, **self._json_dumps_args)
 
                 # Ensure we get the byte length, not the character length
