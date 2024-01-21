@@ -1585,6 +1585,21 @@ class ThreeCanvasProps(MUIFlexBoxProps):
     linear: Union[bool, Undefined] = undefined
     dpr: Union[Tuple[int, int], Undefined] = undefined
     raycastLayerMask: Union[int, Undefined] = undefined
+    isViewMode: Union[bool, Undefined] = undefined
+
+@dataclasses.dataclass
+class ThreeViewProps(MUIFlexBoxProps):
+    threeBackgroundColor: Union[str, Undefined] = undefined
+    allowKeyboardEvent: Union[bool, Undefined] = undefined
+    tabIndex: Union[int, Undefined] = undefined
+    enablePerf: Union[bool, Undefined] = undefined
+    perfPosition: Union[Literal['top-right', 'top-left', 'bottom-right',
+                                 'bottom-left'], Undefined] = undefined
+    elementId: Union[str, Undefined] = undefined
+    className: Union[str, Undefined] = undefined
+    visible: Union[bool, Undefined] = undefined
+    index: Union[int, Undefined] = undefined
+    frames: Union[int, Undefined] = undefined
 
 class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
     def __init__(self,
@@ -1607,6 +1622,46 @@ class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+class View(MUIContainerBase[ThreeViewProps, ThreeComponentType]):
+    def __init__(self,
+                 children: Union[List[ThreeComponentType],
+                                 Dict[str, ThreeComponentType]]) -> None:
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+        super().__init__(UIType.ThreeView, ThreeViewProps,
+                         children)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+class ViewCanvas(MUIContainerBase[ThreeCanvasProps, MUIComponentType]):
+    def __init__(self,
+                 children: Union[List[MUIComponentType],
+                                 Dict[str, MUIComponentType]],
+                 background: Union[str, Undefined] = undefined) -> None:
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+        super().__init__(UIType.ThreeCanvas, ThreeCanvasProps,
+                         children)
+        self.props.threeBackgroundColor = background
+        self.props.isViewMode = True
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 
 @dataclasses.dataclass
 class TransformControlsProps(ContainerBaseProps):

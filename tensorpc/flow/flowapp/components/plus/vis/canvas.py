@@ -663,7 +663,9 @@ class ComplexCanvas(mui.FlexBox):
                     mui.TabDef(
                         "",
                         "5",
-                        ScriptManager(init_python_script=_EXAMPLE_SCRIPT),
+                        ScriptManager(init_scripts={
+                            "python": _EXAMPLE_SCRIPT
+                        }),
                         icon=mui.IconType.Code,
                         tooltip="python script playground",
                         tooltipPlacement="right"),

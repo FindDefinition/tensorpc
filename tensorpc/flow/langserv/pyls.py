@@ -64,6 +64,7 @@ class AsyncJsonRpcStreamReader:
 
         return None
 
+import rich 
 
 class AsyncJsonRpcStreamWriter:
     def __init__(self, wfile: asyncio.StreamWriter, **json_dumps_args):
@@ -80,7 +81,7 @@ class AsyncJsonRpcStreamWriter:
             if self._wfile.is_closing():
                 return
             try:
-                # print("OUT", message)
+                # print("JSONRPC OUT", message)
                 body = json.dumps(message, **self._json_dumps_args)
 
                 # Ensure we get the byte length, not the character length
@@ -127,14 +128,14 @@ class LanguageServerHandler:
             writer = AsyncJsonRpcStreamWriter(aproc.stdin)
             reader = AsyncJsonRpcStreamReader(aproc.stdout)
             async def cosumer(msg):
-                # print("OUTPUT", type(msg), msg)
+                print("[JSONRPC OUT]", msg)
                 await ws.send_json(msg)
             task = asyncio.create_task(reader.listen(cosumer))
             # Create a reader for consuming stdout of the language server. We need to
             # consume this in another thread
             async for ws_msg in ws:
                 if ws_msg.type == aiohttp.WSMsgType.TEXT:
-                    # print("INPUT", ws_msg.json())  
+                    print("[JSONRPC IN]", ws_msg.json())  
                     await writer.write(ws_msg.json())
             
                 elif ws_msg.type == aiohttp.WSMsgType.ERROR:

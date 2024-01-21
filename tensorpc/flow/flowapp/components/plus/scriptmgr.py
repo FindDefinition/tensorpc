@@ -28,6 +28,7 @@ from tensorpc.flow.flowapp import appctx
 
 from tensorpc.flow import marker
 from tensorpc.flow.flowapp.components import mui, three
+from tensorpc.flow.flowapp.components.plus.tutorials import AppInMemory
 from tensorpc.flow.flowapp.core import FrontendEventType
 from .options import CommonOptions
 
@@ -36,15 +37,20 @@ from tensorpc.flow.client import MasterMeta
 @dataclasses.dataclass
 class Script:
     label: str
-    code: str
+    code: Union[str, Dict[str, str]]
     lang: str
 
+    def get_code(self):
+        if isinstance(self.code, dict):
+            return self.code.get(self.lang, "")
+        else:
+            return self.code
 
 _LANG_TO_VSCODE_MAPPING = {
     "python": "python",
     "cpp": "cpp",
-    "cuda": "cpp",
     "bash": "shell",
+    "app": "python",
 }
 
 async def _read_stream(stream, cb):  
@@ -59,13 +65,43 @@ async def _read_stream(stream, cb):
         else:
             break
 
+_INITIAL_SCRIPT_PER_LANG = {
+    "python": """
+from tensorpc.flow import appctx
+import asyncio
+async def main():
+    pass
+asyncio.get_running_loop().create_task(main())
+    """,
+    "app": """
+from tensorpc.flow import mui, three, plus, appctx, mark_create_layout
+class App:
+    @mark_create_layout
+    def my_layout(self):
+        return mui.VBox([
+            mui.Typography("Hello World"),
+        ])
+    """,
+    "cpp": """
+#include <iostream>
+int main(){
+    std::cout << "Hello World" << std::endl;
+    return 0;
+}
+
+    """,
+    "bash": """
+echo "Hello World"
+    """,
+}
+
 class ScriptManager(mui.FlexBox):
 
     def __init__(
         self,
         storage_node_rid: Optional[str] = None,
         graph_id: Optional[str] = None,
-        init_python_script: Optional[str] = None
+        init_scripts: Optional[Dict[str, str]] = None
     ):
         """when storage_node_rid is None, use app node storage, else use the specified node storage
         """
@@ -79,6 +115,14 @@ class ScriptManager(mui.FlexBox):
         self._graph_id = graph_id
         self.code_editor = mui.MonacoEditor("", "python",
                                             "default").prop(flex=1, minHeight=0, minWidth=0)
+        self.app_editor = AppInMemory("scriptmgr", "").prop(flex=1, minHeight=0, minWidth=0)
+        self.app_show_box = mui.FlexBox() # .prop(flex=1)
+
+        self.code_editor_container = mui.HBox({
+            "editor": self.code_editor,
+            "divider":  mui.Divider("horizontal"),
+            "app_show_box": self.app_show_box
+        }).prop(flex=1)
         self.scripts = mui.Autocomplete(
             "Scripts",
             [],
@@ -90,27 +134,34 @@ class ScriptManager(mui.FlexBox):
         self.langs = mui.ToggleButtonGroup([
             mui.ToggleButton("cpp", name="CPP"),
             mui.ToggleButton("python", name="PY"),
-            mui.ToggleButton("cuda", name="CUDA"),
             mui.ToggleButton("bash", name="BASH"),
-
+            mui.ToggleButton("app", name="APP"),
         ], True, self._on_lang_select).prop(value="python",
                                             enforceValueSet=True)
-        self._enable_save_watch = mui.ToggleButton(
-                    "value",
-                    mui.IconType.Visibility).prop(muiColor="secondary", size="small")
+        # self._enable_save_watch = mui.ToggleButton(
+        #             "value",
+        #             mui.IconType.Visibility).prop(muiColor="secondary", size="small")
         self._run_button = mui.IconButton(
                     mui.IconType.PlayArrow,
                     self._on_run_script).prop(progressColor="primary")
-        self.init_add_layout([
-            mui.HBox([
+        self._delete_button = mui.IconButton(
+                    mui.IconType.Delete,
+                    self._on_script_delete).prop(progressColor="primary", confirmTitle="Warning", confirmMessage="Are you sure to delete this script?")
+
+        self.init_add_layout({
+            "header": mui.HBox([
                 self.scripts.prop(flex=1),
                 self._run_button,
-                self._enable_save_watch,
+                # self._enable_save_watch,
                 self.langs,
+                self._delete_button,
+
             ]).prop(alignItems="center"),
-            self.code_editor,
-        ])
-        self._init_python_script = init_python_script
+            "editor": self.code_editor_container,
+        })
+        self._init_scripts = _INITIAL_SCRIPT_PER_LANG.copy()
+        if init_scripts is not None:
+            self._init_scripts.update(init_scripts)
         self.prop(flex=1,
                   flexDirection="column",
                   width="100%",
@@ -136,10 +187,9 @@ class ScriptManager(mui.FlexBox):
             await self.scripts.update_options(options, 0)
             await self._on_script_select(options[0])
         else:
-            if self._init_python_script is not None:
-                await self._on_new_script({
-                        "label": "example",
-                    }, init_str=self._init_python_script)
+            await self._on_new_script({
+                    "label": "example",
+                }, init_str=self._init_scripts["python"])
 
     async def _on_run_script(self):
         await self.code_editor.save()
@@ -149,15 +199,20 @@ class ScriptManager(mui.FlexBox):
                                                   self._storage_node_rid, self._graph_id)
             assert isinstance(item, Script)
             item_uid = f"{self._graph_id}@{self._storage_node_rid}@{item.label}"
+            fname = f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-{item_uid}>"
+            if isinstance(item.code, dict):
+                code = item.code.get(item.lang, "")
+            else:
+                code = item.code
             if item.lang == "python":
                 __tensorpc_script_res: List[Optional[Coroutine]] = [None]
-                lines = item.code.splitlines()
+                lines = code.splitlines()
                 lines = [" " * 4 + line for line in lines]
                 run_name = f"run_{label}"
                 lines.insert(0, f"async def _{run_name}():")
                 lines.append(f"__tensorpc_script_res[0] = _{run_name}()")
                 code = "\n".join(lines)
-                code_comp = compile(code, f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-{item_uid}>", "exec")
+                code_comp = compile(code, fname, "exec")
                 exec(code_comp, {},
                      {"__tensorpc_script_res": __tensorpc_script_res})
                 res = __tensorpc_script_res[0]
@@ -165,7 +220,7 @@ class ScriptManager(mui.FlexBox):
                 await res
             elif item.lang == "bash":
                 proc = await asyncio.create_subprocess_shell(
-                    item.code,
+                    code,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE)
                 await asyncio.wait([
@@ -178,18 +233,37 @@ class ScriptManager(mui.FlexBox):
                 #     print(f'[stdout]\n{stdout.decode()}')
                 # if stderr:
                 #     print(f'[stderr]\n{stderr.decode()}')
+            if item.lang == "app":
+                mod_dict = {}
+                code_comp = compile(code, fname, "exec")
+                exec(code_comp, mod_dict)
+                app_cls = mod_dict["App"]
+                layout = mui.flex_wrapper(app_cls())
+                await self.app_show_box.set_new_layout({"layout": layout})
 
     async def _on_lang_select(self, value):
-        await self.send_and_wait(
-            self.code_editor.update_event(
-                language=_LANG_TO_VSCODE_MAPPING[value]))
+        if value != "app":
+            await self.app_show_box.set_new_layout({})
+        await self.send_and_wait(self.app_show_box.update_event(flex=1 if value == "app" else mui.undefined))
+
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
+
             item = await appctx.read_data_storage(label,
                                                   self._storage_node_rid, self._graph_id)
             assert isinstance(item, Script)
             item.lang = value
+            await self.send_and_wait(
+                self.code_editor.update_event(
+                    language=_LANG_TO_VSCODE_MAPPING[value], value=item.get_code()))
+            if value == "app":
+                # TODO add better option
+                await self._on_run_script()
             await appctx.save_data_storage(label, item, self._storage_node_rid, self._graph_id)
+        else:
+            await self.send_and_wait(
+                self.code_editor.update_event(
+                    language=_LANG_TO_VSCODE_MAPPING[value]))
 
     async def _on_editor_save(self, value: str):
         if self.scripts.value is not None:
@@ -197,10 +271,15 @@ class ScriptManager(mui.FlexBox):
             item = await appctx.read_data_storage(label,
                                                   self._storage_node_rid, self._graph_id)
             assert isinstance(item, Script)
-            item.code = value
+            # compact new code dict
+            if not isinstance(item.code, dict):
+                item.code = self._init_scripts.copy()
+            item.code[item.lang] = value
             await appctx.save_data_storage(label, item, self._storage_node_rid, self._graph_id)
-            if self._enable_save_watch.checked:
-                await self._run_button.headless_click()
+            if item.lang == "app":
+                await self._on_run_script()
+            # if self._enable_save_watch.checked:
+            #     await self._run_button.headless_click()
 
     async def _on_new_script(self, value, init_str: Optional[str] = None):
 
@@ -209,35 +288,39 @@ class ScriptManager(mui.FlexBox):
                                           -1)
         lang = self.langs.props.value
         assert isinstance(lang, str)
-        code_lines: List[str] = []
-        if lang == "python":
-            code_lines.append("from tensorpc.flow import appctx")
-            code_lines.append("import asyncio")
-            code_lines.append("async def main():")
-            if init_str is not None:
-                init_str_lines = init_str.splitlines()
-                init_str_lines = [" " * 4 + line for line in init_str_lines]
-                code_lines.extend(init_str_lines)
-            code_lines.append("    pass")
-            code_lines.append("")
-            code_lines.append("asyncio.get_running_loop().create_task(main())")
-            code_lines.append("")
-        script = Script(new_item_name, "\n".join(code_lines), lang)
+        script = Script(new_item_name, self._init_scripts, lang)
         await appctx.save_data_storage(new_item_name, script, self._storage_node_rid,
                                        self._graph_id)
+        await self.send_and_wait(self.app_show_box.update_event(flex=1 if lang == "app" else mui.undefined))
         await self.send_and_wait(
             self.code_editor.update_event(
                 language=_LANG_TO_VSCODE_MAPPING[lang],
-                value=script.code,
+                value=script.get_code(),
                 path=script.label))
+
+    async def _on_script_delete(self):
+        if self.scripts.value is not None:
+            label = self.scripts.value["label"]
+            await appctx.remove_data_storage(label, self._storage_node_rid, self._graph_id)
+            new_options =  [x for x in self.scripts.props.options if x["label"] != label]
+            await self.scripts.update_options(
+            new_options, 0)
+            if new_options:
+                await self._on_script_select(new_options[0])
 
     async def _on_script_select(self, value):
         label = value["label"]
         item = await appctx.read_data_storage(label, self._storage_node_rid, self._graph_id)
         assert isinstance(item, Script)
+        await self.send_and_wait(self.app_show_box.update_event(flex=1 if item.lang == "app" else mui.undefined))
+            
         await self.langs.set_value(item.lang)
         await self.send_and_wait(
             self.code_editor.update_event(
                 language=_LANG_TO_VSCODE_MAPPING[item.lang],
-                value=item.code,
+                value=item.get_code(),
                 path=item.label))
+        if item.lang != "app":
+            await self.app_show_box.set_new_layout({})
+        else:
+            await self._on_run_script()

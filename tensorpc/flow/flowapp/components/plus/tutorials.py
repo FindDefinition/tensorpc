@@ -69,7 +69,8 @@ class AppInMemory(mui.FlexBox):
         is_horizontal: bool = True
         height: Union[mui.ValueType, mui.Undefined] = mui.undefined
 
-    def __init__(self, path: str, code: str, is_horizontal: bool = True):
+    def __init__(self, path: str, code: str, is_horizontal: bool = True,
+            external_onsave: Optional[Callable[[str], Coroutine[Any, Any, None]]] = None):
         wrapped_path = f"<{TENSORPC_FILE_NAME_PREFIX}-{path}>"
         self.editor = mui.MonacoEditor(code, "python", wrapped_path).prop(minWidth=0, minHeight=0)
         self.path = wrapped_path 
@@ -85,6 +86,8 @@ class AppInMemory(mui.FlexBox):
         self._layout_for_reload: Optional[mui.FlexBox] = None
         self.prop(flexFlow="row" if is_horizontal else "column")
         self.editor.event_editor_save.on(self._on_editor_save)
+
+        self._external_onsave = external_onsave
 
     @mark_did_mount
     async def _on_mount(self):
@@ -125,6 +128,8 @@ class AppInMemory(mui.FlexBox):
     async def _on_editor_save(self, value: str):
         reload_mgr = self.flow_app_comp_core.reload_mgr
         reload_mgr.in_memory_fs.modify_file(self.path, value)
+        if self._external_onsave is not None:
+            await self._external_onsave(value)
         await appctx.get_editable_app()._reload_object_with_new_code(self.path, value)
 
 class CodeBlock(mui.FlexBox):

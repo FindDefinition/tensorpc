@@ -154,6 +154,8 @@ class UIType(enum.IntEnum):
     # this component have different state structure.
     TanstackJsonLikeTreeView = 0x39
     MenuList = 0x3a
+    MatrixDataGrid = 0x3b
+
     GridLayout = 0x40
 
     # special
@@ -186,6 +188,7 @@ class UIType(enum.IntEnum):
     ThreeHtml = 0x1007
 
     ThreeHud = 0x1008
+    ThreeView = 0x1009
 
     ThreeMapControl = 0x1010
     ThreeOrbitControl = 0x1011
@@ -386,6 +389,7 @@ UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
     UIType.Tabs, UIType.Allotment,
     UIType.GridLayout,
     UIType.MenuList,
+    UIType.MatrixDataGrid
 }
 
 class AppDraggableType(enum.Enum):
@@ -2213,10 +2217,10 @@ class MatchCase(ContainerBase[MatchCaseProps, Component]):
     ChildDef = MatchCaseChildDef
 
     def __init__(self,
-                 children: List[Union[MatchCaseItem, ExprCaseItem]],
-                 inited: bool = False) -> None:
-        super().__init__(UIType.MatchCase, MatchCaseProps, MatchCaseChildDef(items=children),
-                         inited)
+                 children: List[Union[MatchCaseItem, ExprCaseItem]], init_value: Union[ValueType, Undefined] = undefined) -> None:
+        super().__init__(UIType.MatchCase, MatchCaseProps, MatchCaseChildDef(items=children))
+        self.props.condition = init_value
+
     @property
     def prop(self):
         propcls = self.propcls

@@ -17,8 +17,9 @@ class MarkdownTutorialsTree:
         pyright_setting = appctx.get_app().get_language_server_settings()
         pyright_setting.python.analysis.pythonPath = sys.executable
         pyright_setting.python.analysis.extraPaths = [
-            str(PACKAGE_ROOT.parent),
+            "/root/distflow_dev/distflow",
         ]
+        pyright_setting.python.analysis.logLevel = "Trace"
         tutorials_path = PACKAGE_ROOT / "examples" / "tutorials"
         tutorials: Dict[str, Any] = {}
         paths = list(tutorials_path.rglob("*.md"))

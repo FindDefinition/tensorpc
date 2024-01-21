@@ -1220,7 +1220,7 @@ class DataGridApp:
 
     @marker.mark_create_layout
     def my_layout(self):
-        rows = list(self.create_many_datas(100))
+        rows = list(self.create_many_datas(10))
         btn = mui.Button("Edit").prop(loading=False)
         btn.event_click.on_standard(lambda x: print(x.keys)).configure(True)
         cbox = mui.Checkbox("")
@@ -1271,7 +1271,7 @@ class DataGridApp:
         dgrid.bind_prop(fat_cell, "fat")
 
         return mui.VBox([
-            dgrid.prop(stickyHeader=False, virtualized=True, size="small"),
+            dgrid.prop(stickyHeader=False, virtualized=False, size="small", tableLayout="fixed"),
         ]).prop(width="100%", height="100%", overflow="hidden")
 
     def _fetch_detail(self, key: str):
@@ -1324,6 +1324,37 @@ class DataGridProxyApp:
             dgrid.prop(stickyHeader=False, virtualized=True, size="small"),
         ]).prop(width="100%", height="100%", overflow="hidden")
 
+class MatrixDataGridApp:    
+    @marker.mark_create_layout
+    def my_layout(self):
+        arr = np.random.uniform(0, 1, size=[100, 3])
+        arr2 = np.random.randint(0, 100, size=[100, 1]).astype(np.int64)
+        column_def = mui.DataGrid.ColumnDef(id=f"unused", specialType=mui.DataGridColumnSpecialType.Number, width=80, specialProps=mui.DataGridColumnSpecialProps(mui.DataGridNumberCell(fixed=8)))
+        custom_footers = [
+            mui.MatchCase([
+                mui.MatchCase.Case("index", mui.Typography("Max")),
+                mui.MatchCase.Case(mui.undefined, mui.Typography().set_override_props(value="data").prop(enableTooltipWhenOverflow=True, tooltipEnterDelay=400, fontSize="12px")),
+            ]).set_override_props(condition="condition")
+        ]
+        custom_footer_datas = [{
+            "a-0": str(arr.max(0)[0]),
+            "a-1": str(arr.max(0)[1]),
+            "a-2": str(arr.max(0)[2]),
+            "b-0": str(arr2.max(0)[0]),
+        }]
+        dgrid = mui.MatrixDataGrid(column_def, {"a": arr, "b": arr2}, 
+            customFooters=custom_footers, 
+            customFooterDatas=custom_footer_datas,
+        )
+        dgrid.prop(rowHover=True, virtualized=True, enableFilter=True, tableLayout="fixed")
+        dgrid.prop(tableSxProps={
+            '& .MuiTableCell-sizeSmall': {
+                "padding": '2px 2px',
+            },
+        })
+        return mui.VBox([
+            dgrid.prop(stickyHeader=False, virtualized=True, size="small"),
+        ]).prop(width="100%", height="100%", overflow="hidden")
 
 class TutorialApp:
     @marker.mark_create_layout
