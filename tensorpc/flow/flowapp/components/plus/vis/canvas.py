@@ -252,7 +252,7 @@ class ComplexCanvas(mui.FlexBox):
         self._init_enable_grid = init_enable_grid
         self.camera.prop(layers=1 | (1 << 31))
 
-        self.ctrl = three.CameraControl().prop(makeDefault=True, mouseButtons=three.MouseButtonConfig(right="none", wheel="rotate"))
+        self.ctrl = three.CameraControl().prop(makeDefault=True, mouseButtons=three.MouseButtonConfig(right="none", middle="rotate"))
         self.background_img = mui.Image()
         self._infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self._axis_helper = three.AxesHelper(20)

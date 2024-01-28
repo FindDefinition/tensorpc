@@ -561,6 +561,7 @@ class IconType(enum.IntEnum):
     BugReport = 43
     Dashboard = 44
     DashboardCustomize = 45
+    Check = 46
 
 
 

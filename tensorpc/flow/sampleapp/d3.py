@@ -838,8 +838,11 @@ class ViewDevApp:
     @mark_create_layout
     def my_layout(self):
         cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
-        canvas = three.ViewCanvas([
-                            three.View([
+        btns = [
+            mui.MenuItem("Button 1"),
+            mui.MenuItem("Button 2")
+        ]
+        view1 = three.View([
                 three.PerspectiveCamera(fov=75,
                                         near=0.1,
                                         far=1000,
@@ -854,7 +857,11 @@ class ViewDevApp:
                     overflow="hidden",
                     index=1,
                     border="1px solid red",
-                    allowKeyboardEvent=True, ),
+                    allowKeyboardEvent=True, 
+                    menuItems=btns)
+        view1.event_context_menu.on(lambda x: print(x))
+        canvas = three.ViewCanvas([
+                            view1,
             three.View([
                 three.PerspectiveCamera(fov=75,
                                         near=0.1,

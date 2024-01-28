@@ -1731,7 +1731,11 @@ class View(MUIContainerBase[ThreeViewProps, ThreeComponentType]):
     ) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ThreeView, ThreeViewProps, children)
+        super().__init__(UIType.ThreeView, ThreeViewProps, children,allowed_events=[
+            FrontendEventType.ContextMenuSelect.value,
+        ])
+        self.event_context_menu = self._create_event_slot(
+            FrontendEventType.ContextMenuSelect)
 
     @property
     def prop(self):
@@ -1742,6 +1746,10 @@ class View(MUIContainerBase[ThreeViewProps, ThreeComponentType]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync)
 
 
 class ViewCanvas(MUIContainerBase[ThreeCanvasProps, MUIComponentType]):
