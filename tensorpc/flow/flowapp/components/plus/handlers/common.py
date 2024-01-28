@@ -14,6 +14,7 @@ from tensorpc.flow.flowapp.components.plus.config import ConfigPanelV2
 
 from ..common import CommonQualNames
 from ..core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler, DataClassesType
+from ..arraygrid import NumpyArrayGrid
 
 
 monospace_14px = dict(fontFamily="monospace", fontSize="14px")
@@ -33,6 +34,12 @@ class TensorHandler(ObjectPreviewHandler):
                                                   whiteSpace="pre-wrap")
         self.slice_val = mui.TextField("Slice", callback=self._slice_change).prop(size="small",
                                                  muiMargin="dense")
+        self.grid_container = mui.HBox([])
+        dialog = mui.Dialog([
+            self.grid_container.prop(flex=1, height="70vh", width="100%")
+        ]).prop(title="Array Viewer", maxWidth="xl", fullWidth=True)
+        self.dialog = dialog
+
         layout = [
             self.title.prop(fontSize="14px", fontFamily="monospace"),
             self.tags,
@@ -43,6 +50,8 @@ class TensorHandler(ObjectPreviewHandler):
             mui.HBox([
                 mui.Button("show sliced", self._on_show_slice),
                 mui.Button("3d visualization", self._on_3d_vis),
+                mui.Button("Viewer", self._on_show_viewer_dialog),
+                self.dialog,
             ]),
             self.data_print,
         ]
@@ -52,6 +61,12 @@ class TensorHandler(ObjectPreviewHandler):
         self.obj: Any = np.zeros([1])
         self.obj_uid: str = ""
         self._tensor_slices: Dict[str, str] = {}
+
+    async def _on_show_viewer_dialog(self):
+        await self.grid_container.set_new_layout([
+             NumpyArrayGrid(self.obj).prop(width="100%", height="100%", overflow="hidden")
+        ])
+        await self.dialog.set_open(True)
 
     async def _on_show_slice(self):
         slice_eval_expr = f"a{self.slice_val.value}"

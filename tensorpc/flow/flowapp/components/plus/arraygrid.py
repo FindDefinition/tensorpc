@@ -67,12 +67,14 @@ def _get_slice_inputs_from_shape(
         [mui.HBox(slice_inputs).prop(alignItems="center")],
         _SLICE_THEME), slices, typo_last_matrix
 
+
 @dataclasses.dataclass
 class ArrayMeta:
-    min: np.ndarray 
+    min: np.ndarray
     max: np.ndarray
     nanIndices: Optional[np.ndarray]
     infIndices: Optional[np.ndarray]
+
 
 class NumpyArrayGrid(mui.FlexBox):
     """display last two dims as matrix
@@ -194,8 +196,7 @@ class NumpyArrayGrid(mui.FlexBox):
         })
         self.dgrid = dgrid
         init_layout = {}
-        if num_slice_inputs > 0:
-            init_layout["slice_inputs"] = slice_inputs_comp
+        init_layout["slice_inputs"] = slice_inputs_comp
         if num_rows_split > 1:
             init_layout["row_split_slider"] = self.row_split_slider
         if num_columns_split > 1:
@@ -204,8 +205,8 @@ class NumpyArrayGrid(mui.FlexBox):
         init_layout["toolbar"] = mui.HBox([
             self.scroll_to_index_input,
             mui.Button("scroll to row", callback=self._on_scroll_to_index),
-            mui.Button("scroll to first nan", callback=self._on_scroll_to_first_nan),
-
+            mui.Button("scroll to first nan",
+                       callback=self._on_scroll_to_first_nan),
         ])
         init_layout["grid"] = dgrid
 
@@ -224,7 +225,8 @@ class NumpyArrayGrid(mui.FlexBox):
             else:
                 nan_indices = None
                 inf_indices = None
-            obj_flatted_min_maxs[k] = ArrayMeta(min_rows, max_rows, nan_indices, inf_indices)
+            obj_flatted_min_maxs[k] = ArrayMeta(min_rows, max_rows,
+                                                nan_indices, inf_indices)
         return obj_flatted_min_maxs
 
     def _get_footer_data(self, flatted_index: int):
@@ -266,12 +268,14 @@ class NumpyArrayGrid(mui.FlexBox):
         await self.scroll_to_index(index)
 
     async def _on_scroll_to_first_nan(self):
-        row_value, col_value, flatted_index = self._get_current_row_column_flatted_index()
+        row_value, col_value, flatted_index = self._get_current_row_column_flatted_index(
+        )
 
-        first_nan: Optional[int] = None 
+        first_nan: Optional[int] = None
         for k, v in self.obj_flatted_min_maxs.items():
             if v.nanIndices is not None:
-                nan_indices_this_flatted = v.nanIndices[v.nanIndices[:, 0] == flatted_index]
+                nan_indices_this_flatted = v.nanIndices[v.nanIndices[:, 0] ==
+                                                        flatted_index]
                 if nan_indices_this_flatted.shape[0] > 0:
                     first_nan = v.nanIndices[0, 1].item()
                     break
@@ -356,7 +360,8 @@ class NumpyArrayGrid(mui.FlexBox):
     def _get_subarray_from_slice_and_col_row_split_slider(
         self
     ) -> Tuple[Dict[str, mui.MatrixDataGridItem], Tuple[int, int, int]]:
-        row_value, col_value, flat_index = self._get_current_row_column_flatted_index()
+        row_value, col_value, flat_index = self._get_current_row_column_flatted_index(
+        )
         subarray = self._get_array_dict_from_offset(
             flat_index, row_value * self.real_display_rows,
             (row_value + 1) * self.real_display_rows,
@@ -380,3 +385,114 @@ class NumpyArrayGrid(mui.FlexBox):
             self.dgrid.update_event(dataList=subarr,
                                     rowOffset=offset[0],
                                     customFooterDatas=new_footer_data))
+
+
+class NumpyArrayGridTable(mui.FlexBox):
+
+    def __init__(self,
+                 init_array_items: Optional[Dict[str,
+                                                 Union[Dict[str, np.ndarray],
+                                                       np.ndarray]]] = None,
+                 max_columns: int = 25,
+                 max_size_row_split: int = 1000000):
+        super().__init__()
+        self.max_columns = max_columns
+        self.max_size_row_split = max_size_row_split
+        btn = mui.Button("Viewer").prop(size="small", loading=False)
+        self.grid_container = mui.HBox([])
+        dialog = mui.Dialog([
+            self.grid_container.prop(flex=1, height="70vh", width="100%")
+        ]).prop(title="Array Viewer",
+                maxWidth="xl",
+                fullWidth=True,
+                includeFormControl=False)
+
+        self.dialog = dialog
+        btn.event_click.on_standard(
+            self._on_btn_select).configure(stop_propagation=True)
+        cbox = mui.Checkbox().prop(size="small", disabled=True)
+        column_defs = [
+            mui.DataGrid.ColumnDef("name", accessorKey="name"),
+            mui.DataGrid.ColumnDef("dtype", accessorKey="dtype"),
+            mui.DataGrid.ColumnDef("shape", accessorKey="shape"),
+
+            mui.DataGrid.ColumnDef("contiguous",
+                                   accessorKey="contiguous",
+                                   cell=cbox),
+            mui.DataGrid.ColumnDef("viewer", cell=btn),
+        ]
+        self.array_items: Dict[str, Union[Dict[str, np.ndarray],
+                                          np.ndarray]] = {}
+        if init_array_items is not None:
+            self.array_items = init_array_items
+
+        dgrid = mui.DataGrid(column_defs,
+                             self._extract_table_data_from_array_items()).prop(
+                                 idKey="id",
+                                 rowHover=True,
+                                 virtualized=True,
+                                 enableFilter=True,
+                                 size="small",
+                                 fullWidth=True)
+        dgrid.bind_prop(cbox, "contiguous")
+
+        self.init_add_layout([dgrid.prop(flex=1), dialog])
+        self.dgrid = dgrid
+        self.prop(width="100%", height="100%", overflow="hidden")
+
+    async def update_array_items(self,
+                                 array_items: Dict[str, Union[Dict[str,
+                                                                   np.ndarray],
+                                                              np.ndarray]]):
+        self.array_items.update(array_items)
+        item_datas = self._extract_table_data_from_array_items()
+        await self.send_and_wait(self.dgrid.update_event(dataList=item_datas))
+
+    async def set_new_array_items(self,
+                                  new_array_items: Dict[str,
+                                                        Union[Dict[str,
+                                                                   np.ndarray],
+                                                              np.ndarray]]):
+        self.array_items = new_array_items
+        item_datas = self._extract_table_data_from_array_items()
+        await self.send_and_wait(self.dgrid.update_event(dataList=item_datas))
+
+    async def clear_array_items(self):
+        self.array_items = {}
+        await self.send_and_wait(self.dgrid.update_event(dataList=[]))
+
+    def _extract_table_data_from_array_items(self):
+        table_data: List[Dict[str, Any]] = []
+        for k, v in self.array_items.items():
+            if isinstance(v, dict):
+                contiguous = all(
+                    [v2.flags['C_CONTIGUOUS'] for v2 in v.values()])
+                table_data.append({
+                    "id": str(k),
+                    "name": k,
+                    "shape": "multiple",
+                    "contiguous": contiguous,
+                    "dtype": "multiple",
+                })
+            else:
+                table_data.append({
+                    "id": str(k),
+                    "name": k,
+                    "shape": str(v.shape),
+                    "contiguous": bool(v.flags['C_CONTIGUOUS']),
+                    "dtype": str(v.dtype),
+                })
+        return table_data
+
+    async def _on_btn_select(self, event: mui.Event):
+        keys = event.keys
+        assert not isinstance(keys, mui.Undefined)
+        key = keys[0]
+        item = self.array_items[key]
+        await self.grid_container.set_new_layout([
+            NumpyArrayGrid(item, self.max_columns,
+                           self.max_size_row_split).prop(width="100%",
+                                                         height="100%",
+                                                         overflow="hidden")
+        ])
+        await self.dialog.set_open(True)

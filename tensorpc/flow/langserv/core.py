@@ -14,7 +14,7 @@ def get_tmux_lang_server_info_may_create(ls_type: str, uid: str, port: int):
     # TODO jedi support
     assert ls_type in ["pyright", "pylsp", "clangd"]
     if ls_type == "pyright":
-        window_command_fmt = "PYRIGHT_PYTHON_FORCE_VERSION=1.1.339 python -m tensorpc.cli.pyls --port={}"
+        window_command_fmt = "python -m tensorpc.cli.pyls --port={}"
         try:
             import pyright
         except ImportError:

@@ -55,7 +55,7 @@ def layout_rectangles_with_priority(
 
 class GridPreviewContainer(mui.FlexBox):
 
-    def __init__(self, preview_layout: mui.FlexBox, name: str):
+    def __init__(self, preview_layout: mui.FlexBox, name: str, close_callback: Optional[Callable[[], Coroutine[None, None, None]]] = None):
         super().__init__({
             "header":
             mui.HBox([
@@ -110,6 +110,12 @@ class GridPreviewLayout(mui.FlexBox):
         self.use_typename_as_title = use_typename_as_title
         super().__init__()
         self.init_add_layout([*self._layout_func()])
+
+    def get_object_by_name(self, name: str) -> Any:
+        for x in self.grid_items:
+            if x.grid_item.name == name:
+                return x.layout_item.obj
+        raise KeyError(name)
 
     def _check_type_support_preview(self, type: Type) -> bool:
         if type in self._type_to_handler_object:

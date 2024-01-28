@@ -1161,12 +1161,12 @@ class Component(Generic[T_base_props, T_child]):
         def wrapper(*args: P.args, **kwargs: P.kwargs):
             # do validation on changed props only
             # self.__prop_cls(**kwargs)
+            TypeAdapter(self.__prop_cls).validate_python(kwargs)
             for k, v in kwargs.items():
                 setattr(self.__props, k, v)
             # do validation for all props (call model validator)
             TypeAdapter(self.__prop_cls).validate_python(self.__props)
             return this
-
         return wrapper
 
     def _update_props_base(self,
@@ -1178,6 +1178,7 @@ class Component(Generic[T_base_props, T_child]):
         def wrapper(*args: P.args, **kwargs: P.kwargs):
             # do validation on changed props only
             # self.__prop_cls(**kwargs)
+            TypeAdapter(self.__prop_cls).validate_python(kwargs)
             for k, v in kwargs.items():
                 setattr(self.__props, k, v)
             # do validation for all props (call model validator)

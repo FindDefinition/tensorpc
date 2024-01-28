@@ -895,10 +895,11 @@ class AutoComputeApp:
                 "year": 1975
             },
         ]
-
+        ac = mui.MultipleAutocomplete("Movies", self.options).prop(
+                variant="checkbox", disableCloseOnSelect=True)
+        
         return mui.VBox([
-            mui.MultipleAutocomplete("Movies", self.options).prop(
-                variant="checkbox", disableCloseOnSelect=True),
+            ac,
         ]).prop(width=640, height=480)
 
 
@@ -1018,14 +1019,15 @@ class PointCloudApp:
         await self.canvas.show_points("key0",
                                       points,
                                       limit=100000,
-                                      colors=colors,
-                                      attrs=points,
-                                      attr_fields=["x", "y", "z"])
-        lines = np.random.uniform(-10, 10, size=[1000, 2, 3]).astype(np.float32)
+                                    #   colors=colors,
+                                    #   attrs=points,
+                                    #   attr_fields=["x", "y", "z"]
+                                      )
+        # lines = np.random.uniform(-10, 10, size=[1000, 2, 3]).astype(np.float32)
         
-        await self.canvas.show_lines("lkey0",
-                                      lines,
-                                      limit=800000)
+        # await self.canvas.show_lines("lkey0",
+        #                               lines,
+        #                               limit=800000)
 
         # boxes: dims, locs, rots, colors (string list, don't support ndarray currently)
         dims = np.random.uniform(1, 2, size=[5, 3])
@@ -1657,9 +1659,19 @@ class GridPreviewLayoutApp:
 
 
 if __name__ == "__main__":
-    import time
-    tps = get_all_members_by_type(mui.FlexBox)
-    for _ in range(10):
-        t = time.time()
-        tps = get_all_members_by_type(mui.FlexBox)
-        print(len(tps), time.time() - t)
+    from pydantic import (
+        BaseModel,
+        GetCoreSchemaHandler,
+        GetJsonSchemaHandler,
+        TypeAdapter,
+        ValidationError,
+    )
+
+    props = mui.MultipleAutocompleteProps()
+    props.variant = "wtf" 
+
+    TypeAdapter(mui.MultipleAutocompleteProps).validate_python(props)
+    # ac = mui.MultipleAutocomplete("Movies", []).prop(
+    #             variant="checkbox", disableCloseOnSelect=True)
+
+    

@@ -174,6 +174,7 @@ class SimpleCanvas(mui.FlexBox):
         # self.ctrl = three.PointerLockControl().prop(
         #                                             enabled=True, makeDefault=True)
         self.ctrl = three.CameraControl().prop(makeDefault=True)
+        
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.axis_helper = three.AxesHelper(20)
         self.infgrid = infgrid
@@ -599,12 +600,12 @@ class SimpleCanvas(mui.FlexBox):
         if key not in self._point_dict:
             if encode_method is not None:
                 if attrs is None:
-                    ui = three.Points(limit).prop(encodeMethod=encode_method, encodeScale=encode_scale)
+                    ui = three.Points(limit).prop(encodeMethod=encode_method, encodeScale=encode_scale, colorMap=three.ColorMap(min=-1.0, max=1.0))
                 else:
                     assert attr_fields is not None 
-                    ui = three.Points(limit).prop(encodeMethod=encode_method, encodeScale=encode_scale, attrs=attrs, attrFields=attr_fields)
+                    ui = three.Points(limit).prop(encodeMethod=encode_method, encodeScale=encode_scale, attrs=attrs, attrFields=attr_fields, colorMap=three.ColorMap(min=-1.0, max=1.0))
             else:
-                ui = three.Points(limit)
+                ui = three.Points(limit).prop(colorMap=three.ColorMap(min=-1.0, max=1.0))
             self._point_dict[key] = ui
             await self._dynamic_pcs.update_childs({key: ui})
         point_ui = self._point_dict[key]
@@ -697,7 +698,7 @@ class SimpleCanvas(mui.FlexBox):
             # ], colors=colors if isinstance(colors, np.ndarray) else mui.undefined)
             ui = three.InstancedMesh(centers, limit, [
                 three.BoxGeometry(size, size, size),
-                three.MeshStandardMaterial().prop(vertexColors=False, color=colors if isinstance(colors, str) else mui.undefined),
+                three.MeshBasicMaterial().prop(vertexColors=False, color=colors if isinstance(colors, str) else mui.undefined),
             ], colors=colors if isinstance(colors, np.ndarray) else mui.undefined)
             self._voxels_dict[key] = ui
             await self._dynamic_voxels.update_childs({key: ui})

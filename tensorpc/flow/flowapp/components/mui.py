@@ -558,6 +558,10 @@ class IconType(enum.IntEnum):
     VisibilityOff = 40
     ManageAccounts = 41
     AccountCircle = 42
+    BugReport = 43
+    Dashboard = 44
+    DashboardCustomize = 45
+
 
 
 @dataclasses.dataclass
@@ -705,11 +709,12 @@ class ListItemIcon(MUIComponentBase[ListItemIconProps]):
 class DialogProps(MUIFlexBoxProps):
     open: bool = False
     title: Union[str, Undefined] = undefined
-    fullScreen: Union[str, Undefined] = undefined
-    fullWidth: Union[str, Undefined] = undefined
+    fullScreen: Union[bool, Undefined] = undefined
+    fullWidth: Union[bool, Undefined] = undefined
     maxWidth: Union[Literal['xs', 'sm', "md", "lg", "xl"],
                     Undefined] = undefined
     scroll: Union[Literal["body", "paper"], Undefined] = undefined
+    includeFormControl: Union[bool, Undefined] = undefined
     cancelLabel: Union[str, Undefined] = undefined
     okLabel: Union[str, Undefined] = undefined
 
@@ -1650,6 +1655,7 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
 class SwitchProps(MUIComponentBaseProps):
     label: Union[str, Undefined] = undefined
     checked: bool = False
+    disabled: Union[bool, Undefined] = undefined
     size: Union[Literal["small", "medium"], Undefined] = undefined
     muiColor: Union[_BtnGroupColor, Undefined] = undefined
     labelPlacement: Union[Literal["top", "start", "bottom", "end"],

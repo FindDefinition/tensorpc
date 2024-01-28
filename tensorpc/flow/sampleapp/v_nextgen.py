@@ -110,34 +110,13 @@ class DevApp:
         #         three.Image().prop(image=random_img)
         #     ])
         # ])
-        with V.group("dev"):
-            points = np.random.uniform(-50, 50, size=[1000, 3]).astype(np.float32)
-            colors = np.random.uniform(0, 255, size=[1000]).astype(np.uint8)
-            points[:, 0] -= 20
+        random_img = np.random.randint(0, 255, (128 * 16, 128 * 16, 3), dtype=np.uint8)
 
-            # V.points("points0", 1000).p(1, 1, 1).p(0, 0, 0).color("red").size(5)
-            V.points("points1X", 1000).array(points) # .size(5)
-
-            V.lines("lines0", 1000).p(2, 2, 2, 5, 5, 5).prop(color="blue")
-            def wtfrtx(a: V.Annotated[float, V.RangedFloat(0, 10, 0.1)] = 5):
-                V.points('points0', 1000).p(a, a, a).prop(colors="blue", size=5)
-            V.program("wtfrtx", wtfrtx)
-            random_img = np.random.randint(0, 255, (128 * 16, 128 * 16, 3), dtype=np.uint8)
+        with V.group("debug"):
             V.image(random_img, pos=(5, 5, 2), use_datatex=True)
-            V.three_ui(three.BoundingBox((1, 1, 1)).prop(position=(9, 9, 3),))
-            V.text("WTF1").prop(color="red")
-            with V.group("box_with_table", (0, 0, 3)):
-                for i in range(random.randint(3, 7)):
-                    tdata = {
-                        "score": random.random(),
-                        "name": f"test{i}",
-                    }
-                    box = V.bounding_box((1, 1, 1), pos=(0, i * 1.5, 0))
-                    V.set_tdata(box, tdata)
+        with V.group("debugX"):
 
-            with V.group("box0", (1, 3, 1)):
-                V.bounding_box((1, 1, 1))
-                V.text("WTF").prop(color="blue")
+            V.image(random_img, pos=(0, 5, 2), use_datatex=True)
 
             points = np.random.uniform(-1, 1, size=[1000, 3]).astype(np.float32)
 

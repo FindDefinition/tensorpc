@@ -344,6 +344,7 @@ def group(name: str,
           pos: Optional[three.Vector3Type] = None,
           rot: Optional[three.Vector3Type] = None,
           canvas: Optional[ComplexCanvas] = None,
+          variant: Optional[Literal["default", "faceToCamera", "relativeToCamera"]] = None,
           loop: Optional[asyncio.AbstractEventLoop] = None):
     if canvas is None:
         canvas = appctx.find_component(ComplexCanvas)
@@ -360,13 +361,13 @@ def group(name: str,
     if v_ctx is None:
         is_first_ctx = True
     # we need to increase frame cnt due to contextmanager
-    obj_self = _find_frame_self(_frame_cnt=2 + 1)
-    if obj_self is not None:
-        obj_self_id = id(obj_self)
-        if obj_self_id in canvas._user_obj_tree_item_to_meta:
-            v_ctx = canvas._user_obj_tree_item_to_meta[obj_self_id].vctx
-            v_ctx.canvas = canvas
-            is_objtree_ctx = True
+    # obj_self = _find_frame_self(_frame_cnt=2 + 1)
+    # if obj_self is not None:
+    #     obj_self_id = id(obj_self)
+    #     if obj_self_id in canvas._user_obj_tree_item_to_meta:
+    #         v_ctx = canvas._user_obj_tree_item_to_meta[obj_self_id].vctx
+    #         v_ctx.canvas = canvas
+    #         is_objtree_ctx = True
     if v_ctx is None:
         assert not is_reserved_name(name), f"{name} should not be reserved name"
         v_ctx = VContext(canvas)
@@ -479,6 +480,8 @@ def group(name: str,
             ev += group.update_event(position=pos)
         if rot is not None:
             ev += group.update_event(rotation=rot)
+        if variant is not None:
+            ev += group.update_event(variant=variant)
 
     item_cfg = get_or_create_canvas_item_cfg(group)
     if item_cfg.proxy is None:
@@ -559,12 +562,12 @@ def _find_frame_self(*, _frame_cnt: int=1):
 def _create_vapi_three_obj_pcfg(obj: three.Component, name: Optional[str], default_name_prefix: str, *, _frame_cnt: int=1):
     v_ctx = get_v_context()
     assert v_ctx is not None
-    if v_ctx.canvas._user_obj_tree_item_to_meta:
-        # write to standalone vctx for tree item
-        obj_self = _find_frame_self(_frame_cnt=_frame_cnt + 1)
-        if obj_self is not None:
-            if id(obj_self) in v_ctx.canvas._user_obj_tree_item_to_meta:
-                v_ctx = v_ctx.canvas._user_obj_tree_item_to_meta[id(obj_self)].vctx
+    # if v_ctx.canvas._user_obj_tree_item_to_meta:
+    #     # write to standalone vctx for tree item
+    #     obj_self = _find_frame_self(_frame_cnt=_frame_cnt + 1)
+    #     if obj_self is not None:
+    #         if id(obj_self) in v_ctx.canvas._user_obj_tree_item_to_meta:
+    #             v_ctx = v_ctx.canvas._user_obj_tree_item_to_meta[id(obj_self)].vctx
     cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
     proxy = cfg.proxy
     assert proxy is not None
@@ -626,6 +629,9 @@ def image(img: np.ndarray, rot: Optional[three.Vector3Type] = None, pos: Optiona
     return obj
 
 def three_ui(comp: three.ThreeComponentType, name: Optional[str] = None):
+    # FIXME better way to handle cast layer
+    if isinstance(comp, (three.Object3dBase, three.Object3dContainerBase)):
+        comp.props.layers = 31
     _create_vapi_three_obj_pcfg(comp, name, "obj3d", _frame_cnt=2)
     return 
 
@@ -644,12 +650,12 @@ def program(name: str, func: Callable):
     func_dcls_obj = func_dcls()
     v_ctx = get_v_context()
     assert v_ctx is not None
-    if v_ctx.canvas._user_obj_tree_item_to_meta:
-        # write to standalone vctx for tree item
-        obj_self = _find_frame_self(_frame_cnt=2)
-        if obj_self is not None:
-            if obj_self in v_ctx.canvas._user_obj_tree_item_to_meta:
-                v_ctx = v_ctx.canvas._user_obj_tree_item_to_meta[obj_self].vctx
+    # if v_ctx.canvas._user_obj_tree_item_to_meta:
+    #     # write to standalone vctx for tree item
+    #     obj_self = _find_frame_self(_frame_cnt=2)
+    #     if obj_self is not None:
+    #         if obj_self in v_ctx.canvas._user_obj_tree_item_to_meta:
+    #             v_ctx = v_ctx.canvas._user_obj_tree_item_to_meta[obj_self].vctx
     cfg = get_or_create_canvas_item_cfg(v_ctx.current_container)
     proxy = cfg.proxy
     assert proxy is not None

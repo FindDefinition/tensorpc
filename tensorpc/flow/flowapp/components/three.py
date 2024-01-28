@@ -38,13 +38,13 @@ from typing_extensions import ParamSpec, TypeAlias, Annotated
 from tensorpc.utils.uniquename import UniqueNamePool
 from .typemetas import RangedFloat, RangedInt, Vector3Type
 from ..core import (AppEvent, AppEventType, BasicProps, Component,
-                    ContainerBase, ContainerBaseProps, EventHandler, SimpleEventType,
-                    Fragment, FrontendEventType, NumberType, T_base_props,
-                    T_child, T_container_props, TaskLoopEvent, UIEvent,
-                    UIRunStatus, UIType, Undefined, ValueType, undefined)
+                    ContainerBase, ContainerBaseProps, EventHandler,
+                    SimpleEventType, Fragment, FrontendEventType, NumberType,
+                    T_base_props, T_child, T_container_props, TaskLoopEvent,
+                    UIEvent, UIRunStatus, UIType, Undefined, ValueType,
+                    undefined)
 from .mui import (FlexBoxProps, MUIFlexBoxProps, MUIComponentType,
-                  MUIContainerBase, PointerEventsProperties,
-                  Image as MUIImage)
+                  MUIContainerBase, MenuItem, PointerEventsProperties, Image as MUIImage)
 from .common import handle_standard_event
 from tensorpc.flow.flowapp.components import typemetas
 
@@ -58,8 +58,8 @@ ThreeLayoutType: TypeAlias = Union[List["ThreeComponentType"],
 ThreeEffectType: TypeAlias = Union[List["ThreeEffectBase"],
                                    Dict[str, "ThreeEffectBase"]]
 
-
 P = ParamSpec('P')
+
 
 class PyDanticConfigForNumpy:
     arbitrary_types_allowed = True
@@ -121,17 +121,20 @@ class MeshMaterialType(enum.Enum):
     Standard = 7
     Toon = 8
 
+
 class SideType(enum.IntEnum):
     Front = 0
     Back = 1
     Double = 2
+
 
 @dataclasses.dataclass
 class ThreeMaterialPropsBase(ThreeBasicProps):
     # deprecated, only works in MeshBasicMaterialV1 and MeshStandardMaterialV1
     # materialType: int = 0
     transparent: Union[bool, Undefined] = undefined
-    opacity: Annotated[Union[NumberType, Undefined], typemetas.CommonObject(default=1.0)] = undefined
+    opacity: Annotated[Union[NumberType, Undefined],
+                       typemetas.CommonObject(default=1.0)] = undefined
     depthTest: Union[bool, Undefined] = undefined
     depthWrite: Union[bool, Undefined] = undefined
     alphaTest: Union[NumberType, Undefined] = undefined
@@ -145,6 +148,7 @@ class ThreeComponentBase(Component[T_base_props, "ThreeComponentType"]):
 
 class ThreeContainerBase(ContainerBase[T_container_props, T_child]):
     pass
+
 
 class ThreeEffectBase(Component[T_base_props, "ThreeComponentType"]):
     pass
@@ -168,8 +172,11 @@ T_geometry_prop = TypeVar("T_geometry_prop", bound=ThreeGeometryPropsBase)
 
 ThreeComponentType = Union[ThreeComponentBase, ThreeContainerBase, Fragment]
 
+
 def is_three_component(obj: Component):
-    return isinstance(obj, (ThreeComponentBase, ThreeContainerBase, Fragment, Canvas, ThreeEffectBase))
+    return isinstance(obj, (ThreeComponentBase, ThreeContainerBase, Fragment,
+                            Canvas, ThreeEffectBase))
+
 
 @dataclasses.dataclass
 class PivotControlsCommonProps:
@@ -179,12 +186,14 @@ class PivotControlsCommonProps:
     anchor: Union[Vector3Type, Undefined] = undefined
     activeAxes: Union[Tuple[bool, bool, bool], Undefined] = undefined
     axisColors: Union[Tuple[ValueType, ValueType, ValueType],
-                       Undefined] = undefined
+                      Undefined] = undefined
     hoveredColor: Union[ValueType, Undefined] = undefined
     depthTest: Union[bool, Undefined] = undefined
-    opacity: Annotated[Union[NumberType, Undefined], typemetas.CommonObject(default=1.0)] = undefined
+    opacity: Annotated[Union[NumberType, Undefined],
+                       typemetas.CommonObject(default=1.0)] = undefined
     visible: Union[bool, Undefined] = undefined
     annotations: Union[bool, Undefined] = undefined
+
 
 @dataclasses.dataclass
 class InteractableProps:
@@ -217,18 +226,26 @@ class InteractableProps:
         default_factory=PivotControlsCommonProps)
     pivotDebounce: Union[NumberType, Undefined] = undefined
 
+
 @dataclasses.dataclass
 class Object3dBaseProps(ThreeBasicProps):
     # position already exists in base flex props, so we use another name
-    position: Annotated[Union[Vector3Type, Undefined], typemetas.Vector3(0.01)] = undefined
-    rotation: Annotated[Union[Vector3Type, Undefined], typemetas.Vector3(0.1)]  = undefined
+    position: Annotated[Union[Vector3Type, Undefined],
+                        typemetas.Vector3(0.01)] = undefined
+    rotation: Annotated[Union[Vector3Type, Undefined],
+                        typemetas.Vector3(0.1)] = undefined
     up: Union[Vector3Type, Undefined] = undefined
-    scale: Annotated[Union[Vector3Type, NumberType, Undefined], typemetas.RangedVector3(0.01, 10.0, 0.01, default=(1, 1, 1))] = undefined
-    visible: Annotated[Union[bool, Undefined], typemetas.CommonObject(default=True)] = undefined
+    scale: Annotated[
+        Union[Vector3Type, NumberType, Undefined],
+        typemetas.RangedVector3(0.01, 10.0, 0.01, default=(1, 1,
+                                                           1))] = undefined
+    visible: Annotated[Union[bool, Undefined],
+                       typemetas.CommonObject(default=True)] = undefined
     receiveShadow: Union[bool, Undefined] = undefined
     castShadow: Union[bool, Undefined] = undefined
     renderOrder: Union[int, Undefined] = undefined
-    layers: Annotated[Union[int, Undefined], typemetas.RangedInt(0, 31, 1, default=0)] = undefined
+    layers: Annotated[Union[int, Undefined],
+                      typemetas.RangedInt(0, 31, 1, default=0)] = undefined
 
 
 @dataclasses.dataclass
@@ -242,8 +259,12 @@ T_o3d_container_prop = TypeVar("T_o3d_container_prop",
 
 
 class Object3dBase(ThreeComponentBase[T_o3d_prop]):
-    def __init__(self, base_type: UIType, prop_cls: Type[T_o3d_prop],
-                 allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
+
+    def __init__(
+            self,
+            base_type: UIType,
+            prop_cls: Type[T_o3d_prop],
+            allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
         super().__init__(base_type, prop_cls, allowed_events)
 
     def update_object3d_event(self,
@@ -295,23 +316,30 @@ class Object3dBase(ThreeComponentBase[T_o3d_prop]):
 
 
 class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
-    def __init__(self, base_type: UIType, prop_cls: Type[T_o3d_prop], 
-                allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
+
+    def __init__(
+            self,
+            base_type: UIType,
+            prop_cls: Type[T_o3d_prop],
+            allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
         if allowed_events is None:
             allowed_events = []
 
-        super().__init__(base_type, prop_cls, allowed_events=[
-            FrontendEventType.Click.value,
-            FrontendEventType.DoubleClick.value,
-            FrontendEventType.Enter.value,
-            FrontendEventType.Leave.value,
-            FrontendEventType.Over.value,
-            FrontendEventType.Out.value,
-            FrontendEventType.Up.value,
-            FrontendEventType.Down.value,
-            FrontendEventType.ContextMenu.value,
-        ] + list(allowed_events))
-        self.event_double_click = self._create_event_slot(FrontendEventType.DoubleClick)
+        super().__init__(base_type,
+                         prop_cls,
+                         allowed_events=[
+                             FrontendEventType.Click.value,
+                             FrontendEventType.DoubleClick.value,
+                             FrontendEventType.Enter.value,
+                             FrontendEventType.Leave.value,
+                             FrontendEventType.Over.value,
+                             FrontendEventType.Out.value,
+                             FrontendEventType.Up.value,
+                             FrontendEventType.Down.value,
+                             FrontendEventType.ContextMenu.value,
+                         ] + list(allowed_events))
+        self.event_double_click = self._create_event_slot(
+            FrontendEventType.DoubleClick)
         self.event_click = self._create_event_slot(FrontendEventType.Click)
         self.event_enter = self._create_event_slot(FrontendEventType.Enter)
         self.event_leave = self._create_event_slot(FrontendEventType.Leave)
@@ -319,19 +347,25 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
         self.event_out = self._create_event_slot(FrontendEventType.Out)
         self.event_up = self._create_event_slot(FrontendEventType.Up)
         self.event_down = self._create_event_slot(FrontendEventType.Down)
-        self.event_context_menu = self._create_event_slot(FrontendEventType.ContextMenu)
+        self.event_context_menu = self._create_event_slot(
+            FrontendEventType.ContextMenu)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync)
 
 
 class Object3dContainerBase(ThreeContainerBase[T_o3d_container_prop, T_child]):
-    def __init__(self,
-                 base_type: UIType,
-                 prop_cls: Type[T_o3d_container_prop],
-                 children: Dict[str, T_child],
-                 allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
-        super().__init__(base_type, prop_cls, children, allowed_events=allowed_events)
+
+    def __init__(
+            self,
+            base_type: UIType,
+            prop_cls: Type[T_o3d_container_prop],
+            children: Dict[str, T_child],
+            allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
+        super().__init__(base_type,
+                         prop_cls,
+                         children,
+                         allowed_events=allowed_events)
 
     def update_object3d_event(self,
                               position: Optional[Union[Vector3Type,
@@ -383,25 +417,31 @@ class Object3dContainerBase(ThreeContainerBase[T_o3d_container_prop, T_child]):
 
 class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
                                                       T_child]):
-    def __init__(self,
-                 base_type: UIType,
-                 prop_cls: Type[T_o3d_container_prop],
-                 children: Dict[str, T_child],
-                 allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
+
+    def __init__(
+            self,
+            base_type: UIType,
+            prop_cls: Type[T_o3d_container_prop],
+            children: Dict[str, T_child],
+            allowed_events: Optional[Iterable[EventDataType]] = None) -> None:
         if allowed_events is None:
             allowed_events = []
-        super().__init__(base_type, prop_cls, children, allowed_events=[
-            FrontendEventType.Click.value,
-            FrontendEventType.DoubleClick.value,
-            FrontendEventType.Enter.value,
-            FrontendEventType.Leave.value,
-            FrontendEventType.Over.value,
-            FrontendEventType.Out.value,
-            FrontendEventType.Up.value,
-            FrontendEventType.Down.value,
-            FrontendEventType.ContextMenu.value,
-        ] + list(allowed_events))
-        self.event_double_click = self._create_event_slot(FrontendEventType.DoubleClick)
+        super().__init__(base_type,
+                         prop_cls,
+                         children,
+                         allowed_events=[
+                             FrontendEventType.Click.value,
+                             FrontendEventType.DoubleClick.value,
+                             FrontendEventType.Enter.value,
+                             FrontendEventType.Leave.value,
+                             FrontendEventType.Over.value,
+                             FrontendEventType.Out.value,
+                             FrontendEventType.Up.value,
+                             FrontendEventType.Down.value,
+                             FrontendEventType.ContextMenu.value,
+                         ] + list(allowed_events))
+        self.event_double_click = self._create_event_slot(
+            FrontendEventType.DoubleClick)
         self.event_click = self._create_event_slot(FrontendEventType.Click)
         self.event_enter = self._create_event_slot(FrontendEventType.Enter)
         self.event_leave = self._create_event_slot(FrontendEventType.Leave)
@@ -409,10 +449,18 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
         self.event_out = self._create_event_slot(FrontendEventType.Out)
         self.event_up = self._create_event_slot(FrontendEventType.Up)
         self.event_down = self._create_event_slot(FrontendEventType.Down)
-        self.event_context_menu = self._create_event_slot(FrontendEventType.ContextMenu)
+        self.event_context_menu = self._create_event_slot(
+            FrontendEventType.ContextMenu)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync)
+
+
+@dataclasses.dataclass
+class ColorMap:
+    type: Literal["jet"] = "jet"
+    min: Union[NumberType, Undefined] = undefined
+    max: Union[NumberType, Undefined] = undefined
 
 
 @dataclasses.dataclass(config=PyDanticConfigForNumpy)
@@ -425,15 +473,15 @@ class PointProps(Object3dBaseProps):
     sizeAttenuation: bool = False
     size: float = 3.0
     sizes: Union[np.ndarray, Undefined] = undefined
-    encodeMethod: Union[Literal["none", "int16"], Undefined] = undefined 
+    encodeMethod: Union[Literal["none", "int16"], Undefined] = undefined
     encodeScale: Union[NumberType, Undefined] = undefined
     enableBvh: Union[bool, Undefined] = undefined
-
+    colorMap: Union[ColorMap, Undefined] = undefined
 
     @field_validator('points')
     def points_validator(cls, v: Union[np.ndarray, Undefined]):
         if not isinstance(v, Undefined):
-            assert v.dtype == np.float32 or v.dtype == np.uint8 
+            assert v.dtype == np.float32 or v.dtype == np.uint8
             assert v.ndim == 2 and v.shape[1] in [3, 4]
         return v
 
@@ -443,6 +491,7 @@ class PointsControlType(enum.Enum):
 
 
 class Points(Object3dWithEventBase[PointProps]):
+
     def __init__(self, limit: int) -> None:
         super().__init__(UIType.ThreePoints, PointProps)
         self.props.points = np.zeros((0, 3), np.float32)
@@ -517,8 +566,11 @@ class Points(Object3dWithEventBase[PointProps]):
                             size_attenuation: bool = False,
                             size: Optional[Union[NumberType,
                                                  Undefined]] = None,
-                            encode_method: Optional[Union[Literal["none", "int16"], Undefined]] = None, 
-                            encode_scale: Optional[Union[NumberType, Undefined] ]= 50):
+                            encode_method: Optional[Union[Literal["none",
+                                                                  "int16"],
+                                                          Undefined]] = None,
+                            encode_scale: Optional[Union[NumberType,
+                                                         Undefined]] = 50):
         # TODO better check, we must handle all errors before sent to frontend.
         assert points.ndim == 2 and points.shape[1] in [
             3, 4
@@ -529,7 +581,7 @@ class Points(Object3dWithEventBase[PointProps]):
         else:
             assert points.shape[
                 0] <= self.props.limit, f"your points size {points.shape[0]} must smaller than limit {self.props.limit}"
-            
+
         assert points.dtype == np.float32, "only support fp32 points"
         if points.shape[1] == 4 and colors is None:
             colors = points[:, 3].astype(np.uint8)
@@ -596,14 +648,15 @@ class SegmentsProps(ThreeBasicProps):
     lineWidth: float = 1.0
     color: Annotated[Union[str, Undefined], typemetas.ColorRGB()] = undefined
     transparent: Union[bool, Undefined] = undefined
-    opacity: Annotated[Union[NumberType, Undefined], typemetas.CommonObject(default=1.0)] = undefined
-    layers: Annotated[Union[int, Undefined], typemetas.RangedInt(0, 31, 1, default=0)] = undefined
+    opacity: Annotated[Union[NumberType, Undefined],
+                       typemetas.CommonObject(default=1.0)] = undefined
+    layers: Annotated[Union[int, Undefined],
+                      typemetas.RangedInt(0, 31, 1, default=0)] = undefined
 
-    @staticmethod 
+    @staticmethod
     def lines_validator(v: np.ndarray):
         assert v.dtype == np.float32
         assert v.ndim == 3 and v.shape[1] == 2 and v.shape[2] == 3
-
 
     @field_validator('lines')
     def _lines_validator(cls, v: Union[np.ndarray, Undefined]):
@@ -611,11 +664,16 @@ class SegmentsProps(ThreeBasicProps):
             cls.lines_validator(v)
         return v
 
+
 class Segments(ThreeComponentBase[SegmentsProps]):
-    def __init__(self,
-                 limit: int,
-                 line_width: float = 1.0,
-                 color: Annotated[Union[str, Undefined], typemetas.ColorRGB()] = undefined) -> None:
+
+    def __init__(
+        self,
+        limit: int,
+        line_width: float = 1.0,
+        color: Annotated[Union[str, Undefined],
+                         typemetas.ColorRGB()] = undefined
+    ) -> None:
         super().__init__(UIType.ThreeSegments, SegmentsProps)
         self.props.lines = np.zeros((0, 2, 3), np.float32)
         self.props.lineWidth = line_width
@@ -644,8 +702,7 @@ class Segments(ThreeComponentBase[SegmentsProps]):
                            lines: np.ndarray,
                            colors: Optional[Union[np.ndarray,
                                                   Undefined]] = None,
-                                                        limit: Optional[int] = None
-):
+                           limit: Optional[int] = None):
         assert lines.ndim == 3 and lines.shape[1] == 2 and lines.shape[
             2] == 3, f"{lines.shape} lines must be [N, 2, 3]"
         if limit is not None:
@@ -705,6 +762,7 @@ class Boxes2DProps(Object3dBaseProps):
 
 
 class Boxes2D(Object3dWithEventBase[Boxes2DProps]):
+
     def __init__(self, limit: int) -> None:
         super().__init__(UIType.ThreeBoxes2D, Boxes2DProps)
         self.props.centers = np.zeros((0, 2), np.float32)
@@ -800,16 +858,22 @@ class Boxes2D(Object3dWithEventBase[Boxes2DProps]):
 class BoundingBoxProps(Object3dBaseProps, InteractableProps):
     dimension: Union[Vector3Type, Undefined] = undefined
     edgeWidth: Union[float, Undefined] = undefined
-    edgeColor: Annotated[Union[str, int, Undefined], typemetas.ColorRGB(default="green")] = undefined
-    emissive: Annotated[Union[str, int, Undefined], typemetas.ColorRGB(default="red")] = undefined
-    color: Annotated[Union[str, int, Undefined], typemetas.ColorRGB(default="red")] = undefined
-    opacity: Annotated[Union[NumberType, Undefined], typemetas.CommonObject(default=0.3)] = undefined
-    edgeOpacity: Annotated[Union[NumberType, Undefined], typemetas.CommonObject(default=0.5)] = undefined
+    edgeColor: Annotated[Union[str, int, Undefined],
+                         typemetas.ColorRGB(default="green")] = undefined
+    emissive: Annotated[Union[str, int, Undefined],
+                        typemetas.ColorRGB(default="red")] = undefined
+    color: Annotated[Union[str, int, Undefined],
+                     typemetas.ColorRGB(default="red")] = undefined
+    opacity: Annotated[Union[NumberType, Undefined],
+                       typemetas.CommonObject(default=0.3)] = undefined
+    edgeOpacity: Annotated[Union[NumberType, Undefined],
+                           typemetas.CommonObject(default=0.5)] = undefined
     checked: bool = False
     addCross: bool = True
 
 
 class BoundingBox(Object3dWithEventBase[BoundingBoxProps]):
+
     def __init__(self,
                  dimension: Vector3Type,
                  edge_width: float = 1,
@@ -826,7 +890,6 @@ class BoundingBox(Object3dWithEventBase[BoundingBoxProps]):
         self.props.color = color
         self.props.opacity = opacity
         self.props.edgeOpacity = edge_opacity
-        
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -859,6 +922,7 @@ class AxesHelperProps(Object3dBaseProps):
 
 
 class AxesHelper(ThreeComponentBase[AxesHelperProps]):
+
     def __init__(self, length: float) -> None:
         super().__init__(UIType.ThreeAxesHelper, AxesHelperProps)
         self.props.length = length
@@ -882,6 +946,7 @@ class EdgesProps(ThreeBasicProps):
 
 
 class Edges(ThreeComponentBase[EdgesProps]):
+
     def __init__(
         self,
         threshold: Union[NumberType, Undefined] = undefined,
@@ -926,6 +991,7 @@ class WireframeProps(ThreeBasicProps):
 class Wireframe(ThreeComponentBase[WireframeProps]):
     """used in Mesh childs.
     """
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeWireframe, WireframeProps)
 
@@ -942,14 +1008,17 @@ class Wireframe(ThreeComponentBase[WireframeProps]):
 
 @dataclasses.dataclass
 class InfiniteGridHelperProps(Object3dBaseProps):
-    size1: Annotated[Union[NumberType, Undefined], RangedFloat(1, 50, 0.1)] = undefined
-    size2: Annotated[Union[NumberType, Undefined], RangedFloat(1, 200, 0.5)] = undefined
+    size1: Annotated[Union[NumberType, Undefined],
+                     RangedFloat(1, 50, 0.1)] = undefined
+    size2: Annotated[Union[NumberType, Undefined],
+                     RangedFloat(1, 200, 0.5)] = undefined
     color: Annotated[Union[str, Undefined], typemetas.ColorRGB()] = undefined
     distance: Union[NumberType, Undefined] = undefined
     axes: Union[str, Undefined] = undefined
 
 
 class InfiniteGridHelper(ThreeComponentBase[InfiniteGridHelperProps]):
+
     def __init__(self,
                  size1: float,
                  size2: float,
@@ -972,21 +1041,23 @@ class InfiniteGridHelper(ThreeComponentBase[InfiniteGridHelperProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
 @dataclasses.dataclass
 class GroupProps(Object3dContainerBaseProps):
     userData: Union[Any, Undefined] = undefined
     enableSelect: Union[bool, Undefined] = undefined
+    variant: Union[Literal["default", "faceToCamera", "relativeToCamera"], Undefined] = undefined
 
-class Group(O3dContainerWithEventBase[GroupProps,
-                                  ThreeComponentType]):
+
+class Group(O3dContainerWithEventBase[GroupProps, ThreeComponentType]):
     # TODO can/should group accept event?
-    def __init__(self,
-                 children: Union[Dict[str, ThreeComponentType],
-                                 List[ThreeComponentType]]) -> None:
+    def __init__(
+        self, children: Union[Dict[str, ThreeComponentType],
+                              List[ThreeComponentType]]
+    ) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ThreeGroup, GroupProps,
-                         children)
+        super().__init__(UIType.ThreeGroup, GroupProps, children)
 
     @property
     def prop(self):
@@ -1001,9 +1072,11 @@ class Group(O3dContainerWithEventBase[GroupProps,
 
 @dataclasses.dataclass(config=PyDanticConfigForNumpy)
 class ImageProps(Object3dBaseProps, InteractableProps):
-    image: Union[np.ndarray, str, bytes] = dataclasses.field(default_factory=str)
+    image: Union[np.ndarray, str,
+                 bytes] = dataclasses.field(default_factory=str)
     segments: Union[NumberType, Undefined] = undefined
-    color: Annotated[Union[str, int, Undefined], typemetas.ColorRGB()] = undefined
+    color: Annotated[Union[str, int, Undefined],
+                     typemetas.ColorRGB()] = undefined
     zoom: Union[NumberType, Undefined] = undefined
     grayscale: Union[NumberType, Undefined] = undefined
     toneMapped: Union[bool, Undefined] = undefined
@@ -1012,6 +1085,7 @@ class ImageProps(Object3dBaseProps, InteractableProps):
 
 
 class Image(Object3dWithEventBase[ImageProps]):
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeImage, ImageProps)
 
@@ -1066,6 +1140,7 @@ class PerspectiveCameraProps(Object3dBaseProps):
 
 
 class PerspectiveCamera(Object3dBase[PerspectiveCameraProps]):
+
     def __init__(
         self,
         make_default: bool = True,
@@ -1104,6 +1179,7 @@ class OrthographicCameraProps(Object3dBaseProps):
 
 
 class OrthographicCamera(Object3dBase[OrthographicCameraProps]):
+
     def __init__(
         self,
         make_default: bool = True,
@@ -1152,6 +1228,17 @@ class OrbitControlProps(ThreeBasicProps):
     keyPanSpeed: Union[NumberType, Undefined] = undefined
     makeDefault: Union[bool, Undefined] = undefined
 
+# "rotate" | "dolly" | "truck" | "offset" | "zoom" | "none"
+MouseButtonType: TypeAlias = Literal["rotate", "dolly", "truck", "offset",
+                                        "zoom", "none"]
+
+@dataclasses.dataclass
+class MouseButtonConfig:
+    left: Union[Undefined, MouseButtonType] = undefined 
+    middle: Union[Undefined, MouseButtonType] = undefined
+    right: Union[Undefined, MouseButtonType] = undefined
+    wheel: Union[Undefined, MouseButtonType] = undefined
+
 
 @dataclasses.dataclass
 class CameraControlProps(ThreeBasicProps):
@@ -1176,9 +1263,11 @@ class CameraControlProps(ThreeBasicProps):
 
     infinityDolly: Union[bool, Undefined] = undefined
     makeDefault: Union[bool, Undefined] = undefined
+    mouseButtons: Union[MouseButtonConfig, Undefined] = undefined
 
 
 class MapControl(ThreeComponentBase[OrbitControlProps]):
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeMapControl, OrbitControlProps)
         self.props.enableDamping = True
@@ -1212,9 +1301,13 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
         x: right
         y: up
         z: negative forward
+    when we look at negative z axis and keep screen is y up and x right, 
+    the rotation of camera is zero.
     """
+
     def __init__(self) -> None:
-        super().__init__(UIType.ThreeCameraControl, CameraControlProps, [FrontendEventType.Change.value])
+        super().__init__(UIType.ThreeCameraControl, CameraControlProps,
+                         [FrontendEventType.Change.value])
 
         # self.props.enableDamping = True
         # self.props.dampingFactor = 1
@@ -1272,7 +1365,6 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
                 update_now,
             }))
 
-
     async def set_lookat(self, origin: List[float], target: List[float]):
         """
         Args: 
@@ -1297,7 +1389,6 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
                 "type": CameraUserControlType.LookAtObject.value,
                 "objectName": obj_uid,
             }))
-    
 
     async def rotate_to(self, azimuth: float, polar: float):
         return await self.send_and_wait(
@@ -1306,7 +1397,6 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
                 "azimuth": azimuth,
                 "polar": polar,
             }))
-
 
     @staticmethod
     def fov_size_to_intrinsic(fov_angle: float, width: NumberType,
@@ -1335,6 +1425,7 @@ class CameraControl(ThreeComponentBase[CameraControlProps]):
 
 
 class OrbitControl(ThreeComponentBase[OrbitControlProps]):
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeOrbitControl, OrbitControlProps)
         self.props.enableDamping = True
@@ -1360,7 +1451,6 @@ class OrbitControl(ThreeComponentBase[OrbitControlProps]):
 #     maxPolarAngle: Union[float, Undefined] = undefined
 #     makeDefault: Union[bool, Undefined] = undefined
 
-
 # class PointerLockControl(ThreeComponentBase[PointerLockControlProps]):
 #     def __init__(self,
 #                  enabled: Union[bool, Undefined] = undefined,
@@ -1381,7 +1471,6 @@ class OrbitControl(ThreeComponentBase[OrbitControlProps]):
 #     def update_event(self):
 #         propcls = self.propcls
 #         return self._update_props_base(propcls)
-
 
 # @dataclasses.dataclass
 # class FirstPersonControlProps(ThreeBasicProps):
@@ -1418,6 +1507,7 @@ class OrbitControl(ThreeComponentBase[OrbitControlProps]):
 
 
 class FlexAutoReflow(ThreeComponentBase[ThreeBasicProps]):
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeFlexAutoReflow, ThreeBasicProps)
 
@@ -1438,6 +1528,7 @@ class FlexManualReflowProps(ThreeBasicProps):
 
 
 class FlexManualReflow(ThreeComponentBase[FlexManualReflowProps]):
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeFlexManualReflow, FlexManualReflowProps)
 
@@ -1466,9 +1557,11 @@ class ScreenShot(ThreeComponentBase[ScreenShotProps]):
     2. get image and userdata you provided from callback.
     currently impossible to get image from one function call.
     """
+
     def __init__(self, callback: Callable[[Tuple[str, Any]],
                                           _CORO_NONE]) -> None:
-        super().__init__(UIType.ThreeScreenShot, ScreenShotProps,
+        super().__init__(UIType.ThreeScreenShot,
+                         ScreenShotProps,
                          allowed_events=[FrontendEventType.Change.value])
         self.register_event_handler(FrontendEventType.Change.value, callback)
         self.event_change = self._create_event_slot(FrontendEventType.Change)
@@ -1504,6 +1597,7 @@ class ScreenShot(ThreeComponentBase[ScreenShotProps]):
 
 
 class _PendingState:
+
     def __init__(self,
                  ev: asyncio.Event,
                  result: Optional[Any] = None) -> None:
@@ -1517,8 +1611,11 @@ class ScreenShotSyncReturn(ThreeComponentBase[ScreenShotProps]):
     2. get image and userdata you provided from callback.
     currently impossible to get image from one function call.
     """
+
     def __init__(self) -> None:
-        super().__init__(UIType.ThreeScreenShot, ScreenShotProps, allowed_events=[FrontendEventType.Change.value])
+        super().__init__(UIType.ThreeScreenShot,
+                         ScreenShotProps,
+                         allowed_events=[FrontendEventType.Change.value])
         self.register_event_handler(FrontendEventType.Change.value,
                                     self._on_callback)
         self._pending_rpc: Dict[int, _PendingState] = {}
@@ -1580,12 +1677,13 @@ class ThreeCanvasProps(MUIFlexBoxProps):
     shadows: Union[bool, Undefined] = undefined
     enablePerf: Union[bool, Undefined] = undefined
     perfPosition: Union[Literal['top-right', 'top-left', 'bottom-right',
-                                 'bottom-left'], Undefined] = undefined
+                                'bottom-left'], Undefined] = undefined
     flat: Union[bool, Undefined] = undefined
     linear: Union[bool, Undefined] = undefined
     dpr: Union[Tuple[int, int], Undefined] = undefined
     raycastLayerMask: Union[int, Undefined] = undefined
     isViewMode: Union[bool, Undefined] = undefined
+
 
 @dataclasses.dataclass
 class ThreeViewProps(MUIFlexBoxProps):
@@ -1594,22 +1692,24 @@ class ThreeViewProps(MUIFlexBoxProps):
     tabIndex: Union[int, Undefined] = undefined
     enablePerf: Union[bool, Undefined] = undefined
     perfPosition: Union[Literal['top-right', 'top-left', 'bottom-right',
-                                 'bottom-left'], Undefined] = undefined
+                                'bottom-left'], Undefined] = undefined
     elementId: Union[str, Undefined] = undefined
     className: Union[str, Undefined] = undefined
     visible: Union[bool, Undefined] = undefined
     index: Union[int, Undefined] = undefined
     frames: Union[int, Undefined] = undefined
+    menuItems: Union[List[MenuItem], Undefined] = undefined
+
 
 class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
+
     def __init__(self,
                  children: Union[List[ThreeComponentType],
                                  Dict[str, ThreeComponentType]],
                  background: Union[str, Undefined] = undefined) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ThreeCanvas, ThreeCanvasProps,
-                         children)
+        super().__init__(UIType.ThreeCanvas, ThreeCanvasProps, children)
         self.props.threeBackgroundColor = background
 
     @property
@@ -1622,14 +1722,16 @@ class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
 class View(MUIContainerBase[ThreeViewProps, ThreeComponentType]):
-    def __init__(self,
-                 children: Union[List[ThreeComponentType],
-                                 Dict[str, ThreeComponentType]]) -> None:
+
+    def __init__(
+        self, children: Union[List[ThreeComponentType],
+                              Dict[str, ThreeComponentType]]
+    ) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ThreeView, ThreeViewProps,
-                         children)
+        super().__init__(UIType.ThreeView, ThreeViewProps, children)
 
     @property
     def prop(self):
@@ -1641,15 +1743,16 @@ class View(MUIContainerBase[ThreeViewProps, ThreeComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
 class ViewCanvas(MUIContainerBase[ThreeCanvasProps, MUIComponentType]):
+
     def __init__(self,
                  children: Union[List[MUIComponentType],
                                  Dict[str, MUIComponentType]],
                  background: Union[str, Undefined] = undefined) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ThreeCanvas, ThreeCanvasProps,
-                         children)
+        super().__init__(UIType.ThreeCanvas, ThreeCanvasProps, children)
         self.props.threeBackgroundColor = background
         self.props.isViewMode = True
 
@@ -1662,6 +1765,7 @@ class ViewCanvas(MUIContainerBase[ThreeCanvasProps, MUIComponentType]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
 
 @dataclasses.dataclass
 class TransformControlsProps(ContainerBaseProps):
@@ -1680,6 +1784,7 @@ class TransformControlsProps(ContainerBaseProps):
 
 
 class TransformControls(ThreeComponentBase[TransformControlsProps]):
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeTransformControl, TransformControlsProps)
 
@@ -1704,10 +1809,9 @@ class ThreeFlexProps(R3FlexPropsBase, ContainerBaseProps):
 
 
 class Flex(ThreeContainerBase[ThreeFlexProps, ThreeComponentType]):
-    def __init__(self,
-                 children: Dict[str, ThreeComponentType]) -> None:
-        super().__init__(UIType.ThreeFlex, ThreeFlexProps,
-                         children)
+
+    def __init__(self, children: Dict[str, ThreeComponentType]) -> None:
+        super().__init__(UIType.ThreeFlex, ThreeFlexProps, children)
 
     @property
     def prop(self):
@@ -1726,8 +1830,8 @@ class ThreeFlexItemBoxProps(R3FlexPropsBase, ContainerBaseProps):
 
 
 class ItemBox(ThreeContainerBase[ThreeFlexItemBoxProps, ThreeComponentType]):
-    def __init__(self,
-                 children: Dict[str, ThreeComponentType]) -> None:
+
+    def __init__(self, children: Dict[str, ThreeComponentType]) -> None:
         super().__init__(UIType.ThreeFlexItemBox, ThreeFlexItemBoxProps,
                          children)
 
@@ -1781,8 +1885,8 @@ class Html(Object3dContainerBase[HtmlProps, MUIComponentType]):
     """we can use MUI components only in Html.
     TODO reject invalid component
     """
-    def __init__(self,
-                 children: Dict[str, MUIComponentType]) -> None:
+
+    def __init__(self, children: Dict[str, MUIComponentType]) -> None:
         super().__init__(UIType.ThreeHtml, HtmlProps, children)
 
     @property
@@ -1800,25 +1904,27 @@ class Html(Object3dContainerBase[HtmlProps, MUIComponentType]):
 class TextProps(Object3dBaseProps):
     value: str = ""
     characters: Union[str, Undefined] = undefined
-    color: Annotated[Union[str, int, Undefined], typemetas.ColorRGB(default="white")] = undefined
-    fontSize: Annotated[Union[NumberType, Undefined], typemetas.RangedFloat(0.1, 20, 0.02, default=1)] = undefined
+    color: Annotated[Union[str, int, Undefined],
+                     typemetas.ColorRGB(default="white")] = undefined
+    fontSize: Annotated[
+        Union[NumberType, Undefined],
+        typemetas.RangedFloat(0.1, 20, 0.02, default=1)] = undefined
     maxWidth: Union[NumberType, Undefined] = undefined
     lineHeight: Union[NumberType, Undefined] = undefined
     letterSpacing: Union[NumberType, Undefined] = undefined
     textAlign: Union[Literal["left", "right", "center", "justify"],
-                      Undefined] = undefined
+                     Undefined] = undefined
     font: Union[str, Undefined] = undefined
     anchorX: Union[NumberType, Literal["left", "center", "right"],
-                    Undefined] = undefined
+                   Undefined] = undefined
     anchorY: Union[NumberType, Literal["top", "top-baseline", "middle",
-                                        "bottom-baseline", "bottom"],
-                    Undefined] = undefined
+                                       "bottom-baseline", "bottom"],
+                   Undefined] = undefined
     clipRect: Union[Tuple[NumberType, NumberType, NumberType, NumberType],
-                     Undefined] = undefined
+                    Undefined] = undefined
     depthOffset: Union[NumberType, Undefined] = undefined
     direction: Union[Literal["auto", "ltr", "rtl"], Undefined] = undefined
-    overflowWrap: Union[Literal["normal", "break-word"],
-                         Undefined] = undefined
+    overflowWrap: Union[Literal["normal", "break-word"], Undefined] = undefined
     whiteSpace: Union[Literal['normal', 'nowrap'], Undefined] = undefined
     outlineWidth: Union[ValueType, Undefined] = undefined
     outlineOffsetX: Union[ValueType, Undefined] = undefined
@@ -1833,6 +1939,7 @@ class TextProps(Object3dBaseProps):
 
 
 class Text(Object3dWithEventBase[TextProps]):
+
     def __init__(self, init: str) -> None:
         super().__init__(UIType.ThreeText, TextProps)
         self.props.value = init
@@ -1865,13 +1972,15 @@ class LineProps(Object3dBaseProps):
     color: Annotated[Union[str, Undefined], typemetas.ColorRGB()] = undefined
     dashed: Union[bool, Undefined] = undefined
     vertexColors: Union[Tuple[NumberType, NumberType, NumberType],
-                         Undefined] = undefined
+                        Undefined] = undefined
     lineWidth: Union[NumberType, Undefined] = undefined
     transparent: Union[bool, Undefined] = undefined
-    opacity: Annotated[Union[NumberType, Undefined], typemetas.CommonObject(default=1.0)] = undefined
+    opacity: Annotated[Union[NumberType, Undefined],
+                       typemetas.CommonObject(default=1.0)] = undefined
 
 
 class Line(Object3dWithEventBase[LineProps]):
+
     def __init__(
         self, points: Union[np.ndarray, List[Tuple[NumberType, NumberType,
                                                    NumberType]]]
@@ -1898,6 +2007,7 @@ class Line(Object3dWithEventBase[LineProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
 
 class GeometryType(enum.Enum):
     Box = 0
@@ -1943,6 +2053,7 @@ class PathShapeProps(ThreeGeometryPropsBase):
 
 
 class Shape:
+
     def __init__(self) -> None:
         self.ops: List[Tuple[int, List[Union[float, bool]]]] = []
 
@@ -1981,6 +2092,7 @@ class Shape:
 
 
 class ShapeGeometry(ThreeGeometryBase[PathShapeProps]):
+
     def __init__(self, shape: Shape) -> None:
         super().__init__(UIType.ThreeShape, PathShapeProps)
         self.props.pathOps = shape.ops
@@ -2022,6 +2134,7 @@ def _rounded_shape_v2(x: float, y: float, w: float, h: float, r: float):
 
 
 class RoundedRectGeometry(ShapeGeometry):
+
     def __init__(self, width: float, height: float, radius: float) -> None:
         shape = _rounded_shape(-width / 2, -height / 2, width, height, radius)
         super().__init__(shape)
@@ -2038,6 +2151,7 @@ class RoundedRectGeometry(ShapeGeometry):
 
 
 class SimpleGeometry(ThreeGeometryBase[SimpleGeometryProps]):
+
     def __init__(self, type: GeometryType, args: List[Union[int, float,
                                                             bool]]) -> None:
         super().__init__(UIType.ThreeSimpleGeometry, SimpleGeometryProps)
@@ -2056,6 +2170,7 @@ class SimpleGeometry(ThreeGeometryBase[SimpleGeometryProps]):
 
 
 class BoxGeometry(SimpleGeometry):
+
     def __init__(self,
                  width: float = 1,
                  height: float = 1,
@@ -2071,6 +2186,7 @@ class BoxGeometry(SimpleGeometry):
 
 
 class CapsuleGeometry(SimpleGeometry):
+
     def __init__(self,
                  radius: float = 1,
                  length: float = 1,
@@ -2083,6 +2199,7 @@ class CapsuleGeometry(SimpleGeometry):
 
 
 class PlaneGeometry(SimpleGeometry):
+
     def __init__(
         self,
         width: float = 1,
@@ -2097,6 +2214,7 @@ class PlaneGeometry(SimpleGeometry):
 
 
 class CircleGeometry(SimpleGeometry):
+
     def __init__(self,
                  radius: float = 1,
                  segments: int = 8,
@@ -2109,6 +2227,7 @@ class CircleGeometry(SimpleGeometry):
 
 
 class ConeGeometry(SimpleGeometry):
+
     def __init__(self,
                  radius: float = 1,
                  height: float = 1,
@@ -2125,6 +2244,7 @@ class ConeGeometry(SimpleGeometry):
 
 
 class CylinderGeometry(SimpleGeometry):
+
     def __init__(self,
                  radius_top: float = 1,
                  radius_bottom: float = 1,
@@ -2142,30 +2262,35 @@ class CylinderGeometry(SimpleGeometry):
 
 
 class DodecahedronGeometry(SimpleGeometry):
+
     def __init__(self, radius: float = 1, detail: int = 0) -> None:
         args: List[Union[int, float, bool]] = [radius, detail]
         super().__init__(GeometryType.Dodecahedron, args)
 
 
 class IcosahedronGeometry(SimpleGeometry):
+
     def __init__(self, radius: float = 1, detail: int = 0) -> None:
         args: List[Union[int, float, bool]] = [radius, detail]
         super().__init__(GeometryType.Icosahedron, args)
 
 
 class OctahedronGeometry(SimpleGeometry):
+
     def __init__(self, radius: float = 1, detail: int = 0) -> None:
         args: List[Union[int, float, bool]] = [radius, detail]
         super().__init__(GeometryType.Octahedron, args)
 
 
 class TetrahedronGeometry(SimpleGeometry):
+
     def __init__(self, radius: float = 1, detail: int = 0) -> None:
         args: List[Union[int, float, bool]] = [radius, detail]
         super().__init__(GeometryType.Tetrahedron, args)
 
 
 class RingGeometry(SimpleGeometry):
+
     def __init__(self,
                  inner_radius: float = 0.5,
                  outer_radius: float = 1,
@@ -2181,6 +2306,7 @@ class RingGeometry(SimpleGeometry):
 
 
 class SphereGeometry(SimpleGeometry):
+
     def __init__(self,
                  radius: float = 1,
                  widthSegments: int = 32,
@@ -2197,6 +2323,7 @@ class SphereGeometry(SimpleGeometry):
 
 
 class TorusGeometry(SimpleGeometry):
+
     def __init__(self,
                  radius: float = 1,
                  tube: float = 0.4,
@@ -2210,6 +2337,7 @@ class TorusGeometry(SimpleGeometry):
 
 
 class TorusKnotGeometry(SimpleGeometry):
+
     def __init__(self,
                  radius: float = 1,
                  tube: float = 0.4,
@@ -2333,16 +2461,18 @@ class ShaderUniformType(enum.IntEnum):
     DataArrayTexture = 13
     Data3DTexture = 14
 
+
 @dataclasses.dataclass
 class ShaderUniform:
     name: str
     type: ShaderUniformType
     value: Any
 
+
 @dataclasses.dataclass(config=PyDanticConfigForNumpy)
 class DataTexture:
-    data: np.ndarray 
-    texType: Union[TextureType, Undefined] = undefined 
+    data: np.ndarray
+    texType: Union[TextureType, Undefined] = undefined
     format: Union[TextureFormat, Undefined] = undefined
     mapping: Union[TextureMappingType, Undefined] = undefined
     wrapS: Union[TextureWrappingMode, Undefined] = undefined
@@ -2350,8 +2480,11 @@ class DataTexture:
 
     @field_validator('data')
     def uniform_data_validator(cls, v: np.ndarray):
-        assert isinstance(v, np.ndarray) and v.dtype == np.uint8 and v.ndim == 3 and v.shape[2] == 4, f"uniform data must be [H, W, 4] RGBA uint8 array"
+        assert isinstance(
+            v, np.ndarray) and v.dtype == np.uint8 and v.ndim == 3 and v.shape[
+                2] == 4, f"uniform data must be [H, W, 4] RGBA uint8 array"
         return v
+
 
 # type TextureValue = {
 #     data: np.NdArray
@@ -2361,6 +2494,7 @@ class DataTexture:
 #     wrapS?: TextureWrappingMode
 #     wrapT?: TextureWrappingMode
 # }
+
 
 @dataclasses.dataclass
 class MeshShaderMaterialProps(ThreeMaterialPropsBase):
@@ -2372,19 +2506,32 @@ class MeshShaderMaterialProps(ThreeMaterialPropsBase):
     @staticmethod
     def _validator_single_uniform(u: ShaderUniform, value: Any):
         uv = value
-        assert u.name.isidentifier(), f"uniform name {u.name} must be identifier"
+        assert u.name.isidentifier(
+        ), f"uniform name {u.name} must be identifier"
         if u.type == ShaderUniformType.Matrix4:
-            assert isinstance(uv, np.ndarray) and uv.dtype == np.float32 and uv.shape == (4, 4)
+            assert isinstance(
+                uv,
+                np.ndarray) and uv.dtype == np.float32 and uv.shape == (4, 4)
         elif u.type == ShaderUniformType.Matrix3:
-            assert isinstance(uv, np.ndarray) and uv.dtype == np.float32 and uv.shape == (3, 3)
+            assert isinstance(
+                uv,
+                np.ndarray) and uv.dtype == np.float32 and uv.shape == (3, 3)
         elif u.type == ShaderUniformType.Quaternion:
-            assert isinstance(uv, np.ndarray) and uv.dtype == np.float32 and uv.shape == (4, )
+            assert isinstance(
+                uv,
+                np.ndarray) and uv.dtype == np.float32 and uv.shape == (4, )
         elif u.type == ShaderUniformType.Vector4:
-            assert isinstance(uv, np.ndarray) and uv.dtype == np.float32 and uv.shape == (4, )
+            assert isinstance(
+                uv,
+                np.ndarray) and uv.dtype == np.float32 and uv.shape == (4, )
         elif u.type == ShaderUniformType.Vector3:
-            assert isinstance(uv, np.ndarray) and uv.dtype == np.float32 and uv.shape == (3, )
+            assert isinstance(
+                uv,
+                np.ndarray) and uv.dtype == np.float32 and uv.shape == (3, )
         elif u.type == ShaderUniformType.Vector2:
-            assert isinstance(uv, np.ndarray) and uv.dtype == np.float32 and uv.shape == (2, )
+            assert isinstance(
+                uv,
+                np.ndarray) and uv.dtype == np.float32 and uv.shape == (2, )
         elif u.type == ShaderUniformType.Color:
             assert isinstance(uv, (str, int))
         elif u.type == ShaderUniformType.Number:
@@ -2405,9 +2552,12 @@ class MeshShaderMaterialProps(ThreeMaterialPropsBase):
     @field_validator('timeUniformKey')
     def time_uniform_key_validator(cls, v):
         if isinstance(v, Undefined):
-            return v 
-        assert isinstance(v, str) and v.isidentifier(), f"timeUniformKey {v} must be identifier"
+            return v
+        assert isinstance(
+            v,
+            str) and v.isidentifier(), f"timeUniformKey {v} must be identifier"
         return v
+
 
 # class MeshBasicMaterialV1(ThreeMaterialBase[MeshBasicMaterialProps]):
 #     def __init__(self) -> None:
@@ -2423,7 +2573,6 @@ class MeshShaderMaterialProps(ThreeMaterialPropsBase):
 #     def update_event(self):
 #         propcls = self.propcls
 #         return self._update_props_base(propcls)
-
 
 # class MeshStandardMaterialV1(ThreeMaterialBase[MeshStandardMaterialProps]):
 #     def __init__(self) -> None:
@@ -2442,6 +2591,7 @@ class MeshShaderMaterialProps(ThreeMaterialPropsBase):
 
 
 class MeshBasicMaterial(ThreeComponentBase[MeshBasicMaterialProps]):
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeMeshBasicMaterial, MeshBasicMaterialProps)
 
@@ -2457,6 +2607,7 @@ class MeshBasicMaterial(ThreeComponentBase[MeshBasicMaterialProps]):
 
 
 class MeshStandardMaterial(ThreeMaterialBase[MeshStandardMaterialProps]):
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeMeshStandardMaterial,
                          MeshStandardMaterialProps)
@@ -2473,6 +2624,7 @@ class MeshStandardMaterial(ThreeMaterialBase[MeshStandardMaterialProps]):
 
 
 class MeshLambertMaterial(ThreeMaterialBase[MeshLambertMaterialProps]):
+
     def __init__(self, ) -> None:
         super().__init__(UIType.ThreeMeshLambertMaterial,
                          MeshLambertMaterialProps)
@@ -2489,6 +2641,7 @@ class MeshLambertMaterial(ThreeMaterialBase[MeshLambertMaterialProps]):
 
 
 class MeshMatcapMaterial(ThreeMaterialBase[MeshMatcapMaterialProps]):
+
     def __init__(self, ) -> None:
         super().__init__(UIType.ThreeMeshMatcapMaterial,
                          MeshMatcapMaterialProps)
@@ -2505,6 +2658,7 @@ class MeshMatcapMaterial(ThreeMaterialBase[MeshMatcapMaterialProps]):
 
 
 class MeshNormalMaterial(ThreeMaterialBase[MeshNormalMaterialProps]):
+
     def __init__(self, ) -> None:
         super().__init__(UIType.ThreeMeshNormalMaterial,
                          MeshNormalMaterialProps)
@@ -2521,6 +2675,7 @@ class MeshNormalMaterial(ThreeMaterialBase[MeshNormalMaterialProps]):
 
 
 class MeshDepthMaterial(ThreeMaterialBase[MeshDepthMaterialProps]):
+
     def __init__(self, ) -> None:
         super().__init__(UIType.ThreeMeshDepthMaterial, MeshDepthMaterialProps)
 
@@ -2536,6 +2691,7 @@ class MeshDepthMaterial(ThreeMaterialBase[MeshDepthMaterialProps]):
 
 
 class MeshPhongMaterial(ThreeMaterialBase[MeshPhongMaterialProps]):
+
     def __init__(self, ) -> None:
         super().__init__(UIType.ThreeMeshPhongMaterial, MeshPhongMaterialProps)
 
@@ -2551,6 +2707,7 @@ class MeshPhongMaterial(ThreeMaterialBase[MeshPhongMaterialProps]):
 
 
 class MeshPhysicalMaterial(ThreeMaterialBase[MeshPhysicalMaterialProps]):
+
     def __init__(self, ) -> None:
         super().__init__(UIType.ThreeMeshPhysicalMaterial,
                          MeshPhysicalMaterialProps)
@@ -2567,6 +2724,7 @@ class MeshPhysicalMaterial(ThreeMaterialBase[MeshPhysicalMaterialProps]):
 
 
 class MeshToonMaterial(ThreeMaterialBase[MeshToonMaterialProps]):
+
     def __init__(self, ) -> None:
         super().__init__(UIType.ThreeMeshToonMaterial, MeshToonMaterialProps)
 
@@ -2583,6 +2741,7 @@ class MeshToonMaterial(ThreeMaterialBase[MeshToonMaterialProps]):
 
 class MeshTransmissionMaterial(ThreeMaterialBase[MeshTransmissionMaterialProps]
                                ):
+
     def __init__(self, ) -> None:
         super().__init__(UIType.ThreeMeshTransmissionMaterial,
                          MeshTransmissionMaterialProps)
@@ -2599,6 +2758,7 @@ class MeshTransmissionMaterial(ThreeMaterialBase[MeshTransmissionMaterialProps]
 
 
 class MeshDiscardMaterial(ThreeMaterialBase[MeshDiscardMaterialProps]):
+
     def __init__(self, ) -> None:
         super().__init__(UIType.ThreeMeshDiscardMaterial,
                          MeshDiscardMaterialProps)
@@ -2613,8 +2773,10 @@ class MeshDiscardMaterial(ThreeMaterialBase[MeshDiscardMaterialProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
 class _ShaderControlType(enum.IntEnum):
     UpdateUniform = 0
+
 
 class MeshShaderMaterial(ThreeMaterialBase[MeshShaderMaterialProps]):
     """don't forget to add some stmt in fragment shader:
@@ -2623,6 +2785,7 @@ class MeshShaderMaterial(ThreeMaterialBase[MeshShaderMaterialProps]):
 
     #include <colorspace_fragment>
     """
+
     def __init__(self, ) -> None:
         super().__init__(UIType.ThreeMeshShaderMaterial,
                          MeshShaderMaterialProps)
@@ -2657,15 +2820,18 @@ class MeshShaderMaterial(ThreeMaterialBase[MeshShaderMaterialProps]):
         })
 
     async def update_uniform_values(self, uniform_values: Dict[str, Any]):
-        await self.send_and_wait(self.update_uniform_values_event(uniform_values))
+        await self.send_and_wait(
+            self.update_uniform_values_event(uniform_values))
+
 
 MeshChildType: TypeAlias = Union[ThreeMaterialBase, ThreeMaterialPropsBase,
                                  ThreeGeometryPropsBase, ThreeGeometryBase]
 
-# @dataclasses.dataclass 
+# @dataclasses.dataclass
 # class MeshUserData:
 #     enableSelect: Union[bool, Undefined] = undefined
 #     data: Union[Undefined, Any] = undefined
+
 
 @dataclasses.dataclass
 class PrimitiveMeshProps(Object3dContainerBaseProps, InteractableProps):
@@ -2675,6 +2841,7 @@ class PrimitiveMeshProps(Object3dContainerBaseProps, InteractableProps):
     # event with userdata of this mesh.
     userData: Union[Undefined, Any] = undefined
 
+
 @dataclasses.dataclass
 class MeshProps(PrimitiveMeshProps):
     hoverColor: Union[str, Undefined] = undefined
@@ -2682,12 +2849,14 @@ class MeshProps(PrimitiveMeshProps):
     toggleMode: Union[bool, Undefined] = undefined
     toggled: Union[bool, Undefined] = undefined
 
-@dataclasses.dataclass 
+
+@dataclasses.dataclass
 class MeshChangeData:
     toggled: Union[bool, Undefined] = undefined
     matrix: Union[Undefined, List[float]] = undefined
     position: Union[Undefined, Vector3Type] = undefined
     rotation: Union[Undefined, Vector3Type] = undefined
+
 
 class Mesh(O3dContainerWithEventBase[PrimitiveMeshProps, ThreeComponentType]):
     """standard three mesh.
@@ -2702,13 +2871,16 @@ class Mesh(O3dContainerWithEventBase[PrimitiveMeshProps, ThreeComponentType]):
 
     see https://docs.pmnd.rs/react-three-fiber/api/objects#piercing-into-nested-properties
     """
+
     def __init__(self, children: ThreeLayoutType) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        
-        super().__init__(UIType.ThreePrimitiveMesh, PrimitiveMeshProps,
-                         children, allowed_events=[
-                            FrontendEventType.Change.value,
+
+        super().__init__(UIType.ThreePrimitiveMesh,
+                         PrimitiveMeshProps,
+                         children,
+                         allowed_events=[
+                             FrontendEventType.Change.value,
                          ])
         self.event_change = self._create_event_slot(FrontendEventType.Change)
 
@@ -2717,7 +2889,7 @@ class Mesh(O3dContainerWithEventBase[PrimitiveMeshProps, ThreeComponentType]):
                                     ev,
                                     sync_state_after_change=False,
                                     is_sync=is_sync)
-        
+
     def state_change_callback(
             self,
             data: dict,
@@ -2741,10 +2913,9 @@ class Mesh(O3dContainerWithEventBase[PrimitiveMeshProps, ThreeComponentType]):
         return self._update_props_base(propcls)
 
 
-
 class MeshV1(O3dContainerWithEventBase[MeshProps, ThreeComponentType]):
-    def __init__(self,
-                 geometry: ThreeGeometryBase,
+
+    def __init__(self, geometry: ThreeGeometryBase,
                  material: ThreeMaterialBase) -> None:
         self.geometry = geometry
         assert isinstance(geometry, ThreeGeometryBase)
@@ -2793,8 +2964,7 @@ class HudProps(ThreeFlexProps):
 
 class Hud(ThreeContainerBase[HudProps, ThreeComponentType]):
     # TODO can/should group accept event?
-    def __init__(self,
-                 children: Dict[str, ThreeComponentType]) -> None:
+    def __init__(self, children: Dict[str, ThreeComponentType]) -> None:
         super().__init__(UIType.ThreeHud, HudProps, children)
 
     @property
@@ -2858,6 +3028,7 @@ class Hud(ThreeContainerBase[HudProps, ThreeComponentType]):
 
 
 class Button(Group):
+
     def __init__(self,
                  name: str,
                  width: float,
@@ -2875,13 +3046,9 @@ class Button(Group):
         ])
         # hoverColor="#222222", clickColor="#009A63"
         mesh.prop(enableHover=True,
-                  hoverOverrideProps={
-                        "material-color": "#222222"
-                  },
+                  hoverOverrideProps={"material-color": "#222222"},
                   enableClick=True,
-                  clickOverrideProps={
-                        "material-color": "#009A63"
-                  })
+                  clickOverrideProps={"material-color": "#009A63"})
         self.mesh = mesh
         text = Text(name)
         text.prop(fontSize=font_size,
@@ -2979,6 +3146,7 @@ class PivotControlsProps(ContainerBaseProps, PivotControlsCommonProps):
 
 class PivotControls(ThreeContainerBase[PivotControlsProps,
                                        ThreeComponentType]):
+
     def __init__(self,
                  children: Optional[Union[Dict[str, ThreeComponentType],
                                           List[ThreeComponentType]]] = None,
@@ -3018,7 +3186,8 @@ class PivotControls(ThreeContainerBase[PivotControlsProps,
 
 @dataclasses.dataclass
 class PointLightProps(Object3dBaseProps):
-    color: Annotated[Union[int, str, Undefined], typemetas.ColorRGB()] = undefined
+    color: Annotated[Union[int, str, Undefined],
+                     typemetas.ColorRGB()] = undefined
     intensity: Union[NumberType, Undefined] = undefined
     distance: Union[NumberType, Undefined] = undefined
     decay: Union[NumberType, Undefined] = undefined
@@ -3028,9 +3197,11 @@ class PointLightProps(Object3dBaseProps):
 
 
 class PointLight(Object3dBase[PointLightProps]):
+
     def __init__(self,
                  position: Union[Vector3Type, Undefined] = undefined,
-                 color: Annotated[Union[int, str, Undefined], typemetas.ColorRGB()] = undefined,
+                 color: Annotated[Union[int, str, Undefined],
+                                  typemetas.ColorRGB()] = undefined,
                  intensity: Union[NumberType, Undefined] = undefined) -> None:
         super().__init__(UIType.ThreePointLight, PointLightProps)
         self.props.color = color
@@ -3050,13 +3221,16 @@ class PointLight(Object3dBase[PointLightProps]):
 
 @dataclasses.dataclass
 class AmbientLightProps(Object3dBaseProps):
-    color: Annotated[Union[int, str, Undefined], typemetas.ColorRGB()] = undefined
+    color: Annotated[Union[int, str, Undefined],
+                     typemetas.ColorRGB()] = undefined
     intensity: Union[NumberType, Undefined] = undefined
 
 
 class AmbientLight(Object3dBase[AmbientLightProps]):
+
     def __init__(self,
-                 color: Annotated[Union[int, str, Undefined], typemetas.ColorRGB()] = undefined,
+                 color: Annotated[Union[int, str, Undefined],
+                                  typemetas.ColorRGB()] = undefined,
                  intensity: Union[NumberType, Undefined] = undefined) -> None:
         super().__init__(UIType.ThreeAmbientLight, AmbientLightProps)
         self.props.color = color
@@ -3075,15 +3249,18 @@ class AmbientLight(Object3dBase[AmbientLightProps]):
 
 @dataclasses.dataclass
 class HemisphereLightProps(Object3dBaseProps):
-    color: Annotated[Union[int, str, Undefined], typemetas.ColorRGB()] = undefined
+    color: Annotated[Union[int, str, Undefined],
+                     typemetas.ColorRGB()] = undefined
     intensity: Union[NumberType, Undefined] = undefined
     groundColor: Union[NumberType, str, Undefined] = undefined
 
 
 class HemisphereLight(Object3dBase[HemisphereLightProps]):
+
     def __init__(
             self,
-            color: Annotated[Union[int, str, Undefined], typemetas.ColorRGB()] = undefined,
+            color: Annotated[Union[int, str, Undefined],
+                             typemetas.ColorRGB()] = undefined,
             intensity: Union[NumberType, Undefined] = undefined,
             ground_color: Union[NumberType, str,
                                 Undefined] = undefined) -> None:
@@ -3105,7 +3282,8 @@ class HemisphereLight(Object3dBase[HemisphereLightProps]):
 
 @dataclasses.dataclass
 class DirectionalLightProps(Object3dBaseProps):
-    color: Annotated[Union[int, str, Undefined], typemetas.ColorRGB()] = undefined
+    color: Annotated[Union[int, str, Undefined],
+                     typemetas.ColorRGB()] = undefined
     intensity: Union[NumberType, Undefined] = undefined
     castShadow: Union[bool, Undefined] = undefined
     targetPosition: Union[Vector3Type, Undefined] = undefined
@@ -3114,10 +3292,12 @@ class DirectionalLightProps(Object3dBaseProps):
 
 
 class DirectionalLight(Object3dBase[DirectionalLightProps]):
+
     def __init__(
             self,
             position: Union[Vector3Type, Undefined] = undefined,
-            color: Annotated[Union[int, str, Undefined], typemetas.ColorRGB()] = undefined,
+            color: Annotated[Union[int, str, Undefined],
+                             typemetas.ColorRGB()] = undefined,
             intensity: Union[NumberType, Undefined] = undefined,
             target_position: Union[Vector3Type,
                                    Undefined] = undefined) -> None:
@@ -3140,7 +3320,8 @@ class DirectionalLight(Object3dBase[DirectionalLightProps]):
 
 @dataclasses.dataclass
 class SpotLightProps(Object3dBaseProps):
-    color: Annotated[Union[int, str, Undefined], typemetas.ColorRGB()] = undefined
+    color: Annotated[Union[int, str, Undefined],
+                     typemetas.ColorRGB()] = undefined
     intensity: Union[NumberType, Undefined] = undefined
     distance: Union[NumberType, Undefined] = undefined
     decay: Union[NumberType, Undefined] = undefined
@@ -3153,14 +3334,16 @@ class SpotLightProps(Object3dBaseProps):
 
 
 class SpotLight(Object3dBase[SpotLightProps]):
+
     def __init__(
             self,
             position: Union[Vector3Type, Undefined] = undefined,
-            color: Annotated[Union[int, str, Undefined], typemetas.ColorRGB()] = undefined,
+            color: Annotated[Union[int, str, Undefined],
+                             typemetas.ColorRGB()] = undefined,
             intensity: Union[NumberType, Undefined] = undefined,
             target_position: Union[Vector3Type,
                                    Undefined] = undefined) -> None:
-        super().__init__(UIType.ThreeDirectionalLight, SpotLightProps)
+        super().__init__(UIType.ThreeSpotLight, SpotLightProps)
         self.props.color = color
         self.props.intensity = intensity
         self.props.targetPosition = target_position
@@ -3199,6 +3382,7 @@ class BufferMeshUpdate(DataClassWithUndefined):
 
 class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
                                            ThreeComponentType]):
+
     def __init__(
             self,
             initial_buffers: Dict[str, np.ndarray],
@@ -3271,10 +3455,11 @@ class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
             assert k in self.initial_buffers, "key not found"
             if v.data.dtype == np.float16 or v.data == np.float64:
                 v.data = v.data.astype(np.float32)
-            offset = v.offset 
+            offset = v.offset
             if isinstance(offset, Undefined):
                 offset = 0
-            assert offset + v.data.shape[0] <= self.props.limit, "update size exceeds limit"
+            assert offset + v.data.shape[
+                0] <= self.props.limit, "update size exceeds limit"
             updates_dict[k] = v.get_dict()
         res = {
             "type": BufferMeshControlType.UpdateBuffers.value,
@@ -3298,6 +3483,7 @@ class VoxelMeshProps(Object3dContainerBaseProps):
 
 
 class VoxelMesh(O3dContainerWithEventBase[VoxelMeshProps, ThreeComponentType]):
+
     def __init__(self,
                  centers: np.ndarray,
                  size: float,
@@ -3341,6 +3527,7 @@ class InstancedMeshProps(Object3dContainerBaseProps):
 
 class InstancedMesh(O3dContainerWithEventBase[InstancedMeshProps,
                                               ThreeComponentType]):
+
     def __init__(self,
                  transforms: np.ndarray,
                  limit: int,
@@ -3386,6 +3573,7 @@ class SkyProps(ThreeBasicProps):
 
 
 class Sky(ThreeComponentBase[SkyProps]):
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeSky, SkyProps)
 
@@ -3421,6 +3609,7 @@ class EnvironmentProps(ContainerBaseProps):
 
 
 class Environment(ThreeContainerBase[EnvironmentProps, ThreeComponentType]):
+
     def __init__(self, children: Optional[ThreeLayoutType] = None) -> None:
         if children is None:
             children = {}
@@ -3440,24 +3629,31 @@ class Environment(ThreeContainerBase[EnvironmentProps, ThreeComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
 class URILoaderType(enum.IntEnum):
     GLTF = 0
     FBX = 1
     RGBE = 2
     TEXTURE = 3
 
+
 @dataclasses.dataclass
 class LoaderContextProps(ContainerBaseProps):
     uri: str = ""
     loaderType: URILoaderType = URILoaderType.GLTF
-    dataKey: Union[str, Undefined] = undefined # default: URILoader
+    dataKey: Union[str, Undefined] = undefined  # default: URILoader
 
 
-class URILoaderContext(ThreeContainerBase[LoaderContextProps, ThreeComponentType]):
+class URILoaderContext(ThreeContainerBase[LoaderContextProps,
+                                          ThreeComponentType]):
     """create a context with template data.
     default dataKey: "" (empty), this means the data itself is passed to children
     """
-    def __init__(self, type: URILoaderType, uri: str, children: Optional[ThreeLayoutType] = None) -> None:
+
+    def __init__(self,
+                 type: URILoaderType,
+                 uri: str,
+                 children: Optional[ThreeLayoutType] = None) -> None:
         if children is None:
             children = {}
         if isinstance(children, list):
@@ -3479,7 +3675,6 @@ class URILoaderContext(ThreeContainerBase[LoaderContextProps, ThreeComponentType
         return self._update_props_base(propcls)
 
 
-    
 @dataclasses.dataclass
 class CubeCameraProps(Object3dContainerBaseProps):
     frames: Union[int, Undefined] = undefined
@@ -3493,15 +3688,15 @@ class CubeCamera(Object3dContainerBase[CubeCameraProps, ThreeComponentType]):
     """create a context with template data. 
     default dataKey: CubeCameraTexture
     """
+
     def __init__(self, children: ThreeLayoutType) -> None:
         if children is None:
             children = {}
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
         assert children, "CubeCamera must have children"
-        super().__init__(UIType.ThreeCubeCamera, CubeCameraProps,
-                         {**children})
-    
+        super().__init__(UIType.ThreeCubeCamera, CubeCameraProps, {**children})
+
     @property
     def prop(self):
         propcls = self.propcls
@@ -3512,9 +3707,11 @@ class CubeCamera(Object3dContainerBase[CubeCameraProps, ThreeComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
 @dataclasses.dataclass
 class ContactShadowsProps(Object3dBaseProps):
-    opacity: Annotated[Union[NumberType, Undefined], typemetas.CommonObject(default=1.0)] = undefined
+    opacity: Annotated[Union[NumberType, Undefined],
+                       typemetas.CommonObject(default=1.0)] = undefined
     width: Union[NumberType, Undefined] = undefined
     height: Union[NumberType, Undefined] = undefined
     blur: Union[NumberType, Undefined] = undefined
@@ -3523,12 +3720,15 @@ class ContactShadowsProps(Object3dBaseProps):
     smooth: Union[bool, Undefined] = undefined
     resolution: Union[NumberType, Undefined] = undefined
     frames: Union[int, Undefined] = undefined
-    scale: Union[NumberType, Tuple[NumberType, NumberType], Undefined] = undefined
-    color: Annotated[Union[int, str, Undefined], typemetas.ColorRGB()] = undefined
+    scale: Union[NumberType, Tuple[NumberType, NumberType],
+                 Undefined] = undefined
+    color: Annotated[Union[int, str, Undefined],
+                     typemetas.ColorRGB()] = undefined
     depthWrite: Union[bool, Undefined] = undefined
 
 
 class ContactShadows(ThreeComponentBase[ContactShadowsProps]):
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeContactShadows, ContactShadowsProps)
 
@@ -3542,17 +3742,23 @@ class ContactShadows(ThreeComponentBase[ContactShadowsProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
 @dataclasses.dataclass
 class GizmoHelperShadowsProps(ThreeBasicProps):
-    alignment: Union[Literal["top-left", "top-right", "bottom-right", "bottom-left", "bottom-center", "center-right", "center-left", "center-center", "top-center"], Undefined] = undefined
+    alignment: Union[Literal["top-left", "top-right", "bottom-right",
+                             "bottom-left", "bottom-center", "center-right",
+                             "center-left", "center-center", "top-center"],
+                     Undefined] = undefined
     margin: Union[Tuple[NumberType, NumberType], Undefined] = undefined
     renderPriority: Union[int, Undefined] = undefined
     autoClear: Union[bool, Undefined] = undefined
     axisColors: Union[Tuple[str, str, str], Undefined] = undefined
-    axisScale: Union[Tuple[NumberType, NumberType, NumberType], Undefined] = undefined
+    axisScale: Union[Tuple[NumberType, NumberType, NumberType],
+                     Undefined] = undefined
     labels: Union[Tuple[str, str, str], Undefined] = undefined
     axisHeadScale: Union[NumberType, Undefined] = undefined
-    labelColor: Annotated[Union[str, Undefined], typemetas.ColorRGB()] = undefined
+    labelColor: Annotated[Union[str, Undefined],
+                          typemetas.ColorRGB()] = undefined
     hideNegativeAxes: Union[bool, Undefined] = undefined
     hideAxisHeads: Union[bool, Undefined] = undefined
     disabled: Union[bool, Undefined] = undefined
@@ -3560,6 +3766,7 @@ class GizmoHelperShadowsProps(ThreeBasicProps):
 
 
 class GizmoHelper(ThreeComponentBase[GizmoHelperShadowsProps]):
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeGizmoHelper, GizmoHelperShadowsProps)
 
@@ -3579,19 +3786,24 @@ class SelectionContextProps(ContainerBaseProps):
     multiple: Union[bool, Undefined] = undefined
     box: Union[bool, Undefined] = undefined
     border: Union[str, Undefined] = undefined
-    backgroundColor: Union[str, Undefined] = undefined 
+    backgroundColor: Union[str, Undefined] = undefined
 
 
-class SelectionContext(ThreeContainerBase[SelectionContextProps, ThreeComponentType]):
-    def __init__(self, children: Optional[ThreeLayoutType] = None, callback: Optional[Callable[[Any],
-                                          _CORO_NONE]] = None) -> None:
+class SelectionContext(ThreeContainerBase[SelectionContextProps,
+                                          ThreeComponentType]):
+
+    def __init__(
+            self,
+            children: Optional[ThreeLayoutType] = None,
+            callback: Optional[Callable[[Any], _CORO_NONE]] = None) -> None:
         if children is None:
             children = {}
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
 
-        super().__init__(UIType.ThreeSelectionContext, SelectionContextProps,
-                         {**children}, allowed_events=[FrontendEventType.Change.value])
+        super().__init__(UIType.ThreeSelectionContext,
+                         SelectionContextProps, {**children},
+                         allowed_events=[FrontendEventType.Change.value])
         self.event_change = self._create_event_slot(FrontendEventType.Change)
         if callback is not None:
             self.event_change.on(callback)
@@ -3651,6 +3863,7 @@ class BlendFunction(enum.IntEnum):
     SUBTRACT = 33
     VIVID_LIGHT = 34
 
+
 class ToneMapppingMode(enum.IntEnum):
     REINHARD = 0
     REINHARD2 = 1
@@ -3658,6 +3871,7 @@ class ToneMapppingMode(enum.IntEnum):
     OPTIMIZED_CINEON = 3
     ACES_FILMIC = 4
     UNCHARTED2 = 5
+
 
 @dataclasses.dataclass
 class EffectComposerProps(ContainerBaseProps):
@@ -3670,18 +3884,21 @@ class EffectComposerProps(ContainerBaseProps):
     resolutionScale: Union[NumberType, Undefined] = undefined
     renderPriority: Union[int, Undefined] = undefined
 
+
 class EffectComposer(ThreeContainerBase[EffectComposerProps, ThreeEffectBase]):
     """when you use postprocessing, you need to set flat=False in canvas (disable default tonemapping) and 
     use ToneMapping effect in postprocessing.
     high-precision frame buffer is enabled by default.
     """
+
     def __init__(self, children: ThreeEffectType) -> None:
         if children is None:
             children = {}
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
         for v in children.values():
-            assert isinstance(v, ThreeEffectBase), "child of effect composer must be effect."
+            assert isinstance(
+                v, ThreeEffectBase), "child of effect composer must be effect."
         super().__init__(UIType.ThreeEffectComposer, EffectComposerProps,
                          {**children})
 
@@ -3709,7 +3926,9 @@ class ToneMappingProps(ThreeBasicProps):
     averageLuminance: Union[NumberType, Undefined] = undefined
     adaptationRate: Union[NumberType, Undefined] = undefined
 
+
 class ToneMapping(ThreeEffectBase[ToneMappingProps]):
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeEffectToneMapping, ToneMappingProps)
 
@@ -3722,6 +3941,7 @@ class ToneMapping(ThreeEffectBase[ToneMappingProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
 
 @dataclasses.dataclass
 class OutlineProps(ThreeBasicProps):
@@ -3737,7 +3957,9 @@ class OutlineProps(ThreeBasicProps):
     xRay: Union[bool, Undefined] = undefined
     blendFunction: Union[BlendFunction, Undefined] = undefined
 
+
 class Outline(ThreeEffectBase[OutlineProps]):
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeEffectOutline, OutlineProps)
 
@@ -3751,6 +3973,7 @@ class Outline(ThreeEffectBase[OutlineProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
 @dataclasses.dataclass
 class BloomProps(ThreeBasicProps):
     luminanceThreshold: Union[NumberType, Undefined] = undefined
@@ -3762,7 +3985,9 @@ class BloomProps(ThreeBasicProps):
     kernelSize: Union[NumberType, Undefined] = undefined
     mipMap: Union[bool, Undefined] = undefined
 
+
 class Bloom(ThreeEffectBase[BloomProps]):
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeEffectBloom, BloomProps)
 
@@ -3776,6 +4001,7 @@ class Bloom(ThreeEffectBase[BloomProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
 @dataclasses.dataclass
 class DepthOfFieldProps(ThreeBasicProps):
     focusDistance: Union[NumberType, Undefined] = undefined
@@ -3785,7 +4011,9 @@ class DepthOfFieldProps(ThreeBasicProps):
     width: Union[NumberType, Undefined] = undefined
     blendFunction: Union[BlendFunction, Undefined] = undefined
 
+
 class DepthOfField(ThreeEffectBase[DepthOfFieldProps]):
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeEffectDepthOfField, DepthOfFieldProps)
 
@@ -3799,6 +4027,7 @@ class DepthOfField(ThreeEffectBase[DepthOfFieldProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
 @dataclasses.dataclass
 class OutlinesProps(ThreeBasicProps):
     color: Annotated[Union[str, Undefined], typemetas.ColorRGB()] = undefined
@@ -3809,6 +4038,7 @@ class OutlinesProps(ThreeBasicProps):
 
 
 class Outlines(ThreeComponentBase[OutlinesProps]):
+
     def __init__(self) -> None:
         super().__init__(UIType.ThreeOutlines, OutlinesProps)
 
@@ -3821,4 +4051,3 @@ class Outlines(ThreeComponentBase[OutlinesProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
-

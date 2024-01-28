@@ -14,8 +14,10 @@ from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.flow import marker
 from tensorpc.flow.flowapp.appcore import find_component_by_uid_with_type_check
 from tensorpc.flow.flowapp.components import mui, three
+from tensorpc.flow.flowapp.components.plus.arraycommon import can_cast_to_np_array, try_cast_to_np_array
+from tensorpc.flow.flowapp.components.plus.arraygrid import NumpyArrayGridTable
 from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
-from tensorpc.flow.flowapp.components.plus.core import ALL_OBJECT_LAYOUT_HANDLERS
+from tensorpc.flow.flowapp.components.plus.core import ALL_OBJECT_LAYOUT_HANDLERS, ObjectGridItemConfig
 from tensorpc.flow.flowapp.components.plus.grid_preview_layout import GridPreviewLayout
 from tensorpc.flow.flowapp.components.plus.objinspect.tree import BasicObjectTree, SelectSingleEvent
 from .core import UNKNOWN_KEY_SPLIT, UNKNOWN_VIS_KEY, UserTreeItemCard, VContext, get_canvas_item_cfg, get_or_create_canvas_item_cfg, _VapiObjects
@@ -250,7 +252,7 @@ class ComplexCanvas(mui.FlexBox):
         self._init_enable_grid = init_enable_grid
         self.camera.prop(layers=1 | (1 << 31))
 
-        self.ctrl = three.CameraControl().prop(makeDefault=True)
+        self.ctrl = three.CameraControl().prop(makeDefault=True, mouseButtons=three.MouseButtonConfig(right="none", wheel="rotate"))
         self.background_img = mui.Image()
         self._infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self._axis_helper = three.AxesHelper(20)
@@ -293,7 +295,7 @@ class ComplexCanvas(mui.FlexBox):
                            height="100%",
                            width="100%",
                            overflow="auto")
-
+        self.array_table = NumpyArrayGridTable()
         self.flatted_tree_nodes: Dict[Tuple[str, ...], Any] = {}
         if init_tree_root is not None and init_tree_child_accessor is not None:
             flatted_tree_nodes = _extrace_all_tree_item_via_accessor(
@@ -389,128 +391,6 @@ class ComplexCanvas(mui.FlexBox):
             border="4px solid transparent",
             sxOverDrop={"border": "4px solid green"},
         )
-
-    async def set_new_tree_root(self, tree_root: T,
-                                tree_child_accessor: Callable[[T], Dict[str,
-                                                                        Any]]):
-        flatted_tree_nodes = _extrace_all_tree_item_via_accessor(
-            tree_root, tree_child_accessor, "root")
-        self.flatted_tree_nodes = flatted_tree_nodes
-        groups, self._user_obj_tree_item_to_meta = self._get_tree_cards_and_groups(
-            flatted_tree_nodes)
-        await self._user_obj_tree_group.set_new_layout({**groups})
-        self.gv_tree_layout.set_tree_root(tree_root)
-        await self.gv_tree_layout.set_new_items({
-            ".".join(k): v
-            for k, v in flatted_tree_nodes.items()
-        })
-
-    async def set_new_grid_items(self, items: Dict[str, Any], is_local: bool = False):
-        if is_local:
-            await self.gv_locals_layout.set_new_items(items)
-        else:
-            await self.gv_custom_layout.set_new_items(items)
-
-    async def update_grid_items(self, items: Dict[str, Any], is_local: bool = False):
-        if is_local:
-            await self.gv_locals_layout.update_items(items)
-        else:
-            await self.gv_custom_layout.update_items(items)
-
-    async def delete_grid_items(self, items: List[str], is_local: bool = False):
-        if is_local:
-            await self.gv_locals_layout.delete_items(items)
-        else:
-            await self.gv_custom_layout.delete_items(items)
-
-    async def clear_grid(self, is_local: bool = False):
-        if is_local:
-            await self.gv_locals_layout.clear_items()
-        else:
-            await self.gv_custom_layout.clear_items()
-
-    def _tree_collect_in_vctx(self):
-        for k1, meta in self._user_obj_tree_item_to_meta.items():
-            group_childs = {}
-            for k2, v in meta.vctx._name_to_group.items():
-                cfg = get_canvas_item_cfg(v)
-                # print(k, cfg )
-                if cfg is not None:
-                    proxy = cfg.proxy
-                    if proxy is not None:
-                        assert isinstance(proxy, GroupProxy)
-                        for c in proxy.childs.values():
-                            c_cfg = get_canvas_item_cfg(c)
-                            assert c_cfg is not None
-                            c_proxy = c_cfg.proxy
-                            assert c_proxy is not None
-                            # TODO
-                            if isinstance(c, _VapiObjects):
-                                c.prepare_vapi_props()
-                        if v is not meta.vctx.root:
-                            assert not v.is_mounted(), f"{type(v)}"
-                            v.init_add_layout(proxy.childs)
-                        else:
-                            group_childs.update(proxy.childs)
-                        proxy.childs.clear()
-            for container, (group, name) in meta.vctx._group_assigns.items():
-                assert container is meta.vctx.root
-                group_childs[name] = group
-            meta.vctx.clear()
-            meta.childs = group_childs
-
-    async def _show_visible_groups_of_objtree(self):
-        app_ev = mui.AppEvent("", {})
-        all_attached, all_removed = [], []
-        for k1, meta in self._user_obj_tree_item_to_meta.items():
-            group = meta.vctx.root
-            new_ev, attached, removed = group.set_new_layout_locally(
-                {**meta.childs})
-            all_attached.extend(attached)
-            all_removed.extend(removed)
-            mdprints = meta.md_prints.copy()
-            meta.md_prints.clear()
-            app_ev += new_ev
-            if mdprints:
-                app_ev += meta.card.print_blocks_event(mdprints)
-        await self.send_and_wait(app_ev)
-        for deleted in all_removed:
-            await deleted._cancel_task()
-        await self._run_special_methods(all_attached, all_removed)
-
-    async def _gv_cards_callback(self, checked: bool, group: three.Group):
-        if group.is_mounted():
-            # TODO sync tree visible state
-            await group.send_and_wait(group.update_event(visible=checked))
-
-    def _get_tree_cards_and_groups(self, flatted_tree: Dict[Tuple[str, ...],
-                                                            Any]):
-        # TODO implement real mui card, we use flexbox currently
-        flatted_tree_items = list(flatted_tree.items())
-        flatted_tree_items.sort(key=lambda x: x[0])
-        # 1. get flatted group for each item
-        groups: Dict[str, three.Group] = {}
-        obj_to_item_meta: Dict[int, CanvasUserTreeItem] = {}
-        for k, v in flatted_tree_items:
-            k_str = UNKNOWN_KEY_SPLIT.join(k)
-            group = three.Group([])
-            groups[k_str] = group
-            cfg = get_or_create_canvas_item_cfg(group)
-            cfg.proxy = GroupProxy("")
-            cfg.type_str_override = get_qualname_of_type(
-                type(v)).split(".")[-1]
-            cfg.alias = k[-1]
-            cfg.is_vapi = False
-            vctx = VContext(self, group)
-            obj_to_item_meta[id(v)] = CanvasUserTreeItem(
-                k, vctx,
-                UserTreeItemCard(k[-1], cfg.type_str_override,
-                                 partial(self._gv_cards_callback,
-                                         group=group)))
-        return groups, obj_to_item_meta
-
-    def _get_tdata_container_pane(self, tdata_table: mui.DataGrid):
-        return mui.Allotment.Pane(tdata_table, preferredSize=1)
 
     @marker.mark_create_layout
     def _layout_func(self):
@@ -651,18 +531,25 @@ class ComplexCanvas(mui.FlexBox):
                     mui.TabDef("",
                                "3",
                                self.gv_locals_layout,
-                               icon=mui.IconType.DataArray,
+                               icon=mui.IconType.Dashboard,
                                tooltip="Frame Locals Grid",
                                tooltipPlacement="right"),
                     mui.TabDef("",
                                "4",
                                self.gv_custom_layout,
-                               icon=mui.IconType.Dataset,
+                               icon=mui.IconType.DashboardCustomize,
                                tooltip="Custom Grid",
                                tooltipPlacement="right"),
+                    mui.TabDef("",
+                               "5",
+                               self.array_table,
+                               icon=mui.IconType.Dataset,
+                               tooltip="numpy array table",
+                               tooltipPlacement="right"),
+
                     mui.TabDef(
                         "",
-                        "5",
+                        "6",
                         ScriptManager(init_scripts={
                             "python": _EXAMPLE_SCRIPT
                         }),
@@ -706,6 +593,129 @@ class ComplexCanvas(mui.FlexBox):
                 ]).prop(flex=1, width="100%", height="100%")
             ]).prop(overflow="hidden", defaultSizes=[3, 1], vertical=False)
         ]
+
+    async def set_new_tree_root(self, tree_root: T,
+                                tree_child_accessor: Callable[[T], Dict[str,
+                                                                        Any]]):
+        flatted_tree_nodes = _extrace_all_tree_item_via_accessor(
+            tree_root, tree_child_accessor, "root")
+        self.flatted_tree_nodes = flatted_tree_nodes
+        groups, self._user_obj_tree_item_to_meta = self._get_tree_cards_and_groups(
+            flatted_tree_nodes)
+        await self._user_obj_tree_group.set_new_layout({**groups})
+        self.gv_tree_layout.set_tree_root(tree_root)
+        await self.gv_tree_layout.set_new_items({
+            ".".join(k): v
+            for k, v in flatted_tree_nodes.items()
+        })
+
+    async def set_new_grid_items(self, items: Dict[str, Any], is_local: bool = False):
+        if is_local:
+            await self.gv_locals_layout.set_new_items(items)
+        else:
+            await self.gv_custom_layout.set_new_items(items)
+
+    async def update_grid_items(self, items: Dict[str, Any], is_local: bool = False):
+        if is_local:
+            await self.gv_locals_layout.update_items(items)
+        else:
+            await self.gv_custom_layout.update_items(items)
+
+    async def delete_grid_items(self, items: List[str], is_local: bool = False):
+        if is_local:
+            await self.gv_locals_layout.delete_items(items)
+        else:
+            await self.gv_custom_layout.delete_items(items)
+
+    async def clear_grid(self, is_local: bool = False):
+        if is_local:
+            await self.gv_locals_layout.clear_items()
+        else:
+            await self.gv_custom_layout.clear_items()
+
+    def _tree_collect_in_vctx(self):
+        for k1, meta in self._user_obj_tree_item_to_meta.items():
+            group_childs = {}
+            for k2, v in meta.vctx._name_to_group.items():
+                cfg = get_canvas_item_cfg(v)
+                # print(k, cfg )
+                if cfg is not None:
+                    proxy = cfg.proxy
+                    if proxy is not None:
+                        assert isinstance(proxy, GroupProxy)
+                        for c in proxy.childs.values():
+                            c_cfg = get_canvas_item_cfg(c)
+                            assert c_cfg is not None
+                            c_proxy = c_cfg.proxy
+                            assert c_proxy is not None
+                            # TODO
+                            if isinstance(c, _VapiObjects):
+                                c.prepare_vapi_props()
+                        if v is not meta.vctx.root:
+                            assert not v.is_mounted(), f"{type(v)}"
+                            v.init_add_layout(proxy.childs)
+                        else:
+                            group_childs.update(proxy.childs)
+                        proxy.childs.clear()
+            for container, (group, name) in meta.vctx._group_assigns.items():
+                assert container is meta.vctx.root
+                group_childs[name] = group
+            meta.vctx.clear()
+            meta.childs = group_childs
+
+    async def _show_visible_groups_of_objtree(self):
+        app_ev = mui.AppEvent("", {})
+        all_attached, all_removed = [], []
+        for k1, meta in self._user_obj_tree_item_to_meta.items():
+            group = meta.vctx.root
+            new_ev, attached, removed = group.set_new_layout_locally(
+                {**meta.childs})
+            all_attached.extend(attached)
+            all_removed.extend(removed)
+            mdprints = meta.md_prints.copy()
+            meta.md_prints.clear()
+            app_ev += new_ev
+            if mdprints:
+                app_ev += meta.card.print_blocks_event(mdprints)
+        await self.send_and_wait(app_ev)
+        for deleted in all_removed:
+            await deleted._cancel_task()
+        await self._run_special_methods(all_attached, all_removed)
+
+    async def _gv_cards_callback(self, checked: bool, group: three.Group):
+        if group.is_mounted():
+            # TODO sync tree visible state
+            await group.send_and_wait(group.update_event(visible=checked))
+
+    def _get_tree_cards_and_groups(self, flatted_tree: Dict[Tuple[str, ...],
+                                                            Any]):
+        # TODO implement real mui card, we use flexbox currently
+        flatted_tree_items = list(flatted_tree.items())
+        flatted_tree_items.sort(key=lambda x: x[0])
+        # 1. get flatted group for each item
+        groups: Dict[str, three.Group] = {}
+        obj_to_item_meta: Dict[int, CanvasUserTreeItem] = {}
+        for k, v in flatted_tree_items:
+            k_str = UNKNOWN_KEY_SPLIT.join(k)
+            group = three.Group([])
+            groups[k_str] = group
+            cfg = get_or_create_canvas_item_cfg(group)
+            cfg.proxy = GroupProxy("")
+            cfg.type_str_override = get_qualname_of_type(
+                type(v)).split(".")[-1]
+            cfg.alias = k[-1]
+            cfg.is_vapi = False
+            vctx = VContext(self, group)
+            obj_to_item_meta[id(v)] = CanvasUserTreeItem(
+                k, vctx,
+                UserTreeItemCard(k[-1], cfg.type_str_override,
+                                 partial(self._gv_cards_callback,
+                                         group=group)))
+        return groups, obj_to_item_meta
+
+    def _get_tdata_container_pane(self, tdata_table: mui.DataGrid):
+        return mui.Allotment.Pane(tdata_table, preferredSize=1)
+
 
     async def _on_pan_to_fwd(self, selected):
         await self.ctrl.send_and_wait(
@@ -1163,9 +1173,17 @@ class ComplexCanvas(mui.FlexBox):
         del frame
         del cur_frame
         new_local_vars = {}
+        local_var_arrays: Dict[str, np.ndarray] = {}
         for k, v in local_vars.items():
-            if self.gv_locals_layout._check_type_support_preview(type(v)):
-                new_local_vars[k] = v
+            arr = try_cast_to_np_array(v)
+            if arr is not None:
+                local_var_arrays[k] = arr
+            else:
+                if self.gv_locals_layout._check_type_support_preview(type(v)):
+                    new_local_vars[k] = v
+        arr_table = NumpyArrayGridTable({**local_var_arrays})
+        arr_table.set_user_meta_by_type(ObjectGridItemConfig(2.0, 2.0))
+        new_local_vars["__tensorpc_arrays"] = arr_table
         await self.gv_locals_layout.set_new_items(new_local_vars)
 
     def update_locals_sync(self,
@@ -1192,9 +1210,18 @@ class ComplexCanvas(mui.FlexBox):
         del frame
         del cur_frame
         new_local_vars = {}
+        local_var_arrays: Dict[str, np.ndarray] = {}
         for k, v in local_vars.items():
-            if self.gv_locals_layout._check_type_support_preview(type(v)):
-                new_local_vars[k] = v
+            arr = try_cast_to_np_array(v)
+            if arr is not None:
+                local_var_arrays[k] = arr
+            else:
+                if self.gv_locals_layout._check_type_support_preview(type(v)):
+                    new_local_vars[k] = v
+        arr_table = NumpyArrayGridTable({**local_var_arrays})
+        arr_table.set_user_meta_by_type(ObjectGridItemConfig(2.0, 2.0))
+
+        new_local_vars["__tensorpc_arrays"] = arr_table
         if appctx.get_app()._flowapp_thread_id == threading.get_ident():
             task = asyncio.create_task(
                 self.gv_locals_layout.set_new_items(new_local_vars))

@@ -167,8 +167,8 @@ class BufferMeshDevApp:
             self.limit,
             [
                 # three.MeshPhongMaterial().prop(vertexColors=True, color="aqua", specular="#ffffff", shininess=250, transparent=False),
-                three.MeshStandardMaterial().prop(vertexColors=True),
-                # three.MeshBasicMaterial().prop(vertexColors=True),
+                # three.MeshStandardMaterial().prop(vertexColors=True),
+                three.MeshBasicMaterial().prop(vertexColors=False, color="red"),
                 # three.Edges(),
                 # three.Wireframe(),
             ],
@@ -179,9 +179,9 @@ class BufferMeshDevApp:
             [
                 # three.MeshPhongMaterial().prop(vertexColors=True, color="aqua", specular="#ffffff", shininess=250, transparent=True),
                 three.BoxGeometry(voxel_size, voxel_size, voxel_size),
-                three.MeshStandardMaterial().prop(),
+                three.MeshStandardMaterial().prop(vertexColors=False),
             ],
-            colors=random_pc_colors).prop()
+            colors=random_pc_colors).prop(receiveShadow=True, castShadow=True)
         self.voxel_mesh = instanced_voxel_mesh
         self.canvas = plus.SimpleCanvas(
             cam,
@@ -195,20 +195,33 @@ class BufferMeshDevApp:
                 # ]).prop(files="tensorpc://old_depot_2k.hdr",
                 #         ground=three.EnvGround(radius=130, height=32)),
                 # three.PerformanceMonitor(),
+                three.Group([
+                    three.PointLight(intensity=8).prop(castShadow=True),
+                    # three.SpotLight(position=(0, 0, 0), target_position=(0, 0, -1)).prop(angle=0.25,
+                    #                                 penumbra=0.5,
+                    #                                 castShadow=True,
+                    #                                 intensity=8,
+                    #                                 helperColor=0x555555,
+                    #                                 distance=50),
+
+                    # three.Mesh([
+                    #     three.BoxGeometry(),
+                    #     three.MeshStandardMaterial().prop(color="orange"),
+                    # ]).prop(castShadow=True),
+                ]).prop(variant="relativeToCamera", position=(0, 0.1, -1)),
                 three.Sky().prop(sunPosition=(1, 1, 1),
                                  distance=450000,
                                  inclination=0,
                                  azimuth=0.25),
                 three.AmbientLight(),
-                three.SpotLight((10, 10, 10)).prop(angle=0.25,
-                                                   penumbra=0.5,
+                three.DirectionalLight((10, 10, 10)).prop(
                                                    castShadow=True),
                 # three.HemisphereLight(color=0xffffff, ground_color=0xb9b9b9, intensity=0.85).prop(position=(-7, 25, 13)),
                 # three.PointLight(intensity=0.8).prop(position=(100, 100, 100),
                 #                                    castShadow=True),
                 # buffer_mesh,
                 # voxel_mesh,
-                voxel_mesh,
+                instanced_voxel_mesh,
                 three.Mesh([
                     three.PlaneGeometry(1000, 1000),
                     three.MeshStandardMaterial().prop(color="#f0f0f0"),

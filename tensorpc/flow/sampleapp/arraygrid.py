@@ -56,7 +56,7 @@ from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from tensorpc.flow.sampleapp.sample_reload_fn import func_support_reload
 from tensorpc.flow.flowapp.objtree import get_objtree_context
 from tensorpc.flow.sampleapp.sample_preview import TestPreview0
-from tensorpc.flow.flowapp.components.plus.arraygrid import NumpyArrayGrid
+from tensorpc.flow.flowapp.components.plus.arraygrid import NumpyArrayGrid, NumpyArrayGridTable
 
 class MatrixDataGridAppV1:    
     @marker.mark_create_layout
@@ -112,18 +112,6 @@ class MatrixDataGridApp:
 class MatrixDataGridContainerApp:    
     @marker.mark_create_layout
     def my_layout(self):
-        btn = mui.Button("Edit").prop(loading=False)
-        self.grid_container = mui.HBox([])
-        dialog = mui.Dialog([
-            self.grid_container.prop(flex=1, height="70vh", width="70vw")
-        ]).prop(title="Array Viewer", maxWidth="xl")
-        self.dialog = dialog
-        btn.event_click.on_standard(self._on_btn_select).configure(stop_propagation=True)
-        column_defs = [
-            mui.DataGrid.ColumnDef("name", accessorKey="name"),
-            mui.DataGrid.ColumnDef("triggerDialogBtn", cell=btn),
-        ]
-
         arr = np.random.uniform(0, 1, size=[1, 3, 20000, 3])
         arr2 = np.random.randint(0, 1000, size=[1, 3, 20000, 4])
         arr3 = np.random.randint(0, 254, size=[1, 3, 20000, 1]).astype(np.uint8)
@@ -134,28 +122,12 @@ class MatrixDataGridContainerApp:
             "b": arr2,
             "c": arr3,
         }
-        arr_item2 = arr3
-        self.arr_items = [arr_item1, arr_item2]
-        dgrid = mui.DataGrid(column_defs, [{
-            "id": "0", 
-            "index": 0,
-            "name": "item1",
-        }, {
-            "id": "1", 
-            "index": 1,
-            "name": "item2",
-        }]).prop(idKey="id", rowHover=True, virtualized=True, enableFilter=True)
+        arr4 = np.random.uniform(0, 1, size=[100, 3])
 
-        return mui.VBox([
-            dgrid.prop(flex=1),
-            dialog,
-        ]).prop(width="100%", height="100%", overflow="hidden")
+        arr_item2 = arr4
+        
 
-    async def _on_btn_select(self, event: mui.Event):
-        indexes = event.indexes
-        idx = indexes[0]
-        item = self.arr_items[idx]
-        await self.grid_container.set_new_layout([
-             NumpyArrayGrid(item).prop(width="100%", height="100%", overflow="hidden")
-        ])
-        await self.dialog.set_open(True)
+        return NumpyArrayGridTable({
+            "a": arr_item1,
+            "b": arr_item2,
+        })
