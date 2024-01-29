@@ -153,7 +153,15 @@ class BufferMeshDevApp:
     def my_layout(self):
         self.limit = 1000
         initial_num_pts = 500
-        cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
+        cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000, children=[
+            three.PointLight(intensity=8).prop(castShadow=True, position=(0, 0, 1)),
+            # three.SpotLight(position=(0, 0, -1), target_position=(0, 0, -3)).prop(angle=0.25,
+            #                                 penumbra=0.5,
+            #                                 castShadow=True,
+            #                                 intensity=8,
+            #                                 helperColor=0x555555,
+            #                                 distance=50),
+        ])
         random_pcs = np.random.randint(1, 20, size=[initial_num_pts, 3])
         random_pc_colors = np.random.uniform(0,
                                              255,
@@ -195,20 +203,20 @@ class BufferMeshDevApp:
                 # ]).prop(files="tensorpc://old_depot_2k.hdr",
                 #         ground=three.EnvGround(radius=130, height=32)),
                 # three.PerformanceMonitor(),
-                three.Group([
-                    three.PointLight(intensity=8).prop(castShadow=True),
-                    # three.SpotLight(position=(0, 0, 0), target_position=(0, 0, -1)).prop(angle=0.25,
-                    #                                 penumbra=0.5,
-                    #                                 castShadow=True,
-                    #                                 intensity=8,
-                    #                                 helperColor=0x555555,
-                    #                                 distance=50),
+                # three.Group([
+                #     three.PointLight(intensity=8).prop(castShadow=True),
+                #     # three.SpotLight(position=(0, 0, 0), target_position=(0, 0, -1)).prop(angle=0.25,
+                #     #                                 penumbra=0.5,
+                #     #                                 castShadow=True,
+                #     #                                 intensity=8,
+                #     #                                 helperColor=0x555555,
+                #     #                                 distance=50),
 
-                    # three.Mesh([
-                    #     three.BoxGeometry(),
-                    #     three.MeshStandardMaterial().prop(color="orange"),
-                    # ]).prop(castShadow=True),
-                ]).prop(variant="relativeToCamera", position=(0, 0.1, -1)),
+                #     # three.Mesh([
+                #     #     three.BoxGeometry(),
+                #     #     three.MeshStandardMaterial().prop(color="orange"),
+                #     # ]).prop(castShadow=True),
+                # ]).prop(variant="relativeToCamera", position=(0, 0.1, -1)),
                 three.Sky().prop(sunPosition=(1, 1, 1),
                                  distance=450000,
                                  inclination=0,
@@ -878,7 +886,7 @@ class ViewDevApp:
                     index=2)
 
 
-        ]).prop(display="flex", flexDirection="row", width="100%", height="100%" , overflow="hidden",)
+        ]).prop(display="flex", flexDirection="row", width="100%", height="100%" , overflow="hidden", enablePerf=True)
         # canvas.update_sx_props({
         #     "grid-template-columns": "1fr 1fr",
         # })

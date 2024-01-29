@@ -44,7 +44,8 @@ from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     UIEvent, UIRunStatus, UIType, Undefined, ValueType,
                     undefined)
 from .mui import (FlexBoxProps, MUIFlexBoxProps, MUIComponentType,
-                  MUIContainerBase, MenuItem, PointerEventsProperties, Image as MUIImage)
+                  MUIContainerBase, MenuItem, PointerEventsProperties, Image as
+                  MUIImage)
 from .common import handle_standard_event
 from tensorpc.flow.flowapp.components import typemetas
 
@@ -1046,7 +1047,8 @@ class InfiniteGridHelper(ThreeComponentBase[InfiniteGridHelperProps]):
 class GroupProps(Object3dContainerBaseProps):
     userData: Union[Any, Undefined] = undefined
     enableSelect: Union[bool, Undefined] = undefined
-    variant: Union[Literal["default", "faceToCamera", "relativeToCamera"], Undefined] = undefined
+    variant: Union[Literal["default", "faceToCamera", "relativeToCamera"],
+                   Undefined] = undefined
 
 
 class Group(O3dContainerWithEventBase[GroupProps, ThreeComponentType]):
@@ -1132,14 +1134,15 @@ class Image(Object3dWithEventBase[ImageProps]):
 
 
 @dataclasses.dataclass
-class PerspectiveCameraProps(Object3dBaseProps):
+class PerspectiveCameraProps(Object3dContainerBaseProps):
     fov: Union[float, Undefined] = undefined
     aspect: Union[float, Undefined] = undefined
     near: Union[float, Undefined] = undefined
     far: Union[float, Undefined] = undefined
 
 
-class PerspectiveCamera(Object3dBase[PerspectiveCameraProps]):
+class PerspectiveCamera(Object3dContainerBase[PerspectiveCameraProps,
+                                              ThreeComponentType]):
 
     def __init__(
         self,
@@ -1149,9 +1152,16 @@ class PerspectiveCamera(Object3dBase[PerspectiveCameraProps]):
         near: Union[float, Undefined] = undefined,
         far: Union[float, Undefined] = undefined,
         position: Vector3Type = (0, 0, 1),
-        up: Vector3Type = (0, 0, 1)
+        up: Vector3Type = (0, 0, 1),
+        children: Optional[Union[List[ThreeComponentType],
+                                 Dict[str, ThreeComponentType]]] = None
     ) -> None:
-        super().__init__(UIType.ThreePerspectiveCamera, PerspectiveCameraProps)
+        if children is None:
+            children = {}
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+        super().__init__(UIType.ThreePerspectiveCamera, PerspectiveCameraProps,
+                         children)
         self.props.fov = fov
         self.props.aspect = aspect
         self.props.near = near
@@ -1172,13 +1182,14 @@ class PerspectiveCamera(Object3dBase[PerspectiveCameraProps]):
 
 
 @dataclasses.dataclass
-class OrthographicCameraProps(Object3dBaseProps):
+class OrthographicCameraProps(Object3dContainerBaseProps):
     zoom: Union[float, Undefined] = undefined
     near: Union[float, Undefined] = undefined
     far: Union[float, Undefined] = undefined
 
 
-class OrthographicCamera(Object3dBase[OrthographicCameraProps]):
+class OrthographicCamera(Object3dContainerBase[OrthographicCameraProps,
+                                               ThreeComponentType]):
 
     def __init__(
         self,
@@ -1187,10 +1198,17 @@ class OrthographicCamera(Object3dBase[OrthographicCameraProps]):
         far: Union[float, Undefined] = undefined,
         zoom: Union[float, Undefined] = undefined,
         position: Vector3Type = (0, 0, 1),
-        up: Vector3Type = (0, 0, 1)
+        up: Vector3Type = (0, 0, 1),
+        children: Optional[Union[List[ThreeComponentType],
+                                 Dict[str, ThreeComponentType]]] = None
     ) -> None:
+        if children is None:
+            children = {}
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ThreeOrthographicCamera,
-                         OrthographicCameraProps)
+                         OrthographicCameraProps, children)
+
         self.props.zoom = zoom
         self.props.near = near
         self.props.far = far
@@ -1228,13 +1246,15 @@ class OrbitControlProps(ThreeBasicProps):
     keyPanSpeed: Union[NumberType, Undefined] = undefined
     makeDefault: Union[bool, Undefined] = undefined
 
+
 # "rotate" | "dolly" | "truck" | "offset" | "zoom" | "none"
 MouseButtonType: TypeAlias = Literal["rotate", "dolly", "truck", "offset",
-                                        "zoom", "none"]
+                                     "zoom", "none"]
+
 
 @dataclasses.dataclass
 class MouseButtonConfig:
-    left: Union[Undefined, MouseButtonType] = undefined 
+    left: Union[Undefined, MouseButtonType] = undefined
     middle: Union[Undefined, MouseButtonType] = undefined
     right: Union[Undefined, MouseButtonType] = undefined
     wheel: Union[Undefined, MouseButtonType] = undefined
@@ -1731,9 +1751,12 @@ class View(MUIContainerBase[ThreeViewProps, ThreeComponentType]):
     ) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ThreeView, ThreeViewProps, children,allowed_events=[
-            FrontendEventType.ContextMenuSelect.value,
-        ])
+        super().__init__(UIType.ThreeView,
+                         ThreeViewProps,
+                         children,
+                         allowed_events=[
+                             FrontendEventType.ContextMenuSelect.value,
+                         ])
         self.event_context_menu = self._create_event_slot(
             FrontendEventType.ContextMenuSelect)
 
@@ -1746,7 +1769,6 @@ class View(MUIContainerBase[ThreeViewProps, ThreeComponentType]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
-
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync)

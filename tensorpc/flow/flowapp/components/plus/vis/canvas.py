@@ -239,20 +239,18 @@ class ComplexCanvas(mui.FlexBox):
                                                              Any]]] = None,
             key: str = "canvas",
             custom_effect: Optional[three.EffectComposer] = None,
-            init_enable_grid: bool = True):
+            init_enable_grid: bool = True,
+            camera: Optional[Union[three.PerspectiveCamera, three.OrthographicCamera]] = None):
 
         super().__init__()
         self.component_tree = three.Fragment([])
-        self.camera = three.PerspectiveCamera(
-            fov=75,
-            near=0.1,
-            far=1000,
-            # position=(1, 1, 10),
-        )
+        if camera is None:
+            camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
+        self.camera = camera
         self._init_enable_grid = init_enable_grid
         self.camera.prop(layers=1 | (1 << 31))
 
-        self.ctrl = three.CameraControl().prop(makeDefault=True, mouseButtons=three.MouseButtonConfig(right="none", middle="rotate"))
+        self.ctrl = three.CameraControl().prop(makeDefault=True)
         self.background_img = mui.Image()
         self._infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self._axis_helper = three.AxesHelper(20)
