@@ -630,7 +630,7 @@ def image(img: np.ndarray, rot: Optional[three.Vector3Type] = None, pos: Optiona
 
 def three_ui(comp: three.ThreeComponentType, name: Optional[str] = None):
     # FIXME better way to handle cast layer
-    if isinstance(comp, (three.Object3dBase, three.Object3dContainerBase)):
+    if isinstance(comp, (three.Points, three.Segments, three.BufferMesh, three.InstancedMesh, three.VoxelMesh)):
         comp.props.layers = 31
     _create_vapi_three_obj_pcfg(comp, name, "obj3d", _frame_cnt=2)
     return 

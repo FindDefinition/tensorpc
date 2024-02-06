@@ -64,8 +64,6 @@ class AsyncJsonRpcStreamReader:
 
         return None
 
-import rich 
-
 class AsyncJsonRpcStreamWriter:
     def __init__(self, wfile: asyncio.StreamWriter, **json_dumps_args):
         self._wfile = wfile

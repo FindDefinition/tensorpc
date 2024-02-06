@@ -846,21 +846,49 @@ class ViewDevApp:
     @mark_create_layout
     def my_layout(self):
         cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
+        cam2 = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
+
         btns = [
             mui.MenuItem("Button 1"),
             mui.MenuItem("Button 2")
         ]
         view1 = three.View([
-                three.PerspectiveCamera(fov=75,
-                                        near=0.1,
-                                        far=1000,
-                                        make_default=True),
-                three.CameraControl().prop(makeDefault=True),
-                three.Mesh([
-                    three.BoxGeometry(),
-                    three.MeshBasicMaterial().prop(color="orange",
-                                                    transparent=True),
+                cam,
+                three.CameraControl().prop(makeDefault=True, syncObject3ds=[cam2]),
+                # three.Mesh([
+                #     three.BoxGeometry(),
+                #     three.MeshBasicMaterial().prop(color="orange",
+                #                                     transparent=True),
+                # ]),
+                three.SelectionContext([
+                    three.EffectComposer([
+                        three.Outline().prop(
+                            blur=True,
+                            edgeStrength=100,
+                            width=1000,
+                            visibleEdgeColor=0xddd,
+                            hiddenEdgeColor=0xddd,
+                            blendFunction=three.BlendFunction.ALPHA),
+                        # three.Bloom(),
+                        # three.GammaCorrection(),
+                        # three.ToneMapping().prop(mode=three.ToneMapppingMode.ACES_FILMIC),
+                    ]).prop(autoClear=False),
+                    three.Mesh([
+                        three.BoxGeometry(),
+                        three.Edges(),
+                        three.MeshBasicMaterial().prop(color="orange",
+                                                        transparent=True),
+                    ]).prop(
+                        enableSelect=True,
+                        castShadow=True,
+                        position=(0, 0, 0),
+                        enableHover=True,
+                        enablePivotControl=True,
+                        enablePivotOnSelected=True,
+                        pivotControlProps=three.PivotControlsCommonProps(
+                            depthTest=False, annotations=True, anchor=(0, 0, 0))),
                 ]),
+
             ]).prop(flex=2,
                     overflow="hidden",
                     index=1,
@@ -869,13 +897,11 @@ class ViewDevApp:
                     menuItems=btns)
         view1.event_context_menu.on(lambda x: print(x))
         canvas = three.ViewCanvas([
-                            view1,
+                            mui.VBox([
+                                view1,
             three.View([
-                three.PerspectiveCamera(fov=75,
-                                        near=0.1,
-                                        far=1000,
-                                        make_default=True),
-                three.CameraControl().prop(makeDefault=True),
+                cam2,
+                # three.CameraControl().prop(makeDefault=True),
                 three.Mesh([
                     three.BoxGeometry(),
                     three.MeshBasicMaterial().prop(color="orange",
@@ -884,6 +910,7 @@ class ViewDevApp:
             ]).prop(flex=1,
                     overflow="hidden",
                     index=2)
+                            ]).prop(width="100%", height="100%" , overflow="hidden")
 
 
         ]).prop(display="flex", flexDirection="row", width="100%", height="100%" , overflow="hidden", enablePerf=True)

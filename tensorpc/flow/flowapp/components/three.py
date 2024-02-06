@@ -338,6 +338,8 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
                              FrontendEventType.Up.value,
                              FrontendEventType.Down.value,
                              FrontendEventType.ContextMenu.value,
+                             FrontendEventType.Change.value,
+
                          ] + list(allowed_events))
         self.event_double_click = self._create_event_slot(
             FrontendEventType.DoubleClick)
@@ -350,6 +352,7 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
         self.event_down = self._create_event_slot(FrontendEventType.Down)
         self.event_context_menu = self._create_event_slot(
             FrontendEventType.ContextMenu)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync)
@@ -914,8 +917,13 @@ class BoundingBox(Object3dWithEventBase[BoundingBoxProps]):
             self,
             data: bool,
             type: ValueType = FrontendEventType.Change.value):
-        self.props.checked = data
-
+        if isinstance(data, bool):
+            self.props.checked = data
+        elif isinstance(data, dict):
+            assert "position" in data
+            assert "rotation" in data
+            self.props.position = data["position"]
+            self.props.rotation = data["rotation"]
 
 @dataclasses.dataclass
 class AxesHelperProps(Object3dBaseProps):
@@ -1284,6 +1292,10 @@ class CameraControlProps(ThreeBasicProps):
     infinityDolly: Union[bool, Undefined] = undefined
     makeDefault: Union[bool, Undefined] = undefined
     mouseButtons: Union[MouseButtonConfig, Undefined] = undefined
+    # used to sync object 3ds based on camera position and rotation.
+    # keep in mind that this won't affact position/rotation of those objects in BACKEND.
+    # you need to due with them in backend.
+    syncObject3ds: Union[List[Union[Object3dBase, Object3dContainerBase]], Undefined] = undefined
 
 
 class MapControl(ThreeComponentBase[OrbitControlProps]):
@@ -1703,6 +1715,7 @@ class ThreeCanvasProps(MUIFlexBoxProps):
     dpr: Union[Tuple[int, int], Undefined] = undefined
     raycastLayerMask: Union[int, Undefined] = undefined
     isViewMode: Union[bool, Undefined] = undefined
+    menuItems: Union[List[MenuItem], Undefined] = undefined
 
 
 @dataclasses.dataclass
@@ -1729,8 +1742,12 @@ class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
                  background: Union[str, Undefined] = undefined) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ThreeCanvas, ThreeCanvasProps, children)
+        super().__init__(UIType.ThreeCanvas, ThreeCanvasProps, children, allowed_events=[
+                             FrontendEventType.ContextMenuSelect.value,
+                         ])
         self.props.threeBackgroundColor = background
+        self.event_context_menu = self._create_event_slot(
+            FrontendEventType.ContextMenuSelect)
 
     @property
     def prop(self):
@@ -1742,6 +1759,8 @@ class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync)
 
 class View(MUIContainerBase[ThreeViewProps, ThreeComponentType]):
 
@@ -3817,6 +3836,7 @@ class SelectionContextProps(ContainerBaseProps):
     box: Union[bool, Undefined] = undefined
     border: Union[str, Undefined] = undefined
     backgroundColor: Union[str, Undefined] = undefined
+    useOutline: Union[bool, Undefined] = undefined
 
 
 class SelectionContext(ThreeContainerBase[SelectionContextProps,

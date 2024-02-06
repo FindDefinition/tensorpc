@@ -136,7 +136,7 @@ class RelayEvent:
     def __init__(self, type: RelayEventType):
         self.type = type
 
-    def to_dict(self):
+    def to_dict(self) -> Dict[str, Any]:
         return {
             "type": self.type.value,
         }
@@ -212,7 +212,7 @@ class UserEvent:
     def __init__(self, type: UserEventType):
         self.type = type
 
-    def to_dict(self):
+    def to_dict(self) -> Dict[str, Any]:
         return {
             "type": self.type.value,
         }
@@ -287,3 +287,27 @@ class ScheduleEvent:
         return cls(data["ts"], data["data"], data["envs"])
 
 
+
+class ComponentUid:
+    # format: length1,length2,length3|part1::part2::part3
+    # part names may contains splitter '::', so we need lengths to split
+    def __init__(self, uid: str, splitter: str = ".") -> None:
+        self.uid_encoded = uid
+        init_parts = uid.split("|")
+        assert len(init_parts) == 2
+        lengths = [int(n) for n in init_parts[0].split(",")]
+        start = 0
+        self.parts: List[str] = []
+        for l in lengths:
+            self.parts.append(init_parts[1][start:start + l])
+            start += l + len(splitter)
+        
+    @classmethod
+    def from_parts(cls, parts: List[str], splitter: str = ".") -> "ComponentUid":
+        return cls("|".join([str(len(p)) for p in parts]) + "|" + splitter.join(parts))
+
+    def __hash__(self) -> int:
+        return hash(self.uid_encoded)
+
+    def append_part(self, part: str) -> "ComponentUid":
+        return ComponentUid.from_parts(self.parts + [part])

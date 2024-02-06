@@ -65,6 +65,8 @@ def get_tmux_lang_server_info_may_create(ls_type: str, uid: str, port: int):
     #     port = get_free_ports(1)[0]
     if not found:
         window_command = window_command_fmt.format(port)
+        print(window_command)
+
         scheduler_sess_name = f"{TENSORPC_FLOW_LANG_SERVER_PREFIX}{_SPLIT}{port}{_SPLIT}{uid}"
         sess = s.new_session(scheduler_sess_name, window_command=window_command)
 

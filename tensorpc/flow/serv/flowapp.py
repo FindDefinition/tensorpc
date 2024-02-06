@@ -20,7 +20,7 @@ import pickle
 from runpy import run_path
 from typing import Any, Dict, List, Optional
 from tensorpc.core.defs import FileDesp, FileResource
-from tensorpc.flow.coretypes import ScheduleEvent, get_uid
+from tensorpc.flow.coretypes import ComponentUid, ScheduleEvent, get_uid
 from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.appcore import ALL_OBSERVED_FUNCTIONS, enter_app_conetxt
 from tensorpc.flow.flowapp.components.mui import FlexBox, flex_wrapper
@@ -40,6 +40,7 @@ from tensorpc.flow.serv_names import serv_names
 import traceback
 import time
 import sys 
+from urllib import parse
 
 
 class FlowApp:
@@ -121,11 +122,12 @@ class FlowApp:
             if not layout_created:
                 await self.app._app_run_layout_function()
         else:
-            self.app.root._attach("root", self.app._flow_app_comp_core)
+            self.app.root._attach(ComponentUid.from_parts(["root"]), self.app._flow_app_comp_core)
         # print(lay["layout"])
         self.app.app_initialize()
         await self.app.app_initialize_async()
         enable_lsp = self.lsp_port is not None and self.app._flowapp_enable_lsp
+        print(enable_lsp,  self.lsp_port)
         if enable_lsp:
             assert self.lsp_port is not None
             get_tmux_lang_server_info_may_create("pyright", self.master_meta.node_id, self.lsp_port)
@@ -208,9 +210,17 @@ class FlowApp:
 
     async def get_file(self, file_key: str, chunk_size=2 ** 16):
         if file_key in self.app._flowapp_file_resource_handlers:
+            url = parse.urlparse(file_key)
+            base = url.path
+            file_key_qparams = parse.parse_qs(url.query)
+            # we only use first value
+            if len(file_key_qparams) > 0:
+                file_key_qparams = {k: v[0] for k, v in file_key_qparams.items()}
+            else:
+                file_key_qparams = {}
             try:
-                handler = self.app._flowapp_file_resource_handlers[file_key]
-                res = handler()
+                handler = self.app._flowapp_file_resource_handlers[base]
+                res = handler(**file_key_qparams)
                 if inspect.iscoroutine(res):
                     res = await res 
                 assert isinstance(res, (str, bytes, FileResource))
@@ -219,7 +229,7 @@ class FlowApp:
                         res = res.encode()
                     bio = io.BytesIO(res)
                     chunk = bio.read(chunk_size)
-                    yield FileDesp(file_key)
+                    yield FileDesp(base)
                     while chunk:
                         yield chunk
                         chunk = bio.read(chunk_size)

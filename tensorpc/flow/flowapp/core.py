@@ -48,7 +48,7 @@ from tensorpc.core.event_emitter.base import ExceptionParam
 from tensorpc.core.moduleid import is_tensorpc_dynamic_path
 from tensorpc.core.serviceunit import (AppFuncType, ReloadableDynamicClass,
                                        ServFunctionMeta)
-from tensorpc.flow.coretypes import MessageLevel
+from tensorpc.flow.coretypes import ComponentUid, MessageLevel
 from tensorpc.flow.flowapp.appcore import EventHandler, EventHandlers
 from tensorpc.flow.flowapp.reload import AppReloadManager, FlowSpecialMethods
 from tensorpc.utils.registry import HashableRegistry
@@ -1026,10 +1026,10 @@ class Component(Generic[T_base_props, T_child]):
                  type: UIType,
                  prop_cls: Type[T_base_props],
                  allowed_events: Optional[Iterable[EventDataType]] = None,
-                 uid: str = "",
+                 uid: Optional[ComponentUid] = None,
                  json_only: bool = False) -> None:
         self._flow_comp_core: Optional[AppComponentCore] = None
-        self._flow_uid = uid
+        self._flow_uid: Optional[ComponentUid] = uid
         self._flow_comp_type = type
         # self._status = UIRunStatus.Stop
         # task for callback of controls
@@ -1039,6 +1039,7 @@ class Component(Generic[T_base_props, T_child]):
         self._parent = ""
         self.__props = prop_cls()
         self.__prop_cls = prop_cls
+        self._prop_validator = TypeAdapter(self.__prop_cls)
         self._prop_field_names: Set[str] = set([x.name for x in dataclasses.fields(prop_cls)])
         self._mounted_override = False
         self.__sx_props: Dict[str, Any] = {}
@@ -1122,6 +1123,11 @@ class Component(Generic[T_base_props, T_child]):
         return self.__props
 
     @property
+    def _flow_uid_encoded(self) -> str:
+        assert self._flow_uid is not None 
+        return self._flow_uid.uid_encoded
+
+    @property
     def propcls(self) -> Type[T_base_props]:
         return self.__prop_cls
 
@@ -1131,7 +1137,7 @@ class Component(Generic[T_base_props, T_child]):
         for k, v in prop_dict.items():
             setattr(self.__props, k, v)
 
-    def _attach(self, uid: str, comp_core: AppComponentCore) -> dict:
+    def _attach(self, uid: ComponentUid, comp_core: AppComponentCore) -> dict:
         if self._flow_reference_count == 0:
             self._flow_uid = uid
             self._flow_comp_core = comp_core
@@ -1146,7 +1152,7 @@ class Component(Generic[T_base_props, T_child]):
         if self._flow_reference_count == 0:
             self.flow_event_emitter.emit(FrontendEventType.BeforeUnmount.value, Event(FrontendEventType.BeforeUnmount.value, None))
             res_uid = self._flow_uid
-            self._flow_uid = ""
+            self._flow_uid = None
             self._flow_comp_core = None
             return {res_uid: self}
         return {}
@@ -1161,11 +1167,11 @@ class Component(Generic[T_base_props, T_child]):
         def wrapper(*args: P.args, **kwargs: P.kwargs):
             # do validation on changed props only
             # self.__prop_cls(**kwargs)
-            TypeAdapter(self.__prop_cls).validate_python(kwargs)
+            # TypeAdapter(self.__prop_cls).validate_python(kwargs)
             for k, v in kwargs.items():
                 setattr(self.__props, k, v)
             # do validation for all props (call model validator)
-            TypeAdapter(self.__prop_cls).validate_python(self.__props)
+            self._prop_validator.validate_python(self.__props)
             return this
         return wrapper
 
@@ -1178,11 +1184,11 @@ class Component(Generic[T_base_props, T_child]):
         def wrapper(*args: P.args, **kwargs: P.kwargs):
             # do validation on changed props only
             # self.__prop_cls(**kwargs)
-            TypeAdapter(self.__prop_cls).validate_python(kwargs)
+            # TypeAdapter(self.__prop_cls).validate_python(kwargs)
             for k, v in kwargs.items():
                 setattr(self.__props, k, v)
             # do validation for all props (call model validator)
-            TypeAdapter(self.__prop_cls).validate_python(self.__props)
+            self._prop_validator.validate_python(self.__props)
             return self.create_update_event(kwargs, json_only)
 
         return wrapper
@@ -1299,7 +1305,7 @@ class Component(Generic[T_base_props, T_child]):
         return
 
     def get_props(self) -> Dict[str, Any]:
-        return self.__props.get_dict()  # type: ignore
+        return self.__props.get_dict(dict_factory=_undefined_comp_dict_factory, obj_factory=_undefined_comp_obj_factory)  # type: ignore
 
     def validate_props(self, props: Dict[str, Any]):
         """use this function to validate props before call
@@ -1317,9 +1323,10 @@ class Component(Generic[T_base_props, T_child]):
 
     async def put_loopback_ui_event(self, ev: SimpleEventType):
         if self.is_mounted():
+            assert self._flow_uid is not None 
             return await self.queue.put(
                 AppEvent("",
-                         {AppEventType.UIEvent: UIEvent({self._flow_uid: ev})},
+                         {AppEventType.UIEvent: UIEvent({self._flow_uid.uid_encoded: ev})},
                          is_loopback=True))
 
     async def put_app_event(self, ev: AppEvent):
@@ -1459,7 +1466,8 @@ class Component(Generic[T_base_props, T_child]):
                 data_unds.append(k)
             else:
                 data_no_und[k] = as_dict_no_undefined(v)
-        ev = UIUpdateEvent({self._flow_uid: (data_no_und, data_unds)},
+        assert self._flow_uid is not None 
+        ev = UIUpdateEvent({self._flow_uid.uid_encoded: (data_no_und, data_unds)},
                            json_only)
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UIUpdateEvent: ev})
@@ -1480,7 +1488,8 @@ class Component(Generic[T_base_props, T_child]):
                 data_unds.append(k)
             else:
                 data_no_und[k] = v
-        ev = UIUpdateEvent({self._flow_uid: (data_no_und, data_unds)})
+        assert self._flow_uid is not None 
+        ev = UIUpdateEvent({self._flow_uid.uid_encoded: (data_no_und, data_unds)})
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UIUpdatePropsEvent: ev})
 
@@ -1488,7 +1497,8 @@ class Component(Generic[T_base_props, T_child]):
         """create component control event for
         backend -> frontend direct communication
         """
-        ev = ComponentEvent({self._flow_uid: as_dict_no_undefined(data)})
+        assert self._flow_uid is not None 
+        ev = ComponentEvent({self._flow_uid.uid_encoded: as_dict_no_undefined(data)})
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.ComponentEvent: ev})
 
@@ -1526,7 +1536,8 @@ class Component(Generic[T_base_props, T_child]):
         e = exc_param.exc
         ss = io.StringIO()
         traceback.print_exc(file=ss)
-        user_exc = UserMessage.create_error(self._flow_uid, repr(e),
+        assert self._flow_uid is not None 
+        user_exc = UserMessage.create_error(self._flow_uid.uid_encoded, repr(e),
                                             ss.getvalue())
         await self.put_app_event(self.create_user_msg_event(user_exc))
         app = get_app()
@@ -1586,7 +1597,9 @@ class Component(Generic[T_base_props, T_child]):
             traceback.print_exc()
             ss = io.StringIO()
             traceback.print_exc(file=ss)
-            user_exc = UserMessage.create_error(self._flow_uid, repr(e),
+            assert self._flow_uid is not None 
+
+            user_exc = UserMessage.create_error(self._flow_uid.uid_encoded, repr(e),
                                                 ss.getvalue())
             await self.put_app_event(self.create_user_msg_event(user_exc))
             app = get_app()
@@ -1650,7 +1663,8 @@ class Component(Generic[T_base_props, T_child]):
                 traceback.print_exc()
                 ss = io.StringIO()
                 traceback.print_exc(file=ss)
-                user_exc = UserMessage.create_error(self._flow_uid, repr(e),
+                assert self._flow_uid is not None 
+                user_exc = UserMessage.create_error(self._flow_uid.uid_encoded, repr(e),
                                                     ss.getvalue())
                 await self.put_app_event(self.create_user_msg_event(user_exc))
                 app = get_app()
@@ -1735,17 +1749,17 @@ def _undefined_comp_dict_factory(x: List[Tuple[str, Any]]):
     res: Dict[str, Any] = {}
     for k, v in x:
         if isinstance(v, Component):
+            assert v.is_mounted(), f"you must ensure component is inside comp tree if you add it to props, {k}, {type(v)}"
             res[k] = v._flow_uid
-        
         elif not isinstance(v, (Undefined, BackendOnlyProp)):
             res[k] = v
     return res
 
 def _undefined_comp_obj_factory(x: Any):
     if isinstance(x, Component):
+        assert x.is_mounted(), f"you must ensure component is inside comp tree if you add it to props, {type(x)}"
         return x._flow_uid
     return x
-
 
 class ContainerBase(Component[T_container_props, T_child]):
 
@@ -1755,7 +1769,7 @@ class ContainerBase(Component[T_container_props, T_child]):
                  _children: Optional[Union[Dict[str, T_child], DataclassType]] = None,
                  inited: bool = False,
                  allowed_events: Optional[Iterable[EventDataType]] = None,
-                 uid: str = "",
+                 uid: Optional[ComponentUid] = None,
                  app_comp_core: Optional[AppComponentCore] = None) -> None:
         super().__init__(base_type, prop_cls, allowed_events, uid)
         self._flow_comp_core = app_comp_core
@@ -1824,12 +1838,12 @@ class ContainerBase(Component[T_container_props, T_child]):
             return [child_comp] + child_comp._get_comps_by_uid_resursive(
                 parts[1:])
 
-    def _foreach_comp_recursive(self, child_ns: str,
-                                handler: Callable[[str, Component],
+    def _foreach_comp_recursive(self, child_ns: ComponentUid,
+                                handler: Callable[[ComponentUid, Component],
                                                   Union[ForEachResult, None]]):
-        res_foreach: List[Tuple[str, ContainerBase]] = []
+        res_foreach: List[Tuple[ComponentUid, ContainerBase]] = []
         for k, v in self._child_comps.items():
-            child_uid = f"{child_ns}.{k}"
+            child_uid = child_ns.append_part(k)
             if isinstance(v, ContainerBase):
                 res = handler(child_uid, v)
                 if res is None:
@@ -1847,9 +1861,9 @@ class ContainerBase(Component[T_container_props, T_child]):
         for child_uid, v in res_foreach:
             v._foreach_comp_recursive(child_uid, handler)
 
-    def _foreach_comp(self, handler: Callable[[str, Component], Union[ForEachResult,
+    def _foreach_comp(self, handler: Callable[[ComponentUid, Component], Union[ForEachResult,
                                                                       None]]):
-        assert self._flow_uid != "", f"_flow_uid must be set before modify_comp, {type(self)}, {self._flow_reference_count}, {id(self)}"
+        assert self._flow_uid is not None, f"_flow_uid must be set before modify_comp, {type(self)}, {self._flow_reference_count}, {id(self)}"
         handler(self._flow_uid, self)
         self._foreach_comp_recursive(self._flow_uid, handler)
 
@@ -1879,23 +1893,34 @@ class ContainerBase(Component[T_container_props, T_child]):
                       comp_core: AppComponentCore,
                       childs: Optional[List[str]] = None):
         atached_uids: Dict[str, Component] = {}
+        assert self._flow_uid is not None 
         if childs is None:
             childs = list(self._child_comps.keys())
         for k in childs:
             v = self._child_comps[k]
-            atached_uids.update(v._attach(f"{self._flow_uid}.{k}", comp_core))
+            atached_uids.update(v._attach(self._flow_uid.append_part(k), comp_core))
         return atached_uids
 
-    def _attach(self, uid: str, comp_core: AppComponentCore):
+    def _attach(self, uid: ComponentUid, comp_core: AppComponentCore):
+        assert self._flow_uid is not None 
         attached: Dict[str, Component] = super()._attach(uid, comp_core)
         for k, v in self._child_comps.items():
-            attached.update(v._attach(f"{uid}.{k}", comp_core))
+            attached.update(v._attach(self._flow_uid.append_part(k), comp_core))
         return attached
 
-    def _get_uid_to_comp_dict(self):
+    def _get_uid_encoded_to_comp_dict(self):
         res: Dict[str, Component] = {}
 
-        def handler(uid, v: Component):
+        def handler(uid: ComponentUid, v: Component):
+            res[uid.uid_encoded] = v
+
+        self._foreach_comp(handler)
+        return res
+
+    def _get_uid_to_comp_dict(self):
+        res: Dict[ComponentUid, Component] = {}
+
+        def handler(uid: ComponentUid, v: Component):
             res[uid] = v
 
         self._foreach_comp(handler)
@@ -2033,14 +2058,14 @@ class ContainerBase(Component[T_container_props, T_child]):
         attached = self._attach_child(self.flow_app_comp_core)
         # update all childs of this component
         comps_frontend = {
-            c._flow_uid: c
+            c._flow_uid_encoded: c
             for c in self._get_all_nested_childs()
         }
         comps_frontend_dict = {
             k: v.to_dict()
             for k, v in comps_frontend.items()
         }
-        child_uids = [self[c]._flow_uid for c in self._child_comps]
+        child_uids = [self[c]._flow_uid_encoded for c in self._child_comps]
         update_msg: Dict[str, Any] = {
             "childs": child_uids
         }
@@ -2094,14 +2119,14 @@ class ContainerBase(Component[T_container_props, T_child]):
                                       list(layout.keys()))
         # remove replaced components first.
         comps_frontend = {
-            c._flow_uid: c
+            c._flow_uid_encoded: c
             for c in self._get_all_nested_childs(list(layout.keys()))
         }
         comps_frontend_dict = {
             k: v.to_dict()
             for k, v in comps_frontend.items()
         }
-        child_uids = [self[c]._flow_uid for c in self._child_comps]
+        child_uids = [self[c]._flow_uid_encoded for c in self._child_comps]
         update_msg: Dict[str, Any] = {
             "childs": child_uids
         }
@@ -2252,8 +2277,8 @@ class MatchCase(ContainerBase[MatchCaseProps, Component]):
 
 def create_ignore_usr_msg(comp: Component):
     msg = comp.create_user_msg_event((UserMessage.create_warning(
-        comp._flow_uid, "UI Running",
-        f"UI {comp._flow_uid}@{str(type(comp).__name__)} is still running, so ignore your control"
+        comp._flow_uid_encoded, "UI Running",
+        f"UI {comp._flow_uid_encoded}@{str(type(comp).__name__)} is still running, so ignore your control"
     )))
     return msg
 

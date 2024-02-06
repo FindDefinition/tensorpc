@@ -9,12 +9,11 @@ from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
                                TypeAlias)
 import abc
 from collections.abc import MutableMapping
-import copy 
+import copy
 
 from pydantic_core import PydanticCustomError, core_schema
 from pydantic import (
-    GetCoreSchemaHandler,
-)
+    GetCoreSchemaHandler, )
 
 ValueType: TypeAlias = Union[int, float, str]
 NumberType: TypeAlias = Union[int, float]
@@ -23,7 +22,9 @@ STRING_LENGTH_LIMIT = 500
 T = TypeVar("T")
 
 
-def flatten_dict(d: MutableMapping, parent_key: str = '', sep: str ='.') -> MutableMapping:
+def flatten_dict(d: MutableMapping,
+                 parent_key: str = '',
+                 sep: str = '.') -> MutableMapping:
     items: List[Any] = []
     for k, v in d.items():
         new_key = parent_key + sep + k if parent_key else k
@@ -33,13 +34,14 @@ def flatten_dict(d: MutableMapping, parent_key: str = '', sep: str ='.') -> Muta
             items.append((new_key, v))
     return dict(items)
 
-class Undefined:
 
+class Undefined:
     def __repr__(self) -> str:
         return "undefined"
 
     @classmethod
-    def __get_pydantic_core_schema__(cls, _source_type: Any, _handler: GetCoreSchemaHandler):
+    def __get_pydantic_core_schema__(cls, _source_type: Any,
+                                     _handler: GetCoreSchemaHandler):
         return core_schema.no_info_after_validator_function(
             cls.validate,
             core_schema.any_schema(),
@@ -53,14 +55,18 @@ class Undefined:
 
     def __eq__(self, o: object) -> bool:
         return isinstance(o, Undefined)
-    
+
     def __ne__(self, o: object) -> bool:
         return not isinstance(o, Undefined)
+
+    def __hash__(self) -> int:
+        # for python 3.11
+        return 0
+
 
 class BackendOnlyProp(Generic[T]):
     """when wrap a property with this class, it will be ignored when serializing to frontend
     """
-
     def __init__(self, data: T) -> None:
         super().__init__()
         self.data = data
@@ -69,7 +75,8 @@ class BackendOnlyProp(Generic[T]):
         return "BackendOnlyProp"
 
     @classmethod
-    def __get_pydantic_core_schema__(cls, _source_type: Any, _handler: GetCoreSchemaHandler):
+    def __get_pydantic_core_schema__(cls, _source_type: Any,
+                                     _handler: GetCoreSchemaHandler):
         return core_schema.no_info_after_validator_function(
             cls.validate,
             core_schema.any_schema(),
@@ -80,13 +87,13 @@ class BackendOnlyProp(Generic[T]):
         if not isinstance(v, BackendOnlyProp):
             raise ValueError('BackendOnlyProp required')
         return cls(v.data)
-    
+
     def __eq__(self, o: object) -> bool:
         if isinstance(o, BackendOnlyProp):
             return o.data == self.data
         else:
             return o == self.data
-    
+
     def __ne__(self, o: object) -> bool:
         if isinstance(o, BackendOnlyProp):
             return o.data != self.data
@@ -142,9 +149,12 @@ def as_dict_no_undefined(obj: Any):
     return dataclasses.asdict(_DataclassSer(obj),
                               dict_factory=undefined_dict_factory)["obj"]
 
-def asdict_field_only(obj, *, dict_factory: Callable[[List[Tuple[str, Any]]], Dict[str, Any]]=dict):
+
+def asdict_field_only(obj,
+                      *,
+                      dict_factory: Callable[[List[Tuple[str, Any]]],
+                                             Dict[str, Any]] = dict):
     "(list[tuple[str, Any]]) -> dict[str, Any]"
-    
     """same as dataclasses.asdict except that this function
     won't recurse into nested container.
     """
@@ -152,17 +162,23 @@ def asdict_field_only(obj, *, dict_factory: Callable[[List[Tuple[str, Any]]], Di
         raise TypeError("asdict() should be called on dataclass instances")
     return _asdict_field_only_inner(obj, dict_factory)
 
+
 def _asdict_field_only_inner(obj, dict_factory):
     if dataclasses.is_dataclass(obj):
         result = []
         for f in dataclasses.fields(obj):
-            value = _asdict_field_only_inner(getattr(obj, f.name), dict_factory)
+            value = _asdict_field_only_inner(getattr(obj, f.name),
+                                             dict_factory)
             result.append((f.name, value))
         return dict_factory(result)
     else:
         return copy.deepcopy(obj)
-    
-def asdict_flatten_field_only(obj, *, dict_factory: Callable[[List[Tuple[str, Any]]], Dict[str, Any]]=dict):
+
+
+def asdict_flatten_field_only(obj,
+                              *,
+                              dict_factory: Callable[[List[Tuple[str, Any]]],
+                                                     Dict[str, Any]] = dict):
     """same as dataclasses.asdict except that this function
     won't recurse into nested container.
     """
@@ -170,18 +186,31 @@ def asdict_flatten_field_only(obj, *, dict_factory: Callable[[List[Tuple[str, An
         raise TypeError("asdict() should be called on dataclass instances")
     return _asdict_flatten_field_only(obj, dict_factory)
 
-def _asdict_flatten_field_only(obj, dict_factory, parent_key: str = '', sep: str ='.'):
+
+def _asdict_flatten_field_only(obj,
+                               dict_factory,
+                               parent_key: str = '',
+                               sep: str = '.'):
     result = []
     for f in dataclasses.fields(obj):
         obj_child = getattr(obj, f.name)
         new_key = parent_key + sep + f.name if parent_key else f.name
         if dataclasses.is_dataclass(obj_child):
-            result.extend(_asdict_flatten_field_only(obj_child, dict_factory, new_key, sep=sep).items())
+            result.extend(
+                _asdict_flatten_field_only(obj_child,
+                                           dict_factory,
+                                           new_key,
+                                           sep=sep).items())
         else:
             result.append((new_key, obj_child))
     return dict_factory(result)
 
-def asdict_no_deepcopy(obj, *, dict_factory: Callable[[List[Tuple[str, Any]]], Dict[str, Any]]=dict, obj_factory: Optional[Callable[[Any], Any]]=None):
+
+def asdict_no_deepcopy(obj,
+                       *,
+                       dict_factory: Callable[[List[Tuple[str, Any]]],
+                                              Dict[str, Any]] = dict,
+                       obj_factory: Optional[Callable[[Any], Any]] = None):
     """Return the fields of a dataclass instance as a new dictionary mapping
     field names to field values.
 
@@ -209,7 +238,8 @@ def _asdict_inner(obj, dict_factory, obj_factory=None):
     if dataclasses.is_dataclass(obj):
         result = []
         for f in dataclasses.fields(obj):
-            value = _asdict_inner(getattr(obj, f.name), dict_factory, obj_factory)
+            value = _asdict_inner(getattr(obj, f.name), dict_factory,
+                                  obj_factory)
             result.append((f.name, value))
         return dict_factory(result)
     elif isinstance(obj, tuple) and hasattr(obj, '_fields'):
@@ -232,12 +262,14 @@ def _asdict_inner(obj, dict_factory, obj_factory=None):
         #   namedtuples, we could no longer call asdict() on a data
         #   structure where a namedtuple was used as a dict key.
 
-        return type(obj)(*[_asdict_inner(v, dict_factory, obj_factory) for v in obj])
+        return type(obj)(
+            *[_asdict_inner(v, dict_factory, obj_factory) for v in obj])
     elif isinstance(obj, (list, tuple)):
         # Assume we can create an object of this type by passing in a
         # generator (which is not true for namedtuples, handled
         # above).
-        return type(obj)(_asdict_inner(v, dict_factory, obj_factory) for v in obj)
+        return type(obj)(_asdict_inner(v, dict_factory, obj_factory)
+                         for v in obj)
     elif isinstance(obj, dict):
         return type(obj)((_asdict_inner(k, dict_factory, obj_factory),
                           _asdict_inner(v, dict_factory, obj_factory))
@@ -247,16 +279,25 @@ def _asdict_inner(obj, dict_factory, obj_factory=None):
             obj = obj_factory(obj)
         return obj
 
+
 @dataclasses.dataclass
 class DataClassWithUndefined:
-
-    def get_dict_and_undefined(self, state: Dict[str, Any]):
+    def get_dict_and_undefined(
+            self,
+            state: Dict[str, Any],
+            dict_factory: Callable[[List[Tuple[str, Any]]],
+                                   Dict[str, Any]] = undefined_dict_factory,
+            obj_factory: Optional[Callable[[Any], Any]] = None):
         this_type = type(self)
         res = {}
         # we only support update in first-level dict,
         # so we ignore all undefined in childs.
-        ref_dict = dataclasses.asdict(self,
-                                      dict_factory=undefined_dict_factory)
+        ref_dict = asdict_no_deepcopy(self,
+                                      dict_factory=dict_factory,
+                                      obj_factory=obj_factory)
+        assert isinstance(ref_dict, dict)
+        # ref_dict = dataclasses.asdict(self,
+        #                               dict_factory=undefined_dict_factory)
         res_und = []
         for field in dataclasses.fields(this_type):
             if field.name in state:
@@ -269,11 +310,20 @@ class DataClassWithUndefined:
                 res[res_camel] = val
         return res, res_und
 
-    def get_dict(self, to_camel: bool = True):
+    def get_dict(self,
+                 to_camel: bool = True,
+                 dict_factory: Callable[[List[Tuple[str, Any]]],
+                                        Dict[str,
+                                             Any]] = undefined_dict_factory,
+                 obj_factory: Optional[Callable[[Any], Any]] = None):
         this_type = type(self)
         res = {}
-        ref_dict = dataclasses.asdict(self,
-                                      dict_factory=undefined_dict_factory)
+        ref_dict = asdict_no_deepcopy(self,
+                                      dict_factory=dict_factory,
+                                      obj_factory=obj_factory)
+        assert isinstance(ref_dict, dict)
+        # ref_dict = dataclasses.asdict(self,
+        #                               dict_factory=undefined_dict_factory)
         for field in dataclasses.fields(this_type):
             if to_camel:
                 res_camel = snake_to_camel(field.name)
@@ -286,11 +336,13 @@ class DataClassWithUndefined:
             res[res_camel] = val
         return res
 
-    def get_flatten_dict(self):
+    def get_flatten_dict(
+        self,
+        dict_factory: Callable[[List[Tuple[str, Any]]],
+                               Dict[str, Any]] = undefined_dict_factory):
         this_type = type(self)
         res = {}
-        ref_dict = asdict_flatten_field_only(self,
-                                      dict_factory=undefined_dict_factory)
+        ref_dict = asdict_flatten_field_only(self, dict_factory=dict_factory)
         for field in dataclasses.fields(this_type):
             res_camel = field.name
             if field.name not in ref_dict:
@@ -300,9 +352,11 @@ class DataClassWithUndefined:
             res[res_camel] = val
         return res
 
+
 class CommonQualNames:
     TorchTensor = "torch.Tensor"
     TVTensor = "cumm.core_cc.tensorview_bind.Tensor"
+
 
 class TensorType(enum.Enum):
     Unknown = ""
@@ -337,11 +391,13 @@ def _div_up(x: int, y: int):
 
 _FOLDER_TYPES = {JsonLikeType.ListFolder.value, JsonLikeType.DictFolder.value}
 
+
 @dataclasses.dataclass(eq=True)
 class IconButtonData:
     id: ValueType
     icon: int
     tooltip: Union[Undefined, str] = undefined
+
 
 @dataclasses.dataclass(eq=True)
 class ContextMenuData:
@@ -382,7 +438,7 @@ class JsonLikeNode:
         res: List[str] = []
         start = index + 1
         for l in lengths:
-            end = start + l 
+            end = start + l
             res.append(uid[start:end])
             start = end + split_length
         return res
@@ -528,7 +584,7 @@ def parse_obj_to_jsonlike(obj, name: str, id: str):
         obj_copy = dataclasses.replace(obj)
         obj_copy.name = name
         obj_copy.id = id
-        obj_copy.drag = False 
+        obj_copy.drag = False
         return obj_copy
     elif isinstance(obj, enum.Enum):
         return JsonLikeNode(id,
@@ -605,6 +661,7 @@ def parse_obj_to_jsonlike(obj, name: str, id: str):
                             value=value,
                             typeStr=obj_type.__qualname__)
 
+
 class TreeItem(abc.ABC):
     @abc.abstractmethod
     async def get_child_desps(self) -> Dict[str, JsonLikeNode]:
@@ -618,21 +675,25 @@ class TreeItem(abc.ABC):
         """name and id is determined by parent, only root node use name provided
         by this method.
         """
-        return None 
-    
+        return None
+
     async def handle_button(self, button_key: str) -> Optional[bool]:
         return None
-    
-    async def handle_child_button(self, button_key: str, child_key: str) -> Optional[bool]:
+
+    async def handle_child_button(self, button_key: str,
+                                  child_key: str) -> Optional[bool]:
         return None
-    
-    async def handle_context_menu(self, userdata: Dict[str, Any]) -> Optional[bool]:
+
+    async def handle_context_menu(self, userdata: Dict[str,
+                                                       Any]) -> Optional[bool]:
         return None
-    
-    async def handle_child_context_menu(self, child_key: str, userdata: Dict[str, Any]) -> Optional[bool]:
+
+    async def handle_child_context_menu(
+            self, child_key: str, userdata: Dict[str, Any]) -> Optional[bool]:
         return None
-    
-    async def handle_child_rename(self, child_key: str, newname: str) -> Optional[bool]:
+
+    async def handle_child_rename(self, child_key: str,
+                                  newname: str) -> Optional[bool]:
         return None
 
     def default_expand(self) -> bool:

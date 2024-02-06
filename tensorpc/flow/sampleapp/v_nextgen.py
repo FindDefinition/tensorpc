@@ -110,15 +110,29 @@ class DevApp:
         #         three.Image().prop(image=random_img)
         #     ])
         # ])
-        random_img = np.random.randint(0, 255, (128 * 16, 128 * 16, 3), dtype=np.uint8)
+        # random_img = np.random.randint(0, 255, (128 * 16, 128 * 16, 3), dtype=np.uint8)
 
-        with V.group("debug"):
-            V.image(random_img, pos=(5, 5, 2), use_datatex=True)
+        # with V.group("debug"):
+        #     V.image(random_img, pos=(5, 5, 2), use_datatex=True)
         with V.group("debugX"):
 
-            V.image(random_img, pos=(0, 5, 2), use_datatex=True)
+            # V.image(random_img, pos=(0, 5, 2), use_datatex=True)
 
             points = np.random.uniform(-1, 1, size=[1000, 3]).astype(np.float32)
+            # V.bounding_box((1, 1, 1))
+            mesh = three.Mesh([
+                three.BoxGeometry(1, 1, 1),
+                three.MeshBasicMaterial().prop(color="red")
+            ]).prop(position=(2, 0, 0), enableSelect=True, enablePivotControl=True, pivotControlProps=three.PivotControlsCommonProps(
+                        depthTest=False, annotations=True, anchor=(0, 0, 0)))
+            mesh.event_change.on(lambda x: print(x))
+
+            V.three_ui(mesh)
+            box = three.BoundingBox([2, 2, 2]).prop(position=(4, 0, 0), enableSelect=True, enablePivotControl=True, pivotControlProps=three.PivotControlsCommonProps(
+                        depthTest=False, annotations=True, anchor=(0, 0, 0)))
+            box.event_change.on(lambda x: print(x))
+
+            V.three_ui(box)
 
         # await self.canvas._unknown_visualization("foo.bar", points)
 

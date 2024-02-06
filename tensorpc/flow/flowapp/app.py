@@ -70,7 +70,7 @@ from tensorpc.core.serviceunit import (ObjectReloadManager,
                                        SimpleCodeManager, get_qualname_to_code)
 from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.constants import TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
-from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem
+from tensorpc.flow.coretypes import ComponentUid, ScheduleEvent, StorageDataItem
 from tensorpc.flow.flowapp.components.plus.objinspect.inspector import get_exception_frame_stack
 from tensorpc.flow.flowapp.components.plus.objinspect.treeitems import TraceTreeItem
 from tensorpc.flow.flowapp.reload import (AppReloadManager,
@@ -257,21 +257,23 @@ class App:
         self._is_external_root = False
         self._use_app_editor = False
         # self.__flowapp_external_wrapped_obj = external_wrapped_obj
+        root_uid = ComponentUid.from_parts([_ROOT])
+
         if external_root is not None:
             # TODO better mount
             root = external_root
-            external_root._flow_uid = _ROOT
+            external_root._flow_uid = root_uid
             # if root._children is not None:
             #     # consume this _children
             #     root.add_layout(root._children)
             #     root._children = None
             # layout saved in external_root
             # self._uid_to_comp = root._uid_to_comp
-            root._attach(_ROOT, self._flow_app_comp_core)
+            root._attach(root_uid, self._flow_app_comp_core)
 
             self._is_external_root = True
         else:
-            root = mui.FlexBox(uid=_ROOT,
+            root = mui.FlexBox(uid=root_uid,
                                app_comp_core=self._flow_app_comp_core)
             root.prop(flexFlow=flex_flow)
             if external_wrapped_obj is not None:
@@ -327,7 +329,7 @@ class App:
 
     def add_file_resource(
         self, key: str,
-        handler: Callable[[], Union[bytes, FileResource,
+        handler: Callable[..., Union[bytes, FileResource,
                                     Coroutine[None, None,
                                               Union[bytes, FileResource]]]]):
         self._flowapp_file_resource_handlers[key] = handler
@@ -538,14 +540,14 @@ class App:
                     mui.Select,
                     mui.MultipleSelect,
             )):
-                state[comp._flow_uid] = {
+                state[comp._flow_uid_encoded] = {
                     "type": comp._flow_comp_type.value,
                     "props": comp.get_sync_props(),
                 }
             # user state
             st = comp.get_persist_props()
             if st is not None:
-                user_state[comp._flow_uid] = {
+                user_state[comp._flow_uid_encoded] = {
                     "type": comp._flow_comp_type.value,
                     "state": st,
                 }
@@ -565,7 +567,7 @@ class App:
         # print("persist_storage", state["persist_storage"])
         if state["persist_storage"]:
             self.__persist_storage.update(state["persist_storage"])
-        uid_to_comp = self.root._get_uid_to_comp_dict()
+        uid_to_comp = self.root._get_uid_encoded_to_comp_dict()
         if self._enable_value_cache:
             ev = AppEvent("", {})
             for k, s in uistate.items():
@@ -601,7 +603,7 @@ class App:
         self.root._prevent_add_layout = False
         prev_comps = self.__previous_error_sync_props.copy()
         prev_user_states = self.__previous_error_persist_state.copy()
-        uid_to_comp = self.root._get_uid_to_comp_dict()
+        uid_to_comp = self.root._get_uid_encoded_to_comp_dict()
         if reload:
             for u, c in uid_to_comp.items():
                 prev_comps[u] = c._to_dict_with_sync_props()
@@ -621,10 +623,11 @@ class App:
             await self.root._run_special_methods(
                 [], [x[1] for x in detached_items], self._flow_reload_manager)
             del detached
+        root_uid = ComponentUid.from_parts([_ROOT])
 
         await self.root._clear()
         # self._uid_to_comp.clear()
-        self.root._flow_uid = _ROOT
+        self.root._flow_uid = root_uid
         new_is_flex = False
         res: mui.LayoutType = {}
         wrapped_obj = self.root._wrapped_obj
@@ -639,7 +642,7 @@ class App:
                         #     temp_res.add_layout(temp_res._children)
                         #     temp_res._children = None
                         # temp_res._flow_uid = _ROOT
-                        attached = temp_res._attach(_ROOT,
+                        attached = temp_res._attach(root_uid,
                                                     self._flow_app_comp_core)
                         # self._uid_to_comp = temp_res._uid_to_comp
                         new_is_flex = True
@@ -677,8 +680,8 @@ class App:
                 res = {str(i): v for i, v in enumerate(res)}
             res_anno: Dict[str, Component] = {**res}
             self.root.add_layout(res_anno)
-            attached = self.root._attach(_ROOT, self._flow_app_comp_core)
-        uid_to_comp = self.root._get_uid_to_comp_dict()
+            attached = self.root._attach(root_uid, self._flow_app_comp_core)
+        uid_to_comp = self.root._get_uid_encoded_to_comp_dict()
         # self._uid_to_comp[_ROOT] = self.root
         self.root._prevent_add_layout = True
         if reload:
@@ -726,7 +729,7 @@ class App:
         uid_to_comp = self.root._get_uid_to_comp_dict()
         # make sure did_mount is called from leaf to root (reversed breadth first order)
         uid_to_comp_items = list(uid_to_comp.items())
-        uid_to_comp_items.sort(key=lambda x: len(x[0].split(".")),
+        uid_to_comp_items.sort(key=lambda x: len(x[0].parts),
                                reverse=True)
         with enter_app_conetxt(self):
             for _, v in uid_to_comp_items:
@@ -755,7 +758,7 @@ class App:
     async def app_terminate_async(self):
         """override this to init app after server stop
         """
-        uid_to_comp = self.root._get_uid_to_comp_dict()
+        uid_to_comp = self.root._get_uid_encoded_to_comp_dict()
         with enter_app_conetxt(self):
             for v in uid_to_comp.values():
                 special_methods = v.get_special_methods(
@@ -795,7 +798,7 @@ class App:
         return self._app_service_unit
 
     def _get_app_layout(self, with_code_editor: bool = True):
-        uid_to_comp = self.root._get_uid_to_comp_dict()
+        uid_to_comp = self.root._get_uid_encoded_to_comp_dict()
         # print({k: v._flow_uid for k, v in uid_to_comp.items()})
         res = {
             "layout": {
@@ -1284,7 +1287,7 @@ class EditableApp(App):
                     self._watchdog_observer.unschedule(obentry.watch)
 
     def __get_default_observe_paths(self):
-        uid_to_comp = self.root._get_uid_to_comp_dict()
+        uid_to_comp = self.root._get_uid_encoded_to_comp_dict()
         res: Set[str] = set()
         for k, v in uid_to_comp.items():
             v_file = v._flow_comp_def_path
@@ -1302,7 +1305,7 @@ class EditableApp(App):
 
     def __get_callback_metas_in_file(self, change_file: str,
                                      layout: mui.FlexBox):
-        uid_to_comp = layout._get_uid_to_comp_dict()
+        uid_to_comp = layout._get_uid_encoded_to_comp_dict()
         resolved_path = self._flow_reload_manager._resolve_path_may_in_memory(
             change_file)
         return create_reload_metas(uid_to_comp, resolved_path)

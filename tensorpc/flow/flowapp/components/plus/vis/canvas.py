@@ -12,6 +12,7 @@ import numpy as np
 from tensorpc.core.moduleid import get_qualname_of_type
 
 from tensorpc.flow import marker
+from tensorpc.flow.coretypes import ComponentUid
 from tensorpc.flow.flowapp.appcore import find_component_by_uid_with_type_check
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.components.plus.arraycommon import can_cast_to_np_array, try_cast_to_np_array
@@ -219,6 +220,83 @@ with V.group("example"):
 """
 
 
+class ComplexCanvasView(three.View):
+
+    def __init__(
+            self,
+            key: str,
+            childs: Optional[three.ThreeLayoutType] = None,
+            transparent_canvas: bool = False,
+            custom_effect: Optional[three.EffectComposer] = None,
+            camera: Optional[Union[three.PerspectiveCamera, three.OrthographicCamera]] = None,
+            control: Optional[three.CameraControl] = None,
+            enable_gizmo: bool = True):
+        if camera is None:
+            camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
+        self.camera = camera
+        self.camera.prop(layers=1 | (1 << 31)) # only objects in layer 0 and 31 is visible.
+        if control is None:
+            control = three.CameraControl().prop(makeDefault=True)
+        self.ctrl = control
+        self._infgrid = three.InfiniteGridHelper(5, 50, "gray")
+        self._axis_helper = three.AxesHelper(20)
+
+        self._dynamic_grid = three.Group([self._infgrid, self._axis_helper])
+
+        init_layout = {
+            # "camera": self.camera,
+            "grid": self._dynamic_grid,
+            # "utree": self._user_obj_tree_group,
+            "effects": custom_effect,
+        }
+        gizmo_helper = three.GizmoHelper().prop(alignment="bottom-right",
+                                                      renderPriority=2)
+        if enable_gizmo:
+            init_layout["gizmo"] = gizmo_helper
+        self._lock = asyncio.Lock()
+        for comp in init_layout.values():
+            lock_component(comp)
+        reserved_group = three.Group(init_layout)
+        lock_component(self._axis_helper)
+        lock_component(self._infgrid)
+        lock_component(reserved_group)
+        layout: three.ThreeLayoutType = {
+            "reserved": reserved_group,
+        }
+        self.reserved_group = reserved_group
+        if childs is not None:
+            layout["init"] = three.Group(childs)
+        self._init_layout = layout
+        self._item_root = three.SelectionContext(layout,
+                                                 self._on_3d_object_select).prop(useOutline=True)
+
+        super().__init__({
+            "root": self._item_root,
+            "camera": self.camera,
+            "control": self.ctrl,
+        })
+        self.prop(flex=1, allowKeyboardEvent=True, menuItems=[
+                    mui.MenuItem("reset", "reset"),
+                    mui.MenuItem("clear", "clear"),
+                ])
+        self.event_context_menu.on(self._on_menu_select)
+
+    def _set_selection_callback(self):
+        pass 
+
+    async def _on_menu_select(self, value: str):
+        if value == "reset":
+            await self._on_reset_cam()
+        elif value == "clear":
+            await self.clear()
+
+    async def clear(self):
+        await self._item_root.set_new_layout({**self._init_layout})
+        await self.item_tree.update_tree()
+
+    async def _on_reset_cam(self):
+        await self.ctrl.reset_camera()
+
 class ComplexCanvas(mui.FlexBox):
     """
     a blender-like canvas
@@ -262,13 +340,12 @@ class ComplexCanvas(mui.FlexBox):
         self._dynamic_grid = three.Group([self._infgrid, self._axis_helper])
         self._cfg_container = mui.Fragment([])
         self._is_transparent = transparent_canvas
-        self._gizmo_helper = three.GizmoHelper().prop(alignment="bottom-right",
-                                                      renderPriority=2)
+        self._gizmo_helper = three.GizmoHelper().prop(alignment="bottom-right")
         self._cur_detail_layout_uid: Optional[str] = None
-        self._cur_detail_layout_object_id: Optional[str] = None
+        self._cur_detail_layout_object_id: Optional[ComponentUid] = None
 
         self._cur_table_uid: Optional[str] = None
-        self._cur_table_object_id: Optional[str] = None
+        self._cur_table_object_id: Optional[ComponentUid] = None
         self._dnd_trees: Set[str] = set()
 
         self._user_obj_tree_item_to_meta: Dict[int, CanvasUserTreeItem] = {}
@@ -316,17 +393,17 @@ class ComplexCanvas(mui.FlexBox):
                                                  height="100%",
                                                  width="100%",
                                                  overflow="auto")
-        if custom_effect is None:
-            custom_effect = three.EffectComposer([
-                three.Outline().prop(blur=True,
-                                     edgeStrength=100,
-                                     width=2000,
-                                     visibleEdgeColor=0xfff,
-                                     hiddenEdgeColor=0xfff,
-                                     blendFunction=three.BlendFunction.ALPHA),
-                three.ToneMapping().prop(
-                    mode=three.ToneMapppingMode.ACES_FILMIC),
-            ]).prop(autoClear=False)
+        # if custom_effect is None:
+        #     custom_effect = three.EffectComposer([
+        #         three.Outline().prop(blur=True,
+        #                              edgeStrength=100,
+        #                              width=2000,
+        #                              visibleEdgeColor=0xfff,
+        #                              hiddenEdgeColor=0xfff,
+        #                              blendFunction=three.BlendFunction.ALPHA),
+        #         three.ToneMapping().prop(
+        #             mode=three.ToneMapppingMode.ACES_FILMIC),
+        #     ]).prop(autoClear=False)
 
         init_layout = {
             # "camera": self.camera,
@@ -334,7 +411,7 @@ class ComplexCanvas(mui.FlexBox):
             "screen shot": self._screen_shot_v2,
             "gizmo": self._gizmo_helper,
             "utree": self._user_obj_tree_group,
-            "effects": custom_effect,
+            # "effects": custom_effect,
         }
         self._lock = asyncio.Lock()
         for comp in init_layout.values():
@@ -351,7 +428,7 @@ class ComplexCanvas(mui.FlexBox):
             layout["init"] = three.Group(init_canvas_childs)
         self._init_layout = layout
         self._item_root = three.SelectionContext(layout,
-                                                 self._on_3d_object_select)
+                                                 self._on_3d_object_select).prop(useOutline=True)
         # self._item_root = three.Group(layout)
         self.key = key
         self.prop_container = mui.HBox([]).prop(overflow="auto",
@@ -374,7 +451,11 @@ class ComplexCanvas(mui.FlexBox):
             "root": self._item_root,
             "camera": self.camera,
             "control": self.ctrl,
-        }).prop(flex=1, allowKeyboardEvent=True, flat=True, shadows=True)
+        }).prop(flex=1, allowKeyboardEvent=True, shadows=True, menuItems=[
+            mui.MenuItem("reset", "reset"),
+            mui.MenuItem("clear", "clear"),
+        ])
+        self.canvas.event_context_menu.on(self._on_menu_select)
         self.custom_tree_handler = CanvasTreeItemHandler()
         self.item_tree = BasicObjectTree(
             self._item_root,
@@ -389,6 +470,7 @@ class ComplexCanvas(mui.FlexBox):
             border="4px solid transparent",
             sxOverDrop={"border": "4px solid green"},
         )
+
 
     @marker.mark_create_layout
     def _layout_func(self):
@@ -592,6 +674,12 @@ class ComplexCanvas(mui.FlexBox):
             ]).prop(overflow="hidden", defaultSizes=[3, 1], vertical=False)
         ]
 
+    async def _on_menu_select(self, value: str):
+        if value == "reset":
+            await self._on_reset_cam()
+        elif value == "clear":
+            await self.clear()
+
     async def set_new_tree_root(self, tree_root: T,
                                 tree_child_accessor: Callable[[T], Dict[str,
                                                                         Any]]):
@@ -757,21 +845,21 @@ class ComplexCanvas(mui.FlexBox):
             # await self.send_and_wait(ev)
         elif uid == "box.edge_width":
             ev = mui.AppEvent("", {})
-            # all_childs = self._dynamic_boxes._get_uid_to_comp_dict()
+            # all_childs = self._dynamic_boxes._get_uid_encoded_to_comp_dict()
             # for v in all_childs.values():
             #     if isinstance(v, three.BoundingBox):
             #         ev += v.update_event(edgeWidth=value)
             # await self.send_and_wait(ev)
         elif uid == "box.opacity":
             ev = mui.AppEvent("", {})
-            # all_childs = self._dynamic_boxes._get_uid_to_comp_dict()
+            # all_childs = self._dynamic_boxes._get_uid_encoded_to_comp_dict()
             # for v in all_childs.values():
             #     if isinstance(v, three.BoundingBox):
             #         ev += v.update_event(opacity=value)
             # await self.send_and_wait(ev)
         elif uid == "box.add_cross":
             ev = mui.AppEvent("", {})
-            # all_childs = self._dynamic_boxes._get_uid_to_comp_dict()
+            # all_childs = self._dynamic_boxes._get_uid_encoded_to_comp_dict()
             # for v in all_childs.values():
             #     if isinstance(v, three.BoundingBox):
             #         ev += v.update_event(add_cross=value)
@@ -819,7 +907,7 @@ class ComplexCanvas(mui.FlexBox):
             obj_local_id = ev.keys[0]
             if obj_local_id in group._child_comps:
                 await self.ctrl.lookat_object(
-                    group._child_comps[obj_local_id]._flow_uid)
+                    group._child_comps[obj_local_id]._flow_uid_encoded)
 
     async def clear(self):
         await self._item_root.set_new_layout({**self._init_layout})

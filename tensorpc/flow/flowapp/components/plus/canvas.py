@@ -279,21 +279,21 @@ class SimpleCanvas(mui.FlexBox):
             await self.send_and_wait(ev)
         elif uid == "box.edge_width":
             ev = mui.AppEvent("", {})
-            all_childs = self._dynamic_boxes._get_uid_to_comp_dict()
+            all_childs = self._dynamic_boxes._get_uid_encoded_to_comp_dict()
             for v in all_childs.values():
                 if isinstance(v, three.BoundingBox):
                     ev += v.update_event(edgeWidth=value)
             await self.send_and_wait(ev)
         elif uid == "box.opacity":
             ev = mui.AppEvent("", {})
-            all_childs = self._dynamic_boxes._get_uid_to_comp_dict()
+            all_childs = self._dynamic_boxes._get_uid_encoded_to_comp_dict()
             for v in all_childs.values():
                 if isinstance(v, three.BoundingBox):
                     ev += v.update_event(opacity=value)
             await self.send_and_wait(ev)
         elif uid == "box.add_cross":
             ev = mui.AppEvent("", {})
-            all_childs = self._dynamic_boxes._get_uid_to_comp_dict()
+            all_childs = self._dynamic_boxes._get_uid_encoded_to_comp_dict()
             for v in all_childs.values():
                 if isinstance(v, three.BoundingBox):
                     ev += v.update_event(addCross=value)

@@ -34,6 +34,8 @@ import numpy as np
 from PIL import Image as PILImage
 from typing_extensions import Literal, TypeAlias, TypedDict
 from pydantic import field_validator, model_validator
+
+from tensorpc.flow.coretypes import ComponentUid
 from .typemetas import Vector3Type
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.defs import FileResource
@@ -1201,7 +1203,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
     def __init__(self,
                  children: Optional[LayoutType] = None,
                  base_type: UIType = UIType.FlexBox,
-                 uid: str = "",
+                 uid: Optional[ComponentUid] = None,
                  app_comp_core: Optional[AppComponentCore] = None,
                  wrapped_obj: Optional[Any] = None) -> None:
         if children is not None and isinstance(children, list):
@@ -1466,7 +1468,7 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
 
     async def headless_write(self, content: str):
         uiev = UIEvent(
-            {self._flow_uid: (FrontendEventType.Change.value, content)})
+            {self._flow_uid_encoded: (FrontendEventType.Change.value, content)})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -1702,7 +1704,7 @@ class SwitchBase(MUIComponentBase[SwitchProps]):
 
     async def headless_write(self, checked: bool):
         uiev = UIEvent(
-            {self._flow_uid: (FrontendEventType.Change.value, checked)})
+            {self._flow_uid_encoded: (FrontendEventType.Change.value, checked)})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -1842,7 +1844,7 @@ class Select(MUIComponentBase[SelectProps]):
 
     async def headless_select(self, value: ValueType):
         uiev = UIEvent(
-            {self._flow_uid: (FrontendEventType.Change.value, value)})
+            {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -1935,7 +1937,7 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
 
     async def headless_select(self, values: List[ValueType]):
         uiev = UIEvent(
-            {self._flow_uid: (FrontendEventType.Change.value, values)})
+            {self._flow_uid_encoded: (FrontendEventType.Change.value, values)})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -2071,7 +2073,7 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
 
     async def headless_select(self, value: ValueType):
         uiev = UIEvent(
-            {self._flow_uid: (FrontendEventType.Change.value, value)})
+            {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -2175,7 +2177,7 @@ class MultipleAutocomplete(MUIComponentBase[MultipleAutocompleteProps]):
 
     async def headless_select(self, value: List[Dict[str, Any]]):
         uiev = UIEvent(
-            {self._flow_uid: (FrontendEventType.Change.value, value)})
+            {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -2280,7 +2282,7 @@ class Slider(MUIComponentBase[SliderProps]):
 
     async def headless_change(self, value: NumberType):
         uiev = UIEvent(
-            {self._flow_uid: (FrontendEventType.Change.value, value)})
+            {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -2387,7 +2389,7 @@ class RangeSlider(MUIComponentBase[RangeSliderProps]):
 
     async def headless_change(self, value: NumberType):
         uiev = UIEvent(
-            {self._flow_uid: (FrontendEventType.Change.value, value)})
+            {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -2492,7 +2494,7 @@ class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
 
     async def headless_change(self, value: NumberType):
         uiev = UIEvent(
-            {self._flow_uid: (FrontendEventType.Change.value, value)})
+            {self._flow_uid_encoded: (FrontendEventType.Change.value, value)})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -2624,7 +2626,7 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
 
     async def headless_run(self):
         uiev = UIEvent({
-            self._flow_uid:
+            self._flow_uid_encoded:
             (FrontendEventType.Change.value, TaskLoopEvent.Start.value)
         })
         return await self.put_app_event(
@@ -2632,7 +2634,7 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
 
     async def headless_stop(self):
         uiev = UIEvent({
-            self._flow_uid:
+            self._flow_uid_encoded:
             (FrontendEventType.Change.value, TaskLoopEvent.Stop.value)
         })
         return await self.put_app_event(
@@ -2722,7 +2724,7 @@ class RawTaskLoop(MUIComponentBase[TaskLoopProps]):
 
     async def headless_event(self, ev: TaskLoopEvent):
         uiev = UIEvent(
-            {self._flow_uid: (FrontendEventType.Change.value, ev.value)})
+            {self._flow_uid_encoded: (FrontendEventType.Change.value, ev.value)})
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -3392,14 +3394,15 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
             self.name = name
 
         def get_model_dict(self):
-            comp_last_uid = self.comp._flow_uid.split(".")[-1]
+            assert self.comp._flow_uid is not None 
+            comp_last_uid = self.comp._flow_uid.parts[-1]
             return {
                 "type": "tab",
                 "id": comp_last_uid,
                 "name": self.name,
                 "component": "app",
                 "config": {
-                    "uid": self.comp._flow_uid
+                    "uid": self.comp._flow_uid_encoded
                 }
             }
 
@@ -4796,7 +4799,7 @@ class Anchor:
 class MenuItem:
     id: str
     label: Union[Undefined, str] = undefined
-    icon: Union[Undefined, str] = undefined
+    icon: Union[IconType, Undefined, str] = undefined
     inset: Union[Undefined, bool] = undefined
     iconSize: Union[Undefined, Literal["inherit", "large", "medium",
                                        "small"]] = undefined
@@ -4818,10 +4821,10 @@ class MenuListProps(MUIFlexBoxProps):
     transformOrigin: Union[Undefined, Anchor] = undefined
     menuItems: Union[List[MenuItem], Undefined] = undefined
 
-    @model_validator(mode='after')
-    def _validator_post_root(self) -> 'MenuListProps':
-        assert not isinstance(self.menuItems, Undefined), "menuItems must be provided"
-        return self
+    # @model_validator(mode='after')
+    # def _validator_post_root(self) -> 'MenuListProps':
+    #     assert not isinstance(self.menuItems, Undefined), "menuItems must be provided"
+    #     return self
 
 
 class MenuList(MUIContainerBase[MenuListProps, MUIComponentType]):
