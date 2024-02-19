@@ -15,6 +15,8 @@ from pydantic_core import PydanticCustomError, core_schema
 from pydantic import (
     GetCoreSchemaHandler, )
 
+from tensorpc.flow.coretypes import UniqueTreeId, UniqueTreeIdForTree
+
 ValueType: TypeAlias = Union[int, float, str]
 NumberType: TypeAlias = Union[int, float]
 
@@ -135,7 +137,9 @@ def split_props_to_undefined(props: Dict[str, Any]):
 def undefined_dict_factory(x: List[Tuple[str, Any]]):
     res: Dict[str, Any] = {}
     for k, v in x:
-        if not isinstance(v, (Undefined, BackendOnlyProp)):
+        if isinstance(v, UniqueTreeId):
+            res[k] = v.uid_encoded
+        elif not isinstance(v, (Undefined, BackendOnlyProp)):
             res[k] = v
     return res
 
@@ -409,7 +413,7 @@ class ContextMenuData:
 
 @dataclasses.dataclass(eq=True)
 class JsonLikeNode:
-    id: str
+    id: UniqueTreeIdForTree
     # must be id.split(SPLIT)[-1] for child of list/dict
     name: str
     type: int
@@ -419,7 +423,7 @@ class JsonLikeNode:
     children: "List[JsonLikeNode]" = dataclasses.field(default_factory=list)
     drag: Union[Undefined, bool] = undefined
     iconBtns: Union[Undefined, List[IconButtonData]] = undefined
-    realId: Union[Undefined, str] = undefined
+    realId: Union[Undefined, UniqueTreeIdForTree] = undefined
     start: Union[Undefined, int] = undefined
     # name color
     color: Union[Undefined, str] = undefined
@@ -431,30 +435,30 @@ class JsonLikeNode:
     alias: Union[Undefined, str] = undefined
     fixedIconBtns: Union[Undefined, List[IconButtonData]] = undefined
 
-    @staticmethod
-    def decode_uid(uid: str, split_length: int = 2):
-        index = uid.find("|")
-        lengths = list(map(int, uid[:index].split(",")))
-        res: List[str] = []
-        start = index + 1
-        for l in lengths:
-            end = start + l
-            res.append(uid[start:end])
-            start = end + split_length
-        return res
+    # @staticmethod
+    # def decode_uid(uid: str, split_length: int = 2):
+    #     index = uid.find("|")
+    #     lengths = list(map(int, uid[:index].split(",")))
+    #     res: List[str] = []
+    #     start = index + 1
+    #     for l in lengths:
+    #         end = start + l
+    #         res.append(uid[start:end])
+    #         start = end + split_length
+    #     return res
+
+    # @staticmethod
+    # def encode_uid(parts: List[str], split: str = ":"):
+    #     lengths = [str(len(p)) for p in parts]
+    #     lengths_str = f",".join(lengths)
+    #     return f"{lengths_str}|{split.join(parts)}"
 
     @staticmethod
-    def encode_uid(parts: List[str], split: str = "::"):
-        lengths = [str(len(p)) for p in parts]
-        lengths_str = f",".join(lengths)
-        return f"{lengths_str}|{split.join(parts)}"
-
-    @staticmethod
-    def decode_uid_legacy(uid: str, split: str = "::"):
+    def decode_uid_legacy(uid: str, split: str = ":"):
         return uid.split(split)
 
-    def last_part(self, split: str = "::"):
-        return self.id[self.id.rfind(split) + len(split):]
+    def last_part(self, split: str = ":"):
+        return self.id.parts[-1]
 
     def is_folder(self):
         return self.type in _FOLDER_TYPES
@@ -464,11 +468,12 @@ class JsonLikeNode:
             return self.dictKey.data
         return undefined
 
-    def _get_node_by_uid(self, uid: str, split: str = "::"):
+    def _get_node_by_uid(self, uid: str, split: str = ":"):
         """TODO if dict key contains split word, this function will
         produce wrong result.
         """
-        parts = uid.split(split)
+        uid_object = UniqueTreeId(uid, 1)
+        parts = uid_object.parts
         if len(parts) == 1:
             return self
         # uid contains root, remove it at first.
@@ -488,8 +493,9 @@ class JsonLikeNode:
         else:
             return node._get_node_by_uid_resursive(parts[1:])
 
-    def _get_node_by_uid_trace(self, uid: str, split: str = "::"):
-        parts = uid.split(split)
+    def _get_node_by_uid_trace(self, uid: str, split: str = ":"):
+        uid_object = UniqueTreeId(uid, 1)
+        parts = uid_object.parts
         if len(parts) == 1:
             return [self]
         # uid contains root, remove it at first.
@@ -498,8 +504,9 @@ class JsonLikeNode:
         assert found
         return [self] + nodes
 
-    def _get_node_by_uid_trace_found(self, uid: str, split: str = "::"):
-        parts = uid.split(split)
+    def _get_node_by_uid_trace_found(self, uid: str, split: str = ":"):
+        uid_object = UniqueTreeId(uid, 1)
+        parts = uid_object.parts
         if len(parts) == 1:
             return [self], True
         # uid contains root, remove it at first.
@@ -547,7 +554,7 @@ class JsonLikeNode:
         if self.type == JsonLikeType.List.value or self.type == JsonLikeType.ListFolder.value:
             for i in range(num_child):
                 this_cnt = min(total - count, divisor)
-                node = JsonLikeNode(self.id + f"{split}{i}",
+                node = JsonLikeNode(self.id.append_part(f"{i}"),
                                     f"{i}",
                                     JsonLikeType.ListFolder.value,
                                     cnt=this_cnt,
@@ -561,7 +568,7 @@ class JsonLikeNode:
             for i in range(num_child):
                 this_cnt = min(total - count, divisor)
                 keys_child = keys[count:count + this_cnt]
-                node = JsonLikeNode(self.id + f"{split}{i}",
+                node = JsonLikeNode(self.id.append_part(f"{i}"),
                                     f"{i}",
                                     JsonLikeType.DictFolder.value,
                                     cnt=this_cnt,
@@ -573,7 +580,7 @@ class JsonLikeNode:
         return res
 
 
-def parse_obj_to_jsonlike(obj, name: str, id: str):
+def parse_obj_to_jsonlike(obj, name: str, id: UniqueTreeIdForTree):
     obj_type = type(obj)
     if obj is None or obj is Ellipsis:
         return JsonLikeNode(id,

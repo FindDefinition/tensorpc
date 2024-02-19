@@ -12,7 +12,7 @@ import numpy as np
 from tensorpc.core.moduleid import get_qualname_of_type
 
 from tensorpc.flow import marker
-from tensorpc.flow.coretypes import ComponentUid
+from tensorpc.flow.coretypes import UniqueTreeId
 from tensorpc.flow.flowapp.appcore import find_component_by_uid_with_type_check
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.components.plus.arraycommon import can_cast_to_np_array, try_cast_to_np_array
@@ -342,10 +342,10 @@ class ComplexCanvas(mui.FlexBox):
         self._is_transparent = transparent_canvas
         self._gizmo_helper = three.GizmoHelper().prop(alignment="bottom-right")
         self._cur_detail_layout_uid: Optional[str] = None
-        self._cur_detail_layout_object_id: Optional[ComponentUid] = None
+        self._cur_detail_layout_object_id: Optional[UniqueTreeId] = None
 
         self._cur_table_uid: Optional[str] = None
-        self._cur_table_object_id: Optional[ComponentUid] = None
+        self._cur_table_object_id: Optional[UniqueTreeId] = None
         self._dnd_trees: Set[str] = set()
 
         self._user_obj_tree_item_to_meta: Dict[int, CanvasUserTreeItem] = {}
@@ -1154,7 +1154,7 @@ class ComplexCanvas(mui.FlexBox):
                     points.prop(colors=pick)
 
             await V._draw_all_in_vctx(vctx_unk,
-                                      rf"{unk_container._flow_uid}\..*")
+                                      rf"{unk_container._flow_uid_encoded}\..*")
             return True
         img_obj = _try_cast_to_image(obj)
         if img_obj is not None:
@@ -1162,7 +1162,7 @@ class ComplexCanvas(mui.FlexBox):
                 V.image(img_obj, name=tree_id_replaced,
                         pos=(0, 0, 0.1)).prop(scale=(3, 3, 3))
             await V._draw_all_in_vctx(vctx_unk,
-                                      rf"{unk_container._flow_uid}\..*")
+                                      rf"{unk_container._flow_uid_encoded}\..*")
             return True
         b3d_obj = _try_cast_to_box3d(obj)
         if b3d_obj is not None:
@@ -1180,7 +1180,7 @@ class ComplexCanvas(mui.FlexBox):
                         V.bounding_box(box[3:6], (0, 0, box[6]),
                                        box[:3]).prop(color=pick)
             await V._draw_all_in_vctx(vctx_unk,
-                                      rf"{unk_container._flow_uid}\..*")
+                                      rf"{unk_container._flow_uid_encoded}\..*")
             return True
         line_obj = _try_cast_to_lines(obj)
         if line_obj is not None:
@@ -1197,7 +1197,7 @@ class ComplexCanvas(mui.FlexBox):
                     line_obj.astype(np.float32))
 
             await V._draw_all_in_vctx(vctx_unk,
-                                      rf"{unk_container._flow_uid}\..*")
+                                      rf"{unk_container._flow_uid_encoded}\..*")
             return True
         return False
 

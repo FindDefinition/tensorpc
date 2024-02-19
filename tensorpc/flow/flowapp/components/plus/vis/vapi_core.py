@@ -678,7 +678,7 @@ def program(name: str, func: Callable):
                 if inspect.iscoroutine(res):
                     await res
             # we need to update tree iff tree change because update tree is very slow.
-            await _draw_all_in_vctx(vctx_program, rf"{group._flow_uid}\..*", update_iff_change=True)
+            await _draw_all_in_vctx(vctx_program, rf"{group._flow_uid_encoded}\..*", update_iff_change=True)
 
     pcfg.detail_layout = ConfigPanelV2(func_dcls_obj, callback)
     pcfg.proxy = GroupProxy("")

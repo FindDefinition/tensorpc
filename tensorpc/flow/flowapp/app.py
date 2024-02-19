@@ -70,7 +70,7 @@ from tensorpc.core.serviceunit import (ObjectReloadManager,
                                        SimpleCodeManager, get_qualname_to_code)
 from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.constants import TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
-from tensorpc.flow.coretypes import ComponentUid, ScheduleEvent, StorageDataItem
+from tensorpc.flow.coretypes import UniqueTreeId, ScheduleEvent, StorageDataItem
 from tensorpc.flow.flowapp.components.plus.objinspect.inspector import get_exception_frame_stack
 from tensorpc.flow.flowapp.components.plus.objinspect.treeitems import TraceTreeItem
 from tensorpc.flow.flowapp.reload import (AppReloadManager,
@@ -257,7 +257,7 @@ class App:
         self._is_external_root = False
         self._use_app_editor = False
         # self.__flowapp_external_wrapped_obj = external_wrapped_obj
-        root_uid = ComponentUid.from_parts([_ROOT])
+        root_uid = UniqueTreeId.from_parts([_ROOT])
 
         if external_root is not None:
             # TODO better mount
@@ -623,7 +623,7 @@ class App:
             await self.root._run_special_methods(
                 [], [x[1] for x in detached_items], self._flow_reload_manager)
             del detached
-        root_uid = ComponentUid.from_parts([_ROOT])
+        root_uid = UniqueTreeId.from_parts([_ROOT])
 
         await self.root._clear()
         # self._uid_to_comp.clear()
@@ -688,15 +688,15 @@ class App:
             # comps = self.root._get_all_nested_childs()
             with _enter_app_conetxt(self):
                 for comp in uid_to_comp.values():
-                    if comp._flow_uid in prev_comps:
+                    if comp._flow_uid_encoded in prev_comps:
                         if comp._flow_comp_type.value == prev_comps[
-                                comp._flow_uid]["type"]:
-                            comp.set_props(prev_comps[comp._flow_uid]["props"])
-                    if comp._flow_uid in prev_user_states:
+                                comp._flow_uid_encoded]["type"]:
+                            comp.set_props(prev_comps[comp._flow_uid_encoded]["props"])
+                    if comp._flow_uid_encoded in prev_user_states:
                         if comp._flow_comp_type.value == prev_user_states[
-                                comp._flow_uid]["type"]:
+                                comp._flow_uid_encoded]["type"]:
                             await comp.set_persist_props_async(
-                                prev_user_states[comp._flow_uid]["state"])
+                                prev_user_states[comp._flow_uid_encoded]["state"])
             del prev_comps
             del prev_user_states
 

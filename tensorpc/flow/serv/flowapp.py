@@ -20,7 +20,7 @@ import pickle
 from runpy import run_path
 from typing import Any, Dict, List, Optional
 from tensorpc.core.defs import FileDesp, FileResource
-from tensorpc.flow.coretypes import ComponentUid, ScheduleEvent, get_uid
+from tensorpc.flow.coretypes import UniqueTreeId, ScheduleEvent, get_uid
 from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.appcore import ALL_OBSERVED_FUNCTIONS, enter_app_conetxt
 from tensorpc.flow.flowapp.components.mui import FlexBox, flex_wrapper
@@ -122,7 +122,7 @@ class FlowApp:
             if not layout_created:
                 await self.app._app_run_layout_function()
         else:
-            self.app.root._attach(ComponentUid.from_parts(["root"]), self.app._flow_app_comp_core)
+            self.app.root._attach(UniqueTreeId.from_parts(["root"]), self.app._flow_app_comp_core)
         # print(lay["layout"])
         self.app.app_initialize()
         await self.app.app_initialize_async()
@@ -290,6 +290,8 @@ class FlowApp:
 
     async def _send_grpc_event_large(self, ev: AppEvent,
                                      robj: tensorpc.AsyncRemoteManager):
+        import rich 
+        rich.print(ev.to_dict())
         if self.master_meta.is_worker:
             return await robj.chunked_remote_call(
                 serv_names.FLOWWORKER_PUT_APP_EVENT, self.master_meta.graph_id,

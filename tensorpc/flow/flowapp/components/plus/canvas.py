@@ -656,7 +656,7 @@ class SimpleCanvas(mui.FlexBox):
                 position=locs[i].tolist(),
                 rotation=rots[i].tolist(),
                 edgeWidth=edge_width,
-                add_cross=self.cfg.box.add_cross,
+                addCross=self.cfg.box.add_cross,
                 opacity=opacity)
         if key not in self._dynamic_boxes:
             new_box = three.Group([]).prop()

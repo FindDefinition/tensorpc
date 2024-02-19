@@ -3,6 +3,7 @@ import sys
 import tokenize
 from tensorpc.core.funcid import find_toplevel_func_node_by_lineno
 from tensorpc.core.tracer import FrameResult, TraceType
+from tensorpc.flow.coretypes import UniqueTreeIdForTree
 from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.components import mui
 from tensorpc.flow.flowapp.reload import reload_object_methods
@@ -83,7 +84,7 @@ class TraceTreeItem(TreeItem):
         else:
             return self.qname
 
-    async def get_child_desps(self, parent_ns: str) -> Dict[str, JsonLikeNode]:
+    async def get_child_desps(self, parent_ns: UniqueTreeIdForTree) -> Dict[str, JsonLikeNode]:
         res: Dict[str, JsonLikeNode] = {}
         for v in self.child_trace_res:
             id = f"{parent_ns}{GLOBAL_SPLIT}{v.get_uid()}"

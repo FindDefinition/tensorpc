@@ -474,9 +474,9 @@ class BasicObjectTree(mui.FlexBox):
                 root = obj
                 break
         if root is not None:
-            return TreeDragTarget(objs[-1], uid, tab_id, self._flow_uid,
+            return TreeDragTarget(objs[-1], uid, tab_id, self._flow_uid_encoded,
                                   lambda: root.enter_context(root))
-        return TreeDragTarget(objs[-1], uid, tab_id, self._flow_uid)
+        return TreeDragTarget(objs[-1], uid, tab_id, self._flow_uid_encoded)
     
     async def _on_select_single(self, uid_list: Union[List[str], str, Dict[str, bool]]):
         if isinstance(uid_list, list):

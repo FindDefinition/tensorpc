@@ -48,7 +48,7 @@ from tensorpc.core.event_emitter.base import ExceptionParam
 from tensorpc.core.moduleid import is_tensorpc_dynamic_path
 from tensorpc.core.serviceunit import (AppFuncType, ReloadableDynamicClass,
                                        ServFunctionMeta)
-from tensorpc.flow.coretypes import ComponentUid, MessageLevel
+from tensorpc.flow.coretypes import UniqueTreeId, MessageLevel
 from tensorpc.flow.flowapp.appcore import EventHandler, EventHandlers
 from tensorpc.flow.flowapp.reload import AppReloadManager, FlowSpecialMethods
 from tensorpc.utils.registry import HashableRegistry
@@ -1026,10 +1026,10 @@ class Component(Generic[T_base_props, T_child]):
                  type: UIType,
                  prop_cls: Type[T_base_props],
                  allowed_events: Optional[Iterable[EventDataType]] = None,
-                 uid: Optional[ComponentUid] = None,
+                 uid: Optional[UniqueTreeId] = None,
                  json_only: bool = False) -> None:
         self._flow_comp_core: Optional[AppComponentCore] = None
-        self._flow_uid: Optional[ComponentUid] = uid
+        self._flow_uid: Optional[UniqueTreeId] = uid
         self._flow_comp_type = type
         # self._status = UIRunStatus.Stop
         # task for callback of controls
@@ -1137,7 +1137,7 @@ class Component(Generic[T_base_props, T_child]):
         for k, v in prop_dict.items():
             setattr(self.__props, k, v)
 
-    def _attach(self, uid: ComponentUid, comp_core: AppComponentCore) -> dict:
+    def _attach(self, uid: UniqueTreeId, comp_core: AppComponentCore) -> dict:
         if self._flow_reference_count == 0:
             self._flow_uid = uid
             self._flow_comp_core = comp_core
@@ -1197,7 +1197,7 @@ class Component(Generic[T_base_props, T_child]):
         pass
     
     def __repr__(self):
-        res = f"{self.__class__.__name__}({self._flow_uid})"
+        res = f"{self.__class__.__name__}({self._flow_uid_encoded})"
         # if self._flow_user_data is not None:
         #     res += f"({self._flow_user_data})"
         return res 
@@ -1258,7 +1258,7 @@ class Component(Generic[T_base_props, T_child]):
         props, und = split_props_to_undefined(props)
         props.update(as_dict_no_undefined(self.__sx_props))
         res = {
-            "uid": self._flow_uid,
+            "uid": self._flow_uid_encoded,
             "type": self._flow_comp_type.value,
             "props": props,
         }
@@ -1282,7 +1282,7 @@ class Component(Generic[T_base_props, T_child]):
         props = self.get_sync_props()
         props, und = split_props_to_undefined(props)
         res = {
-            "uid": self._flow_uid,
+            "uid": self._flow_uid_encoded,
             "type": self._flow_comp_type.value,
             "props": props,
             # "status": self._status.value,
@@ -1750,7 +1750,9 @@ def _undefined_comp_dict_factory(x: List[Tuple[str, Any]]):
     for k, v in x:
         if isinstance(v, Component):
             assert v.is_mounted(), f"you must ensure component is inside comp tree if you add it to props, {k}, {type(v)}"
-            res[k] = v._flow_uid
+            res[k] = v._flow_uid_encoded
+        elif isinstance(v, UniqueTreeId):
+            res[k] = v.uid_encoded
         elif not isinstance(v, (Undefined, BackendOnlyProp)):
             res[k] = v
     return res
@@ -1758,7 +1760,7 @@ def _undefined_comp_dict_factory(x: List[Tuple[str, Any]]):
 def _undefined_comp_obj_factory(x: Any):
     if isinstance(x, Component):
         assert x.is_mounted(), f"you must ensure component is inside comp tree if you add it to props, {type(x)}"
-        return x._flow_uid
+        return x._flow_uid_encoded
     return x
 
 class ContainerBase(Component[T_container_props, T_child]):
@@ -1769,7 +1771,7 @@ class ContainerBase(Component[T_container_props, T_child]):
                  _children: Optional[Union[Dict[str, T_child], DataclassType]] = None,
                  inited: bool = False,
                  allowed_events: Optional[Iterable[EventDataType]] = None,
-                 uid: Optional[ComponentUid] = None,
+                 uid: Optional[UniqueTreeId] = None,
                  app_comp_core: Optional[AppComponentCore] = None) -> None:
         super().__init__(base_type, prop_cls, allowed_events, uid)
         self._flow_comp_core = app_comp_core
@@ -1808,7 +1810,8 @@ class ContainerBase(Component[T_container_props, T_child]):
         return res 
 
     def _get_comp_by_uid(self, uid: str):
-        parts = uid.split(".")
+        uid_obj = UniqueTreeId(uid)
+        parts = uid_obj.parts
         # uid contains root, remove it at first.
         return self._get_comp_by_uid_resursive(parts[1:])
 
@@ -1838,10 +1841,10 @@ class ContainerBase(Component[T_container_props, T_child]):
             return [child_comp] + child_comp._get_comps_by_uid_resursive(
                 parts[1:])
 
-    def _foreach_comp_recursive(self, child_ns: ComponentUid,
-                                handler: Callable[[ComponentUid, Component],
+    def _foreach_comp_recursive(self, child_ns: UniqueTreeId,
+                                handler: Callable[[UniqueTreeId, Component],
                                                   Union[ForEachResult, None]]):
-        res_foreach: List[Tuple[ComponentUid, ContainerBase]] = []
+        res_foreach: List[Tuple[UniqueTreeId, ContainerBase]] = []
         for k, v in self._child_comps.items():
             child_uid = child_ns.append_part(k)
             if isinstance(v, ContainerBase):
@@ -1861,7 +1864,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         for child_uid, v in res_foreach:
             v._foreach_comp_recursive(child_uid, handler)
 
-    def _foreach_comp(self, handler: Callable[[ComponentUid, Component], Union[ForEachResult,
+    def _foreach_comp(self, handler: Callable[[UniqueTreeId, Component], Union[ForEachResult,
                                                                       None]]):
         assert self._flow_uid is not None, f"_flow_uid must be set before modify_comp, {type(self)}, {self._flow_reference_count}, {id(self)}"
         handler(self._flow_uid, self)
@@ -1869,7 +1872,7 @@ class ContainerBase(Component[T_container_props, T_child]):
 
     def _update_uid(self):
 
-        def handler(uid, v: Component):
+        def handler(uid: UniqueTreeId, v: Component):
             v._flow_uid = uid
 
         self._foreach_comp(handler)
@@ -1901,9 +1904,9 @@ class ContainerBase(Component[T_container_props, T_child]):
             atached_uids.update(v._attach(self._flow_uid.append_part(k), comp_core))
         return atached_uids
 
-    def _attach(self, uid: ComponentUid, comp_core: AppComponentCore):
-        assert self._flow_uid is not None 
+    def _attach(self, uid: UniqueTreeId, comp_core: AppComponentCore):
         attached: Dict[str, Component] = super()._attach(uid, comp_core)
+        assert self._flow_uid is not None 
         for k, v in self._child_comps.items():
             attached.update(v._attach(self._flow_uid.append_part(k), comp_core))
         return attached
@@ -1911,16 +1914,16 @@ class ContainerBase(Component[T_container_props, T_child]):
     def _get_uid_encoded_to_comp_dict(self):
         res: Dict[str, Component] = {}
 
-        def handler(uid: ComponentUid, v: Component):
+        def handler(uid: UniqueTreeId, v: Component):
             res[uid.uid_encoded] = v
 
         self._foreach_comp(handler)
         return res
 
     def _get_uid_to_comp_dict(self):
-        res: Dict[ComponentUid, Component] = {}
+        res: Dict[UniqueTreeId, Component] = {}
 
-        def handler(uid: ComponentUid, v: Component):
+        def handler(uid: UniqueTreeId, v: Component):
             res[uid] = v
 
         self._foreach_comp(handler)
@@ -1964,11 +1967,6 @@ class ContainerBase(Component[T_container_props, T_child]):
             comps.extend(self._get_all_nested_child(c))
         return comps
 
-    def _get_uid_with_ns(self, name: str):
-        if self._flow_uid == "":
-            return (f"{name}")
-        return (f"{self._flow_uid}.{name}")
-
     def add_layout(self, layout: Union[Dict[str, Component], List[Component]]):
         return self.init_add_layout(layout)
 
@@ -1997,7 +1995,7 @@ class ContainerBase(Component[T_container_props, T_child]):
 
     def get_props(self):
         state = super().get_props()
-        state["childs"] = [self[n]._flow_uid for n in self._child_comps]
+        state["childs"] = [self[n]._flow_uid_encoded for n in self._child_comps]
         if self._child_structure is not None:
             state["childsComplex"] = asdict_no_deepcopy(self._child_structure, dict_factory=_undefined_comp_dict_factory, obj_factory=_undefined_comp_obj_factory)
         return state

@@ -35,7 +35,7 @@ from PIL import Image as PILImage
 from typing_extensions import Literal, TypeAlias, TypedDict
 from pydantic import field_validator, model_validator
 
-from tensorpc.flow.coretypes import ComponentUid
+from tensorpc.flow.coretypes import UniqueTreeId, UniqueTreeIdForTree
 from .typemetas import Vector3Type
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.defs import FileResource
@@ -1203,7 +1203,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
     def __init__(self,
                  children: Optional[LayoutType] = None,
                  base_type: UIType = UIType.FlexBox,
-                 uid: Optional[ComponentUid] = None,
+                 uid: Optional[UniqueTreeId] = None,
                  app_comp_core: Optional[AppComponentCore] = None,
                  wrapped_obj: Optional[Any] = None) -> None:
         if children is not None and isinstance(children, list):
@@ -3704,7 +3704,7 @@ class JsonViewer(MUIComponentBase[JsonViewerProps]):
 
 
 def _default_json_node():
-    return JsonLikeNode("root", "root", JsonLikeType.Object.value, "Object",
+    return JsonLikeNode(UniqueTreeIdForTree.from_parts(["root"]), "root", JsonLikeType.Object.value, "Object",
                         undefined, 0, [])
 
 
@@ -3802,7 +3802,7 @@ class JsonLikeTreeBase(MUIComponentBase[T_tview_base_props]):
         return root
 
     def _update_subtree_backend(self, node: JsonLikeNode):
-        parts = node.decode_uid_legacy(node.id)
+        parts = node.id.parts
         if len(parts) == 1:
             if node.id == self.props.tree.id:
                 self.props.tree = node
