@@ -18,6 +18,7 @@ import urllib.request
 from typing import Any, Callable, Coroutine, Dict, Hashable, Iterable, List, Literal, Optional, Set, Tuple, Type, Union
 
 import numpy as np
+from tensorpc.core.tree_id import UniqueTreeIdForTree
 
 from tensorpc.flow import marker
 from tensorpc.flow.flowapp.appcore import find_component_by_uid_with_type_check
@@ -520,8 +521,8 @@ class SimpleCanvas(mui.FlexBox):
             return True
         return False
 
-    async def _dnd_cb(self, uid: str, data: Any):
-        await self._unknown_visualization(uid, data)
+    async def _dnd_cb(self, uid: UniqueTreeIdForTree, data: Any):
+        await self._unknown_visualization(uid.uid_encoded, data)
 
     async def _on_drop(self, data):
         from tensorpc.flow.flowapp.components.plus import BasicObjectTree
@@ -532,7 +533,7 @@ class SimpleCanvas(mui.FlexBox):
                 # register to tree
                 tree = find_component_by_uid_with_type_check(data.source_comp_uid, BasicObjectTree)
                 if tree is not None:
-                    tree._register_dnd_uid(data.tree_id,
+                    tree._register_dnd_uid(UniqueTreeIdForTree(data.tree_id),
                                            self._dnd_cb)
                     self._dnd_trees.add(data.source_comp_uid)
 
@@ -600,12 +601,12 @@ class SimpleCanvas(mui.FlexBox):
         if key not in self._point_dict:
             if encode_method is not None:
                 if attrs is None:
-                    ui = three.Points(limit).prop(encodeMethod=encode_method, encodeScale=encode_scale, colorMap=three.ColorMap(min=-1.0, max=1.0))
+                    ui = three.Points(limit).prop(encodeMethod=encode_method, encodeScale=encode_scale, colorMap=three.ColorMap(min=points[:, 2].min(), max=points[:, 2].max()))
                 else:
                     assert attr_fields is not None 
-                    ui = three.Points(limit).prop(encodeMethod=encode_method, encodeScale=encode_scale, attrs=attrs, attrFields=attr_fields, colorMap=three.ColorMap(min=-1.0, max=1.0))
+                    ui = three.Points(limit).prop(encodeMethod=encode_method, encodeScale=encode_scale, attrs=attrs, attrFields=attr_fields, colorMap=three.ColorMap(min=points[:, 2].min(), max=points[:, 2].max()))
             else:
-                ui = three.Points(limit).prop(colorMap=three.ColorMap(min=-1.0, max=1.0))
+                ui = three.Points(limit).prop(colorMap=three.ColorMap(min=points[:, 2].min(), max=points[:, 2].max()))
             self._point_dict[key] = ui
             await self._dynamic_pcs.update_childs({key: ui})
         point_ui = self._point_dict[key]

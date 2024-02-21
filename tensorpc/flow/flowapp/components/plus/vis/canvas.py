@@ -12,7 +12,7 @@ import numpy as np
 from tensorpc.core.moduleid import get_qualname_of_type
 
 from tensorpc.flow import marker
-from tensorpc.flow.coretypes import UniqueTreeId
+from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from tensorpc.flow.flowapp.appcore import find_component_by_uid_with_type_check
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.components.plus.arraycommon import can_cast_to_np_array, try_cast_to_np_array
@@ -21,7 +21,7 @@ from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
 from tensorpc.flow.flowapp.components.plus.core import ALL_OBJECT_LAYOUT_HANDLERS, ObjectGridItemConfig
 from tensorpc.flow.flowapp.components.plus.grid_preview_layout import GridPreviewLayout
 from tensorpc.flow.flowapp.components.plus.objinspect.tree import BasicObjectTree, SelectSingleEvent
-from .core import UNKNOWN_KEY_SPLIT, UNKNOWN_VIS_KEY, UserTreeItemCard, VContext, get_canvas_item_cfg, get_or_create_canvas_item_cfg, _VapiObjects
+from .core import UNKNOWN_KEY_SPLIT, UNKNOWN_VIS_KEY, UserTreeItemCard, VContext, get_canvas_item_cfg, get_or_create_canvas_item_cfg, _VapiObjects, is_reserved_uid
 from tensorpc.flow.flowapp.components.typemetas import RangedFloat
 from tensorpc.flow.flowapp.core import Component, ContainerBase, FrontendEventType
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
@@ -117,12 +117,12 @@ def _try_cast_to_image(obj: Any):
 
 def find_component_trace_by_uid_with_not_exist_parts(
     comp: Component,
-    uid: str,
+    uid: UniqueTreeId,
     container_cls: Tuple[Type[ContainerBase], ...] = (ContainerBase, )
 ) -> Tuple[List[Component], List[str], List[str]]:
     # if comp._flow_uid == uid:
     #     return [comp], []
-    uid_parts = uid.split(".")
+    uid_parts = uid.parts
     # if len(uid_parts) == 0:
     #     return [comp], []
     res: List[Component] = []
@@ -341,10 +341,10 @@ class ComplexCanvas(mui.FlexBox):
         self._cfg_container = mui.Fragment([])
         self._is_transparent = transparent_canvas
         self._gizmo_helper = three.GizmoHelper().prop(alignment="bottom-right")
-        self._cur_detail_layout_uid: Optional[str] = None
+        self._cur_detail_layout_uid: Optional[UniqueTreeId] = None
         self._cur_detail_layout_object_id: Optional[UniqueTreeId] = None
 
-        self._cur_table_uid: Optional[str] = None
+        self._cur_table_uid: Optional[UniqueTreeId] = None
         self._cur_table_object_id: Optional[UniqueTreeId] = None
         self._dnd_trees: Set[str] = set()
 
@@ -963,7 +963,7 @@ class ComplexCanvas(mui.FlexBox):
                 if three.is_three_component(obj):
                     if obj._flow_uid is not None:
                         panel = self._get_default_detail_layout(obj).prop(
-                            reactKey=data.nodes[-1].id)
+                            reactKey=data.nodes[-1].id.uid_encoded)
                         self._cur_detail_layout_uid = data.nodes[-1].id
                         self._cur_detail_layout_object_id = obj._flow_uid
                         await self.prop_container.set_new_layout([panel])
@@ -1011,7 +1011,7 @@ class ComplexCanvas(mui.FlexBox):
             else:
                 if three.is_three_component(obj):
                     panel = self._get_default_detail_layout(obj).prop(
-                        reactKey=self._cur_detail_layout_uid)
+                        reactKey=self._cur_detail_layout_uid.uid_encoded)
                     await self.prop_container.set_new_layout([panel])
 
     async def _install_table_layout(self, obj: three.Component):
@@ -1024,14 +1024,14 @@ class ComplexCanvas(mui.FlexBox):
         else:
             await self.tdata_container_v2.set_new_layout([])
 
-    async def update_detail_layout(self, regex: str):
+    async def update_detail_layout(self, common_uid: UniqueTreeId):
         # TODO when we upgrade tree, we must check if the current selected node is still valid.
         if self._cur_detail_layout_uid is not None:
-            reg = re.compile(regex)
+            # reg = re.compile(regex)
             # print(prefix, self._cur_detail_layout_uid)
             local_uid = self._convert_tree_node_uid_to_local_uid(
                 self._cur_detail_layout_uid)
-            if reg.match(local_uid) is not None:
+            if local_uid.startswith(common_uid) is not None:
                 container_parents, remain_keys, _ = find_component_trace_by_uid_with_not_exist_parts(
                     self._item_root, local_uid)
                 if len(remain_keys) == 0:
@@ -1040,12 +1040,12 @@ class ComplexCanvas(mui.FlexBox):
                 else:
                     await self.prop_container.set_new_layout([])
 
-    async def set_layout_in_container(self, container_key: str,
+    async def set_layout_in_container(self, container_key: UniqueTreeId,
                                       layout: three.ThreeLayoutType):
         if isinstance(layout, list):
             layout = {str(i): v for i, v in enumerate(layout)}
 
-        assert container_key != "" and not is_reserved_name(
+        assert container_key != "" and not is_reserved_uid(
             container_key), "you can't set layout of canvas and reserved."
         container_parents, remain_keys, _ = find_component_trace_by_uid_with_not_exist_parts(
             self._item_root, container_key)
@@ -1055,9 +1055,9 @@ class ComplexCanvas(mui.FlexBox):
                 await container.set_new_layout({**layout})
                 await self.item_tree.update_tree()
 
-    async def update_layout_in_container(self, container_key: str,
+    async def update_layout_in_container(self, container_key: UniqueTreeId,
                                          layout: three.ThreeLayoutType):
-        assert container_key != "" and not is_reserved_name(
+        assert container_key != "" and not is_reserved_uid(
             container_key), "you can't update layout of reserved."
         if isinstance(layout, list):
             layout = {str(i): v for i, v in enumerate(layout)}
@@ -1086,13 +1086,14 @@ class ComplexCanvas(mui.FlexBox):
                 uid: value,
             }, validate=True))
 
-    def _get_local_uid_of_object(self, uid: str):
+    def _get_local_uid_of_object(self, uid: UniqueTreeId):
+        assert self._item_root._flow_uid is not None 
         assert uid.startswith(self._item_root._flow_uid)
-        return uid[len(self._item_root._flow_uid) + 1:]
+        return UniqueTreeIdForTree.from_parts(uid.parts[uid.common_prefix_index(self._item_root._flow_uid):])
 
-    def _convert_tree_node_uid_to_local_uid(self, uid: str):
-        assert uid.startswith("root::")
-        return uid[len("root::"):].replace("::", ".")
+    def _convert_tree_node_uid_to_local_uid(self, uid: UniqueTreeId):
+        assert uid.parts[0] == "root"
+        return UniqueTreeIdForTree.from_parts(uid.parts[1:])
 
     async def _on_3d_object_select(self, selected: list):
         if not selected:
@@ -1102,7 +1103,7 @@ class ComplexCanvas(mui.FlexBox):
         select = selected[0]
         selected_uid = select["userData"]["uid"]
         # print(self.item_tree.tree.props.tree)
-        selected_uid_local_uid = self._get_local_uid_of_object(selected_uid)
+        selected_uid_local_uid = self._get_local_uid_of_object(UniqueTreeIdForTree(selected_uid))
 
         container_parents, remain_keys, _ = find_component_trace_by_uid_with_not_exist_parts(
             self._item_root, selected_uid_local_uid)
@@ -1110,9 +1111,10 @@ class ComplexCanvas(mui.FlexBox):
             obj = container_parents[-1]
             # we need to convert object component uid to tree node uid.
             # tree node uid always start with "root"
-            tree_node_uid = f"root::{selected_uid_local_uid.replace('.', '::')}"
-            await self.item_tree.tree.select([tree_node_uid])
-            await self.item_tree._on_select_single(tree_node_uid)
+            # tree_node_uid = f"root::{selected_uid_local_uid.replace('.', '::')}"
+            tree_node_uid = UniqueTreeIdForTree.from_parts(["root"] + selected_uid_local_uid.parts)
+            await self.item_tree.tree.select([tree_node_uid.uid_encoded])
+            await self.item_tree._on_select_single(tree_node_uid.uid_encoded)
             # print(selected_uid_local_uid, obj, obj._flow_uid)
 
     async def _unknown_visualization(self,
@@ -1154,7 +1156,7 @@ class ComplexCanvas(mui.FlexBox):
                     points.prop(colors=pick)
 
             await V._draw_all_in_vctx(vctx_unk,
-                                      rf"{unk_container._flow_uid_encoded}\..*")
+                                      unk_container._flow_uid)
             return True
         img_obj = _try_cast_to_image(obj)
         if img_obj is not None:
@@ -1162,7 +1164,7 @@ class ComplexCanvas(mui.FlexBox):
                 V.image(img_obj, name=tree_id_replaced,
                         pos=(0, 0, 0.1)).prop(scale=(3, 3, 3))
             await V._draw_all_in_vctx(vctx_unk,
-                                      rf"{unk_container._flow_uid_encoded}\..*")
+                                      unk_container._flow_uid)
             return True
         b3d_obj = _try_cast_to_box3d(obj)
         if b3d_obj is not None:
@@ -1180,7 +1182,7 @@ class ComplexCanvas(mui.FlexBox):
                         V.bounding_box(box[3:6], (0, 0, box[6]),
                                        box[:3]).prop(color=pick)
             await V._draw_all_in_vctx(vctx_unk,
-                                      rf"{unk_container._flow_uid_encoded}\..*")
+                                      unk_container._flow_uid)
             return True
         line_obj = _try_cast_to_lines(obj)
         if line_obj is not None:
@@ -1197,7 +1199,7 @@ class ComplexCanvas(mui.FlexBox):
                     line_obj.astype(np.float32))
 
             await V._draw_all_in_vctx(vctx_unk,
-                                      rf"{unk_container._flow_uid_encoded}\..*")
+                                      unk_container._flow_uid)
             return True
         return False
 
@@ -1205,19 +1207,19 @@ class ComplexCanvas(mui.FlexBox):
         from tensorpc.flow.flowapp.components.plus import BasicObjectTree
         if isinstance(data, TreeDragTarget):
             obj = data.obj
-            tree_id_replaced = data.tree_id.replace("::", "__")
+            # tree_id_replaced = data.tree_id.replace("::", "__")
 
-            success = await self._unknown_visualization(tree_id_replaced, obj)
+            success = await self._unknown_visualization(data.tree_id, obj)
             if success:
                 # register to tree
                 tree = find_component_by_uid_with_type_check(
                     data.source_comp_uid, BasicObjectTree)
                 if tree is not None:
-                    tree._register_dnd_uid(tree_id_replaced, self._dnd_cb)
+                    tree._register_dnd_uid(UniqueTreeIdForTree(data.tree_id), self._dnd_cb)
                     self._dnd_trees.add(data.source_comp_uid)
 
-    async def _dnd_cb(self, uid: str, data: Any):
-        await self._unknown_visualization(uid, data)
+    async def _dnd_cb(self, uid: UniqueTreeIdForTree, data: Any):
+        await self._unknown_visualization(uid.uid_encoded, data)
 
     async def register_cam_control_event_handler(
             self,

@@ -37,6 +37,7 @@ from typing_extensions import Annotated, Literal
 import contextvars
 import contextlib
 from tensorpc.core.dataclass_dispatch import dataclass
+from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from tensorpc.flow.client import is_inside_app_session
 from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.appcore import get_app
@@ -241,7 +242,7 @@ def enter_v_conetxt(robj: VContext):
 
 
 async def _draw_all_in_vctx(vctx: VContext,
-                            detail_update_prefix: Optional[str] = None,
+                            detail_update_prefix: Optional[UniqueTreeId] = None,
                             app_event: Optional[AppEvent] = None,
                             update_iff_change: bool = False):
     # import rich 
@@ -351,6 +352,7 @@ def group(name: str,
         assert canvas is not None, "you must add complex canvas before using vapi"
 
     name_parts = name.split(".")
+    name_obj = UniqueTreeIdForTree.from_parts(name_parts)
     for p in name_parts:
         assert p, "group name can not be empty"
     # find exist group in canvas
@@ -379,11 +381,12 @@ def group(name: str,
     # assert v_ctx is not None
     # canvas = v_ctx.canvas
     if v_ctx.name_stack:
-        uid = f"{v_ctx.current_namespace}.{name}"
+        # uid = f"{v_ctx.current_namespace}.{name}"
+        uid = v_ctx.current_namespace.append_part(name)
     else:
-        uid = name
-    if uid in v_ctx._name_to_group:
-        group = v_ctx._name_to_group[uid]
+        uid = name_obj
+    if uid.uid_encoded in v_ctx._name_to_group:
+        group = v_ctx._name_to_group[uid.uid_encoded]
     else:
         trace, remain, consumed = find_component_trace_by_uid_with_not_exist_parts(
             v_ctx.root, uid, _CARED_CONTAINERS)
@@ -403,10 +406,12 @@ def group(name: str,
         # print(trace, remain, consumed)
         trace.insert(0, v_ctx.root)
         for i in range(len(consumed)):
-            cur_name = ".".join(consumed[:i + 1])
+            cur_name = UniqueTreeIdForTree.from_parts(consumed[:i + 1])
+            # cur_name = ".".join(consumed[:i + 1])
             if cur_name not in v_ctx._name_to_group:
+
                 if i != len(consumed) - 1:
-                    v_ctx._name_to_group[cur_name] = trace[i]
+                    v_ctx._name_to_group[cur_name.uid_encoded] = trace[i]
                 else:
                     comp = trace[-1]
                     container = trace[-2]
@@ -415,12 +420,12 @@ def group(name: str,
                         # replace this comp by group
                         group = three.Group([])
                         item_cfg = get_or_create_canvas_item_cfg(group, True)
-                        item_cfg.proxy = GroupProxy(cur_name)
+                        item_cfg.proxy = GroupProxy(cur_name.uid_encoded)
                         v_ctx._group_assigns[container] = (group, consumed[-1])
-                        v_ctx._name_to_group[cur_name] = group
+                        v_ctx._name_to_group[cur_name.uid_encoded] = group
                         trace[-1] = group
                     else:
-                        v_ctx._name_to_group[cur_name] = comp
+                        v_ctx._name_to_group[cur_name.uid_encoded] = comp
         comsumed_name = ".".join(consumed)
         comp = v_ctx._name_to_group[comsumed_name]
 
@@ -442,9 +447,9 @@ def group(name: str,
             _install_obj_event_handlers(g, v_ctx.canvas)
 
             group_to_yield = g
-            v_ctx._name_to_group[uid] = g
+            v_ctx._name_to_group[uid.uid_encoded] = g
             item_cfg = get_or_create_canvas_item_cfg(g, True)
-            item_cfg.proxy = GroupProxy(uid)
+            item_cfg.proxy = GroupProxy(uid.uid_encoded)
 
             cur_uid = uid
             for i, remain_part in enumerate(remain[::-1]):
@@ -452,12 +457,13 @@ def group(name: str,
                     new_g = three.Group([])
                     _install_obj_event_handlers(new_g, v_ctx.canvas)
 
-                    cur_uid = cur_uid[:len(cur_uid) - len(remain_part) - 1]
+                    # cur_uid = cur_uid[:len(cur_uid) - len(remain_part) - 1]
+                    cur_uid = cur_uid.pop()
                     # if i == 0:
                     #     assert cur_uid == uid, f"{cur_uid} != {uid}"
-                    v_ctx._name_to_group[cur_uid] = new_g
+                    v_ctx._name_to_group[cur_uid.uid_encoded] = new_g
                     item_cfg = get_or_create_canvas_item_cfg(new_g, True)
-                    item_cfg.proxy = GroupProxy(cur_uid)
+                    item_cfg.proxy = GroupProxy(cur_uid.uid_encoded)
                     item_cfg.proxy.childs[remain_part] = new_g
                     g = new_g
                 else:
@@ -485,7 +491,7 @@ def group(name: str,
 
     item_cfg = get_or_create_canvas_item_cfg(group)
     if item_cfg.proxy is None:
-        item_cfg.proxy = GroupProxy(uid)
+        item_cfg.proxy = GroupProxy(uid.uid_encoded)
     try:
         v_ctx.name_stack.extend(name_parts)
         yield item_cfg.proxy
@@ -503,14 +509,14 @@ def group(name: str,
                 loop = asyncio.get_running_loop()
             if app._flowapp_thread_id == threading.get_ident():
                 # we can't wait fut here
-                task = asyncio.create_task(_draw_all_in_vctx(v_ctx, ".*", ev))
+                task = asyncio.create_task(_draw_all_in_vctx(v_ctx, UniqueTreeId(""), ev))
                 # we can't wait fut here
                 # return task
                 # return fut
             else:
                 # we can wait fut here.
                 fut = asyncio.run_coroutine_threadsafe(
-                    _draw_all_in_vctx(v_ctx, ".*", ev), loop)
+                    _draw_all_in_vctx(v_ctx, UniqueTreeId(""), ev), loop)
                 fut.result()
 
 async def _uninstall_detail_when_unmount(ev: three.Event, obj: three.Component, canvas: ComplexCanvas):
@@ -678,7 +684,7 @@ def program(name: str, func: Callable):
                 if inspect.iscoroutine(res):
                     await res
             # we need to update tree iff tree change because update tree is very slow.
-            await _draw_all_in_vctx(vctx_program, rf"{group._flow_uid_encoded}\..*", update_iff_change=True)
+            await _draw_all_in_vctx(vctx_program, group._flow_uid, update_iff_change=True)
 
     pcfg.detail_layout = ConfigPanelV2(func_dcls_obj, callback)
     pcfg.proxy = GroupProxy("")

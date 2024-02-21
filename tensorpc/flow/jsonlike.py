@@ -15,7 +15,7 @@ from pydantic_core import PydanticCustomError, core_schema
 from pydantic import (
     GetCoreSchemaHandler, )
 
-from tensorpc.flow.coretypes import UniqueTreeId, UniqueTreeIdForTree
+from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 
 ValueType: TypeAlias = Union[int, float, str]
 NumberType: TypeAlias = Union[int, float]
@@ -493,9 +493,8 @@ class JsonLikeNode:
         else:
             return node._get_node_by_uid_resursive(parts[1:])
 
-    def _get_node_by_uid_trace(self, uid: str, split: str = ":"):
-        uid_object = UniqueTreeId(uid, 1)
-        parts = uid_object.parts
+    def _get_node_by_uid_trace(self, uid_parts: List[str]):
+        parts = uid_parts
         if len(parts) == 1:
             return [self]
         # uid contains root, remove it at first.
@@ -504,9 +503,8 @@ class JsonLikeNode:
         assert found
         return [self] + nodes
 
-    def _get_node_by_uid_trace_found(self, uid: str, split: str = ":"):
-        uid_object = UniqueTreeId(uid, 1)
-        parts = uid_object.parts
+    def _get_node_by_uid_trace_found(self, uid_parts: List[str]):
+        parts = uid_parts
         if len(parts) == 1:
             return [self], True
         # uid contains root, remove it at first.

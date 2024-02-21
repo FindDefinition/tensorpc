@@ -15,7 +15,8 @@ from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
 
 from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
                                     is_valid_function)
-from tensorpc.flow.coretypes import UniqueTreeId
+from tensorpc.core.tree_id import UniqueTreeId
+
 from tensorpc.flow.jsonlike import Undefined, BackendOnlyProp, undefined
 from tensorpc.core.serviceunit import ObservedFunction, ObservedFunctionRegistry, ObservedFunctionRegistryProtocol
 from tensorpc.flow.client import is_inside_app_session

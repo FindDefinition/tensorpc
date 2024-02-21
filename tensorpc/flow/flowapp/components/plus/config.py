@@ -19,6 +19,7 @@ import json
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, TypeVar, Union, Generic
 import operator
 from typing_extensions import Literal, Annotated, get_origin, get_args
+from tensorpc.core.tree_id import UniqueTreeIdForTree
 
 from tensorpc.flow.flowapp.components import typemetas
 from tensorpc.flow.flowapp.core import AppEvent
@@ -473,14 +474,14 @@ def control_nodes_v1_to_v2(ctrl_node_v1: mui.ControlNode, uid_to_json_like_node:
                                 count=ctrl_node_v1.count,
                                 isInteger=ctrl_node_v1.isInteger)
     node = mui.JsonLikeNode(
-        id=ctrl_node_v1.id,
+        id=UniqueTreeIdForTree.from_parts(ctrl_node_v1.id.split(".")),
         name=ctrl_node_v1.name if isinstance(
             ctrl_node_v1.alias, mui.Undefined) else ctrl_node_v1.alias,
         type=mui.JsonLikeType.Object.value,
         typeStr="",
         children=childs,
         userdata=ctrl_desp)
-    uid_to_json_like_node[node.id] = node
+    uid_to_json_like_node[node.id.uid_encoded] = node
     return node
 
 

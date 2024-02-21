@@ -20,6 +20,7 @@ from tensorpc.core.inspecttools import get_members
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.core.tracer import FrameResult, TraceType, Tracer
+from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.flow.flowapp.appcore import Event, get_app, get_editable_app
 from tensorpc.flow.flowapp.components import mui, three
 from tensorpc.flow.flowapp.components.plus.objinspect.treeitems import TraceTreeItem, parse_frame_result_to_trace_item
@@ -176,8 +177,8 @@ class ObjectInspector(mui.FlexBox):
                                            ObjectPreviewHandler] = {}
         self._current_preview_layout: Optional[mui.FlexBox] = None
 
-    async def get_object_by_uid(self, uid_list: Union[List[str], str]):
-        return await self.tree.get_object_by_uid(uid_list)
+    async def get_object_by_uid(self, uid: str):
+        return await self.tree.get_object_by_uid(uid)
 
     async def _on_select(self, uid_list: Union[List[str], str, Dict[str, bool]]):
         if isinstance(uid_list, list):
@@ -191,7 +192,8 @@ class ObjectInspector(mui.FlexBox):
             uid = list(uid_list.keys())[0]
         else:
             uid = uid_list
-        nodes = self.tree._objinspect_root._get_node_by_uid_trace(uid)
+        uid_obj = UniqueTreeIdForTree(uid)
+        nodes = self.tree._objinspect_root._get_node_by_uid_trace(uid_obj.parts)
         node = nodes[-1]
         if node.type in FOLDER_TYPES:
             await self.preview_container.set_new_layout([])
@@ -205,7 +207,7 @@ class ObjectInspector(mui.FlexBox):
 
         preview_layout: Optional[mui.FlexBox] = None
 
-        objs, found = await self.tree._get_obj_by_uid_trace(uid, nodes)
+        objs, found = await self.tree._get_obj_by_uid_trace(uid_obj, nodes)
         # determine objtree root
         # we don't require your tree is strictly nested,
         # you can have a tree with non-tree-item container,

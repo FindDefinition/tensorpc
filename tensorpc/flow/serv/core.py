@@ -48,6 +48,7 @@ from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
 from tensorpc.constants import TENSORPC_SPLIT
 from tensorpc.core import get_grpc_url
 from tensorpc.core.asynctools import cancel_task
+from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from tensorpc.flow import constants as flowconstants
 from tensorpc.flow.constants import (
     FLOW_DEFAULT_GRAPH_ID, FLOW_FOLDER_PATH, TENSORPC_FLOW_DEFAULT_TMUX_NAME,
@@ -853,6 +854,10 @@ class DataStorageNodeBase(abc.ABC):
         if meta_path.exists():
             with meta_path.open("r") as f:
                 meta_dict = json.load(f)
+            if "|" not in meta_dict["id"]:
+                meta_dict["id"] = UniqueTreeId.from_parts([meta_dict["id"]]).uid_encoded
+                with meta_path.open("w") as f:
+                    json.dump(meta_dict, f)
             return meta_dict
         raise FileNotFoundError(f"{meta_path} not exists")
     
@@ -886,7 +891,7 @@ class DataStorageNodeBase(abc.ABC):
             path.rename(self.get_save_path(new_name))
         # self.remove_data(key)
         item.meta.name = new_name 
-        item.meta.id = new_name
+        item.meta.id = UniqueTreeIdForTree.from_parts([new_name])
         meta_path = self.get_meta_path(key)
         if meta_path.exists():
             meta_path.unlink()
@@ -907,6 +912,12 @@ class DataStorageNodeBase(abc.ABC):
         if path.exists() and meta_path.exists():
             with meta_path.open("r") as f:
                 meta_dict = json.load(f)
+            
+            # TODO remove this (old style uid compat)
+            if "|" not in meta_dict["id"]:
+                meta_dict["id"] = UniqueTreeId.from_parts([meta_dict["id"]]).uid_encoded
+                with meta_path.open("w") as f:
+                    json.dump(meta_dict, f)
             meta = JsonLikeNode(**meta_dict)
             with path.open("rb") as f:
                 data: bytes = pickle.load(f)

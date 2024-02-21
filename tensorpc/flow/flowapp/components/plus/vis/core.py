@@ -6,6 +6,7 @@ from pydantic_core import PydanticCustomError, core_schema
 from pydantic import (
     GetCoreSchemaHandler,
 )
+from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from tensorpc.flow.jsonlike import JsonLikeNode
 from ... import mui, three
 if TYPE_CHECKING:
@@ -13,11 +14,15 @@ if TYPE_CHECKING:
 from tensorpc.utils.uniquename import UniqueNamePool
 
 UNKNOWN_VIS_KEY = "unknown_vis"
-UNKNOWN_KEY_SPLIT = "!!%"
+UNKNOWN_KEY_SPLIT = "%"
 RESERVED_NAMES = set([UNKNOWN_VIS_KEY, "reserved"])
 
 def is_reserved_name(name: str):
     parts = name.split(".")
+    return parts[0] in RESERVED_NAMES
+
+def is_reserved_uid(uid: UniqueTreeId):
+    parts = uid.parts
     return parts[0] in RESERVED_NAMES
 
 class CanvasItemProxy:
@@ -99,14 +104,14 @@ class VContext:
 
     @property
     def current_namespace(self):
-        return ".".join(self.name_stack)
+        return UniqueTreeIdForTree.from_parts(self.name_stack)
 
     @property
     def current_container(self):
         if not self.name_stack:
             return self.root
         else:
-            return self._name_to_group[self.current_namespace]
+            return self._name_to_group[self.current_namespace.uid_encoded]
 
     def clear(self):
         self.stack.clear()

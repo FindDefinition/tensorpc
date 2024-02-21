@@ -48,7 +48,9 @@ from tensorpc.core.event_emitter.base import ExceptionParam
 from tensorpc.core.moduleid import is_tensorpc_dynamic_path
 from tensorpc.core.serviceunit import (AppFuncType, ReloadableDynamicClass,
                                        ServFunctionMeta)
-from tensorpc.flow.coretypes import UniqueTreeId, MessageLevel
+from tensorpc.core.tree_id import UniqueTreeId
+from tensorpc.flow.coretypes import MessageLevel
+
 from tensorpc.flow.flowapp.appcore import EventHandler, EventHandlers
 from tensorpc.flow.flowapp.reload import AppReloadManager, FlowSpecialMethods
 from tensorpc.utils.registry import HashableRegistry
@@ -1147,11 +1149,12 @@ class Component(Generic[T_base_props, T_child]):
         self._flow_reference_count += 1
         return {}
 
-    def _detach(self) -> dict:
+    def _detach(self) -> Dict[UniqueTreeId, "Component"]:
         self._flow_reference_count -= 1
         if self._flow_reference_count == 0:
             self.flow_event_emitter.emit(FrontendEventType.BeforeUnmount.value, Event(FrontendEventType.BeforeUnmount.value, None))
             res_uid = self._flow_uid
+            assert res_uid is not None 
             self._flow_uid = None
             self._flow_comp_core = None
             return {res_uid: self}
@@ -1878,13 +1881,13 @@ class ContainerBase(Component[T_container_props, T_child]):
         self._foreach_comp(handler)
 
     def _detach(self):
-        disposed_uids: Dict[str, Component] = super()._detach()
+        disposed_uids: Dict[UniqueTreeId, Component] = super()._detach()
         for v in self._child_comps.values():
             disposed_uids.update(v._detach())
         return disposed_uids
 
     def _detach_child(self, childs: Optional[List[str]] = None):
-        disposed_uids: Dict[str, Component] = {}
+        disposed_uids: Dict[UniqueTreeId, Component] = {}
         if childs is None:
             childs = list(self._child_comps.keys())
         for k in childs:
@@ -2070,8 +2073,9 @@ class ContainerBase(Component[T_container_props, T_child]):
         if self._child_structure is not None:
             update_msg["childsComplex"] = asdict_no_deepcopy(self._child_structure, dict_factory=_undefined_comp_dict_factory, obj_factory=_undefined_comp_obj_factory)
         update_ev = self.create_update_event(update_msg)
+        deleted = [x.uid_encoded for x in detached_uid_to_comp.keys()]
         return update_ev + self.create_update_comp_event(
-            comps_frontend_dict, list(detached_uid_to_comp.keys())), list(
+            comps_frontend_dict, deleted), list(
                 attached.values()), list(detached_uid_to_comp.values())
 
     async def set_new_layout(self, layout: Union[Dict[str, Component],
@@ -2094,8 +2098,10 @@ class ContainerBase(Component[T_container_props, T_child]):
             self._child_comps.pop(k)
         if not detached_uid_to_comp:
             return
+        deleted = [x.uid_encoded for x in detached_uid_to_comp.keys()]
+
         await self.put_app_event(
-            self.create_delete_comp_event(list(detached_uid_to_comp.keys())))
+            self.create_delete_comp_event(deleted))
         await self._run_special_methods([],
                                         list(detached_uid_to_comp.values()))
 
@@ -2131,8 +2137,10 @@ class ContainerBase(Component[T_container_props, T_child]):
         if self._child_structure is not None:
             update_msg["childsComplex"] = asdict_no_deepcopy(self._child_structure, dict_factory=_undefined_comp_dict_factory, obj_factory=_undefined_comp_obj_factory)
         update_ev = self.create_update_event(update_msg)
+        deleted = [x.uid_encoded for x in detached.keys()]
+
         return update_ev + self.create_update_comp_event(
-            comps_frontend_dict, list(detached.keys())), list(
+            comps_frontend_dict, deleted), list(
                 attached.values()), list(detached.values())
 
     async def update_childs(self, layout: Union[Dict[str, Component],

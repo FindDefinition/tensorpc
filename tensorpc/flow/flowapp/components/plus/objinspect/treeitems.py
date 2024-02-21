@@ -3,7 +3,7 @@ import sys
 import tokenize
 from tensorpc.core.funcid import find_toplevel_func_node_by_lineno
 from tensorpc.core.tracer import FrameResult, TraceType
-from tensorpc.flow.coretypes import UniqueTreeIdForTree
+from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.flow.flowapp import appctx
 from tensorpc.flow.flowapp.components import mui
 from tensorpc.flow.flowapp.reload import reload_object_methods
@@ -13,7 +13,7 @@ from tensorpc.flow.jsonlike import (CommonQualNames, ContextMenuData,
 from typing import Any, Callable, Dict, Generic, Hashable, List, Optional, TypeVar, Union, Tuple
 from tensorpc.core import inspecttools
 from tensorpc.flow.marker import mark_create_preview_layout
-from .analysis import ObjectTreeParser, GLOBAL_SPLIT, get_tree_context, get_tree_context_noexcept
+from .analysis import ObjectTreeParser, get_tree_context, get_tree_context_noexcept
 import humanize
 import datetime as dt
 
@@ -87,7 +87,7 @@ class TraceTreeItem(TreeItem):
     async def get_child_desps(self, parent_ns: UniqueTreeIdForTree) -> Dict[str, JsonLikeNode]:
         res: Dict[str, JsonLikeNode] = {}
         for v in self.child_trace_res:
-            id = f"{parent_ns}{GLOBAL_SPLIT}{v.get_uid()}"
+            id = parent_ns.append_part(v.get_uid())
             node = v.get_json_like_node(id)
             res[v.get_uid()] = node
         res_list = await get_tree_context_noexcept().parser.parse_obj_dict_to_nodes(self.local_vars, parent_ns)
@@ -100,9 +100,9 @@ class TraceTreeItem(TreeItem):
             return self.child_trace_res[child_trace_keys.index(key)]
         return self.local_vars[key]
 
-    def get_json_like_node(self, id: str) -> JsonLikeNode:
+    def get_json_like_node(self, id: UniqueTreeIdForTree) -> JsonLikeNode:
         return JsonLikeNode(id,
-                            id.split(GLOBAL_SPLIT)[-1],
+                            id.parts[-1],
                             JsonLikeType.Object.value,
                             typeStr="Frame",
                             cnt=len(self.local_vars),

@@ -70,7 +70,9 @@ from tensorpc.core.serviceunit import (ObjectReloadManager,
                                        SimpleCodeManager, get_qualname_to_code)
 from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.constants import TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
-from tensorpc.flow.coretypes import UniqueTreeId, ScheduleEvent, StorageDataItem
+from tensorpc.core.tree_id import UniqueTreeId
+from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem
+
 from tensorpc.flow.flowapp.components.plus.objinspect.inspector import get_exception_frame_stack
 from tensorpc.flow.flowapp.components.plus.objinspect.treeitems import TraceTreeItem
 from tensorpc.flow.flowapp.reload import (AppReloadManager,
@@ -494,7 +496,10 @@ class App:
         res: List[dict] = await simple_chunk_call_async(
             meta.grpc_url, serv_names.FLOW_DATA_LIST_ITEM_METAS, graph_id,
             node_id)
-
+        for x in res:
+            # TODO remove this (old style uid compat)
+            if "|" not in x["id"]:
+                x["id"] = UniqueTreeId.from_parts([x["id"]]).uid_encoded
         return [JsonLikeNode(**x) for x in res]
 
     async def list_all_data_storage_nodes(self,

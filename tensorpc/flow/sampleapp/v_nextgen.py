@@ -105,6 +105,9 @@ class DevApp:
         # with V.ctx():
         random_img = np.random.randint(0, 255, (100, 100, 4), dtype=np.uint8)
         random_img[:, :, -1] = 255
+
+        random_img_rgb = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+
         # await self.canvas.canvas.update_childs([
         #     three.Group([
         #         three.Image().prop(image=random_img)
@@ -112,11 +115,11 @@ class DevApp:
         # ])
         # random_img = np.random.randint(0, 255, (128 * 16, 128 * 16, 3), dtype=np.uint8)
 
-        # with V.group("debug"):
-        #     V.image(random_img, pos=(5, 5, 2), use_datatex=True)
+        with V.group("debug"):
+            V.image(random_img, pos=(5, 5, 2), use_datatex=True)
         with V.group("debugX"):
 
-            # V.image(random_img, pos=(0, 5, 2), use_datatex=True)
+            V.image(random_img_rgb, pos=(0, 5, 2), use_datatex=False)
 
             points = np.random.uniform(-1, 1, size=[1000, 3]).astype(np.float32)
             # V.bounding_box((1, 1, 1))

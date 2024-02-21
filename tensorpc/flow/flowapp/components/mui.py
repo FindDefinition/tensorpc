@@ -32,10 +32,10 @@ from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterable,
 
 import numpy as np
 from PIL import Image as PILImage
-from typing_extensions import Literal, TypeAlias, TypedDict
+from typing_extensions import Literal, TypeAlias, TypedDict, Self
 from pydantic import field_validator, model_validator
 
-from tensorpc.flow.coretypes import UniqueTreeId, UniqueTreeIdForTree
+from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from .typemetas import Vector3Type
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.defs import FileResource
@@ -4311,7 +4311,7 @@ class DataGridColumnDef:
         return id_resolu
 
     @model_validator(mode="after")
-    def _check_id_header_accesskey_valid(self) -> "DataGridColumnDef":
+    def _check_id_header_accesskey_valid(self) -> Self:
         id_resolu = self._id_resolution()
         assert id_resolu != "", "id can't be empty"
         return self
@@ -4375,7 +4375,7 @@ class DataGridProps(MUIFlexBoxProps, DataGridPropsBase):
                     DataGridProxy] = dataclasses.field(default_factory=list)
 
     @model_validator(mode='after')
-    def _validator_post_root(self) -> 'DataGridProps':
+    def _validator_post_root(self) -> Self:
         if isinstance(self.dataList, DataGridProxy):
             assert self.virtualized, "proxy mode only works with virtualized mode"
             assert self.dataList.numRows > 0 and self.dataList.numColumns > 0, "proxy mode must provide valid numRows and numColumns"
