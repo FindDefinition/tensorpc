@@ -2278,7 +2278,9 @@ class Flow:
             if k != FLOW_DEFAULT_GRAPH_ID:
                 res = await self.load_graph(k, force_reload=False)
                 final_res.append(res)
-        return [g.to_dict() for g in final_res]
+        return {
+            "flows": [g.to_dict() for g in final_res]
+        }
 
     async def delete_graph(self, graph_id: str):
         flow = self.flow_dict[graph_id]

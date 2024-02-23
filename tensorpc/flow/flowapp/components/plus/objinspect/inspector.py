@@ -107,25 +107,23 @@ class ObjectInspector(mui.FlexBox):
                                "1",
                                self.preview_container,
                                icon=mui.IconType.Preview,
-                               tooltip="preview layout of item",
-                               tooltipPlacement="right"),
+                               tooltip="preview layout of item"),
                     mui.TabDef("",
                                "2",
                                mui.AppTerminal(),
                                icon=mui.IconType.Terminal,
-                               tooltip="app terminal (read only)",
-                               tooltipPlacement="right"),
+                               tooltip="app terminal (read only)"),
                     mui.TabDef("",
                                "3",
                                self.fast_layout_container,
                                icon=mui.IconType.ManageAccounts,
-                               tooltip="custom layout (appctx.inspector.set_custom_layout_sync)",
-                               tooltipPlacement="right"),
+                               tooltip="custom layout (appctx.inspector.set_custom_layout_sync)"),
 
                 ], init_value="2").prop(panelProps=mui.FlexBoxProps(width="100%", padding=0),
                         orientation="vertical",
                         borderRight=1,
-                        borderColor='divider')
+                        borderColor='divider',
+                        tooltipPlacement="right")
             ], tab_theme)
         ])
         if use_allotment:

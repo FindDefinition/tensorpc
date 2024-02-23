@@ -130,4 +130,6 @@ class MatrixDataGridContainerApp:
         return NumpyArrayGridTable({
             "a": arr_item1,
             "b": arr_item2,
+            "d": 5
+
         })

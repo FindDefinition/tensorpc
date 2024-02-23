@@ -3157,7 +3157,12 @@ class TabsProps(MUIFlexBoxProps):
     scrollButtons: Union[Literal["auto"], bool, Undefined] = undefined
     selectionFollowsFocus: Union[Undefined, bool] = undefined
     panelProps: Union[FlexBoxProps, Undefined] = undefined
-
+    tooltipPlacement: Union[_TooltipPlacement, Undefined] = undefined
+    tooltipMultiline: Union[bool, Undefined] = undefined
+    # 300 by default
+    tooltipEnterDelay: Union[NumberType, Undefined] = undefined
+    tooltipLeaveDelay: Union[NumberType, Undefined] = undefined
+    tooltipEnterNextDelay: Union[NumberType, Undefined] = undefined
 
 @dataclasses.dataclass
 class TabDef:
@@ -3175,8 +3180,6 @@ class TabDef:
                     Undefined] = undefined
     iconFontSize: Union[ValueType, Undefined] = undefined
     tooltip: Union[str, Undefined] = undefined
-    tooltipPlacement: Union[_TooltipPlacement, Undefined] = undefined
-    tooltipMultiline: Union[bool, Undefined] = undefined
     labelComponent: Union[Component, Undefined] = undefined
 
 

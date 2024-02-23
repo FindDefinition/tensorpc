@@ -19,6 +19,7 @@ from typing import Any, Callable, Coroutine, Dict, Hashable, Iterable, List, Lit
 
 import numpy as np
 from tensorpc.core.core_io import _div_up
+from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.flow.flowapp.components import mui, three
 
 
@@ -392,7 +393,7 @@ class NumpyArrayGridTable(mui.FlexBox):
     def __init__(self,
                  init_array_items: Optional[Dict[str,
                                                  Union[Dict[str, np.ndarray],
-                                                       np.ndarray]]] = None,
+                                                       np.ndarray, int, float, bool]]] = None,
                  max_columns: int = 25,
                  max_size_row_split: int = 1000000):
         super().__init__()
@@ -410,6 +411,10 @@ class NumpyArrayGridTable(mui.FlexBox):
         self.dialog = dialog
         btn.event_click.on_standard(
             self._on_btn_select).configure(stop_propagation=True)
+        value_cell = mui.MatchCase([
+            mui.MatchCase.ExprCase("x != \"scalar\"", btn),
+            mui.MatchCase.Case(mui.undefined, mui.Typography("").set_override_props(value="value")),
+        ]).set_override_props(condition="shape")
         cbox = mui.Checkbox().prop(size="small", disabled=True)
         column_defs = [
             mui.DataGrid.ColumnDef("name", accessorKey="name"),
@@ -419,10 +424,10 @@ class NumpyArrayGridTable(mui.FlexBox):
             mui.DataGrid.ColumnDef("contiguous",
                                    accessorKey="contiguous",
                                    cell=cbox),
-            mui.DataGrid.ColumnDef("viewer", cell=btn),
+            mui.DataGrid.ColumnDef("value", cell=value_cell),
         ]
         self.array_items: Dict[str, Union[Dict[str, np.ndarray],
-                                          np.ndarray]] = {}
+                                          np.ndarray, int, float, bool]] = {}
         if init_array_items is not None:
             self.array_items = init_array_items
 
@@ -443,7 +448,7 @@ class NumpyArrayGridTable(mui.FlexBox):
     async def update_array_items(self,
                                  array_items: Dict[str, Union[Dict[str,
                                                                    np.ndarray],
-                                                              np.ndarray]]):
+                                                              np.ndarray, int, float, bool]]):
         self.array_items.update(array_items)
         item_datas = self._extract_table_data_from_array_items()
         await self.send_and_wait(self.dgrid.update_event(dataList=item_datas))
@@ -452,7 +457,7 @@ class NumpyArrayGridTable(mui.FlexBox):
                                   new_array_items: Dict[str,
                                                         Union[Dict[str,
                                                                    np.ndarray],
-                                                              np.ndarray]]):
+                                                              np.ndarray, int, float, bool]]):
         self.array_items = new_array_items
         item_datas = self._extract_table_data_from_array_items()
         await self.send_and_wait(self.dgrid.update_event(dataList=item_datas))
@@ -474,13 +479,22 @@ class NumpyArrayGridTable(mui.FlexBox):
                     "contiguous": contiguous,
                     "dtype": "multiple",
                 })
-            else:
+            elif isinstance(v, np.ndarray):
                 table_data.append({
                     "id": str(k),
                     "name": k,
                     "shape": str(v.shape),
                     "contiguous": bool(v.flags['C_CONTIGUOUS']),
                     "dtype": str(v.dtype),
+                })
+            elif isinstance(v, (int, float, bool)):
+                table_data.append({
+                    "id": str(k),
+                    "name": k,
+                    "shape": "scalar",
+                    "contiguous": True,
+                    "dtype": get_qualname_of_type(type(v)),
+                    "value": str(v)
                 })
         return table_data
 
@@ -489,6 +503,7 @@ class NumpyArrayGridTable(mui.FlexBox):
         assert not isinstance(keys, mui.Undefined)
         key = keys[0]
         item = self.array_items[key]
+        assert not isinstance(item, (int, float, bool))
         await self.grid_container.set_new_layout([
             NumpyArrayGrid(item, self.max_columns,
                            self.max_size_row_split).prop(width="100%",
