@@ -2261,7 +2261,14 @@ class Flow:
                         serv_names.FLOWWORKER_SYNC_GRAPH, graph_id,
                         node.to_dict(), [n.to_dict() for n in driv_nodes],
                         graph.variable_dict)
+    
+    async def save_dock_state(self, state):
+        # TODO do we need a async lock here?
+        flow_path = self.root / f"__tensorpc_dockview_layout.json"
+        with flow_path.open("w") as f:
+            json.dump(state, f)
                     
+
     async def update_node_data_and_save_graph(self, graph_id: str, node_id: str, update_node_data: Dict[str, Any]):
         graph = self.flow_dict[graph_id]
         node_desp = self._get_node_desp(graph_id, node_id)
@@ -2271,6 +2278,7 @@ class Flow:
 
 
     async def load_default_graph(self):
+        dock_state = self.load_dock_state()
         final_res = [
             await self.load_graph(FLOW_DEFAULT_GRAPH_ID, force_reload=False)
         ]
@@ -2279,7 +2287,8 @@ class Flow:
                 res = await self.load_graph(k, force_reload=False)
                 final_res.append(res)
         return {
-            "flows": [g.to_dict() for g in final_res]
+            "flows": [g.to_dict() for g in final_res],
+            **dock_state
         }
 
     async def delete_graph(self, graph_id: str):
@@ -2313,6 +2322,15 @@ class Flow:
         assert isinstance(node, MarkdownNode)
         node.set_page(page, current_key)
         node.set_current_key(current_key)
+
+    def load_dock_state(self):
+        flow_path = self.root / f"__tensorpc_dockview_layout.json"
+        if flow_path.exists():
+            with flow_path.open("r") as f:
+                flow_data = json.load(f)
+            return flow_data
+        else:
+            return {}
 
     async def load_graph(self, graph_id: str, force_reload: bool = False):
         flow_path = self.root / f"{graph_id}.json"

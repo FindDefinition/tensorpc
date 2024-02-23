@@ -1605,4 +1605,80 @@ class EditableApp(App):
         # 2. all callback defined in changed file will be reset
         # 3. if layout function changed, load new layout
         # 4. if mount/unmount function changed, reset them
-        # 5. if autorun chang
+        # 5. if autorun changed, run them
+
+        if isinstance(ev, watchdog.events.FileModifiedEvent):
+            dcls = self._get_app_dynamic_cls()
+            rprint("<watchdog>", ev)
+            with self._watch_lock:
+                if self._flowapp_code_mgr is None or self._loop is None:
+                    return
+                asyncio.run_coroutine_threadsafe(
+                    self._reload_object_with_new_code(ev.src_path), self._loop)
+
+    def _reload_app_file(self):
+        # comps = self._uid_to_comp
+        # callback_dict = {}
+        # for k, v in comps.items():
+        #     cb = v.get_callback()
+        #     if cb is not None:
+        #         callback_dict[k] = cb
+        if self._is_external_root:
+            obj = self.root
+            if self.root._wrapped_obj is not None:
+                obj = self.root._wrapped_obj
+            new_cb, code_changed = self._get_app_dynamic_cls(
+            ).reload_obj_methods(obj, {}, self._flow_reload_manager)
+        else:
+            new_cb, code_changed = self._get_app_dynamic_cls(
+            ).reload_obj_methods(self, {}, self._flow_reload_manager)
+        self._get_app_service_unit().reload_metas(self._flow_reload_manager)
+        # for k, v in comps.items():
+        #     if k in new_cb:
+        #         v.set_callback(new_cb[k])
+        return code_changed
+
+    async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
+        """override this method to support vscode editor.
+        """
+        if self._use_app_editor:
+            app_path = self._get_app_dynamic_cls().file_path
+            if event.type == AppEditorFrontendEventType.Save:
+                with self._watch_lock:
+                    # self._watchdog_ignore_next = True
+                    if self.code_editor.external_path is not None:
+                        path = self.code_editor.external_path
+                    else:
+                        path = app_path
+                    # if self.code_editor.external_path is None:
+                    with open(path, "w") as f:
+                        f.write(event.data)
+                    await self._reload_object_with_new_code(path, event.data)
+        return
+
+
+class EditableLayoutApp(EditableApp):
+
+    def __init__(self,
+                 use_app_editor: bool = True,
+                 flex_flow: Union[str, Undefined] = "column nowrap",
+                 maxqsize: int = 10,
+                 observed_files: Optional[List[str]] = None,
+                 external_root: Optional[mui.FlexBox] = None,
+                 reload_manager: Optional[AppReloadManager] = None) -> None:
+        super().__init__(True,
+                         use_app_editor,
+                         flex_flow,
+                         maxqsize,
+                         observed_files,
+                         external_root=external_root,
+                         reload_manager=reload_manager)
+
+
+async def _run_zeroarg_func(cb: Callable):
+    try:
+        coro = cb()
+        if inspect.iscoroutine(coro):
+            await coro
+    except:
+        traceback.print_exc()
