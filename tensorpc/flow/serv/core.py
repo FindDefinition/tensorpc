@@ -2157,6 +2157,15 @@ class Flow:
         if isinstance(node_desp.node, (NodeWithSSHBase)):
             return node_desp.node.get_node_status().to_dict()
         return UserStatusEvent.empty().to_dict()
+    
+    def _get_all_node_status(self, graphs: List[FlowGraph]):
+        res = {}
+        for graph in graphs:
+            graph_id = graph.graph_id
+            for node in graph.nodes:
+                res[node.id] = self.query_node_status(graph_id, node.id)
+        return res
+
 
     async def save_terminal_state(self, graph_id: str, node_id: str, state,
                                   timestamp_ms: int):
@@ -2264,7 +2273,7 @@ class Flow:
     
     async def save_dock_state(self, state):
         # TODO do we need a async lock here?
-        flow_path = self.root / f"__tensorpc_dockview_layout.json"
+        flow_path = self.root / "dockview" / f"dockview_layout.json"
         with flow_path.open("w") as f:
             json.dump(state, f)
                     
@@ -2277,7 +2286,7 @@ class Flow:
         self._save_graph_content_only(graph_id, graph.get_save_data())
 
 
-    async def load_default_graph(self):
+    async def load_default_graph_object(self):
         dock_state = self.load_dock_state()
         final_res = [
             await self.load_graph(FLOW_DEFAULT_GRAPH_ID, force_reload=False)
@@ -2286,9 +2295,17 @@ class Flow:
             if k != FLOW_DEFAULT_GRAPH_ID:
                 res = await self.load_graph(k, force_reload=False)
                 final_res.append(res)
+        return final_res
+
+    async def load_default_graph(self):
+        dock_state = self.load_dock_state()
+
+        final_res = await self.load_default_graph_object()
+        # dockLayoutModel, 
         return {
             "flows": [g.to_dict() for g in final_res],
-            **dock_state
+            **dock_state,
+            "nodeStatus": self._get_all_node_status(final_res)
         }
 
     async def delete_graph(self, graph_id: str):
@@ -2324,7 +2341,7 @@ class Flow:
         node.set_current_key(current_key)
 
     def load_dock_state(self):
-        flow_path = self.root / f"__tensorpc_dockview_layout.json"
+        flow_path = self.root / "dockview" / f"dockview_layout.json"
         if flow_path.exists():
             with flow_path.open("r") as f:
                 flow_data = json.load(f)
