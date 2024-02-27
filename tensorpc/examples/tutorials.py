@@ -38,7 +38,7 @@ class MarkdownTutorialsTree:
                     overflow="auto")
         self.tutorials = tutorials
         self.panel = plus.InspectPanel({}, use_fast_tree=True)
-        return self.panel.prop(width="1280px", height="720px")
+        return self.panel.prop(width="100%", height="100%", overflow="hidden")
 
     @mark_did_mount
     async def _on_init(self):

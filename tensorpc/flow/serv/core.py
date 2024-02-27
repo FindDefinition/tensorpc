@@ -2270,13 +2270,40 @@ class Flow:
                         serv_names.FLOWWORKER_SYNC_GRAPH, graph_id,
                         node.to_dict(), [n.to_dict() for n in driv_nodes],
                         graph.variable_dict)
-    
+
+    def load_dock_state(self):
+        flow_path = self.root / "dockview" / f"dockview_layout.json"
+        if flow_path.exists():
+            with flow_path.open("r") as f:
+                flow_data = json.load(f)
+            return flow_data
+        else:
+            return {}
+
     async def save_dock_state(self, state):
         # TODO do we need a async lock here?
         flow_path = self.root / "dockview" / f"dockview_layout.json"
+        if not flow_path.parent.exists():
+            flow_path.parent.mkdir(0o755, True, True)
         with flow_path.open("w") as f:
             json.dump(state, f)
-                    
+
+    def load_favorite_nodes(self):
+        flow_path = self.root / "dockview" / f"favorite_nodes.json"
+        if flow_path.exists():
+            with flow_path.open("r") as f:
+                flow_data = json.load(f)
+            return flow_data
+        else:
+            return []
+
+    async def save_favorite_nodes(self, nodeIds: List[str]):
+        # TODO do we need a async lock here?
+        flow_path = self.root / "dockview" / f"favorite_nodes.json"
+        if not flow_path.parent.exists():
+            flow_path.parent.mkdir(0o755, True, True)
+        with flow_path.open("w") as f:
+            json.dump(nodeIds, f)
 
     async def update_node_data_and_save_graph(self, graph_id: str, node_id: str, update_node_data: Dict[str, Any]):
         graph = self.flow_dict[graph_id]
@@ -2287,7 +2314,6 @@ class Flow:
 
 
     async def load_default_graph_object(self):
-        dock_state = self.load_dock_state()
         final_res = [
             await self.load_graph(FLOW_DEFAULT_GRAPH_ID, force_reload=False)
         ]
@@ -2299,13 +2325,14 @@ class Flow:
 
     async def load_default_graph(self):
         dock_state = self.load_dock_state()
-
+        favorites = self.load_favorite_nodes()
         final_res = await self.load_default_graph_object()
         # dockLayoutModel, 
         return {
             "flows": [g.to_dict() for g in final_res],
             **dock_state,
-            "nodeStatus": self._get_all_node_status(final_res)
+            "nodeStatus": self._get_all_node_status(final_res),
+            "favoriteNodes": favorites,
         }
 
     async def delete_graph(self, graph_id: str):
@@ -2340,14 +2367,6 @@ class Flow:
         node.set_page(page, current_key)
         node.set_current_key(current_key)
 
-    def load_dock_state(self):
-        flow_path = self.root / "dockview" / f"dockview_layout.json"
-        if flow_path.exists():
-            with flow_path.open("r") as f:
-                flow_data = json.load(f)
-            return flow_data
-        else:
-            return {}
 
     async def load_graph(self, graph_id: str, force_reload: bool = False):
         flow_path = self.root / f"{graph_id}.json"

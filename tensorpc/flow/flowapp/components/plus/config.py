@@ -583,7 +583,9 @@ class ConfigPanelV2(mui.SimpleControls):
 
     async def callback(self, value: Tuple[str, Any]):
         uid = value[0]
-        cmeta = self._obj_to_ctrl_meta[uid]
+        uid_obj = UniqueTreeIdForTree(uid)
+        uid_dot_split = ".".join(uid_obj.parts)
+        cmeta = self._obj_to_ctrl_meta[uid_dot_split]
         compare_res = cmeta.compare(value[1])
         if not compare_res:
             # here we need to compare value, emit event iff
@@ -599,7 +601,7 @@ class ConfigPanelV2(mui.SimpleControls):
             handlers = self.get_event_handlers(self.__callback_key)
             if handlers is not None:
                 for handler in handlers.handlers:
-                    coro = handler.cb(uid, cmeta.getter())
+                    coro = handler.cb(uid_dot_split, cmeta.getter())
                     if inspect.iscoroutine(coro):
                         await coro
 

@@ -393,17 +393,17 @@ class ComplexCanvas(mui.FlexBox):
                                                  height="100%",
                                                  width="100%",
                                                  overflow="auto")
-        # if custom_effect is None:
-        #     custom_effect = three.EffectComposer([
-        #         three.Outline().prop(blur=True,
-        #                              edgeStrength=100,
-        #                              width=2000,
-        #                              visibleEdgeColor=0xfff,
-        #                              hiddenEdgeColor=0xfff,
-        #                              blendFunction=three.BlendFunction.ALPHA),
-        #         three.ToneMapping().prop(
-        #             mode=three.ToneMapppingMode.ACES_FILMIC),
-        #     ]).prop(autoClear=False)
+        if custom_effect is None:
+            custom_effect = three.EffectComposer([
+                three.Outline().prop(blur=True,
+                                     edgeStrength=100,
+                                     width=2000,
+                                     visibleEdgeColor=0xfff,
+                                     hiddenEdgeColor=0xfff,
+                                     blendFunction=three.BlendFunction.ALPHA),
+                three.ToneMapping().prop(
+                    mode=three.ToneMapppingMode.ACES_FILMIC),
+            ]).prop(autoClear=False)
 
         init_layout = {
             # "camera": self.camera,
@@ -411,7 +411,7 @@ class ComplexCanvas(mui.FlexBox):
             "screen shot": self._screen_shot_v2,
             "gizmo": self._gizmo_helper,
             "utree": self._user_obj_tree_group,
-            # "effects": custom_effect,
+            "effects": custom_effect,
         }
         self._lock = asyncio.Lock()
         for comp in init_layout.values():
@@ -428,7 +428,7 @@ class ComplexCanvas(mui.FlexBox):
             layout["init"] = three.Group(init_canvas_childs)
         self._init_layout = layout
         self._item_root = three.SelectionContext(layout,
-                                                 self._on_3d_object_select).prop(useOutline=True)
+                                                 self._on_3d_object_select).prop(useOutline=False)
         # self._item_root = three.Group(layout)
         self.key = key
         self.prop_container = mui.HBox([]).prop(overflow="auto",
