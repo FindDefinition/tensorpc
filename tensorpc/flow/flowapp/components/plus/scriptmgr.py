@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import tempfile
 import asyncio
 import dataclasses
 import enum
@@ -233,6 +233,28 @@ class ScriptManager(mui.FlexBox):
                 #     print(f'[stdout]\n{stdout.decode()}')
                 # if stderr:
                 #     print(f'[stderr]\n{stderr.decode()}')
+            elif item.lang == "cpp":
+                import ccimport
+                from ccimport.utils import tempdir
+                from pathlib import Path 
+                import subprocess
+
+                with tempdir() as tempd:
+                    path = Path(tempd) / "source.cc"
+                    exec_path = Path(tempd) / "executable"
+                    with open(path, "w") as f:
+                        f.write(code)
+                    sources = [
+                        path,
+                    ]
+                    build_meta = ccimport.BuildMeta()
+                    source = ccimport.ccimport(sources,
+                                            exec_path,
+                                            build_meta,
+                                            shared=False,
+                                            load_library=False,
+                                            verbose=False)
+                    subprocess.check_call([str(source)])
             if item.lang == "app":
                 mod_dict = {}
                 code_comp = compile(code, fname, "exec")
