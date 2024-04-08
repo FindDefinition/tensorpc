@@ -669,7 +669,8 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
         return res
 
     async def readuntil(self, separator: object,
-                        datatype: asyncssh.DataType) -> AnyStr:
+                        datatype: asyncssh.DataType,
+                        max_separator_len: int = 0) -> AnyStr:
         """Read data from the channel until a separator is seen"""
 
         if not separator:

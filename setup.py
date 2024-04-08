@@ -13,7 +13,7 @@ from setuptools import Command, find_packages, setup
 
 # Package meta-data.
 NAME = 'tensorpc'
-DESCRIPTION = 'Backend for distflow-frontend.'
+DESCRIPTION = 'Backend for devflow.'
 URL = 'https://github.com/FindDefinition/tensorpc'
 EMAIL = 'yanyan.sub@outlook.com'
 AUTHOR = 'Yan Yan'
