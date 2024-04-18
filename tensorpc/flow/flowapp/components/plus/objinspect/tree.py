@@ -162,9 +162,10 @@ class DataStorageTreeItem(TreeItem):
         self.node_id = node_id
         self.readable_id = readable_id
 
-    async def get_child_desps(self) -> Dict[str, mui.JsonLikeNode]:
+    async def get_child_desps(self, parent_ns: UniqueTreeIdForTree) -> Dict[str, mui.JsonLikeNode]:
         metas = await appctx.list_data_storage(self.node_id)
         for m in metas:
+            m.id = parent_ns + m.id
             userdata = {
                 "type": ContextMenuType.DataStorageItemDelete.value,
             }
@@ -191,11 +192,11 @@ class DataStorageTreeItem(TreeItem):
         res = await appctx.read_data_storage(key, self.node_id)
         return res
 
-    def get_json_like_node(self) -> Optional[mui.JsonLikeNode]:
+    def get_json_like_node(self, id: UniqueTreeIdForTree) -> Optional[mui.JsonLikeNode]:
         btns = [
             IconButtonData(ButtonType.Delete.value, mui.IconType.Delete.value)
         ]
-        return mui.JsonLikeNode(UniqueTreeIdForTree.from_parts([self.readable_id]),
+        return mui.JsonLikeNode(id + self.readable_id,
                                 self.readable_id,
                                 mui.JsonLikeType.Object.value,
                                 typeStr="DataStorageTreeItem",
@@ -241,10 +242,10 @@ class ObservedFunctionTree(TreeItem):
 
     # async def get_childs(self):
 
-    async def get_child_desps(self) -> Dict[str, mui.JsonLikeNode]:
+    async def get_child_desps(self, parent_ns: UniqueTreeIdForTree) -> Dict[str, mui.JsonLikeNode]:
         metas: Dict[str, mui.JsonLikeNode] = {}
         for k, v in appctx.get_app().get_observed_func_registry().items():
-            node = mui.JsonLikeNode(UniqueTreeIdForTree.from_parts([k]), v.name,
+            node = mui.JsonLikeNode(parent_ns + k, v.name,
                                     mui.JsonLikeType.Function.value, alias=v.name)
             node.iconBtns = [
                 IconButtonData(ButtonType.Watch.value,
@@ -266,7 +267,7 @@ class ObservedFunctionTree(TreeItem):
     async def get_child(self, key: str) -> Any:
         return appctx.get_app().get_observed_func_registry()[key]
 
-    def get_json_like_node(self) -> Optional[mui.JsonLikeNode]:
+    def get_json_like_node(self, id: UniqueTreeIdForTree) -> Optional[mui.JsonLikeNode]:
         return mui.JsonLikeNode(UniqueTreeIdForTree.from_parts(["observedFunc"]),
                                 "observedFunc",
                                 mui.JsonLikeType.Object.value,
@@ -540,10 +541,7 @@ class BasicObjectTree(mui.FlexBox):
             # if the object is special (extend TreeItem), we use used-defined
             # function instead of analysis it.
             if isinstance(obj, TreeItem):
-                obj_dict_desp = await obj.get_child_desps()  
-                for k, v in obj_dict_desp.items():
-                    # v.id = f"{uid}{GLOBAL_SPLIT}{v.id}"
-                    v.id = uid + v.id
+                obj_dict_desp = await obj.get_child_desps(uid)  
                 obj_dict = {**obj_dict_desp}
                 tree = list(obj_dict_desp.values())
             else:

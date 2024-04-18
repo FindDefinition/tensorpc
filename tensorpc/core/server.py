@@ -20,10 +20,11 @@ import threading
 import time
 import traceback
 from concurrent import futures
-from typing import Callable, Dict, List, Mapping, Optional, Sequence, Union
+from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import grpc
 import numpy as np
+from tensorpc.constants import TENSORPC_PORT_MAX_TRY
 from tensorpc.core.defs import ServiceDef
 
 from tensorpc.core.server_core import ProtobufServiceCore, ServerMeta
@@ -34,6 +35,7 @@ from tensorpc.protos_export import rpc_message_pb2
 from tensorpc.protos_export import \
     remote_object_pb2_grpc as remote_object_pb2_grpc
 from tensorpc.utils.df_logging import get_logger
+from tensorpc.utils.wait_tools import get_free_ports
 
 LOGGER = get_logger()
 
@@ -130,7 +132,8 @@ def serve_service(service: RemoteObjectService,
                   is_local=False,
                   max_threads=10,
                   process_id=-1,
-                  credentials=None):
+                  credentials=None,
+                  grpc_options: Optional[List[Tuple[str, Union[str, int]]]] = None):
     assert isinstance(service, RemoteObjectService)
     if is_local and process_id >= 0:
         if hasattr(os, "sched_setaffinity"):
@@ -141,18 +144,32 @@ def serve_service(service: RemoteObjectService,
     wait_interval = _ONE_DAY_IN_SECONDS
     if wait_time > 0:
         wait_interval = wait_time
-    options = None
+    options = []
     if length > 0:
         options = [('grpc.max_send_message_length', length * 1024 * 1024),
                    ('grpc.max_receive_message_length', length * 1024 * 1024)]
+    options.append(('grpc.so_reuseport', 0))
+    if grpc_options is not None:
+        options = grpc_options # override
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_threads),
                          options=options)
-    url = '[::]:{}'.format(port)
     remote_object_pb2_grpc.add_RemoteObjectServicer_to_server(service, server)
-    if credentials is not None:
-        server.add_secure_port(url, credentials)
-    else:
-        server.add_insecure_port(url)
+    for i in range(TENSORPC_PORT_MAX_TRY):
+        if port == -1:
+            port = get_free_ports(1)[0]
+        url = '[::]:{}'.format(port)
+        try:
+            if credentials is not None:
+                server.add_secure_port(url, credentials)
+            else:
+                server.add_insecure_port(url)
+            LOGGER.info("server started at {}".format(url))
+            break
+        except:
+            port = -1
+    if port == -1:
+        raise RuntimeError("Cannot find free port")
+
     server.start()
     server_core = service.server_core
     try:

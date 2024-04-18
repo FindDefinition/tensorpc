@@ -1,4 +1,9 @@
 # Changelog
+# [0.10.2] - 2024-04-18
+### Fixed
+- fix bug in inspector
+### Changed
+- change default grpc option: reuseport = False
 
 # [0.10.1] - 2024-04-08
 ### Fixed

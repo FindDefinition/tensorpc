@@ -669,7 +669,7 @@ def parse_obj_to_jsonlike(obj, name: str, id: UniqueTreeIdForTree):
 
 class TreeItem(abc.ABC):
     @abc.abstractmethod
-    async def get_child_desps(self) -> Dict[str, JsonLikeNode]:
+    async def get_child_desps(self, parent_ns: UniqueTreeIdForTree) -> Dict[str, JsonLikeNode]:
         raise NotImplementedError
 
     @abc.abstractmethod

@@ -112,7 +112,7 @@ class ObjectTreeParser:
             return obj.get_childs()
         elif isinstance(obj, TreeItem):
             # this is very special, we need to lazy access the child of a treeitem.
-            return await obj.get_child_desps() 
+            return await obj.get_child_desps(UniqueTreeIdForTree("")) 
         if self.custom_tree_item_handler is not None:
             res_tmp = await self.custom_tree_item_handler.get_childs(obj)
             if res_tmp is not None:
@@ -135,11 +135,11 @@ class ObjectTreeParser:
         except:
             print("???", type(obj))
             raise 
+        uid_name = UniqueTreeIdForTree.from_parts([name])
         if isinst:
-            node_candidate = obj.get_json_like_node()
+            node_candidate = obj.get_json_like_node(uid_name)
             if node_candidate is not None:
                 return node_candidate
-        uid_name = UniqueTreeIdForTree.from_parts([name])
         node = parse_obj_to_jsonlike(obj, name, uid_name)
         if isinstance(obj, mui.JsonLikeNode):
             return node
@@ -218,10 +218,10 @@ class ObjectTreeParser:
         if not self._should_expand_node(obj, node, total_expand_level):
             return 
         if isinstance(obj, TreeItem):
-            obj_dict = await obj.get_child_desps()
-            for k, v in obj_dict.items():
-                # v.id = f"{node.id}{GLOBAL_SPLIT}{v.id}"
-                v.id = node.id + v.id
+            obj_dict = await obj.get_child_desps(node.id)
+            # for k, v in obj_dict.items():
+            #     # v.id = f"{node.id}{GLOBAL_SPLIT}{v.id}"
+            #     v.id = node.id + v.id
             tree_children = list(obj_dict.values())
         else:
             obj_dict = await self.expand_object(obj)

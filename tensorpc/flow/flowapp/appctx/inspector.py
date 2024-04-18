@@ -60,6 +60,7 @@ def trace_sync(traced_locs: List[Union[str, Path, types.ModuleType]],
                trace_return: bool = True,
                depth: int = 5,
                use_return_locals: bool = False,
+               use_profile: bool = False,
                *,
                _frame_cnt=5):
     """trace, store call vars, then write result to ObjectInspector.
@@ -78,6 +79,7 @@ def trace_sync(traced_locs: List[Union[str, Path, types.ModuleType]],
                          depth,
                          use_return_locals,
                          _frame_cnt=_frame_cnt,
+                         use_profile=use_profile,
                          loop=get_app()._loop):
         yield
 
@@ -90,6 +92,7 @@ def trace_sync_return(traced_locs: List[Union[str, Path, types.ModuleType]],
                       traced_folders: Optional[Set[str]] = None,
                       trace_return: bool = True,
                       depth: int = 5,
+                      use_profile: bool = False,
                       *,
                       _frame_cnt=5):
     """trace, store local vars in return stmt, then write result to ObjectInspector.
@@ -107,6 +110,7 @@ def trace_sync_return(traced_locs: List[Union[str, Path, types.ModuleType]],
                          trace_return,
                          depth,
                          True,
+                         use_profile=use_profile,
                          _frame_cnt=_frame_cnt,
                          loop=get_app()._loop):
         yield
@@ -121,6 +125,7 @@ async def trace(traced_locs: List[Union[str, Path, types.ModuleType]],
                 trace_return: bool = True,
                 depth: int = 5,
                 use_return_locals: bool = False,
+                use_profile: bool = False,
                 *,
                 _frame_cnt=5):
     """async trace, store local vars / args in return stmt, then write result to ObjectInspector.
@@ -138,6 +143,7 @@ async def trace(traced_locs: List[Union[str, Path, types.ModuleType]],
                           trace_return,
                           depth,
                           use_return_locals,
+                          use_profile=use_profile,
                           _frame_cnt=_frame_cnt):
         yield
 

@@ -474,6 +474,7 @@ class ObjectInspector(mui.FlexBox):
                    depth: int = 5,
                    use_return_locals: bool = False,
                    ignored_names: Optional[Set[str]] = None,
+                    use_profile: bool = False,
                    *,
                    _frame_cnt=3,
                    loop: Optional[asyncio.AbstractEventLoop] = None):
@@ -492,7 +493,8 @@ class ObjectInspector(mui.FlexBox):
                         trace_return,
                         depth,
                         ignored_names,
-                        _frame_cnt=_frame_cnt)
+                        _frame_cnt=_frame_cnt,
+                        use_profile=use_profile)
         try:
             with tracer:
                 yield
@@ -512,6 +514,7 @@ class ObjectInspector(mui.FlexBox):
                           trace_return: bool = True,
                           depth: int = 5,
                           ignored_names: Optional[Set[str]] = None,
+                            use_profile: bool = False,
                           *,
                           _frame_cnt: int = 4,
                           loop: Optional[asyncio.AbstractEventLoop] = None):
@@ -538,6 +541,7 @@ class ObjectInspector(mui.FlexBox):
                     depth: int = 5,
                     use_return_locals: bool = False,
                     ignored_names: Optional[Set[str]] = None,
+                    use_profile: bool = False,
                     *,
                     _frame_cnt: int = 3):
         if traced_folders is None:
@@ -551,10 +555,10 @@ class ObjectInspector(mui.FlexBox):
                         trace_return,
                         depth,
                         ignored_names,
+                        use_profile=use_profile,
                         _frame_cnt=_frame_cnt)
         try:
             with tracer:
-
                 yield
         finally:
             tree_items = parse_frame_result_to_trace_item(
