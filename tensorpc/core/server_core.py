@@ -170,6 +170,10 @@ class ServiceCore(object):
         self._exposed_props._async_shutdown_event = self.async_shutdown_event
         await self.service_units.run_async_init()
 
+
+    def _set_port(self, port: int):
+        self._exposed_props.server_meta.port = port
+
     def init_http_client_session(self, sess: aiohttp.ClientSession):
         self._global_context.http_client_session = sess
 

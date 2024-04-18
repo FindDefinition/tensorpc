@@ -182,7 +182,7 @@ async def serve_service(service: AsyncRemoteObjectService,
     await server.start()
     loop = asyncio.get_running_loop()
     server_core = service.server_core
-
+    server_core._set_port(port)
     async def server_graceful_shutdown():
         # Shuts down the server with 5 seconds of grace period. During the
         # grace period, the server won't accept new connections and allow

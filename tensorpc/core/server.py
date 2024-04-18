@@ -169,9 +169,10 @@ def serve_service(service: RemoteObjectService,
             port = -1
     if port == -1:
         raise RuntimeError("Cannot find free port")
-
+    
     server.start()
     server_core = service.server_core
+    server_core._set_port(port)
     try:
         while True:
             # looks like event return false instead of raise timeouterror

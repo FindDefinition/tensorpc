@@ -1,4 +1,8 @@
 # Changelog
+# [0.10.3] - 2024-04-18
+### Fixed
+- fix port in meta when use dynamic port
+
 # [0.10.2] - 2024-04-18
 ### Fixed
 - fix bug in inspector
