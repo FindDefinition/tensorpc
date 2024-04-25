@@ -183,6 +183,9 @@ class ServiceCore(object):
     def exec_exit_funcs_sync(self):
         return self.service_units.run_exit_sync()
 
+    def run_event(self, event: serviceunit.ServiceEventType, *args: Any):
+        return self.service_units.run_event(event, *args)
+
     def _reset_timeout(self):
         with self.reset_timeout_lock:
             self.latest_active_time = time.time()

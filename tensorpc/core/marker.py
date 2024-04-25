@@ -1,6 +1,6 @@
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from tensorpc.constants import TENSORPC_FUNC_META_KEY
-from tensorpc.core.serviceunit import FunctionUserMeta, ServiceType
+from tensorpc.core.serviceunit import FunctionUserMeta, ServiceEventType, ServiceType
 
 
 def meta_decorator(func=None,
@@ -28,6 +28,10 @@ def meta_decorator(func=None,
         return wrapper(func)
     else:
         return wrapper
+
+def mark_server_event(func=None, event_type: ServiceEventType = ServiceEventType.Normal):
+    meta = FunctionUserMeta(ServiceType.Event, event_type=event_type)
+    return meta_decorator(func, meta)
 
 
 def mark_exit(func=None):

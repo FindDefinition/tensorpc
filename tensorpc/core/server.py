@@ -29,6 +29,7 @@ from tensorpc.core.defs import ServiceDef
 
 from tensorpc.core.server_core import ProtobufServiceCore, ServerMeta
 
+from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.protos_export import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos_export import rpc_message_pb2
 
@@ -169,10 +170,11 @@ def serve_service(service: RemoteObjectService,
             port = -1
     if port == -1:
         raise RuntimeError("Cannot find free port")
-    
-    server.start()
     server_core = service.server_core
     server_core._set_port(port)
+    server_core.run_event(ServiceEventType.BeforeServerStart)
+
+    server.start()
     try:
         while True:
             # looks like event return false instead of raise timeouterror
@@ -203,9 +205,12 @@ def serve(service_def: ServiceDef,
     url = '[::]:{}'.format(port)
     smeta = ServerMeta(port=port, http_port=-1)
     server_core = ProtobufServiceCore(url, service_def, True, smeta)
-    service = RemoteObjectService(server_core, is_local, length)
-    return serve_service(service, wait_time, port, length, is_local,
-                         max_threads, process_id, credentials)
+    with server_core.enter_global_context():
+        server_core.service_units.run_init()
+
+        service = RemoteObjectService(server_core, is_local, length)
+        return serve_service(service, wait_time, port, length, is_local,
+                            max_threads, process_id, credentials)
 
 
 def serve_with_http(service_def: ServiceDef,
@@ -225,26 +230,28 @@ def serve_with_http(service_def: ServiceDef,
 
     server_core = ProtobufServiceCore(url, service_def, True, smeta)
     service = RemoteObjectService(server_core, is_local, length)
+    with server_core.enter_global_context():
+        server_core.service_units.run_init()
 
-    kwargs = {
-        "service": service,
-        "wait_time": wait_time,
-        "port": port,
-        "length": length,
-        "is_local": is_local,
-        "max_threads": max_threads,
-        "process_id": process_id,
-        "credentials": credentials,
-    }
-    threads = []
-    thread = threading.Thread(target=serve_service, kwargs=kwargs)
-    thread.setDaemon(True)
-    thread.start()
-    threads.append(thread)
-    try:
-        httpserver.serve_service_core(server_core, http_port, None)
-    finally:
-        server_core.shutdown_event.set()
-        # loop = asyncio.get_running_loop()
-        for thread in threads:
-            thread.join()
+        kwargs = {
+            "service": service,
+            "wait_time": wait_time,
+            "port": port,
+            "length": length,
+            "is_local": is_local,
+            "max_threads": max_threads,
+            "process_id": process_id,
+            "credentials": credentials,
+        }
+        threads = []
+        thread = threading.Thread(target=serve_service, kwargs=kwargs)
+        thread.setDaemon(True)
+        thread.start()
+        threads.append(thread)
+        try:
+            httpserver.serve_service_core(server_core, http_port, None)
+        finally:
+            server_core.shutdown_event.set()
+            # loop = asyncio.get_running_loop()
+            for thread in threads:
+                thread.join()

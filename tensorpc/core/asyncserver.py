@@ -28,6 +28,7 @@ from tensorpc import compat
 from tensorpc.constants import TENSORPC_PORT_MAX_TRY
 from tensorpc.core.defs import ServiceDef
 from tensorpc.core.server_core import ProtobufServiceCore, ServerMeta
+from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.protos_export import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos_export import rpc_message_pb2
 from tensorpc.protos_export import \
@@ -172,17 +173,17 @@ async def serve_service(service: AsyncRemoteObjectService,
                 server.add_secure_port(url, credentials)
             else:
                 server.add_insecure_port(url)
-            LOGGER.info("server started at {}".format(url))
+            LOGGER.warning("server started at {}".format(url))
             break
         except:
             port = -1
     if port == -1:
         raise RuntimeError("Cannot find free port")
-
-    await server.start()
-    loop = asyncio.get_running_loop()
     server_core = service.server_core
     server_core._set_port(port)
+    server_core.run_event(ServiceEventType.BeforeServerStart)
+    await server.start()
+    loop = asyncio.get_running_loop()
     async def server_graceful_shutdown():
         # Shuts down the server with 5 seconds of grace period. During the
         # grace period, the server won't accept new connections and allow
@@ -314,14 +315,17 @@ def serve(service_def: ServiceDef,
           max_threads=10,
           process_id=-1,
           ssl_key_path: str = "",
-          ssl_crt_path: str = ""):
+          ssl_crt_path: str = "",
+          create_loop: bool = False):
     if not compat.Python3_7AndLater:
         raise NotImplementedError
     url = '[::]:{}'.format(port)
     smeta = ServerMeta(port=port, http_port=-1)
     server_core = ProtobufServiceCore(url, service_def, False, smeta)
-    loop = asyncio.get_event_loop()
-
+    if create_loop:
+        loop = asyncio.new_event_loop()
+    else:
+        loop = asyncio.get_event_loop()
     try:
         loop.run_until_complete(
             serve_async(server_core,

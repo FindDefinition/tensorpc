@@ -1,4 +1,5 @@
 import ast
+import asyncio
 import dataclasses
 import importlib
 import importlib.util
@@ -77,6 +78,15 @@ class ServiceType(Enum):
     WebSocketEventProvider = "EventProvider"  # only support ws
     WebSocketOnConnect = "WebSocketOnConnect"  # only support ws
     WebSocketOnDisConnect = "WebSocketOnDisConnect"  # only support ws
+    Event = "Event"
+
+class ServiceEventType(Enum):
+    Normal = "Normal"
+    Exit = "Exit"
+    Init = "AsyncInit"
+    BeforeServerStart = "BeforeServerStart" # all server meta are ready
+    WebSocketOnConnect = "WebSocketOnConnect"  # only support ws
+    WebSocketOnDisConnect = "WebSocketOnDisConnect"  # only support ws
 
 
 class AppFuncType(Enum):
@@ -111,6 +121,8 @@ class ServFunctionMeta:
     fn: Callable
     name: str
     type: ServiceType
+    event_type: ServiceEventType
+
     args: List[ParamMeta]
     is_gen: bool
     is_async: bool
@@ -125,6 +137,7 @@ class ServFunctionMeta:
                  fn: Callable,
                  name: str,
                  type: ServiceType,
+                event_type: ServiceEventType,
                  sig: inspect.Signature,
                  is_gen: bool,
                  is_async: bool,
@@ -146,9 +159,10 @@ class ServFunctionMeta:
         self.code = ""
         self.qualname = qualname
         self.user_app_meta = user_app_meta
+        self.event_type = event_type
 
     def copy(self):
-        return ServFunctionMeta(self.fn, self.name, self.type, self.sig,
+        return ServFunctionMeta(self.fn, self.name, self.type, self.event_type, self.sig,
                                 self.is_gen, self.is_async, self.is_static,
                                 self.is_binded, self.qualname,
                                 self.user_app_meta)
@@ -161,6 +175,7 @@ class ServFunctionMeta:
         return {
             "name": self.name,
             "type": self.type.value,
+            "event_type": self.event_type.value,
             "args": [a.to_json() for a in self.args],
             "is_gen": self.is_gen,
             "is_async": self.is_async,
@@ -1004,6 +1019,7 @@ class ReloadableDynamicClass(DynamicClass):
             serv_meta = ServFunctionMeta(v,
                                          k,
                                          ServiceType.Normal,
+                                         ServiceEventType.Normal,
                                          v_sig,
                                          is_gen,
                                          is_async,
@@ -1100,10 +1116,12 @@ class FunctionUserMeta:
     def __init__(self,
                  type: ServiceType,
                  event_name: str = "",
-                 is_dynamic: bool = False) -> None:
+                 is_dynamic: bool = False,
+                 event_type: ServiceEventType = ServiceEventType.Normal) -> None:
         self.type = type
         self._event_name = event_name
         self.is_dynamic = is_dynamic
+        self.event_type = event_type
 
     @property
     def event_name(self):
@@ -1154,6 +1172,8 @@ class ServiceUnit(DynamicClass):
         self.async_init: Optional[Callable[[], Coroutine[None, None,
                                                          None]]] = None
         self.ws_ondisconn_fn: Optional[Callable[[Any], None]] = None
+
+        self._event_to_handlers: Dict[ServiceEventType, List[ServFunctionMeta]] = {}
         self.name_to_events: Dict[str, EventProvider] = {}
         self.serv_metas = self._init_all_metas(self.obj_type)
         assert len(
@@ -1197,6 +1217,7 @@ class ServiceUnit(DynamicClass):
             serv_key = f"{self.module_key}.{k}"
 
             serv_type = ServiceType.Normal
+            serv_event_type = ServiceEventType.Normal
             is_gen = inspect.isgeneratorfunction(v)
             is_async_gen = inspect.isasyncgenfunction(v)
             is_async = inspect.iscoroutinefunction(v) or is_async_gen
@@ -1213,6 +1234,7 @@ class ServiceUnit(DynamicClass):
                                                  TENSORPC_FUNC_META_KEY)
                 # meta: FunctionUserMeta = inspect.getattr_static(v, TENSORPC_FUNC_META_KEY)
                 serv_type = meta.type
+                serv_event_type = meta.event_type
                 if serv_type == ServiceType.WebSocketEventProvider:
                     num_parameters = len(
                         v_sig.parameters) - (0 if is_static else 1)
@@ -1239,16 +1261,21 @@ class ServiceUnit(DynamicClass):
             if serv_type == ServiceType.WebSocketOnDisConnect:
                 assert self.ws_ondisconn_fn is None, "you can only register one ws_onconn_fn"
                 self.ws_ondisconn_fn = v
-
             serv_meta = ServFunctionMeta(v,
                                          k,
                                          serv_type,
+                                         serv_event_type,
                                          v_sig,
                                          is_gen,
                                          is_async,
                                          is_static,
                                          False,
                                          user_app_meta=app_meta)
+            if serv_type == ServiceType.Event:
+                if serv_event_type not in self._event_to_handlers:
+                    self._event_to_handlers[serv_event_type] = []
+                self._event_to_handlers[serv_event_type].append(serv_meta)
+
             # if module_name == "distflow.services.for_test:Service2:Test3" and k == "client_stream":
             #     print(dir(v))
             # print(module_name, serv_meta, is_async, is_async_gen)
@@ -1293,8 +1320,7 @@ class ServiceUnit(DynamicClass):
             for k, meta in self.services.items():
                 # bind fn if not static
                 if not meta.is_static and not meta.is_binded:
-                    meta.fn = types.MethodType(meta.fn, self.obj)
-                    meta.is_binded = True
+                    meta.bind(self.obj)
             for ev in self.name_to_events.values():
                 if not ev.is_static and not ev.is_binded:
                     new_fn = types.MethodType(ev.fn, self.obj)
@@ -1319,18 +1345,25 @@ class ServiceUnit(DynamicClass):
     def get_service_and_meta(self, serv_key: str):
         self.init_service()
         meta = self.services[serv_key]
-        return meta.fn, meta
+        return meta.get_binded_fn(), meta
 
     def run_service(self, serv_key: str, *args, **kwargs):
         self.init_service()
         assert self.obj is not None
-        fn = self.services[serv_key].fn
+        fn = self.services[serv_key].get_binded_fn()
         return fn(*args, **kwargs)
 
     def run_service_from_fn(self, fn: Callable, *args, **kwargs):
         self.init_service()
         assert self.obj is not None
         return fn(*args, **kwargs)
+
+    def run_event(self, event: ServiceEventType, *args: Any):
+        if event in self._event_to_handlers:
+            for h in self._event_to_handlers[event]:
+                coro = h.get_binded_fn()(*args)
+                if inspect.iscoroutine(coro):
+                    asyncio.run_coroutine_threadsafe(coro, asyncio.get_event_loop())
 
     def websocket_onconnect(self, client):
         if self.ws_onconn_fn is not None:
@@ -1400,6 +1433,10 @@ class ServiceUnits:
         for s in self.sus:
             s.run_exit_sync()
 
+    def run_event(self, event: ServiceEventType, *args: Any):
+        for s in self.sus:
+            s.run_event(event, *args)
+
     def get_all_service_metas_json(self):
         return {su.module_key: su.get_service_metas_json() for su in self.sus}
 
@@ -1421,3 +1458,6 @@ class ServiceUnits:
         self.init_service()
         for s in self.sus:
             await s.run_async_init()
+
+    def run_init(self):
+        self.init_service()

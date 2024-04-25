@@ -1,4 +1,9 @@
 # Changelog
+# [0.10.4] - 2024-04-25
+### Added
+- add basic support for standard server event
+- add simple bg server
+
 # [0.10.3] - 2024-04-18
 ### Fixed
 - fix port in meta when use dynamic port
