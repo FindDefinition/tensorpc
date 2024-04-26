@@ -22,6 +22,7 @@ from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Uni
 
 import grpc
 import grpc.aio
+import traceback
 import numpy as np
 
 from tensorpc import compat
@@ -176,6 +177,7 @@ async def serve_service(service: AsyncRemoteObjectService,
             LOGGER.warning("server started at {}".format(url))
             break
         except:
+            traceback.print_exc()
             port = -1
     if port == -1:
         raise RuntimeError("Cannot find free port")

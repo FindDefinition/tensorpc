@@ -1293,6 +1293,9 @@ class ServiceUnit(DynamicClass):
                     self.name_to_events[alias_key] = ev_provider
         return new_metas
 
+    def is_inited(self):
+        return self.obj is not None
+
     def init_service(self,
                      external_obj: Optional[Any] = None,
                      rebind: bool = False):
@@ -1360,6 +1363,8 @@ class ServiceUnit(DynamicClass):
 
     def run_event(self, event: ServiceEventType, *args: Any):
         if event in self._event_to_handlers:
+            if not self.is_inited():
+                self.init_service()
             for h in self._event_to_handlers[event]:
                 coro = h.get_binded_fn()(*args)
                 if inspect.iscoroutine(coro):
@@ -1367,14 +1372,20 @@ class ServiceUnit(DynamicClass):
 
     def websocket_onconnect(self, client):
         if self.ws_onconn_fn is not None:
+            if not self.is_inited():
+                self.init_service()
             self.ws_onconn_fn(client)
 
     def websocket_ondisconnect(self, client):
         if self.ws_ondisconn_fn is not None:
+            if not self.is_inited():
+                self.init_service()
             self.ws_ondisconn_fn(client)
 
     async def run_async_init(self):
         if self.async_init is not None:
+            if not self.is_inited():
+                self.init_service()
             await self.async_init()
 
     async def run_exit(self):
@@ -1455,9 +1466,10 @@ class ServiceUnits:
         return res
 
     async def run_async_init(self):
-        self.init_service()
+        # self.init_service()
         for s in self.sus:
             await s.run_async_init()
 
     def run_init(self):
-        self.init_service()
+        pass 
+        # self.init_service()

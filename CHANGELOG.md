@@ -1,4 +1,8 @@
 # Changelog
+# [0.10.5] - 2024-04-26
+### Fixed
+- fix lazy init services don't work in previous release
+
 # [0.10.4] - 2024-04-25
 ### Added
 - add basic support for standard server event

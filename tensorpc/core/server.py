@@ -167,6 +167,7 @@ def serve_service(service: RemoteObjectService,
             LOGGER.info("server started at {}".format(url))
             break
         except:
+            traceback.print_exc()
             port = -1
     if port == -1:
         raise RuntimeError("Cannot find free port")
