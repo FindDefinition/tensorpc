@@ -22,6 +22,7 @@ import uvicorn
 import blacksheep as web
 from blacksheep import Application, WebSocket, Request, Response
 from tensorpc.constants import TENSORPC_WEBSOCKET_MSG_SIZE
+from tensorpc.core.serviceunit import ServiceEventType
 
 from .core import WebsocketClientBase, WebsocketMsg, WebsocketMsgType, WebsocketHandler
 
@@ -211,6 +212,8 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
     with ctx:
         if standalone:
             await server_core._init_async_members()
+            await server_core.run_event_async(ServiceEventType.Init)
+
         ws_service = BlacksheepWebsocketHandler(server_core, client_max_size)
         app = web.Application()
         # TODO should we create a global client session for all http call in server?

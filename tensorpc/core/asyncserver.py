@@ -183,7 +183,7 @@ async def serve_service(service: AsyncRemoteObjectService,
         raise RuntimeError("Cannot find free port")
     server_core = service.server_core
     server_core._set_port(port)
-    server_core.run_event(ServiceEventType.BeforeServerStart)
+    await server_core.run_event_async(ServiceEventType.BeforeServerStart)
     await server.start()
     loop = asyncio.get_running_loop()
     async def server_graceful_shutdown():
@@ -193,53 +193,11 @@ async def serve_service(service: AsyncRemoteObjectService,
         await server.stop(5)
     _cleanup_coroutines.append(server_graceful_shutdown())
     await server_core.async_shutdown_event.wait()
-
-    # while True:
-    #     looks like event return false instead of raise timeouterror
-    #     if await _await_thread_ev(server_core.shutdown_event, loop,
-    #                               wait_interval):
-    #         break
-    #     with server_core.reset_timeout_lock:
-    #         interval = time.time() - server_core.latest_active_time
-    #         if wait_time > 0 and interval > wait_time:
-    #             break
     await server.stop(0)
     await server.wait_for_termination()
     # exec cleanup functions
-    await server_core.exec_exit_funcs()
+    await server_core.run_event_async(ServiceEventType.Exit)
 
-
-# def serve_with_http(service_def: ServiceDef,
-#                     wait_time=-1,
-#                     port=50051,
-#                     http_port=50052,
-#                     length=-1,
-#                     is_local=False,
-#                     max_threads=10,
-#                     process_id=-1,
-#                     credentials=None):
-#     if not compat.Python3_7AndLater:
-#         raise NotImplementedError
-#     from distflow.core import httpserver
-#     # run grpc server in background, and ws in main
-#     url = '[::]:{}'.format(port)
-#     # loop = asyncio.get_running_loop()
-#     server_core = ProtobufServiceCore(url, service_def, loop=None)
-#     service = AsyncRemoteObjectService(server_core, is_local, length)
-#     grpc_task = serve_service(service, wait_time, port, length, is_local,
-#                               max_threads, process_id, credentials)
-#     http_task = httpserver.serve_service_core_task(server_core, http_port,
-#                                                    None, is_sync=False)
-#     coro = asyncio.gather(grpc_task, http_task)
-#     try:
-#         asyncio.run(coro)
-#         # loop.run_until_complete(coro)
-#     except KeyboardInterrupt:
-#         server_core.shutdown_event.set()
-#         server_core.async_shutdown_event.set()
-#         # set shutdown ev and resume previous task.
-#         # loop.run_until_complete(coro)
-#         print("shutdown by keyboard interrupt")
 
 
 async def serve_with_http_async(server_core: ProtobufServiceCore,
@@ -264,7 +222,7 @@ async def serve_with_http_async(server_core: ProtobufServiceCore,
         url = '[::]:{}'.format(port)
         with server_core.enter_global_context():
             await server_core._init_async_members()
-
+            await server_core.run_event_async(ServiceEventType.Init)
             service = AsyncRemoteObjectService(server_core, is_local, length)
             grpc_task = serve_service(service, wait_time, port, length,
                                       is_local, max_threads, process_id,
@@ -283,7 +241,7 @@ async def run_exit_async(server_core: ProtobufServiceCore):
     async with aiohttp.ClientSession() as sess:
         server_core.init_http_client_session(sess)
         with server_core.enter_global_context():
-            await server_core.exec_exit_funcs()
+            await server_core.run_event_async(ServiceEventType.Exit)
 
 
 async def serve_async(sc: ProtobufServiceCore,
@@ -301,6 +259,7 @@ async def serve_async(sc: ProtobufServiceCore,
     server_core = sc
     with server_core.enter_global_context():
         await server_core._init_async_members()
+        await server_core.run_event_async(ServiceEventType.Init)
         service = AsyncRemoteObjectService(server_core, is_local, length)
         grpc_task = serve_service(service, wait_time, port, length, is_local,
                                   max_threads, process_id, ssl_key_path,
@@ -340,9 +299,10 @@ def serve(service_def: ServiceDef,
                         ssl_crt_path=ssl_crt_path))
     except KeyboardInterrupt:
         loop.run_until_complete(run_exit_async(server_core))
+        print("shutdown by keyboard interrupt")
+    finally:
         if _cleanup_coroutines:
             loop.run_until_complete(*_cleanup_coroutines)
-        print("shutdown by keyboard interrupt")
 
 
 # import uvloop
@@ -379,6 +339,7 @@ def serve_with_http(service_def: ServiceDef,
                                   ssl_crt_path=ssl_crt_path))
     except KeyboardInterrupt:
         loop.run_until_complete(run_exit_async(server_core))
+        print("shutdown by keyboard interrupt")
+    finally:
         if _cleanup_coroutines:
             loop.run_until_complete(*_cleanup_coroutines)
-        print("shutdown by keyboard interrupt")

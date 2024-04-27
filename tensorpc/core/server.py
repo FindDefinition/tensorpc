@@ -187,10 +187,10 @@ def serve_service(service: RemoteObjectService,
                     break
         server.stop(0)
         # exec cleanup functions
-        server_core.exec_exit_funcs_sync()
+        server_core.run_event(ServiceEventType.Exit)
         LOGGER.info("server closed")
     except KeyboardInterrupt:
-        server_core.exec_exit_funcs_sync()
+        server_core.run_event(ServiceEventType.Exit)
         server.stop(0)
         LOGGER.info("server shutdown by keyboard interrupt")
 
@@ -207,8 +207,7 @@ def serve(service_def: ServiceDef,
     smeta = ServerMeta(port=port, http_port=-1)
     server_core = ProtobufServiceCore(url, service_def, True, smeta)
     with server_core.enter_global_context():
-        server_core.service_units.run_init()
-
+        server_core.run_event(ServiceEventType.Init)
         service = RemoteObjectService(server_core, is_local, length)
         return serve_service(service, wait_time, port, length, is_local,
                             max_threads, process_id, credentials)
@@ -232,8 +231,7 @@ def serve_with_http(service_def: ServiceDef,
     server_core = ProtobufServiceCore(url, service_def, True, smeta)
     service = RemoteObjectService(server_core, is_local, length)
     with server_core.enter_global_context():
-        server_core.service_units.run_init()
-
+        server_core.run_event(ServiceEventType.Init)
         kwargs = {
             "service": service,
             "wait_time": wait_time,

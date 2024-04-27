@@ -153,9 +153,8 @@ class ProcessObserveManager:
         self._lock = asyncio.Lock()
         self.clients: Dict[str, AsyncRemoteManager] = {}
         self.is_sync_server = is_sync_server
-        
 
-    @marker.mark_async_init
+    @marker.mark_server_event(event_type=marker.ServiceEventType.Init)
     async def init(self):
         if self.is_sync_server:
             return 

@@ -39,6 +39,7 @@ from tensorpc.flow.langserv import close_tmux_lang_server, get_tmux_lang_server_
 from ..client import MasterMeta
 from tensorpc import prim
 from tensorpc.flow.serv_names import serv_names
+from tensorpc.core.serviceunit import ServiceEventType
 import traceback
 import time
 import sys 
@@ -112,7 +113,7 @@ class FlowApp:
         self.external_argv = external_argv
         self._external_argv_task: Optional[asyncio.Future] = None
 
-    @marker.mark_async_init
+    @marker.mark_server_event(event_type=marker.ServiceEventType.Init)
     async def init(self):
         if self.app._force_special_layout_method:
             layout_created = False
@@ -382,7 +383,7 @@ class FlowApp:
 
         self._send_loop_task = None
 
-    @marker.mark_exit
+    @marker.mark_server_event(event_type=ServiceEventType.Exit)
     async def on_exit(self):
         # save simple state to master
         try:

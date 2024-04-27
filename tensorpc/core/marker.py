@@ -29,18 +29,8 @@ def meta_decorator(func=None,
     else:
         return wrapper
 
-def mark_server_event(func=None, event_type: ServiceEventType = ServiceEventType.Normal):
+def mark_server_event(*, func=None, event_type: ServiceEventType = ServiceEventType.Normal):
     meta = FunctionUserMeta(ServiceType.Event, event_type=event_type)
-    return meta_decorator(func, meta)
-
-
-def mark_exit(func=None):
-    meta = FunctionUserMeta(ServiceType.Exit)
-    return meta_decorator(func, meta)
-
-
-def mark_async_init(func=None):
-    meta = FunctionUserMeta(ServiceType.AsyncInit)
     return meta_decorator(func, meta)
 
 
@@ -56,16 +46,6 @@ def mark_bidirectional_stream(func=None):
 
 def mark_websocket_peer(func=None):
     meta = FunctionUserMeta(ServiceType.AsyncWebSocket)
-    return meta_decorator(func, meta)
-
-
-def mark_websocket_onconnect(func=None):
-    meta = FunctionUserMeta(ServiceType.WebSocketOnConnect)
-    return meta_decorator(func, meta)
-
-
-def mark_websocket_ondisconnect(func=None):
-    meta = FunctionUserMeta(ServiceType.WebSocketOnDisConnect)
     return meta_decorator(func, meta)
 
 

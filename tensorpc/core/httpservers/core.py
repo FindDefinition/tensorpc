@@ -17,7 +17,7 @@ from tensorpc import compat
 from tensorpc.core import core_io, defs
 from tensorpc.core import serviceunit
 from tensorpc.core.client import RemoteException, format_stdout
-from tensorpc.core.serviceunit import ServiceType
+from tensorpc.core.serviceunit import ServiceType, ServiceEventType
 import ssl
 from tensorpc.core.server_core import ProtobufServiceCore, ServiceCore, ServerMeta
 from pathlib import Path
@@ -384,7 +384,7 @@ class WebsocketHandler:
         conn_rpc_queue: "asyncio.Queue[asyncio.Task]" = asyncio.Queue(1000)
         with service_core._enter_exec_context():
             try:
-                service_core.service_units.websocket_onconnect(client)
+                await service_core.service_units.run_event_async(ServiceEventType.WebSocketOnConnect, client)
             except Exception as e:
                 await client.send_user_error(e, 0)
         # assert not self.event_to_clients and not self.client_to_events
@@ -559,7 +559,7 @@ class WebsocketHandler:
             if self._delete_events:
                 self.delete_event_ev.set()
             try:
-                service_core.service_units.websocket_ondisconnect(client)
+                await service_core.service_units.run_event_async(ServiceEventType.WebSocketOnDisConnect, client)
             except:
                 traceback.print_exc()
             conn_st_ev.set()

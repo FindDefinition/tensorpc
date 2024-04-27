@@ -1165,14 +1165,6 @@ class ServiceUnit(DynamicClass):
         # self.obj_type, self.alias, self.module_key = get_cls_obj_from_module_name(
         #     module_name)
         self.services: Dict[str, ServFunctionMeta] = {}
-        self.exit_fn: Optional[Any] = None
-        self._is_exit_fn_async: bool = False
-        self._is_exit_fn_binded = False
-        self.ws_onconn_fn: Optional[Callable[[Any], None]] = None
-        self.async_init: Optional[Callable[[], Coroutine[None, None,
-                                                         None]]] = None
-        self.ws_ondisconn_fn: Optional[Callable[[Any], None]] = None
-
         self._event_to_handlers: Dict[ServiceEventType, List[ServFunctionMeta]] = {}
         self.name_to_events: Dict[str, EventProvider] = {}
         self.serv_metas = self._init_all_metas(self.obj_type)
@@ -1247,20 +1239,6 @@ class ServiceUnit(DynamicClass):
             app_meta: Optional[AppFunctionMeta] = None
             if hasattr(v_static, TENSORPC_FLOW_FUNC_META_KEY):
                 app_meta = getattr(v_static, TENSORPC_FLOW_FUNC_META_KEY)
-
-            if serv_type == ServiceType.Exit:
-                assert self.exit_fn is None, "you can only register one exit"
-                self.exit_fn = v
-                self._is_exit_fn_async = is_async
-            if serv_type == ServiceType.AsyncInit:
-                assert self.async_init is None, "you can only register one exit"
-                self.async_init = v
-            if serv_type == ServiceType.WebSocketOnConnect:
-                assert self.ws_onconn_fn is None, "you can only register one ws_onconn_fn"
-                self.ws_onconn_fn = v
-            if serv_type == ServiceType.WebSocketOnDisConnect:
-                assert self.ws_ondisconn_fn is None, "you can only register one ws_onconn_fn"
-                self.ws_ondisconn_fn = v
             serv_meta = ServFunctionMeta(v,
                                          k,
                                          serv_type,
@@ -1308,18 +1286,6 @@ class ServiceUnit(DynamicClass):
                     self.obj = self.obj_type(**self.config)
             else:
                 assert self.obj is not None
-            if self.exit_fn is not None:
-                # TODO if exit fn is static
-                self.exit_fn = types.MethodType(self.exit_fn, self.obj)
-                self._is_exit_fn_binded = True
-            if self.async_init is not None:
-                self.async_init = types.MethodType(self.async_init, self.obj)
-            if self.ws_onconn_fn is not None:
-                self.ws_onconn_fn = types.MethodType(self.ws_onconn_fn,
-                                                     self.obj)
-            if self.ws_ondisconn_fn is not None:
-                self.ws_ondisconn_fn = types.MethodType(
-                    self.ws_ondisconn_fn, self.obj)
             for k, meta in self.services.items():
                 # bind fn if not static
                 if not meta.is_static and not meta.is_binded:
@@ -1360,47 +1326,23 @@ class ServiceUnit(DynamicClass):
         self.init_service()
         assert self.obj is not None
         return fn(*args, **kwargs)
-
+    
     def run_event(self, event: ServiceEventType, *args: Any):
+        if event in self._event_to_handlers:
+            if not self.is_inited():
+                self.init_service()
+            for h in self._event_to_handlers[event]:
+                if not h.is_async:
+                    h.get_binded_fn()(*args)
+
+    async def run_event_async(self, event: ServiceEventType, *args: Any):
         if event in self._event_to_handlers:
             if not self.is_inited():
                 self.init_service()
             for h in self._event_to_handlers[event]:
                 coro = h.get_binded_fn()(*args)
                 if inspect.iscoroutine(coro):
-                    asyncio.run_coroutine_threadsafe(coro, asyncio.get_event_loop())
-
-    def websocket_onconnect(self, client):
-        if self.ws_onconn_fn is not None:
-            if not self.is_inited():
-                self.init_service()
-            self.ws_onconn_fn(client)
-
-    def websocket_ondisconnect(self, client):
-        if self.ws_ondisconn_fn is not None:
-            if not self.is_inited():
-                self.init_service()
-            self.ws_ondisconn_fn(client)
-
-    async def run_async_init(self):
-        if self.async_init is not None:
-            if not self.is_inited():
-                self.init_service()
-            await self.async_init()
-
-    async def run_exit(self):
-        if self.exit_fn is not None and self._is_exit_fn_binded:
-            if self._is_exit_fn_async:
-                await self.exit_fn()
-            else:
-                self.exit_fn()
-
-    def run_exit_sync(self):
-        if self.exit_fn is not None and self._is_exit_fn_binded:
-            if self._is_exit_fn_async:
-                return
-            else:
-                self.exit_fn()
+                    await coro
 
 
 class ServiceUnits:
@@ -1436,39 +1378,22 @@ class ServiceUnits:
     def run_service(self, serv_key: str, *args, **kwargs):
         return self.get_service(serv_key)(*args, **kwargs)
 
-    async def run_exit(self):
-        for s in self.sus:
-            await s.run_exit()
-
-    def run_exit_sync(self):
-        for s in self.sus:
-            s.run_exit_sync()
-
     def run_event(self, event: ServiceEventType, *args: Any):
         for s in self.sus:
             s.run_event(event, *args)
 
+    async def run_event_async(self, event: ServiceEventType, *args: Any):
+        for s in self.sus:
+            await s.run_event_async(event, *args)
+
     def get_all_service_metas_json(self):
         return {su.module_key: su.get_service_metas_json() for su in self.sus}
-
-    def websocket_onconnect(self, client):
-        for s in self.sus:
-            s.websocket_onconnect(client)
-
-    def websocket_ondisconnect(self, client):
-        for s in self.sus:
-            s.websocket_ondisconnect(client)
 
     def get_all_event_providers(self):
         res: Dict[str, EventProvider] = {}
         for su in self.sus:
             res.update(su.get_all_event_providers())
         return res
-
-    async def run_async_init(self):
-        # self.init_service()
-        for s in self.sus:
-            await s.run_async_init()
 
     def run_init(self):
         pass 

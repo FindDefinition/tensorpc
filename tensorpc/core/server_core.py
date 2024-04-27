@@ -21,11 +21,9 @@ from tensorpc import compat
 from tensorpc.core import core_io, serviceunit
 from tensorpc.protos_export import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos_export import rpc_message_pb2 as rpc_msg_pb2
-
+from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.utils import df_logging
 import contextvars
-if TYPE_CHECKING:
-    from tensorpc.core.httpservers.core import WebsocketClientPair
 LOGGER = df_logging.get_logger()
 
 
@@ -162,13 +160,11 @@ class ServiceCore(object):
 
         self._global_context = ServerGlobalContext(self.local_url, is_sync,
                                                    server_meta)
-        self._all_websockets: Dict[str, WebsocketClientPair] = {}
 
     async def _init_async_members(self):
         # in future python versions, asyncio event can't be created if no event loop running.
         self.async_shutdown_event = asyncio.Event()
         self._exposed_props._async_shutdown_event = self.async_shutdown_event
-        await self.service_units.run_async_init()
 
 
     def _set_port(self, port: int):
@@ -177,14 +173,11 @@ class ServiceCore(object):
     def init_http_client_session(self, sess: aiohttp.ClientSession):
         self._global_context.http_client_session = sess
 
-    async def exec_exit_funcs(self):
-        return await self.service_units.run_exit()
-
-    def exec_exit_funcs_sync(self):
-        return self.service_units.run_exit_sync()
-
     def run_event(self, event: serviceunit.ServiceEventType, *args: Any):
         return self.service_units.run_event(event, *args)
+    
+    async def run_event_async(self, event: serviceunit.ServiceEventType, *args: Any):
+        return await self.service_units.run_event_async(event, *args)
 
     def _reset_timeout(self):
         with self.reset_timeout_lock:

@@ -34,6 +34,7 @@ from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.defs import File
 from tensorpc.core.moduleid import get_qualname_of_type
+from tensorpc.core.serviceunit import ServiceEventType
 import aiohttp
 import asyncssh
 import bcrypt
@@ -1701,7 +1702,7 @@ class Flow:
                 driver = gh.get_node_by_id(node.driver_id)
         return NodeDesp(node, gh, driver)
 
-    @marker.mark_websocket_ondisconnect
+    @marker.mark_server_event(event_type=marker.ServiceEventType.WebSocketOnDisConnect)
     def _on_client_disconnect(self, cl):
         # TODO when all client closed instead of one client, close all terminal
         for g in self.flow_dict.values():
@@ -2694,7 +2695,7 @@ class Flow:
             port = int(url_parts[1])
         return SSHTarget(url_no_port, port, node.username, node.password, init_commands=node.init_commands)
 
-    @marker.mark_exit
+    @marker.mark_server_event(event_type=ServiceEventType.Exit)
     async def _on_exit(self):
         # send exit message to all remote workers
         for g in self.flow_dict.values():

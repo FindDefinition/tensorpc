@@ -67,7 +67,7 @@ class Scheduler:
         self.resource_manager = ResourceManager(max_number_of_task, len(get_nvidia_gpu_measures()))
 
 
-    @marker.mark_async_init
+    @marker.mark_server_event(event_type=marker.ServiceEventType.Init)
     async def init_scheduler(self):
         self.lock = asyncio.Lock()
         self.grpc_port = prim.get_server_grpc_port()

@@ -1,4 +1,8 @@
 # Changelog
+# [0.10.6] - 2024-04-27
+### Changed
+- change all legacy server events to standard api
+
 # [0.10.5] - 2024-04-26
 ### Fixed
 - fix lazy init services don't work in previous release

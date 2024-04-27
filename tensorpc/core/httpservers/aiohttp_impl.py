@@ -19,7 +19,7 @@ from tensorpc.protos_export import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos_export import rpc_message_pb2
 from contextlib import suppress
 from aiohttp import streamer
-
+from tensorpc.core.serviceunit import ServiceEventType
 
 @streamer
 async def file_sender(writer, file_bytes: bytes, chunk_size=2**16):
@@ -294,6 +294,8 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
     with ctx:
         if standalone:
             await server_core._init_async_members()
+            await server_core.run_event_async(ServiceEventType.Init)
+
         ws_service = AiohttpWebsocketHandler(server_core)
         # print("???????", client_max_size)
         app = web.Application(client_max_size=client_max_size)
