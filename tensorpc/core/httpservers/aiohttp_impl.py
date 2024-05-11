@@ -149,7 +149,7 @@ class HttpService:
         }
         res = web.Response(body=byte, headers=headers)
         return res
-    
+
     async def fetch_status(self, request: web.Request):
         status = {
             "status": "ok",

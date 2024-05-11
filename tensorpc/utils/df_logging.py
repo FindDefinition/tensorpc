@@ -100,7 +100,7 @@ def get_logger():
             return _logger
 
         # Scope the TensorFlow logger to not conflict with users' loggers.
-        logger = _logging.getLogger('distflow')
+        logger = _logging.getLogger('tensorpc')
 
         # Override findCaller on the logger to skip internal helper functions
         logger.findCaller = _logger_find_caller

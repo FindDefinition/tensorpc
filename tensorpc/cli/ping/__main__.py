@@ -7,7 +7,7 @@ def ping(ip: str):
     with RemoteManager(ip) as robj:
         t = time.time()
         robj.health_check()
-        print("[distflow.ping]{} response time: {:.4f}ms".format(
+        print("[tensorpc.ping]{} response time: {:.4f}ms".format(
             ip, 1000 * (time.time() - t)))
 
 

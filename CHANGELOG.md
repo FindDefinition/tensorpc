@@ -1,4 +1,10 @@
 # Changelog
+# [0.10.7] - 2024-05-11
+### Changed 
+- change year in license
+### Added
+- add option to attach metadata when app runs
+
 # [0.10.6] - 2024-04-27
 ### Changed
 - change all legacy server events to standard api

@@ -1,4 +1,4 @@
-# DistFlow Design
+# TensoRPC Design
 
 ## Major Features
 
@@ -11,7 +11,7 @@
 
 A node is a simple class that inherit a very simple base class. Node must have a sync method called "handle_message" which is used for rmq. Users need to use ```@rpc_method``` to indicate a method is exported as rpc.
 
-For large message, distflow use grpc to send large message: 
+For large message, tensorpc use grpc to send large message: 
 1. the large message is saved in current node, and a small specific message is sent via rmq
 2. target node launch grpc stream to receive the large message from current node.
 

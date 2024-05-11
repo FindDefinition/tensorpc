@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package distflow.protos;
+package tensorpc.protos;
 
 // first byte contains type, followed by header, array data saved in following code.
 

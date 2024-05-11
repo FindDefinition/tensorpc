@@ -4,7 +4,7 @@ import pickle
 from collections import abc
 from enum import Enum
 from functools import reduce
-from typing import Any, Callable, Dict, Hashable, List, Tuple, TypeVar, Union
+from typing import Any, Callable, Dict, Hashable, List, Optional, Tuple, TypeVar, Union
 from typing_extensions import Literal
 
 import msgpack
@@ -189,7 +189,7 @@ class FromBufferStream(object):
         self.current_datas = []
         self.args = []
 
-    def __call__(self, buf):
+    def __call__(self, buf: rpc_message_pb2.RemoteCallStream):
         if buf.arg_id == 0:
             self.num_args = buf.num_args
         if buf.chunk_id == 0:
@@ -305,6 +305,7 @@ def _extract_arrays_from_data(arrays,
                               object_classes=(np.ndarray, bytes),
                               json_index=False):
     # can't use abc.Sequence because string is sequence too.
+    data_skeleton: Optional[Union[List[Any], Dict[str, Any], Placeholder]]
     if isinstance(data, (list, tuple)):
         data_skeleton = [None] * len(data)
         for i in range(len(data)):
@@ -318,9 +319,10 @@ def _extract_arrays_from_data(arrays,
             else:
                 data_skeleton[i] = _extract_arrays_from_data(
                     arrays, e, object_classes, json_index)
+        data_skeleton_res = data_skeleton
         if isinstance(data, tuple):
-            data_skeleton = tuple(data_skeleton)
-        return data_skeleton
+            data_skeleton_res = tuple(data_skeleton)
+        return data_skeleton_res
     elif isinstance(data, abc.Mapping):
         data_skeleton = {}
         for k, v in data.items():
@@ -352,7 +354,7 @@ def _extract_arrays_from_data(arrays,
 def extract_arrays_from_data(data,
                              object_classes=(np.ndarray, bytes),
                              json_index=False):
-    arrays = []
+    arrays: List[Union[np.ndarray, bytes]] = []
     data_skeleton = _extract_arrays_from_data(arrays,
                                               data,
                                               object_classes=object_classes,
@@ -509,14 +511,15 @@ def data_to_pb_shmem(data, shared_mem, multi_thread=False, align_nbit=0):
     sum_array_nbytes = 0
     array_buffers = []
     for i in range(len(arrays)):
-        if isinstance(arrays[i], bytes):
+        arr = arrays[i]
+        if isinstance(arr, bytes):
             sum_array_nbytes += len(arrays[i])
             array_buffers.append((arrays[i], len(arrays[i])))
         else:
-            if not arrays[i].flags['C_CONTIGUOUS']:
-                arrays[i] = np.ascontiguousarray(arrays[i])
-            sum_array_nbytes += arrays[i].nbytes
-            array_buffers.append((arrays[i].view(np.uint8), arrays[i].nbytes))
+            if not arr.flags['C_CONTIGUOUS']:
+                arrays[i] = np.ascontiguousarray(arr)
+            sum_array_nbytes += arr.nbytes
+            array_buffers.append((arr.view(np.uint8), arr.nbytes))
     if sum_array_nbytes + len(data_skeleton_bytes) > shared_mem.nbytes:
         x, y = sum_array_nbytes + len(data_skeleton_bytes), shared_mem.nbytes
         raise ValueError("your shared mem is too small: {} vs {}.".format(
@@ -736,7 +739,7 @@ def json_only_encode(data, type: SocketMsgType, req: wsdef_pb2.Header):
 
 class SocketMessageEncoder:
     """
-    distflow socket message format
+    tensorpc socket message format
 
     0-1: msg type, can be rpc/event/error/raw
 

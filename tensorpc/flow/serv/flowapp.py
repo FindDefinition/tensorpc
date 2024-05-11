@@ -1,4 +1,4 @@
-# Copyright 2022 Yan Yan
+# Copyright 2024 Yan Yan
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ import tensorpc
 from tensorpc.flow.flowapp.reload import AppReloadManager, FlowSpecialMethods
 
 from tensorpc.flow.langserv import close_tmux_lang_server, get_tmux_lang_server_info_may_create
-from ..client import MasterMeta
+from ..client import AppLocalMeta, MasterMeta
 from tensorpc import prim
 from tensorpc.flow.serv_names import serv_names
 from tensorpc.core.serviceunit import ServiceEventType
@@ -65,6 +65,13 @@ class FlowApp:
         self.config = config
         self.shutdown_ev = asyncio.Event()
         self.master_meta = MasterMeta()
+        self.app_meta = AppLocalMeta()
+        process_title = self.master_meta.process_title
+        try:
+            import setproctitle
+            setproctitle.setproctitle(process_title)
+        except ImportError:
+            pass 
         if not headless:
             assert self.master_meta.is_inside_devflow, "this service must run inside devflow"
             # assert self.master_meta.is_http_valid
@@ -120,7 +127,7 @@ class FlowApp:
             special_methods = FlowSpecialMethods(self.app_su.serv_metas)
             if special_methods.create_layout is not None:
                 await self.app._app_run_layout_function(
-                    decorator_fn=special_methods.create_layout.fn)
+                    decorator_fn=special_methods.create_layout.get_binded_fn())
                 layout_created = True
             if not layout_created:
                 await self.app._app_run_layout_function()

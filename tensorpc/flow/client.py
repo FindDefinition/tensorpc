@@ -1,4 +1,4 @@
-# Copyright 2022 Yan Yan
+# Copyright 2024 Yan Yan
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import dataclasses
 from typing import Any, AsyncGenerator, List, Optional, Tuple, Generator
 
+from tensorpc.core import prim
 from tensorpc.protos_export import rpc_message_pb2
 
 from ..utils.address import get_url_port
@@ -27,6 +29,7 @@ import time
 from tensorpc.flow.coretypes import Message, MessageItem, MessageLevel, RelayUpdateNodeEvent
 import uuid
 
+import psutil 
 
 class MasterMeta:
 
@@ -89,6 +92,15 @@ class MasterMeta:
         assert self._node_id is not None
         return self._node_id
 
+    @property
+    def process_title(self):
+        gport = self.grpc_port if self.grpc_port else 0
+        port = self.http_port if self.http_port else 0
+        app_meta = AppLocalMeta()
+        app_gport = app_meta.grpc_port if app_meta.grpc_port else 0
+        app_port = app_meta.http_port if app_meta.http_port else 0
+        return f"{constants.TENSORPC_FLOW_PROCESS_NAME_PREFIX}-{gport}-{port}-{app_gport}-{app_port}"
+
 
 class AppLocalMeta:
 
@@ -109,6 +121,24 @@ class AppLocalMeta:
         self.http_url = url
         self.is_inside_devflow = gport is not None and port is not None and self.module_name != ""
 
+@dataclasses.dataclass
+class AppProcessMeta:
+    name: str 
+    pid: int
+    port: int 
+    grpc_port: int 
+    app_port: int 
+    app_grpc_port: int
+
+def list_all_app_in_machine():
+    res: List[AppProcessMeta] = []
+    for proc in psutil.process_iter(['pid', 'name']):
+        proc_name = proc.info["name"]
+        if proc_name.startswith(constants.TENSORPC_FLOW_PROCESS_NAME_PREFIX):
+            ports = list(map(int, proc_name.split("-")[1:]))
+            meta = AppProcessMeta(proc_name, proc.info["pid"], ports[0], ports[1], ports[2], ports[3])
+            res.append(meta)
+    return res 
 
 def is_inside_devflow():
     meta = MasterMeta()
