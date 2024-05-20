@@ -53,7 +53,7 @@ _ONEARG_EDITOR_EVENTS = set([
 _ONEARG_SPECIAL_EVENTS = set([
     FrontendEventType.Drop.value,
     FrontendEventType.SelectNewItem.value,
-
+    FrontendEventType.FlowSelectionChange.value,
 ])
 _ONEARG_DATAGRID_EVENTS = set([
     FrontendEventType.DataGridRowSelection.value,

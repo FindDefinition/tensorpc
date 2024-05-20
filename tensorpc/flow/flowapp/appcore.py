@@ -211,6 +211,7 @@ class AppSpecialEventType(enum.Enum):
     ObservedFunctionChange = "ObservedFunctionChange"
     # emitted when layout update is sent to frontend.
     LayoutChange = "LayoutChange"
+    VscodeTensorpcMessage = "VscodeTensorpcMessage"
 
 @dataclasses.dataclass
 class _CompReloadMeta:

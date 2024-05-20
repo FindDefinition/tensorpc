@@ -71,7 +71,7 @@ from tensorpc.core.serviceunit import (ObjectReloadManager,
 from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.constants import TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
-from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem
+from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem, VscodeTensorpcMessage
 
 from tensorpc.flow.flowapp.components.plus.objinspect.inspector import get_exception_frame_stack
 from tensorpc.flow.flowapp.components.plus.objinspect.treeitems import TraceTreeItem
@@ -622,7 +622,7 @@ class App:
             detached = self.root._detach()
             # make sure did_mount is called from root to leaf (breadth first order)
             detached_items = list(detached.items())
-            detached_items.sort(key=lambda x: len(x[0].split(".")),
+            detached_items.sort(key=lambda x: len(x[0].parts),
                                 reverse=False)
 
             await self.root._run_special_methods(
@@ -999,12 +999,17 @@ class App:
         with _enter_app_conetxt(self):
             return await self.handle_event(ev, is_sync)
 
+    async def run_vscode_event(self, data: VscodeTensorpcMessage):
+        return await self._flowapp_special_eemitter.emit_async(
+                            AppSpecialEventType.VscodeTensorpcMessage,
+                            data)
+
     async def _run_autorun(self, cb: Callable):
         try:
             coro = cb()
             if inspect.iscoroutine(coro):
                 await coro
-            self._flowapp_special_eemitter.emit(AppSpecialEventType.AutoRunEnd,
+            await self._flowapp_special_eemitter.emit_async(AppSpecialEventType.AutoRunEnd,
                                                 None)
         except:
             traceback.print_exc()
@@ -1553,7 +1558,7 @@ class EditableApp(App):
                                     func_globals = entry.current_func.__globals__
                                     code_comp = compile(code_to_run, f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-{entry.qualname}>", "exec")
                                     exec(code_comp, func_globals, code_locals)
-                        self._flowapp_special_eemitter.emit(
+                        await self._flowapp_special_eemitter.emit_async(
                             AppSpecialEventType.ObservedFunctionChange,
                             observed_func_changed)
                 # print(is_callback_change, is_reload)

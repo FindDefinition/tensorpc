@@ -159,6 +159,7 @@ class UIType(enum.IntEnum):
     MatrixDataGrid = 0x3b
 
     GridLayout = 0x40
+    Flow = 0x41
 
     # special
     TaskLoop = 0x100
@@ -380,6 +381,8 @@ class FrontendEventType(enum.IntEnum):
     DataGridFetchInf = 72
     DataGridRowRangeChanged = 73
     DataGridProxyLazyLoadRange = 74
+
+    FlowSelectionChange = 80
 
     PlotlyClickData = 100
     PlotlyClickAnnotation = 101

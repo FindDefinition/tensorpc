@@ -134,6 +134,30 @@ class HttpService:
         res.add_header(b'Access-Control-Allow-Origin', b'*')
         return res
 
+    async def simple_remote_json_call_http(self, request: web.Request):
+        try:
+            # json body must be {"service_key": "serv_key", "data": "data"}
+            data_bin = await request.read()
+            data = json.loads(data_bin)
+            pb_data = rpc_message_pb2.RemoteJsonCallRequest()
+            pb_data.data = json.dumps(data["data"])
+            pb_data.service_key = data["service_key"]
+            pb_data.flags = rpc_message_pb2.JsonArray
+            res = await self.service_core.remote_json_call_async(pb_data)
+            res_json_str = res.data
+
+        except Exception as e:
+            data = self.service_core._remote_exception_json(e)
+            res = rpc_message_pb2.RemoteCallReply(exception=data)
+            res_json_str = data
+        # TODO better headers
+        res = web.Response(
+            status=200,
+            content=web.Content(b"", res_json_str),
+        )
+        res.add_header(b'Access-Control-Allow-Origin', b'*')
+        return res
+
     async def remote_pickle_call_http(self, request: web.Request):
         try:
             data_bin = await request.read()
@@ -204,6 +228,7 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
                                   standalone: bool = True,
                                   ssl_key_path: str = "",
                                   ssl_crt_path: str = "",
+                                  simple_json_rpc_name="/api/simple_json_rpc",
                                   ws_backup_name="/api/ws_backup/{client_id}"):
     http_service = HttpService(server_core)
     ctx = contextlib.nullcontext()
@@ -221,6 +246,9 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
         @app.router.post(rpc_name)
         async def _handle_rpc(request):
             return await http_service.remote_json_call_http(request)
+        @app.router.post(simple_json_rpc_name)
+        async def _handle_simple_rpc(request):
+            return await http_service.simple_remote_json_call_http(request)
 
         @app.router.post(rpc_pickle_name)
         async def _handle_rpc_pkl(request):

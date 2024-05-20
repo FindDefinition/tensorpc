@@ -150,6 +150,31 @@ class HttpService:
         res = web.Response(body=byte, headers=headers)
         return res
 
+    async def simple_remote_json_call_http(self, request: web.Request):
+        try:
+            # json body must be {"service_key": "serv_key", "data": "data"}
+            data_bin = await request.read()
+            data = json.loads(data_bin)
+            pb_data = rpc_message_pb2.RemoteJsonCallRequest()
+            pb_data.data = json.dumps(data["data"])
+            pb_data.service_key = data["service_key"]
+            pb_data.flags = rpc_message_pb2.JsonArray
+            res = await self.service_core.remote_json_call_async(pb_data)
+            res_json_str = res.data
+
+        except Exception as e:
+            data = self.service_core._remote_exception_json(e)
+            res = rpc_message_pb2.RemoteCallReply(exception=data)
+            res_json_str = data
+        # TODO better headers
+        headers = {
+            'Access-Control-Allow-Origin': '*',
+            # 'Access-Control-Allow-Headers': '*',
+            # 'Access-Control-Allow-Method': 'POST',
+        }
+        res = web.Response(body=res_json_str, headers=headers)
+        return res
+
     async def fetch_status(self, request: web.Request):
         status = {
             "status": "ok",
@@ -285,6 +310,7 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
                                   standalone: bool = True,
                                   ssl_key_path: str = "",
                                   ssl_crt_path: str = "",
+                                  simple_json_rpc_name="/api/simple_json_rpc",
                                   ws_backup_name="/api/ws_backup/{client_id}"):
     # client_max_size 4MB is enough for most image upload.
     http_service = HttpService(server_core)
@@ -302,6 +328,8 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
         # TODO should we create a global client session for all http call in server?
         loop_task = asyncio.create_task(ws_service.event_provide_executor())
         app.router.add_post(rpc_name, http_service.remote_json_call_http)
+        app.router.add_post(simple_json_rpc_name, http_service.simple_remote_json_call_http)
+
         app.router.add_post(rpc_pickle_name,
                             http_service.remote_pickle_call_http)
         app.router.add_post(TENSORPC_API_FILE_UPLOAD, http_service.file_upload_call)

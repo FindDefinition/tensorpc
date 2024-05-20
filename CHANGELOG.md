@@ -1,4 +1,8 @@
 # Changelog
+# [0.11.0] - 2024-05-30
+### Added 
+- add flow graph based on xyflow. must be used on dock mode.
+
 # [0.10.7] - 2024-05-11
 ### Changed 
 - change year in license

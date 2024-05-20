@@ -20,7 +20,7 @@ import pickle
 from runpy import run_path
 from typing import Any, Dict, List, Optional
 from tensorpc.core.defs import FileDesp, FileResource
-from tensorpc.flow.coretypes import ScheduleEvent, get_uid
+from tensorpc.flow.coretypes import ScheduleEvent, VscodeTensorpcMessage, get_uid
 from tensorpc.core.tree_id import UniqueTreeId
 
 from tensorpc.flow.flowapp import appctx
@@ -68,7 +68,7 @@ class FlowApp:
         self.app_meta = AppLocalMeta()
         process_title = self.master_meta.process_title
         try:
-            import setproctitle
+            import setproctitle # type: ignore
             setproctitle.setproctitle(process_title)
         except ImportError:
             pass 
@@ -208,6 +208,18 @@ class FlowApp:
                 AppEvent(self._uid, {
                     AppEventType.ScheduleNext: appev,
                 }))
+
+    async def handle_vscode_event(self, data: dict):
+        """run event come from vscode, you need to install vscode-tensorpc-bridge extension first,
+        then enable it in machine which run this app.
+        """
+        ev = VscodeTensorpcMessage(
+            type=data["type"],
+            currentUri=data["currentUri"],
+            workspaceUri=data["workspaceUri"],
+            selections=data["selections"] if "selections" in data else None,
+        )
+        await self.app.run_vscode_event(ev) 
 
     def get_layout(self, editor_only: bool = False):
         if editor_only:

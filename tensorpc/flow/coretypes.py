@@ -4,6 +4,7 @@ from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable,
                     Coroutine, Dict, Generic, Iterable, List, Optional, Set, Tuple,
                     Type, TypeVar, Union)
 from tensorpc.autossh.core import Event, event_from_dict
+from tensorpc.core import dataclass_dispatch
 from tensorpc.core.moduleid import get_qualname_of_type
 from .jsonlike import JsonLikeNode, as_dict_no_undefined, Undefined
 def get_uid(graph_id: str, node_id: str):
@@ -283,3 +284,26 @@ class ScheduleEvent:
     def from_dict(cls, data):
         return cls(data["ts"], data["data"], data["envs"])
 
+
+class VscodeTensorpcMessageType(enum.IntEnum):
+    UpdateActiveTab = 0
+    UpdateCursorPosition = 1
+
+@dataclass_dispatch.dataclass
+class Position:
+    line: int
+    character: int
+
+@dataclass_dispatch.dataclass
+class Selection:
+    start: Position
+    end: Position
+    anchor: Position
+    active: Position
+
+@dataclass_dispatch.dataclass
+class VscodeTensorpcMessage:
+    type: VscodeTensorpcMessageType
+    currentUri: str 
+    workspaceUri: str
+    selections: Optional[List[Selection]] = None 
