@@ -24,7 +24,7 @@ from typing_extensions import Literal, TypeAlias
 from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     FrontendEventType, NumberType, UIType, Undefined,
                     undefined)
-from .mui import ContainerBaseProps, MUIContainerBase, MUIComponentType, Theme, MUIComponentBaseProps, MUIComponentBase, ValueType
+from .mui import ContainerBaseProps, LayoutType, MUIContainerBase, MUIComponentType, Theme, MUIComponentBaseProps, MUIComponentBase, ValueType
 
 
 @dataclasses.dataclass
@@ -106,8 +106,8 @@ class Node:
     id: str
     data: NodeData
     type: Union[Undefined, Literal["app", "appTemplate", "input", "default",
-                                   "output", "group"]] = undefined
-    position: Union[Undefined, XYPosition] = undefined
+                                   "output", "group", "annotation"]] = undefined
+    position: XYPosition = dataclasses.field(default_factory=lambda: XYPosition(0, 0))
     style: Union[Undefined, Any] = undefined
     className: Union[Undefined, str] = undefined
     dragHandle: Union[Undefined, bool] = undefined
@@ -118,7 +118,7 @@ class Node:
     deletable: Union[Undefined, bool] = undefined
     width: Union[Undefined, NumberType] = undefined
     height: Union[Undefined, NumberType] = undefined
-    # parentNode
+    parentNode: Union[Undefined, str] = undefined
     focusable: Union[Undefined, bool] = undefined
 
 
@@ -201,6 +201,10 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         for edge in self.edges:
             self._node_id_to_sources[edge.source].append(self._id_to_node[edge.target].id)
             self._node_id_to_targets[edge.target].append(self._id_to_node[edge.source].id)
+        # TODO detection cycle
+        for n in self.nodes:
+            if not isinstance(n, Undefined):
+                assert n.id in self._id_to_node
 
     def get_source_nodes(self, node_id: str):
         return [self._id_to_node[id] for id in self._node_id_to_sources[node_id]]
@@ -218,6 +222,16 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
     def state_change_callback(self, value: dict, type: ValueType = FrontendEventType.Change.value):
         if "nodes" in value:
+            cur_id_to_comp: Dict[str, Component] = {}
+            for n in self.nodes:
+                if not isinstance(n.data.component, Undefined):
+                    assert n.data.component._flow_uid is not None 
+                    cur_id_to_comp[n.data.component._flow_uid.uid_encoded] = n.data.component
+            for node_raw in value["nodes"]:
+                data = node_raw["data"]
+                if "component" in data:
+                    assert data["component"] in cur_id_to_comp
+                    data["component"] = cur_id_to_comp[data["component"]]
             self.childs_complex.nodes = _NodesHelper(value["nodes"]).nodes
         if "edges" in value:
             self.childs_complex.edges = _EdgesHelper(value["edges"]).edges
@@ -247,3 +261,160 @@ class Handle(MUIComponentBase[HandleProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class NodeColorMap:
+    app: Union[Undefined, str] = undefined
+    input: Union[Undefined, str] = undefined
+    default: Union[Undefined, str] = undefined
+    output: Union[Undefined, str] = undefined
+    group: Union[Undefined, str] = undefined
+    annotation: Union[Undefined, str] = undefined
+
+
+@dataclasses.dataclass
+class MiniMapProps(MUIComponentBaseProps):
+    nodeColorMap: Union[Undefined, NodeColorMap] = undefined
+    nodeStrokeColorMap: Union[Undefined, NodeColorMap] = undefined
+    nodeBorderRadius: Union[Undefined, int] = undefined
+    nodeStrokeWidth: Union[Undefined, int] = undefined
+    maskColor: Union[Undefined, str] = undefined
+    maskStrokeColor: Union[Undefined, str] = undefined
+    maskStrokeWidth: Union[Undefined, int] = undefined
+    position: Union[Undefined, Literal["top-left", "top-right", "bottom-left", "bottom-right", "top-center", "bottom-center"]] = undefined
+    pannable: Union[Undefined, bool] = undefined
+    zoomable: Union[Undefined, bool] = undefined
+    inversePan: Union[Undefined, bool] = undefined
+    zoomStep: Union[Undefined, int] = undefined
+    offsetScale: Union[Undefined, int] = undefined
+
+
+class MiniMap(MUIComponentBase[MiniMapProps]):
+
+    def __init__(self) -> None:
+        super().__init__(
+            UIType.FlowMiniMap, MiniMapProps, [])
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+
+@dataclasses.dataclass
+class ControlsProps(MUIComponentBaseProps):
+    position: Union[Undefined, Literal["top-left", "top-right", "bottom-left", "bottom-right", "top-center", "bottom-center"]] = undefined
+    showZoom: Union[Undefined, bool] = undefined
+    showFitView: Union[Undefined, bool] = undefined
+    showInteractive: Union[Undefined, bool] = undefined
+    fitViewOptions: Union[Undefined, FlowFitViewOptions] = undefined
+
+class Controls(MUIComponentBase[ControlsProps]):
+
+    def __init__(self) -> None:
+        super().__init__(
+            UIType.FlowControls, ControlsProps, [])
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+
+@dataclasses.dataclass
+class BackgroundProps(MUIComponentBaseProps):
+    id: Union[Undefined, str] = undefined
+    variant: Union[Undefined, Literal["lines", "dots", "cross"]] = undefined
+    color: Union[Undefined, str] = undefined
+    gap: Union[Undefined, NumberType] = undefined
+    size: Union[Undefined, NumberType] = undefined
+    offset: Union[Undefined, NumberType] = undefined
+    lineWidth: Union[Undefined, NumberType] = undefined
+
+class Background(MUIComponentBase[BackgroundProps]):
+
+    def __init__(self) -> None:
+        super().__init__(
+            UIType.FlowBackground, BackgroundProps, [])
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class NodeResizerProps(MUIComponentBaseProps):
+    minWidth: Union[Undefined, NumberType] = undefined
+    minHeight: Union[Undefined, NumberType] = undefined
+    keepAspectRatio: Union[Undefined, bool] = undefined
+    maxWidth: Union[Undefined, NumberType] = undefined
+    maxHeight: Union[Undefined, NumberType] = undefined
+    isVisible: Union[Undefined, bool] = undefined
+    color: Union[Undefined, str] = undefined
+    handleClassName: Union[Undefined, str] = undefined
+    lineClassName: Union[Undefined, str] = undefined
+    handleStyle: Union[Undefined, Any] = undefined
+    lineStyle: Union[Undefined, Any] = undefined
+
+
+class NodeResizer(MUIComponentBase[NodeResizerProps]):
+
+    def __init__(self) -> None:
+        super().__init__(
+            UIType.FlowNodeResizer, NodeResizerProps, [])
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class NodeToolbarProps(MUIComponentBaseProps):
+    position: Union[Undefined, Literal["top", "bottom", "left", "right"]] = undefined
+    isVisible: Union[Undefined, bool] = undefined
+    offset: Union[Undefined, NumberType] = undefined
+    align: Union[Undefined, Literal["center", "start", "end"]] = undefined
+
+@dataclasses.dataclass
+class NodeToolbar(MUIContainerBase):
+
+    def __init__(
+            self,
+            children: LayoutType) -> None:
+        if isinstance(children, list):
+            children = {str(i): v for i, v in enumerate(children)}
+        super().__init__(UIType.FlowNodeToolBar,
+                         NodeToolbarProps,
+                         children,
+                         allowed_events=[])
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+

@@ -159,7 +159,6 @@ class UIType(enum.IntEnum):
     MatrixDataGrid = 0x3b
 
     GridLayout = 0x40
-    Flow = 0x41
 
     # special
     TaskLoop = 0x100
@@ -282,6 +281,14 @@ class UIType(enum.IntEnum):
     # a poly line and lots of circle markers/tooltips (typo) in single flowapp element.
     LeafletTracklet = 0x2100
 
+    MASK_FLOW_COMPONENTS = 0x8000
+    Flow = 0x8001
+    FlowMiniMap = 0x8002
+    FlowControls = 0x8003
+    FlowNodeResizer = 0x8004
+    FlowNodeToolBar = 0x8005
+    FlowBackground = 0x8006
+
 
 class AppEventType(enum.IntEnum):
     # layout events
@@ -394,7 +401,8 @@ UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
     UIType.Tabs, UIType.Allotment,
     UIType.GridLayout,
     UIType.MenuList,
-    UIType.MatrixDataGrid
+    UIType.MatrixDataGrid,
+    UIType.Flow
 }
 
 class AppDraggableType(enum.Enum):
@@ -1746,7 +1754,7 @@ def _find_comps_in_dc_inner(obj, res_comp_localids: List[Tuple[Component, str]],
     elif isinstance(obj, dict):
         # TODO validate that all keys are number or letters
         for k in obj.keys():
-            assert isinstance(k, str) and k.isalnum(), f"key {k} must be string and alphanumeric"
+            assert isinstance(k, str), f"key {k} must be string and alphanumeric"
         return type(obj)((k,
                           _find_comps_in_dc_inner(v, res_comp_localids, local_id_prefix + k))
                          for k, v in obj.items())
