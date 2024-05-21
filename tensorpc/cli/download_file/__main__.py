@@ -1,7 +1,7 @@
-
 from pathlib import Path
 import fire
 from tensorpc.apps.file import get_file
+
 
 def main(addr: str, server_path: str, store_path: str = ""):
     if store_path == "":

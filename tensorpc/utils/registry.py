@@ -85,6 +85,7 @@ class HashableSeqRegistryKeyOnly(Generic[T]):
         self.global_dict: Dict[Hashable, List[T]] = {}
 
     def register(self, key: Optional[Hashable] = None):
+
         def wrapper(func: T) -> T:
             key_ = key
             if key is None:

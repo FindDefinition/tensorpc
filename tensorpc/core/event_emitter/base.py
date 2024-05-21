@@ -217,7 +217,7 @@ class EventEmitter(Generic[KT, Unpack[VTs]]):
     ) -> None:
         coro = f(*args)
         if inspect.iscoroutine(coro):
-            return await coro 
+            return await coro
         else:
             return coro
 
@@ -415,5 +415,3 @@ class EventEmitter(Generic[KT, Unpack[VTs]]):
     def listeners(self, event: KT) -> List[Callable[[Unpack[VTs]], Any]]:
         """Returns a list of all listeners registered to the `event`."""
         return list(self._events.get(event, OrderedDict()).keys())
-
-

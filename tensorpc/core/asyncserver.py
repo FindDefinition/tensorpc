@@ -122,21 +122,23 @@ async def _await_thread_ev(ev, loop, timeout=None):
     waiter = partial(ev.wait, timeout=timeout)
     return await loop.run_in_executor(None, waiter)
 
+
 # https://github.com/grpc/grpc/blob/master/examples/python/helloworld/async_greeter_server_with_graceful_shutdown.py
 # Coroutines to be invoked when the event loop is shutting down.
 _cleanup_coroutines = []
 
 
-async def serve_service(service: AsyncRemoteObjectService,
-                        wait_time=-1,
-                        port=50051,
-                        length=-1,
-                        is_local=False,
-                        max_threads=10,
-                        process_id=-1,
-                        ssl_key_path: str = "",
-                        ssl_crt_path: str = "",
-                        grpc_options: Optional[List[Tuple[str, Union[str, int]]]] = None):
+async def serve_service(
+        service: AsyncRemoteObjectService,
+        wait_time=-1,
+        port=50051,
+        length=-1,
+        is_local=False,
+        max_threads=10,
+        process_id=-1,
+        ssl_key_path: str = "",
+        ssl_crt_path: str = "",
+        grpc_options: Optional[List[Tuple[str, Union[str, int]]]] = None):
     assert isinstance(service, AsyncRemoteObjectService)
     if is_local and process_id >= 0:
         if hasattr(os, "sched_setaffinity"):
@@ -153,7 +155,7 @@ async def serve_service(service: AsyncRemoteObjectService,
                    ('grpc.max_receive_message_length', length * 1024 * 1024)]
     options.append(('grpc.so_reuseport', 0))
     if grpc_options is not None:
-        options = grpc_options # override
+        options = grpc_options  # override
     server = grpc.aio.server(options=options)
     remote_object_pb2_grpc.add_RemoteObjectServicer_to_server(service, server)
     credentials = None
@@ -164,7 +166,7 @@ async def serve_service(service: AsyncRemoteObjectService,
             certificate_chain = f.read()
         credentials = grpc.ssl_server_credentials([(private_key,
                                                     certificate_chain)])
-    
+
     for i in range(TENSORPC_PORT_MAX_TRY):
         if port == -1:
             port = get_free_ports(1)[0]
@@ -186,18 +188,19 @@ async def serve_service(service: AsyncRemoteObjectService,
     await server_core.run_event_async(ServiceEventType.BeforeServerStart)
     await server.start()
     loop = asyncio.get_running_loop()
+
     async def server_graceful_shutdown():
         # Shuts down the server with 5 seconds of grace period. During the
         # grace period, the server won't accept new connections and allow
         # existing RPCs to continue within the grace period.
         await server.stop(5)
+
     _cleanup_coroutines.append(server_graceful_shutdown())
     await server_core.async_shutdown_event.wait()
     await server.stop(0)
     await server.wait_for_termination()
     # exec cleanup functions
     await server_core.run_event_async(ServiceEventType.Exit)
-
 
 
 async def serve_with_http_async(server_core: ProtobufServiceCore,
@@ -264,7 +267,7 @@ async def serve_async(sc: ProtobufServiceCore,
         grpc_task = serve_service(service, wait_time, port, length, is_local,
                                   max_threads, process_id, ssl_key_path,
                                   ssl_crt_path)
-                                  
+
         return await grpc_task
 
 

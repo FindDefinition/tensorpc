@@ -34,6 +34,7 @@ from .options import CommonOptions
 
 from tensorpc.flow.client import MasterMeta
 
+
 @dataclasses.dataclass
 class Script:
     label: str
@@ -46,6 +47,7 @@ class Script:
         else:
             return self.code
 
+
 _LANG_TO_VSCODE_MAPPING = {
     "python": "python",
     "cpp": "cpp",
@@ -53,7 +55,8 @@ _LANG_TO_VSCODE_MAPPING = {
     "app": "python",
 }
 
-async def _read_stream(stream, cb):  
+
+async def _read_stream(stream, cb):
     while True:
         line = await stream.readline()
         if line:
@@ -64,6 +67,7 @@ async def _read_stream(stream, cb):
             cb(line_print)
         else:
             break
+
 
 _INITIAL_SCRIPT_PER_LANG = {
     "python": """
@@ -95,14 +99,13 @@ echo "Hello World"
     """,
 }
 
+
 class ScriptManager(mui.FlexBox):
 
-    def __init__(
-        self,
-        storage_node_rid: Optional[str] = None,
-        graph_id: Optional[str] = None,
-        init_scripts: Optional[Dict[str, str]] = None
-    ):
+    def __init__(self,
+                 storage_node_rid: Optional[str] = None,
+                 graph_id: Optional[str] = None,
+                 init_scripts: Optional[Dict[str, str]] = None):
         """when storage_node_rid is None, use app node storage, else use the specified node storage
         """
         super().__init__()
@@ -114,14 +117,21 @@ class ScriptManager(mui.FlexBox):
 
         self._graph_id = graph_id
         self.code_editor = mui.MonacoEditor("", "python",
-                                            "default").prop(flex=1, minHeight=0, minWidth=0)
-        self.app_editor = AppInMemory("scriptmgr", "").prop(flex=1, minHeight=0, minWidth=0)
-        self.app_show_box = mui.FlexBox() # .prop(flex=1)
+                                            "default").prop(flex=1,
+                                                            minHeight=0,
+                                                            minWidth=0)
+        self.app_editor = AppInMemory("scriptmgr", "").prop(flex=1,
+                                                            minHeight=0,
+                                                            minWidth=0)
+        self.app_show_box = mui.FlexBox()  # .prop(flex=1)
 
         self.code_editor_container = mui.HBox({
-            "editor": self.code_editor,
-            "divider":  mui.Divider("horizontal"),
-            "app_show_box": self.app_show_box
+            "editor":
+            self.code_editor,
+            "divider":
+            mui.Divider("horizontal"),
+            "app_show_box":
+            self.app_show_box
         }).prop(flex=1)
         self.scripts = mui.Autocomplete(
             "Scripts",
@@ -142,22 +152,25 @@ class ScriptManager(mui.FlexBox):
         #             "value",
         #             mui.IconType.Visibility).prop(muiColor="secondary", size="small")
         self._run_button = mui.IconButton(
-                    mui.IconType.PlayArrow,
-                    self._on_run_script).prop(progressColor="primary")
+            mui.IconType.PlayArrow,
+            self._on_run_script).prop(progressColor="primary")
         self._delete_button = mui.IconButton(
-                    mui.IconType.Delete,
-                    self._on_script_delete).prop(progressColor="primary", confirmTitle="Warning", confirmMessage="Are you sure to delete this script?")
+            mui.IconType.Delete, self._on_script_delete).prop(
+                progressColor="primary",
+                confirmTitle="Warning",
+                confirmMessage="Are you sure to delete this script?")
 
         self.init_add_layout({
-            "header": mui.HBox([
+            "header":
+            mui.HBox([
                 self.scripts.prop(flex=1),
                 self._run_button,
                 # self._enable_save_watch,
                 self.langs,
                 self._delete_button,
-
             ]).prop(alignItems="center"),
-            "editor": self.code_editor_container,
+            "editor":
+            self.code_editor_container,
         })
         self._init_scripts = _INITIAL_SCRIPT_PER_LANG.copy()
         if init_scripts is not None:
@@ -175,7 +188,8 @@ class ScriptManager(mui.FlexBox):
             FrontendEventType.EditorReady.value, self._on_editor_ready)
 
     async def _on_editor_ready(self):
-        items = await appctx.list_data_storage(self._storage_node_rid, self._graph_id)
+        items = await appctx.list_data_storage(self._storage_node_rid,
+                                               self._graph_id)
         items.sort(key=lambda x: x.userdata["timestamp"]
                    if not isinstance(x.userdata, mui.Undefined) else 0,
                    reverse=True)
@@ -188,15 +202,17 @@ class ScriptManager(mui.FlexBox):
             await self._on_script_select(options[0])
         else:
             await self._on_new_script({
-                    "label": "example",
-                }, init_str=self._init_scripts["python"])
+                "label": "example",
+            },
+                                      init_str=self._init_scripts["python"])
 
     async def _on_run_script(self):
         await self.code_editor.save()
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
             item = await appctx.read_data_storage(label,
-                                                  self._storage_node_rid, self._graph_id)
+                                                  self._storage_node_rid,
+                                                  self._graph_id)
             assert isinstance(item, Script)
             item_uid = f"{self._graph_id}@{self._storage_node_rid}@{item.label}"
             fname = f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-{item_uid}>"
@@ -236,7 +252,7 @@ class ScriptManager(mui.FlexBox):
             elif item.lang == "cpp":
                 import ccimport
                 from ccimport.utils import tempdir
-                from pathlib import Path 
+                from pathlib import Path
                 import subprocess
 
                 with tempdir() as tempd:
@@ -249,11 +265,11 @@ class ScriptManager(mui.FlexBox):
                     ]
                     build_meta = ccimport.BuildMeta()
                     source = ccimport.ccimport(sources,
-                                            exec_path,
-                                            build_meta,
-                                            shared=False,
-                                            load_library=False,
-                                            verbose=False)
+                                               exec_path,
+                                               build_meta,
+                                               shared=False,
+                                               load_library=False,
+                                               verbose=False)
                     subprocess.check_call([str(source)])
             if item.lang == "app":
                 mod_dict = {}
@@ -266,22 +282,27 @@ class ScriptManager(mui.FlexBox):
     async def _on_lang_select(self, value):
         if value != "app":
             await self.app_show_box.set_new_layout({})
-        await self.send_and_wait(self.app_show_box.update_event(flex=1 if value == "app" else mui.undefined))
+        await self.send_and_wait(
+            self.app_show_box.update_event(
+                flex=1 if value == "app" else mui.undefined))
 
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
 
             item = await appctx.read_data_storage(label,
-                                                  self._storage_node_rid, self._graph_id)
+                                                  self._storage_node_rid,
+                                                  self._graph_id)
             assert isinstance(item, Script)
             item.lang = value
             await self.send_and_wait(
                 self.code_editor.update_event(
-                    language=_LANG_TO_VSCODE_MAPPING[value], value=item.get_code()))
+                    language=_LANG_TO_VSCODE_MAPPING[value],
+                    value=item.get_code()))
             if value == "app":
                 # TODO add better option
                 await self._on_run_script()
-            await appctx.save_data_storage(label, item, self._storage_node_rid, self._graph_id)
+            await appctx.save_data_storage(label, item, self._storage_node_rid,
+                                           self._graph_id)
         else:
             await self.send_and_wait(
                 self.code_editor.update_event(
@@ -291,13 +312,15 @@ class ScriptManager(mui.FlexBox):
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
             item = await appctx.read_data_storage(label,
-                                                  self._storage_node_rid, self._graph_id)
+                                                  self._storage_node_rid,
+                                                  self._graph_id)
             assert isinstance(item, Script)
             # compact new code dict
             if not isinstance(item.code, dict):
                 item.code = self._init_scripts.copy()
             item.code[item.lang] = value
-            await appctx.save_data_storage(label, item, self._storage_node_rid, self._graph_id)
+            await appctx.save_data_storage(label, item, self._storage_node_rid,
+                                           self._graph_id)
             if item.lang == "app":
                 await self._on_run_script()
             # if self._enable_save_watch.checked:
@@ -311,9 +334,11 @@ class ScriptManager(mui.FlexBox):
         lang = self.langs.props.value
         assert isinstance(lang, str)
         script = Script(new_item_name, self._init_scripts, lang)
-        await appctx.save_data_storage(new_item_name, script, self._storage_node_rid,
-                                       self._graph_id)
-        await self.send_and_wait(self.app_show_box.update_event(flex=1 if lang == "app" else mui.undefined))
+        await appctx.save_data_storage(new_item_name, script,
+                                       self._storage_node_rid, self._graph_id)
+        await self.send_and_wait(
+            self.app_show_box.update_event(
+                flex=1 if lang == "app" else mui.undefined))
         await self.send_and_wait(
             self.code_editor.update_event(
                 language=_LANG_TO_VSCODE_MAPPING[lang],
@@ -323,19 +348,24 @@ class ScriptManager(mui.FlexBox):
     async def _on_script_delete(self):
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
-            await appctx.remove_data_storage(label, self._storage_node_rid, self._graph_id)
-            new_options =  [x for x in self.scripts.props.options if x["label"] != label]
-            await self.scripts.update_options(
-            new_options, 0)
+            await appctx.remove_data_storage(label, self._storage_node_rid,
+                                             self._graph_id)
+            new_options = [
+                x for x in self.scripts.props.options if x["label"] != label
+            ]
+            await self.scripts.update_options(new_options, 0)
             if new_options:
                 await self._on_script_select(new_options[0])
 
     async def _on_script_select(self, value):
         label = value["label"]
-        item = await appctx.read_data_storage(label, self._storage_node_rid, self._graph_id)
+        item = await appctx.read_data_storage(label, self._storage_node_rid,
+                                              self._graph_id)
         assert isinstance(item, Script)
-        await self.send_and_wait(self.app_show_box.update_event(flex=1 if item.lang == "app" else mui.undefined))
-            
+        await self.send_and_wait(
+            self.app_show_box.update_event(
+                flex=1 if item.lang == "app" else mui.undefined))
+
         await self.langs.set_value(item.lang)
         await self.send_and_wait(
             self.code_editor.update_event(

@@ -25,9 +25,9 @@ from tensorpc.flow.flowapp.components.common import (handle_standard_event)
 from typing_extensions import Literal, TypeAlias
 
 from ..core import (AppEvent, AppEventType, BasicProps, Component,
-                    ContainerBase, FrontendEventType, NumberType, T_child, TaskLoopEvent, UIEvent,
-                    UIRunStatus, UIType, Undefined, undefined,
-                    as_dict_no_undefined)
+                    ContainerBase, FrontendEventType, NumberType, T_child,
+                    TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
+                    undefined, as_dict_no_undefined)
 from .mui import MUIComponentBase
 
 
@@ -59,8 +59,10 @@ class Trace:
     x: Union[Undefined, List[Union[NumberType, str]]] = undefined
     y: Union[Undefined, List[Union[NumberType, str]]] = undefined
     z: Union[Undefined, List[Union[NumberType, str]]] = undefined
-    type: Union[Undefined, Literal["scatter", "scattergl", "bar", "image"]] = undefined
-    mode: Union[Undefined, Literal["markers", "lines", "lines+markers"]] = undefined
+    type: Union[Undefined, Literal["scatter", "scattergl", "bar",
+                                   "image"]] = undefined
+    mode: Union[Undefined, Literal["markers", "lines",
+                                   "lines+markers"]] = undefined
     visible: Union[Undefined, bool] = undefined
     name: Union[Undefined, str] = undefined
     line: Union[Undefined, Line] = undefined
@@ -69,6 +71,7 @@ class Trace:
     labels: Union[Undefined, List[Union[NumberType, str]]] = undefined
     width: Union[Undefined, NumberType, List[NumberType]] = undefined
     text: Union[Undefined, str, List[str]] = undefined
+
 
 @dataclasses.dataclass
 class Margin:
@@ -115,32 +118,41 @@ class Axis:
     automargin: Union[Undefined, bool] = undefined
     domain: Union[Undefined, List[NumberType]] = undefined
 
+
 @dataclasses.dataclass
 class LegendTitle:
     text: Union[Undefined, str] = undefined
     font: Union[Undefined, Font] = undefined
     side: Union[Undefined, Literal["top", "left", "top left"]] = undefined
 
+
 @dataclasses.dataclass
 class Legend:
     borderwidth: Union[Undefined, NumberType] = undefined
-    groupclick: Union[Undefined, Literal["toggleitem", "togglegroup"]] = undefined
+    groupclick: Union[Undefined, Literal["toggleitem",
+                                         "togglegroup"]] = undefined
     grouptitlefont: Union[Undefined, Font] = undefined
-    itemclick: Union[Undefined, Literal["toggle", "toggleothers", False]] = undefined
-    itemdoubleclick: Union[Undefined, Literal["toggle", "toggleothers", False]] = undefined
+    itemclick: Union[Undefined, Literal["toggle", "toggleothers",
+                                        False]] = undefined
+    itemdoubleclick: Union[Undefined, Literal["toggle", "toggleothers",
+                                              False]] = undefined
     itemsizing: Union[Undefined, Literal["trace", "constant"]] = undefined
     itemwidth: Union[Undefined, NumberType] = undefined
     orientation: Union[Undefined, Literal["v", "h"]] = undefined
     title: Union[Undefined, LegendTitle] = undefined
     tracegroupgap: Union[Undefined, NumberType] = undefined
-    traceorder: Union[Undefined, Literal["grouped", "normal", "reversed", "reversed+grouped"]] = undefined
+    traceorder: Union[Undefined, Literal["grouped", "normal", "reversed",
+                                         "reversed+grouped"]] = undefined
     uirevision: Union[Undefined, NumberType, str] = undefined
     uid: Union[Undefined, str] = undefined
     valign: Union[Undefined, Literal["top", "middle", "bottom"]] = undefined
     x: Union[Undefined, NumberType] = undefined
-    xanchor: Union[Undefined, Literal["auto", "left", "center", "right"]] = undefined
+    xanchor: Union[Undefined, Literal["auto", "left", "center",
+                                      "right"]] = undefined
     y: Union[Undefined, NumberType] = undefined
-    yanchor: Union[Undefined, Literal["auto", "top", "middle", "bottom"]] = undefined
+    yanchor: Union[Undefined, Literal["auto", "top", "middle",
+                                      "bottom"]] = undefined
+
 
 @dataclasses.dataclass
 class Layout:
@@ -193,9 +205,10 @@ class ChartControlType(enum.IntEnum):
     ClearData = 1
     UpdateTrace = 2
 
+
 @dataclasses.dataclass
 class PlotlyTraceDataUpdate:
-    traceUpdateIndex: int 
+    traceUpdateIndex: int
     dataMaxCount: Union[Undefined, int] = undefined
     x: Union[Undefined, List[Union[NumberType, str]]] = undefined
     y: Union[Undefined, List[Union[NumberType, str]]] = undefined
@@ -208,12 +221,17 @@ class PlotlyTraceDataUpdate:
     values: Union[Undefined, List[Union[NumberType, str]]] = undefined
     labels: Union[Undefined, List[Union[NumberType, str]]] = undefined
 
+
 class Plotly(MUIComponentBase[PlotlyProps]):
     TraceDataUpdate = PlotlyTraceDataUpdate
     """see https://plotly.com/javascript/ for documentation"""
 
-    def __init__(self, data: Optional[List[Trace]] = None, layout: Optional[Layout] = None) -> None:
-        super().__init__(UIType.Plotly, PlotlyProps, allowed_events=[FrontendEventType.Click])
+    def __init__(self,
+                 data: Optional[List[Trace]] = None,
+                 layout: Optional[Layout] = None) -> None:
+        super().__init__(UIType.Plotly,
+                         PlotlyProps,
+                         allowed_events=[FrontendEventType.Click])
         self.event_click = self._create_event_slot(FrontendEventType.Click)
         if data is not None:
             self.prop(data=data)
@@ -261,10 +279,10 @@ class Plotly(MUIComponentBase[PlotlyProps]):
             "type": ChartControlType.ClearData.value,
             "deleteTraceIndexes": clear_trace_idxes,
         })
-        data = self.props.data 
+        data = self.props.data
         for idx in clear_trace_idxes:
             if idx >= len(data) or idx < 0:
-                continue 
+                continue
             trace = data[idx]
             if not isinstance(trace.x, Undefined):
                 trace.x.clear()
@@ -272,17 +290,22 @@ class Plotly(MUIComponentBase[PlotlyProps]):
                 trace.y.clear()
             if not isinstance(trace.z, Undefined):
                 trace.z.clear()
-            if not isinstance(trace.text, Undefined) and isinstance(trace.text, list):
+            if not isinstance(trace.text, Undefined) and isinstance(
+                    trace.text, list):
                 trace.text.clear()
-            if not isinstance(trace.width, Undefined) and isinstance(trace.width, list):
+            if not isinstance(trace.width, Undefined) and isinstance(
+                    trace.width, list):
                 trace.width.clear()
-            if not isinstance(trace.marker, Undefined) and isinstance(trace.marker, Marker):
+            if not isinstance(trace.marker, Undefined) and isinstance(
+                    trace.marker, Marker):
                 if isinstance(trace.marker.size, list):
                     trace.marker.size.clear()
-            if not isinstance(trace.marker, Undefined) and isinstance(trace.marker, Marker):
+            if not isinstance(trace.marker, Undefined) and isinstance(
+                    trace.marker, Marker):
                 if isinstance(trace.marker.color, list):
                     trace.marker.color.clear()
-            if not isinstance(trace.marker, Undefined) and isinstance(trace.marker, Marker):
+            if not isinstance(trace.marker, Undefined) and isinstance(
+                    trace.marker, Marker):
                 if isinstance(trace.marker.opacity, list):
                     trace.marker.opacity.clear()
             if not isinstance(trace.values, Undefined):
@@ -297,32 +320,48 @@ class Plotly(MUIComponentBase[PlotlyProps]):
             "type": ChartControlType.ExtendData.value,
             "updates": updates,
         })
-        data = self.props.data 
+        data = self.props.data
         for update in updates:
-            if update.traceUpdateIndex >= len(data) or update.traceUpdateIndex < 0:
-                continue 
+            if update.traceUpdateIndex >= len(
+                    data) or update.traceUpdateIndex < 0:
+                continue
             trace = data[update.traceUpdateIndex]
-            if not isinstance(update.x, Undefined) and not isinstance(trace.x, Undefined):
+            if not isinstance(update.x, Undefined) and not isinstance(
+                    trace.x, Undefined):
                 trace.x.extend(update.x)
-            if not isinstance(update.y, Undefined) and not isinstance(trace.y, Undefined):
+            if not isinstance(update.y, Undefined) and not isinstance(
+                    trace.y, Undefined):
                 trace.y.extend(update.y)
-            if not isinstance(update.z, Undefined) and not isinstance(trace.z, Undefined):
+            if not isinstance(update.z, Undefined) and not isinstance(
+                    trace.z, Undefined):
                 trace.z.extend(update.z)
-            if not isinstance(update.text, Undefined) and not isinstance(trace.text, Undefined) and isinstance(trace.text, list):
+            if not isinstance(update.text, Undefined) and not isinstance(
+                    trace.text, Undefined) and isinstance(trace.text, list):
                 trace.text.extend(update.text)
-            if not isinstance(update.width, Undefined) and not isinstance(trace.width, Undefined) and isinstance(trace.width, list):
+            if not isinstance(update.width, Undefined) and not isinstance(
+                    trace.width, Undefined) and isinstance(trace.width, list):
                 trace.width.extend(update.width)
-            if not isinstance(update.markerSize, Undefined) and not isinstance(trace.marker, Undefined) and isinstance(trace.marker, Marker):
+            if not isinstance(update.markerSize, Undefined) and not isinstance(
+                    trace.marker, Undefined) and isinstance(
+                        trace.marker, Marker):
                 if isinstance(trace.marker.size, list):
                     trace.marker.size.extend(update.markerSize)
-            if not isinstance(update.markerColor, Undefined) and not isinstance(trace.marker, Undefined) and isinstance(trace.marker, Marker):
+            if not isinstance(update.markerColor,
+                              Undefined) and not isinstance(
+                                  trace.marker, Undefined) and isinstance(
+                                      trace.marker, Marker):
                 if isinstance(trace.marker.color, list):
                     trace.marker.color.extend(update.markerColor)
-            if not isinstance(update.markerOpacity, Undefined) and not isinstance(trace.marker, Undefined) and isinstance(trace.marker, Marker):
+            if not isinstance(update.markerOpacity,
+                              Undefined) and not isinstance(
+                                  trace.marker, Undefined) and isinstance(
+                                      trace.marker, Marker):
                 if isinstance(trace.marker.opacity, list):
                     trace.marker.opacity.extend(update.markerOpacity)
-            if not isinstance(update.values, Undefined) and not isinstance(trace.values, Undefined):
+            if not isinstance(update.values, Undefined) and not isinstance(
+                    trace.values, Undefined):
                 trace.values.extend(update.values)
-            if not isinstance(update.labels, Undefined) and not isinstance(trace.labels, Undefined):
+            if not isinstance(update.labels, Undefined) and not isinstance(
+                    trace.labels, Undefined):
                 trace.labels.extend(update.labels)
         await self.send_and_wait(ev)

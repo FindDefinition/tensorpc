@@ -22,9 +22,11 @@ from tensorpc.flow.flowapp.appcore import Event
 from tensorpc.flow.flowapp.components.common import (handle_standard_event)
 from typing_extensions import Literal, TypeAlias
 
+from tensorpc.utils.uniquename import UniqueNamePool
+
 from ..core import (AppEvent, AppEventType, BasicProps, Component,
-                    FrontendEventType, NumberType, UIType, Undefined,
-                    undefined)
+                    DataclassType, FrontendEventType, NumberType, UIType,
+                    Undefined, undefined)
 from .mui import ContainerBaseProps, LayoutType, MUIContainerBase, MUIComponentType, Theme, MUIComponentBaseProps, MUIComponentBase, ValueType
 
 
@@ -89,6 +91,11 @@ class FlowProps(ContainerBaseProps):
                                                  "simplebezier"]] = undefined
     debounce: Union[Undefined, NumberType] = undefined
 
+    droppable: Union[bool, Undefined] = undefined
+    allowedDndTypes: Union[List[str], Undefined] = undefined
+    allowFile: Union[bool, Undefined] = undefined
+
+
 @dataclasses.dataclass
 class XYPosition:
     x: NumberType
@@ -102,14 +109,17 @@ class NodeData:
     selectedBoxSxProps: Union[Undefined, Dict[str, Any]] = undefined
     data: Union[Undefined, Any] = undefined
     label: Union[Undefined, str] = undefined
-    
+
+
 @dataclasses.dataclass
 class Node:
     id: str
     data: Union[Undefined, NodeData] = undefined
-    type: Union[Undefined, Literal["app", "appTemplate", "input", "default",
-                                   "output", "group", "annotation"]] = undefined
-    position: XYPosition = dataclasses.field(default_factory=lambda: XYPosition(0, 0))
+    type: Union[Undefined,
+                Literal["app", "appTemplate", "input", "default", "output",
+                        "group", "annotation"]] = undefined
+    position: XYPosition = dataclasses.field(
+        default_factory=lambda: XYPosition(0, 0))
     style: Union[Undefined, Any] = undefined
     className: Union[Undefined, str] = undefined
     dragHandle: Union[Undefined, bool] = undefined
@@ -122,7 +132,16 @@ class Node:
     height: Union[Undefined, NumberType] = undefined
     parentId: Union[Undefined, str] = undefined
     focusable: Union[Undefined, bool] = undefined
-    extent: Union[Undefined, Literal["parent"], Tuple[Tuple[NumberType, NumberType], Tuple[NumberType, NumberType]]] = undefined
+    extent: Union[Undefined, Literal["parent"],
+                  Tuple[Tuple[NumberType, NumberType],
+                        Tuple[NumberType, NumberType]]] = undefined
+
+    def get_component(self) -> Optional[Component]:
+        if not isinstance(self.data, Undefined):
+            if not isinstance(self.data.component, Undefined):
+                return self.data.component
+        return None
+
 
 @dataclasses.dataclass
 class EdgeMarker:
@@ -133,6 +152,7 @@ class EdgeMarker:
     markerUnits: Union[Undefined, str] = undefined
     orient: Union[Undefined, str] = undefined
     strokeWidth: Union[Undefined, NumberType] = undefined
+
 
 @dataclasses.dataclass
 class Edge:
@@ -159,11 +179,13 @@ class _NodesHelper:
 class _EdgesHelper:
     edges: List[Edge]
 
+
 class FlowControlType(enum.IntEnum):
     DagreLayout = 0
     FitView = 1
 
-@dataclasses.dataclass 
+
+@dataclasses.dataclass
 class DagreLayoutOptions:
     rankdir: Union[Undefined, Literal["TB", "BT", "LR", "RL"]] = undefined
     align: Union[Undefined, Literal["UL", "UR", "DL", "DR"]] = undefined
@@ -173,7 +195,9 @@ class DagreLayoutOptions:
     marginy: Union[Undefined, NumberType] = undefined
     edgesep: Union[Undefined, NumberType] = undefined
     acyclicer: Union[Undefined, Literal["greedy"]] = undefined
-    ranker: Union[Undefined, Literal["network-simplex", "tight-tree", "longest-path"]] = undefined
+    ranker: Union[Undefined, Literal["network-simplex", "tight-tree",
+                                     "longest-path"]] = undefined
+
 
 class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
@@ -182,33 +206,49 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         nodes: List[Node]
         edges: List[Edge]
         extraChilds: Union[Undefined, List[Component]] = undefined
-        componentTemplate: Union[Undefined, str] = undefined
+        componentTemplate: Union[Undefined, Component] = undefined
 
     def __init__(
             self,
             nodes: List[Node],
             edges: List[Edge],
             extra_childs: Union[Undefined, List[Component]] = undefined,
-            component_template: Union[Undefined, str] = undefined) -> None:
+            component_template: Union[Undefined,
+                                      Component] = undefined) -> None:
         super().__init__(UIType.Flow,
                          FlowProps,
                          Flow.ChildDef(nodes, edges, extra_childs,
                                        component_template),
-                         allowed_events=[FrontendEventType.FlowSelectionChange.value])
+                         allowed_events=[
+                             FrontendEventType.FlowSelectionChange.value,
+                             FrontendEventType.FlowNodesInitialized.value,
+                             FrontendEventType.FlowEdgeConnection.value,
+                             FrontendEventType.FlowEdgeDelete.value,
+                             FrontendEventType.Drop.value,
+                         ])
         self.event_selection_change = self._create_event_slot(
             FrontendEventType.FlowSelectionChange)
+        self.event_nodes_initialized = self._create_event_slot(
+            FrontendEventType.FlowNodesInitialized)
+        self.event_edge_connection = self._create_event_slot(
+            FrontendEventType.FlowEdgeConnection)
+        self.event_edge_delete = self._create_event_slot(
+            FrontendEventType.FlowEdgeDelete)
+        self.event_node_delete = self._create_event_slot(
+            FrontendEventType.FlowNodeDelete)
+        self.event_drop = self._create_event_slot(FrontendEventType.Drop)
         self._update_graph_data()
 
-    @property 
+    @property
     def childs_complex(self):
         assert isinstance(self._child_structure, Flow.ChildDef)
         return self._child_structure
 
-    @property 
+    @property
     def nodes(self):
         return self.childs_complex.nodes
 
-    @property 
+    @property
     def edges(self):
         return self.childs_complex.edges
 
@@ -216,6 +256,20 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
     def prop(self):
         propcls = self.propcls
         return self._prop_base(propcls, self)
+
+    def _find_comps_in_dataclass(self, child: "Flow.ChildDef"):
+        unique_name_pool = UniqueNamePool()
+        res: Dict[str, Component] = {}
+        for node in child.nodes:
+            if not isinstance(node.data, Undefined) and not isinstance(
+                    node.data.component, Undefined):
+                comp = node.data.component
+                unique_name_pool(node.id)
+                res[node.id] = comp
+        if not isinstance(child.componentTemplate, Undefined):
+            res[unique_name_pool(
+                "__flow_template__")] = child.componentTemplate
+        return res
 
     def _update_graph_data(self):
         # node id must unique
@@ -229,18 +283,24 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         self._node_id_to_sources = {node.id: [] for node in self.nodes}
         self._node_id_to_targets = {node.id: [] for node in self.nodes}
         for edge in self.edges:
-            self._node_id_to_sources[edge.source].append(self._id_to_node[edge.target].id)
-            self._node_id_to_targets[edge.target].append(self._id_to_node[edge.source].id)
+            self._node_id_to_sources[edge.source].append(
+                self._id_to_node[edge.target].id)
+            self._node_id_to_targets[edge.target].append(
+                self._id_to_node[edge.source].id)
         # TODO detection cycle
         for n in self.nodes:
             if not isinstance(n, Undefined):
                 assert n.id in self._id_to_node
 
     def get_source_nodes(self, node_id: str):
-        return [self._id_to_node[id] for id in self._node_id_to_sources[node_id]]
+        return [
+            self._id_to_node[id] for id in self._node_id_to_sources[node_id]
+        ]
 
     def get_target_nodes(self, node_id: str):
-        return [self._id_to_node[id] for id in self._node_id_to_targets[node_id]]
+        return [
+            self._id_to_node[id] for id in self._node_id_to_targets[node_id]
+        ]
 
     @property
     def update_event(self):
@@ -251,13 +311,18 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         print(ev.type)
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
-    def state_change_callback(self, value: dict, type: ValueType = FrontendEventType.Change.value):
+    def state_change_callback(
+            self,
+            value: dict,
+            type: ValueType = FrontendEventType.Change.value):
         if "nodes" in value:
             cur_id_to_comp: Dict[str, Component] = {}
             for n in self.nodes:
-                if not isinstance(n.data, Undefined) and not isinstance(n.data.component, Undefined):
-                    assert n.data.component._flow_uid is not None 
-                    cur_id_to_comp[n.data.component._flow_uid.uid_encoded] = n.data.component
+                if not isinstance(n.data, Undefined) and not isinstance(
+                        n.data.component, Undefined):
+                    assert n.data.component._flow_uid is not None
+                    cur_id_to_comp[n.data.component._flow_uid.
+                                   uid_encoded] = n.data.component
             for node_raw in value["nodes"]:
                 if "data" in node_raw:
                     data = node_raw["data"]
@@ -269,7 +334,9 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             self.childs_complex.edges = _EdgesHelper(value["edges"]).edges
         self._update_graph_data()
 
-    async def do_dagre_layout(self, options: Optional[DagreLayoutOptions] = None, fit_view: bool = False):
+    async def do_dagre_layout(self,
+                              options: Optional[DagreLayoutOptions] = None,
+                              fit_view: bool = False):
         if options is None:
             options = DagreLayoutOptions()
         res = {
@@ -286,10 +353,44 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         }
         return await self.send_and_wait(self.create_comp_event(res))
 
+    async def add_nodes(self, nodes: List[Node]):
+        new_layout: Dict[str, Component] = {}
+        for node in nodes:
+            assert node.id not in self._id_to_node, f"node id {node.id} already exists"
+            comp = node.get_component()
+            if comp is not None:
+                new_layout[node.id] = comp
+            self.nodes.append(node)
+        self._update_graph_data()
+        if new_layout:
+            return await self.update_childs(new_layout,
+                                            update_child_complex=False,
+                                            additional_ev_creator=lambda: self.
+                                            update_childs_complex_event())
+        else:
+            return await self.update_childs_complex()
+
+    async def add_node(self, node: Node):
+        await self.add_nodes([node])
+
+    async def delete_nodes_by_ids(self, node_ids: List[str]):
+        node_ids_set = set(node_ids)
+        new_nodes: List[Node] = []
+        for node in self.nodes:
+            if node.id not in node_ids_set:
+                new_nodes.append(node)
+        self.childs_complex.nodes = new_nodes
+        return await self.remove_childs_by_keys(
+            node_ids,
+            update_child_complex=False,
+            additional_ev_creator=lambda: self.update_childs_complex_event())
+
+
 @dataclasses.dataclass
 class HandleProps(MUIComponentBaseProps):
     type: Union[Literal["source", "target"], Undefined] = undefined
-    position: Union[Literal["left", "top", "right", "bottom"], Undefined] = undefined
+    position: Union[Literal["left", "top", "right", "bottom"],
+                    Undefined] = undefined
     isConnectable: Union[bool, Undefined] = undefined
     style: Union[Undefined, Any] = undefined
     id: Union[Undefined, str] = undefined
@@ -297,9 +398,9 @@ class HandleProps(MUIComponentBaseProps):
 
 class Handle(MUIComponentBase[HandleProps]):
 
-    def __init__(self, type: Literal["source", "target"], position: Literal["left", "top", "right", "bottom"]) -> None:
-        super().__init__(
-            UIType.Handle, HandleProps,[])
+    def __init__(self, type: Literal["source", "target"],
+                 position: Literal["left", "top", "right", "bottom"]) -> None:
+        super().__init__(UIType.Handle, HandleProps, [])
         self.prop(type=type, position=position)
 
     @property
@@ -311,6 +412,7 @@ class Handle(MUIComponentBase[HandleProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
 
 @dataclasses.dataclass
 class NodeColorMap:
@@ -331,7 +433,9 @@ class MiniMapProps(MUIComponentBaseProps):
     maskColor: Union[Undefined, str] = undefined
     maskStrokeColor: Union[Undefined, str] = undefined
     maskStrokeWidth: Union[Undefined, int] = undefined
-    position: Union[Undefined, Literal["top-left", "top-right", "bottom-left", "bottom-right", "top-center", "bottom-center"]] = undefined
+    position: Union[Undefined, Literal["top-left", "top-right", "bottom-left",
+                                       "bottom-right", "top-center",
+                                       "bottom-center"]] = undefined
     pannable: Union[Undefined, bool] = undefined
     zoomable: Union[Undefined, bool] = undefined
     inversePan: Union[Undefined, bool] = undefined
@@ -342,8 +446,7 @@ class MiniMapProps(MUIComponentBaseProps):
 class MiniMap(MUIComponentBase[MiniMapProps]):
 
     def __init__(self) -> None:
-        super().__init__(
-            UIType.FlowMiniMap, MiniMapProps, [])
+        super().__init__(UIType.FlowMiniMap, MiniMapProps, [])
 
     @property
     def prop(self):
@@ -358,17 +461,19 @@ class MiniMap(MUIComponentBase[MiniMapProps]):
 
 @dataclasses.dataclass
 class ControlsProps(MUIComponentBaseProps):
-    position: Union[Undefined, Literal["top-left", "top-right", "bottom-left", "bottom-right", "top-center", "bottom-center"]] = undefined
+    position: Union[Undefined, Literal["top-left", "top-right", "bottom-left",
+                                       "bottom-right", "top-center",
+                                       "bottom-center"]] = undefined
     showZoom: Union[Undefined, bool] = undefined
     showFitView: Union[Undefined, bool] = undefined
     showInteractive: Union[Undefined, bool] = undefined
     fitViewOptions: Union[Undefined, FlowFitViewOptions] = undefined
 
+
 class Controls(MUIComponentBase[ControlsProps]):
 
     def __init__(self) -> None:
-        super().__init__(
-            UIType.FlowControls, ControlsProps, [])
+        super().__init__(UIType.FlowControls, ControlsProps, [])
 
     @property
     def prop(self):
@@ -391,11 +496,11 @@ class BackgroundProps(MUIComponentBaseProps):
     offset: Union[Undefined, NumberType] = undefined
     lineWidth: Union[Undefined, NumberType] = undefined
 
+
 class Background(MUIComponentBase[BackgroundProps]):
 
     def __init__(self) -> None:
-        super().__init__(
-            UIType.FlowBackground, BackgroundProps, [])
+        super().__init__(UIType.FlowBackground, BackgroundProps, [])
 
     @property
     def prop(self):
@@ -406,6 +511,7 @@ class Background(MUIComponentBase[BackgroundProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
 
 @dataclasses.dataclass
 class NodeResizerProps(MUIComponentBaseProps):
@@ -425,8 +531,7 @@ class NodeResizerProps(MUIComponentBaseProps):
 class NodeResizer(MUIComponentBase[NodeResizerProps]):
 
     def __init__(self) -> None:
-        super().__init__(
-            UIType.FlowNodeResizer, NodeResizerProps, [])
+        super().__init__(UIType.FlowNodeResizer, NodeResizerProps, [])
 
     @property
     def prop(self):
@@ -438,9 +543,11 @@ class NodeResizer(MUIComponentBase[NodeResizerProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+
 @dataclasses.dataclass
 class NodeToolbarProps(ContainerBaseProps):
-    position: Union[Undefined, Literal["top", "bottom", "left", "right"]] = undefined
+    position: Union[Undefined, Literal["top", "bottom", "left",
+                                       "right"]] = undefined
     isVisible: Union[Undefined, bool] = undefined
     offset: Union[Undefined, NumberType] = undefined
     align: Union[Undefined, Literal["center", "start", "end"]] = undefined
@@ -448,9 +555,7 @@ class NodeToolbarProps(ContainerBaseProps):
 
 class NodeToolbar(MUIContainerBase[NodeToolbarProps, MUIComponentType]):
 
-    def __init__(
-            self,
-            children: LayoutType) -> None:
+    def __init__(self, children: LayoutType) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.FlowNodeToolBar,
@@ -467,4 +572,3 @@ class NodeToolbar(MUIContainerBase[NodeToolbarProps, MUIComponentType]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
-

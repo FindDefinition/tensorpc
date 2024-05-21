@@ -53,6 +53,7 @@ class ListSlider(mui.Slider, Generic[T]):
                 if inspect.iscoroutine(coro):
                     await coro
 
+
 class BlenderListSlider(mui.BlenderSlider, Generic[T]):
     """a slider that used for list.
     """
@@ -86,4 +87,3 @@ class BlenderListSlider(mui.BlenderSlider, Generic[T]):
                 coro = handler.cb(obj)
                 if inspect.iscoroutine(coro):
                     await coro
-

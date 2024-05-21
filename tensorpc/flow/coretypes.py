@@ -1,31 +1,31 @@
 import enum
 
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable,
-                    Coroutine, Dict, Generic, Iterable, List, Optional, Set, Tuple,
-                    Type, TypeVar, Union)
+                    Coroutine, Dict, Generic, Iterable, List, Optional, Set,
+                    Tuple, Type, TypeVar, Union)
 from tensorpc.autossh.core import Event, event_from_dict
 from tensorpc.core import dataclass_dispatch
 from tensorpc.core.moduleid import get_qualname_of_type
 from .jsonlike import JsonLikeNode, as_dict_no_undefined, Undefined
+
+
 def get_uid(graph_id: str, node_id: str):
     return f"{graph_id}@{node_id}"
 
 
 class StorageDataItem:
 
-    def __init__(self, data: bytes, 
-                 meta: JsonLikeNode) -> None:
+    def __init__(self, data: bytes, meta: JsonLikeNode) -> None:
         self.data = data
         self.meta = meta
-        assert not isinstance(self.meta.userdata, Undefined) 
-
+        assert not isinstance(self.meta.userdata, Undefined)
 
     def empty(self):
         return len(self.data) > 0
 
-    @property 
+    @property
     def timestamp(self):
-        assert not isinstance(self.meta.userdata, Undefined) 
+        assert not isinstance(self.meta.userdata, Undefined)
         return self.meta.userdata["timestamp"]
 
     def __len__(self):
@@ -289,10 +289,12 @@ class VscodeTensorpcMessageType(enum.IntEnum):
     UpdateActiveTab = 0
     UpdateCursorPosition = 1
 
+
 @dataclass_dispatch.dataclass
 class Position:
     line: int
     character: int
+
 
 @dataclass_dispatch.dataclass
 class Selection:
@@ -301,9 +303,10 @@ class Selection:
     anchor: Position
     active: Position
 
+
 @dataclass_dispatch.dataclass
 class VscodeTensorpcMessage:
     type: VscodeTensorpcMessageType
-    currentUri: str 
+    currentUri: str
     workspaceUri: str
-    selections: Optional[List[Selection]] = None 
+    selections: Optional[List[Selection]] = None

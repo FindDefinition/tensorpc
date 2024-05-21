@@ -22,12 +22,15 @@ _DELTA_SHORTCUTS = [
     ("milliseconds", "millisecond", "ms"),
 ]
 
+
 def _delta_shortcut(string: str):
     for ss, s, sh in _DELTA_SHORTCUTS:
         string = string.replace(ss, sh).replace(s, sh)
     return string
 
-def parse_frame_result_to_trace_item(frame_results: List[FrameResult], use_return_locals: bool = False):
+
+def parse_frame_result_to_trace_item(frame_results: List[FrameResult],
+                                     use_return_locals: bool = False):
     fr_stack: List[Tuple[FrameResult, TraceTreeItem]] = []
     res: List[TraceTreeItem] = []
     # print([(x.qualname, x.type, x.depth) for x in frame_results])
@@ -53,6 +56,7 @@ def parse_frame_result_to_trace_item(frame_results: List[FrameResult], use_retur
 
 
 class TraceTreeItem(TreeItem):
+
     def __init__(self, frame_res: FrameResult) -> None:
         super().__init__()
         self.set_return_frame_result(frame_res)
@@ -84,13 +88,15 @@ class TraceTreeItem(TreeItem):
         else:
             return self.qname
 
-    async def get_child_desps(self, parent_ns: UniqueTreeIdForTree) -> Dict[str, JsonLikeNode]:
+    async def get_child_desps(
+            self, parent_ns: UniqueTreeIdForTree) -> Dict[str, JsonLikeNode]:
         res: Dict[str, JsonLikeNode] = {}
         for v in self.child_trace_res:
             id = parent_ns.append_part(v.get_uid())
             node = v.get_json_like_node(id)
             res[v.get_uid()] = node
-        res_list = await get_tree_context_noexcept().parser.parse_obj_dict_to_nodes(self.local_vars, parent_ns)
+        res_list = await get_tree_context_noexcept(
+        ).parser.parse_obj_dict_to_nodes(self.local_vars, parent_ns)
         res.update({x.name: x for x in res_list})
         return res
 
@@ -123,7 +129,9 @@ class TraceTreeItem(TreeItem):
         delta = 0
         if self.end_ts != -1 and self.start_ts != -1:
             delta = (self.end_ts - self.start_ts) / 1e6
-        delta_str = _delta_shortcut(humanize.naturaldelta(dt.timedelta(milliseconds=delta), minimum_unit="milliseconds"))
+        delta_str = _delta_shortcut(
+            humanize.naturaldelta(dt.timedelta(milliseconds=delta),
+                                  minimum_unit="milliseconds"))
         if delta == 0:
             delta_str = "undefined"
         return delta_str
@@ -146,27 +154,27 @@ class TraceTreeItem(TreeItem):
 
     def _get_qname(self):
         if sys.version_info[:2] >= (3, 11):
-            return self.qname 
+            return self.qname
         else:
-            # use ast parse 
+            # use ast parse
             with tokenize.open(self.filename) as f:
                 data = f.read()
             tree = ast.parse(data)
             res = find_toplevel_func_node_by_lineno(tree, self.lineno)
             if res is None:
-                return None 
+                return None
             if res[0].name != self.name:
-                return None 
+                return None
             ns = ".".join([x.name for x in res[1]])
             return f"{ns}.{res[0]}"
 
     def _get_static_method(self):
         qname = self._get_qname()
         if qname is None:
-            return None 
+            return None
         module = sys.modules.get(self.module_qname)
         if module is None:
-            return None 
+            return None
         parts = qname.split(".")
         obj = module.__dict__[parts[0]]
         for part in parts[1:]:
@@ -183,13 +191,19 @@ class TraceTreeItem(TreeItem):
                 raise ValueError(
                     "self not in local vars, currently only support run frame with self"
                 )
-            async with appctx.inspector.trace([], f"trace-{self.name}", traced_names=set([self.name]), use_return_locals=True):
+            async with appctx.inspector.trace([],
+                                              f"trace-{self.name}",
+                                              traced_names=set([self.name]),
+                                              use_return_locals=True):
                 method(**self.local_vars)
         else:
             local_vars = {k: v for k, v in self.local_vars.items()}
             local_vars.pop("self")
             fn = getattr(self.local_vars["self"], self.name)
-            async with appctx.inspector.trace([], f"trace-{self.name}", traced_names=set([self.name]), use_return_locals=True):
+            async with appctx.inspector.trace([],
+                                              f"trace-{self.name}",
+                                              traced_names=set([self.name]),
+                                              use_return_locals=True):
                 fn(**local_vars)
 
     def _on_reload_self(self):

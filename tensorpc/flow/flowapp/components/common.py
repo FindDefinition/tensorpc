@@ -34,7 +34,6 @@ _ONEARG_TREE_EVENTS = set([
     FrontendEventType.TreeItemButton.value,
     FrontendEventType.ContextMenuSelect.value,
     FrontendEventType.TreeItemRename.value,
-
 ])
 
 _ONEARG_COMPLEXL_EVENTS = set([
@@ -55,18 +54,17 @@ _ONEARG_SPECIAL_EVENTS = set([
     FrontendEventType.SelectNewItem.value,
     FrontendEventType.FlowSelectionChange.value,
     FrontendEventType.FlowNodesInitialized.value,
-
 ])
 _ONEARG_DATAGRID_EVENTS = set([
     FrontendEventType.DataGridRowSelection.value,
     FrontendEventType.DataGridFetchDetail.value,
     FrontendEventType.DataGridRowRangeChanged.value,
     FrontendEventType.DataGridProxyLazyLoadRange.value,
-
 ])
 
 _ONEARG_EVENTS = set(
-    ALL_POINTER_EVENTS) | _ONEARG_TREE_EVENTS | _ONEARG_COMPLEXL_EVENTS | _ONEARG_SPECIAL_EVENTS | _ONEARG_EDITOR_EVENTS
+    ALL_POINTER_EVENTS
+) | _ONEARG_TREE_EVENTS | _ONEARG_COMPLEXL_EVENTS | _ONEARG_SPECIAL_EVENTS | _ONEARG_EDITOR_EVENTS
 _ONEARG_EVENTS = _ONEARG_EVENTS | _ONEARG_DATAGRID_EVENTS
 
 _NOARG_EVENTS = set([
@@ -75,11 +73,12 @@ _NOARG_EVENTS = set([
     FrontendEventType.DoubleClick.value,
     FrontendEventType.EditorQueryState.value,
     FrontendEventType.Delete.value,
-
 ])
 
 
-async def handle_raw_event(event: Event, comp: Component, just_run: bool = False):
+async def handle_raw_event(event: Event,
+                           comp: Component,
+                           just_run: bool = False):
     # ev: [type, data]
     type = event.type
     data = event.data
@@ -115,8 +114,8 @@ async def handle_standard_event(comp: Component,
         return
     elif comp.props.status == UIRunStatus.Stop.value:
         if not isinstance(event.keys, Undefined):
-            # for all template components, we must disable 
-            # status change and sync. status indicator 
+            # for all template components, we must disable
+            # status change and sync. status indicator
             # in Button and IconButton will be disabled.
             sync_status_first = False
             change_status = False
@@ -134,14 +133,18 @@ async def handle_standard_event(comp: Component,
             if handlers is not None:
                 # state change events must sync state after callback
                 if is_sync:
-                    return await comp.run_callbacks(handlers.get_bind_event_handlers(event),
-                                      sync_state, 
-                                      sync_status_first=False, change_status=change_status)
+                    return await comp.run_callbacks(
+                        handlers.get_bind_event_handlers(event),
+                        sync_state,
+                        sync_status_first=False,
+                        change_status=change_status)
                 else:
                     comp._task = asyncio.create_task(
-                        comp.run_callbacks(handlers.get_bind_event_handlers(event),
-                                        sync_state,
-                                        sync_status_first=sync_status_first, change_status=change_status))
+                        comp.run_callbacks(
+                            handlers.get_bind_event_handlers(event),
+                            sync_state,
+                            sync_status_first=sync_status_first,
+                            change_status=change_status))
             else:
                 # all controlled component must sync state after state change
                 if sync_state_after_change:
@@ -152,20 +155,28 @@ async def handle_standard_event(comp: Component,
             if handlers is not None:
                 run_funcs = handlers.get_bind_event_handlers_noarg(event)
                 if is_sync:
-                    return await comp.run_callbacks(run_funcs, sync_status_first=False)
+                    return await comp.run_callbacks(run_funcs,
+                                                    sync_status_first=False)
                 else:
                     comp._task = asyncio.create_task(
-                        comp.run_callbacks(run_funcs, sync_status_first=sync_status_first, change_status=change_status))
+                        comp.run_callbacks(run_funcs,
+                                           sync_status_first=sync_status_first,
+                                           change_status=change_status))
         elif event.type in _ONEARG_EVENTS:
             handlers = comp.get_event_handlers(event.type)
             # other events don't need to sync state
             if handlers is not None:
                 run_funcs = handlers.get_bind_event_handlers(event)
                 if is_sync:
-                    return await comp.run_callbacks(run_funcs, sync_status_first=False, change_status=change_status)
+                    return await comp.run_callbacks(
+                        run_funcs,
+                        sync_status_first=False,
+                        change_status=change_status)
                 else:
                     comp._task = asyncio.create_task(
-                        comp.run_callbacks(run_funcs, sync_status_first=sync_status_first, change_status=change_status))
+                        comp.run_callbacks(run_funcs,
+                                           sync_status_first=sync_status_first,
+                                           change_status=change_status))
 
         else:
             raise NotImplementedError

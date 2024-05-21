@@ -430,7 +430,8 @@ def parse_to_control_nodes(origin_obj,
                             child_node.initValue = first_anno_meta.default
                     child_node.min = first_anno_meta.lo
                     child_node.max = first_anno_meta.hi
-                    child_node.isInteger = isinstance(first_anno_meta, typemetas.RangedInt)
+                    child_node.isInteger = isinstance(first_anno_meta,
+                                                      typemetas.RangedInt)
                     child_node.alias = mui.undefined if first_anno_meta.alias is None else first_anno_meta.alias
                     child_node.step = mui.undefined if first_anno_meta.step is None else first_anno_meta.step
                     if first_anno_meta.step is None and ty is int:
@@ -460,9 +461,13 @@ def parse_to_control_nodes(origin_obj,
     return res_node
 
 
-def control_nodes_v1_to_v2(ctrl_node_v1: mui.ControlNode, uid_to_json_like_node: Dict[str, mui.JsonLikeNode]) -> mui.JsonLikeNode:
+def control_nodes_v1_to_v2(
+        ctrl_node_v1: mui.ControlNode,
+        uid_to_json_like_node: Dict[str,
+                                    mui.JsonLikeNode]) -> mui.JsonLikeNode:
     childs: List[mui.JsonLikeNode] = [
-        control_nodes_v1_to_v2(c, uid_to_json_like_node) for c in ctrl_node_v1.children
+        control_nodes_v1_to_v2(c, uid_to_json_like_node)
+        for c in ctrl_node_v1.children
     ]
     ctrl_desp = mui.ControlDesp(type=ctrl_node_v1.type,
                                 initValue=ctrl_node_v1.initValue,
@@ -486,6 +491,7 @@ def control_nodes_v1_to_v2(ctrl_node_v1: mui.ControlNode, uid_to_json_like_node:
 
 
 class ConfigPanel(mui.DynamicControls):
+
     def __init__(self,
                  config_obj: Any,
                  callback: Optional[Callable[[str, Any],
@@ -558,6 +564,7 @@ class ConfigPanel(mui.DynamicControls):
 
 
 class ConfigPanelV2(mui.SimpleControls):
+
     def __init__(self,
                  config_obj: Any,
                  callback: Optional[Callable[[str, Any],
@@ -572,7 +579,8 @@ class ConfigPanelV2(mui.SimpleControls):
                                       "",
                                       self._obj_to_ctrl_meta,
                                       ignored_field_names=ignored_field_names)
-        super().__init__(init=control_nodes_v1_to_v2(node, self.uid_to_json_like_node).children,
+        super().__init__(init=control_nodes_v1_to_v2(
+            node, self.uid_to_json_like_node).children,
                          callback=self.callback)
         self.__config_obj = config_obj
         self.__callback_key = "config_panel_v3_handler"

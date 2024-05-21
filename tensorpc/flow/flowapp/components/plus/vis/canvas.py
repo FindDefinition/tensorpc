@@ -222,19 +222,20 @@ with V.group("example"):
 
 class ComplexCanvasView(three.View):
 
-    def __init__(
-            self,
-            key: str,
-            childs: Optional[three.ThreeLayoutType] = None,
-            transparent_canvas: bool = False,
-            custom_effect: Optional[three.EffectComposer] = None,
-            camera: Optional[Union[three.PerspectiveCamera, three.OrthographicCamera]] = None,
-            control: Optional[three.CameraControl] = None,
-            enable_gizmo: bool = True):
+    def __init__(self,
+                 key: str,
+                 childs: Optional[three.ThreeLayoutType] = None,
+                 transparent_canvas: bool = False,
+                 custom_effect: Optional[three.EffectComposer] = None,
+                 camera: Optional[Union[three.PerspectiveCamera,
+                                        three.OrthographicCamera]] = None,
+                 control: Optional[three.CameraControl] = None,
+                 enable_gizmo: bool = True):
         if camera is None:
             camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         self.camera = camera
-        self.camera.prop(layers=1 | (1 << 31)) # only objects in layer 0 and 31 is visible.
+        self.camera.prop(
+            layers=1 | (1 << 31))  # only objects in layer 0 and 31 is visible.
         if control is None:
             control = three.CameraControl().prop(makeDefault=True)
         self.ctrl = control
@@ -250,7 +251,7 @@ class ComplexCanvasView(three.View):
             "effects": custom_effect,
         }
         gizmo_helper = three.GizmoHelper().prop(alignment="bottom-right",
-                                                      renderPriority=2)
+                                                renderPriority=2)
         if enable_gizmo:
             init_layout["gizmo"] = gizmo_helper
         self._lock = asyncio.Lock()
@@ -267,22 +268,24 @@ class ComplexCanvasView(three.View):
         if childs is not None:
             layout["init"] = three.Group(childs)
         self._init_layout = layout
-        self._item_root = three.SelectionContext(layout,
-                                                 self._on_3d_object_select).prop(useOutline=True)
+        self._item_root = three.SelectionContext(
+            layout, self._on_3d_object_select).prop(useOutline=True)
 
         super().__init__({
             "root": self._item_root,
             "camera": self.camera,
             "control": self.ctrl,
         })
-        self.prop(flex=1, allowKeyboardEvent=True, menuItems=[
-                    mui.MenuItem("reset", "reset"),
-                    mui.MenuItem("clear", "clear"),
-                ])
+        self.prop(flex=1,
+                  allowKeyboardEvent=True,
+                  menuItems=[
+                      mui.MenuItem("reset", "reset"),
+                      mui.MenuItem("clear", "clear"),
+                  ])
         self.event_context_menu.on(self._on_menu_select)
 
     def _set_selection_callback(self):
-        pass 
+        pass
 
     async def _on_menu_select(self, value: str):
         if value == "reset":
@@ -297,6 +300,7 @@ class ComplexCanvasView(three.View):
     async def _on_reset_cam(self):
         await self.ctrl.reset_camera()
 
+
 class ComplexCanvas(mui.FlexBox):
     """
     a blender-like canvas
@@ -308,17 +312,17 @@ class ComplexCanvas(mui.FlexBox):
     """
 
     def __init__(
-            self,
-            init_canvas_childs: Optional[three.ThreeLayoutType] = None,
-            transparent_canvas: bool = False,
-            init_tree_root: Optional[Any] = None,
-            init_tree_child_accessor: Optional[Callable[[Any],
-                                                        Dict[str,
-                                                             Any]]] = None,
-            key: str = "canvas",
-            custom_effect: Optional[three.EffectComposer] = None,
-            init_enable_grid: bool = True,
-            camera: Optional[Union[three.PerspectiveCamera, three.OrthographicCamera]] = None):
+        self,
+        init_canvas_childs: Optional[three.ThreeLayoutType] = None,
+        transparent_canvas: bool = False,
+        init_tree_root: Optional[Any] = None,
+        init_tree_child_accessor: Optional[Callable[[Any], Dict[str,
+                                                                Any]]] = None,
+        key: str = "canvas",
+        custom_effect: Optional[three.EffectComposer] = None,
+        init_enable_grid: bool = True,
+        camera: Optional[Union[three.PerspectiveCamera,
+                               three.OrthographicCamera]] = None):
 
         super().__init__()
         self.component_tree = three.Fragment([])
@@ -427,8 +431,8 @@ class ComplexCanvas(mui.FlexBox):
         if init_canvas_childs is not None:
             layout["init"] = three.Group(init_canvas_childs)
         self._init_layout = layout
-        self._item_root = three.SelectionContext(layout,
-                                                 self._on_3d_object_select).prop(useOutline=False)
+        self._item_root = three.SelectionContext(
+            layout, self._on_3d_object_select).prop(useOutline=False)
         # self._item_root = three.Group(layout)
         self.key = key
         self.prop_container = mui.HBox([]).prop(overflow="auto",
@@ -451,10 +455,13 @@ class ComplexCanvas(mui.FlexBox):
             "root": self._item_root,
             "camera": self.camera,
             "control": self.ctrl,
-        }).prop(flex=1, allowKeyboardEvent=True, shadows=True, menuItems=[
-            mui.MenuItem("reset", "reset"),
-            mui.MenuItem("clear", "clear"),
-        ])
+        }).prop(flex=1,
+                allowKeyboardEvent=True,
+                shadows=True,
+                menuItems=[
+                    mui.MenuItem("reset", "reset"),
+                    mui.MenuItem("clear", "clear"),
+                ])
         self.canvas.event_context_menu.on(self._on_menu_select)
         self.custom_tree_handler = CanvasTreeItemHandler()
         self.item_tree = BasicObjectTree(
@@ -470,7 +477,6 @@ class ComplexCanvas(mui.FlexBox):
             border="4px solid transparent",
             sxOverDrop={"border": "4px solid green"},
         )
-
 
     @marker.mark_create_layout
     def _layout_func(self):
@@ -525,10 +531,7 @@ class ComplexCanvas(mui.FlexBox):
                 ]).prop(backgroundColor="lavender", borderRadius="4px"),
                 # self._cfg_panel,
                 self._cfg_container,
-            ]).prop(position="absolute",
-                    top=3,
-                    left=3,
-                    zIndex=5),
+            ]).prop(position="absolute", top=3, left=3, zIndex=5),
             mui.HBox([
                 mui.IconButton(mui.IconType.Help, lambda: None).prop(
                     tooltip=help_string,
@@ -619,15 +622,12 @@ class ComplexCanvas(mui.FlexBox):
                                self.array_table,
                                icon=mui.IconType.Dataset,
                                tooltip="numpy array table"),
-
-                    mui.TabDef(
-                        "",
-                        "6",
-                        ScriptManager(init_scripts={
-                            "python": _EXAMPLE_SCRIPT
-                        }),
-                        icon=mui.IconType.Code,
-                        tooltip="python script playground"),
+                    mui.TabDef("",
+                               "6",
+                               ScriptManager(
+                                   init_scripts={"python": _EXAMPLE_SCRIPT}),
+                               icon=mui.IconType.Code,
+                               tooltip="python script playground"),
                 ], "2").prop(panelProps=mui.FlexBoxProps(width="100%",
                                                          padding=0),
                              orientation="vertical",
@@ -688,19 +688,25 @@ class ComplexCanvas(mui.FlexBox):
             for k, v in flatted_tree_nodes.items()
         })
 
-    async def set_new_grid_items(self, items: Dict[str, Any], is_local: bool = False):
+    async def set_new_grid_items(self,
+                                 items: Dict[str, Any],
+                                 is_local: bool = False):
         if is_local:
             await self.gv_locals_layout.set_new_items(items)
         else:
             await self.gv_custom_layout.set_new_items(items)
 
-    async def update_grid_items(self, items: Dict[str, Any], is_local: bool = False):
+    async def update_grid_items(self,
+                                items: Dict[str, Any],
+                                is_local: bool = False):
         if is_local:
             await self.gv_locals_layout.update_items(items)
         else:
             await self.gv_custom_layout.update_items(items)
 
-    async def delete_grid_items(self, items: List[str], is_local: bool = False):
+    async def delete_grid_items(self,
+                                items: List[str],
+                                is_local: bool = False):
         if is_local:
             await self.gv_locals_layout.delete_items(items)
         else:
@@ -794,7 +800,6 @@ class ComplexCanvas(mui.FlexBox):
 
     def _get_tdata_container_pane(self, tdata_table: mui.DataGrid):
         return mui.Allotment.Pane(tdata_table, preferredSize=1)
-
 
     async def _on_pan_to_fwd(self, selected):
         await self.ctrl.send_and_wait(
@@ -1080,9 +1085,10 @@ class ComplexCanvas(mui.FlexBox):
             }, validate=True))
 
     def _get_local_uid_of_object(self, uid: UniqueTreeId):
-        assert self._item_root._flow_uid is not None 
+        assert self._item_root._flow_uid is not None
         assert uid.startswith(self._item_root._flow_uid)
-        return UniqueTreeIdForTree.from_parts(uid.parts[uid.common_prefix_index(self._item_root._flow_uid):])
+        return UniqueTreeIdForTree.from_parts(
+            uid.parts[uid.common_prefix_index(self._item_root._flow_uid):])
 
     def _convert_tree_node_uid_to_local_uid(self, uid: UniqueTreeId):
         assert uid.parts[0] == "root"
@@ -1096,7 +1102,8 @@ class ComplexCanvas(mui.FlexBox):
         select = selected[0]
         selected_uid = select["userData"]["uid"]
         # print(self.item_tree.tree.props.tree)
-        selected_uid_local_uid = self._get_local_uid_of_object(UniqueTreeIdForTree(selected_uid))
+        selected_uid_local_uid = self._get_local_uid_of_object(
+            UniqueTreeIdForTree(selected_uid))
 
         container_parents, remain_keys, _ = find_component_trace_by_uid_with_not_exist_parts(
             self._item_root, selected_uid_local_uid)
@@ -1105,7 +1112,8 @@ class ComplexCanvas(mui.FlexBox):
             # we need to convert object component uid to tree node uid.
             # tree node uid always start with "root"
             # tree_node_uid = f"root::{selected_uid_local_uid.replace('.', '::')}"
-            tree_node_uid = UniqueTreeIdForTree.from_parts(["root"] + selected_uid_local_uid.parts)
+            tree_node_uid = UniqueTreeIdForTree.from_parts(
+                ["root"] + selected_uid_local_uid.parts)
             await self.item_tree.tree.select([tree_node_uid.uid_encoded])
             await self.item_tree._on_select_single(tree_node_uid.uid_encoded)
             # print(selected_uid_local_uid, obj, obj._flow_uid)
@@ -1148,16 +1156,14 @@ class ComplexCanvas(mui.FlexBox):
                 if pc_obj.shape[1] == 3:
                     points.prop(colors=pick)
 
-            await V._draw_all_in_vctx(vctx_unk,
-                                      unk_container._flow_uid)
+            await V._draw_all_in_vctx(vctx_unk, unk_container._flow_uid)
             return True
         img_obj = _try_cast_to_image(obj)
         if img_obj is not None:
             with V.enter_v_conetxt(V.VContext(self, unk_container)):
                 V.image(img_obj, name=tree_id_replaced,
                         pos=(0, 0, 0.1)).prop(scale=(3, 3, 3))
-            await V._draw_all_in_vctx(vctx_unk,
-                                      unk_container._flow_uid)
+            await V._draw_all_in_vctx(vctx_unk, unk_container._flow_uid)
             return True
         b3d_obj = _try_cast_to_box3d(obj)
         if b3d_obj is not None:
@@ -1174,8 +1180,7 @@ class ComplexCanvas(mui.FlexBox):
                     for box in b3d_obj:
                         V.bounding_box(box[3:6], (0, 0, box[6]),
                                        box[:3]).prop(color=pick)
-            await V._draw_all_in_vctx(vctx_unk,
-                                      unk_container._flow_uid)
+            await V._draw_all_in_vctx(vctx_unk, unk_container._flow_uid)
             return True
         line_obj = _try_cast_to_lines(obj)
         if line_obj is not None:
@@ -1191,8 +1196,7 @@ class ComplexCanvas(mui.FlexBox):
                 points = V.lines(tree_id_replaced, line_obj.shape[0]).array(
                     line_obj.astype(np.float32))
 
-            await V._draw_all_in_vctx(vctx_unk,
-                                      unk_container._flow_uid)
+            await V._draw_all_in_vctx(vctx_unk, unk_container._flow_uid)
             return True
         return False
 
@@ -1208,7 +1212,8 @@ class ComplexCanvas(mui.FlexBox):
                 tree = find_component_by_uid_with_type_check(
                     data.source_comp_uid, BasicObjectTree)
                 if tree is not None:
-                    tree._register_dnd_uid(UniqueTreeIdForTree(data.tree_id), self._dnd_cb)
+                    tree._register_dnd_uid(UniqueTreeIdForTree(data.tree_id),
+                                           self._dnd_cb)
                     self._dnd_trees.add(data.source_comp_uid)
 
     async def _dnd_cb(self, uid: UniqueTreeIdForTree, data: Any):

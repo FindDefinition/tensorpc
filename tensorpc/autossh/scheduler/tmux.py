@@ -12,12 +12,15 @@ import psutil
 
 _SPLIT = constants.TMUX_SESSION_NAME_SPLIT
 
+
 def get_tmux_scheduler_info_may_create():
     s = libtmux.Server()
     sessions = s.sessions
     sess_names = [sess.name for sess in sessions]
     scheduler_sess_names = [
-        sess_name for sess_name in sess_names if sess_name.startswith(constants.TMUX_SESSION_PREFIX)]
+        sess_name for sess_name in sess_names
+        if sess_name.startswith(constants.TMUX_SESSION_PREFIX)
+    ]
     if len(scheduler_sess_names) == 0:
         uuid_str = uuid.uuid4().hex
         serv_name = f"tensorpc.autossh.services.scheduler{TENSORPC_SPLIT}Scheduler"
@@ -44,7 +47,12 @@ def get_tmux_scheduler_info_may_create():
     return port, uuid_str
 
 
-def launch_tmux_task(uuid_str: str, window_command: str, one_shot: bool, sched_port: int, resources: List[Tuple[ResourceType, int]], cwd: str = ""):
+def launch_tmux_task(uuid_str: str,
+                     window_command: str,
+                     one_shot: bool,
+                     sched_port: int,
+                     resources: List[Tuple[ResourceType, int]],
+                     cwd: str = ""):
     s = libtmux.Server()
     sess_name = f"{constants.TMUX_SESSION_TASK_PREFIX}{_SPLIT}{uuid_str}"
     envs = {
@@ -94,12 +102,13 @@ def launch_tmux_task(uuid_str: str, window_command: str, one_shot: bool, sched_p
                 pane.send_keys(f"cd {cwd}")
             pane.send_keys(window_command)
 
+
 def kill_task(uuid_str: str, pid: int):
     s = libtmux.Server()
     sess_name = f"{constants.TMUX_SESSION_TASK_PREFIX}{_SPLIT}{uuid_str}"
     if pid > 0:
         parent = psutil.Process(pid)
-        for child in parent.children(recursive=True): 
+        for child in parent.children(recursive=True):
             child.kill()
         parent.kill()
     else:
@@ -107,6 +116,7 @@ def kill_task(uuid_str: str, pid: int):
         sess = s.sessions.get(session_name=sess_name)
         assert isinstance(sess, libtmux.Session)
         sess.kill_session()
+
 
 def cancel_task(uuid_str: str):
     s = libtmux.Server()
@@ -117,6 +127,7 @@ def cancel_task(uuid_str: str):
     pane: libtmux.Pane = sess.windows[0].panes[0]
     pane.send_keys("\x03")
 
+
 def delete_task(uuid_str: str):
     s = libtmux.Server()
     sess_name = f"{constants.TMUX_SESSION_TASK_PREFIX}{_SPLIT}{uuid_str}"
@@ -126,14 +137,13 @@ def delete_task(uuid_str: str):
     pane: libtmux.Pane = sess.windows[0].panes[0]
     pane.send_keys("exit")
 
+
 def capture_pane_last_lines(uuid_str: str, num_lines: int):
     s = libtmux.Server()
     sess_name = f"{constants.TMUX_SESSION_TASK_PREFIX}{_SPLIT}{uuid_str}"
     if not s.has_session(sess_name):
-        return "" 
+        return ""
     sess = s.sessions.get(session_name=sess_name)
     assert isinstance(sess, libtmux.Session)
     pane: libtmux.Pane = sess.windows[0].panes[0]
     return pane.capture_pane(0)[-num_lines:]
-
-

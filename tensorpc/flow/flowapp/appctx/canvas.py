@@ -1,11 +1,10 @@
-
-
 import asyncio
 import contextlib
 from functools import partial
 import inspect
-from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
-                    Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
+from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable,
+                    Coroutine, Dict, Iterable, List, Optional, Set, Tuple,
+                    Type, TypeVar, Union)
 
 from typing_extensions import ParamSpec
 
@@ -36,13 +35,25 @@ def get_simple_canvas_may_exist(key: Optional[str] = None):
         comp = find_component(plus.SimpleCanvas)
     return comp
 
-async def unknown_visualization(obj: Any, tree_id: str, key: Optional[str] = None):
-    return await get_simple_canvas(key)._unknown_visualization(tree_id, obj, ignore_registry=False)
 
-async def unknown_visualization_no_registry(obj: Any, tree_id: str, key: Optional[str] = None):
-    return await get_simple_canvas(key)._unknown_visualization(tree_id, obj, ignore_registry=True)
+async def unknown_visualization(obj: Any,
+                                tree_id: str,
+                                key: Optional[str] = None):
+    return await get_simple_canvas(key)._unknown_visualization(
+        tree_id, obj, ignore_registry=False)
 
-async def unknown_visualization_temp_objs(*objs, vis_root_id: str = "", canvas_key: Optional[str] = None, **kwobjs):
+
+async def unknown_visualization_no_registry(obj: Any,
+                                            tree_id: str,
+                                            key: Optional[str] = None):
+    return await get_simple_canvas(key)._unknown_visualization(
+        tree_id, obj, ignore_registry=True)
+
+
+async def unknown_visualization_temp_objs(*objs,
+                                          vis_root_id: str = "",
+                                          canvas_key: Optional[str] = None,
+                                          **kwobjs):
     pool = UniqueNamePool()
     canvas = get_simple_canvas(canvas_key)
     for i, o in enumerate(objs):
@@ -55,6 +66,7 @@ async def unknown_visualization_temp_objs(*objs, vis_root_id: str = "", canvas_k
         if vis_root_id != "":
             uid = f"{vis_root_id}.{uid}"
         await canvas._unknown_visualization(uid, o)
+
 
 def get_canvas(key: Optional[str] = None) -> "ComplexCanvas":
     from tensorpc.flow.flowapp.components import plus
@@ -75,5 +87,3 @@ def get_canvas_may_exist(key: Optional[str] = None):
     else:
         comp = find_component(plus.ComplexCanvas)
     return comp
-
-

@@ -171,6 +171,7 @@ async def read_item(uid: str):
     assert comp is not None, "you must add inspector to your UI to use exception inspect"
     return await comp.get_object_by_uid(uid)
 
+
 def has_object(key: str):
     comp = find_component(plus.ObjectInspector)
     if comp is None:
@@ -178,13 +179,14 @@ def has_object(key: str):
     assert comp is not None, "you must add inspector to your UI"
     return comp.tree.has_object(key)
 
+
 def set_custom_layout_sync(layout: mui.FlexBox):
     comp = find_component(plus.ObjectInspector)
     if comp is None:
         return
     assert comp is not None, "you must add inspector to your UI"
-    return comp.set_custom_layout_sync(loop=get_app()._loop,
-                                    layout=layout)
+    return comp.set_custom_layout_sync(loop=get_app()._loop, layout=layout)
+
 
 async def set_custom_layout(layout: mui.FlexBox):
     comp = find_component(plus.ObjectInspector)

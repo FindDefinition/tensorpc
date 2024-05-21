@@ -7,8 +7,8 @@ import traceback
 from functools import partial
 from pathlib import Path
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable,
-                    Coroutine, Dict, Generic, Iterable, List, Optional, Set, Tuple,
-                    Type, TypeVar, Union)
+                    Coroutine, Dict, Generic, Iterable, List, Optional, Set,
+                    Tuple, Type, TypeVar, Union)
 
 from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
                                TypeAlias)
@@ -37,6 +37,7 @@ T = TypeVar("T")
 
 T_comp = TypeVar("T_comp")
 
+
 @dataclasses.dataclass
 class Event:
     type: EventDataType
@@ -49,9 +50,8 @@ class Event:
 
 
 class EventHandler:
-    def __init__(self,
-                 cb: Callable,
-                 simple_event: bool = True) -> None:
+
+    def __init__(self, cb: Callable, simple_event: bool = True) -> None:
         self.cb = cb
         self.simple_event = simple_event
 
@@ -60,7 +60,7 @@ class EventHandler:
             return self.cb(event.data)
         else:
             return self.cb(event)
-        
+
     async def run_event_async(self, event: Event):
         if self.simple_event:
             coro = self.cb(event.data)
@@ -78,7 +78,9 @@ class EventHandler:
         else:
             return self.cb(event)
 
+
 class EventHandlers:
+
     def __init__(self,
                  handlers: List[EventHandler],
                  stop_propagation: bool = False,
@@ -105,14 +107,21 @@ class EventHandlers:
         return res
 
     def get_bind_event_handlers(self, event: Event):
-        return [partial(handler.run_event, event=event) for handler in self.handlers]
-    
+        return [
+            partial(handler.run_event, event=event)
+            for handler in self.handlers
+        ]
+
     def get_bind_event_handlers_noarg(self, event: Event):
-        return [partial(handler.run_noarg_event, event=event) for handler in self.handlers]
+        return [
+            partial(handler.run_noarg_event, event=event)
+            for handler in self.handlers
+        ]
 
     def remove_handler(self, handler: Callable):
         self.handlers = [h for h in self.handlers if h.cb != handler]
         return
+
 
 class AppContext:
 
@@ -131,18 +140,22 @@ APP_CONTEXT_VAR: contextvars.ContextVar[
 def get_app_context() -> Optional[AppContext]:
     return APP_CONTEXT_VAR.get()
 
+
 def is_inside_app():
     return is_inside_app_session() and get_app_context() is not None
+
 
 def get_editable_app() -> "EditableApp":
     ctx = get_app_context()
     assert ctx is not None and ctx.is_editable_app()
-    return ctx.app # type: ignore
+    return ctx.app  # type: ignore
+
 
 def get_app() -> "App":
     ctx = get_app_context()
     assert ctx is not None
     return ctx.app
+
 
 @contextlib.contextmanager
 def enter_app_conetxt(app: "App"):
@@ -160,16 +173,23 @@ def get_app_storage():
     return ctx.app.get_persist_storage()
 
 
-def find_component(type: Type[T_comp], validator: Optional[Callable[[T_comp], bool]] = None) -> Optional[T_comp]:
+def find_component(
+        type: Type[T_comp],
+        validator: Optional[Callable[[T_comp],
+                                     bool]] = None) -> Optional[T_comp]:
     appctx = get_app_context()
     assert appctx is not None, "you must use this function in app"
     return appctx.app.find_component(type, validator)
 
-def find_all_components(type: Type[T_comp], check_nested: bool = False, 
-                        validator: Optional[Callable[[T_comp], bool]] = None) -> List[T_comp]:
+
+def find_all_components(
+        type: Type[T_comp],
+        check_nested: bool = False,
+        validator: Optional[Callable[[T_comp], bool]] = None) -> List[T_comp]:
     appctx = get_app_context()
     assert appctx is not None, "you must use this function in app"
     return appctx.app.find_all_components(type, check_nested, validator)
+
 
 def find_component_by_uid(uid: str) -> Optional["Component"]:
     appctx = get_app_context()
@@ -177,9 +197,11 @@ def find_component_by_uid(uid: str) -> Optional["Component"]:
     try:
         return appctx.app.root._get_comp_by_uid(uid)
     except KeyError:
-        return None 
-    
-def find_component_by_uid_with_type_check(uid: str, type: Type[T_comp]) -> Optional[T_comp]:
+        return None
+
+
+def find_component_by_uid_with_type_check(
+        uid: str, type: Type[T_comp]) -> Optional[T_comp]:
     appctx = get_app_context()
     assert appctx is not None, "you must use this function in app"
     try:
@@ -187,7 +209,8 @@ def find_component_by_uid_with_type_check(uid: str, type: Type[T_comp]) -> Optio
         assert isinstance(res, type)
         return res
     except KeyError:
-        return None 
+        return None
+
 
 def get_reload_manager():
     appctx = get_app_context()
@@ -212,6 +235,7 @@ class AppSpecialEventType(enum.Enum):
     # emitted when layout update is sent to frontend.
     LayoutChange = "LayoutChange"
     VscodeTensorpcMessage = "VscodeTensorpcMessage"
+
 
 @dataclasses.dataclass
 class _CompReloadMeta:
@@ -247,7 +271,9 @@ def create_reload_metas(uid_to_comp: Dict[str, "Component"], path: str):
                 if cb_file != path_resolve:
                     continue
                 # code, _ = inspect.getsourcelines(cb_real)
-                metas.append(_CompReloadMeta(k, handler, cb_file, cb_real, cb_real.__qualname__))
+                metas.append(
+                    _CompReloadMeta(k, handler, cb_file, cb_real,
+                                    cb_real.__qualname__))
     return metas
 
 
@@ -260,11 +286,15 @@ async def _run_zeroarg_func(cb: Callable):
         traceback.print_exc()
 
 
-class AppObservedFunctionRegistry(ObservedFunctionRegistry):    
+class AppObservedFunctionRegistry(ObservedFunctionRegistry):
+
     def is_enabled(self):
         return not self.is_frozen and is_inside_app_session()
-    
-ALL_OBSERVED_FUNCTIONS: ObservedFunctionRegistryProtocol = AppObservedFunctionRegistry()
+
+
+ALL_OBSERVED_FUNCTIONS: ObservedFunctionRegistryProtocol = AppObservedFunctionRegistry(
+)
+
 
 def observe_function(func: Callable):
     return ALL_OBSERVED_FUNCTIONS.register(func)
@@ -273,5 +303,8 @@ def observe_function(func: Callable):
 def observe_autorun_function(func: Callable):
     return ALL_OBSERVED_FUNCTIONS.register(func, autorun_when_changed=True)
 
+
 def observe_autorun_script(func: Callable):
-    return ALL_OBSERVED_FUNCTIONS.register(func, autorun_when_changed=True, autorun_block_symbol=r"#%%")
+    return ALL_OBSERVED_FUNCTIONS.register(func,
+                                           autorun_when_changed=True,
+                                           autorun_block_symbol=r"#%%")

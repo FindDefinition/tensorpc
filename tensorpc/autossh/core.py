@@ -82,14 +82,15 @@ class CommandEventType(enum.Enum):
     CONTINUATION_START = "F"
     CONTINUATION_END = "G"
 
+
 class CommandEventParseState(enum.IntEnum):
-    VscPromptStart = 0 # reached when we encounter \033
+    VscPromptStart = 0  # reached when we encounter \033
     # VscCmdIdReached = 1 # reached when we encounter \]784;
-    VscCmdCodeABCFG = 2 # reached when we encounter A/B/C/F/G
-    VscCmdCodeD = 3 # reached when we encounter D
-    VscCmdCodeE = 4 # reached when we encounter E
-    VscCmdCodeP = 5 # reached when we encounter P
-    VscPromptEnd = 100 # reached when we encounter \007, idle state
+    VscCmdCodeABCFG = 2  # reached when we encounter A/B/C/F/G
+    VscCmdCodeD = 3  # reached when we encounter D
+    VscCmdCodeE = 4  # reached when we encounter E
+    VscCmdCodeP = 5  # reached when we encounter P
+    VscPromptEnd = 100  # reached when we encounter \007, idle state
 
 
 class CommandParseSpecialCharactors:
@@ -113,6 +114,7 @@ def remove_ansi_seq(string: Union[str, bytes]):
 
 
 class OutData:
+
     def __init__(self) -> None:
         pass
 
@@ -336,6 +338,7 @@ async def _cancel(task):
 
 
 class ReadResult:
+
     def __init__(self,
                  data: Any,
                  is_eof: bool,
@@ -362,6 +365,7 @@ _ENCODE = "utf-8"
 
 class SocketProxyTunnel:
     """A wrapper which opens a socket you can run an SSH connection over"""
+
     def __init__(self, proxy_url):
         self.proxy_url = proxy_url
 
@@ -380,6 +384,7 @@ class PeerSSHClient:
     1. identifier extraction
     2. code path detection
     """
+
     def __init__(self,
                  stdin: asyncssh.stream.SSHWriter,
                  stdout: asyncssh.stream.SSHReader,
@@ -548,12 +553,14 @@ class SSHRequestType(enum.Enum):
 
 
 class SSHRequest:
+
     def __init__(self, type: SSHRequestType, data: Any) -> None:
         self.type = type
         self.data = data
 
 
 class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
+
     def __init__(self) -> None:
         super().__init__()
         self.callback: Optional[Callable[[Event], Awaitable[None]]] = None
@@ -650,13 +657,16 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
                 print("WTF")
                 await self._block_read(datatype)
 
-class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
+
+class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
+                                        ):
+
     def __init__(self) -> None:
         super().__init__()
         self.callback: Optional[Callable[[Event], Awaitable[None]]] = None
         self.uid = ""
 
-        self.state = CommandEventParseState.VscPromptEnd # idle
+        self.state = CommandEventParseState.VscPromptEnd  # idle
 
     def data_received(self, data: bytes, datatype) -> None:
         res = super().data_received(data, datatype)
@@ -668,7 +678,8 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
                 self.callback(RawEvent(ts, res_str, False, self.uid)), loop)
         return res
 
-    async def readuntil(self, separator: object,
+    async def readuntil(self,
+                        separator: object,
                         datatype: asyncssh.DataType,
                         max_separator_len: int = 0) -> AnyStr:
         """Read data from the channel until a separator is seen"""
@@ -720,11 +731,13 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
                     buf += newbuf
                     start = 0
                     # rprint(self.state, buf)
-                    idx_start_all = buf.find(CommandParseSpecialCharactors.StartAll)
+                    idx_start_all = buf.find(
+                        CommandParseSpecialCharactors.StartAll)
                     idx_start = buf.find(CommandParseSpecialCharactors.Start)
                     # ensure if buf start is partial, we should wait for all possible string available.
                     if idx_start != -1:
-                        if len(buf) - start >= len(CommandParseSpecialCharactors.StartAll):
+                        if len(buf) - start >= len(
+                                CommandParseSpecialCharactors.StartAll):
                             if idx_start_all == -1:
                                 idx_start = -1
                     idx_end = buf.find(CommandParseSpecialCharactors.End)
@@ -796,7 +809,6 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
                                 recv_buf.pop(0)
                             self._maybe_resume_reading()
                             return buf
-
 
                     # if self.state == CommandEventParseState.VscPromptEnd:
                     #     idx = buf.find(CommandParseSpecialCharactors.Start)
@@ -939,7 +951,9 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
 
                 await self._block_read(datatype)
 
+
 class SSHClient:
+
     def __init__(self,
                  url: str,
                  username: str,
@@ -966,8 +980,9 @@ class SSHClient:
                 import python_socks
                 self.tunnel = SocketProxyTunnel(TENSORPC_ASYNCSSH_PROXY)
             except ImportError:
-                warnings.warn("you provide TENSORPC_ASYNCSSH_PROXY but python_socks not installed."
-                              " use 'pip install python-socks' and restart server.")
+                warnings.warn(
+                    "you provide TENSORPC_ASYNCSSH_PROXY but python_socks not installed."
+                    " use 'pip install python-socks' and restart server.")
                 self.tunnel = None
         else:
             self.tunnel = None

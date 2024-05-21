@@ -1,5 +1,5 @@
 import inspect
-from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Type, Union 
+from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Type, Union
 
 import types
 
@@ -98,28 +98,31 @@ def get_obj_userdefined_properties(obj: Any) -> Set[str]:
                     res.add(key)
     return res
 
+
 def is_obj_builtin_or_module(v):
     if isinstance(v, types.ModuleType):
-        return True 
-    if inspect.isfunction(v) or inspect.ismethod(v) or inspect.isbuiltin(
-            v):
-        return True 
-    return False 
+        return True
+    if inspect.isfunction(v) or inspect.ismethod(v) or inspect.isbuiltin(v):
+        return True
+    return False
+
 
 def filter_local_vars(local_var: Mapping[str, Any]) -> Mapping[str, Any]:
     new_local_vars: Dict[str, Any] = {}
     for k, v in local_var.items():
         if not is_obj_builtin_or_module(v) and k != "__class__":
-            new_local_vars[k] = v 
+            new_local_vars[k] = v
 
     return new_local_vars
+
 
 def get_function_defined_type(func: Callable):
     func = inspect.unwrap(func)
     mod = inspect.getmodule(func)
     if mod is None:
-        return None 
-    if mod.__name__.startswith("tensorpc") and not mod.__name__.startswith("tensorpc.flow.sampleapp"):
+        return None
+    if mod.__name__.startswith("tensorpc") and not mod.__name__.startswith(
+            "tensorpc.flow.sampleapp"):
         # ignore all tensorpc type
         return None
     func_qname = func.__qualname__
@@ -130,4 +133,3 @@ def get_function_defined_type(func: Callable):
         cur_obj = cur_obj[part]
         res = cur_obj
     return res
-        

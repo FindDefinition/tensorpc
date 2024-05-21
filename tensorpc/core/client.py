@@ -48,6 +48,7 @@ class RemoteObject(object):
     num_blocks: int
     """
     _stub: Optional[remote_object_pb2_grpc.RemoteObjectStub]
+
     def __init__(self,
                  channel: Optional[grpc.Channel],
                  name="",

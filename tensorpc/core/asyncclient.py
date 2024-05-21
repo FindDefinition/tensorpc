@@ -57,6 +57,7 @@ class AsyncRemoteObject(object):
     num_blocks: int
     """
     _stub: Optional[remote_object_pb2_grpc.RemoteObjectStub]
+
     def __init__(self,
                  channel: Optional[grpc.aio.Channel],
                  name="",
@@ -436,6 +437,7 @@ async def simple_remote_call_async(addr, key, *args, timeout=None, **kwargs):
 async def simple_chunk_call_async(addr, key, *args, **kwargs):
     async with AsyncRemoteManager(addr) as robj:
         return await robj.chunked_remote_call(key, *args, **kwargs)
+
 
 async def shutdown_server_async(addr):
     async with AsyncRemoteManager(addr) as robj:

@@ -1,19 +1,17 @@
-
-from tensorpc.flow import appctx 
+from tensorpc.flow import appctx
 
 
 @appctx.observe_function
 def func_support_reload(a, b):
     print("hi6", a, b)
 
-
-
     return a + b
+
 
 # from cumm.common import TensorViewNVRTC
 # from cumm.inliner import NVRTCInlineBuilder
-# import pccm 
-# from cumm import tensorview as tv 
+# import pccm
+# from cumm import tensorview as tv
 # from pccm.builder.inliner import PreCaptureFunctionCode
 
 # class Dev:
@@ -27,7 +25,7 @@ def func_support_reload(a, b):
 #             code.raw(f"""
 #             int A = $(self.a);
 #             """)
-        
+
 #     @appctx.observe_function
 #     def dev(self):
 #         a = tv.zeros([1], tv.float32, 0)
@@ -37,4 +35,3 @@ def func_support_reload(a, b):
 #         tv::printf2(A, "RTX2411214");
 #         """)
 #         self.inliner.kernel_1d("dev", 1, 0, code)
-    

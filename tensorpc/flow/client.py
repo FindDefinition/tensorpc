@@ -29,7 +29,8 @@ import time
 from tensorpc.flow.coretypes import Message, MessageItem, MessageLevel, RelayUpdateNodeEvent
 import uuid
 
-import psutil 
+import psutil
+
 
 class MasterMeta:
 
@@ -68,10 +69,13 @@ class MasterMeta:
         self.grpc_url = grpc_url
         self.http_url = url
         self.is_worker = is_worker
-        lsp_port = os.getenv(constants.TENSORPC_FLOW_APP_LANG_SERVER_PORT, None)
-        self.lsp_port = int(lsp_port) if lsp_port is not None else None 
-        lsp_fwd_port = os.getenv(constants.TENSORPC_FLOW_APP_LANG_SERVER_FWD_PORT, None)
-        self.lsp_fwd_port = int(lsp_fwd_port) if lsp_fwd_port is not None else None 
+        lsp_port = os.getenv(constants.TENSORPC_FLOW_APP_LANG_SERVER_PORT,
+                             None)
+        self.lsp_port = int(lsp_port) if lsp_port is not None else None
+        lsp_fwd_port = os.getenv(
+            constants.TENSORPC_FLOW_APP_LANG_SERVER_FWD_PORT, None)
+        self.lsp_fwd_port = int(
+            lsp_fwd_port) if lsp_fwd_port is not None else None
 
         self.is_grpc_valid = grpc_url != ""
         self.is_http_valid = self.http_url != ""
@@ -121,14 +125,16 @@ class AppLocalMeta:
         self.http_url = url
         self.is_inside_devflow = gport is not None and port is not None and self.module_name != ""
 
+
 @dataclasses.dataclass
 class AppProcessMeta:
-    name: str 
+    name: str
     pid: int
-    port: int 
-    grpc_port: int 
-    app_port: int 
+    port: int
+    grpc_port: int
+    app_port: int
     app_grpc_port: int
+
 
 def list_all_app_in_machine():
     res: List[AppProcessMeta] = []
@@ -136,9 +142,11 @@ def list_all_app_in_machine():
         proc_name = proc.info["name"]
         if proc_name.startswith(constants.TENSORPC_FLOW_PROCESS_NAME_PREFIX):
             ports = list(map(int, proc_name.split("-")[1:]))
-            meta = AppProcessMeta(proc_name, proc.info["pid"], ports[0], ports[1], ports[2], ports[3])
+            meta = AppProcessMeta(proc_name, proc.info["pid"], ports[0],
+                                  ports[1], ports[2], ports[3])
             res.append(meta)
-    return res 
+    return res
+
 
 def is_inside_devflow():
     meta = MasterMeta()

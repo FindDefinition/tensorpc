@@ -105,7 +105,8 @@ class FlexComponentBaseProps(BasicProps):
     left: Union[ValueType, Undefined] = undefined
     right: Union[ValueType, Undefined] = undefined
     zIndex: Union[ValueType, Undefined] = undefined
-    textAlign: Union[Literal["start", "end", "inherit", "left", "right", "center", "justify"], Undefined] = undefined
+    textAlign: Union[Literal["start", "end", "inherit", "left", "right",
+                             "center", "justify"], Undefined] = undefined
     flex: Union[ValueType, Undefined] = undefined
     alignSelf: Union[Literal["auto", "flex-start", "flex-end", "center",
                              "baseline", "stretch"], Undefined] = undefined
@@ -564,7 +565,6 @@ class IconType(enum.IntEnum):
     Dashboard = 44
     DashboardCustomize = 45
     Check = 46
-
 
 
 @dataclasses.dataclass
@@ -1467,8 +1467,9 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
         self.props.value = data
 
     async def headless_write(self, content: str):
-        uiev = UIEvent(
-            {self._flow_uid_encoded: (FrontendEventType.Change.value, content)})
+        uiev = UIEvent({
+            self._flow_uid_encoded: (FrontendEventType.Change.value, content)
+        })
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -1703,8 +1704,9 @@ class SwitchBase(MUIComponentBase[SwitchProps]):
         self.props.checked = data
 
     async def headless_write(self, checked: bool):
-        uiev = UIEvent(
-            {self._flow_uid_encoded: (FrontendEventType.Change.value, checked)})
+        uiev = UIEvent({
+            self._flow_uid_encoded: (FrontendEventType.Change.value, checked)
+        })
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -2210,6 +2212,7 @@ class SliderProps(SliderBaseProps):
     value: Union[Undefined, NumberType] = undefined
     defaultValue: Union[Undefined, NumberType] = undefined
     marks: Union[Undefined, bool] = undefined
+
 
 class Slider(MUIComponentBase[SliderProps]):
 
@@ -2723,8 +2726,9 @@ class RawTaskLoop(MUIComponentBase[TaskLoopProps]):
         self.props.label = label
 
     async def headless_event(self, ev: TaskLoopEvent):
-        uiev = UIEvent(
-            {self._flow_uid_encoded: (FrontendEventType.Change.value, ev.value)})
+        uiev = UIEvent({
+            self._flow_uid_encoded: (FrontendEventType.Change.value, ev.value)
+        })
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
@@ -3164,6 +3168,7 @@ class TabsProps(MUIFlexBoxProps):
     tooltipLeaveDelay: Union[NumberType, Undefined] = undefined
     tooltipEnterNextDelay: Union[NumberType, Undefined] = undefined
 
+
 @dataclasses.dataclass
 class TabDef:
     label: str
@@ -3397,7 +3402,7 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
             self.name = name
 
         def get_model_dict(self):
-            assert self.comp._flow_uid is not None 
+            assert self.comp._flow_uid is not None
             comp_last_uid = self.comp._flow_uid.parts[-1]
             return {
                 "type": "tab",
@@ -3707,8 +3712,8 @@ class JsonViewer(MUIComponentBase[JsonViewerProps]):
 
 
 def _default_json_node():
-    return JsonLikeNode(UniqueTreeIdForTree.from_parts(["root"]), "root", JsonLikeType.Object.value, "Object",
-                        undefined, 0, [])
+    return JsonLikeNode(UniqueTreeIdForTree.from_parts(["root"]), "root",
+                        JsonLikeType.Object.value, "Object", undefined, 0, [])
 
 
 class _TreeControlType(enum.IntEnum):
@@ -4495,12 +4500,11 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
-    
+
     async def scroll_to_index(self, index: int):
         return await self.send_and_wait(
             self.create_comp_event({
-                "type":
-                DataListControlType.ScrollToIndex.value,
+                "type": DataListControlType.ScrollToIndex.value,
                 "index": index,
             }))
 
@@ -4562,16 +4566,18 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         else:
             raise ValueError("only support components with change event")
 
+
 @dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
 class MatrixDataGridItem:
-    array: np.ndarray 
+    array: np.ndarray
     columnOffset: int = 0
 
 
 @dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
 class MatrixDataGridProps(MUIFlexBoxProps, DataGridPropsBase):
     # dict of matrix with same number of rows.
-    dataList: Dict[str, MatrixDataGridItem] = dataclasses.field(default_factory=dict)
+    dataList: Dict[str, MatrixDataGridItem] = dataclasses.field(
+        default_factory=dict)
     rowOffset: Union[Undefined, int] = undefined
 
 
@@ -4624,17 +4630,23 @@ class MatrixDataGrid(MUIContainerBase[MatrixDataGridProps, MUIComponentType]):
         assert len(data_list) > 0, "empty data list not allowed"
         init_shape: List[int] = []
         for k, v in data_list.items():
-            assert isinstance(v, MatrixDataGridItem), "data must be MatrixDataGridItem"
-            assert isinstance(v.array, np.ndarray), "data must be MatrixDataGridItem"
+            assert isinstance(
+                v, MatrixDataGridItem), "data must be MatrixDataGridItem"
+            assert isinstance(v.array,
+                              np.ndarray), "data must be MatrixDataGridItem"
             assert v.array.dtype != np.bool_ and v.array.dtype != np.float16, "bool, float16 and object dtype not supported"
             assert v.array.size > 0, "empty array not allowed"
             if not init_shape:
                 init_shape = list(v.array.shape)
             else:
                 if len(data_list) > 1:
-                    assert len(v.array.shape) == len(init_shape), "all matrix must have same number of dimensions"
-                    assert list(v.array.shape[:-1]) == list(init_shape[:-1]), f"all matrix must have same number of rows, {k} has {v.array.shape[:-1]} while others has {init_shape[:-1]}"
-    
+                    assert len(v.array.shape) == len(
+                        init_shape
+                    ), "all matrix must have same number of dimensions"
+                    assert list(v.array.shape[:-1]) == list(
+                        init_shape[:-1]
+                    ), f"all matrix must have same number of rows, {k} has {v.array.shape[:-1]} while others has {init_shape[:-1]}"
+
     @staticmethod
     def _check_data_np_dict(data_list: Dict[str, np.ndarray]):
         data_list_items: Dict[str, MatrixDataGridItem] = {}
@@ -4662,12 +4674,11 @@ class MatrixDataGrid(MUIContainerBase[MatrixDataGridProps, MUIComponentType]):
     @staticmethod
     def get_column_id(arr_key: str, column: int):
         return f"{arr_key}-{column}"
-    
+
     async def scroll_to_index(self, index: int):
         return await self.send_and_wait(
             self.create_comp_event({
-                "type":
-                DataListControlType.ScrollToIndex.value,
+                "type": DataListControlType.ScrollToIndex.value,
                 "index": index,
             }))
 
@@ -4797,6 +4808,7 @@ class GridLayout(MUIContainerBase[GridLayoutProps, MUIComponentType]):
 class Anchor:
     vertical: Literal["top", "center", "bottom"]
     horizontal: Literal["left", "center", "right"]
+
 
 @dataclasses.dataclass
 class MenuItem:

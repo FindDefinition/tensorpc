@@ -53,10 +53,10 @@ if platform.system() == "Darwin":
 
 def is_relative_to(path: Path, other: Path):
     if Python3_9AndLater:
-        return path.is_relative_to(other) # type: ignore
+        return path.is_relative_to(other)  # type: ignore
     else:
         try:
             path.relative_to(other)
         except:
-            return False 
+            return False
         return True

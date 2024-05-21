@@ -1,6 +1,6 @@
 from ..core import (ALL_OBJECT_LAYOUT_HANDLERS, ALL_OBJECT_PREVIEW_HANDLERS,
-                   ObjectLayoutHandler, ObjectPreviewHandler,
-                   register_user_obj_tree_type)
+                    ObjectLayoutHandler, ObjectPreviewHandler,
+                    register_user_obj_tree_type)
 from .inspector import ObjectInspector
 from .inspectpanel import InspectPanel
 from .layout import AnyFlexLayout

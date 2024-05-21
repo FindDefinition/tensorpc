@@ -38,6 +38,7 @@ def flatten_dict(d: MutableMapping,
 
 
 class Undefined:
+
     def __repr__(self) -> str:
         return "undefined"
 
@@ -69,6 +70,7 @@ class Undefined:
 class BackendOnlyProp(Generic[T]):
     """when wrap a property with this class, it will be ignored when serializing to frontend
     """
+
     def __init__(self, data: T) -> None:
         super().__init__()
         self.data = data
@@ -286,6 +288,7 @@ def _asdict_inner(obj, dict_factory, obj_factory=None):
 
 @dataclasses.dataclass
 class DataClassWithUndefined:
+
     def get_dict_and_undefined(
             self,
             state: Dict[str, Any],
@@ -668,8 +671,10 @@ def parse_obj_to_jsonlike(obj, name: str, id: UniqueTreeIdForTree):
 
 
 class TreeItem(abc.ABC):
+
     @abc.abstractmethod
-    async def get_child_desps(self, parent_ns: UniqueTreeIdForTree) -> Dict[str, JsonLikeNode]:
+    async def get_child_desps(
+            self, parent_ns: UniqueTreeIdForTree) -> Dict[str, JsonLikeNode]:
         raise NotImplementedError
 
     @abc.abstractmethod

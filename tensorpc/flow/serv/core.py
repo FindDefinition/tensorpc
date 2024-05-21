@@ -57,10 +57,11 @@ from tensorpc.flow.constants import (
     TENSORPC_FLOW_MASTER_HTTP_PORT, TENSORPC_FLOW_NODE_ID,
     TENSORPC_FLOW_NODE_READABLE_ID, TENSORPC_FLOW_NODE_UID,
     TENSORPC_FLOW_USE_REMOTE_FWD)
-from tensorpc.flow.coretypes import (
-    Message, MessageEvent, MessageEventType, MessageLevel,
-    ScheduleEvent, SessionStatus, StorageDataItem, UserContentEvent,
-    UserDataUpdateEvent, UserEvent, UserStatusEvent, get_uid)
+from tensorpc.flow.coretypes import (Message, MessageEvent, MessageEventType,
+                                     MessageLevel, ScheduleEvent,
+                                     SessionStatus, StorageDataItem,
+                                     UserContentEvent, UserDataUpdateEvent,
+                                     UserEvent, UserStatusEvent, get_uid)
 from tensorpc.flow.flowapp.core import (AppEvent, AppEventType, ComponentEvent,
                                         FrontendEventType, NotifyEvent,
                                         NotifyType, ScheduleNextForApp,
@@ -111,7 +112,8 @@ class NodeStatus:
 ENCODING = "utf-8"
 ENCODING = None
 USE_APP_HTTP_PORT = True
-USE_LANG_SERVER_PORT = True 
+USE_LANG_SERVER_PORT = True
+
 
 def _extract_graph_node_id(uid: str):
     parts = uid.split("@")
@@ -267,7 +269,7 @@ class Node:
     @property
     def raw_data(self) -> Dict[str, Any]:
         return self._flow_data
-    
+
     def update_data(self, update_data: Dict[str, Any]):
         self._flow_data["data"].update(update_data)
 
@@ -773,6 +775,7 @@ class EnvNode(Node):
     def value(self):
         return self.node_data["value"]
 
+
 class DataStorageNodeBase(abc.ABC):
     """storage: 
     """
@@ -783,11 +786,10 @@ class DataStorageNodeBase(abc.ABC):
     @abc.abstractmethod
     def get_node_id(self) -> str:
         raise NotImplementedError
-    
+
     @abc.abstractmethod
     def get_in_memory_limit(self) -> int:
         raise NotImplementedError
-
 
     def get_data_attrs(self):
         items = self.get_item_metas()
@@ -856,19 +858,19 @@ class DataStorageNodeBase(abc.ABC):
             with meta_path.open("r") as f:
                 meta_dict = json.load(f)
             if "|" not in meta_dict["id"]:
-                meta_dict["id"] = UniqueTreeId.from_parts([meta_dict["id"]]).uid_encoded
+                meta_dict["id"] = UniqueTreeId.from_parts([meta_dict["id"]
+                                                           ]).uid_encoded
                 with meta_path.open("w") as f:
                     json.dump(meta_dict, f)
             return meta_dict
         raise FileNotFoundError(f"{meta_path} not exists")
-    
 
     def remove_data(self, key: Optional[str]):
         if key is None:
             items = self.get_items()
             for k in items:
                 self.remove_data(k)
-            return 
+            return
         if key in self.stored_data:
             self.stored_data.pop(key)
         meta_path = self.get_meta_path(key)
@@ -880,18 +882,18 @@ class DataStorageNodeBase(abc.ABC):
 
     def rename_data(self, key: str, new_name: str):
         if key == new_name:
-            return False 
+            return False
         if key not in self.stored_data:
             return False
         if new_name in self.stored_data:
             return False
         item = self.stored_data[key]
-        # rename data 
+        # rename data
         path = self.get_save_path(key)
         if path.exists():
             path.rename(self.get_save_path(new_name))
         # self.remove_data(key)
-        item.meta.name = new_name 
+        item.meta.name = new_name
         item.meta.id = UniqueTreeIdForTree.from_parts([new_name])
         meta_path = self.get_meta_path(key)
         if meta_path.exists():
@@ -900,7 +902,7 @@ class DataStorageNodeBase(abc.ABC):
             json.dump(item.get_meta_dict(), f)
         # print(item.meta)
         # self.save_data(new_name, item.data, item.meta, item.timestamp)
-        return True 
+        return True
 
     def read_data(self, key: str) -> StorageDataItem:
         if key in self.stored_data:
@@ -913,10 +915,11 @@ class DataStorageNodeBase(abc.ABC):
         if path.exists() and meta_path.exists():
             with meta_path.open("r") as f:
                 meta_dict = json.load(f)
-            
+
             # TODO remove this (old style uid compat)
             if "|" not in meta_dict["id"]:
-                meta_dict["id"] = UniqueTreeId.from_parts([meta_dict["id"]]).uid_encoded
+                meta_dict["id"] = UniqueTreeId.from_parts([meta_dict["id"]
+                                                           ]).uid_encoded
                 with meta_path.open("w") as f:
                     json.dump(meta_dict, f)
             meta = JsonLikeNode(**meta_dict)
@@ -926,8 +929,7 @@ class DataStorageNodeBase(abc.ABC):
                 if len(data) <= self.get_in_memory_limit():
                     self.stored_data[key] = data_item
                 else:
-                    self.stored_data[key] = StorageDataItem(
-                        bytes(), meta)
+                    self.stored_data[key] = StorageDataItem(bytes(), meta)
                 return data_item
         raise FileNotFoundError(f"{path} not exists")
 
@@ -938,6 +940,7 @@ class DataStorageNodeBase(abc.ABC):
         if self.need_update(key, timestamp):
             return self.read_data(key)
         return None
+
 
 @ALL_NODES.register
 class DataStorageNode(Node, DataStorageNodeBase):
@@ -1138,14 +1141,18 @@ class AppNode(CommandNode, DataStorageNodeBase):
             print(self.lang_server_port, fports[2])
             if self.lang_server_port != -1:
                 self.fwd_lang_server_port = fports[2]
-                env[flowconstants.TENSORPC_FLOW_APP_LANG_SERVER_FWD_PORT] = str(
-                    self.fwd_lang_server_port)
+                env[flowconstants.
+                    TENSORPC_FLOW_APP_LANG_SERVER_FWD_PORT] = str(
+                        self.fwd_lang_server_port)
 
         super()._env_port_modifier(fports, rfports, env)
 
-    async def stop_language_server(self, enable_port_forward: bool, url: str,
-                            username: str,
-                            password: str, init_cmds: str = ""):
+    async def stop_language_server(self,
+                                   enable_port_forward: bool,
+                                   url: str,
+                                   username: str,
+                                   password: str,
+                                   init_cmds: str = ""):
         if enable_port_forward:
             await _close_lang_serv(self.id, url, username, password, init_cmds)
         else:
@@ -1183,7 +1190,8 @@ class AppNode(CommandNode, DataStorageNodeBase):
         num_port = 3
         if not is_worker:
             # query two free port in target via ssh, then use them as app ports
-            ports = await _get_free_port(num_port, url, username, password, init_cmds)
+            ports = await _get_free_port(num_port, url, username, password,
+                                         init_cmds)
         else:
             # query two local ports in flow remote worker, then use them as app ports
             ports = get_free_ports(num_port)
@@ -1208,6 +1216,7 @@ class AppNode(CommandNode, DataStorageNodeBase):
             self.last_event = CommandEventType.PROMPT_END
             self.set_stop_status()
             self.running_driver_id = ""
+
         envs.update({
             flowconstants.TENSORPC_FLOW_APP_GRPC_PORT:
             str(self.grpc_port),
@@ -1580,10 +1589,12 @@ async def _get_free_port(count: int,
             raise ValueError(e.stderr)
     return ports
 
-async def _query_lang_serv_port_and_init(uid: str, url: str,
-                         username: str,
-                         password: str,
-                         init_cmds: str = ""):
+
+async def _query_lang_serv_port_and_init(uid: str,
+                                         url: str,
+                                         username: str,
+                                         password: str,
+                                         init_cmds: str = ""):
     client = SSHClient(url, username, password, None, "", "utf-8")
     port = -1
     # res = await client.simple_run_command(f"python -m tensorpc.cli.free_port {count}")
@@ -1597,8 +1608,9 @@ async def _query_lang_serv_port_and_init(uid: str, url: str,
                     f'"{init_cmds} && python -m tensorpc.flow.init_langserv pyright {uid}"'
                 )
             else:
-                cmd = (f"bash -i -c "
-                       f'"python -m tensorpc.flow.init_langserv pyright {uid}"')
+                cmd = (
+                    f"bash -i -c "
+                    f'"python -m tensorpc.flow.init_langserv pyright {uid}"')
             result = await conn.run(cmd, check=True)
             stdout = result.stdout
             if stdout is not None:
@@ -1616,10 +1628,12 @@ async def _query_lang_serv_port_and_init(uid: str, url: str,
             raise ValueError(e.stderr)
     return port
 
-async def _close_lang_serv(uid: str, url: str,
-                         username: str,
-                         password: str,
-                         init_cmds: str = ""):
+
+async def _close_lang_serv(uid: str,
+                           url: str,
+                           username: str,
+                           password: str,
+                           init_cmds: str = ""):
     client = SSHClient(url, username, password, None, "", "utf-8")
     port = -1
     # res = await client.simple_run_command(f"python -m tensorpc.cli.free_port {count}")
@@ -1688,7 +1702,7 @@ class Flow:
                 flow_data = json.load(f)
             self.flow_dict[flow_path.stem] = FlowGraph(flow_data,
                                                        flow_path.stem)
-            
+
         self._prev_ssh_q_task: Optional[asyncio.Task[Event]] = None
 
     def _get_node_desp(self, graph_id: str, node_id: str):
@@ -1702,7 +1716,8 @@ class Flow:
                 driver = gh.get_node_by_id(node.driver_id)
         return NodeDesp(node, gh, driver)
 
-    @marker.mark_server_event(event_type=marker.ServiceEventType.WebSocketOnDisConnect)
+    @marker.mark_server_event(
+        event_type=marker.ServiceEventType.WebSocketOnDisConnect)
     def _on_client_disconnect(self, cl):
         # TODO when all client closed instead of one client, close all terminal
         for g in self.flow_dict.values():
@@ -1852,10 +1867,11 @@ class Flow:
                     worker_key, graph_id, node_id, type, ui_ev_dict, is_sync)
             else:
                 return await driver.http_remote_call(worker_key, graph_id,
-                                                     node_id, type, ui_ev_dict, is_sync)
+                                                     node_id, type, ui_ev_dict,
+                                                     is_sync)
         else:
             # if node.last_event == CommandEventType.COMMAND_COMPLETE:
-            #     return 
+            #     return
             if use_grpc:
                 grpc_port = node.grpc_port
                 durl, _ = get_url_port(driver.url)
@@ -1876,11 +1892,16 @@ class Flow:
                 return await http_remote_call(sess, app_url, app_key, type,
                                               ui_ev_dict, is_sync)
 
-    async def run_ui_event(self, graph_id: str, node_id: str,
-                           ui_ev_dict: Dict[str, Any], is_sync: bool = False):
-        return await self.run_single_event(graph_id, node_id,
+    async def run_ui_event(self,
+                           graph_id: str,
+                           node_id: str,
+                           ui_ev_dict: Dict[str, Any],
+                           is_sync: bool = False):
+        return await self.run_single_event(graph_id,
+                                           node_id,
                                            AppEventType.UIEvent.value,
-                                           ui_ev_dict, is_sync=is_sync)
+                                           ui_ev_dict,
+                                           is_sync=is_sync)
 
     async def run_app_editor_event(self, graph_id: str, node_id: str,
                                    ui_ev_dict: Dict[str, Any]):
@@ -1920,9 +1941,9 @@ class Flow:
             else:
                 app_url = get_grpc_url(durl, grpc_port)
             async with AsyncRemoteManager(app_url) as robj:
-                async for x in robj.remote_generator(serv_names.APP_GET_FILE, file_key):
+                async for x in robj.remote_generator(serv_names.APP_GET_FILE,
+                                                     file_key):
                     yield x
-
 
     async def query_app_state(self,
                               graph_id: str,
@@ -1947,9 +1968,7 @@ class Flow:
             return await tensorpc.simple_chunk_call_async(
                 app_url, serv_names.APP_GET_LAYOUT, editor_only)
 
-    async def stop_app_node(self,
-                              graph_id: str,
-                              node_id: str):
+    async def stop_app_node(self, graph_id: str, node_id: str):
         node, driver = self._get_app_node_and_driver(graph_id, node_id)
         if not node.is_session_started():
             return None
@@ -2105,7 +2124,8 @@ class Flow:
                     if isinstance(node, CommandNode):
                         if event.arg is not None:
                             current_cmd = event.arg.decode("utf-8")
-                            if node._previous_cmd.strip() == current_cmd.strip():
+                            if node._previous_cmd.strip() == current_cmd.strip(
+                            ):
                                 node._start_record_stdout = True
                 if event.type == CommandEventType.COMMAND_COMPLETE:
                     if isinstance(node, CommandNode):
@@ -2158,7 +2178,7 @@ class Flow:
         if isinstance(node_desp.node, (NodeWithSSHBase)):
             return node_desp.node.get_node_status().to_dict()
         return UserStatusEvent.empty().to_dict()
-    
+
     def _get_all_node_status(self, graphs: List[FlowGraph]):
         res = {}
         for graph in graphs:
@@ -2166,7 +2186,6 @@ class Flow:
             for node in graph.nodes:
                 res[node.id] = self.query_node_status(graph_id, node.id)
         return res
-
 
     async def save_terminal_state(self, graph_id: str, node_id: str, state,
                                   timestamp_ms: int):
@@ -2306,13 +2325,15 @@ class Flow:
         with flow_path.open("w") as f:
             json.dump(nodeIds, f)
 
-    async def update_node_data_and_save_graph(self, graph_id: str, node_id: str, update_node_data: Dict[str, Any]):
+    async def update_node_data_and_save_graph(self, graph_id: str,
+                                              node_id: str,
+                                              update_node_data: Dict[str,
+                                                                     Any]):
         graph = self.flow_dict[graph_id]
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
         node.update_data(update_node_data)
         self._save_graph_content_only(graph_id, graph.get_save_data())
-
 
     async def load_default_graph_object(self):
         final_res = [
@@ -2328,7 +2349,7 @@ class Flow:
         dock_state = self.load_dock_state()
         favorites = self.load_favorite_nodes()
         final_res = await self.load_default_graph_object()
-        # dockLayoutModel, 
+        # dockLayoutModel,
         return {
             "flows": [g.to_dict() for g in final_res],
             **dock_state,
@@ -2367,7 +2388,6 @@ class Flow:
         assert isinstance(node, MarkdownNode)
         node.set_page(page, current_key)
         node.set_current_key(current_key)
-
 
     async def load_graph(self, graph_id: str, force_reload: bool = False):
         flow_path = self.root / f"{graph_id}.json"
@@ -2621,7 +2641,7 @@ class Flow:
         node = node_desp.node
         assert isinstance(node, DataStorageNodeBase)
         return node.get_items()
-    
+
     async def query_all_data_node_ids(self, graph_id: str):
         assert graph_id in self.flow_dict, f"can't find graph {graph_id}"
         gh = self.flow_dict[graph_id]
@@ -2661,8 +2681,9 @@ class Flow:
         node = node_desp.node
         assert isinstance(node, DataStorageNodeBase), f"{type(node)}"
         return node.get_data_attrs()
-    
-    async def delete_datastorage_data(self, graph_id: str, node_id: str, key: Optional[str]):
+
+    async def delete_datastorage_data(self, graph_id: str, node_id: str,
+                                      key: Optional[str]):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
         assert isinstance(node, DataStorageNodeBase)
@@ -2670,9 +2691,10 @@ class Flow:
         if isinstance(node, DataStorageNode):
             await self._user_ev_q.put(
                 (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
-        return res 
-    
-    async def rename_datastorage_data(self, graph_id: str, node_id: str, key: str, newname: str):
+        return res
+
+    async def rename_datastorage_data(self, graph_id: str, node_id: str,
+                                      key: str, newname: str):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
         assert isinstance(node, DataStorageNodeBase)
@@ -2680,7 +2702,7 @@ class Flow:
         if isinstance(node, DataStorageNode):
             await self._user_ev_q.put(
                 (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
-        return res 
+        return res
 
     async def get_ssh_node_data(self, graph_id: str, node_id: str):
         node_desp = self._get_node_desp(graph_id, node_id)
@@ -2693,7 +2715,11 @@ class Flow:
         else:
             url_no_port = url_parts[0]
             port = int(url_parts[1])
-        return SSHTarget(url_no_port, port, node.username, node.password, init_commands=node.init_commands)
+        return SSHTarget(url_no_port,
+                         port,
+                         node.username,
+                         node.password,
+                         init_commands=node.init_commands)
 
     @marker.mark_server_event(event_type=ServiceEventType.Exit)
     async def _on_exit(self):

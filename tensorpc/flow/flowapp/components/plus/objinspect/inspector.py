@@ -29,7 +29,7 @@ from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType, _g
 from tensorpc.flow.flowapp.objtree import UserObjTreeProtocol
 from ..handlers.common import DefaultHandler
 from ..core import (ALL_OBJECT_PREVIEW_HANDLERS, USER_OBJ_TREE_TYPES,
-                   ObjectPreviewHandler, DataClassesType)
+                    ObjectPreviewHandler, DataClassesType)
 from .tree import _DEFAULT_OBJ_NAME, FOLDER_TYPES, ObjectTree
 from tensorpc.core import inspecttools
 
@@ -67,6 +67,7 @@ def get_exception_frame_stack() -> Dict[str, TraceTreeItem]:
 
 
 class ObjectInspector(mui.FlexBox):
+
     def __init__(self,
                  init: Optional[Any] = None,
                  cared_types: Optional[Set[Type]] = None,
@@ -82,10 +83,10 @@ class ObjectInspector(mui.FlexBox):
                                                    width="100%",
                                                    height="100%")
         self.fast_layout_container = mui.HBox([]).prop(overflow="auto",
-                                                   padding="3px",
-                                                   flex=1,
-                                                   width="100%",
-                                                   height="100%")
+                                                       padding="3px",
+                                                       flex=1,
+                                                       width="100%",
+                                                       height="100%")
 
         tab_theme = mui.Theme(
             components={
@@ -99,7 +100,7 @@ class ObjectInspector(mui.FlexBox):
                     }
                 }
             })
-            
+
         self.detail_container = mui.HBox([
             mui.ThemeProvider([
                 mui.Tabs([
@@ -113,17 +114,21 @@ class ObjectInspector(mui.FlexBox):
                                mui.AppTerminal(),
                                icon=mui.IconType.Terminal,
                                tooltip="app terminal (read only)"),
-                    mui.TabDef("",
-                               "3",
-                               self.fast_layout_container,
-                               icon=mui.IconType.ManageAccounts,
-                               tooltip="custom layout (appctx.inspector.set_custom_layout_sync)"),
-
-                ], init_value="2").prop(panelProps=mui.FlexBoxProps(width="100%", padding=0),
-                        orientation="vertical",
-                        borderRight=1,
-                        borderColor='divider',
-                        tooltipPlacement="right")
+                    mui.TabDef(
+                        "",
+                        "3",
+                        self.fast_layout_container,
+                        icon=mui.IconType.ManageAccounts,
+                        tooltip=
+                        "custom layout (appctx.inspector.set_custom_layout_sync)"
+                    ),
+                ],
+                         init_value="2").prop(panelProps=mui.FlexBoxProps(
+                             width="100%", padding=0),
+                                              orientation="vertical",
+                                              borderRight=1,
+                                              borderColor='divider',
+                                              tooltipPlacement="right")
             ], tab_theme)
         ])
         if use_allotment:
@@ -178,7 +183,8 @@ class ObjectInspector(mui.FlexBox):
     async def get_object_by_uid(self, uid: str):
         return await self.tree.get_object_by_uid(uid)
 
-    async def _on_select(self, uid_list: Union[List[str], str, Dict[str, bool]]):
+    async def _on_select(self, uid_list: Union[List[str], str, Dict[str,
+                                                                    bool]]):
         if isinstance(uid_list, list):
             # node id list may empty
             if not uid_list:
@@ -191,7 +197,8 @@ class ObjectInspector(mui.FlexBox):
         else:
             uid = uid_list
         uid_obj = UniqueTreeIdForTree(uid)
-        nodes = self.tree._objinspect_root._get_node_by_uid_trace(uid_obj.parts)
+        nodes = self.tree._objinspect_root._get_node_by_uid_trace(
+            uid_obj.parts)
         node = nodes[-1]
         if node.type in FOLDER_TYPES:
             await self.preview_container.set_new_layout([])
@@ -270,12 +277,18 @@ class ObjectInspector(mui.FlexBox):
             # preview_layout.event_emitter.remove_listener()
             if self._current_preview_layout is None:
                 get_editable_app().observe_layout(
-                    preview_layout, partial(self._on_preview_layout_reload, uid=uid, obj_id=id(obj)))
+                    preview_layout,
+                    partial(self._on_preview_layout_reload,
+                            uid=uid,
+                            obj_id=id(obj)))
             else:
                 # get_app()._get_self_as_editable_app()._flowapp_remove_observer(
                 #     self._current_preview_layout)
                 get_editable_app().observe_layout(
-                    preview_layout, partial(self._on_preview_layout_reload, uid=uid, obj_id=id(obj)))
+                    preview_layout,
+                    partial(self._on_preview_layout_reload,
+                            uid=uid,
+                            obj_id=id(obj)))
             self._current_preview_layout = preview_layout
             self._cached_preview_layouts[uid] = (preview_layout, id(obj))
 
@@ -288,10 +301,16 @@ class ObjectInspector(mui.FlexBox):
             await handler.bind(obj, uid)
 
     async def _on_preview_layout_reload(self, layout: mui.FlexBox,
-                                        create_layout: ServFunctionMeta, uid: str, obj_id: int):
-        layout_flex = await preview_layout_reload(lambda x: self.preview_container.set_new_layout([x]), layout, create_layout)
+                                        create_layout: ServFunctionMeta,
+                                        uid: str, obj_id: int):
+        layout_flex = await preview_layout_reload(
+            lambda x: self.preview_container.set_new_layout([x]), layout,
+            create_layout)
         if layout_flex is not None:
-            get_editable_app().observe_layout(layout_flex, partial(self._on_preview_layout_reload, uid=uid, obj_id=obj_id))
+            get_editable_app().observe_layout(
+                layout_flex,
+                partial(self._on_preview_layout_reload, uid=uid,
+                        obj_id=obj_id))
             self._cached_preview_layouts[uid] = (layout_flex, obj_id)
             return layout_flex
 
@@ -386,17 +405,16 @@ class ObjectInspector(mui.FlexBox):
                 self.set_object(obj, key, expand_level), loop)
 
             return fut.result()
-        
-    async def set_custom_layout(self,
-                        layout: mui.FlexBox):
+
+    async def set_custom_layout(self, layout: mui.FlexBox):
         """set object in sync manner, usually used on non-sync code via appctx.
         """
         await self.fast_layout_container.set_new_layout([layout])
 
-
-    def set_custom_layout_sync(self,
-                        layout: mui.FlexBox,
-                        loop: Optional[asyncio.AbstractEventLoop] = None):
+    def set_custom_layout_sync(
+            self,
+            layout: mui.FlexBox,
+            loop: Optional[asyncio.AbstractEventLoop] = None):
         """set object in sync manner, usually used on non-sync code via appctx.
         """
         if loop is None:
@@ -474,7 +492,7 @@ class ObjectInspector(mui.FlexBox):
                    depth: int = 5,
                    use_return_locals: bool = False,
                    ignored_names: Optional[Set[str]] = None,
-                    use_profile: bool = False,
+                   use_profile: bool = False,
                    *,
                    _frame_cnt=3,
                    loop: Optional[asyncio.AbstractEventLoop] = None):
@@ -514,7 +532,7 @@ class ObjectInspector(mui.FlexBox):
                           trace_return: bool = True,
                           depth: int = 5,
                           ignored_names: Optional[Set[str]] = None,
-                            use_profile: bool = False,
+                          use_profile: bool = False,
                           *,
                           _frame_cnt: int = 4,
                           loop: Optional[asyncio.AbstractEventLoop] = None):

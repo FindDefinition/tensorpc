@@ -339,7 +339,6 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
                              FrontendEventType.Down.value,
                              FrontendEventType.ContextMenu.value,
                              FrontendEventType.Change.value,
-
                          ] + list(allowed_events))
         self.event_double_click = self._create_event_slot(
             FrontendEventType.DoubleClick)
@@ -925,6 +924,7 @@ class BoundingBox(Object3dWithEventBase[BoundingBoxProps]):
             self.props.position = data["position"]
             self.props.rotation = data["rotation"]
 
+
 @dataclasses.dataclass
 class AxesHelperProps(Object3dBaseProps):
     length: NumberType = 10
@@ -1295,7 +1295,8 @@ class CameraControlProps(ThreeBasicProps):
     # used to sync object 3ds based on camera position and rotation.
     # keep in mind that this won't affact position/rotation of those objects in BACKEND.
     # you need to due with them in backend.
-    syncObject3ds: Union[List[Union[Object3dBase, Object3dContainerBase]], Undefined] = undefined
+    syncObject3ds: Union[List[Union[Object3dBase, Object3dContainerBase]],
+                         Undefined] = undefined
 
 
 class MapControl(ThreeComponentBase[OrbitControlProps]):
@@ -1742,7 +1743,10 @@ class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
                  background: Union[str, Undefined] = undefined) -> None:
         if isinstance(children, list):
             children = {str(i): v for i, v in enumerate(children)}
-        super().__init__(UIType.ThreeCanvas, ThreeCanvasProps, children, allowed_events=[
+        super().__init__(UIType.ThreeCanvas,
+                         ThreeCanvasProps,
+                         children,
+                         allowed_events=[
                              FrontendEventType.ContextMenuSelect.value,
                          ])
         self.props.threeBackgroundColor = background
@@ -1761,6 +1765,7 @@ class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync)
+
 
 class View(MUIContainerBase[ThreeViewProps, ThreeComponentType]):
 

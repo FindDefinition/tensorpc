@@ -34,24 +34,29 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 LOGGER = df_logging.get_logger()
-JS_MAX_SAFE_INT = 2 ** 53 - 1
+JS_MAX_SAFE_INT = 2**53 - 1
+
 
 class HttpServerType(enum.IntEnum):
     AioHttp = 0
     Blacksheep = 1
+
 
 class WebsocketMsgType(enum.IntEnum):
     Binary = 0
     Text = 1
     Error = 2
 
+
 @dataclasses.dataclass
 class WebsocketMsg:
     data: bytes
     type: WebsocketMsgType
 
+
 class JsonEncodeException(Exception):
     pass
+
 
 class WebsocketClientBase(abc.ABC):
     # TODO peer client use a async queue instead of recv because
@@ -76,35 +81,45 @@ class WebsocketClientBase(abc.ABC):
         self.hang_shutdown_event = asyncio.Event()
 
     @abc.abstractmethod
-    async def close(self): ...
+    async def close(self):
+        ...
 
     @abc.abstractmethod
-    def get_msg_max_size(self) -> int: ...
+    def get_msg_max_size(self) -> int:
+        ...
 
     @abc.abstractmethod
-    async def send_bytes(self, data: bytes): ...
+    async def send_bytes(self, data: bytes):
+        ...
 
     @abc.abstractmethod
-    def get_client_id(self) -> int: ...
+    def get_client_id(self) -> int:
+        ...
 
     def get_event_id(self):
         self._ev_cnt = (self._ev_cnt + 1) % JS_MAX_SAFE_INT
         return self._ev_cnt
-    
+
     def get_pingpong_id(self):
         self._pingpong_cnt = (self._pingpong_cnt + 1) % JS_MAX_SAFE_INT
         return self._pingpong_cnt
 
     def __hash__(self):
         return self.get_client_id()
-    
+
     async def send_ping(self):
         rid = self.get_pingpong_id()
-        await self.send("", core_io.SocketMsgType.Ping, request_id=rid, is_json=True)
+        await self.send("",
+                        core_io.SocketMsgType.Ping,
+                        request_id=rid,
+                        is_json=True)
         return rid
-    
+
     async def send_pong(self, rpc_id: int):
-        await self.send("", core_io.SocketMsgType.Pong, request_id=rpc_id, is_json=True)
+        await self.send("",
+                        core_io.SocketMsgType.Pong,
+                        request_id=rpc_id,
+                        is_json=True)
 
     async def send(self,
                    data,
@@ -141,7 +156,8 @@ class WebsocketClientBase(abc.ABC):
         # max_size = 1024 * 1024
         # TODO reslove "8192"
         try:
-            encoder = core_io.SocketMessageEncoder(data, skeleton_size_limit=max_size - 8192)
+            encoder = core_io.SocketMessageEncoder(
+                data, skeleton_size_limit=max_size - 8192)
         except Exception as e:
             traceback.print_exc()
             raise JsonEncodeException(str(e))
@@ -150,11 +166,12 @@ class WebsocketClientBase(abc.ABC):
         try:
             cnt = 0
             for chunk in encoder.get_message_chunks(msg_type, req, max_size):
-                use_large_data_ws = prefer_large_data and self._large_data_ws is not None and len(chunk) > send_large_chunk_size_thresh
+                use_large_data_ws = prefer_large_data and self._large_data_ws is not None and len(
+                    chunk) > send_large_chunk_size_thresh
                 assert len(chunk) <= max_size
                 async with async_timeout.timeout(5):
                     if use_large_data_ws:
-                        assert self._large_data_ws is not None 
+                        assert self._large_data_ws is not None
                         # print("SEND WITH LARGE DATA WS", cnt, max_size)
                         await self._large_data_ws.send_bytes(chunk)
                     else:
@@ -166,11 +183,14 @@ class WebsocketClientBase(abc.ABC):
         except:
             # use main ws to send client reset msg to frontend
             if use_large_data_ws:
-                print("LARGE CLIENT SEND TIMEOUT ERROR. data will be dropped, client should reset large-data-ws")
-                assert self._large_data_ws is not None 
+                print(
+                    "LARGE CLIENT SEND TIMEOUT ERROR. data will be dropped, client should reset large-data-ws"
+                )
+                assert self._large_data_ws is not None
                 print("LARGE CLIENT USE BACKUP TO SEND.")
                 await self.send_bytes(
-                    core_io.json_only_encode({}, core_io.SocketMsgType.ResetLargeDataClient, req))
+                    core_io.json_only_encode(
+                        {}, core_io.SocketMsgType.ResetLargeDataClient, req))
                 print("LARGE CLIENT Closing....")
                 async with async_timeout.timeout(5):
                     await self._large_data_ws.close()
@@ -178,23 +198,24 @@ class WebsocketClientBase(abc.ABC):
 
             else:
                 print("CLIENT SEND TIMEOUT ERROR", )
-                assert self._large_data_ws is not None 
+                assert self._large_data_ws is not None
                 await self._large_data_ws.send_bytes(
-                    core_io.json_only_encode({}, core_io.SocketMsgType.ResetLargeDataClient, req))
+                    core_io.json_only_encode(
+                        {}, core_io.SocketMsgType.ResetLargeDataClient, req))
                 print("CLIENT SEND TIMEOUT ERROR 2", )
                 traceback.print_exc()
                 return
-                # raise 
+                # raise
         finally:
-            return 
+            return
 
     async def send_with_lock(self,
-                   data,
-                   msg_type: core_io.SocketMsgType,
-                   service_key: str = "",
-                   request_id: int = 0,
-                   is_json: bool = False,
-                   dynamic_key: str = ""):
+                             data,
+                             msg_type: core_io.SocketMsgType,
+                             service_key: str = "",
+                             request_id: int = 0,
+                             is_json: bool = False,
+                             dynamic_key: str = ""):
         """data must not be encoded.
         """
         if self._uid is not None:
@@ -216,7 +237,9 @@ class WebsocketClientBase(abc.ABC):
         max_size = self.get_msg_max_size() - 128
         # max_size = 1024 * 1024
         # TODO reslove "8192"
-        encoder = core_io.SocketMessageEncoder(data, skeleton_size_limit=max_size - 8192)
+        encoder = core_io.SocketMessageEncoder(data,
+                                               skeleton_size_limit=max_size -
+                                               8192)
         # tasks = []
         # max_size = TENSORPC_WEBSOCKET_MSG_SIZE
         # t = time.time()
@@ -235,14 +258,15 @@ class WebsocketClientBase(abc.ABC):
             #     print("WS PREPARE SEND", encoder.get_total_array_binary_size())
             # t = time.time()
             async with self._lock:
-                for chunk in encoder.get_message_chunks(msg_type, req, max_size):
+                for chunk in encoder.get_message_chunks(
+                        msg_type, req, max_size):
                     assert len(chunk) <= max_size
                     # tasks.append(self.ws.send_bytes(chunk))
                     async with async_timeout.timeout(10):
                         await self.send_bytes(chunk)
             # if encoder.get_total_array_binary_size() > max_size:
 
-                # print("WS SEND TIME", time.time() - t)
+            # print("WS SEND TIME", time.time() - t)
         except ConnectionResetError:
             print("CLIENT SEND ERROR, RETURN")
         except:
@@ -253,7 +277,7 @@ class WebsocketClientBase(abc.ABC):
             self._recv_cancel_event.clear()
             self._allow_recv_event.set()
 
-            return 
+            return
         # await tasks[0]
         # if len(tasks) > 1:
         #     tasks = [asyncio.create_task(t) for t in tasks[1:]]
@@ -293,7 +317,10 @@ class WebsocketClientBase(abc.ABC):
                                          request_id)
 
     @abc.abstractmethod
-    async def binary_msg_generator(self, shutdown_ev: asyncio.Event) -> AsyncGenerator[WebsocketMsg, None]: ...
+    async def binary_msg_generator(
+            self,
+            shutdown_ev: asyncio.Event) -> AsyncGenerator[WebsocketMsg, None]:
+        ...
 
 
 def create_task(coro):
@@ -376,7 +403,10 @@ class WebsocketHandler:
             rid = await client.send_ping()
             print("sent ping", rid)
 
-    async def handle_new_connection(self, client: WebsocketClientBase, client_id: str, is_backup: bool = False):
+    async def handle_new_connection(self,
+                                    client: WebsocketClientBase,
+                                    client_id: str,
+                                    is_backup: bool = False):
         print(f"NEW CONN {client.id}, is backup: ", is_backup)
         service_core = self.service_core
         conn_st_ev = asyncio.Event()
@@ -384,27 +414,28 @@ class WebsocketHandler:
         conn_rpc_queue: "asyncio.Queue[asyncio.Task]" = asyncio.Queue(1000)
         with service_core._enter_exec_context():
             try:
-                await service_core.service_units.run_event_async(ServiceEventType.WebSocketOnConnect, client)
+                await service_core.service_units.run_event_async(
+                    ServiceEventType.WebSocketOnConnect, client)
             except Exception as e:
                 await client.send_user_error(e, 0)
         # assert not self.event_to_clients and not self.client_to_events
         # pingpong_task = asyncio.create_task(self.send_ping_loop(client))
         # To avoid possible hang when send large data to client, we use
-        # two websockets, one for small payload, one for large payload. 
+        # two websockets, one for small payload, one for large payload.
         # this only enabled we receive websocket config with pair enabled from client.
 
         # when hang happens, we will receive exception in ws.send or get
         # message from client. Then we can close the websocket (send), client
         # should restart a new websocket connection when it detect hang or receive
-        # restart request in backup connection. 
+        # restart request in backup connection.
         if not is_backup:
             if client_id not in self.client_id_to_client:
                 self.client_id_to_client[client_id] = client
             else:
                 client_prev = self.client_id_to_client[client_id]
-                assert client_prev.is_backup 
-                self.client_id_to_client[client_id] = client 
-                client.is_backup = False 
+                assert client_prev.is_backup
+                self.client_id_to_client[client_id] = client
+                client.is_backup = False
                 client._large_data_ws = client_prev
         else:
             if client_id in self.client_id_to_client:
@@ -424,7 +455,8 @@ class WebsocketHandler:
                               is_json=True)
             # TODO we should wait shutdown here
             # TODO handle send error
-            async for ws_msg in client.binary_msg_generator(client.hang_shutdown_event):
+            async for ws_msg in client.binary_msg_generator(
+                client.hang_shutdown_event):
                 if ws_msg.type == WebsocketMsgType.Binary:
                     data = ws_msg.data
                     try:
@@ -517,7 +549,7 @@ class WebsocketHandler:
                         await client.send([],
                                           msg_type=msg_type,
                                           request_id=req.rpc_id)
-                        
+
                     elif msg_type == core_io.SocketMsgType.RPC:
                         arg_data = core_io.parse_message_chunks(header, [data])
                         # TODO if full for some time, drop rpc (raise busy error)
@@ -559,7 +591,8 @@ class WebsocketHandler:
             if self._delete_events:
                 self.delete_event_ev.set()
             try:
-                await service_core.service_units.run_event_async(ServiceEventType.WebSocketOnDisConnect, client)
+                await service_core.service_units.run_event_async(
+                    ServiceEventType.WebSocketOnDisConnect, client)
             except:
                 traceback.print_exc()
             conn_st_ev.set()
@@ -578,7 +611,7 @@ class WebsocketHandler:
                 if client_may_main.is_backup:
                     self.client_id_to_client.pop(client_id)
                 else:
-                    client_may_main._large_data_ws = None 
+                    client_may_main._large_data_ws = None
             else:
                 self.client_id_to_client.pop(client_id)
         print(f"CONN {client_id} (is_backup={is_backup}) disconnected.")
@@ -613,9 +646,10 @@ class WebsocketHandler:
             k: asyncio.create_task(ev.fn(), name=k)
             for k, ev in subed_evs
         }
-        task_to_ev: Dict[asyncio.Task,
-                         str] = {v: k
-                                 for k, v in ev_tasks.items()}
+        task_to_ev: Dict[asyncio.Task, str] = {
+            v: k
+            for k, v in ev_tasks.items()
+        }
         wait_new_ev_task = asyncio.create_task(self.new_event_ev.wait(),
                                                name="new_event")
         wait_del_ev_task = asyncio.create_task(self.delete_event_ev.wait(),
@@ -789,4 +823,3 @@ class WebsocketHandler:
 
             # print("SEND TIME", cur_ev, time.time() - t)
             task_to_ev = new_task_to_ev
-

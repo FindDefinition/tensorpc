@@ -105,8 +105,10 @@ class MapEventSetZoom(MapEventBase):
 class MapContainerProps(ContainerBaseProps, FlexBoxProps):
     pass
 
-MapLayoutType = Union[List[MapComponentType], Dict[str,
-                                    MapComponentType]]
+
+MapLayoutType = Union[List[MapComponentType], Dict[str, MapComponentType]]
+
+
 class MapContainer(MUIContainerBase[MapContainerProps, MapComponentType]):
 
     def __init__(self,
@@ -166,6 +168,7 @@ class TileLayer(MapComponentBase[TileLayerProps]):
     """see https://leaflet-extras.github.io/leaflet-providers/preview/
     for all leaflet providers.
     """
+
     def __init__(
         self,
         url: str = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -194,16 +197,16 @@ class PathOptions:
     weight: Union[Undefined, NumberType] = undefined
     opacity: Union[Undefined, NumberType] = undefined
     lineCap: Union[Undefined, Literal['butt', 'round', 'square',
-                                       'inherit']] = undefined
+                                      'inherit']] = undefined
     lineJoin: Union[Undefined, Literal['miter', 'round', 'bevel',
-                                        'inherit']] = undefined
+                                       'inherit']] = undefined
     dashArray: Union[Undefined, str, List[NumberType]] = undefined
     dashOffset: Union[Undefined, str] = undefined
     fill: Union[Undefined, bool] = undefined
     fillColor: Union[Undefined, str] = undefined
     fillOpacity: Union[Undefined, NumberType] = undefined
     fillRule: Union[Undefined, Literal['nonzero', 'evenodd',
-                                        'inherit']] = undefined
+                                       'inherit']] = undefined
 
 
 @dataclasses.dataclass
@@ -281,7 +284,7 @@ class Polyline(MapContainerBase[PolylineProps, MapElementChildType]):
                          PolylineProps,
                          _children=children,
                          allowed_events=[
-                                FrontendEventType.Click.value,
+                             FrontendEventType.Click.value,
                          ])
         self.props.color = color
         self.props.positions = positions

@@ -29,7 +29,10 @@ def meta_decorator(func=None,
     else:
         return wrapper
 
-def mark_server_event(*, func=None, event_type: ServiceEventType = ServiceEventType.Normal):
+
+def mark_server_event(*,
+                      func=None,
+                      event_type: ServiceEventType = ServiceEventType.Normal):
     meta = FunctionUserMeta(ServiceType.Event, event_type=event_type)
     return meta_decorator(func, meta)
 

@@ -29,6 +29,7 @@ import csv
 from dataclasses import dataclass
 import humanize
 
+
 @dataclass
 class GPUMeasure:
     name: str
@@ -43,14 +44,16 @@ class GPUMeasure:
         msg += f"{self.temperature}\u2103,io={self.memusage}%"
         return msg
 
-@dataclass 
+
+@dataclass
 class NetworkMeasure:
-    name: str 
+    name: str
     bytes_recv: int
     bytes_sent: int
-    recv_speed: float 
+    recv_speed: float
     send_speed: float
     timestamp_second: float
+
 
 @dataclass
 class GPUMonitor:
@@ -76,7 +79,9 @@ class ComputeResourceMonitor(mui.FlexBox):
                                               variant="determinate")
             self.gpus.append(GPUMonitor(util, mem))
             gpu_uis.extend([mui.Divider("vertical"), util, mem])
-        self.net_info_str = mui.Typography("").prop(whiteSpace="pre-wrap", fontSize="14px", fontFamily="monospace")
+        self.net_info_str = mui.Typography("").prop(whiteSpace="pre-wrap",
+                                                    fontSize="14px",
+                                                    fontFamily="monospace")
         super().__init__([
             mui.HBox([
                 self.cpu,
@@ -112,19 +117,23 @@ class ComputeResourceMonitor(mui.FlexBox):
                 if nic in self.prev_net_measures:
                     prev_measure = prev_measures[nic]
                     recv_speed = (io_counters.bytes_recv -
-                                  prev_measure.bytes_recv) / (ts - prev_measure.timestamp_second)
+                                  prev_measure.bytes_recv) / (
+                                      ts - prev_measure.timestamp_second)
                     send_speed = (io_counters.bytes_sent -
-                                  prev_measure.bytes_sent) / (ts - prev_measure.timestamp_second)
+                                  prev_measure.bytes_sent) / (
+                                      ts - prev_measure.timestamp_second)
                 else:
                     recv_speed = 0
                     send_speed = 0
-                measure = NetworkMeasure(nic, io_counters.bytes_recv, io_counters.bytes_sent, recv_speed, send_speed, ts)
+                measure = NetworkMeasure(nic, io_counters.bytes_recv,
+                                         io_counters.bytes_sent, recv_speed,
+                                         send_speed, ts)
                 self.prev_net_measures[nic] = measure
                 network_measures.append(measure)
         return network_measures
-        
+
     def _get_gpu_measures(self) -> List[GPUMeasure]:
-        
+
         querys = [
             "gpu_name",
             "utilization.gpu",
@@ -162,13 +171,17 @@ class ComputeResourceMonitor(mui.FlexBox):
     async def get_resource(self):
         while True:
             cpu_percent = psutil.cpu_percent()
-            
+
             vm_percent = psutil.virtual_memory().percent
             net_measures = self._get_network_measure()
-            net_info_strs = [f"{m.name}: recv={humanize.naturalsize(m.recv_speed)}/s, send={humanize.naturalsize(m.send_speed)}/s" for m in net_measures]
+            net_info_strs = [
+                f"{m.name}: recv={humanize.naturalsize(m.recv_speed)}/s, send={humanize.naturalsize(m.send_speed)}/s"
+                for m in net_measures
+            ]
             ev = self.cpu.update_event(value=cpu_percent)
             ev += self.mem.update_event(value=vm_percent)
-            ev += self.net_info_str.update_event(value="\n".join(net_info_strs))
+            ev += self.net_info_str.update_event(
+                value="\n".join(net_info_strs))
             if len(self.gpus) > 0:
                 gpumeasures: List[GPUMeasure] = self._get_gpu_measures()
                 for g, m in zip(gpumeasures, self.gpus):

@@ -5,7 +5,6 @@ https://github.com/windmill-labs/windmill/blob/v1.101.1/lsp/pyls_launcher.py
 https://github.com/python-lsp/python-lsp-jsonrpc/blob/v1.0.0/pylsp_jsonrpc/streams.py
 """
 
-
 import asyncio
 import json
 
@@ -21,11 +20,12 @@ import ssl
 
 from tensorpc.core.asynctools import cancel_task
 
-
 log = logging.getLogger(__name__)
 logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))
 
+
 class AsyncJsonRpcStreamReader:
+
     def __init__(self, reader: asyncio.StreamReader):
         self._rfile = reader
 
@@ -60,11 +60,14 @@ class AsyncJsonRpcStreamReader:
             try:
                 return int(value)
             except ValueError as e:
-                raise ValueError("Invalid Content-Length header: {}".format(value)) from e
+                raise ValueError(
+                    "Invalid Content-Length header: {}".format(value)) from e
 
         return None
 
+
 class AsyncJsonRpcStreamWriter:
+
     def __init__(self, wfile: asyncio.StreamWriter, **json_dumps_args):
         self._wfile = wfile
         self._wfile_lock = asyncio.Lock()
@@ -83,19 +86,21 @@ class AsyncJsonRpcStreamWriter:
                 body = json.dumps(message, **self._json_dumps_args)
 
                 # Ensure we get the byte length, not the character length
-                content_length = len(body) if isinstance(body, bytes) else len(body.encode('utf-8'))
+                content_length = len(body) if isinstance(body, bytes) else len(
+                    body.encode('utf-8'))
                 response = (
                     "Content-Length: {}\r\n"
                     "Content-Type: application/vscode-jsonrpc; charset=utf8\r\n\r\n"
-                    "{}".format(content_length, body)
-                )
+                    "{}".format(content_length, body))
                 self._wfile.write(response.encode('utf-8'))
                 await self._wfile.drain()
             except Exception:  # pylint: disable=broad-except
-                log.exception("Failed to write message to output file %s", message)
+                log.exception("Failed to write message to output file %s",
+                              message)
 
 
 class LanguageServerHandler:
+
     def __init__(self, st_ev: asyncio.Event, ls_cmd: List[str]) -> None:
         self.ls_cmd = ls_cmd
         self._num_conn = 0
@@ -114,28 +119,32 @@ class LanguageServerHandler:
         try:
             ws = web.WebSocketResponse()
             await ws.prepare(request)
-            aproc = await asyncio.create_subprocess_exec(*self.ls_cmd, env=os.environ,
+            aproc = await asyncio.create_subprocess_exec(
+                *self.ls_cmd,
+                env=os.environ,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE)
-            assert aproc.stdout is not None 
-            assert aproc.stdin is not None 
+            assert aproc.stdout is not None
+            assert aproc.stdin is not None
             # proc = subprocess.Popen(["python", "-m", "tensorpc.cli.pyright_launch", "--stdio"], env=os.environ,
             #     stdin=subprocess.PIPE,
             #     stdout=subprocess.PIPE)
             # Create a writer that formats json messages with the correct LSP headers
             writer = AsyncJsonRpcStreamWriter(aproc.stdin)
             reader = AsyncJsonRpcStreamReader(aproc.stdout)
+
             async def cosumer(msg):
                 print("[JSONRPC OUT]", msg)
                 await ws.send_json(msg)
+
             task = asyncio.create_task(reader.listen(cosumer))
             # Create a reader for consuming stdout of the language server. We need to
             # consume this in another thread
             async for ws_msg in ws:
                 if ws_msg.type == aiohttp.WSMsgType.TEXT:
-                    print("[JSONRPC IN]", ws_msg.json())  
+                    print("[JSONRPC IN]", ws_msg.json())
                     await writer.write(ws_msg.json())
-            
+
                 elif ws_msg.type == aiohttp.WSMsgType.ERROR:
                     print("ERROR", ws_msg)
                     print("ERROR", ws_msg.data)
@@ -146,12 +155,14 @@ class LanguageServerHandler:
             self._num_conn -= 1
             if self._num_conn == 0:
                 print("SHUTDOWN LANGUAGE SERVER AFTER 1 Minute")
-                self._shutdown_delay_task = asyncio.create_task(self._shutdown_task_delayed(60))
+                self._shutdown_delay_task = asyncio.create_task(
+                    self._shutdown_task_delayed(60))
         return ws
 
     async def _shutdown_task_delayed(self, delay: float):
         await asyncio.sleep(delay)
         self.st_ev.set()
+
 
 async def serve_app(app,
                     port,
@@ -165,10 +176,11 @@ async def serve_app(app,
     await async_shutdown_ev.wait()
     await runner.cleanup()
 
+
 async def serve_ls(port: int,
                    ls_cmd: List[str],
-                    ssl_key_path: str = "",
-                    ssl_crt_path: str = ""):
+                   ssl_key_path: str = "",
+                   ssl_crt_path: str = ""):
     async_shutdown_ev = asyncio.Event()
     app = web.Application()
     handler = LanguageServerHandler(async_shutdown_ev, ls_cmd)
@@ -178,7 +190,6 @@ async def serve_ls(port: int,
         ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         ssl_context.load_cert_chain(ssl_crt_path, ssl_key_path)
     return await serve_app(app,
-                    port,
-                    async_shutdown_ev,
-                    ssl_context=ssl_context)
-
+                           port,
+                           async_shutdown_ev,
+                           ssl_context=ssl_context)

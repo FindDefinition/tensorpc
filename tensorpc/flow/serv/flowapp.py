@@ -42,7 +42,7 @@ from tensorpc.flow.serv_names import serv_names
 from tensorpc.core.serviceunit import ServiceEventType
 import traceback
 import time
-import sys 
+import sys
 from urllib import parse
 
 
@@ -68,10 +68,10 @@ class FlowApp:
         self.app_meta = AppLocalMeta()
         process_title = self.master_meta.process_title
         try:
-            import setproctitle # type: ignore
+            import setproctitle  # type: ignore
             setproctitle.setproctitle(process_title)
         except ImportError:
-            pass 
+            pass
         if not headless:
             assert self.master_meta.is_inside_devflow, "this service must run inside devflow"
             # assert self.master_meta.is_http_valid
@@ -96,11 +96,13 @@ class FlowApp:
         elif isinstance(obj, FlexBox):
             # external root
             external_root = obj
-            self.app: App = EditableApp(external_root=external_root, reload_manager=reload_mgr)
+            self.app: App = EditableApp(external_root=external_root,
+                                        reload_manager=reload_mgr)
         else:
             # other object, must declare a tensorpc_flow_layout
             # external_root = flex_wrapper(obj)
-            self.app: App = EditableApp(external_wrapped_obj=obj, reload_manager=reload_mgr)
+            self.app: App = EditableApp(external_wrapped_obj=obj,
+                                        reload_manager=reload_mgr)
             self.app._app_force_use_layout_function()
         self.app._flow_app_comp_core.reload_mgr = reload_mgr
         self.app_su = ServiceUnit(module_name, config)
@@ -113,10 +115,10 @@ class FlowApp:
         self._send_loop_task = asyncio.create_task(self._send_loop())
         self.lsp_port = self.master_meta.lsp_port
         if self.lsp_port is not None:
-            assert self.master_meta.lsp_fwd_port is not None 
+            assert self.master_meta.lsp_fwd_port is not None
             self.lsp_fwd_port = self.master_meta.lsp_fwd_port
         else:
-            self.lsp_fwd_port = None 
+            self.lsp_fwd_port = None
         self.external_argv = external_argv
         self._external_argv_task: Optional[asyncio.Future] = None
 
@@ -132,29 +134,38 @@ class FlowApp:
             if not layout_created:
                 await self.app._app_run_layout_function()
         else:
-            self.app.root._attach(UniqueTreeId.from_parts(["root"]), self.app._flow_app_comp_core)
+            self.app.root._attach(UniqueTreeId.from_parts(["root"]),
+                                  self.app._flow_app_comp_core)
         # print(lay["layout"])
         self.app.app_initialize()
         await self.app.app_initialize_async()
         enable_lsp = self.lsp_port is not None and self.app._flowapp_enable_lsp
-        print(enable_lsp,  self.lsp_port)
+        print(enable_lsp, self.lsp_port)
         if enable_lsp:
             assert self.lsp_port is not None
-            get_tmux_lang_server_info_may_create("pyright", self.master_meta.node_id, self.lsp_port)
+            get_tmux_lang_server_info_may_create("pyright",
+                                                 self.master_meta.node_id,
+                                                 self.lsp_port)
         lay = self.app._get_app_layout()
         self.app._flowapp_is_inited = True
         await self._send_loop_queue.put(
             AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)}))
         # TODO should we just use grpc client to query init state here?
-        init_event: Dict[AppEventType, Any] = {AppEventType.Notify: NotifyEvent(NotifyType.AppStart)}
+        init_event: Dict[AppEventType, Any] = {
+            AppEventType.Notify: NotifyEvent(NotifyType.AppStart)
+        }
         if self.lsp_fwd_port is not None and enable_lsp:
-            init_event[AppEventType.InitLSPClient] = InitLSPClientEvent(self.lsp_fwd_port, self.app._flowapp_internal_lsp_config.get_dict())
-        await self._send_loop_queue.put(
-            AppEvent("", init_event))
+            init_event[AppEventType.InitLSPClient] = InitLSPClientEvent(
+                self.lsp_fwd_port,
+                self.app._flowapp_internal_lsp_config.get_dict())
+        await self._send_loop_queue.put(AppEvent("", init_event))
         if self.external_argv is not None:
             with enter_app_conetxt(self.app):
                 print("??????????????????????????", self.external_argv)
-                self._external_argv_task = asyncio.create_task(appctx.run_in_executor_with_exception_inspect(partial(self._run_app_script, argv=self.external_argv),))
+                self._external_argv_task = asyncio.create_task(
+                    appctx.run_in_executor_with_exception_inspect(
+                        partial(self._run_app_script,
+                                argv=self.external_argv), ))
 
     def _run_app_script(self, argv: List[str]):
         argv_bkp = sys.argv
@@ -219,7 +230,7 @@ class FlowApp:
             workspaceUri=data["workspaceUri"],
             selections=data["selections"] if "selections" in data else None,
         )
-        await self.app.run_vscode_event(ev) 
+        await self.app.run_vscode_event(ev)
 
     def get_layout(self, editor_only: bool = False):
         if editor_only:
@@ -228,23 +239,26 @@ class FlowApp:
             res = self.app._get_app_layout()
         if self.app._flowapp_enable_lsp:
             res["lspPort"] = self.lsp_port
-        return res 
+        return res
 
-    async def get_file(self, file_key: str, chunk_size=2 ** 16):
+    async def get_file(self, file_key: str, chunk_size=2**16):
         if file_key in self.app._flowapp_file_resource_handlers:
             url = parse.urlparse(file_key)
             base = url.path
             file_key_qparams = parse.parse_qs(url.query)
             # we only use first value
             if len(file_key_qparams) > 0:
-                file_key_qparams = {k: v[0] for k, v in file_key_qparams.items()}
+                file_key_qparams = {
+                    k: v[0]
+                    for k, v in file_key_qparams.items()
+                }
             else:
                 file_key_qparams = {}
             try:
                 handler = self.app._flowapp_file_resource_handlers[base]
                 res = handler(**file_key_qparams)
                 if inspect.iscoroutine(res):
-                    res = await res 
+                    res = await res
                 assert isinstance(res, (str, bytes, FileResource))
                 if isinstance(res, (str, bytes)):
                     if isinstance(res, str):
@@ -256,7 +270,7 @@ class FlowApp:
                         yield chunk
                         chunk = bio.read(chunk_size)
                 else:
-                    fname = res.name 
+                    fname = res.name
                     if res.chunk_size is not None:
                         assert res.chunk_size > 1024
                         chunk_size = res.chunk_size
@@ -268,7 +282,7 @@ class FlowApp:
                                 yield chunk
                                 chunk = f.read(chunk_size)
                     elif res.content is not None:
-                        content = res.content 
+                        content = res.content
                         if isinstance(content, str):
                             content = content.encode()
                         bio = io.BytesIO(content)
@@ -283,7 +297,7 @@ class FlowApp:
                 traceback.print_exc()
                 raise
         else:
-            raise NotImplementedError 
+            raise NotImplementedError
 
     async def _http_remote_call(self, key: str, *args, **kwargs):
         return await http_remote_call(prim.get_http_client_session(),
@@ -312,7 +326,7 @@ class FlowApp:
 
     async def _send_grpc_event_large(self, ev: AppEvent,
                                      robj: tensorpc.AsyncRemoteManager):
-        # import rich 
+        # import rich
         # rich.print(ev.to_dict())
         if self.master_meta.is_worker:
             return await robj.chunked_remote_call(
@@ -356,7 +370,8 @@ class FlowApp:
                         if k == AppEventType.UIEvent:
                             assert isinstance(v, UIEvent)
                             await self.app._handle_event_with_ctx(v)
-                    send_task = asyncio.create_task(self._send_loop_queue.get())
+                    send_task = asyncio.create_task(
+                        self._send_loop_queue.get())
                     wait_tasks: List[asyncio.Task] = [shut_task, send_task]
                     continue
                 ts = time.time()
@@ -417,7 +432,11 @@ class FlowApp:
             grpc_url = self.master_meta.grpc_url
             uiev = UISaveStateEvent(self.app._get_simple_app_state())
             editorev = self.app.set_editor_value_event("")
-            ev = AppEvent(self._uid, {AppEventType.UISaveStateEvent: uiev, AppEventType.AppEditor: editorev})
+            ev = AppEvent(
+                self._uid, {
+                    AppEventType.UISaveStateEvent: uiev,
+                    AppEventType.AppEditor: editorev
+                })
             # TODO remove this dump
             # check user error, user can't store invalid
             # object that exists after reload module.

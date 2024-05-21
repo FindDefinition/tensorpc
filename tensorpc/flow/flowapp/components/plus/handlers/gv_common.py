@@ -5,7 +5,7 @@ import traceback
 from typing import Any, Dict, List, Union
 
 import numpy as np
-import io 
+import io
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import ObservedFunction
 from tensorpc.flow.flowapp import appctx
@@ -15,7 +15,6 @@ from tensorpc.flow.flowapp.components.plus.config import ConfigPanelV2
 
 from ..common import CommonQualNames
 from ..core import ALL_OBJECT_LAYOUT_HANDLERS, ObjectGridItemConfig, ObjectLayoutHandler, DataClassesType, PriorityCommon
-
 
 monospace_14px = dict(fontFamily="monospace", fontSize="14px")
 _MAX_STRING_IN_DETAIL = 10000
@@ -32,14 +31,15 @@ class TensorMeta:
     hasinf: bool
     is_float: bool
     min_value: Union[float, int]
-    max_value: Union[float, int] 
+    max_value: Union[float, int]
 
     def get_tags(self):
         tags = [
             mui.Chip(str(self.dtype)).prop(size="small", clickable=False),
         ]
         if self.device is not None:
-            tags.append(mui.Chip(self.device).prop(size="small", clickable=False))
+            tags.append(
+                mui.Chip(self.device).prop(size="small", clickable=False))
         if self.is_contiguous:
             tags.append(
                 mui.Chip("contiguous").prop(muiColor="success",
@@ -53,14 +53,15 @@ class TensorMeta:
         if self.hasnan:
             tags.append(
                 mui.Chip("nan").prop(muiColor="error",
-                                    size="small",
-                                    clickable=False))
+                                     size="small",
+                                     clickable=False))
         if self.hasinf:
             tags.append(
                 mui.Chip("inf").prop(muiColor="error",
-                                    size="small",
-                                    clickable=False))
+                                     size="small",
+                                     clickable=False))
         return tags
+
 
 def _get_tensor_meta(obj):
     qualname = "np.ndarray"
@@ -106,7 +107,8 @@ def _get_tensor_meta(obj):
         is_float = np.issubdtype(dtype, np.floating)
     else:
         raise NotImplementedError
-    return TensorMeta(qualname, shape, str(dtype), device, is_contig, is_float, hasnan, hasinf, min_value, max_value)
+    return TensorMeta(qualname, shape, str(dtype), device, is_contig, is_float,
+                      hasnan, hasinf, min_value, max_value)
 
 
 class TensorPreview(mui.FlexBox):
@@ -132,13 +134,15 @@ class TensorPreview(mui.FlexBox):
         super().__init__(layout)
         self.prop(flexDirection="column", flex=1)
 
+
 @ALL_OBJECT_LAYOUT_HANDLERS.register(np.ndarray)
 @ALL_OBJECT_LAYOUT_HANDLERS.register(CommonQualNames.TorchTensor)
 @ALL_OBJECT_LAYOUT_HANDLERS.register(CommonQualNames.TVTensor)
 class TensorHandler(ObjectLayoutHandler):
+
     def create_layout(self, obj: Any) -> mui.FlexBox:
         res = TensorPreview(obj)
-        return res 
+        return res
 
     def get_grid_layout_item(self, obj: Any) -> ObjectGridItemConfig:
         meta = _get_tensor_meta(obj)

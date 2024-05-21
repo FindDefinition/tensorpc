@@ -1,4 +1,3 @@
-
 import json
 import pickle
 from collections import abc
@@ -94,14 +93,16 @@ BYTES_SKELETON_CODE = 101
 INV_NPDTYPE_TO_PB_MAP = _inv_map(NPDTYPE_TO_PB_MAP)
 INV_NPDTYPE_TO_JSONARRAY_MAP = _inv_map(NPDTYPE_TO_JSONARRAY_MAP)
 
-NPBYTEORDER_TO_PB_MAP: Dict[Literal["=", "<", ">", "|"], "arraybuf_pb2.dtype.ByteOrder"] = {
-    "=": arraybuf_pb2.dtype.native,
-    "<": arraybuf_pb2.dtype.littleEndian,
-    ">": arraybuf_pb2.dtype.bigEndian,
-    "|": arraybuf_pb2.dtype.na,
-}
-INV_NPBYTEORDER_TO_PB_MAP: Dict["arraybuf_pb2.dtype.ByteOrder", Literal["=", "<", ">", "|"]] = _inv_map(NPBYTEORDER_TO_PB_MAP)
-
+NPBYTEORDER_TO_PB_MAP: Dict[Literal["=", "<", ">", "|"],
+                            "arraybuf_pb2.dtype.ByteOrder"] = {
+                                "=": arraybuf_pb2.dtype.native,
+                                "<": arraybuf_pb2.dtype.littleEndian,
+                                ">": arraybuf_pb2.dtype.bigEndian,
+                                "|": arraybuf_pb2.dtype.na,
+                            }
+INV_NPBYTEORDER_TO_PB_MAP: Dict["arraybuf_pb2.dtype.ByteOrder",
+                                Literal["=", "<", ">",
+                                        "|"]] = _inv_map(NPBYTEORDER_TO_PB_MAP)
 
 
 def bytes2pb(data: bytes, send_data=True) -> arraybuf_pb2.ndarray:
@@ -122,7 +123,7 @@ def array2pb(array: npt.NDArray, send_data=True) -> arraybuf_pb2.ndarray:
     assert isinstance(array, np.ndarray)
     dtype = NPDTYPE_TO_PB_MAP[array.dtype]
     assert array.dtype.byteorder in ("=", "<", ">", "|")
-    order = NPBYTEORDER_TO_PB_MAP[array.dtype.byteorder] # type: ignore
+    order = NPBYTEORDER_TO_PB_MAP[array.dtype.byteorder]  # type: ignore
     pb_dtype = arraybuf_pb2.dtype(
         type=dtype,
         byte_order=order,
@@ -163,9 +164,12 @@ def data2pb(array_or_bytes: Union[bytes, np.ndarray],
     else:
         raise NotImplementedError("only support ndarray/bytes.")
 
+
 class JsonOnlyData:
+
     def __init__(self, data) -> None:
         self.data = data
+
 
 class FromBufferStream(object):
 
@@ -238,7 +242,7 @@ def to_protobuf_stream(data_list: List[Any],
             if not arg.flags['C_CONTIGUOUS']:
                 data_bytes = arg.tobytes()
             else:
-                data_bytes = None 
+                data_bytes = None
             order = NPBYTEORDER_TO_PB_MAP[arg.dtype.byteorder]
             data_dtype = arraybuf_pb2.dtype(
                 type=NPDTYPE_TO_PB_MAP[arg.dtype],
@@ -248,7 +252,8 @@ def to_protobuf_stream(data_list: List[Any],
             shape = arg.shape
             length = arg.nbytes
         elif isinstance(arg, bytes):
-            data_dtype = arraybuf_pb2.dtype(type=arraybuf_pb2.dtype.CustomBytes)
+            data_dtype = arraybuf_pb2.dtype(
+                type=arraybuf_pb2.dtype.CustomBytes)
             # ref_buf = bytes2pb(arg)
             data_bytes = arg
             shape = ()
@@ -272,12 +277,13 @@ def to_protobuf_stream(data_list: List[Any],
                     arg_id=arg_idx,
                     dtype=data_dtype,
                     func_key=func_key,
-                    chunked_data=arg_view[i * chunk_size:(i + 1) * chunk_size].tobytes(),
+                    chunked_data=arg_view[i * chunk_size:(i + 1) *
+                                          chunk_size].tobytes(),
                     shape=[],
                     flags=flags,
                 )
             else:
-                assert data_bytes is not None 
+                assert data_bytes is not None
                 buf = rpc_message_pb2.RemoteCallStream(
                     num_chunk=num_chunk,
                     chunk_id=i,
@@ -285,7 +291,8 @@ def to_protobuf_stream(data_list: List[Any],
                     arg_id=arg_idx,
                     dtype=data_dtype,
                     func_key=func_key,
-                    chunked_data=data_bytes[i * chunk_size:(i + 1) * chunk_size],
+                    chunked_data=data_bytes[i * chunk_size:(i + 1) *
+                                            chunk_size],
                     shape=[],
                     flags=flags,
                 )
@@ -337,7 +344,7 @@ def _extract_arrays_from_data(arrays,
                     arrays, v, object_classes, json_index)
         return data_skeleton
     elif isinstance(data, JsonOnlyData):
-        return data.data 
+        return data.data
     else:
         data_skeleton = None
         if isinstance(data, object_classes):
@@ -708,8 +715,6 @@ class SocketMsgType(Enum):
 
     ErrorMask = 0xF0
 
-    
-
 
 def encode_protobuf_uint(val: int):
     """this function encode protobuf fised uint to make sure
@@ -753,7 +758,8 @@ class SocketMessageEncoder:
 
     """
 
-    def __init__(self, data, skeleton_size_limit: int = int(1024 * 1024 * 3.6)) -> None:
+    def __init__(
+        self, data, skeleton_size_limit: int = int(1024 * 1024 * 3.6)) -> None:
         arrays, data_skeleton = extract_arrays_from_data(data, json_index=True)
         self.arrays: List[Union[np.ndarray, bytes]] = arrays
         self.data_skeleton = data_skeleton
@@ -774,7 +780,8 @@ class SocketMessageEncoder:
             assert data_skeleton_pack is not None
             self.arrays.append(data_skeleton_pack)
             self._total_size += len(data_skeleton_pack)
-            self._arr_metadata.append((BYTES_SKELETON_CODE, [len(data_skeleton_pack)]))
+            self._arr_metadata.append(
+                (BYTES_SKELETON_CODE, [len(data_skeleton_pack)]))
             self.data_skeleton = {}
             self._ser_skeleton = json.dumps(self.get_skeleton())
 
@@ -992,4 +999,3 @@ def get_exception_json(exc: BaseException):
     detail = traceback.format_exc()
     exception_json = {"error": str(exc), "detail": detail}
     return exception_json
-

@@ -54,12 +54,12 @@ _TASK_STATUS_TO_UI_TEXT_AND_COLOR: Dict[TaskStatus,
                                             TaskStatus.Finished: ("Finished",
                                                                   "success"),
                                             TaskStatus.Booting: ("Finished",
-                                                                  "secondary"),
-
+                                                                 "secondary"),
                                         }
 
 
 class TaskCard(mui.FlexBox):
+
     def __init__(self, client: SchedulerClient, task: Task) -> None:
         self.task_id = task.id
         self.task = task
@@ -79,17 +79,19 @@ class TaskCard(mui.FlexBox):
                                                size="small")
         self.command = mui.Typography(task.command).prop(
             fontSize="14px", fontFamily="monospace", wordBreak="break-word")
-        self.tmux_pane = mui.Typography("").prop(
-            fontSize="12px", fontFamily="monospace", whiteSpace="pre-line", border="1px solid #ccc", padding="5px")
+        self.tmux_pane = mui.Typography("").prop(fontSize="12px",
+                                                 fontFamily="monospace",
+                                                 whiteSpace="pre-line",
+                                                 border="1px solid #ccc",
+                                                 padding="5px")
 
         self.detail = mui.Collapse([
-            mui.VBox([self.command, self.tmux_pane]).prop(maxHeight="300px", overflow="auto"),
+            mui.VBox([self.command, self.tmux_pane]).prop(maxHeight="300px",
+                                                          overflow="auto"),
         ]).prop(timeout="auto", unmountOnExit=True)
         self._expanded = False
-        self.gpu_tag = mui.Chip(f"{task.num_gpu_used} gpus").prop(color="green",
-                                    size="small",
-                                    margin="0 3px 0 3px",
-                                    clickable=False)
+        self.gpu_tag = mui.Chip(f"{task.num_gpu_used} gpus").prop(
+            color="green", size="small", margin="0 3px 0 3px", clickable=False)
         layout = [
             mui.VBox([
                 mui.HBox([
@@ -150,7 +152,6 @@ class TaskCard(mui.FlexBox):
                       "opacity": "0.5",
                   })
 
-
     async def _on_expand_more(self):
         self._expanded = not self._expanded
         icon = mui.IconType.ExpandLess if self._expanded else mui.IconType.ExpandMore
@@ -199,7 +200,8 @@ class TaskCard(mui.FlexBox):
             ev += self.progress.update_event(value=task.state.progress * 100,
                                              variant="determinate")
         if task.state.tmux_pane_last_lines:
-            ev += self.tmux_pane.update_event(value=task.state.tmux_pane_last_lines)
+            ev += self.tmux_pane.update_event(
+                value=task.state.tmux_pane_last_lines)
         self.task = task
 
         return ev
@@ -210,10 +212,14 @@ class TaskCard(mui.FlexBox):
     def update_tmux_pane_event(self, data: str):
         return self.tmux_pane.update_event(value=data)
 
+
 class TmuxScheduler(mui.FlexBox):
+
     def __init__(
-        self, ssh_target: Optional[Union[SSHTarget, Callable[[], Coroutine[None, None,
-                                                                  SSHTarget]]]] = None
+        self,
+        ssh_target: Optional[Union[SSHTarget,
+                                   Callable[[], Coroutine[None, None,
+                                                          SSHTarget]]]] = None
     ) -> None:
         ssh_target_creator: Optional[Callable[[], Coroutine[None, None,
                                                             SSHTarget]]] = None
@@ -223,7 +229,9 @@ class TmuxScheduler(mui.FlexBox):
             ssh_desp = f"SSH: {ssh_target.username}@{ssh_target.hostname}:{ssh_target.port}"
             if ssh_target.is_localhost():
                 ssh_desp = f"SSH: localhost"
-            self.info = mui.Typography(ssh_desp).prop(margin="5px", fontSize="14px", fontFamily="monospace")
+            self.info = mui.Typography(ssh_desp).prop(margin="5px",
+                                                      fontSize="14px",
+                                                      fontFamily="monospace")
         else:
             ssh_target_creator = ssh_target
             ssh_target = SSHTarget.create_fake_target()
@@ -290,7 +298,8 @@ class TmuxScheduler(mui.FlexBox):
         num_tmux_pane_capture_lines = 5
         try:
             await asyncio.sleep(1)
-            updated, deleted = await self.client.update_tasks(num_tmux_pane_capture_lines)
+            updated, deleted = await self.client.update_tasks(
+                num_tmux_pane_capture_lines)
             await self.info.write(
                 self._get_info(await self._get_resource_info()))
             ev = mui.AppEvent("", {})
@@ -308,11 +317,14 @@ class TmuxScheduler(mui.FlexBox):
             for task_card in self.task_cards.values():
                 if task_card._expanded:
                     task_card_detail_expand.append(task_card)
-            tmux_pane_captures = await self.client.query_tmux_panes([x.task.id for x in task_card_detail_expand], num_tmux_pane_capture_lines)
+            tmux_pane_captures = await self.client.query_tmux_panes(
+                [x.task.id for x in task_card_detail_expand],
+                num_tmux_pane_capture_lines)
 
             for task_card in task_card_detail_expand:
                 if task_card.task.id in tmux_pane_captures:
-                    ev += task_card.update_tmux_pane_event(tmux_pane_captures[task_card.task.id])
+                    ev += task_card.update_tmux_pane_event(
+                        tmux_pane_captures[task_card.task.id])
             if updated:
                 await self.send_and_wait(ev)
                 await self.tasks.update_childs(new_task_cards)

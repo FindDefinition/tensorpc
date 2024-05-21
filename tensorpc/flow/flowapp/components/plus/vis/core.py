@@ -1,11 +1,9 @@
-
 import json
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 from tensorpc.core.dataclass_dispatch import dataclass, field
 from pydantic_core import PydanticCustomError, core_schema
 from pydantic import (
-    GetCoreSchemaHandler,
-)
+    GetCoreSchemaHandler, )
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from tensorpc.flow.jsonlike import JsonLikeNode
 from ... import mui, three
@@ -17,15 +15,19 @@ UNKNOWN_VIS_KEY = "unknown_vis"
 UNKNOWN_KEY_SPLIT = "%"
 RESERVED_NAMES = set([UNKNOWN_VIS_KEY, "reserved"])
 
+
 def is_reserved_name(name: str):
     parts = name.split(".")
     return parts[0] in RESERVED_NAMES
+
 
 def is_reserved_uid(uid: UniqueTreeId):
     parts = uid.parts
     return parts[0] in RESERVED_NAMES
 
+
 class CanvasItemProxy:
+
     def __init__(self) -> None:
         super().__init__()
         self._detail_layout: Optional[mui.FlexBox] = None
@@ -33,14 +35,15 @@ class CanvasItemProxy:
         self._tdata: Optional[Dict[str, Any]] = None
 
     # def update_event(self, comp: three.Component):
-    #     pass 
+    #     pass
 
     # def detail_layout(self, layout: mui.FlexBox):
     #     self._detail_layout = layout
     #     return self
 
     @classmethod
-    def __get_pydantic_core_schema__(cls, _source_type: Any, _handler: GetCoreSchemaHandler):
+    def __get_pydantic_core_schema__(cls, _source_type: Any,
+                                     _handler: GetCoreSchemaHandler):
         return core_schema.no_info_after_validator_function(
             cls.validate,
             core_schema.any_schema(),
@@ -58,11 +61,12 @@ class CanvasItemProxy:
     #     self._tdata = data
     #     return self
 
+
 @dataclass
 class CanvasItemCfg:
     lock: bool = False
     visible: bool = True
-    proxy: Optional[CanvasItemProxy] = None 
+    proxy: Optional[CanvasItemProxy] = None
     is_vapi: bool = False
     # if exists, will use it as detail layout
     detail_layout: Optional[mui.Component] = None
@@ -71,13 +75,16 @@ class CanvasItemCfg:
     node: Optional[JsonLikeNode] = None
     tdata: Optional[Dict[str, Any]] = None
 
+
 def get_canvas_item_cfg(comp: three.Component) -> Optional[CanvasItemCfg]:
     res = comp.find_user_meta_by_type(CanvasItemCfg)
     if res is not None:
         return res
-    return None 
+    return None
 
-def get_or_create_canvas_item_cfg(comp: three.Component, is_vapi: Optional[bool] = None):
+
+def get_or_create_canvas_item_cfg(comp: three.Component,
+                                  is_vapi: Optional[bool] = None):
     res = comp.find_user_meta_by_type(CanvasItemCfg)
     if res is None:
         res = CanvasItemCfg()
@@ -88,6 +95,7 @@ def get_or_create_canvas_item_cfg(comp: three.Component, is_vapi: Optional[bool]
 
 
 class VContext:
+
     def __init__(self,
                  canvas: "ComplexCanvas",
                  root: Optional[three.ContainerBase] = None):
@@ -121,9 +129,9 @@ class VContext:
         self._name_to_group[""] = self.root
         self._group_assigns.clear()
 
-
     @classmethod
-    def __get_pydantic_core_schema__(cls, _source_type: Any, _handler: GetCoreSchemaHandler):
+    def __get_pydantic_core_schema__(cls, _source_type: Any,
+                                     _handler: GetCoreSchemaHandler):
         return core_schema.no_info_after_validator_function(
             cls.validate,
             core_schema.any_schema(),
@@ -136,11 +144,12 @@ class VContext:
         return v
 
 
-
 class ContainerProxy(CanvasItemProxy):
     pass
 
+
 class GroupProxy(ContainerProxy):
+
     def __init__(self, uid: str) -> None:
         super().__init__()
         self.uid = uid
@@ -158,13 +167,22 @@ class GroupProxy(ContainerProxy):
 
 
 class UserTreeItemCard(mui.FlexBox):
-    def __init__(self, name: str, type_str: str, callback: Callable[[bool], Any], init_width: mui.ValueType = "240px"):
+
+    def __init__(self,
+                 name: str,
+                 type_str: str,
+                 callback: Callable[[bool], Any],
+                 init_width: mui.ValueType = "240px"):
         self.preview_layout = mui.VBox([])
         self._is_selected = mui.Checkbox(callback=callback).prop(checked=True)
-        self._print_blocks = mui.DataFlexBox(mui.Markdown().set_override_props(value="data")).prop(flexFlow="column nowrap", overflowY="auto", height="100%")
+        self._print_blocks = mui.DataFlexBox(mui.Markdown().set_override_props(
+            value="data")).prop(flexFlow="column nowrap",
+                                overflowY="auto",
+                                height="100%")
         layout: mui.LayoutType = [
             mui.HBox([
-                mui.Typography(f"{name}@{type_str}").prop(variant="caption", flex=1),
+                mui.Typography(f"{name}@{type_str}").prop(variant="caption",
+                                                          flex=1),
                 self._is_selected.prop(size="small"),
             ]),
             mui.HDivider(),
@@ -179,7 +197,7 @@ class UserTreeItemCard(mui.FlexBox):
     @property
     def is_selected(self):
         return self._is_selected.checked
-    
+
     def print_blocks_event(self, data: List[str]):
         data_list = [{"id": i, "data": d} for i, d in enumerate(data)]
         return self._print_blocks.update_event(dataList=data_list)
@@ -198,5 +216,6 @@ class CanvasUserTreeItem:
 
 
 class _VapiObjects:
+
     def prepare_vapi_props(self) -> None:
         raise NotImplementedError

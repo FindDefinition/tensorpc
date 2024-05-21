@@ -172,7 +172,6 @@ class _ServiceNames:
         return get_service_key_by_type(FlowWorker,
                                        FlowWorker.get_layout.__name__)
 
-
     @property
     def APP_RUN_SINGLE_EVENT(self):
         from tensorpc.flow.serv.flowapp import FlowApp
@@ -183,11 +182,11 @@ class _ServiceNames:
     def APP_GET_LAYOUT(self):
         from tensorpc.flow.serv.flowapp import FlowApp
         return get_service_key_by_type(FlowApp, FlowApp.get_layout.__name__)
+
     @property
     def APP_GET_FILE(self):
         from tensorpc.flow.serv.flowapp import FlowApp
-        return get_service_key_by_type(FlowApp,
-                                       FlowApp.get_file.__name__)
+        return get_service_key_by_type(FlowApp, FlowApp.get_file.__name__)
 
     @property
     def FLOW_DATA_SAVE(self):
@@ -204,21 +203,20 @@ class _ServiceNames:
     @property
     def FLOW_DATA_LIST_ITEM_METAS(self):
         from tensorpc.flow.serv.core import Flow
-        return get_service_key_by_type(Flow,
-                                       Flow.query_data_attrs.__name__)
+        return get_service_key_by_type(Flow, Flow.query_data_attrs.__name__)
 
     @property
     def FLOW_DATA_QUERY_DATA_NODE_IDS(self):
         from tensorpc.flow.serv.core import Flow
         return get_service_key_by_type(Flow,
                                        Flow.query_all_data_node_ids.__name__)
-    
+
     @property
     def FLOW_DATA_DELETE_ITEM(self):
         from tensorpc.flow.serv.core import Flow
         return get_service_key_by_type(Flow,
                                        Flow.delete_datastorage_data.__name__)
-    
+
     @property
     def FLOW_DATA_RENAME_ITEM(self):
         from tensorpc.flow.serv.core import Flow
@@ -228,7 +226,7 @@ class _ServiceNames:
     @property
     def FLOW_GET_SSH_NODE_DATA(self):
         from tensorpc.flow.serv.core import Flow
-        return get_service_key_by_type(Flow,
-                                       Flow.get_ssh_node_data.__name__)
+        return get_service_key_by_type(Flow, Flow.get_ssh_node_data.__name__)
+
 
 serv_names = _ServiceNames()

@@ -17,30 +17,36 @@ import queue
 import threading
 from typing import Optional, Union, List, Dict
 import multiprocessing
-import sys 
+import sys
 from tensorpc import marker, prim, AsyncRemoteManager
-import traceback 
-import asyncio 
+import traceback
+import asyncio
 import numpy as np
-import time 
+import time
 
-from tensorpc.core.serviceunit import ServiceEventType 
+from tensorpc.core.serviceunit import ServiceEventType
+
+
 class Simple:
+
     def __init__(self) -> None:
         print("???????????")
+
     def echo(self, x):
         return x
-    
+
     def sleep(self, interval: float):
         time.sleep(interval)
-    
+
+
 class SpeedTestServer:
 
     def recv_data(self, x):
-        return 
-    
+        return
+
     def send_data(self, size_mb: int):
         return np.zeros([size_mb * 1024 * 1024], dtype=np.uint8)
+
 
 class FileOps:
 
@@ -120,16 +126,20 @@ class FileOps:
             path.unlink()
             raise e
 
+
 class ProcessObserver:
-    def __init__(self, q: Optional[Union[queue.Queue, multiprocessing.Queue]] = None) -> None:
+
+    def __init__(
+            self,
+            q: Optional[Union[queue.Queue,
+                              multiprocessing.Queue]] = None) -> None:
         self.q = q
-    
+
     @marker.mark_server_event(event_type=ServiceEventType.BeforeServerStart)
     def server_start(self):
         if self.q is not None:
             port = prim.get_server_grpc_port()
             self.q.put(port)
-
 
     def get_threads_current_status(self):
         this_tid = threading.get_ident()
@@ -145,9 +155,11 @@ class ProcessObserver:
                 "filename": frame.f_code.co_filename,
                 "lineno": frame.f_lineno,
             })
-        return res 
+        return res
+
 
 class ProcessObserveManager:
+
     def __init__(self) -> None:
         is_sync_server = prim.get_server_exposed_props().is_sync
         self._lock = asyncio.Lock()
@@ -157,30 +169,36 @@ class ProcessObserveManager:
     @marker.mark_server_event(event_type=marker.ServiceEventType.Init)
     async def init(self):
         if self.is_sync_server:
-            return 
+            return
         self._check_loop_task = asyncio.create_task(self._check_client_loop())
 
     async def register_client(self, url: str, identifier: str):
         if self.is_sync_server:
-            raise ValueError("register_client can only be called in async server.")
+            raise ValueError(
+                "register_client can only be called in async server.")
         async with self._lock:
             self.clients[identifier] = AsyncRemoteManager(url)
 
     async def register_local_client(self, port: int, identifier: str):
         return await self.register_client(f"localhost:{port}", identifier)
-    
+
     async def _check_client_loop(self):
         stdn_ev = prim.get_async_shutdown_event()
         shut_task = asyncio.create_task(stdn_ev.wait())
 
-        wait_tasks: List[asyncio.Task] = [shut_task, asyncio.create_task(asyncio.sleep(1))]
+        wait_tasks: List[asyncio.Task] = [
+            shut_task, asyncio.create_task(asyncio.sleep(1))
+        ]
 
         while True:
-            (done, pending) = await asyncio.wait(
-                wait_tasks, return_when=asyncio.FIRST_COMPLETED)
+            (done,
+             pending) = await asyncio.wait(wait_tasks,
+                                           return_when=asyncio.FIRST_COMPLETED)
             if shut_task in done:
                 break
-            wait_tasks: List[asyncio.Task] = [shut_task, asyncio.create_task(asyncio.sleep(1))]
+            wait_tasks: List[asyncio.Task] = [
+                shut_task, asyncio.create_task(asyncio.sleep(1))
+            ]
             for identifier, client in self.clients.items():
                 try:
                     res = await client.health_check(timeout=1)

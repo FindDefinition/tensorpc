@@ -58,16 +58,28 @@ from tensorpc.flow.flowapp.objtree import get_objtree_context
 from tensorpc.flow.sampleapp.sample_preview import TestPreview0
 from tensorpc.flow.flowapp.components.plus.arraygrid import NumpyArrayGrid, NumpyArrayGridTable
 
-class MatrixDataGridAppV1:    
+
+class MatrixDataGridAppV1:
+
     @marker.mark_create_layout
     def my_layout(self):
         arr = np.random.uniform(0, 1, size=[100, 3])
         arr2 = np.random.randint(0, 100, size=[100, 1]).astype(np.int64)
-        column_def = mui.DataGrid.ColumnDef(id=f"unused", specialType=mui.DataGridColumnSpecialType.Number, width=80, specialProps=mui.DataGridColumnSpecialProps(mui.DataGridNumberCell(fixed=8)))
+        column_def = mui.DataGrid.ColumnDef(
+            id=f"unused",
+            specialType=mui.DataGridColumnSpecialType.Number,
+            width=80,
+            specialProps=mui.DataGridColumnSpecialProps(
+                mui.DataGridNumberCell(fixed=8)))
         custom_footers = [
             mui.MatchCase([
                 mui.MatchCase.Case("index", mui.Typography("Max")),
-                mui.MatchCase.Case(mui.undefined, mui.Typography().set_override_props(value="data").prop(enableTooltipWhenOverflow=True, tooltipEnterDelay=400, fontSize="12px")),
+                mui.MatchCase.Case(
+                    mui.undefined,
+                    mui.Typography().set_override_props(value="data").prop(
+                        enableTooltipWhenOverflow=True,
+                        tooltipEnterDelay=400,
+                        fontSize="12px")),
             ]).set_override_props(condition="condition")
         ]
         custom_footer_datas = [{
@@ -76,11 +88,19 @@ class MatrixDataGridAppV1:
             "a-2": str(arr.max(0)[2]),
             "b-0": str(arr2.max(0)[0]),
         }]
-        dgrid = mui.MatrixDataGrid(column_def, {"a": arr, "b": arr2}, 
-            customFooters=custom_footers, 
+        dgrid = mui.MatrixDataGrid(
+            column_def,
+            {
+                "a": arr,
+                "b": arr2
+            },
+            customFooters=custom_footers,
             customFooterDatas=custom_footer_datas,
         )
-        dgrid.prop(rowHover=True, virtualized=True, enableFilter=True, tableLayout="fixed")
+        dgrid.prop(rowHover=True,
+                   virtualized=True,
+                   enableFilter=True,
+                   tableLayout="fixed")
         dgrid.prop(tableSxProps={
             '& .MuiTableCell-sizeSmall': {
                 "padding": '2px 2px',
@@ -90,12 +110,15 @@ class MatrixDataGridAppV1:
             dgrid.prop(stickyHeader=False, virtualized=True, size="small"),
         ]).prop(width="100%", height="100%", overflow="hidden")
 
-class MatrixDataGridApp:    
+
+class MatrixDataGridApp:
+
     @marker.mark_create_layout
     def my_layout(self):
         arr = np.random.uniform(0, 1, size=[1, 3, 20000, 3])
         arr2 = np.random.randint(0, 1000, size=[1, 3, 20000, 4])
-        arr3 = np.random.randint(0, 254, size=[1, 3, 20000, 1]).astype(np.uint8)
+        arr3 = np.random.randint(0, 254, size=[1, 3, 20000,
+                                               1]).astype(np.uint8)
         arr.reshape(-1)[-2] = np.nan
         arr.reshape(-1)[-1] = np.inf
 
@@ -109,12 +132,14 @@ class MatrixDataGridApp:
         ]).prop(width="100%", height="100%", overflow="hidden")
 
 
-class MatrixDataGridContainerApp:    
+class MatrixDataGridContainerApp:
+
     @marker.mark_create_layout
     def my_layout(self):
         arr = np.random.uniform(0, 1, size=[1, 3, 20000, 3])
         arr2 = np.random.randint(0, 1000, size=[1, 3, 20000, 4])
-        arr3 = np.random.randint(0, 254, size=[1, 3, 20000, 1]).astype(np.uint8)
+        arr3 = np.random.randint(0, 254, size=[1, 3, 20000,
+                                               1]).astype(np.uint8)
         arr.reshape(-1)[-2] = np.nan
         arr.reshape(-1)[-1] = np.inf
         arr_item1 = {
@@ -125,11 +150,5 @@ class MatrixDataGridContainerApp:
         arr4 = np.random.uniform(0, 1, size=[100, 3])
 
         arr_item2 = arr4
-        
 
-        return NumpyArrayGridTable({
-            "a": arr_item1,
-            "b": arr_item2,
-            "d": 5
-
-        })
+        return NumpyArrayGridTable({"a": arr_item1, "b": arr_item2, "d": 5})

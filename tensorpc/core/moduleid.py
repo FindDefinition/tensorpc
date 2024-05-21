@@ -34,9 +34,11 @@ def get_qualname_of_type(klass: Type) -> str:
         return klass.__qualname__  # avoid outputs like 'builtins.str'
     return module + '.' + klass.__qualname__
 
+
 def get_mro_qualnames_of_type(klass: Type) -> Set[str]:
     mros = inspect.getmro(klass)
     return set(get_qualname_of_type(mro) for mro in mros)
+
 
 def is_lambda(obj: Callable):
     if not inspect.isfunction(obj) and not inspect.ismethod(obj):
@@ -51,47 +53,57 @@ def is_valid_function(obj: Callable):
 def get_function_qualname(obj: Callable):
     return obj.__qualname__
 
+
 if sys.version_info >= (3, 10):
     _ClassInfo: TypeAlias = type | types.UnionType | tuple["_ClassInfo", ...]
 else:
-    _ClassInfo: TypeAlias = Union[type, Tuple["_ClassInfo", ...]] 
+    _ClassInfo: TypeAlias = Union[type, Tuple["_ClassInfo", ...]]
+
 
 def loose_isinstance(obj, _class_or_tuple: _ClassInfo):
     """for reloaded code, the type of obj may be different from the type of the class in the current module.
     """
     obj_qnames = get_mro_qualnames_of_type(type(obj))
     if not isinstance(_class_or_tuple, (list, tuple)):
-        _class_or_tuple = (_class_or_tuple,)
+        _class_or_tuple = (_class_or_tuple, )
 
     for c in _class_or_tuple:
         if get_qualname_of_type(c) in obj_qnames:
-            return True 
-    return False 
+            return True
+    return False
+
 
 @dataclasses.dataclass
 class InMemoryFSItem:
-    path: str 
-    st_size: int 
+    path: str
+    st_size: int
     st_mtime: float
     st_ctime: float
     content: str
 
+
 class InMemoryFS:
+
     def __init__(self):
         self.fs_dict: Dict[str, InMemoryFSItem] = {}
 
     def add_file(self, path: str, content: str):
-        self.fs_dict[path] = InMemoryFSItem(path, len(content), time.time(), time.time(), content)
+        self.fs_dict[path] = InMemoryFSItem(path, len(content), time.time(),
+                                            time.time(), content)
 
     def modify_file(self, path: str, content: str):
         if path not in self.fs_dict:
             raise ValueError("file not exist")
-        self.fs_dict[path] = InMemoryFSItem(path, len(content), time.time(), self.fs_dict[path].st_ctime, content)
-    
+        self.fs_dict[path] = InMemoryFSItem(path, len(content), time.time(),
+                                            self.fs_dict[path].st_ctime,
+                                            content)
+
     def add_or_modify_file(self, path: str, content: str):
         if path not in self.fs_dict:
             return self.add_file(path, content)
-        self.fs_dict[path] = InMemoryFSItem(path, len(content), time.time(), self.fs_dict[path].st_ctime, content)
+        self.fs_dict[path] = InMemoryFSItem(path, len(content), time.time(),
+                                            self.fs_dict[path].st_ctime,
+                                            content)
 
     def stat(self, path: str):
         if path not in self.fs_dict:
@@ -100,7 +112,7 @@ class InMemoryFS:
 
     def __contains__(self, path: str):
         return path in self.fs_dict
-    
+
     def __getitem__(self, path: str):
         return self.fs_dict[path]
 
@@ -114,11 +126,11 @@ class InMemoryFS:
         # we need to add module to sys.modules to get inspect.getfile work.
         sys.modules[path] = module
         return module
-    
 
 
 def is_tensorpc_dynamic_path(path: str):
     return path.startswith(f"<{TENSORPC_FILE_NAME_PREFIX}")
+
 
 @dataclasses.dataclass
 class TypeMeta:
@@ -149,7 +161,8 @@ class TypeMeta:
             if self.is_in_memory:
                 assert in_memory_fs is not None
             if in_memory_fs is not None and self.is_in_memory:
-                standard_module = in_memory_fs.load_in_memory_module(self.module_key)
+                standard_module = in_memory_fs.load_in_memory_module(
+                    self.module_key)
             else:
                 mod_name = Path(self.module_key).stem + "_" + uuid.uuid4().hex
                 mod_name = f"<{mod_name}>"
@@ -171,7 +184,8 @@ class TypeMeta:
         return None
 
     @staticmethod
-    def get_local_type_from_module_dict_qualname(qualname: str, module_dict: Dict[str, Any]):
+    def get_local_type_from_module_dict_qualname(qualname: str,
+                                                 module_dict: Dict[str, Any]):
         parts = qualname.split(".")
         obj = module_dict[parts[0]]
         for part in parts[1:]:
@@ -185,6 +199,7 @@ class TypeMeta:
             obj = getattr(obj, part)
         return obj
 
+
 def get_obj_type_meta(obj_type) -> Optional[TypeMeta]:
     qualname = get_qualname_of_type(obj_type)
     spec = importlib.util.find_spec(qualname.split(".")[0])
@@ -197,7 +212,7 @@ def get_obj_type_meta(obj_type) -> Optional[TypeMeta]:
             path = inspect.getfile(obj_type)
             if path.startswith(f"<{TENSORPC_FILE_NAME_PREFIX}"):
                 module_path = path
-                is_in_memory = True 
+                is_in_memory = True
             else:
                 module_path_p = Path(path).resolve()
                 module_path = str(module_path_p)
@@ -206,10 +221,10 @@ def get_obj_type_meta(obj_type) -> Optional[TypeMeta]:
             type_path = obj_type.__module__
             if type_path.startswith(f"<{TENSORPC_FILE_NAME_PREFIX}"):
                 module_path = type_path
-                is_in_memory = True 
+                is_in_memory = True
             else:
                 return None
-    # assert spec is not None 
+    # assert spec is not None
     if spec is not None and spec.origin is not None:
         if "<" in spec.name:
             is_standard_module = False

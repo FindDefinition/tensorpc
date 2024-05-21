@@ -14,7 +14,7 @@
 
 import re
 from typing import Dict, Tuple
-import numpy as np 
+import numpy as np
 # https://developer.mozilla.org/en-US/docs/Web/CSS/color_value
 
 CSS_COLORS_TO_HEX = {
@@ -181,7 +181,6 @@ RANDOM_COLORS_FOR_UI = [
     "yellow",
     "black",
     "grey",
-
 ]
 
 CSS_COLORS = list(CSS_COLORS_TO_HEX.keys())
@@ -217,7 +216,8 @@ def str_to_rgb_float(color: str):
 
 def colors_for_label_array(label_array: np.ndarray):
     unique_labels, inverse = np.unique(label_array, return_inverse=True)
-    color_rgbs = np.array([str_to_rgb_float(color) for color in RANDOM_COLORS_FOR_UI])
+    color_rgbs = np.array(
+        [str_to_rgb_float(color) for color in RANDOM_COLORS_FOR_UI])
 
     color_for_each_unique_label = color_rgbs[unique_labels % len(color_rgbs)]
     label_color = color_for_each_unique_label[inverse]

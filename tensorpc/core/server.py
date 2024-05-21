@@ -134,7 +134,8 @@ def serve_service(service: RemoteObjectService,
                   max_threads=10,
                   process_id=-1,
                   credentials=None,
-                  grpc_options: Optional[List[Tuple[str, Union[str, int]]]] = None):
+                  grpc_options: Optional[List[Tuple[str, Union[str,
+                                                               int]]]] = None):
     assert isinstance(service, RemoteObjectService)
     if is_local and process_id >= 0:
         if hasattr(os, "sched_setaffinity"):
@@ -151,7 +152,7 @@ def serve_service(service: RemoteObjectService,
                    ('grpc.max_receive_message_length', length * 1024 * 1024)]
     options.append(('grpc.so_reuseport', 0))
     if grpc_options is not None:
-        options = grpc_options # override
+        options = grpc_options  # override
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_threads),
                          options=options)
     remote_object_pb2_grpc.add_RemoteObjectServicer_to_server(service, server)
@@ -210,7 +211,7 @@ def serve(service_def: ServiceDef,
         server_core.run_event(ServiceEventType.Init)
         service = RemoteObjectService(server_core, is_local, length)
         return serve_service(service, wait_time, port, length, is_local,
-                            max_threads, process_id, credentials)
+                             max_threads, process_id, credentials)
 
 
 def serve_with_http(service_def: ServiceDef,

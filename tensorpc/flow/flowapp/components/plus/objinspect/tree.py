@@ -23,14 +23,15 @@ from tensorpc.flow.flowapp.components.plus.monitor import \
     ComputeResourceMonitor
 from tensorpc.flow.flowapp.components.plus.core import (
     ALL_OBJECT_LAYOUT_HANDLERS, ALL_OBJECT_PREVIEW_HANDLERS,
-    USER_OBJ_TREE_TYPES, ContextMenuType, CustomTreeItemHandler, ObjectLayoutCreator,
-    ObjectLayoutHandler)
+    USER_OBJ_TREE_TYPES, ContextMenuType, CustomTreeItemHandler,
+    ObjectLayoutCreator, ObjectLayoutHandler)
 from tensorpc.flow.flowapp.core import FlowSpecialMethods, FrontendEventType
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 from tensorpc.flow.flowapp.objtree import UserObjTree, UserObjTreeProtocol
 from tensorpc.flow.flowapp.reload import reload_object_methods
 from tensorpc.flow.jsonlike import (CommonQualNames, ContextMenuData,
-                                    IconButtonData, parse_obj_to_jsonlike, TreeItem)
+                                    IconButtonData, parse_obj_to_jsonlike,
+                                    TreeItem)
 from tensorpc.flow.marker import mark_did_mount, mark_will_unmount
 from .controllers import CallbackSlider, ThreadLocker, MarkdownViewer
 from .analysis import ObjectTreeParser, TreeContext, enter_tree_conetxt
@@ -63,6 +64,7 @@ class ButtonType(enum.Enum):
     Watch = "watch"
     Record = "record"
 
+
 # _SHOULD_EXPAND_TYPES = {mui.JsonLikeType.List.value, mui.JsonLikeType.Tuple.value,
 #                         mui.JsonLikeType.Dict.value, mui.JsonLikeType.Object.value,
 #                             mui.JsonLikeType.ListFolder.value, mui.JsonLikeType.DictFolder.value,
@@ -76,7 +78,6 @@ class ButtonType(enum.Enum):
 #     if len(ignored_types) != 0:
 #         valid &= obj_type not in ignored_types
 #     return valid
-
 
 # def _get_root_tree(obj,
 #                    checker: Callable[[Type], bool],
@@ -93,7 +94,6 @@ class ButtonType(enum.Enum):
 #     root_node.cnt = len(obj_dict)
 #     return root_node
 
-
 # async def _parse_obj_to_node(obj,
 #                        node: mui.JsonLikeNode,
 #                        checker: Callable[[Type], bool],
@@ -101,7 +101,7 @@ class ButtonType(enum.Enum):
 #                        obj_meta_cache=None,
 #                        total_expand_level: int = 0):
 #     if node.type not in _SHOULD_EXPAND_TYPES:
-#         return 
+#         return
 #     if isinstance(obj, TreeItem):
 #         obj_dict = await obj.get_child_desps(node.id)  # type: ignore
 #         tree_children = list(obj_dict.values())
@@ -118,7 +118,6 @@ class ButtonType(enum.Enum):
 #             await _parse_obj_to_node(v, child_node, checker, cached_lazy_expand_ids,
 #                                obj_meta_cache, total_expand_level - 1)
 
-
 # async def _get_obj_tree(obj,
 #                   checker: Callable[[Type], bool],
 #                   key: str,
@@ -127,7 +126,7 @@ class ButtonType(enum.Enum):
 #                   cached_lazy_expand_ids: Optional[List[str]] = None,
 #                   total_expand_level: int = 0):
 #     if parent_id == "":
-#         obj_id = key 
+#         obj_id = key
 #     else:
 #         obj_id = f"{parent_id}{GLOBAL_SPLIT}{key}"
 #     assert total_expand_level >= 0
@@ -162,7 +161,9 @@ class DataStorageTreeItem(TreeItem):
         self.node_id = node_id
         self.readable_id = readable_id
 
-    async def get_child_desps(self, parent_ns: UniqueTreeIdForTree) -> Dict[str, mui.JsonLikeNode]:
+    async def get_child_desps(
+            self,
+            parent_ns: UniqueTreeIdForTree) -> Dict[str, mui.JsonLikeNode]:
         metas = await appctx.list_data_storage(self.node_id)
         for m in metas:
             m.id = parent_ns + m.id
@@ -192,7 +193,8 @@ class DataStorageTreeItem(TreeItem):
         res = await appctx.read_data_storage(key, self.node_id)
         return res
 
-    def get_json_like_node(self, id: UniqueTreeIdForTree) -> Optional[mui.JsonLikeNode]:
+    def get_json_like_node(
+            self, id: UniqueTreeIdForTree) -> Optional[mui.JsonLikeNode]:
         btns = [
             IconButtonData(ButtonType.Delete.value, mui.IconType.Delete.value)
         ]
@@ -228,7 +230,9 @@ class DataStorageTreeItem(TreeItem):
             await appctx.remove_data_storage(child_key, self.node_id)
             return True  # tell outside update childs
         if type == ContextMenuType.DataStorageItemCommand:
-            await appctx.get_app().copy_text_to_clipboard(f"await appctx.read_data_storage('{child_key}', '{self.node_id}')")
+            await appctx.get_app().copy_text_to_clipboard(
+                f"await appctx.read_data_storage('{child_key}', '{self.node_id}')"
+            )
 
     async def handle_context_menu(self, userdata: Dict[str, Any]):
         return
@@ -242,11 +246,15 @@ class ObservedFunctionTree(TreeItem):
 
     # async def get_childs(self):
 
-    async def get_child_desps(self, parent_ns: UniqueTreeIdForTree) -> Dict[str, mui.JsonLikeNode]:
+    async def get_child_desps(
+            self,
+            parent_ns: UniqueTreeIdForTree) -> Dict[str, mui.JsonLikeNode]:
         metas: Dict[str, mui.JsonLikeNode] = {}
         for k, v in appctx.get_app().get_observed_func_registry().items():
-            node = mui.JsonLikeNode(parent_ns + k, v.name,
-                                    mui.JsonLikeType.Function.value, alias=v.name)
+            node = mui.JsonLikeNode(parent_ns + k,
+                                    v.name,
+                                    mui.JsonLikeType.Function.value,
+                                    alias=v.name)
             node.iconBtns = [
                 IconButtonData(ButtonType.Watch.value,
                                mui.IconType.Visibility.value, "Watch"),
@@ -267,8 +275,10 @@ class ObservedFunctionTree(TreeItem):
     async def get_child(self, key: str) -> Any:
         return appctx.get_app().get_observed_func_registry()[key]
 
-    def get_json_like_node(self, id: UniqueTreeIdForTree) -> Optional[mui.JsonLikeNode]:
-        return mui.JsonLikeNode(UniqueTreeIdForTree.from_parts(["observedFunc"]),
+    def get_json_like_node(
+            self, id: UniqueTreeIdForTree) -> Optional[mui.JsonLikeNode]:
+        return mui.JsonLikeNode(UniqueTreeIdForTree.from_parts(
+            ["observedFunc"]),
                                 "observedFunc",
                                 mui.JsonLikeType.Object.value,
                                 typeStr="ObservedFunctions",
@@ -299,13 +309,16 @@ class SimpleCanvasCreator(ObjectLayoutCreator):
     def create(self):
         return SimpleCanvas()
 
+
 class BasicTreeEventType(enum.IntEnum):
     SelectSingle = 0
+
 
 @dataclasses.dataclass
 class SelectSingleEvent:
     nodes: List[mui.JsonLikeNode]
     objs: Optional[List[Any]] = None
+
 
 class BasicObjectTree(mui.FlexBox):
     """basic object tree, contains enough features
@@ -332,7 +345,10 @@ class BasicObjectTree(mui.FlexBox):
             self.tree.prop(ignoreRoot=True, fixedSize=fixed_size),
         ])
         self.prop(overflow="auto")
-        self._tree_parser = ObjectTreeParser(cared_types, ignored_types, custom_tree_item_handler=custom_tree_handler)
+        self._tree_parser = ObjectTreeParser(
+            cared_types,
+            ignored_types,
+            custom_tree_item_handler=custom_tree_handler)
         self._uid_to_node: Dict[str, mui.JsonLikeNode] = {}
         if cared_types is None:
             cared_types = set()
@@ -343,8 +359,9 @@ class BasicObjectTree(mui.FlexBox):
         self._obj_meta_cache = {}
         self._auto_lazy_expand = auto_lazy_expand
         # self._cached_lazy_expand_uids: List[str] = []
-        self._cared_dnd_uids: Dict[UniqueTreeIdForTree, Callable[[UniqueTreeIdForTree, Any],
-                                                 mui.CORO_NONE]] = {}
+        self._cared_dnd_uids: Dict[UniqueTreeIdForTree,
+                                   Callable[[UniqueTreeIdForTree, Any],
+                                            mui.CORO_NONE]] = {}
         self.limit = limit
         if init is None:
             self.root = {}
@@ -368,21 +385,25 @@ class BasicObjectTree(mui.FlexBox):
         self.tree.register_event_handler(
             FrontendEventType.TreeItemRename.value, self._on_rename)
         self.tree.register_event_handler(
-            FrontendEventType.TreeItemSelectChange.value, self._on_select_single)
+            FrontendEventType.TreeItemSelectChange.value,
+            self._on_select_single)
 
         self.tree.register_event_handler(FrontendEventType.DragCollect.value,
                                          self._on_drag_collect,
                                          backend_only=True)
         self.default_expand_level = default_expand_level
 
-        self.event_async_select_single = self._create_emitter_event_slot(BasicTreeEventType.SelectSingle)
+        self.event_async_select_single = self._create_emitter_event_slot(
+            BasicTreeEventType.SelectSingle)
 
     @mark_did_mount
     async def _on_mount(self):
         # self.tree.props.tree = await _get_root_tree_async(
         #     self.root, self._valid_checker, _ROOT, self._obj_meta_cache)
-        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree, self)):
-            root_node = await self._tree_parser.get_root_tree(self.root, _ROOT, self.default_expand_level)
+        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree,
+                                            self)):
+            root_node = await self._tree_parser.get_root_tree(
+                self.root, _ROOT, self.default_expand_level)
         # self.tree.props.tree = await _get_obj_tree(
         #     self.root, self._valid_checker, _ROOT, "", self._obj_meta_cache, total_expand_level=self.default_expand_level)
         self.tree.props.tree = root_node
@@ -410,10 +431,12 @@ class BasicObjectTree(mui.FlexBox):
             if not tree_node_trace[i].is_folder():
                 real_keys.append(k)
                 real_uids.append(uids[i])
-        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree, self)):
-            return await self._tree_parser.get_obj_by_uid(self.root,
-                                        UniqueTreeIdForTree.from_parts(real_uids),
-                                        real_keys=real_keys)
+        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree,
+                                            self)):
+            return await self._tree_parser.get_obj_by_uid(
+                self.root,
+                UniqueTreeIdForTree.from_parts(real_uids),
+                real_keys=real_keys)
 
     async def _get_obj_by_uid_trace(self, uid: UniqueTreeIdForTree,
                                     tree_node_trace: List[mui.JsonLikeNode]):
@@ -425,13 +448,16 @@ class BasicObjectTree(mui.FlexBox):
             if not tree_node_trace[i].is_folder():
                 real_keys.append(k)
                 real_uids.append(uids[i])
-        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree, self)):
-            return await self._tree_parser.get_obj_by_uid_trace(self.root,
-                                            UniqueTreeIdForTree.from_parts(real_uids),
-                                            real_keys=real_keys)
+        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree,
+                                            self)):
+            return await self._tree_parser.get_obj_by_uid_trace(
+                self.root,
+                UniqueTreeIdForTree.from_parts(real_uids),
+                real_keys=real_keys)
 
-    def _register_dnd_uid(self, uid: UniqueTreeIdForTree, cb: Callable[[UniqueTreeIdForTree, Any],
-                                                       mui.CORO_NONE]):
+    def _register_dnd_uid(self, uid: UniqueTreeIdForTree,
+                          cb: Callable[[UniqueTreeIdForTree, Any],
+                                       mui.CORO_NONE]):
         self._cared_dnd_uids[uid] = cb
 
     def _unregister_dnd_uid(self, uid: UniqueTreeIdForTree):
@@ -464,8 +490,10 @@ class BasicObjectTree(mui.FlexBox):
     async def _on_drag_collect(self, data):
         uid: str = data["id"]
         uid_obj = UniqueTreeIdForTree(uid)
-        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree, self)):
-            objs, found = await self._tree_parser.get_obj_by_uid_trace(self.root, uid_obj)
+        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree,
+                                            self)):
+            objs, found = await self._tree_parser.get_obj_by_uid_trace(
+                self.root, uid_obj)
         if not found:
             return None
         tab_id = ""
@@ -478,11 +506,13 @@ class BasicObjectTree(mui.FlexBox):
                 root = obj
                 break
         if root is not None:
-            return TreeDragTarget(objs[-1], uid, tab_id, self._flow_uid_encoded,
+            return TreeDragTarget(objs[-1], uid, tab_id,
+                                  self._flow_uid_encoded,
                                   lambda: root.enter_context(root))
         return TreeDragTarget(objs[-1], uid, tab_id, self._flow_uid_encoded)
-    
-    async def _on_select_single(self, uid_list: Union[List[str], str, Dict[str, bool]]):
+
+    async def _on_select_single(self, uid_list: Union[List[str], str,
+                                                      Dict[str, bool]]):
         if isinstance(uid_list, list):
             # node id list may empty
             if not uid_list:
@@ -497,11 +527,14 @@ class BasicObjectTree(mui.FlexBox):
         uid_obj = UniqueTreeIdForTree(uid)
         nodes = self._objinspect_root._get_node_by_uid_trace(uid_obj.parts)
         objs, found = await self._get_obj_by_uid_trace(uid_obj, nodes)
-        return await self.flow_event_emitter.emit_async(BasicTreeEventType.SelectSingle, 
-            mui.Event(BasicTreeEventType.SelectSingle, SelectSingleEvent(nodes, objs if found else None)))
+        return await self.flow_event_emitter.emit_async(
+            BasicTreeEventType.SelectSingle,
+            mui.Event(BasicTreeEventType.SelectSingle,
+                      SelectSingleEvent(nodes, objs if found else None)))
 
     async def _on_expand(self, uid_encoded: str):
-        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree, self)):
+        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree,
+                                            self)):
             uid = UniqueTreeIdForTree(uid_encoded)
             node = self._objinspect_root._get_node_by_uid(uid_encoded)
             nodes, node_found = self._objinspect_root._get_node_by_uid_trace_found(
@@ -515,18 +548,21 @@ class BasicObjectTree(mui.FlexBox):
                 assert not isinstance(node.start, mui.Undefined)
                 assert not isinstance(node.realId, mui.Undefined)
                 if node._is_divisible(self.limit):
-                    node.children = node._get_divided_tree(self.limit, node.start)
+                    node.children = node._get_divided_tree(
+                        self.limit, node.start)
                     upd = self.tree.update_event(tree=self._objinspect_root)
                     return await self.tree.send_and_wait(upd)
                 # real_node = self._objinspect_root._get_node_by_uid(node.realId)
-                real_obj, found = await self._get_obj_by_uid(node.realId, nodes)
+                real_obj, found = await self._get_obj_by_uid(
+                    node.realId, nodes)
                 if node.type == mui.JsonLikeType.ListFolder.value:
                     data = real_obj[node.start:node.start + node.cnt]
                 else:
                     assert not isinstance(node.keys, mui.Undefined)
                     data = {k: real_obj[k] for k in node.keys.data}
                 obj_dict = {**(await self._tree_parser.expand_object(data))}
-                tree = await self._tree_parser.parse_obj_dict_to_nodes(obj_dict, node.id)
+                tree = await self._tree_parser.parse_obj_dict_to_nodes(
+                    obj_dict, node.id)
                 node.children = tree
                 upd = self.tree.update_event(tree=self._objinspect_root)
                 return await self.tree.send_and_wait(upd)
@@ -541,24 +577,27 @@ class BasicObjectTree(mui.FlexBox):
             # if the object is special (extend TreeItem), we use used-defined
             # function instead of analysis it.
             if isinstance(obj, TreeItem):
-                obj_dict_desp = await obj.get_child_desps(uid)  
+                obj_dict_desp = await obj.get_child_desps(uid)
                 obj_dict = {**obj_dict_desp}
                 tree = list(obj_dict_desp.values())
             else:
                 obj_dict = {**(await self._tree_parser.expand_object(obj))}
-                tree = await self._tree_parser.parse_obj_dict_to_nodes(obj_dict, node.id)
+                tree = await self._tree_parser.parse_obj_dict_to_nodes(
+                    obj_dict, node.id)
             node.children = tree
             upd = self.tree.update_event(tree=self._objinspect_root)
             return await self.tree.send_and_wait(upd)
 
     async def _on_rename(self, uid_newname: Tuple[str, str]):
-        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree, self)):
+        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree,
+                                            self)):
 
             uid = uid_newname[0]
             uid_obj = UniqueTreeIdForTree(uid)
             uid_parts = uid_obj.parts
 
-            obj_trace, found = await self._tree_parser.get_obj_by_uid_trace(self.root, uid_obj)
+            obj_trace, found = await self._tree_parser.get_obj_by_uid_trace(
+                self.root, uid_obj)
             if not found:
                 return
             # if object is TreeItem or parent is TreeItem,
@@ -567,20 +606,23 @@ class BasicObjectTree(mui.FlexBox):
             if len(obj_trace) >= 2:
                 parent = obj_trace[-2]
                 if isinstance(parent, TreeItem):
-                    nodes = self._objinspect_root._get_node_by_uid_trace(uid_obj.parts)
+                    nodes = self._objinspect_root._get_node_by_uid_trace(
+                        uid_obj.parts)
                     parent_node = nodes[-2]
-                    res = await parent.handle_child_rename(uid_parts[-1],
-                                                        uid_newname[1])
+                    res = await parent.handle_child_rename(
+                        uid_parts[-1], uid_newname[1])
                     if res == True:
                         await self._on_expand(parent_node.id.uid_encoded)
                     return
 
     async def _on_custom_button(self, uid_btn: Tuple[str, str]):
-        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree, self)):
+        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree,
+                                            self)):
             uid = uid_btn[0]
             uid_obj = UniqueTreeIdForTree(uid)
             uid_parts = uid_obj.parts
-            obj_trace, found = await self._tree_parser.get_obj_by_uid_trace(self.root, uid_obj)
+            obj_trace, found = await self._tree_parser.get_obj_by_uid_trace(
+                self.root, uid_obj)
             if not found:
                 return
 
@@ -599,8 +641,8 @@ class BasicObjectTree(mui.FlexBox):
                 parent = obj_trace[-2]
                 if isinstance(parent, TreeItem):
                     parent_node = nodes[-2]
-                    res = await parent.handle_child_button(uid_btn[1],
-                                                        uid_parts[-1])
+                    res = await parent.handle_child_button(
+                        uid_btn[1], uid_parts[-1])
                     if res == True:
                         await self._on_expand(parent_node.id.uid_encoded)
                     return
@@ -613,11 +655,13 @@ class BasicObjectTree(mui.FlexBox):
                 else:
                     print("reload failed.")
             if self._tree_parser.custom_tree_item_handler is not None:
-                await self._tree_parser.custom_tree_item_handler.handle_button(obj_trace, nodes, uid_btn[1])
+                await self._tree_parser.custom_tree_item_handler.handle_button(
+                    obj_trace, nodes, uid_btn[1])
 
     async def _on_contextmenu(self, uid_menuid_data: Tuple[str, str,
                                                            Optional[Any]]):
-        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree, self)):
+        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree,
+                                            self)):
 
             uid = uid_menuid_data[0]
             uid_obj = UniqueTreeIdForTree(uid)
@@ -636,7 +680,8 @@ class BasicObjectTree(mui.FlexBox):
                             # update this node
                             await self._on_expand(uid)
                         return
-                    nodes = self._objinspect_root._get_node_by_uid_trace(uid_obj.parts)
+                    nodes = self._objinspect_root._get_node_by_uid_trace(
+                        uid_obj.parts)
                     if len(obj_trace) >= 2:
                         parent = obj_trace[-2]
                         parent_node = nodes[-2]
@@ -645,20 +690,28 @@ class BasicObjectTree(mui.FlexBox):
                                 uid_parts[-1], userdata)
                             if res == True:
                                 # update this node
-                                await self._on_expand(parent_node.id.uid_encoded)
+                                await self._on_expand(
+                                    parent_node.id.uid_encoded)
                             return
                     if self._tree_parser.custom_tree_item_handler is not None:
-                        await self._tree_parser.custom_tree_item_handler.handle_button(obj_trace, nodes, userdata)
+                        await self._tree_parser.custom_tree_item_handler.handle_button(
+                            obj_trace, nodes, userdata)
 
     def has_object(self, key: str):
         return key in self.root
 
-    async def set_object(self, obj, key: str = _DEFAULT_OBJ_NAME, expand_level: int = 1):
+    async def set_object(self,
+                         obj,
+                         key: str = _DEFAULT_OBJ_NAME,
+                         expand_level: int = 1):
         key_in_root = key in self.root
         self.root[key] = obj
-        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree, self)):
-            obj_tree = await self._tree_parser.get_root_tree(obj, key, expand_level, ns=self.tree.props.tree.id)
-            await self._tree_parser.parse_obj_to_tree(obj, obj_tree, expand_level)
+        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree,
+                                            self)):
+            obj_tree = await self._tree_parser.get_root_tree(
+                obj, key, expand_level, ns=self.tree.props.tree.id)
+            await self._tree_parser.parse_obj_to_tree(obj, obj_tree,
+                                                      expand_level)
         # obj_tree = await _get_obj_tree(obj, self._checker, key,
         #                          self.tree.props.tree.id, self._obj_meta_cache,
         #                          self._cached_lazy_expand_uids,
@@ -676,10 +729,15 @@ class BasicObjectTree(mui.FlexBox):
             self.tree.update_event(tree=self.tree.props.tree))
         await self._do_when_tree_updated(obj_tree.id)
 
-    async def update_tree(self, wait: bool = True, update_tree: bool = True, update_iff_change: bool = False):
+    async def update_tree(self,
+                          wait: bool = True,
+                          update_tree: bool = True,
+                          update_iff_change: bool = False):
         t = time.time()
-        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree, self)):
-            new_tree = await self._tree_parser.get_root_tree(self.root, _ROOT, self.default_expand_level)
+        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree,
+                                            self)):
+            new_tree = await self._tree_parser.get_root_tree(
+                self.root, _ROOT, self.default_expand_level)
         # print(0, time.time() - t)
         if update_tree:
             if update_iff_change:
@@ -697,8 +755,10 @@ class BasicObjectTree(mui.FlexBox):
         # print(2, time.time() - t)
 
     async def update_tree_event(self):
-        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree, self)):
-            self.tree.props.tree = await self._tree_parser.get_root_tree(self.root, _ROOT, self.default_expand_level)
+        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree,
+                                            self)):
+            self.tree.props.tree = await self._tree_parser.get_root_tree(
+                self.root, _ROOT, self.default_expand_level)
         return self.tree.update_event(tree=self.tree.props.tree)
 
     async def remove_object(self, key: str):
@@ -713,7 +773,9 @@ class BasicObjectTree(mui.FlexBox):
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
 
-    async def _get_obj_by_uid_with_folder(self, uid_may_obj: Union[str, UniqueTreeIdForTree], nodes: List[mui.JsonLikeNode]):
+    async def _get_obj_by_uid_with_folder(
+            self, uid_may_obj: Union[str, UniqueTreeIdForTree],
+            nodes: List[mui.JsonLikeNode]):
         if isinstance(uid_may_obj, str):
             uid_obj = UniqueTreeIdForTree(uid_may_obj)
             uid = uid_may_obj
@@ -754,7 +816,9 @@ class BasicObjectTree(mui.FlexBox):
             obj, found = await self._get_obj_by_uid(uid_obj, nodes)
         return obj, found
 
-    async def _get_obj_by_uid_with_folder_trace(self, uid_may_obj: Union[str, UniqueTreeIdForTree], nodes: List[mui.JsonLikeNode]):
+    async def _get_obj_by_uid_with_folder_trace(
+            self, uid_may_obj: Union[str, UniqueTreeIdForTree],
+            nodes: List[mui.JsonLikeNode]):
         # TODO merge this with _get_obj_by_uid_with_folder
         node = nodes[-1]
         if isinstance(uid_may_obj, str):
@@ -795,12 +859,14 @@ class BasicObjectTree(mui.FlexBox):
                         obj = real_obj[key]
                     obj_trace.append(obj)
             else:
-                obj_trace, found = await self._get_obj_by_uid_trace(uid_obj, nodes)
+                obj_trace, found = await self._get_obj_by_uid_trace(
+                    uid_obj, nodes)
         else:
             obj_trace, found = await self._get_obj_by_uid(uid_obj, nodes)
         return obj_trace, found
 
-    async def get_object_by_uid(self, uid_may_obj: Union[str, UniqueTreeIdForTree]):
+    async def get_object_by_uid(self, uid_may_obj: Union[str,
+                                                         UniqueTreeIdForTree]):
         if isinstance(uid_may_obj, str):
             uid_obj = UniqueTreeIdForTree(uid_may_obj)
             uid = uid_may_obj
@@ -845,18 +911,21 @@ class BasicObjectTree(mui.FlexBox):
                 f"your object {uid} is invalid, may need to reflesh")
         return obj
 
+
 class ObjectTree(BasicObjectTree):
     """object tree for object inspector.
     """
 
-    def __init__(self,
-                 init: Optional[Any] = None,
-                 cared_types: Optional[Set[Type]] = None,
-                 ignored_types: Optional[Set[Type]] = None,
-                 use_fast_tree: bool = False,
-                 limit: int = 50,
-                 fixed_size: bool = False,
-                 custom_tree_handler: Optional[CustomTreeItemHandler] = None) -> None:
+    def __init__(
+            self,
+            init: Optional[Any] = None,
+            cared_types: Optional[Set[Type]] = None,
+            ignored_types: Optional[Set[Type]] = None,
+            use_fast_tree: bool = False,
+            limit: int = 50,
+            fixed_size: bool = False,
+            custom_tree_handler: Optional[CustomTreeItemHandler] = None
+    ) -> None:
         self._default_data_storage_nodes: Dict[str, DataStorageTreeItem] = {}
         self._default_obs_funcs = ObservedFunctionTree()
         default_builtins = {
@@ -874,8 +943,15 @@ class ObjectTree(BasicObjectTree):
             _DEFAULT_DATA_STORAGE_NAME: self._default_data_storage_nodes,
             _DEFAULT_OBSERVED_FUNC_NAME: self._default_obs_funcs,
         }
-        self._data_storage_uid = UniqueTreeIdForTree.from_parts([_ROOT, _DEFAULT_DATA_STORAGE_NAME])
-        super().__init__(init, cared_types, ignored_types, limit, use_fast_tree, fixed_size=fixed_size, custom_tree_handler=custom_tree_handler)
+        self._data_storage_uid = UniqueTreeIdForTree.from_parts(
+            [_ROOT, _DEFAULT_DATA_STORAGE_NAME])
+        super().__init__(init,
+                         cared_types,
+                         ignored_types,
+                         limit,
+                         use_fast_tree,
+                         fixed_size=fixed_size,
+                         custom_tree_handler=custom_tree_handler)
         self.root.update(default_builtins)
 
     @mark_did_mount
@@ -905,8 +981,10 @@ class ObjectTree(BasicObjectTree):
                 n, readable_n)
         # self.tree.props.tree = await _get_root_tree_async(
         #     self.root, self._valid_checker, _ROOT, self._obj_meta_cache)
-        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree, self)):
-            self.tree.props.tree = await self._tree_parser.get_root_tree(self.root, _ROOT, self.default_expand_level)
+        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree,
+                                            self)):
+            self.tree.props.tree = await self._tree_parser.get_root_tree(
+                self.root, _ROOT, self.default_expand_level)
         if context_menus:
             await self.tree.send_and_wait(
                 self.tree.update_event(tree=self.tree.props.tree,
@@ -938,7 +1016,6 @@ class ObjectTree(BasicObjectTree):
     async def _sync_data_storage_node(self):
         await self._on_expand(self._data_storage_uid.uid_encoded)
 
-
     async def _on_contextmenu(self, uid_menuid_data: Tuple[str, str,
                                                            Optional[Any]]):
         uid = uid_menuid_data[0]
@@ -957,11 +1034,12 @@ class ObjectTree(BasicObjectTree):
                     if res == True:
                         # update this node
                         await self._on_expand(uid)
-                    if res is not None: # handle this event
+                    if res is not None:  # handle this event
                         return
                 if len(obj_trace) >= 2:
                     parent = obj_trace[-2]
-                    nodes = self._objinspect_root._get_node_by_uid_trace(uid_obj.parts)
+                    nodes = self._objinspect_root._get_node_by_uid_trace(
+                        uid_obj.parts)
                     parent_node = nodes[-2]
 
                     if isinstance(parent, TreeItem):
@@ -970,7 +1048,7 @@ class ObjectTree(BasicObjectTree):
                         if res == True:
                             # update this node
                             await self._on_expand(parent_node.id.uid_encoded)
-                        if res is not None: # handle this event
+                        if res is not None:  # handle this event
                             return
                 # handle regular objects
                 menu_type = ContextMenuType(userdata["type"])
@@ -981,5 +1059,5 @@ class ObjectTree(BasicObjectTree):
                     await appctx.save_data_storage(uid_parts[-1], obj, node_id)
                     await self._sync_data_storage_node()
                 if menu_type == ContextMenuType.CopyReadItemCode:
-                    await appctx.get_app().copy_text_to_clipboard(f"await appctx.inspector.read_item('{uid}')")
-
+                    await appctx.get_app().copy_text_to_clipboard(
+                        f"await appctx.inspector.read_item('{uid}')")

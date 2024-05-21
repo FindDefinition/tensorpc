@@ -1,9 +1,8 @@
-
-
 from typing import Any, Optional
 from tensorpc.flow.jsonlike import TensorType
 from tensorpc.core.moduleid import get_qualname_of_type
-import numpy as np 
+import numpy as np
+
 
 def _try_cast_tensor_dtype(obj: Any) -> Optional[np.dtype]:
     try:
@@ -28,6 +27,7 @@ def _try_cast_tensor_dtype(obj: Any) -> Optional[np.dtype]:
     except:
         return None
 
+
 def _get_tensor_type(obj):
     if isinstance(obj, np.ndarray):
         return TensorType.NpArray
@@ -37,6 +37,7 @@ def _get_tensor_type(obj):
         return TensorType.TorchTensor
     else:
         return TensorType.Unknown
+
 
 def _cast_tensor_to_np(obj: Any) -> Optional[np.ndarray]:
     if isinstance(obj, np.ndarray):
@@ -52,7 +53,9 @@ def _cast_tensor_to_np(obj: Any) -> Optional[np.ndarray]:
         return obj.numpy()
     return None
 
+
 class TensorContainer:
+
     def __init__(self, obj: Any, type: TensorType, dtype: np.dtype) -> None:
         self.type = type
         self.dtype = dtype
@@ -60,17 +63,18 @@ class TensorContainer:
 
     def numpy(self):
         res = _cast_tensor_to_np(self._obj)
-        assert res is not None 
-        return res 
-    
-    @property 
+        assert res is not None
+        return res
+
+    @property
     def shape(self):
         return list(self._obj.shape)
+
 
 def get_tensor_container(obj) -> Optional[TensorContainer]:
     type = _get_tensor_type(obj)
     if type == TensorType.Unknown:
-        return None 
+        return None
     dtype = _try_cast_tensor_dtype(obj)
-    assert dtype is not None 
+    assert dtype is not None
     return TensorContainer(obj, type, dtype)

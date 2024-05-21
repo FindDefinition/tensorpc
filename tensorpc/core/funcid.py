@@ -159,6 +159,7 @@ def get_attribute_name_parts(node):
 def get_attribute_name(node):
     return ".".join(get_attribute_name_parts(node))
 
+
 def determine_code_common_indent(code: str):
     lines = code.split("\n")
     indent = None
@@ -172,11 +173,13 @@ def determine_code_common_indent(code: str):
             indent = min(indent, line_indent)
     return indent
 
+
 def remove_common_indent_from_code(code: str):
     common_indent = determine_code_common_indent(code)
     code_without_indent = "\n".join(
         [l[common_indent:] for l in code.split("\n")])
     return code_without_indent
+
 
 def get_body_blocks_from_code(code: str, autorun_block_symbol: str = ""):
     code = remove_common_indent_from_code(code)

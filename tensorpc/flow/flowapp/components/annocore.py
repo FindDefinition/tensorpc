@@ -5,5 +5,3 @@ import numpy.typing as npt
 from pydantic_core import CoreSchema, core_schema
 
 from pydantic.types import TransformSchema
-
-

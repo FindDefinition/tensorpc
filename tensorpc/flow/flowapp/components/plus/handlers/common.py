@@ -4,7 +4,7 @@ import traceback
 from typing import Any, Dict
 
 import numpy as np
-import io 
+import io
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import ObservedFunction
 from tensorpc.flow.flowapp import appctx
@@ -15,7 +15,6 @@ from tensorpc.flow.flowapp.components.plus.config import ConfigPanelV2
 from ..common import CommonQualNames
 from ..core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler, DataClassesType
 from ..arraygrid import NumpyArrayGrid
-
 
 monospace_14px = dict(fontFamily="monospace", fontSize="14px")
 _MAX_STRING_IN_DETAIL = 10000
@@ -32,8 +31,9 @@ class TensorHandler(ObjectPreviewHandler):
         self.data_print = mui.Typography("").prop(fontFamily="monospace",
                                                   fontSize="12px",
                                                   whiteSpace="pre-wrap")
-        self.slice_val = mui.TextField("Slice", callback=self._slice_change).prop(size="small",
-                                                 muiMargin="dense")
+        self.slice_val = mui.TextField(
+            "Slice", callback=self._slice_change).prop(size="small",
+                                                       muiMargin="dense")
         self.grid_container = mui.HBox([])
         dialog = mui.Dialog([
             self.grid_container.prop(flex=1, height="70vh", width="100%")
@@ -64,7 +64,9 @@ class TensorHandler(ObjectPreviewHandler):
 
     async def _on_show_viewer_dialog(self):
         await self.grid_container.set_new_layout([
-             NumpyArrayGrid(self.obj).prop(width="100%", height="100%", overflow="hidden")
+            NumpyArrayGrid(self.obj).prop(width="100%",
+                                          height="100%",
+                                          overflow="hidden")
         ])
         await self.dialog.set_open(True)
 
@@ -88,7 +90,7 @@ class TensorHandler(ObjectPreviewHandler):
 
     async def _slice_change(self, value: str):
         if self.obj_uid != "":
-             self._tensor_slices[self.obj_uid] = value
+            self._tensor_slices[self.obj_uid] = value
 
     async def _on_3d_vis(self):
         if self.obj_uid in self._tensor_slices:
@@ -98,7 +100,7 @@ class TensorHandler(ObjectPreviewHandler):
         slice_eval_expr = f"a{self._tensor_slices[self.obj_uid]}"
         res = eval(slice_eval_expr, {"a": self.obj})
         canvas = appctx.find_component(SimpleCanvas)
-        assert canvas is not None 
+        assert canvas is not None
         await canvas._unknown_visualization(self.obj_uid, res)
 
     async def bind(self, obj, uid: str):
@@ -162,13 +164,13 @@ class TensorHandler(ObjectPreviewHandler):
         if hasnan:
             tags.append(
                 mui.Chip("nan").prop(muiColor="error",
-                                    size="small",
-                                    clickable=False))
+                                     size="small",
+                                     clickable=False))
         if hasinf:
             tags.append(
                 mui.Chip("inf").prop(muiColor="error",
-                                    size="small",
-                                    clickable=False))
+                                     size="small",
+                                     clickable=False))
         await self.tags.set_new_layout([*tags])
 
 
@@ -214,14 +216,12 @@ class ObservedFunctionHandler(ObjectPreviewHandler):
         await self.path.write(obj.path)
 
 
-
 @ALL_OBJECT_PREVIEW_HANDLERS.register(DataClassesType)
 class DataclassesHandler(ObjectPreviewHandler):
 
     def __init__(self) -> None:
         self.cfg_ctrl_container = mui.Fragment([])
-        super().__init__(
-            [self.cfg_ctrl_container])
+        super().__init__([self.cfg_ctrl_container])
         self.prop(flexDirection="column", flex=1)
 
     async def bind(self, obj: Any, uid: str):
@@ -230,10 +230,12 @@ class DataclassesHandler(ObjectPreviewHandler):
         panel = ConfigPanelV2(obj).prop(reactKey=uid)
         await self.cfg_ctrl_container.set_new_layout([panel])
 
+
 class DefaultHandler(ObjectPreviewHandler):
     """
     TODO if the object support any-layout, add a button to enable it.
     """
+
     def __init__(self) -> None:
         self.tags = mui.FlexBox().prop(flexFlow="row wrap")
         self.title = mui.Typography("").prop(wordBreak="break-word")

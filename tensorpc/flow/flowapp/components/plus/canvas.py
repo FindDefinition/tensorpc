@@ -31,13 +31,15 @@ from tensorpc.flow.jsonlike import TreeItem
 from tensorpc.utils.registry import HashableSeqRegistryKeyOnly
 from tensorpc.flow.flowapp.components.core import get_tensor_container
 
-UNKNOWN_VIS_REGISTRY: HashableSeqRegistryKeyOnly[Callable[[Any, str, "SimpleCanvas"], Coroutine[None, None, bool]]] = HashableSeqRegistryKeyOnly()
+UNKNOWN_VIS_REGISTRY: HashableSeqRegistryKeyOnly[
+    Callable[[Any, str, "SimpleCanvas"],
+             Coroutine[None, None, bool]]] = HashableSeqRegistryKeyOnly()
 
 
 def _try_cast_to_point_cloud(obj: Any):
     tc = get_tensor_container(obj)
     if tc is None:
-        return None 
+        return None
 
     ndim = obj.ndim
     if ndim == 2:
@@ -52,7 +54,7 @@ def _try_cast_to_point_cloud(obj: Any):
 def _try_cast_to_box3d(obj: Any):
     tc = get_tensor_container(obj)
     if tc is None:
-        return None 
+        return None
     ndim = obj.ndim
     if ndim == 2:
         dtype = tc.dtype
@@ -66,7 +68,7 @@ def _try_cast_to_box3d(obj: Any):
 def _try_cast_to_lines(obj: Any):
     tc = get_tensor_container(obj)
     if tc is None:
-        return None 
+        return None
     ndim = obj.ndim
     if ndim == 3:
         dtype = tc.dtype
@@ -79,7 +81,7 @@ def _try_cast_to_lines(obj: Any):
 def _try_cast_to_image(obj: Any):
     tc = get_tensor_container(obj)
     if tc is None:
-        return None 
+        return None
     ndim = obj.ndim
     valid = False
     is_rgba = False
@@ -87,7 +89,7 @@ def _try_cast_to_image(obj: Any):
         valid = tc.dtype == np.uint8
     elif ndim == 3:
         valid = tc.dtype == np.uint8 and (obj.shape[2] == 3
-                                           or obj.shape[2] == 4)
+                                          or obj.shape[2] == 4)
         is_rgba = obj.shape[2] == 4
     if valid:
         res = tc.numpy()
@@ -96,16 +98,19 @@ def _try_cast_to_image(obj: Any):
         return res
     return None
 
+
 class CanvasTreeItem(TreeItem):
-    pass 
+    pass
+
 
 @dataclasses.dataclass
 class PointCfg:
     size: float = dataclasses.field(default=3,
                                     metadata=ConfigPanel.slider_meta(1, 10))
     encode_method: Literal["none", "int16"] = "none"
-    encode_scale: mui.NumberType = dataclasses.field(default=50,
-                                    metadata=ConfigPanel.slider_meta(25, 100))
+    encode_scale: mui.NumberType = dataclasses.field(
+        default=50, metadata=ConfigPanel.slider_meta(25, 100))
+
 
 @dataclasses.dataclass
 class BoxCfg:
@@ -114,16 +119,15 @@ class BoxCfg:
                                               1, 5))
     add_cross: bool = True
     opacity: float = dataclasses.field(default=0.2,
-                                          metadata=ConfigPanel.slider_meta(
-                                              0.0, 1.0))
+                                       metadata=ConfigPanel.slider_meta(
+                                           0.0, 1.0))
 
 
 @dataclasses.dataclass
 class GlobalCfg:
     background: mui.ControlColorRGBA
     enable_perf: bool = dataclasses.field(
-        default=False,
-        metadata=ConfigPanel.base_meta(alias="Enable Perf"))
+        default=False, metadata=ConfigPanel.base_meta(alias="Enable Perf"))
 
 
 class CamCtrlKeyboardMode(enum.Enum):
@@ -162,20 +166,21 @@ class SimpleCanvas(mui.FlexBox):
             screenshot_callback: Optional[Callable[[bytes, Any],
                                                    mui._CORO_NONE]] = None,
             transparent_canvas: bool = False,
-            init_canvas_childs: Optional[List[three.ThreeComponentType]] = None,
+            init_canvas_childs: Optional[List[
+                three.ThreeComponentType]] = None,
             key: str = "canvas",
             sync_canvases: Optional[Set["SimpleCanvas"]] = None):
         if camera is None:
             camera = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         self.camera = camera
         # self.ctrl = three.FirstPersonControl().prop(makeDefault=True,
-        #                                             enabled=True, activeLook=True, constrainVertical=False, 
+        #                                             enabled=True, activeLook=True, constrainVertical=False,
         #                                             autoForward=False, heightCoef=1, heightMin=0, heightMax=1,
         #                                             lookVertical=True, lookSpeed=0.005, movementSpeed=1, verticalMax=np.pi, verticalMin=0,)
         # self.ctrl = three.PointerLockControl().prop(
         #                                             enabled=True, makeDefault=True)
         self.ctrl = three.CameraControl().prop(makeDefault=True)
-        
+
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.axis_helper = three.AxesHelper(20)
         self.infgrid = infgrid
@@ -199,7 +204,6 @@ class SimpleCanvas(mui.FlexBox):
         if init_canvas_childs is None:
             init_canvas_childs = []
         canvas_layout = [
-
             self.ctrl,
             self.camera,
             self._dynamic_pcs,
@@ -215,13 +219,12 @@ class SimpleCanvas(mui.FlexBox):
 
             # three.GizmoHelper().prop(alignment="bottom-right", renderPriority=1),
             *init_canvas_childs,
-
         ]
         # if with_grid:
         #     canvas_layout.append(infgrid)
         self._ctrl_container = mui.Fragment([])
-        self.canvas = three.Canvas(canvas_layout).prop(
-            flex=1, allowKeyboardEvent=True)
+        self.canvas = three.Canvas(canvas_layout).prop(flex=1,
+                                                       allowKeyboardEvent=True)
         if not self._is_transparent:
             self.canvas.prop(threeBackgroundColor="#ffffff")
         self._point_dict: Dict[str, three.Points] = {}
@@ -239,21 +242,23 @@ class SimpleCanvas(mui.FlexBox):
             sync_canvases = set()
         self._sync_canvases: Set[SimpleCanvas] = sync_canvases
         if len(sync_canvases) > 0:
-            self.ctrl.event_change.on(self._sync_camera_ctrl).configure(throttle=100)
+            self.ctrl.event_change.on(
+                self._sync_camera_ctrl).configure(throttle=100)
 
         super().__init__()
         self.init_add_layout([*self._layout_func()])
 
     def __get_cfg_panel(self):
         _cfg_panel = ConfigPanelV2(self.cfg, self._on_cfg_change)
-        _cfg_panel.prop(border="1px solid",
-                             borderColor="gray",
-                             backgroundColor="white",
-                            #  collapsed=True,
-                            #  title="configs",
-                             marginLeft="5px",
-                             width="400px",
-                             height="300px")
+        _cfg_panel.prop(
+            border="1px solid",
+            borderColor="gray",
+            backgroundColor="white",
+            #  collapsed=True,
+            #  title="configs",
+            marginLeft="5px",
+            width="400px",
+            height="300px")
         return _cfg_panel
 
     async def _on_screen_shot_finish(self, img_and_data: Tuple[str, Any]):
@@ -355,7 +360,6 @@ class SimpleCanvas(mui.FlexBox):
                                          size="small",
                                          tooltip="Enable Config Panel",
                                          tooltipPlacement="right"),
-
                     mui.IconButton(mui.IconType.Clear,
                                    callback=self._on_clear).prop(
                                        tooltip="Clear",
@@ -367,7 +371,11 @@ class SimpleCanvas(mui.FlexBox):
                 ]),
                 # self._cfg_panel,
                 self._ctrl_container,
-            ]).prop(position="absolute", top=3, left=3, zIndex=5, maxHeight="10%"),
+            ]).prop(position="absolute",
+                    top=3,
+                    left=3,
+                    zIndex=5,
+                    maxHeight="10%"),
             mui.IconButton(mui.IconType.Help,
                            lambda: None).prop(tooltip=help_string,
                                               position="absolute",
@@ -399,7 +407,7 @@ class SimpleCanvas(mui.FlexBox):
             sxOverDrop={"border": "4px solid green"},
         )
         return layout
-    
+
     async def set_transparent(self, is_transparent: bool):
         if is_transparent:
             await self.canvas.send_and_wait(
@@ -408,24 +416,24 @@ class SimpleCanvas(mui.FlexBox):
             await self.canvas.send_and_wait(
                 self.canvas.update_event(threeBackgroundColor="#ffffff"))
 
-    @staticmethod 
+    @staticmethod
     def register_unknown_vis_handler(key: Type):
         """register a handler for unknown vis. the handle must be a 
         function with (obj, uid) argument.
         """
         return UNKNOWN_VIS_REGISTRY.register(key)
-    
-    @staticmethod 
+
+    @staticmethod
     def get_tensor_container(obj: Any):
         return get_tensor_container(obj)
-        
-    async def register_cam_control_event_handler(self,
-                                           handler: Callable[[Any],
-                                                             mui.CORO_NONE],
-                                           throttle: int = 100,
-                                           debounce: Optional[int] = None):
+
+    async def register_cam_control_event_handler(
+            self,
+            handler: Callable[[Any], mui.CORO_NONE],
+            throttle: int = 100,
+            debounce: Optional[int] = None):
         self.ctrl.event_change.on(handler).configure(throttle=throttle,
-                                         debounce=debounce)
+                                                     debounce=debounce)
         await self.ctrl.sync_used_events()
 
     async def clear_cam_control_event_handler(self):
@@ -441,8 +449,7 @@ class SimpleCanvas(mui.FlexBox):
 
     async def _on_enable_cfg_panel(self, selected):
         if selected:
-            await self._ctrl_container.set_new_layout(
-                [self.__get_cfg_panel()])
+            await self._ctrl_container.set_new_layout([self.__get_cfg_panel()])
         else:
             await self._ctrl_container.set_new_layout([])
 
@@ -453,7 +460,8 @@ class SimpleCanvas(mui.FlexBox):
         for c in canvas:
             self._sync_canvases.add(c)
         if self._sync_canvases:
-            await self.register_cam_control_event_handler(self._sync_camera_ctrl)
+            await self.register_cam_control_event_handler(
+                self._sync_camera_ctrl)
 
     async def _sync_camera_ctrl(self, camdata):
         # print(camdata)
@@ -462,14 +470,17 @@ class SimpleCanvas(mui.FlexBox):
         for canvas in self._sync_canvases:
             await canvas.set_cam2world(mat, 50)
 
-    async def _unknown_visualization(self, tree_id: str, obj: Any, ignore_registry: bool = False):
+    async def _unknown_visualization(self,
+                                     tree_id: str,
+                                     obj: Any,
+                                     ignore_registry: bool = False):
         obj_type = type(obj)
         if obj_type in UNKNOWN_VIS_REGISTRY and not ignore_registry:
             handlers = UNKNOWN_VIS_REGISTRY[obj_type]
             for handler in handlers:
                 res = await handler(obj, tree_id, self)
                 if res == True:
-                    return True 
+                    return True
         # found nothing in registry. use default one.
         pc_obj = _try_cast_to_point_cloud(obj)
         if pc_obj is not None:
@@ -483,8 +494,10 @@ class SimpleCanvas(mui.FlexBox):
             colors_pc: Optional[str] = None
             if pc_obj.shape[1] == 3:
                 colors_pc = pick
-            await self.show_points(tree_id, pc_obj.astype(np.float32),
-                                   pc_obj.shape[0], colors=colors_pc)
+            await self.show_points(tree_id,
+                                   pc_obj.astype(np.float32),
+                                   pc_obj.shape[0],
+                                   colors=colors_pc)
             return True
         img_obj = _try_cast_to_image(obj)
         if img_obj is not None:
@@ -517,7 +530,10 @@ class SimpleCanvas(mui.FlexBox):
                                      len(random_colors)]
                 self._random_colors[tree_id] = pick
 
-            await self.show_lines(tree_id, line_obj, line_obj.shape[0], color=pick)
+            await self.show_lines(tree_id,
+                                  line_obj,
+                                  line_obj.shape[0],
+                                  color=pick)
             return True
         return False
 
@@ -531,7 +547,8 @@ class SimpleCanvas(mui.FlexBox):
             success = await self._unknown_visualization(data.tree_id, obj)
             if success:
                 # register to tree
-                tree = find_component_by_uid_with_type_check(data.source_comp_uid, BasicObjectTree)
+                tree = find_component_by_uid_with_type_check(
+                    data.source_comp_uid, BasicObjectTree)
                 if tree is not None:
                     tree._register_dnd_uid(UniqueTreeIdForTree(data.tree_id),
                                            self._dnd_cb)
@@ -578,22 +595,21 @@ class SimpleCanvas(mui.FlexBox):
     async def reset_camera(self):
         return await self.ctrl.reset_camera()
 
-    async def show_points(self,
-                          key: str,
-                          points: np.ndarray,
-                          limit: int,
-                          colors: Optional[Union[np.ndarray, str]] = None,
-                          sizes: Optional[Union[mui.Undefined,
-                                                np.ndarray]] = None,
-                          size_attenuation: bool = False,
-                          size: Optional[float] = None,
-                          encode_method: Optional[Union[Literal["none", "int16"], mui.Undefined]] = None, 
-                          encode_scale: Optional[Union[mui.NumberType, mui.Undefined]] = None,
-                        attrs: Optional[Union[np.ndarray,
-                                                mui.Undefined]] = None,
-                        attr_fields: Optional[List[str]] = None,
-
-                          ):
+    async def show_points(
+        self,
+        key: str,
+        points: np.ndarray,
+        limit: int,
+        colors: Optional[Union[np.ndarray, str]] = None,
+        sizes: Optional[Union[mui.Undefined, np.ndarray]] = None,
+        size_attenuation: bool = False,
+        size: Optional[float] = None,
+        encode_method: Optional[Union[Literal["none", "int16"],
+                                      mui.Undefined]] = None,
+        encode_scale: Optional[Union[mui.NumberType, mui.Undefined]] = None,
+        attrs: Optional[Union[np.ndarray, mui.Undefined]] = None,
+        attr_fields: Optional[List[str]] = None,
+    ):
         if encode_method is None:
             encode_method = self.cfg.point.encode_method
         if encode_scale is None:
@@ -601,25 +617,37 @@ class SimpleCanvas(mui.FlexBox):
         if key not in self._point_dict:
             if encode_method is not None:
                 if attrs is None:
-                    ui = three.Points(limit).prop(encodeMethod=encode_method, encodeScale=encode_scale, colorMap=three.ColorMap(min=points[:, 2].min(), max=points[:, 2].max()))
+                    ui = three.Points(limit).prop(encodeMethod=encode_method,
+                                                  encodeScale=encode_scale,
+                                                  colorMap=three.ColorMap(
+                                                      min=points[:, 2].min(),
+                                                      max=points[:, 2].max()))
                 else:
-                    assert attr_fields is not None 
-                    ui = three.Points(limit).prop(encodeMethod=encode_method, encodeScale=encode_scale, attrs=attrs, attrFields=attr_fields, colorMap=three.ColorMap(min=points[:, 2].min(), max=points[:, 2].max()))
+                    assert attr_fields is not None
+                    ui = three.Points(limit).prop(encodeMethod=encode_method,
+                                                  encodeScale=encode_scale,
+                                                  attrs=attrs,
+                                                  attrFields=attr_fields,
+                                                  colorMap=three.ColorMap(
+                                                      min=points[:, 2].min(),
+                                                      max=points[:, 2].max()))
             else:
-                ui = three.Points(limit).prop(colorMap=three.ColorMap(min=points[:, 2].min(), max=points[:, 2].max()))
+                ui = three.Points(limit).prop(colorMap=three.ColorMap(
+                    min=points[:, 2].min(), max=points[:, 2].max()))
             self._point_dict[key] = ui
             await self._dynamic_pcs.update_childs({key: ui})
         point_ui = self._point_dict[key]
-        await point_ui.update_points(points,
-                                     colors,
-                                     limit=limit,
-                                     size=self.cfg.point.size if size is None else size,
-                                     sizes=sizes,
-                                     size_attenuation=size_attenuation,
-                                     encode_method=encode_method, 
-                                     encode_scale=encode_scale,
-                                     attrs=attrs,
-                                     attr_fields=attr_fields)
+        await point_ui.update_points(
+            points,
+            colors,
+            limit=limit,
+            size=self.cfg.point.size if size is None else size,
+            sizes=sizes,
+            size_attenuation=size_attenuation,
+            encode_method=encode_method,
+            encode_scale=encode_scale,
+            attrs=attrs,
+            attr_fields=attr_fields)
         return point_ui
 
     async def clear_points(self, clear_keys: Optional[List[str]] = None):
@@ -687,36 +715,52 @@ class SimpleCanvas(mui.FlexBox):
         self._segment_dict.clear()
         await self._dynamic_lines.set_new_layout({})
 
-    async def show_voxels(self,
-                         key: str,
-                         centers: np.ndarray,
-                         colors: Union[np.ndarray, str],
-                         size: float,
-                         limit: int):
+    async def show_voxels(self, key: str, centers: np.ndarray,
+                          colors: Union[np.ndarray,
+                                        str], size: float, limit: int):
         if key not in self._voxels_dict:
             # ui = three.VoxelMesh(centers, size, limit, [
             #     three.MeshStandardMaterial().prop(vertexColors=isinstance(colors, np.ndarray), color=colors if isinstance(colors, str) else mui.undefined),
             # ], colors=colors if isinstance(colors, np.ndarray) else mui.undefined)
-            ui = three.InstancedMesh(centers, limit, [
-                three.BoxGeometry(size, size, size),
-                three.MeshBasicMaterial().prop(vertexColors=False, color=colors if isinstance(colors, str) else mui.undefined),
-            ], colors=colors if isinstance(colors, np.ndarray) else mui.undefined)
+            ui = three.InstancedMesh(
+                centers,
+                limit, [
+                    three.BoxGeometry(size, size, size),
+                    three.MeshBasicMaterial().prop(
+                        vertexColors=False,
+                        color=colors
+                        if isinstance(colors, str) else mui.undefined),
+                ],
+                colors=colors
+                if isinstance(colors, np.ndarray) else mui.undefined)
             self._voxels_dict[key] = ui
             await self._dynamic_voxels.update_childs({key: ui})
-            return 
+            return
         ui = self._voxels_dict[key]
         limit_prev = ui.props.limit
         assert not isinstance(limit_prev, mui.Undefined)
         if isinstance(ui, three.InstancedMesh):
             if limit <= limit_prev:
-                await ui.send_and_wait(ui.update_event(size=size, colors=colors, transforms=centers))
+                await ui.send_and_wait(
+                    ui.update_event(size=size,
+                                    colors=colors,
+                                    transforms=centers))
             else:
-                await ui.send_and_wait(ui.update_event(size=size, colors=colors, transforms=centers, limit=limit))
+                await ui.send_and_wait(
+                    ui.update_event(size=size,
+                                    colors=colors,
+                                    transforms=centers,
+                                    limit=limit))
         else:
             if limit <= limit_prev:
-                await ui.send_and_wait(ui.update_event(size=size, colors=colors, centers=centers))
+                await ui.send_and_wait(
+                    ui.update_event(size=size, colors=colors, centers=centers))
             else:
-                await ui.send_and_wait(ui.update_event(size=size, colors=colors, centers=centers, limit=limit))
+                await ui.send_and_wait(
+                    ui.update_event(size=size,
+                                    colors=colors,
+                                    centers=centers,
+                                    limit=limit))
 
     async def clear_all_voxels(self):
         # TODO currently no way to clear lines without unmount

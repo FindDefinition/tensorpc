@@ -30,7 +30,6 @@ from tensorpc.flow.flowapp.appcore import (enter_app_conetxt, find_component,
 from tensorpc.flow.flowapp.components import plus
 from tensorpc.flow.flowapp.components.plus.objinspect.controllers import ThreadLocker
 
-
 P = ParamSpec('P')
 
 T = TypeVar('T')
@@ -86,13 +85,16 @@ async def list_all_data_storage_nodes(
     app = get_app()
     return await app.list_all_data_storage_nodes(graph_id)
 
+
 def set_app_z_index(z_index: int):
     app = get_app()
-    app._dialog_z_index = z_index 
+    app._dialog_z_index = z_index
+
 
 def set_observed_func_registry(registry: ObservedFunctionRegistryProtocol):
     app = get_app()
     return app.set_observed_func_registry(registry)
+
 
 def run_with_exception_inspect(func: Callable[P, T], *args: P.args,
                                **kwargs: P.kwargs) -> T:
@@ -116,18 +118,20 @@ def _run_func_with_app(app, func: Callable[P, T], *args: P.args,
         return func(*args, **kwargs)
 
 
-async def run_in_executor_with_exception_inspect(func: Callable[P, T],
-                                                 *args: P.args,
+async def run_in_executor_with_exception_inspect(func: Callable[P, T], *args:
+                                                 P.args,
                                                  **kwargs: P.kwargs) -> T:
     """run a sync function in executor with exception inspect.
     """
     comp = find_component(plus.ObjectInspector)
     if comp is None:
         return await asyncio.get_running_loop().run_in_executor(
-            None, _run_func_with_app, get_app(), func, *args, **kwargs)  # type: ignore
+            None, _run_func_with_app, get_app(), func, *args,
+            **kwargs)  # type: ignore
     assert comp is not None, "you must add inspector to your UI to use exception inspect"
     return await comp.run_in_executor_with_exception_inspect(
         _run_func_with_app, get_app(), func, *args, **kwargs)
+
 
 def run_coro_sync(coro: Coroutine) -> Any:
     loop = get_app()._loop
@@ -140,6 +144,5 @@ def run_coro_sync(coro: Coroutine) -> Any:
         # return fut
     else:
         # we can wait fut here.
-        fut = asyncio.run_coroutine_threadsafe(
-            coro, loop)
+        fut = asyncio.run_coroutine_threadsafe(coro, loop)
         return fut.result()

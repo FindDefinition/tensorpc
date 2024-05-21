@@ -25,65 +25,79 @@ class _ServiceNames:
     @property
     def SCHED_TASK_SET_EXCEPTION(self):
         from tensorpc.autossh.services.scheduler import Scheduler
-        return get_service_key_by_type(Scheduler, Scheduler.set_task_exception.__name__)
-    
+        return get_service_key_by_type(Scheduler,
+                                       Scheduler.set_task_exception.__name__)
+
     @property
     def SCHED_TASK_SET_FINISHED(self):
         from tensorpc.autossh.services.scheduler import Scheduler
-        return get_service_key_by_type(Scheduler, Scheduler.set_task_finished.__name__)
-    
+        return get_service_key_by_type(Scheduler,
+                                       Scheduler.set_task_finished.__name__)
+
     @property
     def SCHED_TASK_QUERY_UPDATES(self):
         from tensorpc.autossh.services.scheduler import Scheduler
-        return get_service_key_by_type(Scheduler, Scheduler.query_task_updates.__name__)
-    
+        return get_service_key_by_type(Scheduler,
+                                       Scheduler.query_task_updates.__name__)
+
     @property
     def SCHED_TASK_GET_ALL_TASK(self):
         from tensorpc.autossh.services.scheduler import Scheduler
-        return get_service_key_by_type(Scheduler, Scheduler.get_all_task_state.__name__)
-    
+        return get_service_key_by_type(Scheduler,
+                                       Scheduler.get_all_task_state.__name__)
+
     @property
     def SCHED_TASK_SUBMIT_TASK(self):
         from tensorpc.autossh.services.scheduler import Scheduler
-        return get_service_key_by_type(Scheduler, Scheduler.submit_task.__name__)
+        return get_service_key_by_type(Scheduler,
+                                       Scheduler.submit_task.__name__)
 
     @property
     def SCHED_TASK_UPDATE_TASK(self):
         from tensorpc.autossh.services.scheduler import Scheduler
-        return get_service_key_by_type(Scheduler, Scheduler.update_task.__name__)
+        return get_service_key_by_type(Scheduler,
+                                       Scheduler.update_task.__name__)
+
     @property
     def SCHED_TASK_CANCEL_TASK(self):
         from tensorpc.autossh.services.scheduler import Scheduler
-        return get_service_key_by_type(Scheduler, Scheduler.cancel_task.__name__)
-    
+        return get_service_key_by_type(Scheduler,
+                                       Scheduler.cancel_task.__name__)
+
     @property
     def SCHED_TASK_KILL_TASK(self):
         from tensorpc.autossh.services.scheduler import Scheduler
         return get_service_key_by_type(Scheduler, Scheduler.kill_task.__name__)
-    
+
     @property
     def SCHED_TASK_CHECK_STATUS(self):
         from tensorpc.autossh.services.scheduler import Scheduler
-        return get_service_key_by_type(Scheduler, Scheduler.check_task_status.__name__)
-    
+        return get_service_key_by_type(Scheduler,
+                                       Scheduler.check_task_status.__name__)
+
     @property
     def SCHED_TASK_SET_STATUS(self):
         from tensorpc.autossh.services.scheduler import Scheduler
-        return get_service_key_by_type(Scheduler, Scheduler.set_task_status.__name__)
+        return get_service_key_by_type(Scheduler,
+                                       Scheduler.set_task_status.__name__)
 
     @property
     def SCHED_TASK_DELETE(self):
         from tensorpc.autossh.services.scheduler import Scheduler
-        return get_service_key_by_type(Scheduler, Scheduler.delete_task.__name__)
+        return get_service_key_by_type(Scheduler,
+                                       Scheduler.delete_task.__name__)
 
     @property
     def SCHED_TASK_RESOURCE_USAGE(self):
         from tensorpc.autossh.services.scheduler import Scheduler
-        return get_service_key_by_type(Scheduler, Scheduler.get_resource_usage.__name__)
-    
+        return get_service_key_by_type(Scheduler,
+                                       Scheduler.get_resource_usage.__name__)
+
     @property
     def SCHED_TASK_QUERY_TMUX_PANES(self):
         from tensorpc.autossh.services.scheduler import Scheduler
-        return get_service_key_by_type(Scheduler, Scheduler.query_task_tmux_lines.__name__)
+        return get_service_key_by_type(
+            Scheduler, Scheduler.query_task_tmux_lines.__name__)
+
 
 serv_names = _ServiceNames()

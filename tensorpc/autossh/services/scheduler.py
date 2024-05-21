@@ -5,20 +5,24 @@ from tensorpc.autossh.scheduler.core import ALL_CTRL_C_CANCELABLE_STATUS, ALL_KI
 from tensorpc.autossh.scheduler import tmux
 from tensorpc.core import marker, prim
 import uuid
-import time 
+import time
 import psutil
-import subprocess 
+import subprocess
 import dataclasses
-import io 
-import csv 
+import io
+import csv
 from tensorpc.utils.gpuusage import get_nvidia_gpu_measures
 
 _SUPPORTED_SET_STATUS = set([TaskStatus.NeedToCancel])
 
+
 class ResourceManager:
+
     def __init__(self, num_cpu: int, num_gpu: int) -> None:
-        self.idle_resources: Dict[ResourceType, Set[Tuple[ResourceType, int]]] = {}
-        self.occupied_resources: Dict[ResourceType, Set[Tuple[ResourceType, int]]] = {}
+        self.idle_resources: Dict[ResourceType, Set[Tuple[ResourceType,
+                                                          int]]] = {}
+        self.occupied_resources: Dict[ResourceType, Set[Tuple[ResourceType,
+                                                              int]]] = {}
         self.num_gpu = num_gpu
         for item in ResourceType:
             self.idle_resources[item] = set()
@@ -33,13 +37,16 @@ class ResourceManager:
         num_gpu_idle = len(self.idle_resources[ResourceType.GPU])
         return f"ResourceManager(GPU={num_gpu_idle}/{self.num_gpu})"
 
-    def request_idle_cpus(self, num_cpu: int) -> List[Tuple[ResourceType, int]]:
+    def request_idle_cpus(self,
+                          num_cpu: int) -> List[Tuple[ResourceType, int]]:
         return self._request_idle_resources(ResourceType.CPU, num_cpu)
-    
-    def request_idle_gpus(self, num_gpu: int) -> List[Tuple[ResourceType, int]]:
+
+    def request_idle_gpus(self,
+                          num_gpu: int) -> List[Tuple[ResourceType, int]]:
         return self._request_idle_resources(ResourceType.GPU, num_gpu)
 
-    def _request_idle_resources(self, resource_type: ResourceType, num: int) -> List[Tuple[ResourceType, int]]:
+    def _request_idle_resources(self, resource_type: ResourceType,
+                                num: int) -> List[Tuple[ResourceType, int]]:
         idle_resources = self.idle_resources[resource_type]
         if len(idle_resources) < num:
             return []
@@ -57,36 +64,38 @@ class ResourceManager:
                     self.occupied_resources[item].remove(r)
                     self.idle_resources[item].add(r)
 
+
 class Scheduler:
-    def __init__(self, uid: str = "scheduler", max_number_of_task = 32) -> None:
+
+    def __init__(self, uid: str = "scheduler", max_number_of_task=32) -> None:
         self.tasks: Dict[str, Task] = {}
         self.uid = uid
         self.grpc_port = -1
         self.period_check_duration = 1.0
         max_number_of_task = min(psutil.cpu_count(False), max_number_of_task)
-        self.resource_manager = ResourceManager(max_number_of_task, len(get_nvidia_gpu_measures()))
-
+        self.resource_manager = ResourceManager(max_number_of_task,
+                                                len(get_nvidia_gpu_measures()))
 
     @marker.mark_server_event(event_type=marker.ServiceEventType.Init)
     async def init_scheduler(self):
         self.lock = asyncio.Lock()
         self.grpc_port = prim.get_server_grpc_port()
-        self._period_task = asyncio.create_task(self._period_check_task_status())
+        self._period_task = asyncio.create_task(
+            self._period_check_task_status())
 
     def init_task(self, task_id: str, pid: int):
         if task_id in self.tasks:
             task = self.tasks[task_id]
             task.state.status = TaskStatus.Running
-            task.state.pid = pid 
+            task.state.pid = pid
             self._update_task_timestamp(task)
             return task.command, task.params
         # task may be deleted before init and after tmux process launch.
-        return None 
+        return None
 
     def _release_task_resources(self, task: Task):
         self.resource_manager.release_resources(task.state.resources)
         task.state.resources = []
-
 
     async def _period_check_task_status(self):
         await asyncio.sleep(self.period_check_duration)
@@ -114,22 +123,25 @@ class Scheduler:
                     # print("RELEASE TASK", task.id)
 
                     self._release_task_resources(task)
-                    # task_changed = True 
+                    # task_changed = True
         # if task_changed:
         # print("PERIOD SCHEDULE")
 
         self._do_schedule()
         # print("num idle", len(self.resource_manager.idle_resources[ResourceType.GPU]), "num occ", len(self.resource_manager.occupied_resources[ResourceType.GPU]))
 
-        self._period_task = asyncio.create_task(self._period_check_task_status())
+        self._period_task = asyncio.create_task(
+            self._period_check_task_status())
 
     def get_all_task_state(self):
-        return list(self.tasks.values()) 
-    
+        return list(self.tasks.values())
+
     def get_resource_usage(self):
         return self.resource_manager.idle_resources, self.resource_manager.occupied_resources
 
-    def query_task_updates(self, ts_uids: List[Tuple[int, str]], tmux_pane_lines: int = 0):
+    def query_task_updates(self,
+                           ts_uids: List[Tuple[int, str]],
+                           tmux_pane_lines: int = 0):
         """compare query timestamp, return updated + new and deleted tasks
         """
         deleted_uids: List[str] = []
@@ -154,13 +166,15 @@ class Scheduler:
                 task.state.tmux_pane_last_lines = res
         return update_tasks, deleted_uids
 
-    def query_task_tmux_lines(self, task_uids: List[str], tmux_pane_lines: int = 0):
+    def query_task_tmux_lines(self,
+                              task_uids: List[str],
+                              tmux_pane_lines: int = 0):
         returns: Dict[str, str] = {}
         for task_id in task_uids:
             res = tmux.capture_pane_last_lines(task_id, tmux_pane_lines)
             if isinstance(res, list):
                 res = "\n".join(res)
-            returns[task_id] = res 
+            returns[task_id] = res
         return returns
 
     def submit_task(self, task: Task):
@@ -176,7 +190,8 @@ class Scheduler:
             # print("submit_task PREV", prev_task.id, prev_task.state.status)
 
             if prev_task.state.status in ALL_RUNNING_STATUS:
-                raise RuntimeError(f"task {task.id} is already running or pending")
+                raise RuntimeError(
+                    f"task {task.id} is already running or pending")
             else:
                 # replace old task with new one
                 self.tasks[task.id] = task
@@ -195,18 +210,18 @@ class Scheduler:
             return task.state.status
         else:
             return TaskStatus.Unknown
-        
+
     def set_task_status(self, task_id: str, status: TaskStatus):
         assert status in _SUPPORTED_SET_STATUS, f"only support set to {list(_SUPPORTED_SET_STATUS)}"
         if task_id in self.tasks:
             task = self.tasks[task_id]
             if status == TaskStatus.NeedToCancel:
                 if task.state.status not in ALL_RUNNING_STATUS:
-                    return False 
-            task.state.status = status 
+                    return False
+            task.state.status = status
             self._update_task_timestamp(task)
             return True
-        return False 
+        return False
 
     def run_task(self, task_id: str):
         task = self.tasks[task_id]
@@ -214,42 +229,44 @@ class Scheduler:
             # print("RUNTASK", task_id)
             cmd = f"python -m tensorpc.autossh.scheduler.runtask {task.type.value}"
             task.state.status = TaskStatus.Booting
-            tmux.launch_tmux_task(task_id, cmd, not task.keep_tmux_session, self.grpc_port, task.state.resources, task.cwd)
+            tmux.launch_tmux_task(task_id, cmd, not task.keep_tmux_session,
+                                  self.grpc_port, task.state.resources,
+                                  task.cwd)
             self._update_task_timestamp(task)
-            return True 
-        return False 
-    
+            return True
+        return False
+
     def cancel_task(self, task_id: str):
         task = self.tasks[task_id]
         if task.state.status in ALL_CTRL_C_CANCELABLE_STATUS:
             tmux.cancel_task(task_id)
-            return True 
+            return True
         elif task.state.status == TaskStatus.Pending:
             task.state.status = TaskStatus.Canceled
             self._update_task_timestamp(task)
             return True
-        return False 
-    
+        return False
+
     def kill_task(self, task_id: str):
         task = self.tasks[task_id]
         if task.state.status in ALL_KILLABLE_STATUS:
             tmux.kill_task(task_id, task.state.pid)
-            return True 
+            return True
         elif task.state.status == TaskStatus.Pending:
             task.state.status = TaskStatus.Canceled
             self._update_task_timestamp(task)
             return True
-        return False 
-    
+        return False
+
     def delete_task(self, task_id: str):
         if task_id in self.tasks:
             task = self.tasks[task_id]
             assert task.state.status not in ALL_RUNNING_STATUS, "you can't delete a running task"
             self.tasks.pop(task_id)
             tmux.delete_task(task_id)
-            return True 
-        return False 
-    
+            return True
+        return False
+
     def _update_task_timestamp(self, task: Task):
         task.state.timestamp = time.time_ns()
 
@@ -259,22 +276,23 @@ class Scheduler:
             if task.state.status == TaskStatus.Pending:
                 pending_tasks.append(task)
         if not pending_tasks:
-            return 
+            return
         pending_tasks.sort(key=lambda x: x.create_timestamp)
         for task in pending_tasks:
-            num_cpu_used = 1 
+            num_cpu_used = 1
             num_gpu_used = task.num_gpu_used
             resources = self.resource_manager.request_idle_cpus(num_cpu_used)
             if len(resources) == 0:
-                break 
+                break
             if num_gpu_used > 0:
                 # print("BEFORE REQUEST GPU", self.resource_manager)
 
-                gpu_resources = self.resource_manager.request_idle_gpus(num_gpu_used)
+                gpu_resources = self.resource_manager.request_idle_gpus(
+                    num_gpu_used)
                 # print(task.id, num_gpu_used, gpu_resources, self.resource_manager)
                 if len(gpu_resources) == 0:
                     self.resource_manager.release_resources(resources)
-                    continue 
+                    continue
                 resources.extend(gpu_resources)
             task.state.resources = resources
             self.run_task(task.id)
@@ -288,7 +306,10 @@ class Scheduler:
             self._release_task_resources(task)
             self._do_schedule()
 
-    def update_task(self, task_id: str, progress: float, output: Optional[TaskOutput] = None):
+    def update_task(self,
+                    task_id: str,
+                    progress: float,
+                    output: Optional[TaskOutput] = None):
         if task_id in self.tasks:
             task = self.tasks[task_id]
             task.state.progress = max(min(progress, 1.0), 0.0)
@@ -305,4 +326,3 @@ class Scheduler:
                 task.state.status = TaskStatus.AlmostFinished
                 task.state.progress = 1.0
             self._update_task_timestamp(task)
-

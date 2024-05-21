@@ -21,6 +21,7 @@ from contextlib import suppress
 from aiohttp import streamer
 from tensorpc.core.serviceunit import ServiceEventType
 
+
 @streamer
 async def file_sender(writer, file_bytes: bytes, chunk_size=2**16):
     """
@@ -28,10 +29,11 @@ async def file_sender(writer, file_bytes: bytes, chunk_size=2**16):
     without reading them into memory
     """
     bio = io.BytesIO(file_bytes)
-    chunk = bio.read(2 ** 16)
+    chunk = bio.read(2**16)
     while chunk:
         await writer.write(chunk)
-        chunk = bio.read(2 ** 16)
+        chunk = bio.read(2**16)
+
 
 @streamer
 async def grpc_iter_file_sender(writer, reader):
@@ -46,13 +48,17 @@ async def grpc_iter_file_sender(writer, reader):
 
 
 from .core import WebsocketClientBase, WebsocketMsg, WebsocketMsgType, WebsocketHandler
+
+
 async def _cancel(task):
     # more info: https://stackoverflow.com/a/43810272/1113207
     task.cancel()
     with suppress(asyncio.CancelledError):
         await task
 
+
 class AiohttpWebsocketClient(WebsocketClientBase):
+
     def __init__(self,
                  id: str,
                  ws: web.WebSocketResponse,
@@ -64,23 +70,24 @@ class AiohttpWebsocketClient(WebsocketClientBase):
     async def close(self):
         return await self.ws.close()
 
-    def get_msg_max_size(self) -> int: 
+    def get_msg_max_size(self) -> int:
         return self.ws._max_msg_size
 
-    async def send_bytes(self, data: bytes): 
+    async def send_bytes(self, data: bytes):
         return await self.ws.send_bytes(data)
 
-
-    def get_client_id(self) -> int: 
+    def get_client_id(self) -> int:
         return id(self.ws)
 
-    async def binary_msg_generator(self, shutdown_ev: asyncio.Event) -> AsyncGenerator[WebsocketMsg, None]: 
+    async def binary_msg_generator(
+            self,
+            shutdown_ev: asyncio.Event) -> AsyncGenerator[WebsocketMsg, None]:
         # while True:
         #     recv_task = asyncio.create_task(self.ws.receive(), name="recv_task")
         #     st_task = asyncio.create_task(shutdown_ev.wait(), name="shutdown_task")
         #     done, pending = await asyncio.wait([recv_task, st_task], return_when=asyncio.FIRST_COMPLETED)
         #     if st_task in done:
-        #         # cancel recv task 
+        #         # cancel recv task
         #         await cancel_task(recv_task)
         #         break
         #     else:
@@ -99,18 +106,21 @@ class AiohttpWebsocketClient(WebsocketClientBase):
             elif msg.type == aiohttp.WSMsgType.TEXT:
                 yield WebsocketMsg(msg.data, WebsocketMsgType.Text)
             elif msg.type == aiohttp.WSMsgType.ERROR:
-                raise Exception("websocket connection closed with exception %s" %
-                                self.ws.exception())
+                raise Exception(
+                    "websocket connection closed with exception %s" %
+                    self.ws.exception())
+
 
 class AiohttpWebsocketHandler(WebsocketHandler):
+
     async def handle_new_connection_aiohttp(self, request):
         client_id = request.match_info.get('client_id')
         print("NEW CONN", client_id, request)
         service_core = self.service_core
         ws = web.WebSocketResponse()
         await ws.prepare(request)
-        client = AiohttpWebsocketClient(client_id, 
-            ws, service_core.service_units.get_service_id_to_name())
+        client = AiohttpWebsocketClient(
+            client_id, ws, service_core.service_units.get_service_id_to_name())
         await self.handle_new_connection(client, client_id)
         return ws
 
@@ -120,10 +130,11 @@ class AiohttpWebsocketHandler(WebsocketHandler):
         service_core = self.service_core
         ws = web.WebSocketResponse()
         await ws.prepare(request)
-        client = AiohttpWebsocketClient(client_id, 
-            ws, service_core.service_units.get_service_id_to_name())
+        client = AiohttpWebsocketClient(
+            client_id, ws, service_core.service_units.get_service_id_to_name())
         await self.handle_new_connection(client, client_id, True)
         return ws
+
 
 class HttpService:
 
@@ -187,7 +198,6 @@ class HttpService:
         }
         res = web.json_response(status, headers=headers)
         return res
-    
 
     async def resource_download_call(self, request: web.Request):
         params = request.rel_url.query
@@ -201,7 +211,9 @@ class HttpService:
         }
         if node_uid is not None and resource_key is not None:
             ait = self.service_core.execute_async_generator_service(
-                "tensorpc.flow.serv.core::Flow.app_get_file", [node_uid, resource_key], {}, json_call=False)
+                "tensorpc.flow.serv.core::Flow.app_get_file",
+                [node_uid, resource_key], {},
+                json_call=False)
             desp, is_exc = await ait.__anext__()
             if is_exc:
                 return web.Response(status=500, text=desp, headers=headers)
@@ -209,13 +221,10 @@ class HttpService:
             headers["Content-Disposition"] = f"Attachment;filename={desp.name}"
             if desp.content_type is not None:
                 headers["Content-Type"] = desp.content_type
-            return web.Response(
-                body=grpc_iter_file_sender(reader=ait),
-                headers=headers
-            )
+            return web.Response(body=grpc_iter_file_sender(reader=ait),
+                                headers=headers)
         else:
             raise web.HTTPBadRequest(text="nodeUid or key is None")
-
 
     async def file_upload_call(self, request: web.Request):
         reader = await request.multipart()
@@ -328,16 +337,20 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
         # TODO should we create a global client session for all http call in server?
         loop_task = asyncio.create_task(ws_service.event_provide_executor())
         app.router.add_post(rpc_name, http_service.remote_json_call_http)
-        app.router.add_post(simple_json_rpc_name, http_service.simple_remote_json_call_http)
+        app.router.add_post(simple_json_rpc_name,
+                            http_service.simple_remote_json_call_http)
 
         app.router.add_post(rpc_pickle_name,
                             http_service.remote_pickle_call_http)
-        app.router.add_post(TENSORPC_API_FILE_UPLOAD, http_service.file_upload_call)
-        app.router.add_get(TENSORPC_API_FILE_DOWNLOAD, http_service.resource_download_call)
+        app.router.add_post(TENSORPC_API_FILE_UPLOAD,
+                            http_service.file_upload_call)
+        app.router.add_get(TENSORPC_API_FILE_DOWNLOAD,
+                           http_service.resource_download_call)
         app.router.add_get(TENSORPC_FETCH_STATUS, http_service.fetch_status)
 
         app.router.add_get(ws_name, ws_service.handle_new_connection_aiohttp)
-        app.router.add_get(ws_backup_name, ws_service.handle_new_backup_connection_aiohttp)
+        app.router.add_get(ws_backup_name,
+                           ws_service.handle_new_backup_connection_aiohttp)
 
         ssl_context = None
         if ssl_key_path != "" and ssl_key_path != "":

@@ -11,8 +11,8 @@ import tempfile
 import threading
 import time
 import traceback
-from typing import (TYPE_CHECKING, Any, AsyncIterator, Callable, Dict, Iterator, List,
-                    Mapping, Optional, Sequence, Union)
+from typing import (TYPE_CHECKING, Any, AsyncIterator, Callable, Dict,
+                    Iterator, List, Mapping, Optional, Sequence, Union)
 import dataclasses
 
 import aiohttp
@@ -24,6 +24,7 @@ from tensorpc.protos_export import rpc_message_pb2 as rpc_msg_pb2
 from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.utils import df_logging
 import contextvars
+
 LOGGER = df_logging.get_logger()
 
 
@@ -166,7 +167,6 @@ class ServiceCore(object):
         self.async_shutdown_event = asyncio.Event()
         self._exposed_props._async_shutdown_event = self.async_shutdown_event
 
-
     def _set_port(self, port: int):
         self._exposed_props.server_meta.port = port
 
@@ -175,8 +175,9 @@ class ServiceCore(object):
 
     def run_event(self, event: serviceunit.ServiceEventType, *args: Any):
         return self.service_units.run_event(event, *args)
-    
-    async def run_event_async(self, event: serviceunit.ServiceEventType, *args: Any):
+
+    async def run_event_async(self, event: serviceunit.ServiceEventType, *args:
+                              Any):
         return await self.service_units.run_event_async(event, *args)
 
     def _reset_timeout(self):

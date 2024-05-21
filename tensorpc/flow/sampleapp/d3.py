@@ -153,15 +153,20 @@ class BufferMeshDevApp:
     def my_layout(self):
         self.limit = 1000
         initial_num_pts = 500
-        cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000, children=[
-            three.PointLight(intensity=8).prop(castShadow=True, position=(0, 0, 1)),
-            # three.SpotLight(position=(0, 0, -1), target_position=(0, 0, -3)).prop(angle=0.25,
-            #                                 penumbra=0.5,
-            #                                 castShadow=True,
-            #                                 intensity=8,
-            #                                 helperColor=0x555555,
-            #                                 distance=50),
-        ])
+        cam = three.PerspectiveCamera(
+            fov=75,
+            near=0.1,
+            far=1000,
+            children=[
+                three.PointLight(intensity=8).prop(castShadow=True,
+                                                   position=(0, 0, 1)),
+                # three.SpotLight(position=(0, 0, -1), target_position=(0, 0, -3)).prop(angle=0.25,
+                #                                 penumbra=0.5,
+                #                                 castShadow=True,
+                #                                 intensity=8,
+                #                                 helperColor=0x555555,
+                #                                 distance=50),
+            ])
         random_pcs = np.random.randint(1, 20, size=[initial_num_pts, 3])
         random_pc_colors = np.random.uniform(0,
                                              255,
@@ -176,7 +181,8 @@ class BufferMeshDevApp:
             [
                 # three.MeshPhongMaterial().prop(vertexColors=True, color="aqua", specular="#ffffff", shininess=250, transparent=False),
                 # three.MeshStandardMaterial().prop(vertexColors=True),
-                three.MeshBasicMaterial().prop(vertexColors=False, color="red"),
+                three.MeshBasicMaterial().prop(vertexColors=False,
+                                               color="red"),
                 # three.Edges(),
                 # three.Wireframe(),
             ],
@@ -222,8 +228,7 @@ class BufferMeshDevApp:
                                  inclination=0,
                                  azimuth=0.25),
                 three.AmbientLight(),
-                three.DirectionalLight((10, 10, 10)).prop(
-                                                   castShadow=True),
+                three.DirectionalLight((10, 10, 10)).prop(castShadow=True),
                 # three.HemisphereLight(color=0xffffff, ground_color=0xb9b9b9, intensity=0.85).prop(position=(-7, 25, 13)),
                 # three.PointLight(intensity=0.8).prop(position=(100, 100, 100),
                 #                                    castShadow=True),
@@ -848,72 +853,70 @@ class ViewDevApp:
         cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         cam2 = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
 
-        btns = [
-            mui.MenuItem("Button 1"),
-            mui.MenuItem("Button 2")
-        ]
+        btns = [mui.MenuItem("Button 1"), mui.MenuItem("Button 2")]
         view1 = three.View([
-                cam,
-                three.CameraControl().prop(makeDefault=True, syncObject3ds=[cam2]),
-                # three.Mesh([
-                #     three.BoxGeometry(),
-                #     three.MeshBasicMaterial().prop(color="orange",
-                #                                     transparent=True),
-                # ]),
-                three.SelectionContext([
-                    three.EffectComposer([
-                        three.Outline().prop(
-                            blur=True,
-                            edgeStrength=100,
-                            width=1000,
-                            visibleEdgeColor=0xddd,
-                            hiddenEdgeColor=0xddd,
-                            blendFunction=three.BlendFunction.ALPHA),
-                        # three.Bloom(),
-                        # three.GammaCorrection(),
-                        # three.ToneMapping().prop(mode=three.ToneMapppingMode.ACES_FILMIC),
-                    ]).prop(autoClear=False),
-                    three.Mesh([
-                        three.BoxGeometry(),
-                        three.Edges(),
-                        three.MeshBasicMaterial().prop(color="orange",
-                                                        transparent=True),
-                    ]).prop(
-                        enableSelect=True,
+            cam,
+            three.CameraControl().prop(makeDefault=True, syncObject3ds=[cam2]),
+            # three.Mesh([
+            #     three.BoxGeometry(),
+            #     three.MeshBasicMaterial().prop(color="orange",
+            #                                     transparent=True),
+            # ]),
+            three.SelectionContext([
+                three.EffectComposer([
+                    three.Outline().prop(
+                        blur=True,
+                        edgeStrength=100,
+                        width=1000,
+                        visibleEdgeColor=0xddd,
+                        hiddenEdgeColor=0xddd,
+                        blendFunction=three.BlendFunction.ALPHA),
+                    # three.Bloom(),
+                    # three.GammaCorrection(),
+                    # three.ToneMapping().prop(mode=three.ToneMapppingMode.ACES_FILMIC),
+                ]).prop(autoClear=False),
+                three.Mesh([
+                    three.BoxGeometry(),
+                    three.Edges(),
+                    three.MeshBasicMaterial().prop(color="orange",
+                                                   transparent=True),
+                ]).prop(enableSelect=True,
                         castShadow=True,
                         position=(0, 0, 0),
                         enableHover=True,
                         enablePivotControl=True,
                         enablePivotOnSelected=True,
                         pivotControlProps=three.PivotControlsCommonProps(
-                            depthTest=False, annotations=True, anchor=(0, 0, 0))),
-                ]),
-
-            ]).prop(flex=2,
-                    overflow="hidden",
-                    index=1,
-                    border="1px solid red",
-                    allowKeyboardEvent=True, 
-                    menuItems=btns)
+                            depthTest=False,
+                            annotations=True,
+                            anchor=(0, 0, 0))),
+            ]),
+        ]).prop(flex=2,
+                overflow="hidden",
+                index=1,
+                border="1px solid red",
+                allowKeyboardEvent=True,
+                menuItems=btns)
         view1.event_context_menu.on(lambda x: print(x))
         canvas = three.ViewCanvas([
-                            mui.VBox([
-                                view1,
-            three.View([
-                cam2,
-                # three.CameraControl().prop(makeDefault=True),
-                three.Mesh([
-                    three.BoxGeometry(),
-                    three.MeshBasicMaterial().prop(color="orange",
-                                                    transparent=True),
-                ]),
-            ]).prop(flex=1,
-                    overflow="hidden",
-                    index=2)
-                            ]).prop(width="100%", height="100%" , overflow="hidden")
-
-
-        ]).prop(display="flex", flexDirection="row", width="100%", height="100%" , overflow="hidden", enablePerf=True)
+            mui.VBox([
+                view1,
+                three.View([
+                    cam2,
+                    # three.CameraControl().prop(makeDefault=True),
+                    three.Mesh([
+                        three.BoxGeometry(),
+                        three.MeshBasicMaterial().prop(color="orange",
+                                                       transparent=True),
+                    ]),
+                ]).prop(flex=1, overflow="hidden", index=2)
+            ]).prop(width="100%", height="100%", overflow="hidden")
+        ]).prop(display="flex",
+                flexDirection="row",
+                width="100%",
+                height="100%",
+                overflow="hidden",
+                enablePerf=True)
         # canvas.update_sx_props({
         #     "grid-template-columns": "1fr 1fr",
         # })

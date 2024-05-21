@@ -34,17 +34,14 @@ class DownloadFromSSH(EditableLayoutApp):
 
         return {
             "container":
-            mui.VBox(
-                {
-                    "url": self.ssh_url,
-                    "ssh_files": self.ssh_files,
-                    "ssh_username": self.ssh_username,
-                    "ssh_password": self.ssh_password,
-                    "target_loc": self.target_loc,
-                    "run": self.run,
-                }
-                ).prop(width=480,
-                height=480)
+            mui.VBox({
+                "url": self.ssh_url,
+                "ssh_files": self.ssh_files,
+                "ssh_username": self.ssh_username,
+                "ssh_password": self.ssh_password,
+                "target_loc": self.target_loc,
+                "run": self.run,
+            }).prop(width=480, height=480)
         }
 
     async def download_files(self):

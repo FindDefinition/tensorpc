@@ -5,6 +5,7 @@ from asyncio import AbstractEventLoop, ensure_future, Future, iscoroutine
 
 from typing_extensions import TypeVarTuple, Unpack
 
+
 class AsyncIOEventEmitter(EventEmitter[KT, Unpack[VTs]]):
     """An event emitter class which can run asyncio coroutines in addition to
     synchronous blocking functions. For example:

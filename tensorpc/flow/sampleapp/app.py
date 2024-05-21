@@ -57,7 +57,9 @@ from tensorpc.flow.sampleapp.sample_reload_fn import func_support_reload
 from tensorpc.flow.flowapp.objtree import get_objtree_context
 from tensorpc.flow.sampleapp.sample_preview import TestPreview0
 
+
 class SampleApp(App):
+
     def __init__(self) -> None:
         super().__init__()
         self.img_ui = mui.Image()
@@ -201,6 +203,7 @@ class SampleApp(App):
 
 
 class SampleDictApp(App):
+
     def __init__(self) -> None:
         super().__init__()
         self.vlist = VList({
@@ -238,6 +241,7 @@ class SampleDictApp(App):
 
 
 class SamplePlotMetricApp(App):
+
     def __init__(self) -> None:
         super().__init__()
         self.plots = plus.HomogeneousMetricFigure(300, 300)
@@ -279,6 +283,7 @@ class SamplePlotMetricApp(App):
 
 
 class SampleFlowApp(App):
+
     def __init__(self) -> None:
         super().__init__()
         self.text = mui.Typography("")
@@ -293,6 +298,7 @@ class SampleFlowApp(App):
 
 
 class SampleEditorApp(EditableApp):
+
     def __init__(self) -> None:
         super().__init__()
         self.text = mui.Typography("WTF")
@@ -318,6 +324,7 @@ class SampleEditorApp(EditableApp):
 
 
 class SampleEditorAppV2(EditableApp):
+
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         self.text = mui.Typography("WTF")
@@ -350,6 +357,7 @@ class SampleEditorAppV2(EditableApp):
 
 
 class SampleThreeApp(EditableApp):
+
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
@@ -422,9 +430,7 @@ class SampleThreeApp(EditableApp):
         attrs = pc
         attrFields = ["x", "y", "z"]
         # print("???", pc.size * pc.itemsize)
-        await self.points.update_points(pc,
-                                        attrs=attrs,
-                                        attrFields=attrFields)
+        await self.points.update_points(pc, attrs=attrs, attrFields=attrFields)
 
         random_lines = np.random.uniform(-5, 5, size=[5, 2,
                                                       3]).astype(np.float32)
@@ -469,8 +475,8 @@ class SampleThreeApp(EditableApp):
                                         attrFields=attrFields)
 
 
-
 class SampleThreePointsApp(EditableApp):
+
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
@@ -525,6 +531,7 @@ class SampleThreePointsApp(EditableApp):
 
 
 class SampleTestApp(App):
+
     def __init__(self) -> None:
         super().__init__()
         self.root.add_layout({
@@ -539,6 +546,7 @@ class SampleTestApp(App):
 
 
 class SampleThreeHudApp(EditableApp):
+
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
@@ -562,7 +570,7 @@ class SampleThreeHudApp(EditableApp):
         infgrid = three.InfiniteGridHelper(5, 50, "gray")
         self.b2d = three.Boxes2D(1000)
         mesh = three.MeshV1(three.RoundedRectGeometry(2, 1.5, 0.5),
-                          three.MeshBasicMaterial().prop(color="#393939"))
+                            three.MeshBasicMaterial().prop(color="#393939"))
         mesh.set_pointer_callback(
             on_click=three.EventHandler(lambda x: print(1), True))
         mesh.prop(hover_color="#222222", click_color="#009A63")
@@ -704,6 +712,7 @@ class SampleThreeHudApp(EditableApp):
 
 
 class SampleThree2DApp(EditableApp):
+
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
@@ -828,7 +837,9 @@ class WTF:
     v3: three.Vector3Type = (1, 2, 3)
     v4: V.Annotated[three.Vector3Type, V.Vector3(1.0)] = (1, 2, 3)
 
+
 class SampleConfigApp(EditableApp):
+
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         self.set_init_window_size([800, 600])
@@ -847,6 +858,7 @@ class SampleConfigApp(EditableApp):
 
 
 class SampleDataControlApp(EditableApp):
+
     def __init__(self) -> None:
         super().__init__(reloadable_layout=True)
         # makesure three canvas size fit parent.
@@ -870,6 +882,7 @@ class SampleDataControlApp(EditableApp):
 
 
 class AutoComputeApp:
+
     @mark_create_layout
     def create_layout(self):
 
@@ -896,14 +909,15 @@ class AutoComputeApp:
             },
         ]
         ac = mui.MultipleAutocomplete("Movies", self.options).prop(
-                variant="checkbox", disableCloseOnSelect=True)
-        
+            variant="checkbox", disableCloseOnSelect=True)
+
         return mui.VBox([
             ac,
         ]).prop(width=640, height=480)
 
 
 class AnyLayout:
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -920,6 +934,7 @@ class AnyLayout:
 
 
 class ObjectInspectApp:
+
     @marker.mark_create_layout
     def my_latout(self):
         self.array = np.random.uniform(-1, 1, size=[500])
@@ -939,19 +954,19 @@ class ObjectInspectApp:
 
 
 class PointCloudApp:
+
     @mark_create_layout
     def my_layout(self):
         cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
         self.wtfobj = UserObjTree()
 
         self.canvas = plus.SimpleCanvas(cam, self._on_video_save)
-        self.slider = mui.Slider(0,
-                                 1,
-                                 1,
-                                 callback=self._on_slider_select)
+        self.slider = mui.Slider(0, 1, 1, callback=self._on_slider_select)
 
         res = mui.VBox([
-            mui.Markdown("PointCloud **:red[App]** :dog: :+1: :green[$\\sqrt{3}$]").prop(padding="10px", katex=True, emoji=True),
+            mui.Markdown(
+                "PointCloud **:red[App]** :dog: :+1: :green[$\\sqrt{3}$]").
+            prop(padding="10px", katex=True, emoji=True),
             mui.Input("hello world"),
             mui.HBox([
                 mui.Button("Change Slider Range",
@@ -1016,15 +1031,16 @@ class PointCloudApp:
         sizes = np.random.uniform(0.5, 10.5, size=[1000]).astype(
             np.float32) * 1
 
-        await self.canvas.show_points("key0",
-                                      points,
-                                      limit=100000,
-                                    #   colors=colors,
-                                    #   attrs=points,
-                                    #   attr_fields=["x", "y", "z"]
-                                      )
+        await self.canvas.show_points(
+            "key0",
+            points,
+            limit=100000,
+            #   colors=colors,
+            #   attrs=points,
+            #   attr_fields=["x", "y", "z"]
+        )
         # lines = np.random.uniform(-10, 10, size=[1000, 2, 3]).astype(np.float32)
-        
+
         # await self.canvas.show_lines("lkey0",
         #                               lines,
         #                               limit=800000)
@@ -1036,7 +1052,7 @@ class PointCloudApp:
         rots[:, :2] = 0
         colors = ["red", "yellow", "red", "blue", "yellow"]
         await self.canvas.show_boxes("key0", dims, locs, rots, colors)
-        
+
         voxel_size = 0.1
         size = np.random.randint(100, 300)
         pcs = np.random.randint(-10, 10, size=[size, 3]) * voxel_size
@@ -1048,9 +1064,12 @@ class PointCloudApp:
         await self.canvas.show_voxels("vox0", pcs, pc_colors, voxel_size, 1000)
         random_img = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
 
-        await self.canvas.show_image("img0", random_img, (0, 0, 0), (0, 0, 0), 3)
+        await self.canvas.show_image("img0", random_img, (0, 0, 0), (0, 0, 0),
+                                     3)
+
 
 class PlotApp:
+
     @mark_create_layout
     def my_layout(self):
         self.plot = plotly.Plotly().prop(
@@ -1089,7 +1108,9 @@ class PlotApp:
         )
         await self.plot.show_raw(data, layout)
 
+
 class ThreadLockerApp:
+
     @mark_create_layout
     def my_layout(self):
         return mui.VBox([
@@ -1098,7 +1119,7 @@ class ThreadLockerApp:
 
     async def _enter_lock(self):
         return await appctx.run_in_executor(self.long_process)
-    
+
     def long_process(self):
 
         for i in range(100):
@@ -1107,6 +1128,7 @@ class ThreadLockerApp:
 
 
 class MatchCaseAppBase:
+
     @marker.mark_create_layout
     def my_layout(self):
         self.switchcase = mui.MatchCase([
@@ -1117,7 +1139,8 @@ class MatchCaseAppBase:
         ])
         self.switchcase_fp = mui.MatchCase([
             mui.MatchCase.ExprCase("x <= 0.2", mui.Typography("1")),
-            mui.MatchCase.ExprCase("x >= 0.2 and x < 0.6", mui.Typography("2")),
+            mui.MatchCase.ExprCase("x >= 0.2 and x < 0.6",
+                                   mui.Typography("2")),
             mui.MatchCase.ExprCase("x >= 0.6", mui.Typography("3")),
             mui.MatchCase.Case(mui.undefined, mui.Typography("default")),
         ])
@@ -1130,7 +1153,7 @@ class MatchCaseAppBase:
             mui.Slider(0, 1.0, 0.01, self._on_slider),
             self.switchcase_fp,
         ])
-    
+
     async def _on_slider(self, value):
         print(value, 4)
         await self.switchcase_fp.set_condition(value)
@@ -1139,12 +1162,16 @@ class MatchCaseAppBase:
         print(3)
         await self.switchcase.set_condition(value)
 
+
 class MatchCaseApp(MatchCaseAppBase):
+
     async def _on_slider(self, value):
         print(value, 2)
         await self.switchcase_fp.set_condition(value)
 
+
 class DataListApp:
+
     @marker.mark_create_layout
     def my_layout(self):
         dataList = [
@@ -1158,9 +1185,12 @@ class DataListApp:
                 }],
             },
             {
-                "id": "2",
-                "name": "name2",
-                "isCheck": True,
+                "id":
+                "2",
+                "name":
+                "name2",
+                "isCheck":
+                True,
                 "tags": [{
                     "id": "0",
                     "tag": "good",
@@ -1168,7 +1198,6 @@ class DataListApp:
                     "id": "1",
                     "tag": "small",
                 }],
-
             },
             {
                 "id": "3",
@@ -1178,47 +1207,53 @@ class DataListApp:
                     "id": "0",
                     "tag": "fat",
                 }],
-
             },
-
         ]
         datalist_checkbox = mui.Checkbox()
         datalist_comp = mui.HBox([
             mui.Typography().set_override_props(value="name"),
             datalist_checkbox,
-            mui.DataFlexBox(mui.Chip().prop(size="small").set_override_props(label="tag")).set_override_props(dataList="tags").prop(flexFlow="row", virtualized=False),
+            mui.DataFlexBox(mui.Chip().prop(size="small").set_override_props(
+                label="tag")).set_override_props(dataList="tags").prop(
+                    flexFlow="row", virtualized=False),
         ]).prop(alignItems="center")
-        datalist = mui.DataFlexBox(datalist_comp).prop(flexFlow="column", dataList=dataList)
+        datalist = mui.DataFlexBox(datalist_comp).prop(flexFlow="column",
+                                                       dataList=dataList)
         datalist.bind_prop(datalist_checkbox, "isCheck")
         return mui.VBox([
             datalist,
         ])
 
+
 class DataGridApp:
-    def create_data(self, index: int, name: str, calories: float,
-        fat: float,
-        carbs: float,
-        protein: bool):
+
+    def create_data(self, index: int, name: str, calories: float, fat: float,
+                    carbs: float, protein: bool):
         return {
-            "id": str(index),
-            "name": name,
-            "calories": calories,
-            "fat": fat,
-            "carbs": carbs,
-            "protein": protein,
-            "nested": [
-                {
-                    "id": str(i),
-                    "iq": random.randint(0, 100),
-                } for i in range(random.randint(2, 6))
-            ]
+            "id":
+            str(index),
+            "name":
+            name,
+            "calories":
+            calories,
+            "fat":
+            fat,
+            "carbs":
+            carbs,
+            "protein":
+            protein,
+            "nested": [{
+                "id": str(i),
+                "iq": random.randint(0, 100),
+            } for i in range(random.randint(2, 6))]
         }
-    
+
     def create_many_datas(self, count: int):
         fake = Faker()
         for i in range(count):
-            yield self.create_data(i, fake.name(), random.randint(100, 300), random.randint(1, 25), random.randint(22, 44), i % 2 == 0)
-
+            yield self.create_data(i, fake.name(), random.randint(100, 300),
+                                   random.randint(1, 25),
+                                   random.randint(22, 44), i % 2 == 0)
 
     @marker.mark_create_layout
     def my_layout(self):
@@ -1230,13 +1265,22 @@ class DataGridApp:
         fat_cell = mui.Slider(0, 100, 1)
 
         column_defs = [
-            mui.DataGrid.ColumnDef("special", specialType=mui.DataGridColumnSpecialType.MasterDetail.value),
+            mui.DataGrid.ColumnDef(
+                "special",
+                specialType=mui.DataGridColumnSpecialType.MasterDetail.value),
             mui.DataGrid.ColumnDef("id", accessorKey="id"),
-            mui.DataGrid.ColumnDef("name", accessorKey="name", width=120, editCell=input_cell),
+            mui.DataGrid.ColumnDef("name",
+                                   accessorKey="name",
+                                   width=120,
+                                   editCell=input_cell),
             mui.DataGrid.ColumnDef("calories", accessorKey="calories"),
-            mui.DataGrid.ColumnDef("fat", accessorKey="fat", editCell=fat_cell),
+            mui.DataGrid.ColumnDef("fat", accessorKey="fat",
+                                   editCell=fat_cell),
             mui.DataGrid.ColumnDef("carbs", accessorKey="carbs"),
-            mui.DataGrid.ColumnDef("protein", accessorKey="protein", align="right", cell=cbox),
+            mui.DataGrid.ColumnDef("protein",
+                                   accessorKey="protein",
+                                   align="right",
+                                   cell=cbox),
             mui.DataGrid.ColumnDef("btn", cell=btn),
         ]
         master_detail = mui.JsonViewer().set_override_props(data=".")
@@ -1245,7 +1289,12 @@ class DataGridApp:
             mui.DataGrid([
                 mui.DataGrid.ColumnDef("id", accessorKey="id"),
                 mui.DataGrid.ColumnDef("iq", accessorKey="iq"),
-            ]).prop(idKey="id", rowHover=True, stickyHeader=False, virtualized=False, size="small", enableFilter=False).set_override_props(dataList="nested")
+            ]).prop(idKey="id",
+                    rowHover=True,
+                    stickyHeader=False,
+                    virtualized=False,
+                    size="small",
+                    enableFilter=False).set_override_props(dataList="nested")
         ]).prop(width="100%", alignItems="center")
         # master_detail = mui.DataFlexBox(mui.HBox([
         #     mui.Typography().set_override_props(value="id"),
@@ -1256,36 +1305,53 @@ class DataGridApp:
         md_root = mui.Markdown("")
         btn.event_click.on(lambda: md_root.write("FOOT!"))
 
-        dgrid = mui.DataGrid(column_defs, rows, master_detail, customHeaders=[
-            mui.MatchCase([
-                mui.MatchCase.Case("name", btn),
-                mui.MatchCase.Case(mui.undefined, mui.Typography("Other H!")),
-            ]).set_override_props(condition="condition")
-        ], customFooters=[
-            mui.MatchCase([
-                mui.MatchCase.Case("name", md_root),
-                mui.MatchCase.Case(mui.undefined, mui.Typography("Other F!")),
-            ]).set_override_props(condition="condition")
-        ]).prop(idKey="id", rowHover=True, virtualized=True, enableFilter=True)
+        dgrid = mui.DataGrid(
+            column_defs,
+            rows,
+            master_detail,
+            customHeaders=[
+                mui.MatchCase([
+                    mui.MatchCase.Case("name", btn),
+                    mui.MatchCase.Case(mui.undefined,
+                                       mui.Typography("Other H!")),
+                ]).set_override_props(condition="condition")
+            ],
+            customFooters=[
+                mui.MatchCase([
+                    mui.MatchCase.Case("name", md_root),
+                    mui.MatchCase.Case(mui.undefined,
+                                       mui.Typography("Other F!")),
+                ]).set_override_props(condition="condition")
+            ]).prop(idKey="id",
+                    rowHover=True,
+                    virtualized=True,
+                    enableFilter=True)
         # dgrid.event_fetch_detail.on(self._fetch_detail)
         dgrid.bind_prop(cbox, "protein")
         dgrid.bind_prop(input_cell, "name")
         dgrid.bind_prop(fat_cell, "fat")
 
         return mui.VBox([
-            dgrid.prop(stickyHeader=False, virtualized=False, size="small", tableLayout="fixed"),
+            dgrid.prop(stickyHeader=False,
+                       virtualized=False,
+                       size="small",
+                       tableLayout="fixed"),
         ]).prop(width="100%", height="100%", overflow="hidden")
 
     def _fetch_detail(self, key: str):
         print("WTF", key)
         return {"key": key}
 
+
 class NumpyDataGridProxy(mui.DataGridProxy):
+
     def __init__(self, obj: np.ndarray):
         assert obj.ndim == 2
         self.obj = obj
         default_data = {f"{c}": 0 for c in range(obj.shape[1])}
-        super().__init__(numRows=obj.shape[0], numColumns=obj.shape[1], defaultData=default_data)
+        super().__init__(numRows=obj.shape[0],
+                         numColumns=obj.shape[1],
+                         defaultData=default_data)
 
     async def fetch_data(self, start: int, end: int):
         print("fetch", start, end)
@@ -1308,7 +1374,9 @@ class NumpyDataGridProxy(mui.DataGridProxy):
             data_list.append(col)
         return data_list
 
-class DataGridProxyApp:    
+
+class DataGridProxyApp:
+
     @marker.mark_create_layout
     def my_layout(self):
         arr = np.random.uniform(0, 1, size=[1000, 3])
@@ -1321,21 +1389,37 @@ class DataGridProxyApp:
         column_defs = [
             mui.DataGrid.ColumnDef(id=f"{c}") for c in range(arr.shape[1])
         ]
-        dgrid = mui.DataGrid(column_defs, NumpyDataGridProxy(arr)).prop(idKey="id", rowHover=True, virtualized=True, enableFilter=True)
+        dgrid = mui.DataGrid(column_defs,
+                             NumpyDataGridProxy(arr)).prop(idKey="id",
+                                                           rowHover=True,
+                                                           virtualized=True,
+                                                           enableFilter=True)
         return mui.VBox([
             dgrid.prop(stickyHeader=False, virtualized=True, size="small"),
         ]).prop(width="100%", height="100%", overflow="hidden")
 
-class MatrixDataGridApp:    
+
+class MatrixDataGridApp:
+
     @marker.mark_create_layout
     def my_layout(self):
         arr = np.random.uniform(0, 1, size=[100, 3])
         arr2 = np.random.randint(0, 100, size=[100, 1]).astype(np.int64)
-        column_def = mui.DataGrid.ColumnDef(id=f"unused", specialType=mui.DataGridColumnSpecialType.Number, width=80, specialProps=mui.DataGridColumnSpecialProps(mui.DataGridNumberCell(fixed=8)))
+        column_def = mui.DataGrid.ColumnDef(
+            id=f"unused",
+            specialType=mui.DataGridColumnSpecialType.Number,
+            width=80,
+            specialProps=mui.DataGridColumnSpecialProps(
+                mui.DataGridNumberCell(fixed=8)))
         custom_footers = [
             mui.MatchCase([
                 mui.MatchCase.Case("index", mui.Typography("Max")),
-                mui.MatchCase.Case(mui.undefined, mui.Typography().set_override_props(value="data").prop(enableTooltipWhenOverflow=True, tooltipEnterDelay=400, fontSize="12px")),
+                mui.MatchCase.Case(
+                    mui.undefined,
+                    mui.Typography().set_override_props(value="data").prop(
+                        enableTooltipWhenOverflow=True,
+                        tooltipEnterDelay=400,
+                        fontSize="12px")),
             ]).set_override_props(condition="condition")
         ]
         custom_footer_datas = [{
@@ -1344,11 +1428,19 @@ class MatrixDataGridApp:
             "a-2": str(arr.max(0)[2]),
             "b-0": str(arr2.max(0)[0]),
         }]
-        dgrid = mui.MatrixDataGrid(column_def, {"a": arr, "b": arr2}, 
-            customFooters=custom_footers, 
+        dgrid = mui.MatrixDataGrid(
+            column_def,
+            {
+                "a": arr,
+                "b": arr2
+            },
+            customFooters=custom_footers,
             customFooterDatas=custom_footer_datas,
         )
-        dgrid.prop(rowHover=True, virtualized=True, enableFilter=True, tableLayout="fixed")
+        dgrid.prop(rowHover=True,
+                   virtualized=True,
+                   enableFilter=True,
+                   tableLayout="fixed")
         dgrid.prop(tableSxProps={
             '& .MuiTableCell-sizeSmall': {
                 "padding": '2px 2px',
@@ -1358,7 +1450,9 @@ class MatrixDataGridApp:
             dgrid.prop(stickyHeader=False, virtualized=True, size="small"),
         ]).prop(width="100%", height="100%", overflow="hidden")
 
+
 class TutorialApp:
+
     @marker.mark_create_layout
     def my_layout(self):
         code = f"""
@@ -1382,8 +1476,10 @@ class App:
         return mui.VBox([
             plus.AppInMemory("sample_code", code).prop(flex=1),
         ])
-    
+
+
 class LinkDownloadApp:
+
     @marker.mark_create_layout
     def my_layout(self):
         appctx.get_app().add_file_resource("sample.py", self.sample_file)
@@ -1395,8 +1491,9 @@ class LinkDownloadApp:
     def sample_file(self):
         return Path(__file__).read_bytes()
 
+
 class VirtualizedBoxApp:
-    
+
     def create_many_datas(self, count: int):
         fake = Faker()
         for i in range(count):
@@ -1405,12 +1502,17 @@ class VirtualizedBoxApp:
     @marker.mark_create_layout
     def my_layout(self):
         rows = list(self.create_many_datas(10))
-        row_elems = [mui.HBox([mui.Typography(row).prop(variant="body1")]) for row in rows]
+        row_elems = [
+            mui.HBox([mui.Typography(row).prop(variant="body1")])
+            for row in rows
+        ]
         return mui.VBox([
             mui.VirtualizedBox([*row_elems]),
         ]).prop(width="100%", height="100%", overflow="hidden")
 
+
 class CollectionApp:
+
     @mark_create_layout
     def my_layout(self):
         self.anylayout = AnyLayout()
@@ -1468,15 +1570,17 @@ class CollectionApp:
 
         res = mui.HBox([
             mui.Allotment([
-                plus.ObjectInspector(self, use_fast_tree=True).prop(width="100%",
-                                                height="100%",
-                                                overflow="hidden"),
+                plus.ObjectInspector(self, use_fast_tree=True).prop(
+                    width="100%", height="100%", overflow="hidden"),
                 mui.HBox([
                     plus.AnyFlexLayout(
-                        mui.FlexLayout.VBox([self.sm, mui.FlexLayout.HBox([
-                            mui.Markdown("1"),
-                            mui.Markdown("2"),
-                        ])])),
+                        mui.FlexLayout.VBox([
+                            self.sm,
+                            mui.FlexLayout.HBox([
+                                mui.Markdown("1"),
+                                mui.Markdown("2"),
+                            ])
+                        ])),
                 ]).prop(width="100%", height="100%", overflow="hidden")
             ]).prop(defaultSizes=[1, 3], width="100%", height="100%")
         ]).prop(flexFlow="row nowrap")
@@ -1485,10 +1589,8 @@ class CollectionApp:
 
     @mark_autorun
     async def _autorun_dev(self):
-        
 
         return await self._autorun_dev2()
-
 
     @staticmethod
     @observe_autorun_function
@@ -1507,14 +1609,17 @@ class CollectionApp:
     @observe_autorun_script
     def _autorun_dev4():
         print("BLOCK0 asasff WTF")
-        appctx.inspector.set_custom_layout_sync(mui.VBox([
-            mui.Markdown("## :red[WTF2]"),
-        ]))
+        appctx.inspector.set_custom_layout_sync(
+            mui.VBox([
+                mui.Markdown("## :red[WTF2]"),
+            ]))
         a = 5
         #%% block split
         print("BLOCK2s asfasf asf")
 
+
 class SchedulerTest:
+
     @mark_create_layout
     def my_layout(self):
 
@@ -1552,6 +1657,7 @@ class SchedulerTest:
 
 
 class SchedulerApp:
+
     @mark_create_layout
     def my_layout(self):
 
@@ -1569,13 +1675,13 @@ class SchedulerApp:
 
 
 class CameraBenchmarkApp:
+
     @mark_create_layout
     def my_layout(self):
         self.img_ui = mui.Image()
         self.task = None
         return mui.VBox([
-            mui.Button("OpenCam",
-                        self.on_button_click),
+            mui.Button("OpenCam", self.on_button_click),
             self.img_ui,
         ]).prop(width="400px", height="400px")
 
@@ -1622,18 +1728,19 @@ class CameraBenchmarkApp:
             # await asyncio.sleep(0)
             # print(dura, dura_encode, dura_cv, len(img_str), frame.shape)
 
+
 class TestNodeNode0(UserObjTree):
+
     def __init__(self) -> None:
         super().__init__()
 
     @marker.mark_create_preview_layout
     def layout_func(self):
-        return mui.VBox([
-            mui.Button("WTF"),
-            mui.Markdown("## 6")
-        ])
+        return mui.VBox([mui.Button("WTF"), mui.Markdown("## 6")])
+
 
 class TestNodeRoot(UserObjTree):
+
     def __init__(self) -> None:
         super().__init__()
         self.node0 = TestNodeNode0()
@@ -1641,21 +1748,22 @@ class TestNodeRoot(UserObjTree):
 
     @marker.mark_create_preview_layout
     def layout_func(self):
-        return mui.VBox([
-            mui.Button("ROOT"),
-            mui.Markdown("## ROOT132")
-        ])
+        return mui.VBox([mui.Button("ROOT"), mui.Markdown("## ROOT132")])
+
 
 class GridPreviewLayoutApp:
+
     @mark_create_layout
     def my_layout(self):
         root = TestNodeRoot()
         reload_mgr = appctx.get_reload_manager()
 
-        return mui.HBox([plus.GridPreviewLayout({
-            "root": root,
-            "root.node0": root.get_childs()["node0"]
-        })]).prop(width="100%")
+        return mui.HBox([
+            plus.GridPreviewLayout({
+                "root": root,
+                "root.node0": root.get_childs()["node0"]
+            })
+        ]).prop(width="100%")
 
 
 if __name__ == "__main__":
@@ -1668,10 +1776,8 @@ if __name__ == "__main__":
     )
 
     props = mui.MultipleAutocompleteProps()
-    props.variant = "wtf" 
+    props.variant = "wtf"
 
     TypeAdapter(mui.MultipleAutocompleteProps).validate_python(props)
     # ac = mui.MultipleAutocomplete("Movies", []).prop(
     #             variant="checkbox", disableCloseOnSelect=True)
-
-    

@@ -101,18 +101,18 @@ def compile_proto(cwd,
             with path.open("w") as f:
                 f.writelines(lines)
 
+
 def main_legacy():
-    compile_proto(
-        Path(__file__).parent / "protos_legacy",
-        Path(__file__).parent.resolve() / "protos_legacy",
-        js_out=False,
-        with_pyi=False)
+    compile_proto(Path(__file__).parent / "protos_legacy",
+                  Path(__file__).parent.resolve() / "protos_legacy",
+                  js_out=False,
+                  with_pyi=False)
+
 
 def main():
-    compile_proto(
-        Path(__file__).parent / "protos",
-        Path(__file__).parent.resolve() / "protos",
-        js_out=False)
+    compile_proto(Path(__file__).parent / "protos",
+                  Path(__file__).parent.resolve() / "protos",
+                  js_out=False)
 
 
 if __name__ == "__main__":

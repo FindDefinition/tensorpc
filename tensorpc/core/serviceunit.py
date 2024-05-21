@@ -25,7 +25,9 @@ from tensorpc.constants import (TENSORPC_FLOW_FUNC_META_KEY,
                                 TENSORPC_FUNC_META_KEY, TENSORPC_SPLIT)
 from tensorpc.core import inspecttools
 from typing import Protocol
-from tensorpc.core.funcid import (determine_code_common_indent, get_body_blocks_from_code, get_toplevel_class_node,
+from tensorpc.core.funcid import (determine_code_common_indent,
+                                  get_body_blocks_from_code,
+                                  get_toplevel_class_node,
                                   get_toplevel_func_node)
 from tensorpc.core.moduleid import TypeMeta, get_obj_type_meta, get_qualname_of_type, InMemoryFS, is_tensorpc_dynamic_path
 from functools import wraps
@@ -80,11 +82,12 @@ class ServiceType(Enum):
     WebSocketOnDisConnect = "WebSocketOnDisConnect"  # only support ws
     Event = "Event"
 
+
 class ServiceEventType(Enum):
     Normal = "Normal"
     Exit = "Exit"
     Init = "AsyncInit"
-    BeforeServerStart = "BeforeServerStart" # all server meta are ready
+    BeforeServerStart = "BeforeServerStart"  # all server meta are ready
     WebSocketOnConnect = "WebSocketOnConnect"  # only support ws
     WebSocketOnDisConnect = "WebSocketOnDisConnect"  # only support ws
 
@@ -104,7 +107,10 @@ class AppFuncType(Enum):
 
 class AppFunctionMeta:
 
-    def __init__(self, type: AppFuncType, name: str = "", data: Optional[Any] = None) -> None:
+    def __init__(self,
+                 type: AppFuncType,
+                 name: str = "",
+                 data: Optional[Any] = None) -> None:
         self.type = type
         self.name = name
         self.data = data
@@ -137,7 +143,7 @@ class ServFunctionMeta:
                  fn: Callable,
                  name: str,
                  type: ServiceType,
-                event_type: ServiceEventType,
+                 event_type: ServiceEventType,
                  sig: inspect.Signature,
                  is_gen: bool,
                  is_async: bool,
@@ -162,9 +168,9 @@ class ServFunctionMeta:
         self.event_type = event_type
 
     def copy(self):
-        return ServFunctionMeta(self.fn, self.name, self.type, self.event_type, self.sig,
-                                self.is_gen, self.is_async, self.is_static,
-                                self.is_binded, self.qualname,
+        return ServFunctionMeta(self.fn, self.name, self.type, self.event_type,
+                                self.sig, self.is_gen, self.is_async,
+                                self.is_static, self.is_binded, self.qualname,
                                 self.user_app_meta)
 
     def to_json(self):
@@ -222,6 +228,7 @@ class ObservedFunctionProtocol(Protocol):
     body_code_blocks: List[str] = []
     first_changed_block_idx: int = 0
     userdata: Optional[Any] = None
+
     def run_function_with_record(self) -> Any:
         ...
 
@@ -242,6 +249,7 @@ class ObservedFunction:
     body_code_blocks: List[str] = dataclasses.field(default_factory=list)
     first_changed_block_idx: int = 0
     userdata: Optional[Any] = None
+
     def run_function_with_record(self):
         assert self.recorded_data is not None
         return self.current_func(*self.recorded_data[0],
@@ -301,7 +309,12 @@ class ObservedFunctionRegistry:
     def get_path_to_qname(self):
         return self.path_to_qname
 
-    def register(self, func=None, autorun_when_changed: bool = False, userdata: Optional[Any] = None, autorun_block_symbol: str = ""):
+    def register(self,
+                 func=None,
+                 autorun_when_changed: bool = False,
+                 userdata: Optional[Any] = None,
+                 autorun_block_symbol: str = ""):
+
         def wrapper(func):
             if not self.is_enabled():
                 return func
@@ -309,14 +322,16 @@ class ObservedFunctionRegistry:
 
             is_static = isinstance(func_unwrap, staticmethod)
             if is_static:
-                raise NotImplementedError("you must register before staticmethod apply")
+                raise NotImplementedError(
+                    "you must register before staticmethod apply")
             try:
                 path = inspect.getfile(func_unwrap)
                 path = str(Path(path).resolve())
             except:
                 raise ValueError(f"can't get file path of function, {func}")
             code = inspect.getsource(func_unwrap)
-            body_code_blocks = get_body_blocks_from_code(code, autorun_block_symbol)
+            body_code_blocks = get_body_blocks_from_code(
+                code, autorun_block_symbol)
             # TODO check func is a function
             qname = get_qualname_of_type(func_unwrap)
             func_sig = inspect.signature(func_unwrap)
@@ -333,20 +348,30 @@ class ObservedFunctionRegistry:
                 # compare blocks between old and new
                 first_changed_block_idx = len(body_code_blocks)
                 for i in range(len(body_code_blocks)):
-                    if i >= len(self.global_dict[qname].body_code_blocks) or body_code_blocks[i] != self.global_dict[qname].body_code_blocks[i]:
+                    if i >= len(self.global_dict[qname].body_code_blocks
+                                ) or body_code_blocks[i] != self.global_dict[
+                                    qname].body_code_blocks[i]:
                         first_changed_block_idx = i
                         break
                 self.global_dict[qname].current_func = func
                 self.global_dict[qname].current_sig = func_sig
-                self.global_dict[qname].first_changed_block_idx = first_changed_block_idx
+                self.global_dict[
+                    qname].first_changed_block_idx = first_changed_block_idx
                 self.global_dict[qname].body_code_blocks = body_code_blocks
             else:
                 if path not in self.path_to_qname:
                     self.path_to_qname[path] = []
-                self.path_to_qname[path].append((qname, func_unwrap.__qualname__))
+                self.path_to_qname[path].append(
+                    (qname, func_unwrap.__qualname__))
                 self.global_dict[qname] = ObservedFunction(
-                    func_unwrap.__name__, qname, func, func, func_sig, path, 
-                    autorun_when_changed=autorun_when_changed, userdata=userdata,
+                    func_unwrap.__name__,
+                    qname,
+                    func,
+                    func,
+                    func_sig,
+                    path,
+                    autorun_when_changed=autorun_when_changed,
+                    userdata=userdata,
                     body_code_blocks=body_code_blocks)
 
             @wraps(func)
@@ -359,6 +384,7 @@ class ObservedFunctionRegistry:
                     return entry.current_func(*args, **kwargs)
                 else:
                     return func(*args, **kwargs)
+
             setattr(wrapped_func, TENSORPC_OBSERVED_FUNCTION_ATTR, True)
             return wrapped_func
 
@@ -556,7 +582,7 @@ class ObjectReloadResultWithType(ObjectReloadResult):
     type_meta: TypeMeta
 
 
-@dataclasses.dataclass 
+@dataclasses.dataclass
 class MethodMetaItem:
     type: Optional[Type]
     metas: List[ServFunctionMeta]
@@ -576,7 +602,8 @@ class ObjectReloadManager:
         self.file_cache: Dict[str, FileCacheEntry] = {}
         # self.type_cache: Dict[str, TypeCacheEntry] = {}
         self.type_meta_cache: Dict[ObjectReloadManager.TypeUID, TypeMeta] = {}
-        self.type_method_meta_cache: Dict[Tuple[ObjectReloadManager.TypeUID, bool],
+        self.type_method_meta_cache: Dict[Tuple[ObjectReloadManager.TypeUID,
+                                                bool],
                                           List[ServFunctionMeta]] = {}
         self.module_cache: Dict[str, ModuleCacheEntry] = {}
 
@@ -587,7 +614,8 @@ class ObjectReloadManager:
     def _is_memory_fs_path(self, path: str):
         return path in self.in_memory_fs
 
-    def update_observed_registry(self, observed_registry: ObservedFunctionRegistryProtocol):
+    def update_observed_registry(
+            self, observed_registry: ObservedFunctionRegistryProtocol):
         self.observed_registry = observed_registry
 
     def check_file_cache(self, path: str):
@@ -723,18 +751,18 @@ class ObjectReloadManager:
         #             if isinstance(new_func, staticmethod):
         #                 new_func = new_func.__func__
         #             new_func_unwrap = inspect.unwrap(new_func, stop=lambda fn: not hasattr(fn, TENSORPC_OBSERVED_FUNCTION_ATTR))
-                    # self.observed_registry.reload_func(local_qname, new_func_unwrap)
+        # self.observed_registry.reload_func(local_qname, new_func_unwrap)
         return ObjectReloadResultWithType(self.module_cache[path], True,
                                           self.file_cache[path], meta)
 
     def get_type_unique_id(self, type: Type):
         return (self._inspect_get_file_resolved(type), type.__qualname__)
 
-    def query_type_method_meta(self,
-                               type: Type,
-                               no_code: bool = False,
-                               include_base: bool = False
-                               ) -> List[ServFunctionMeta]:
+    def query_type_method_meta(
+            self,
+            type: Type,
+            no_code: bool = False,
+            include_base: bool = False) -> List[ServFunctionMeta]:
         """we should always use new type (after reload) with this function.
         """
         try:
@@ -780,27 +808,33 @@ class ObjectReloadManager:
         new_metas = [m.copy() for m in new_metas]
         return new_metas
 
-    def query_type_method_meta_dict(self, this_type: Type,
-                               no_code: bool = False) -> Dict["ObjectReloadManager.TypeUID", MethodMetaItem]:
-        res_list = self.query_type_method_meta(this_type, no_code, include_base=True)
+    def query_type_method_meta_dict(
+        self,
+        this_type: Type,
+        no_code: bool = False
+    ) -> Dict["ObjectReloadManager.TypeUID", MethodMetaItem]:
+        res_list = self.query_type_method_meta(this_type,
+                                               no_code,
+                                               include_base=True)
         res: Dict[Tuple[str, str], MethodMetaItem] = {}
         for meta in res_list:
             fn = meta.fn
             type = inspecttools.get_function_defined_type(fn)
             if type is None:
-                continue 
+                continue
             key = type
             if inspect.ismodule(key):
                 key = None
-                is_leaf = True 
+                is_leaf = True
             else:
-                is_leaf = self.get_type_unique_id(this_type) == self.get_type_unique_id(type)
+                is_leaf = self.get_type_unique_id(
+                    this_type) == self.get_type_unique_id(type)
             uid = self.get_type_unique_id(type)
             if uid not in res:
                 res[uid] = MethodMetaItem(key, [], is_leaf)
             res[uid].metas.append(meta)
         return res
-    
+
     def _tokenize_read_path_lines(self, path: str):
         if path in self.in_memory_fs:
             ss = io.StringIO(self.in_memory_fs[path].content)
@@ -1113,11 +1147,12 @@ def get_cls_obj_from_module_name(module_name: str):
 
 class FunctionUserMeta:
 
-    def __init__(self,
-                 type: ServiceType,
-                 event_name: str = "",
-                 is_dynamic: bool = False,
-                 event_type: ServiceEventType = ServiceEventType.Normal) -> None:
+    def __init__(
+            self,
+            type: ServiceType,
+            event_name: str = "",
+            is_dynamic: bool = False,
+            event_type: ServiceEventType = ServiceEventType.Normal) -> None:
         self.type = type
         self._event_name = event_name
         self.is_dynamic = is_dynamic
@@ -1165,7 +1200,8 @@ class ServiceUnit(DynamicClass):
         # self.obj_type, self.alias, self.module_key = get_cls_obj_from_module_name(
         #     module_name)
         self.services: Dict[str, ServFunctionMeta] = {}
-        self._event_to_handlers: Dict[ServiceEventType, List[ServFunctionMeta]] = {}
+        self._event_to_handlers: Dict[ServiceEventType,
+                                      List[ServFunctionMeta]] = {}
         self.name_to_events: Dict[str, EventProvider] = {}
         self.serv_metas = self._init_all_metas(self.obj_type)
         assert len(
@@ -1326,7 +1362,7 @@ class ServiceUnit(DynamicClass):
         self.init_service()
         assert self.obj is not None
         return fn(*args, **kwargs)
-    
+
     def run_event(self, event: ServiceEventType, *args: Any):
         if event in self._event_to_handlers:
             if not self.is_inited():
@@ -1396,5 +1432,5 @@ class ServiceUnits:
         return res
 
     def run_init(self):
-        pass 
+        pass
         # self.init_service()

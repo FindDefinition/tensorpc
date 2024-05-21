@@ -30,7 +30,7 @@ from .core import WebsocketClientBase, WebsocketMsg, WebsocketMsgType, Websocket
 class BlacksheepWebsocketClient(WebsocketClientBase):
 
     def __init__(self,
-                id: str,
+                 id: str,
                  ws: WebSocket,
                  serv_id_to_name: Dict[int, str],
                  uid: Optional[int] = None,
@@ -47,14 +47,16 @@ class BlacksheepWebsocketClient(WebsocketClientBase):
             return TENSORPC_WEBSOCKET_MSG_SIZE
         else:
             return self.client_max_size
-        
+
     async def send_bytes(self, data: bytes):
         return await self.ws.send_bytes(data)
 
     def get_client_id(self) -> int:
         return id(self.ws)
 
-    async def binary_msg_generator(self, shutdown_ev: asyncio.Event) -> AsyncGenerator[WebsocketMsg, None]:
+    async def binary_msg_generator(
+            self,
+            shutdown_ev: asyncio.Event) -> AsyncGenerator[WebsocketMsg, None]:
         while True:
             msg = await self.ws.receive_bytes()
             yield WebsocketMsg(msg, WebsocketMsgType.Binary)
@@ -63,7 +65,7 @@ class BlacksheepWebsocketClient(WebsocketClientBase):
             # st_task = asyncio.create_task(shutdown_ev.wait(), name="shutdown_task")
             # done, pending = await asyncio.wait([recv_task, st_task], return_when=asyncio.FIRST_COMPLETED)
             # if st_task in done:
-            #     # cancel recv task 
+            #     # cancel recv task
             #     await cancel_task(recv_task)
             #     break
             # else:
@@ -73,25 +75,33 @@ class BlacksheepWebsocketClient(WebsocketClientBase):
 
 
 class BlacksheepWebsocketHandler(WebsocketHandler):
-    def __init__(self, service_core: ProtobufServiceCore, client_max_size: int):
+
+    def __init__(self, service_core: ProtobufServiceCore,
+                 client_max_size: int):
         super().__init__(service_core)
         self.client_max_size = client_max_size
 
-    async def handle_new_connection_blacksheep(self, request: WebSocket, client_id: str):
+    async def handle_new_connection_blacksheep(self, request: WebSocket,
+                                               client_id: str):
         print("NEW CONN", client_id, request)
         service_core = self.service_core
         await request.accept()
-        client = BlacksheepWebsocketClient(client_id, 
-            request, service_core.service_units.get_service_id_to_name(), 
+        client = BlacksheepWebsocketClient(
+            client_id,
+            request,
+            service_core.service_units.get_service_id_to_name(),
             client_max_size=self.client_max_size)
         return await self.handle_new_connection(client, client_id)
 
-    async def handle_new_backup_connection_blacksheep(self, request: WebSocket, client_id: str):
+    async def handle_new_backup_connection_blacksheep(self, request: WebSocket,
+                                                      client_id: str):
         print("NEW CONN", client_id, request)
         service_core = self.service_core
         await request.accept()
-        client = BlacksheepWebsocketClient(client_id, 
-            request, service_core.service_units.get_service_id_to_name(), 
+        client = BlacksheepWebsocketClient(
+            client_id,
+            request,
+            service_core.service_units.get_service_id_to_name(),
             client_max_size=self.client_max_size)
         return await self.handle_new_connection(client, client_id, True)
 
@@ -111,7 +121,6 @@ class HttpService:
         )
         res.add_header(b'Access-Control-Allow-Origin', b'*')
         return res
-    
 
     async def remote_json_call_http(self,
                                     request: web.Request) -> web.Response:
@@ -189,7 +198,7 @@ class HttpService:
             elif part.name == b"file":
                 assert metadata is not None
                 filename = part.file_name
-                assert filename is not None 
+                assert filename is not None
                 serv_key = metadata["serv_key"]
                 serv_data = metadata["serv_data"]
                 file_size = metadata["file_size"]
@@ -201,8 +210,10 @@ class HttpService:
                     return web.text(status=500, value=res)
         return web.text('{} successfully stored'.format(handled_fnames))
 
+
 async def _await_shutdown(shutdown_ev, loop):
     return await loop.run_in_executor(None, shutdown_ev.wait)
+
 
 async def serve_app(serv: uvicorn.Server,
                     shutdown_ev: threading.Event,
@@ -243,9 +254,11 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
         app = web.Application()
         # TODO should we create a global client session for all http call in server?
         loop_task = asyncio.create_task(ws_service.event_provide_executor())
+
         @app.router.post(rpc_name)
         async def _handle_rpc(request):
             return await http_service.remote_json_call_http(request)
+
         @app.router.post(simple_json_rpc_name)
         async def _handle_simple_rpc(request):
             return await http_service.simple_remote_json_call_http(request)
@@ -257,18 +270,20 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
         @app.router.post(TENSORPC_API_FILE_UPLOAD)
         async def _handle_rpc_file(request):
             return await http_service.file_upload_call(request)
-        
+
         @app.router.get(TENSORPC_FETCH_STATUS)
         async def _fetch_status(request):
             return await http_service.fetch_status(request)
 
         @app.router.ws(ws_name)
         async def _handle_new_connection(request, client_id):
-            return await ws_service.handle_new_connection_blacksheep(request, client_id)
+            return await ws_service.handle_new_connection_blacksheep(
+                request, client_id)
 
         @app.router.ws(ws_backup_name)
         async def _handle_new_backup_connection(request, client_id):
-            return await ws_service.handle_new_backup_connection_blacksheep(request, client_id)
+            return await ws_service.handle_new_backup_connection_blacksheep(
+                request, client_id)
 
         config = uvicorn.Config(app,
                                 port=port,

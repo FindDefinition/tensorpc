@@ -1,7 +1,6 @@
-
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable,
-                    Coroutine, Dict, Generic, Iterable, List, Optional, Set, Tuple,
-                    Type, TypeVar, Union)
+                    Coroutine, Dict, Generic, Iterable, List, Optional, Set,
+                    Tuple, Type, TypeVar, Union)
 from pydantic_core import core_schema
 from pydantic import (
     GetCoreSchemaHandler, )
@@ -16,7 +15,9 @@ class UniqueTreeId:
         splitter_first_index = uid.find("|")
         if splitter_first_index == -1:
             # empty uid, means uid must be ""
-            assert len(uid) == 0, f"uid should be empty if no splitter exists, but got {uid}"
+            assert len(
+                uid
+            ) == 0, f"uid should be empty if no splitter exists, but got {uid}"
             self.parts: List[str] = []
             uid_part = ""
             lengths: List[int] = []
@@ -24,7 +25,8 @@ class UniqueTreeId:
             length_part = uid[:splitter_first_index]
             uid_part = uid[splitter_first_index + 1:]
             lengths = [int(n) for n in length_part.split(",")]
-            assert sum(lengths) == len(uid_part) - splitter_length * (len(lengths) - 1), f"{uid} not valid, {lengths}, {uid_part}"
+            assert sum(lengths) == len(uid_part) - splitter_length * (
+                len(lengths) - 1), f"{uid} not valid, {lengths}, {uid_part}"
         start = 0
         self.parts: List[str] = []
         for l in lengths:
@@ -36,10 +38,15 @@ class UniqueTreeId:
         return len(self.uid_encoded) == 0
 
     @classmethod
-    def from_parts(cls, parts: List[str], splitter: str = ".") -> "UniqueTreeId":
+    def from_parts(cls,
+                   parts: List[str],
+                   splitter: str = ".") -> "UniqueTreeId":
         if len(parts) == 0:
             return cls("", len(splitter))
-        return cls(",".join([str(len(p)) for p in parts]) + "|" + splitter.join(parts), len(splitter))
+        return cls(
+            ",".join([str(len(p))
+                      for p in parts]) + "|" + splitter.join(parts),
+            len(splitter))
 
     def __repr__(self) -> str:
         return f"UniqueTreeId({self.uid_encoded})"
@@ -92,30 +99,43 @@ class UniqueTreeId:
 
     def common_prefix(self, other: "UniqueTreeId") -> "UniqueTreeId":
         i = 0
-        while i < len(self.parts) and i < len(other.parts) and self.parts[i] == other.parts[i]:
+        while i < len(self.parts) and i < len(
+                other.parts) and self.parts[i] == other.parts[i]:
             i += 1
         return UniqueTreeId.from_parts(self.parts[:i])
 
     def common_prefix_index(self, other: "UniqueTreeId") -> int:
         i = 0
-        while i < len(self.parts) and i < len(other.parts) and self.parts[i] == other.parts[i]:
+        while i < len(self.parts) and i < len(
+                other.parts) and self.parts[i] == other.parts[i]:
             i += 1
         return i
 
+
 class UniqueTreeIdForTree(UniqueTreeId):
+
     @classmethod
-    def from_parts(cls, parts: List[str], splitter: str = ":") -> "UniqueTreeIdForTree":
+    def from_parts(cls,
+                   parts: List[str],
+                   splitter: str = ":") -> "UniqueTreeIdForTree":
         if len(parts) == 0:
             return cls("", len(splitter))
-        return cls(",".join([str(len(p)) for p in parts]) + "|" + splitter.join(parts), len(splitter))
+        return cls(
+            ",".join([str(len(p))
+                      for p in parts]) + "|" + splitter.join(parts),
+            len(splitter))
 
-    def append_part(self, part: str, splitter: str = ":") -> "UniqueTreeIdForTree":
+    def append_part(self,
+                    part: str,
+                    splitter: str = ":") -> "UniqueTreeIdForTree":
         return UniqueTreeIdForTree.from_parts(self.parts + [part], splitter)
 
     def pop(self):
         return UniqueTreeIdForTree.from_parts(self.parts[:-1])
 
-    def __add__(self, other: Union["UniqueTreeIdForTree", str]) -> "UniqueTreeIdForTree":
+    def __add__(
+            self, other: Union["UniqueTreeIdForTree",
+                               str]) -> "UniqueTreeIdForTree":
         if isinstance(other, str):
             return UniqueTreeIdForTree.from_parts(self.parts + [other], ":")
         return UniqueTreeIdForTree.from_parts(self.parts + other.parts, ":")

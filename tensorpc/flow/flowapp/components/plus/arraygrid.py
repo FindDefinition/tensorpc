@@ -393,7 +393,8 @@ class NumpyArrayGridTable(mui.FlexBox):
     def __init__(self,
                  init_array_items: Optional[Dict[str,
                                                  Union[Dict[str, np.ndarray],
-                                                       np.ndarray, int, float, bool]]] = None,
+                                                       np.ndarray, int, float,
+                                                       bool]]] = None,
                  max_columns: int = 25,
                  max_size_row_split: int = 1000000):
         super().__init__()
@@ -413,21 +414,22 @@ class NumpyArrayGridTable(mui.FlexBox):
             self._on_btn_select).configure(stop_propagation=True)
         value_cell = mui.MatchCase([
             mui.MatchCase.ExprCase("x != \"scalar\"", btn),
-            mui.MatchCase.Case(mui.undefined, mui.Typography("").set_override_props(value="value")),
+            mui.MatchCase.Case(
+                mui.undefined,
+                mui.Typography("").set_override_props(value="value")),
         ]).set_override_props(condition="shape")
         cbox = mui.Checkbox().prop(size="small", disabled=True)
         column_defs = [
             mui.DataGrid.ColumnDef("name", accessorKey="name"),
             mui.DataGrid.ColumnDef("dtype", accessorKey="dtype"),
             mui.DataGrid.ColumnDef("shape", accessorKey="shape"),
-
             mui.DataGrid.ColumnDef("contiguous",
                                    accessorKey="contiguous",
                                    cell=cbox),
             mui.DataGrid.ColumnDef("value", cell=value_cell),
         ]
-        self.array_items: Dict[str, Union[Dict[str, np.ndarray],
-                                          np.ndarray, int, float, bool]] = {}
+        self.array_items: Dict[str, Union[Dict[str, np.ndarray], np.ndarray,
+                                          int, float, bool]] = {}
         if init_array_items is not None:
             self.array_items = init_array_items
 
@@ -448,7 +450,8 @@ class NumpyArrayGridTable(mui.FlexBox):
     async def update_array_items(self,
                                  array_items: Dict[str, Union[Dict[str,
                                                                    np.ndarray],
-                                                              np.ndarray, int, float, bool]]):
+                                                              np.ndarray, int,
+                                                              float, bool]]):
         self.array_items.update(array_items)
         item_datas = self._extract_table_data_from_array_items()
         await self.send_and_wait(self.dgrid.update_event(dataList=item_datas))
@@ -457,7 +460,8 @@ class NumpyArrayGridTable(mui.FlexBox):
                                   new_array_items: Dict[str,
                                                         Union[Dict[str,
                                                                    np.ndarray],
-                                                              np.ndarray, int, float, bool]]):
+                                                              np.ndarray, int,
+                                                              float, bool]]):
         self.array_items = new_array_items
         item_datas = self._extract_table_data_from_array_items()
         await self.send_and_wait(self.dgrid.update_event(dataList=item_datas))

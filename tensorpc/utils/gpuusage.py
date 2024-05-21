@@ -1,8 +1,9 @@
 from typing import Dict, List, Optional, Tuple
-import subprocess 
+import subprocess
 import dataclasses
-import io 
-import csv 
+import io
+import csv
+
 
 @dataclasses.dataclass
 class GPUMeasure:
@@ -17,6 +18,7 @@ class GPUMeasure:
         msg = f"gpu={self.gpuusage}%,mem={self.memused}/{self.memtotal}MB,"
         msg += f"{self.temperature}\u2103,io={self.memusage}%"
         return msg
+
 
 def get_nvidia_gpu_measures() -> List[GPUMeasure]:
     gpumeasures: List[GPUMeasure] = []

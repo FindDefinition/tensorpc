@@ -25,11 +25,14 @@ from tensorpc.flow.flowapp.core import (AppEditorFrontendEvent,
 from tensorpc.flow.flowapp.coretypes import TreeDragTarget
 
 FlexLayoutInitType: TypeAlias = Union[List[Union[mui.FlexLayout.Row,
-                                                     mui.FlexLayout.TabSet]],
-                                          mui.FlexLayout.Row,
-                                          mui.FlexLayout.TabSet,
-                                          mui.FlexLayout.Tab, mui.FlexLayout.HBox,
-                                          mui.FlexLayout.VBox, mui.MUIComponentType]
+                                                 mui.FlexLayout.TabSet]],
+                                      mui.FlexLayout.Row,
+                                      mui.FlexLayout.TabSet,
+                                      mui.FlexLayout.Tab, mui.FlexLayout.HBox,
+                                      mui.FlexLayout.VBox,
+                                      mui.MUIComponentType]
+
+
 class AnyFlexLayout(mui.FlexLayout):
 
     def __init__(self,
@@ -99,7 +102,8 @@ class AnyFlexLayout(mui.FlexLayout):
             else:
                 if not isinstance(obj, mui.Component):
                     if obj_is_anylayout:
-                        wrapped_obj = mui.flex_wrapper(obj, reload_mgr=self.flow_app_comp_core.reload_mgr)
+                        wrapped_obj = mui.flex_wrapper(
+                            obj, reload_mgr=self.flow_app_comp_core.reload_mgr)
                     else:
                         if type(obj) in ALL_OBJECT_LAYOUT_HANDLERS:
                             handler_cls = ALL_OBJECT_LAYOUT_HANDLERS[type(obj)]
@@ -107,7 +111,8 @@ class AnyFlexLayout(mui.FlexLayout):
                             assert type(obj) == handler_cls and isinstance(
                                 wrapped_obj, mui.FlexBox)
                         else:
-                            raise ValueError("this shouldn't happen", obj, type(obj))
+                            raise ValueError("this shouldn't happen", obj,
+                                             type(obj))
                 else:
                     wrapped_obj = obj
             wrapped_obj.set_flow_event_context_creator(target.context_creator)

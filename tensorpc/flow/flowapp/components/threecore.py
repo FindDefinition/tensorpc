@@ -1,4 +1,5 @@
-import enum 
+import enum
+
 
 class TextureFormat(enum.IntEnum):
     AlphaFormat = 0
@@ -15,6 +16,7 @@ class TextureFormat(enum.IntEnum):
     DepthFormat = 11
     DepthStencilFormat = 12
 
+
 class TextureType(enum.IntEnum):
     UnsignedByteType = 0
     ByteType = 1
@@ -29,6 +31,7 @@ class TextureType(enum.IntEnum):
     UnsignedShort565Type = 10
     UnsignedInt248Type = 11
 
+
 class TextureMappingType(enum.Enum):
     UVMapping = 0
     CubeReflectionMapping = 1
@@ -37,11 +40,13 @@ class TextureMappingType(enum.Enum):
     EquirectangularRefractionMapping = 4
     CubeUVReflectionMapping = 5
 
+
 class TextureWrappingMode(enum.IntEnum):
     RepeatWrapping = 0
     ClampToEdgeWrapping = 1
     MirroredRepeatWrapping = 2
-    
+
+
 class TextureFilterType(enum.IntEnum):
     NearestFilter = 0
     NearestMipmapNearestFilter = 1

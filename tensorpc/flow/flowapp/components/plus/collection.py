@@ -23,6 +23,7 @@ import shlex
 class SimpleFileReader(mui.FlexBox):
     """support json/pickle (.json/.pkl/.pickle) and numpy (.npy/.npz) files
     """
+
     def __init__(self):
         self.text = mui.Typography("Drop file here")
         self.text.prop(color="secondary")
@@ -63,19 +64,19 @@ class SimpleFileReader(mui.FlexBox):
         await appctx.inspector.set_object(data, "droppedFile")
 
 
-
 class ScriptExecutor(mui.FlexBox):
+
     def __init__(self):
         self.path = mui.TextField(label="Path").prop(muiMargin="dense")
         self.args = mui.TextField(label="Args").prop(muiMargin="dense")
 
-        super().__init__(
-            [self.path, self.args,
-             mui.HBox([
-                 mui.Button("Run", self._run),
-                 mui.Button("Cancel", self._cancel),
-
-             ])])
+        super().__init__([
+            self.path, self.args,
+            mui.HBox([
+                mui.Button("Run", self._run),
+                mui.Button("Cancel", self._cancel),
+            ])
+        ])
         self.prop(flexDirection="column")
         self._external_argv_task: Optional[asyncio.Future] = None
 
@@ -86,7 +87,8 @@ class ScriptExecutor(mui.FlexBox):
             appctx.run_in_executor_with_exception_inspect(
                 partial(self._run_app_script,
                         path=self.path.str(),
-                        argv=shlex.split(" ".join([self.path.str(), self.args.str()]))), ))
+                        argv=shlex.split(" ".join(
+                            [self.path.str(), self.args.str()]))), ))
 
     async def _cancel(self):
         if self._external_argv_task is None:

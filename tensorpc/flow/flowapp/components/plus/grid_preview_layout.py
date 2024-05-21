@@ -21,7 +21,6 @@ from tensorpc.flow.flowapp.components.plus.core import (
 from typing import List, Tuple
 
 
-
 def layout_rectangles_with_priority(
         rectangles: List[Tuple[int, int, int]],
         bounding_width: int) -> List[Tuple[int, int, Tuple[int, int]]]:
@@ -32,7 +31,9 @@ def layout_rectangles_with_priority(
 
     # Initialize variables
     x, y, row_height = 0, 0, 0
-    layout: List[Tuple[int, int, Tuple[int, int]]] = [(0, 0, (0, 0)) for _ in range(len(rectangles))]
+    layout: List[Tuple[int, int,
+                       Tuple[int, int]]] = [(0, 0, (0, 0))
+                                            for _ in range(len(rectangles))]
 
     # Layout rectangles
     for i, rectangle in rectangles_with_index:
@@ -55,7 +56,12 @@ def layout_rectangles_with_priority(
 
 class GridPreviewContainer(mui.FlexBox):
 
-    def __init__(self, preview_layout: mui.FlexBox, name: str, close_callback: Optional[Callable[[], Coroutine[None, None, None]]] = None):
+    def __init__(self,
+                 preview_layout: mui.FlexBox,
+                 name: str,
+                 close_callback: Optional[Callable[[],
+                                                   Coroutine[None, None,
+                                                             None]]] = None):
         super().__init__({
             "header":
             mui.HBox([
@@ -85,10 +91,12 @@ class _GridLayoutItem:
     item_cfg: ObjectGridItemConfig
     is_preview_layout: bool
 
+
 @dataclasses.dataclass
 class _GridLayoutedItem:
     layout_item: _GridLayoutItem
     grid_item: mui.GridItem
+
 
 class GridPreviewLayout(mui.FlexBox):
 
@@ -124,14 +132,13 @@ class GridPreviewLayout(mui.FlexBox):
         metas = reload_mgr.query_type_method_meta(type, True, True)
         special_methods = FlowSpecialMethods(metas)
         if special_methods.create_preview_layout is not None:
-            return True 
+            return True
         return ALL_OBJECT_LAYOUT_HANDLERS.check_type_exists(type)
 
     def _parse_obj_to_grid_item(self, obj: Any):
         from tensorpc.flow.flowapp import appctx
         if isinstance(obj, mui.FlexBox):
-            obj_grid_item = obj.find_user_meta_by_type(
-                ObjectGridItemConfig)
+            obj_grid_item = obj.find_user_meta_by_type(ObjectGridItemConfig)
             if obj_grid_item is None:
                 obj_grid_item = ObjectGridItemConfig(1.0, 1.0)
             return _GridLayoutItem(obj, obj, obj_grid_item, False)
@@ -153,8 +160,7 @@ class GridPreviewLayout(mui.FlexBox):
                     preview_layout = mui.flex_preview_wrapper(
                         obj, metas, reload_mgr)
                 else:
-                    with self._tree_root.enter_context(
-                            self._tree_root):
+                    with self._tree_root.enter_context(self._tree_root):
                         preview_layout = mui.flex_preview_wrapper(
                             obj, metas, reload_mgr)
             else:
@@ -176,7 +182,8 @@ class GridPreviewLayout(mui.FlexBox):
                 ObjectGridItemConfig)
             if preview_grid_item is None:
                 preview_grid_item = ObjectGridItemConfig(1.0, 1.0)
-            return _GridLayoutItem(obj, preview_layout, preview_grid_item, True)
+            return _GridLayoutItem(obj, preview_layout, preview_grid_item,
+                                   True)
         elif handler is not None:
             layout = handler.create_layout(obj)
             item = handler.get_grid_layout_item(obj)
@@ -216,25 +223,29 @@ class GridPreviewLayout(mui.FlexBox):
             item.item_cfg.w = layout_w
             item.item_cfg.h = layout_h
 
-    def _grid_layout_items_to_ui_items(self, name_to_grid_items: Dict[str, _GridLayoutItem], use_typename_as_title: bool):
+    def _grid_layout_items_to_ui_items(
+            self, name_to_grid_items: Dict[str, _GridLayoutItem],
+            use_typename_as_title: bool):
         grid_items: List[_GridLayoutedItem] = []
         for name, grid_layout_item in name_to_grid_items.items():
             obj = grid_layout_item.obj
             obj_type = type(obj)
             obj_type_name = obj_type.__name__
-            container = GridPreviewContainer(grid_layout_item.layout, obj_type_name if use_typename_as_title else name)
+            container = GridPreviewContainer(
+                grid_layout_item.layout,
+                obj_type_name if use_typename_as_title else name)
             if grid_layout_item.is_preview_layout:
                 get_editable_app().observe_layout(
                     grid_layout_item.layout,
                     partial(self._on_preview_layout_reload,
                             container=container))
             item = mui.GridItem(
-                    container, name,
-                    mui.GridItemProps(i=name,
-                                      x=grid_layout_item.item_cfg.x,
-                                      y=grid_layout_item.item_cfg.y,
-                                      w=grid_layout_item.item_cfg.w,
-                                      h=grid_layout_item.item_cfg.h))
+                container, name,
+                mui.GridItemProps(i=name,
+                                  x=grid_layout_item.item_cfg.x,
+                                  y=grid_layout_item.item_cfg.y,
+                                  w=grid_layout_item.item_cfg.w,
+                                  h=grid_layout_item.item_cfg.h))
             grid_items.append(_GridLayoutedItem(grid_layout_item, item))
         return grid_items
 
@@ -253,7 +264,9 @@ class GridPreviewLayout(mui.FlexBox):
                 continue
             name_to_grid_item[name] = grid_item
         self._layout_items_inplace(name_to_grid_item)
-        grid_items: List[_GridLayoutedItem] = self._grid_layout_items_to_ui_items(name_to_grid_item, self.use_typename_as_title)
+        grid_items: List[
+            _GridLayoutedItem] = self._grid_layout_items_to_ui_items(
+                name_to_grid_item, self.use_typename_as_title)
         # res.init_add_layout([
         #     mui.GridLayout(preview_layouts_v2).prop(flex=1, cols=12, draggableHandle=".grid-layout-drag-handle", rowHeight=300)
         # ])
@@ -261,12 +274,11 @@ class GridPreviewLayout(mui.FlexBox):
         self.prop(flexDirection="row", flex=1, width="100%", height="100%")
         self.grid_items = grid_items
         return [
-            mui.GridLayout([x.grid_item for x in grid_items]).prop(
-                flex=1,
-                cols=int(cols),
-                draggableHandle=".grid-layout-drag-handle",
-                rowHeight=50
-                )
+            mui.GridLayout([x.grid_item for x in grid_items
+                            ]).prop(flex=1,
+                                    cols=int(cols),
+                                    draggableHandle=".grid-layout-drag-handle",
+                                    rowHeight=50)
         ]
 
     async def _on_preview_layout_reload(self, layout: mui.FlexBox,
@@ -275,8 +287,7 @@ class GridPreviewLayout(mui.FlexBox):
         # print("DO PREVIEW LAYOUT RELOAD", create_layout.user_app_meta)
         ctx = nullcontext()
         if self._tree_root is not None:
-            ctx = self._tree_root.enter_context(
-                    self._tree_root)
+            ctx = self._tree_root.enter_context(self._tree_root)
         with ctx:
             layout_flex = await preview_layout_reload(
                 lambda x: container.update_childs({"layout": x}), layout,
@@ -300,19 +311,26 @@ class GridPreviewLayout(mui.FlexBox):
                 continue
             name_to_grid_item[name] = grid_item
         self._layout_items_inplace(name_to_grid_item)
-        grid_items: List[_GridLayoutedItem] = self._grid_layout_items_to_ui_items(name_to_grid_item, self.use_typename_as_title)
+        grid_items: List[
+            _GridLayoutedItem] = self._grid_layout_items_to_ui_items(
+                name_to_grid_item, self.use_typename_as_title)
         self.grid_items = grid_items
         cols = self.width_rate * self.max_cols
-        await self.set_new_layout([mui.GridLayout([x.grid_item for x in grid_items]).prop(
-                flex=1,
-                cols=cols,
-                draggableHandle=".grid-layout-drag-handle",
-                rowHeight=50)])
+        await self.set_new_layout([
+            mui.GridLayout([x.grid_item for x in grid_items
+                            ]).prop(flex=1,
+                                    cols=cols,
+                                    draggableHandle=".grid-layout-drag-handle",
+                                    rowHeight=50)
+        ])
 
     async def update_items(self, item: Dict[str, Any]):
         name_to_grid_item: Dict[str, _GridLayoutItem] = {}
         prev_layouted_items = self.grid_items.copy()
-        name_to_prev_layouted_items = {x.grid_item.name: x for x in prev_layouted_items}
+        name_to_prev_layouted_items = {
+            x.grid_item.name: x
+            for x in prev_layouted_items
+        }
         for name, obj in item.items():
             grid_item = self._parse_obj_to_grid_item(obj)
             if grid_item is None:
@@ -320,37 +338,55 @@ class GridPreviewLayout(mui.FlexBox):
             name_to_grid_item[name] = grid_item
             if name in name_to_prev_layouted_items:
                 name_to_prev_layouted_items.pop(name)
-        name_to_grid_item.update({x.grid_item.name: x.layout_item for x in name_to_prev_layouted_items.values()})
+        name_to_grid_item.update({
+            x.grid_item.name: x.layout_item
+            for x in name_to_prev_layouted_items.values()
+        })
         self._layout_items_inplace(name_to_grid_item)
-        grid_items: List[_GridLayoutedItem] = self._grid_layout_items_to_ui_items(name_to_grid_item, self.use_typename_as_title)
+        grid_items: List[
+            _GridLayoutedItem] = self._grid_layout_items_to_ui_items(
+                name_to_grid_item, self.use_typename_as_title)
         cols = self.width_rate * self.max_cols
-        await self.set_new_layout([mui.GridLayout([x.grid_item for x in grid_items]).prop(
-                flex=1,
-                cols=cols,
-                draggableHandle=".grid-layout-drag-handle",
-                rowHeight=50)])
+        await self.set_new_layout([
+            mui.GridLayout([x.grid_item for x in grid_items
+                            ]).prop(flex=1,
+                                    cols=cols,
+                                    draggableHandle=".grid-layout-drag-handle",
+                                    rowHeight=50)
+        ])
 
     async def delete_items(self, item: List[str]):
         name_to_grid_item: Dict[str, _GridLayoutItem] = {}
         prev_layouted_items = self.grid_items.copy()
-        name_to_prev_layouted_items = {x.grid_item.name: x for x in prev_layouted_items}
+        name_to_prev_layouted_items = {
+            x.grid_item.name: x
+            for x in prev_layouted_items
+        }
         for name in name_to_prev_layouted_items.keys():
             if name in item:
                 name_to_prev_layouted_items.pop(name)
-        name_to_grid_item.update({x.grid_item.name: x.layout_item for x in name_to_prev_layouted_items.values()})
+        name_to_grid_item.update({
+            x.grid_item.name: x.layout_item
+            for x in name_to_prev_layouted_items.values()
+        })
         self._layout_items_inplace(name_to_grid_item)
-        grid_items: List[_GridLayoutedItem] = self._grid_layout_items_to_ui_items(name_to_grid_item, self.use_typename_as_title)
+        grid_items: List[
+            _GridLayoutedItem] = self._grid_layout_items_to_ui_items(
+                name_to_grid_item, self.use_typename_as_title)
         cols = self.width_rate * self.max_cols
-        await self.set_new_layout([mui.GridLayout([x.grid_item for x in grid_items]).prop(
-                flex=1,
-                cols=cols,
-                draggableHandle=".grid-layout-drag-handle",
-                rowHeight=50)])
-        
+        await self.set_new_layout([
+            mui.GridLayout([x.grid_item for x in grid_items
+                            ]).prop(flex=1,
+                                    cols=cols,
+                                    draggableHandle=".grid-layout-drag-handle",
+                                    rowHeight=50)
+        ])
+
     async def clear_items(self):
         cols = self.width_rate * self.max_cols
-        await self.set_new_layout([mui.GridLayout([]).prop(
-                flex=1,
-                cols=cols,
-                draggableHandle=".grid-layout-drag-handle",
-                rowHeight=50)])
+        await self.set_new_layout([
+            mui.GridLayout([]).prop(flex=1,
+                                    cols=cols,
+                                    draggableHandle=".grid-layout-drag-handle",
+                                    rowHeight=50)
+        ])

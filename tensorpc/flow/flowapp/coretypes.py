@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Any, Optional, Callable 
+from typing import Any, Optional, Callable
 
 from typing_extensions import ContextManager
 

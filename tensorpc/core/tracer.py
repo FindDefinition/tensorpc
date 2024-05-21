@@ -9,9 +9,10 @@ import time
 from types import CodeType, FrameType
 from typing import Any, Callable, Dict, Mapping, Optional, Set, Tuple, Type
 from tensorpc import compat
-from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX 
+from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 
 THREAD_GLOBALS = threading.local()
+
 
 class TraceType(enum.Enum):
     Call = 0
@@ -43,6 +44,7 @@ class Tracer(object):
     2. method/function names
     3. include folders
     """
+
     def __init__(self,
                  callback: Callable[[FrameResult], Any],
                  traced_types: Optional[Tuple[Type]] = None,
@@ -73,7 +75,8 @@ class Tracer(object):
         self._frame_cnt = _frame_cnt
         self.use_profile = use_profile
 
-        self._inner_frame_fnames: Set[str] = set([Tracer.__enter__.__code__.co_filename])
+        self._inner_frame_fnames: Set[str] = set(
+            [Tracer.__enter__.__code__.co_filename])
 
     def _filter_frame(self, frame: FrameType):
         if frame.f_code in self.code_res:
@@ -85,25 +88,26 @@ class Tracer(object):
         # TODO better handle tensorpc scripts
         if frame.f_code.co_filename.startswith(self._tensorpc_prefix):
             self.code_res[frame.f_code] = (True, True)
-            return True 
+            return True
         if co_name.startswith("<") and co_name.endswith(">"):
             # ignore all comp frame such as <listcomp>
             # listcomp frame will be removed in python 3.12
             self.code_res[frame.f_code] = (False, False)
-            return False 
+            return False
         # TODO better check
         keep_one_frame = False
-        if co_name == "__getattr__" or co_name == "__setattr__" :
+        if co_name == "__getattr__" or co_name == "__setattr__":
             self.code_res[frame.f_code] = (False, False)
-            return False 
+            return False
         if self.traced_types is not None and "self" in frame.f_locals:
-            is_traced_types = isinstance(frame.f_locals["self"],self.traced_types)
+            is_traced_types = isinstance(frame.f_locals["self"],
+                                         self.traced_types)
         if self.traced_names is not None:
             is_traced_names = frame.f_code.co_name in self.traced_names
         if self.ignored_names is not None:
             if frame.f_code.co_name in self.ignored_names:
                 self.code_res[frame.f_code] = (False, False)
-                return False 
+                return False
         if self.traced_folders is not None:
             code_path = Path(frame.f_code.co_filename)
             found = False
@@ -115,10 +119,11 @@ class Tracer(object):
             if not found:
                 # keep external trace for one depth
                 back = frame.f_back
-                if self.keep_one_frame_for_ignored and back is not None and back.f_code in self.code_res and self.code_res[back.f_code][1]:
+                if self.keep_one_frame_for_ignored and back is not None and back.f_code in self.code_res and self.code_res[
+                        back.f_code][1]:
                     keep_one_frame = True
         res = is_traced_types and is_traced_names and is_traced_folders
-        filter_res = res 
+        filter_res = res
         if keep_one_frame:
             filter_res = keep_one_frame
         self.code_res[frame.f_code] = (filter_res, res)
@@ -180,16 +185,21 @@ class Tracer(object):
         if event == 'return':
             THREAD_GLOBALS.depth -= 1
             # print(event, frame.f_code.co_name, "THREAD_GLOBALS.depth", THREAD_GLOBALS.depth)
-            self.callback(self.get_frame_result(TraceType.Return, frame, THREAD_GLOBALS.depth))
+            self.callback(
+                self.get_frame_result(TraceType.Return, frame,
+                                      THREAD_GLOBALS.depth))
 
     @staticmethod
-    def get_frame_result(trace_type: TraceType, frame: FrameType, depth: int=-1, c_call_obj: Optional[object]=None):
+    def get_frame_result(trace_type: TraceType,
+                         frame: FrameType,
+                         depth: int = -1,
+                         c_call_obj: Optional[object] = None):
         qname = frame.f_code.co_name
         if sys.version_info[:2] >= (3, 11):
-            qname = frame.f_code.co_qualname # type: ignore
+            qname = frame.f_code.co_qualname  # type: ignore
         else:
             if "self" in frame.f_locals:
-                qname = type(frame.f_locals["self"]).__qualname__ + "." + qname                
+                qname = type(frame.f_locals["self"]).__qualname__ + "." + qname
         module = inspect.getmodule(frame)
         module_qname = ""
         if module is not None:
@@ -263,10 +273,11 @@ class Tracer(object):
         if not self._filter_frame(frame):
             return None
         if event == "call":
-            self.callback(self.get_frame_result(TraceType.Call, frame, THREAD_GLOBALS.depth))
+            self.callback(
+                self.get_frame_result(TraceType.Call, frame,
+                                      THREAD_GLOBALS.depth))
             # print("THREAD_GLOBALS.depth CALL", THREAD_GLOBALS.depth)
 
             THREAD_GLOBALS.depth += 1
 
         return self.trace_lite
-

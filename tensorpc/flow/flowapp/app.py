@@ -103,8 +103,6 @@ from .core import (AppComponentCore, AppEditorEvent, AppEditorEventType,
                    ValueType, undefined)
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 
-
-
 ALL_APP_EVENTS = HashableRegistry()
 P = ParamSpec('P')
 
@@ -192,8 +190,10 @@ T = TypeVar("T")
 @dataclasses.dataclass
 class _LayoutObserveMeta:
     # one type (base class) may related to multiple layouts
-    layouts: Dict[Union[mui.FlexBox, "App"], Optional[Callable[[mui.FlexBox, ServFunctionMeta],
-                                Coroutine[None, None, Optional[mui.FlexBox]]]]]
+    layouts: Dict[Union[mui.FlexBox, "App"],
+                  Optional[Callable[[mui.FlexBox, ServFunctionMeta],
+                                    Coroutine[None, None,
+                                              Optional[mui.FlexBox]]]]]
     qualname_prefix: str
     # if type is None, it means they are defined in global scope.
     type: Type
@@ -208,18 +208,24 @@ class _WatchDogWatchEntry:
     obmetas: Dict[ObjectReloadManager.TypeUID, _LayoutObserveMeta]
     watch: Optional[ObservedWatch]
 
+
 class _FlowAppObserveContext:
+
     def __init__(self) -> None:
         self._removed_layouts: List[mui.FlexBox] = []
-        self._added_layouts_and_cbs: Dict[mui.FlexBox, Optional[Callable[[mui.FlexBox, ServFunctionMeta],
-                                    Coroutine]]] = {}
+        self._added_layouts_and_cbs: Dict[mui.FlexBox, Optional[Callable[
+            [mui.FlexBox, ServFunctionMeta], Coroutine]]] = {}
         self._reloaded_layout_pairs: List[Tuple[mui.FlexBox, mui.FlexBox]] = []
 
+
 _FLOWAPP_OBSERVE_CONTEXT: contextvars.ContextVar[
-    Optional[_FlowAppObserveContext]] = contextvars.ContextVar("_FLOWAPP_OBSERVE_CONTEXT", default=None)
+    Optional[_FlowAppObserveContext]] = contextvars.ContextVar(
+        "_FLOWAPP_OBSERVE_CONTEXT", default=None)
+
 
 def _get_flowapp_observe_context():
     return _FLOWAPP_OBSERVE_CONTEXT.get()
+
 
 @contextlib.contextmanager
 def _enter_flowapp_observe_context(ctx: _FlowAppObserveContext):
@@ -332,8 +338,8 @@ class App:
     def add_file_resource(
         self, key: str,
         handler: Callable[..., Union[bytes, FileResource,
-                                    Coroutine[None, None,
-                                              Union[bytes, FileResource]]]]):
+                                     Coroutine[None, None,
+                                               Union[bytes, FileResource]]]]):
         self._flowapp_file_resource_handlers[key] = handler
 
     def remove_file_resource(
@@ -399,7 +405,8 @@ class App:
             graph_id = self.__flowapp_master_meta.graph_id
         if node_id is None:
             node_id = self.__flowapp_master_meta.node_id
-        meta = parse_obj_to_jsonlike(data, key, UniqueTreeIdForTree.from_parts([key]))
+        meta = parse_obj_to_jsonlike(data, key,
+                                     UniqueTreeIdForTree.from_parts([key]))
         in_memory_limit_bytes = in_memory_limit * 1024 * 1024
         meta.userdata = {
             "timestamp": time.time_ns(),
@@ -622,8 +629,7 @@ class App:
             detached = self.root._detach()
             # make sure did_mount is called from root to leaf (breadth first order)
             detached_items = list(detached.items())
-            detached_items.sort(key=lambda x: len(x[0].parts),
-                                reverse=False)
+            detached_items.sort(key=lambda x: len(x[0].parts), reverse=False)
 
             await self.root._run_special_methods(
                 [], [x[1] for x in detached_items], self._flow_reload_manager)
@@ -696,12 +702,14 @@ class App:
                     if comp._flow_uid_encoded in prev_comps:
                         if comp._flow_comp_type.value == prev_comps[
                                 comp._flow_uid_encoded]["type"]:
-                            comp.set_props(prev_comps[comp._flow_uid_encoded]["props"])
+                            comp.set_props(
+                                prev_comps[comp._flow_uid_encoded]["props"])
                     if comp._flow_uid_encoded in prev_user_states:
                         if comp._flow_comp_type.value == prev_user_states[
                                 comp._flow_uid_encoded]["type"]:
                             await comp.set_persist_props_async(
-                                prev_user_states[comp._flow_uid_encoded]["state"])
+                                prev_user_states[
+                                    comp._flow_uid_encoded]["state"])
             del prev_comps
             del prev_user_states
 
@@ -734,8 +742,7 @@ class App:
         uid_to_comp = self.root._get_uid_to_comp_dict()
         # make sure did_mount is called from leaf to root (reversed breadth first order)
         uid_to_comp_items = list(uid_to_comp.items())
-        uid_to_comp_items.sort(key=lambda x: len(x[0].parts),
-                               reverse=True)
+        uid_to_comp_items.sort(key=lambda x: len(x[0].parts), reverse=True)
         with enter_app_conetxt(self):
             for _, v in uid_to_comp_items:
                 special_methods = v.get_special_methods(
@@ -747,10 +754,9 @@ class App:
                         change_status=False)
                 for k, effects in v.effects._flow_effects.items():
                     for effect in effects:
-                        res = await v.run_callback(
-                            effect,
-                            sync_status_first=False,
-                            change_status=False)
+                        res = await v.run_callback(effect,
+                                                   sync_status_first=False,
+                                                   change_status=False)
                         if res is not None:
                             # res is effect
                             v.effects._flow_unmounted_effects[k].append(res)
@@ -1001,16 +1007,15 @@ class App:
 
     async def run_vscode_event(self, data: VscodeTensorpcMessage):
         return await self._flowapp_special_eemitter.emit_async(
-                            AppSpecialEventType.VscodeTensorpcMessage,
-                            data)
+            AppSpecialEventType.VscodeTensorpcMessage, data)
 
     async def _run_autorun(self, cb: Callable):
         try:
             coro = cb()
             if inspect.iscoroutine(coro):
                 await coro
-            await self._flowapp_special_eemitter.emit_async(AppSpecialEventType.AutoRunEnd,
-                                                None)
+            await self._flowapp_special_eemitter.emit_async(
+                AppSpecialEventType.AutoRunEnd, None)
         except:
             traceback.print_exc()
             if self._flowapp_enable_exception_inspect:
@@ -1203,7 +1208,10 @@ class EditableApp(App):
         self._loop = asyncio.get_running_loop()
         self._watch_lock = threading.Lock()
 
-    def __observe_layout_effect(self, obj: mui.FlexBox, callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta],
+    def __observe_layout_effect(
+        self,
+        obj: mui.FlexBox,
+        callback: Optional[Callable[[mui.FlexBox, ServFunctionMeta],
                                     Coroutine]] = None):
         self._flowapp_observe(obj, callback)
         return partial(self._flowapp_remove_observer, obj)
@@ -1215,11 +1223,15 @@ class EditableApp(App):
                                     Coroutine]] = None):
         if not obj.effects.has_effect_key(TENSORPC_FLOW_EFFECTS_OBSERVE):
             # already observed
-            obj.effects.use_effect(partial(self.__observe_layout_effect, obj, callback), key=TENSORPC_FLOW_EFFECTS_OBSERVE)
+            obj.effects.use_effect(partial(self.__observe_layout_effect, obj,
+                                           callback),
+                                   key=TENSORPC_FLOW_EFFECTS_OBSERVE)
             if obj.is_mounted():
                 self._flowapp_observe(obj, callback)
                 # TODO better code
-                obj.effects._flow_unmounted_effects[TENSORPC_FLOW_EFFECTS_OBSERVE].append(partial(self._flowapp_remove_observer, obj))
+                obj.effects._flow_unmounted_effects[
+                    TENSORPC_FLOW_EFFECTS_OBSERVE].append(
+                        partial(self._flowapp_remove_observer, obj))
 
     def _flowapp_observe(
         self,
@@ -1259,7 +1271,8 @@ class EditableApp(App):
                     obentry.obmetas[meta_type_uid].layouts[obj] = callback
                 else:
                     qualname_prefix = meta_type_uid[1]
-                    obmeta = _LayoutObserveMeta({obj: callback}, qualname_prefix,
+                    obmeta = _LayoutObserveMeta({obj: callback},
+                                                qualname_prefix,
                                                 meta_item.type,
                                                 meta_item.is_leaf,
                                                 meta_item.metas)
@@ -1361,10 +1374,10 @@ class EditableApp(App):
                     obmetas_items = list(obmetas.items())
                     # sort obmetas_items by mro
                     obmetas_items.sort(key=lambda x: len(x[1].type.mro()),
-                                    reverse=True)
+                                       reverse=True)
                     # store accessed metas in inheritance tree
                     resolved_metas: Dict[ObjectReloadManager.TypeUID,
-                                        Set[str]] = {}
+                                         Set[str]] = {}
                     # print("len(obmetas)", resolved_path, len(obmetas))
                     for type_uid, obmeta in obmetas_items:
                         # get changed metas for special methods
@@ -1376,7 +1389,8 @@ class EditableApp(App):
                             if m.qualname in change:
                                 changed_metas.append(m)
                         new_method_names: List[str] = [
-                            x for x in new if x.startswith(obmeta.qualname_prefix)
+                            x for x in new
+                            if x.startswith(obmeta.qualname_prefix)
                             and x != obmeta.qualname_prefix
                         ]
                         # layout = obmeta.layout
@@ -1399,28 +1413,31 @@ class EditableApp(App):
                         # for m in changed_metas:
                         #     print(m.qualname, "CHANGED")
                         # do reload, run special methods
-                        flow_special_for_check = FlowSpecialMethods(changed_metas)
+                        flow_special_for_check = FlowSpecialMethods(
+                            changed_metas)
                         do_reload = flow_special_for_check.contains_special_method(
                         ) or bool(new_method_names)
                         # print("do_reload", do_reload)
                         if not do_reload:
                             continue
                         # rprint(obmeta.layouts)
-                        for i, (layout, layout_reload_cb) in enumerate(obmeta.layouts.items()):
+                        for i, (layout, layout_reload_cb) in enumerate(
+                                obmeta.layouts.items()):
                             changed_user_obj = None
 
                             if layout is self:
                                 # reload app
                                 if changed_metas or bool(new_method_names):
                                     # reload app servunit and method
-                                    changed_user_obj = self._get_user_app_object()
+                                    changed_user_obj = self._get_user_app_object(
+                                    )
                                     # self._get_app_dynamic_cls(
                                     # ).reload_obj_methods(user_obj, {}, self._flow_reload_manager)
                                     self._get_app_service_unit().reload_metas(
                                         self._flow_reload_manager)
                             else:
-                                assert isinstance(layout,
-                                                mui.FlexBox), f"{type(layout)}"
+                                assert isinstance(
+                                    layout, mui.FlexBox), f"{type(layout)}"
                                 # if self.code_editor.external_path is not None and new_code is None:
                                 #     if str(
                                 #             Path(self.code_editor.external_path).
@@ -1428,7 +1445,8 @@ class EditableApp(App):
                                 #         await self.set_editor_value(new_data, lineno=0)
                                 # reload dynamic layout
                                 if changed_metas or bool(new_method_names):
-                                    changed_user_obj = layout._get_user_object()
+                                    changed_user_obj = layout._get_user_object(
+                                    )
                             # print("RTX", changed_user_obj, new_method_names)
                             if changed_user_obj is not None:
                                 # reload_res = self._flow_reload_manager.reload_type(
@@ -1491,7 +1509,8 @@ class EditableApp(App):
                                         self._flow_reload_manager)
                             # use updated metas to run special methods such as create_layout and auto_run
                             if changed_metas:
-                                flow_special = FlowSpecialMethods(changed_metas)
+                                flow_special = FlowSpecialMethods(
+                                    changed_metas)
                                 with _enter_app_conetxt(self):
                                     if flow_special.create_layout:
                                         fn = flow_special.create_layout.get_binded_fn(
@@ -1509,8 +1528,8 @@ class EditableApp(App):
                                                     layout,
                                                     flow_special.create_layout)
                                                 # if new_layout is not None:
-                                                    # obmeta.layouts[i] = new_layout
-                                                    # observe_ctx._reloaded_layout_pairs.append((layout, new_layout))
+                                                # obmeta.layouts[i] = new_layout
+                                                # observe_ctx._reloaded_layout_pairs.append((layout, new_layout))
                                             # dynamic layout
                                     if flow_special.create_preview_layout:
                                         if not isinstance(layout, App):
@@ -1520,8 +1539,8 @@ class EditableApp(App):
                                                     layout, flow_special.
                                                     create_preview_layout)
                                                 # if new_layout is not None:
-                                                    # obmeta.layouts[i] = new_layout
-                                                    # observe_ctx._reloaded_layout_pairs.append((layout, new_layout))
+                                                # obmeta.layouts[i] = new_layout
+                                                # observe_ctx._reloaded_layout_pairs.append((layout, new_layout))
                                     for auto_run in flow_special.auto_runs:
                                         if auto_run is not None:
                                             await self._run_autorun(
@@ -1548,15 +1567,22 @@ class EditableApp(App):
                                 if entry.autorun_when_changed:
                                     await self._run_autorun(entry.current_func)
                             else:
-                                if entry.first_changed_block_idx < len(entry.body_code_blocks):
+                                if entry.first_changed_block_idx < len(
+                                        entry.body_code_blocks):
                                     first_changed_block_idx = entry.first_changed_block_idx
                                     if not entry.autorun_locals:
                                         first_changed_block_idx = 0
-                                    code_to_run = "\n".join(entry.body_code_blocks[first_changed_block_idx:])
-                                    code_to_run = remove_common_indent_from_code(code_to_run)
+                                    code_to_run = "\n".join(
+                                        entry.body_code_blocks[
+                                            first_changed_block_idx:])
+                                    code_to_run = remove_common_indent_from_code(
+                                        code_to_run)
                                     code_locals = entry.autorun_locals
                                     func_globals = entry.current_func.__globals__
-                                    code_comp = compile(code_to_run, f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-{entry.qualname}>", "exec")
+                                    code_comp = compile(
+                                        code_to_run,
+                                        f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-{entry.qualname}>",
+                                        "exec")
                                     exec(code_comp, func_globals, code_locals)
                         await self._flowapp_special_eemitter.emit_async(
                             AppSpecialEventType.ObservedFunctionChange,
@@ -1595,7 +1621,7 @@ class EditableApp(App):
                 self._flowapp_remove_observer(layout)
             for layout, cb in observe_ctx._added_layouts_and_cbs.items():
                 self._flowapp_observe(layout, cb)
-            return 
+            return
 
     def _watchdog_on_modified(self, ev: _WATCHDOG_MODIFY_EVENT_TYPES):
         # which event trigger reload?

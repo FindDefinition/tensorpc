@@ -54,17 +54,18 @@ import numpy as np
 from .core import get_canvas_item_cfg, get_or_create_canvas_item_cfg, ContainerProxy, GroupProxy
 
 
-
 class Points(three.Points, _VapiObjects):
+
     def __init__(self, limit: int) -> None:
         super().__init__(limit)
         self._points: List[three.Vector3Type] = []
         self._points_arr: List[np.ndarray] = []
         self.prop(layers=31)
-    
+
     @property
     def _count(self):
-        return len(self._points) + sum([arr.shape[0] for arr in self._points_arr])
+        return len(self._points) + sum(
+            [arr.shape[0] for arr in self._points_arr])
 
     def p(self, x: float, y: float, z: float):
         assert self._count + 1 <= self.props.limit, f"points count exceed limit {self.props.limit}"
@@ -72,27 +73,39 @@ class Points(three.Points, _VapiObjects):
         return self
 
     def array(self, data: np.ndarray):
-        assert data.ndim == 2 and data.shape[1] in [3, 4], "points dim must be 3 or 4 (with intensity)"
-        assert self._count + data.shape[0] <= self.props.limit, f"points count exceed limit {self.props.limit}"
+        assert data.ndim == 2 and data.shape[1] in [
+            3, 4
+        ], "points dim must be 3 or 4 (with intensity)"
+        assert self._count + data.shape[
+            0] <= self.props.limit, f"points count exceed limit {self.props.limit}"
         if self._points_arr:
-            assert data.shape[1] == self._points_arr[0].shape[1], "points dim must be same as first array"
+            assert data.shape[1] == self._points_arr[0].shape[
+                1], "points dim must be same as first array"
         if data.dtype != np.float32:
             data = data.astype(np.float32)
         self._points_arr.append(data)
         return self
-    
+
     def prepare_vapi_props(self):
         # TODO global config
-        points_nparray = np.array(self._points, dtype=np.float32).reshape(-1, 3)
+        points_nparray = np.array(self._points,
+                                  dtype=np.float32).reshape(-1, 3)
         if self._points_arr:
             has_intensity = self._points_arr[0].shape[1] == 4
             if has_intensity:
-                points_nparray = np.concatenate([points_nparray, np.full((points_nparray.shape[0], 1), 255.0, dtype=np.float32)], axis=-1)
+                points_nparray = np.concatenate([
+                    points_nparray,
+                    np.full(
+                        (points_nparray.shape[0], 1), 255.0, dtype=np.float32)
+                ],
+                                                axis=-1)
             points_nparray = np.concatenate(self._points_arr +
                                             [points_nparray])
         self.prop(points=points_nparray)
 
+
 class ColoredPoints(three.Points, _VapiObjects):
+
     def __init__(self, limit: int) -> None:
         super().__init__(limit)
         self._points: List[three.Vector3Type] = []
@@ -103,7 +116,8 @@ class ColoredPoints(three.Points, _VapiObjects):
 
     @property
     def _count(self):
-        return len(self._points) + sum([arr.shape[0] for arr in self._points_arr])
+        return len(self._points) + sum(
+            [arr.shape[0] for arr in self._points_arr])
 
     def p(self, x: float, y: float, z: float, r: int, g: int, b: int):
         assert r >= 0 and r <= 255
@@ -116,30 +130,35 @@ class ColoredPoints(three.Points, _VapiObjects):
 
     def array(self, data: np.ndarray, color: np.ndarray):
         assert color.dtype == np.uint8, "color must be uint8 array"
-        assert data.ndim == 2 and data.shape[1] == 3, "points with color dim must be 3"
-        assert color.ndim == 2 and color.shape[1] == 3, "points with color dim must be 3"
-        assert self._count + data.shape[0] <= self.props.limit, f"points count exceed limit {self.props.limit}"
+        assert data.ndim == 2 and data.shape[
+            1] == 3, "points with color dim must be 3"
+        assert color.ndim == 2 and color.shape[
+            1] == 3, "points with color dim must be 3"
+        assert self._count + data.shape[
+            0] <= self.props.limit, f"points count exceed limit {self.props.limit}"
         if self._points_arr:
-            assert data.shape[1] == self._points_arr[0].shape[1], "points dim must be same as first array"
+            assert data.shape[1] == self._points_arr[0].shape[
+                1], "points dim must be same as first array"
         if data.dtype != np.float32:
             data = data.astype(np.float32)
         self._points_arr.append(data)
         self._colors_arr.append(color)
         return self
-    
+
     def prepare_vapi_props(self):
         # TODO global config
-        points_nparray = np.array(self._points, dtype=np.float32).reshape(-1, 3)
+        points_nparray = np.array(self._points,
+                                  dtype=np.float32).reshape(-1, 3)
         color_nparray = np.array(self._colors, dtype=np.uint8).reshape(-1, 3)
         if self._points_arr:
             points_nparray = np.concatenate(self._points_arr +
                                             [points_nparray])
-            color_nparray = np.concatenate(self._colors_arr +
-                                            [color_nparray])
+            color_nparray = np.concatenate(self._colors_arr + [color_nparray])
         self.prop(points=points_nparray, colors=color_nparray)
 
 
 class _Polygon:
+
     def __init__(self, start: three.Vector3Type, closed: bool,
                  line_proxy: "Lines") -> None:
         self.line_proxy = line_proxy
@@ -151,8 +170,11 @@ class _Polygon:
         self.start = (x, y, z)
         return self
 
+
 class Lines(three.Segments, _VapiObjects):
-    def __init__(self, limit: int,
+
+    def __init__(self,
+                 limit: int,
                  line_width: float = 1.0,
                  color: Union[str, mui.Undefined] = mui.undefined) -> None:
         super().__init__(limit, line_width, color)
@@ -163,7 +185,8 @@ class Lines(three.Segments, _VapiObjects):
 
     @property
     def _count(self):
-        return len(self._point_pairs) + sum([arr.shape[0] for arr in self._lines_arr])
+        return len(self._point_pairs) + sum(
+            [arr.shape[0] for arr in self._lines_arr])
 
     def p(self, x1: float, y1: float, z1: float, x2: float, y2: float,
           z2: float):
@@ -172,7 +195,8 @@ class Lines(three.Segments, _VapiObjects):
         return self
 
     def array(self, data: np.ndarray):
-        assert self._count + data.shape[0] <= self.props.limit, f"lines count exceed limit {self.props.limit}"
+        assert self._count + data.shape[
+            0] <= self.props.limit, f"lines count exceed limit {self.props.limit}"
         if data.dtype != np.float32:
             data = data.astype(np.float32)
         three.SegmentsProps.lines_validator(data)
@@ -180,7 +204,8 @@ class Lines(three.Segments, _VapiObjects):
         return self
 
     def prepare_vapi_props(self):
-        lines_array = np.array(self._point_pairs, dtype=np.float32).reshape(-1, 2, 3)
+        lines_array = np.array(self._point_pairs,
+                               dtype=np.float32).reshape(-1, 2, 3)
         if self._lines_arr:
             lines_array = np.concatenate(self._lines_arr + [lines_array])
         self.prop(lines=lines_array)
@@ -191,11 +216,15 @@ class Lines(three.Segments, _VapiObjects):
     def closed_polygon(self, x: float, y: float, z: float):
         return _Polygon((x, y, z), True, self)
 
+
 class BoundingBox(three.BoundingBox, _VapiObjects):
+
     def prepare_vapi_props(self):
         self.prop(enableSelect=True)
 
+
 class Image(three.Image, _VapiObjects):
+
     def __init__(self, img: np.ndarray, use_datatex: bool = False) -> None:
         super().__init__()
         self._img = img
@@ -209,15 +238,22 @@ class Image(three.Image, _VapiObjects):
         img = self._img
         if use_datatex:
             if img.ndim == 3 and img.shape[-1] == 3:
-                img = np.concatenate([img, np.full((*img.shape[:-1], 1), 255, dtype=np.uint8)], axis=-1)
+                img = np.concatenate(
+                    [img,
+                     np.full((*img.shape[:-1], 1), 255, dtype=np.uint8)],
+                    axis=-1)
             elif img.ndim == 2:
                 # gray to rgba
                 img = img.reshape((*img.shape, 1))
                 img = np.tile(img, (1, 1, 3))
-                img = np.concatenate([img, np.full((*img.shape[:-1], 1), 255, dtype=np.uint8)], axis=-1)
+                img = np.concatenate(
+                    [img,
+                     np.full((*img.shape[:-1], 1), 255, dtype=np.uint8)],
+                    axis=-1)
             self.prop(image=img, enableSelect=True)
         else:
-            self.prop(image=mui.Image.encode_image_bytes(img), enableSelect=True)
+            self.prop(image=mui.Image.encode_image_bytes(img),
+                      enableSelect=True)
 
 
 V_CONTEXT_VAR: contextvars.ContextVar[
@@ -241,11 +277,12 @@ def enter_v_conetxt(robj: VContext):
         V_CONTEXT_VAR.reset(token)
 
 
-async def _draw_all_in_vctx(vctx: VContext,
-                            detail_update_prefix: Optional[UniqueTreeId] = None,
-                            app_event: Optional[AppEvent] = None,
-                            update_iff_change: bool = False):
-    # import rich 
+async def _draw_all_in_vctx(
+        vctx: VContext,
+        detail_update_prefix: Optional[UniqueTreeId] = None,
+        app_event: Optional[AppEvent] = None,
+        update_iff_change: bool = False):
+    # import rich
     # rich.print("?", vctx._group_assigns)
     # rich.print(vctx._name_to_group)
     vctx.canvas._tree_collect_in_vctx()
@@ -279,7 +316,8 @@ async def _draw_all_in_vctx(vctx: VContext,
             await container.update_childs({name: group})
     await vctx.canvas._show_visible_groups_of_objtree()
 
-    await vctx.canvas.item_tree.update_tree(wait=True, update_iff_change=update_iff_change)
+    await vctx.canvas.item_tree.update_tree(
+        wait=True, update_iff_change=update_iff_change)
     if detail_update_prefix is not None:
         await vctx.canvas.update_detail_layout(detail_update_prefix)
     if app_event is not None:
@@ -345,7 +383,8 @@ def group(name: str,
           pos: Optional[three.Vector3Type] = None,
           rot: Optional[three.Vector3Type] = None,
           canvas: Optional[ComplexCanvas] = None,
-          variant: Optional[Literal["default", "faceToCamera", "relativeToCamera"]] = None,
+          variant: Optional[Literal["default", "faceToCamera",
+                                    "relativeToCamera"]] = None,
           loop: Optional[asyncio.AbstractEventLoop] = None):
     if canvas is None:
         canvas = appctx.find_component(ComplexCanvas)
@@ -371,7 +410,8 @@ def group(name: str,
     #         v_ctx.canvas = canvas
     #         is_objtree_ctx = True
     if v_ctx is None:
-        assert not is_reserved_name(name), f"{name} should not be reserved name"
+        assert not is_reserved_name(
+            name), f"{name} should not be reserved name"
         v_ctx = VContext(canvas)
     #     token = V_CONTEXT_VAR.set(v_ctx)
     # else:
@@ -509,7 +549,8 @@ def group(name: str,
                 loop = asyncio.get_running_loop()
             if app._flowapp_thread_id == threading.get_ident():
                 # we can't wait fut here
-                task = asyncio.create_task(_draw_all_in_vctx(v_ctx, UniqueTreeId(""), ev))
+                task = asyncio.create_task(
+                    _draw_all_in_vctx(v_ctx, UniqueTreeId(""), ev))
                 # we can't wait fut here
                 # return task
                 # return fut
@@ -519,38 +560,52 @@ def group(name: str,
                     _draw_all_in_vctx(v_ctx, UniqueTreeId(""), ev), loop)
                 fut.result()
 
-async def _uninstall_detail_when_unmount(ev: three.Event, obj: three.Component, canvas: ComplexCanvas):
+
+async def _uninstall_detail_when_unmount(ev: three.Event, obj: three.Component,
+                                         canvas: ComplexCanvas):
     object_pyid = obj._flow_uid
     cur_detail_obj_pyid = canvas._cur_detail_layout_object_id
     if object_pyid == cur_detail_obj_pyid:
-        await canvas._uninstall_detail_layout() 
+        await canvas._uninstall_detail_layout()
 
-async def _install_detail_before_mount(ev: three.Event, obj: three.Component, canvas: ComplexCanvas):
+
+async def _install_detail_before_mount(ev: three.Event, obj: three.Component,
+                                       canvas: ComplexCanvas):
     object_pyid = obj._flow_uid
     cur_detail_obj_pyid = canvas._cur_detail_layout_object_id
     if object_pyid == cur_detail_obj_pyid:
-        await canvas._install_detail_layout(obj) 
+        await canvas._install_detail_layout(obj)
 
-async def _uninstall_table_when_unmount(ev: three.Event, obj: three.Component, canvas: ComplexCanvas):
+
+async def _uninstall_table_when_unmount(ev: three.Event, obj: three.Component,
+                                        canvas: ComplexCanvas):
     object_pyid = obj._flow_uid
     cur_detail_obj_pyid = canvas._cur_table_object_id
     if object_pyid == cur_detail_obj_pyid:
-        await canvas._uninstall_table_layout() 
+        await canvas._uninstall_table_layout()
 
-async def _install_table_before_mount(ev: three.Event, obj: three.Component, canvas: ComplexCanvas):
+
+async def _install_table_before_mount(ev: three.Event, obj: three.Component,
+                                      canvas: ComplexCanvas):
     object_pyid = obj._flow_uid
     cur_detail_obj_pyid = canvas._cur_table_object_id
     if object_pyid == cur_detail_obj_pyid:
-        await canvas._install_table_layout(obj) 
+        await canvas._install_table_layout(obj)
+
 
 def _install_obj_event_handlers(obj: three.Component, canvas: ComplexCanvas):
     if isinstance(obj, three.Group):
-        obj.event_before_mount.on(partial(_install_table_before_mount, obj=obj, canvas=canvas))
-        obj.event_before_unmount.on(partial(_uninstall_table_when_unmount, obj=obj, canvas=canvas))
-    obj.event_before_mount.on(partial(_install_detail_before_mount, obj=obj, canvas=canvas))
-    obj.event_before_unmount.on(partial(_uninstall_detail_when_unmount, obj=obj, canvas=canvas))
+        obj.event_before_mount.on(
+            partial(_install_table_before_mount, obj=obj, canvas=canvas))
+        obj.event_before_unmount.on(
+            partial(_uninstall_table_when_unmount, obj=obj, canvas=canvas))
+    obj.event_before_mount.on(
+        partial(_install_detail_before_mount, obj=obj, canvas=canvas))
+    obj.event_before_unmount.on(
+        partial(_uninstall_detail_when_unmount, obj=obj, canvas=canvas))
 
-def _find_frame_self(*, _frame_cnt: int=1):
+
+def _find_frame_self(*, _frame_cnt: int = 1):
     cur_frame = inspect.currentframe()
     assert cur_frame is not None
     frame = cur_frame
@@ -563,9 +618,14 @@ def _find_frame_self(*, _frame_cnt: int=1):
     if "self" in local_vars:
         obj = local_vars["self"]
         return obj
-    return None 
- 
-def _create_vapi_three_obj_pcfg(obj: three.Component, name: Optional[str], default_name_prefix: str, *, _frame_cnt: int=1):
+    return None
+
+
+def _create_vapi_three_obj_pcfg(obj: three.Component,
+                                name: Optional[str],
+                                default_name_prefix: str,
+                                *,
+                                _frame_cnt: int = 1):
     v_ctx = get_v_context()
     assert v_ctx is not None
     # if v_ctx.canvas._user_obj_tree_item_to_meta:
@@ -585,11 +645,13 @@ def _create_vapi_three_obj_pcfg(obj: three.Component, name: Optional[str], defau
     pcfg = get_or_create_canvas_item_cfg(obj, True)
     return pcfg
 
+
 def points(name: str, limit: int):
     point = Points(limit)
     pcfg = _create_vapi_three_obj_pcfg(point, name, "points", _frame_cnt=2)
     pcfg.proxy = CanvasItemProxy()
     return point
+
 
 def colored_points(name: str, limit: int):
     point = ColoredPoints(limit)
@@ -597,13 +659,18 @@ def colored_points(name: str, limit: int):
     pcfg.proxy = CanvasItemProxy()
     return point
 
+
 def lines(name: str, limit: int):
     point = Lines(limit)
     pcfg = _create_vapi_three_obj_pcfg(point, name, "lines", _frame_cnt=2)
     pcfg.proxy = CanvasItemProxy()
     return point
 
-def bounding_box(dim: three.Vector3Type, rot: Optional[three.Vector3Type] = None, pos: Optional[three.Vector3Type] = None, name: Optional[str] = None):
+
+def bounding_box(dim: three.Vector3Type,
+                 rot: Optional[three.Vector3Type] = None,
+                 pos: Optional[three.Vector3Type] = None,
+                 name: Optional[str] = None):
     obj = BoundingBox(dim)
     if rot is not None:
         obj.prop(rotation=rot)
@@ -613,7 +680,11 @@ def bounding_box(dim: three.Vector3Type, rot: Optional[three.Vector3Type] = None
     pcfg.proxy = CanvasItemProxy()
     return obj
 
-def text(text: str, rot: Optional[three.Vector3Type] = None, pos: Optional[three.Vector3Type] = None, name: Optional[str] = None):
+
+def text(text: str,
+         rot: Optional[three.Vector3Type] = None,
+         pos: Optional[three.Vector3Type] = None,
+         name: Optional[str] = None):
     obj = three.Text(text)
     if rot is not None:
         obj.prop(rotation=rot)
@@ -623,7 +694,12 @@ def text(text: str, rot: Optional[three.Vector3Type] = None, pos: Optional[three
     pcfg.proxy = CanvasItemProxy()
     return obj
 
-def image(img: np.ndarray, rot: Optional[three.Vector3Type] = None, pos: Optional[three.Vector3Type] = None, name: Optional[str] = None, use_datatex: bool = False):
+
+def image(img: np.ndarray,
+          rot: Optional[three.Vector3Type] = None,
+          pos: Optional[three.Vector3Type] = None,
+          name: Optional[str] = None,
+          use_datatex: bool = False):
     assert img.dtype == np.uint8 and (img.ndim == 3 or img.ndim == 2)
     obj = Image(img, use_datatex)
     if rot is not None:
@@ -634,20 +710,25 @@ def image(img: np.ndarray, rot: Optional[three.Vector3Type] = None, pos: Optiona
     pcfg.proxy = CanvasItemProxy()
     return obj
 
+
 def three_ui(comp: three.ThreeComponentType, name: Optional[str] = None):
     # FIXME better way to handle cast layer
-    if isinstance(comp, (three.Points, three.Segments, three.BufferMesh, three.InstancedMesh, three.VoxelMesh)):
+    if isinstance(comp, (three.Points, three.Segments, three.BufferMesh,
+                         three.InstancedMesh, three.VoxelMesh)):
         comp.props.layers = 31
     _create_vapi_three_obj_pcfg(comp, name, "obj3d", _frame_cnt=2)
-    return 
+    return
+
 
 def set_tdata(obj: three.Component, tdata: Dict[str, Any]):
     cfg = get_or_create_canvas_item_cfg(obj)
     cfg.tdata = tdata
 
+
 def set_detail_layout(obj: three.Component, layout: mui.FlexBox):
     cfg = get_or_create_canvas_item_cfg(obj)
     cfg.detail_layout = layout
+
 
 def program(name: str, func: Callable):
     # raise NotImplementedError
@@ -684,7 +765,9 @@ def program(name: str, func: Callable):
                 if inspect.iscoroutine(res):
                     await res
             # we need to update tree iff tree change because update tree is very slow.
-            await _draw_all_in_vctx(vctx_program, group._flow_uid, update_iff_change=True)
+            await _draw_all_in_vctx(vctx_program,
+                                    group._flow_uid,
+                                    update_iff_change=True)
 
     pcfg.detail_layout = ConfigPanelV2(func_dcls_obj, callback)
     pcfg.proxy = GroupProxy("")
