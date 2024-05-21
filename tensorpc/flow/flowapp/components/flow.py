@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import enum
 import tensorpc.core.dataclass_dispatch as dataclasses
 from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Dict, Iterable,
                     List, Optional, Tuple, Type, TypeVar, Union)
@@ -98,13 +99,14 @@ class XYPosition:
 class NodeData:
     component: Union[Undefined, Component] = undefined
     selectedTheme: Union[Undefined, Theme] = undefined
+    selectedBoxSxProps: Union[Undefined, Dict[str, Any]] = undefined
     data: Union[Undefined, Any] = undefined
     label: Union[Undefined, str] = undefined
     
 @dataclasses.dataclass
 class Node:
     id: str
-    data: NodeData
+    data: Union[Undefined, NodeData] = undefined
     type: Union[Undefined, Literal["app", "appTemplate", "input", "default",
                                    "output", "group", "annotation"]] = undefined
     position: XYPosition = dataclasses.field(default_factory=lambda: XYPosition(0, 0))
@@ -118,9 +120,19 @@ class Node:
     deletable: Union[Undefined, bool] = undefined
     width: Union[Undefined, NumberType] = undefined
     height: Union[Undefined, NumberType] = undefined
-    parentNode: Union[Undefined, str] = undefined
+    parentId: Union[Undefined, str] = undefined
     focusable: Union[Undefined, bool] = undefined
+    extent: Union[Undefined, Literal["parent"], Tuple[Tuple[NumberType, NumberType], Tuple[NumberType, NumberType]]] = undefined
 
+@dataclasses.dataclass
+class EdgeMarker:
+    type: Literal["arrow", "arrowclosed"]
+    color: Union[Undefined, str] = undefined
+    width: Union[Undefined, NumberType] = undefined
+    height: Union[Undefined, NumberType] = undefined
+    markerUnits: Union[Undefined, str] = undefined
+    orient: Union[Undefined, str] = undefined
+    strokeWidth: Union[Undefined, NumberType] = undefined
 
 @dataclasses.dataclass
 class Edge:
@@ -133,6 +145,9 @@ class Edge:
     animated: Union[Undefined, bool] = undefined
     hidden: Union[Undefined, bool] = undefined
     focusable: Union[Undefined, bool] = undefined
+    label: Union[Undefined, str] = undefined
+    markerStart: Union[Undefined, EdgeMarker, str] = undefined
+    markerEnd: Union[Undefined, EdgeMarker, str] = undefined
 
 
 @dataclasses.dataclass
@@ -144,6 +159,21 @@ class _NodesHelper:
 class _EdgesHelper:
     edges: List[Edge]
 
+class FlowControlType(enum.IntEnum):
+    DagreLayout = 0
+    FitView = 1
+
+@dataclasses.dataclass 
+class DagreLayoutOptions:
+    rankdir: Union[Undefined, Literal["TB", "BT", "LR", "RL"]] = undefined
+    align: Union[Undefined, Literal["UL", "UR", "DL", "DR"]] = undefined
+    nodesep: Union[Undefined, NumberType] = undefined
+    ranksep: Union[Undefined, NumberType] = undefined
+    marginx: Union[Undefined, NumberType] = undefined
+    marginy: Union[Undefined, NumberType] = undefined
+    edgesep: Union[Undefined, NumberType] = undefined
+    acyclicer: Union[Undefined, Literal["greedy"]] = undefined
+    ranker: Union[Undefined, Literal["network-simplex", "tight-tree", "longest-path"]] = undefined
 
 class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
@@ -218,24 +248,43 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         return self._update_props_base(propcls)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
+        print(ev.type)
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
     def state_change_callback(self, value: dict, type: ValueType = FrontendEventType.Change.value):
         if "nodes" in value:
             cur_id_to_comp: Dict[str, Component] = {}
             for n in self.nodes:
-                if not isinstance(n.data.component, Undefined):
+                if not isinstance(n.data, Undefined) and not isinstance(n.data.component, Undefined):
                     assert n.data.component._flow_uid is not None 
                     cur_id_to_comp[n.data.component._flow_uid.uid_encoded] = n.data.component
             for node_raw in value["nodes"]:
-                data = node_raw["data"]
-                if "component" in data:
-                    assert data["component"] in cur_id_to_comp
-                    data["component"] = cur_id_to_comp[data["component"]]
+                if "data" in node_raw:
+                    data = node_raw["data"]
+                    if "component" in data:
+                        assert data["component"] in cur_id_to_comp
+                        data["component"] = cur_id_to_comp[data["component"]]
             self.childs_complex.nodes = _NodesHelper(value["nodes"]).nodes
         if "edges" in value:
             self.childs_complex.edges = _EdgesHelper(value["edges"]).edges
         self._update_graph_data()
+
+    async def do_dagre_layout(self, options: Optional[DagreLayoutOptions] = None, fit_view: bool = False):
+        if options is None:
+            options = DagreLayoutOptions()
+        res = {
+            "type": FlowControlType.DagreLayout,
+            "graphOptions": options,
+            "fitView": fit_view,
+        }
+        return await self.send_and_wait(self.create_comp_event(res))
+
+    async def fit_view(self):
+        res = {
+            "type": FlowControlType.FitView,
+            "fitView": True,
+        }
+        return await self.send_and_wait(self.create_comp_event(res))
 
 @dataclasses.dataclass
 class HandleProps(MUIComponentBaseProps):
@@ -243,6 +292,7 @@ class HandleProps(MUIComponentBaseProps):
     position: Union[Literal["left", "top", "right", "bottom"], Undefined] = undefined
     isConnectable: Union[bool, Undefined] = undefined
     style: Union[Undefined, Any] = undefined
+    id: Union[Undefined, str] = undefined
 
 
 class Handle(MUIComponentBase[HandleProps]):
@@ -389,14 +439,14 @@ class NodeResizer(MUIComponentBase[NodeResizerProps]):
         return self._update_props_base(propcls)
 
 @dataclasses.dataclass
-class NodeToolbarProps(MUIComponentBaseProps):
+class NodeToolbarProps(ContainerBaseProps):
     position: Union[Undefined, Literal["top", "bottom", "left", "right"]] = undefined
     isVisible: Union[Undefined, bool] = undefined
     offset: Union[Undefined, NumberType] = undefined
     align: Union[Undefined, Literal["center", "start", "end"]] = undefined
 
-@dataclasses.dataclass
-class NodeToolbar(MUIContainerBase):
+
+class NodeToolbar(MUIContainerBase[NodeToolbarProps, MUIComponentType]):
 
     def __init__(
             self,

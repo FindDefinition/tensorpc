@@ -22,9 +22,9 @@ VERSION = None
 
 # What packages are required for this module to be executed?
 REQUIRED = [
-    "protobuf>=4.21.6",
-    "grpcio>=1.49.0",
-    "grpcio-tools>=1.49.0",
+    "protobuf>=3.18.0",
+    "grpcio>=1.48.2",
+    "grpcio-tools>=1.48.2",
     "fire",
     "pytest",
     "pytest-asyncio",

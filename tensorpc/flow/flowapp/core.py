@@ -390,6 +390,7 @@ class FrontendEventType(enum.IntEnum):
     DataGridProxyLazyLoadRange = 74
 
     FlowSelectionChange = 80
+    FlowNodesInitialized = 81
 
     PlotlyClickData = 100
     PlotlyClickAnnotation = 101
