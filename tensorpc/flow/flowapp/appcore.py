@@ -133,7 +133,8 @@ class AppContext:
 
 class EventHandlingContext:
 
-    def __init__(self) -> None:
+    def __init__(self, uid: UniqueTreeId) -> None:
+        self.comp_uid = uid
         self.delayed_callbacks: List[Callable[[], CORO_ANY]] = []
 
 
@@ -178,8 +179,8 @@ def enter_app_conetxt(app: "App"):
         APP_CONTEXT_VAR.reset(token)
 
 @contextlib.contextmanager
-def enter_event_handling_conetxt():
-    ctx = EventHandlingContext()
+def enter_event_handling_conetxt(uid: UniqueTreeId):
+    ctx = EventHandlingContext(uid)
     token = EVENT_HANDLING_CONTEXT_VAR.set(ctx)
     try:
         yield ctx

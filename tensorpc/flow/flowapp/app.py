@@ -1000,25 +1000,10 @@ class App:
         if is_sync:
             return res
 
-    async def _run_delayed_callbacks(self, evctx: EventHandlingContext):
-        print("DELAYED_CB", evctx.delayed_callbacks)
-        for cb in evctx.delayed_callbacks:
-            coro = cb()
-            if inspect.iscoroutine(coro):
-                await coro
-
-
     async def _handle_event_with_ctx(self, ev: UIEvent, is_sync: bool = False):
         # TODO run control from other component
-        is_sync = True
-        with _enter_app_conetxt(self) as appctx:
-            with enter_event_handling_conetxt() as evctx:
-                print("ENTER EVCTX", id(evctx), ev.to_dict())
-                res = await self.handle_event(ev, is_sync)
-            if is_sync:
-                await self._run_delayed_callbacks(evctx)
-            else:
-                asyncio.create_task(self._run_delayed_callbacks(evctx))
+        with _enter_app_conetxt(self):
+            res = await self.handle_event(ev, is_sync)
         return res 
 
     async def run_vscode_event(self, data: VscodeTensorpcMessage):

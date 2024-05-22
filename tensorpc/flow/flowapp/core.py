@@ -63,7 +63,7 @@ from ..jsonlike import (BackendOnlyProp, DataClassWithUndefined, Undefined,
                         camel_to_snake, snake_to_camel,
                         split_props_to_undefined, undefined,
                         undefined_dict_factory)
-from .appcore import SimpleEventType, NumberType, ValueType, get_app, Event, EventDataType
+from .appcore import SimpleEventType, NumberType, ValueType, enter_event_handling_conetxt, get_app, Event, EventDataType, get_event_handling_context
 from tensorpc.flow.constants import TENSORPC_FLOW_COMP_UID_STRUCTURE_SPLIT
 
 
@@ -1653,33 +1653,40 @@ class Component(Generic[T_base_props, T_child]):
             await self.sync_status(sync_state, ev)
             await ev.wait()
         res = None
-        try:
-            coro = cb()
-            if inspect.iscoroutine(coro):
-                res = await coro
-            else:
-                res = coro
-            if res_callback is not None:
-                res_coro = res_callback(res)
-                if inspect.iscoroutine(res_coro):
-                    await res_coro
+        assert self._flow_uid is not None 
+        with enter_event_handling_conetxt(self._flow_uid) as evctx:
+            try:
+                coro = cb()
+                if inspect.iscoroutine(coro):
+                    res = await coro
+                else:
+                    res = coro
+                if res_callback is not None:
+                    res_coro = res_callback(res)
+                    if inspect.iscoroutine(res_coro):
+                        await res_coro
 
-        except Exception as e:
-            traceback.print_exc()
-            ss = io.StringIO()
-            traceback.print_exc(file=ss)
-            assert self._flow_uid is not None
+            except Exception as e:
+                traceback.print_exc()
+                ss = io.StringIO()
+                traceback.print_exc(file=ss)
+                assert self._flow_uid is not None
 
-            user_exc = UserMessage.create_error(self._flow_uid.uid_encoded,
-                                                repr(e), ss.getvalue())
-            await self.put_app_event(self.create_user_msg_event(user_exc))
-            app = get_app()
-            if app._flowapp_enable_exception_inspect:
-                await app._inspect_exception()
-        finally:
-            if change_status:
-                self.props.status = UIRunStatus.Stop.value
-                await self.sync_status(sync_state)
+                user_exc = UserMessage.create_error(self._flow_uid.uid_encoded,
+                                                    repr(e), ss.getvalue())
+                await self.put_app_event(self.create_user_msg_event(user_exc))
+                app = get_app()
+                if app._flowapp_enable_exception_inspect:
+                    await app._inspect_exception()
+            finally:
+                if change_status:
+                    self.props.status = UIRunStatus.Stop.value
+                    await self.sync_status(sync_state)
+                if evctx.delayed_callbacks:
+                    for cb in evctx.delayed_callbacks:
+                        coro = cb()
+                        if inspect.iscoroutine(coro):
+                            await coro
         return res
 
     async def run_callbacks(
@@ -1719,35 +1726,42 @@ class Component(Generic[T_base_props, T_child]):
             await self.sync_status(sync_state, ev)
             await ev.wait()
         res = None
-        for cb in cbs:
-            try:
-                coro = cb()
-                if inspect.iscoroutine(coro):
-                    res = await coro
-                else:
-                    res = coro
-                if res_callback is not None:
-                    res_coro = res_callback(res)
-                    if inspect.iscoroutine(res_coro):
-                        await res_coro
-            except Exception as e:
-                traceback.print_exc()
-                ss = io.StringIO()
-                traceback.print_exc(file=ss)
-                assert self._flow_uid is not None
-                user_exc = UserMessage.create_error(self._flow_uid.uid_encoded,
-                                                    repr(e), ss.getvalue())
-                await self.put_app_event(self.create_user_msg_event(user_exc))
-                app = get_app()
-                if app._flowapp_enable_exception_inspect:
-                    await app._inspect_exception()
-        # finally:
-        if change_status:
-            self.props.status = UIRunStatus.Stop.value
-            await self.sync_status(sync_state)
-        else:
-            if sync_state:
-                await self.sync_state()
+        assert self._flow_uid is not None 
+        with enter_event_handling_conetxt(self._flow_uid) as evctx:
+            for cb in cbs:
+                try:
+                    coro = cb()
+                    if inspect.iscoroutine(coro):
+                        res = await coro
+                    else:
+                        res = coro
+                    if res_callback is not None:
+                        res_coro = res_callback(res)
+                        if inspect.iscoroutine(res_coro):
+                            await res_coro
+                except Exception as e:
+                    traceback.print_exc()
+                    ss = io.StringIO()
+                    traceback.print_exc(file=ss)
+                    assert self._flow_uid is not None
+                    user_exc = UserMessage.create_error(self._flow_uid.uid_encoded,
+                                                        repr(e), ss.getvalue())
+                    await self.put_app_event(self.create_user_msg_event(user_exc))
+                    app = get_app()
+                    if app._flowapp_enable_exception_inspect:
+                        await app._inspect_exception()
+            # finally:
+            if change_status:
+                self.props.status = UIRunStatus.Stop.value
+                await self.sync_status(sync_state)
+            else:
+                if sync_state:
+                    await self.sync_state()
+            if evctx.delayed_callbacks:
+                for cb in evctx.delayed_callbacks:
+                    coro = cb()
+                    if inspect.iscoroutine(coro):
+                        await coro
         return res
 
     async def sync_status(self,
@@ -2188,6 +2202,18 @@ class ContainerBase(Component[T_container_props, T_child]):
         await self.put_app_event(new_ev)
         await self._run_special_methods(attached, removed)
 
+    def _check_ctx_contains_self(self, keys: Union[List[str], Set[str]]):
+        evctx = get_event_handling_context()
+        self_to_be_removed = False
+        if evctx is not None:
+            for k in keys:
+                if k in self._child_comps:
+                    comp = self._child_comps[k]
+                    if comp._flow_uid is not None and evctx.comp_uid.startswith(comp._flow_uid):
+                        self_to_be_removed = True 
+                        break 
+        return self_to_be_removed 
+
     async def remove_childs_by_keys(
             self,
             keys: List[str],
@@ -2195,8 +2221,22 @@ class ContainerBase(Component[T_container_props, T_child]):
             additional_ev_creator: Optional[Callable[[], AppEvent]] = None):
         if update_child_complex:
             self.__check_child_structure_is_none()
+        self_to_be_removed = self._check_ctx_contains_self(keys)
+        evctx = get_event_handling_context()
+        if evctx is not None and self_to_be_removed:
+            evctx.delayed_callbacks.append(lambda: self._remove_childs_by_keys_delay(keys, additional_ev_creator, comp_dont_need_cancel=evctx.comp_uid))
+        else:
+            await self._remove_childs_by_keys_delay(keys, additional_ev_creator)
+
+    async def _remove_childs_by_keys_delay(
+            self,
+            keys: List[str],
+            additional_ev_creator: Optional[Callable[[], AppEvent]] = None,
+            comp_dont_need_cancel: Optional[UniqueTreeId] = None):
         detached_uid_to_comp = self._detach_child(keys)
         for k, comp in detached_uid_to_comp.items():
+            if comp_dont_need_cancel is not None and comp_dont_need_cancel == k:
+                continue
             await comp._cancel_task()
         for k in keys:
             self._child_comps.pop(k)
@@ -2216,7 +2256,6 @@ class ContainerBase(Component[T_container_props, T_child]):
             self._child_structure,
             dict_factory=_undefined_comp_dict_factory,
             obj_factory=_undefined_comp_obj_factory)
-        print(update_msg)
         update_ev = self.create_update_event(update_msg)
         return update_ev
 
@@ -2260,7 +2299,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         deleted = [x.uid_encoded for x in detached.keys()]
 
         return update_ev + self.create_update_comp_event(
-            comps_frontend_dict, deleted), list(attached.values()), list(
+            comps_frontend_dict, deleted), list(attached.values()), list(detached.keys()), list(
                 detached.values())
 
     async def update_childs(
@@ -2280,9 +2319,23 @@ class ContainerBase(Component[T_container_props, T_child]):
             layout = {str(i): v for i, v in enumerate(layout)}
         if update_child_complex:
             self.__check_child_structure_is_none()
-        new_ev, attached, removed = self.update_childs_locally(
+        intersect = set(layout.keys()).intersection(self._child_comps.keys())
+        evctx = get_event_handling_context()
+        self_to_be_removed = self._check_ctx_contains_self(intersect)
+        if evctx is not None and self_to_be_removed:
+            evctx.delayed_callbacks.append(lambda: self._update_childs_delay(layout, update_child_complex, additional_ev_creator, evctx.comp_uid))
+        else:
+            await self._update_childs_delay(layout, update_child_complex, additional_ev_creator)
+
+    async def _update_childs_delay(self, layout: Dict[str, Component],
+                                    update_child_complex: bool = True, 
+                                   additional_ev_creator: Optional[Callable[[], AppEvent]] = None,
+                                   comp_dont_need_cancel: Optional[UniqueTreeId] = None):
+        new_ev, attached, removed_uids, removed = self.update_childs_locally(
             layout, update_child_complex)
-        for deleted in removed:
+        for deleted, deleted_uid in zip(removed, removed_uids):
+            if comp_dont_need_cancel == deleted_uid:
+                continue
             await deleted._cancel_task()
         if additional_ev_creator is not None:
             new_ev = new_ev + additional_ev_creator()

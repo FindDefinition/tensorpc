@@ -384,7 +384,6 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             if node.id not in node_ids_set:
                 new_nodes.append(node)
         self.childs_complex.nodes = new_nodes
-        print("???", node_ids)
         # remove edges
         new_edges: List[Edge] = []
         for edge in self.edges:
