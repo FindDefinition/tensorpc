@@ -87,7 +87,7 @@ from tensorpc.utils.reload import reload_method
 from tensorpc.utils.uniquename import UniqueNamePool
 
 from .appcore import (ALL_OBSERVED_FUNCTIONS, AppContext, AppSpecialEventType,
-                      _CompReloadMeta, Event, create_reload_metas)
+                      _CompReloadMeta, Event, EventHandlingContext, create_reload_metas, enter_event_handling_conetxt)
 from .appcore import enter_app_conetxt
 from .appcore import enter_app_conetxt as _enter_app_conetxt
 from .appcore import get_app, get_app_context
@@ -1000,10 +1000,26 @@ class App:
         if is_sync:
             return res
 
+    async def _run_delayed_callbacks(self, evctx: EventHandlingContext):
+        print("DELAYED_CB", evctx.delayed_callbacks)
+        for cb in evctx.delayed_callbacks:
+            coro = cb()
+            if inspect.iscoroutine(coro):
+                await coro
+
+
     async def _handle_event_with_ctx(self, ev: UIEvent, is_sync: bool = False):
         # TODO run control from other component
-        with _enter_app_conetxt(self):
-            return await self.handle_event(ev, is_sync)
+        is_sync = True
+        with _enter_app_conetxt(self) as appctx:
+            with enter_event_handling_conetxt() as evctx:
+                print("ENTER EVCTX", id(evctx), ev.to_dict())
+                res = await self.handle_event(ev, is_sync)
+            if is_sync:
+                await self._run_delayed_callbacks(evctx)
+            else:
+                asyncio.create_task(self._run_delayed_callbacks(evctx))
+        return res 
 
     async def run_vscode_event(self, data: VscodeTensorpcMessage):
         return await self._flowapp_special_eemitter.emit_async(

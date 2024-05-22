@@ -131,15 +131,26 @@ class AppContext:
     def is_editable_app(self):
         return self.app._is_editable_app()
 
+class EventHandlingContext:
+
+    def __init__(self) -> None:
+        self.delayed_callbacks: List[Callable[[], CORO_ANY]] = []
+
 
 APP_CONTEXT_VAR: contextvars.ContextVar[
     Optional[AppContext]] = contextvars.ContextVar("flowapp_context",
+                                                   default=None)
+
+EVENT_HANDLING_CONTEXT_VAR: contextvars.ContextVar[
+    Optional[EventHandlingContext]] = contextvars.ContextVar("flowapp_event_context",
                                                    default=None)
 
 
 def get_app_context() -> Optional[AppContext]:
     return APP_CONTEXT_VAR.get()
 
+def get_event_handling_context() -> Optional[EventHandlingContext]:
+    return EVENT_HANDLING_CONTEXT_VAR.get()
 
 def is_inside_app():
     return is_inside_app_session() and get_app_context() is not None
@@ -166,12 +177,25 @@ def enter_app_conetxt(app: "App"):
     finally:
         APP_CONTEXT_VAR.reset(token)
 
+@contextlib.contextmanager
+def enter_event_handling_conetxt():
+    ctx = EventHandlingContext()
+    token = EVENT_HANDLING_CONTEXT_VAR.set(ctx)
+    try:
+        yield ctx
+    finally:
+        EVENT_HANDLING_CONTEXT_VAR.reset(token)
 
 def get_app_storage():
     ctx = get_app_context()
     assert ctx is not None
     return ctx.app.get_persist_storage()
 
+def enqueue_delayed_callback(cb: Callable[[], CORO_ANY]):
+    ctx = get_event_handling_context()
+    assert ctx is not None
+    print("EVCTX", id(ctx))
+    ctx.delayed_callbacks.append(cb)
 
 def find_component(
         type: Type[T_comp],

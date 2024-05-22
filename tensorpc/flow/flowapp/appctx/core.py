@@ -26,7 +26,7 @@ from tensorpc.flow.flowapp.appcore import (enter_app_conetxt, find_component,
                                            find_component_by_uid, get_app,
                                            get_app_context, get_editable_app,
                                            get_reload_manager, is_inside_app,
-                                           observe_function)
+                                           observe_function, enqueue_delayed_callback)
 from tensorpc.flow.flowapp.components import plus
 from tensorpc.flow.flowapp.components.plus.objinspect.controllers import ThreadLocker
 

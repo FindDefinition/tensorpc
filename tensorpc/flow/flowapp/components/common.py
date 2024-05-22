@@ -54,7 +54,11 @@ _ONEARG_SPECIAL_EVENTS = set([
     FrontendEventType.SelectNewItem.value,
     FrontendEventType.FlowSelectionChange.value,
     FrontendEventType.FlowNodesInitialized.value,
+    FrontendEventType.FlowNodeDelete.value,
+    FrontendEventType.FlowEdgeConnection.value,
+    FrontendEventType.FlowEdgeDelete.value,
 ])
+
 _ONEARG_DATAGRID_EVENTS = set([
     FrontendEventType.DataGridRowSelection.value,
     FrontendEventType.DataGridFetchDetail.value,

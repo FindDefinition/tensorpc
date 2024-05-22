@@ -2216,6 +2216,7 @@ class ContainerBase(Component[T_container_props, T_child]):
             self._child_structure,
             dict_factory=_undefined_comp_dict_factory,
             obj_factory=_undefined_comp_obj_factory)
+        print(update_msg)
         update_ev = self.create_update_event(update_msg)
         return update_ev
 

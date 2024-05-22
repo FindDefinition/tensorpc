@@ -259,16 +259,19 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
     def _find_comps_in_dataclass(self, child: "Flow.ChildDef"):
         unique_name_pool = UniqueNamePool()
-        res: Dict[str, Component] = {}
+        res: List[Tuple[Component, str]] = []
         for node in child.nodes:
             if not isinstance(node.data, Undefined) and not isinstance(
                     node.data.component, Undefined):
                 comp = node.data.component
                 unique_name_pool(node.id)
-                res[node.id] = comp
+                res.append((comp, node.id))
         if not isinstance(child.componentTemplate, Undefined):
-            res[unique_name_pool(
-                "__flow_template__")] = child.componentTemplate
+            res.append((child.componentTemplate,
+                        unique_name_pool("__flow_template__")))
+        if not isinstance(child.extraChilds, Undefined):
+            for i, c in enumerate(child.extraChilds):
+                res.append((c, unique_name_pool(f"extraChilds:{i}")))
         return res
 
     def _update_graph_data(self):
@@ -309,13 +312,14 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         print(ev.type)
-        return await handle_standard_event(self, ev, is_sync=is_sync)
+        return await handle_standard_event(self, ev, is_sync=is_sync, sync_state_after_change=False, change_status=False)
 
     def state_change_callback(
             self,
             value: dict,
             type: ValueType = FrontendEventType.Change.value):
         if "nodes" in value:
+            print(value)
             cur_id_to_comp: Dict[str, Component] = {}
             for n in self.nodes:
                 if not isinstance(n.data, Undefined) and not isinstance(
@@ -380,6 +384,15 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             if node.id not in node_ids_set:
                 new_nodes.append(node)
         self.childs_complex.nodes = new_nodes
+        print("???", node_ids)
+        # remove edges
+        new_edges: List[Edge] = []
+        for edge in self.edges:
+            if edge.source in node_ids_set or edge.target in node_ids_set:
+                continue
+            new_edges.append(edge)
+        self.childs_complex.edges = new_edges
+        self._update_graph_data()
         return await self.remove_childs_by_keys(
             node_ids,
             update_child_complex=False,
