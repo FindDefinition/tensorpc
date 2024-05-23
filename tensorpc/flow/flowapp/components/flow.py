@@ -89,6 +89,7 @@ class FlowProps(ContainerBaseProps):
     connectionLineType: Union[Undefined, Literal["default", "straight", "step",
                                                  "smoothstep",
                                                  "simplebezier"]] = undefined
+    selectedBoxSxProps: Union[Undefined, Dict[str, Any]] = undefined
     debounce: Union[Undefined, NumberType] = undefined
 
     droppable: Union[bool, Undefined] = undefined
@@ -183,6 +184,8 @@ class _EdgesHelper:
 class FlowControlType(enum.IntEnum):
     DagreLayout = 0
     FitView = 1
+    AddNewNodes = 2
+    DeleteNodeByIds = 3
 
 
 @dataclasses.dataclass
@@ -239,6 +242,9 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         self.event_drop = self._create_event_slot(FrontendEventType.Drop)
         self._update_graph_data()
 
+        self._unique_name_pool_node = UniqueNamePool()
+        self._unique_name_pool_edge = UniqueNamePool()
+
     @property
     def childs_complex(self):
         assert isinstance(self._child_structure, Flow.ChildDef)
@@ -256,6 +262,12 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
     def prop(self):
         propcls = self.propcls
         return self._prop_base(propcls, self)
+
+    def create_unique_node_id(self, id: str):
+        return self._unique_name_pool_node(id)
+
+    def create_unique_edge_id(self, id: str):
+        return self._unique_name_pool_edge(id)
 
     def _find_comps_in_dataclass(self, child: "Flow.ChildDef"):
         unique_name_pool = UniqueNamePool()
@@ -294,6 +306,10 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         for n in self.nodes:
             if not isinstance(n, Undefined):
                 assert n.id in self._id_to_node
+        all_node_ids = set(self._id_to_node.keys())
+        self._unique_name_pool_node = UniqueNamePool(init_set=all_node_ids)
+        all_edge_ids = set(self._id_to_edge.keys())
+        self._unique_name_pool_edge = UniqueNamePool(init_set=all_edge_ids)
 
     def get_source_nodes(self, node_id: str):
         return [
@@ -311,7 +327,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         return self._update_props_base(propcls)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
-        print(ev.type)
+        print("flow event", ev.type)
         return await handle_standard_event(self, ev, is_sync=is_sync, sync_state_after_change=False, change_status=False)
 
     def state_change_callback(
@@ -319,7 +335,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             value: dict,
             type: ValueType = FrontendEventType.Change.value):
         if "nodes" in value:
-            print(value)
+            # print(value)
             cur_id_to_comp: Dict[str, Component] = {}
             for n in self.nodes:
                 if not isinstance(n.data, Undefined) and not isinstance(
@@ -357,7 +373,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         }
         return await self.send_and_wait(self.create_comp_event(res))
 
-    async def add_nodes(self, nodes: List[Node]):
+    async def add_nodes(self, nodes: List[Node], screen_to_flow: Optional[bool] = None):
         new_layout: Dict[str, Component] = {}
         for node in nodes:
             assert node.id not in self._id_to_node, f"node id {node.id} already exists"
@@ -366,13 +382,19 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                 new_layout[node.id] = comp
             self.nodes.append(node)
         self._update_graph_data()
+        ev_new_node = {
+            "type": FlowControlType.AddNewNodes,
+            "nodes": nodes,
+        }
+        if screen_to_flow is not None:
+            ev_new_node["screenToFlowPosition"] = screen_to_flow
         if new_layout:
             return await self.update_childs(new_layout,
                                             update_child_complex=False,
                                             additional_ev_creator=lambda: self.
-                                            update_childs_complex_event())
+                                            create_comp_event(ev_new_node))
         else:
-            return await self.update_childs_complex()
+            return await self.send_and_wait(self.create_comp_event(ev_new_node))
 
     async def add_node(self, node: Node):
         await self.add_nodes([node])

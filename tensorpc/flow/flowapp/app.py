@@ -960,16 +960,20 @@ class App:
                 # print(src_uid, comp, src_comp, handler, collect_handler)
                 if handlers is not None and collect_handlers is not None:
                     src_event = Event(FrontendEventType.DragCollect.value,
-                                      src_data["data"], keys, indexes)
+                                    src_data["data"], keys, indexes)
                     cbs = []
                     for handler in handlers.handlers:
                         cb = partial(self.__handle_dnd_event,
-                                     handler=handler,
-                                     src_handler=collect_handlers.handlers[0],
-                                     src_event=src_event)
+                                    handler=handler,
+                                    src_handler=collect_handlers.handlers[0],
+                                    src_event=src_event)
                         cbs.append(cb)
                     comp._task = asyncio.create_task(
                         comp.run_callbacks(cbs, sync_status_first=False))
+                else:
+                    # drag object already contains drag data.
+                    res[uid_original] = await comp.handle_event(
+                        event, is_sync=is_sync)
             elif event.type == FrontendEventType.FileDrop.value:
                 # for file drop, we can't use regular drop above, so
                 # just convert it to drop event, no drag collect needed.

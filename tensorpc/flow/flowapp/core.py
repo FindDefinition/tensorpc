@@ -2189,6 +2189,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         deleted = [x.uid_encoded for x in detached_uid_to_comp.keys()]
         return update_ev + self.create_update_comp_event(
             comps_frontend_dict, deleted), list(attached.values()), list(
+                detached_uid_to_comp.keys()), list(
                 detached_uid_to_comp.values())
 
     async def set_new_layout(self, layout: Union[Dict[str, Component],
@@ -2196,8 +2197,21 @@ class ContainerBase(Component[T_container_props, T_child]):
                                                  T_child_structure]):
         if isinstance(layout, list):
             layout = {str(i): v for i, v in enumerate(layout)}
-        new_ev, attached, removed = self.set_new_layout_locally(layout)
-        for deleted in removed:
+
+        self_to_be_removed = self._check_ctx_contains_self(list(self._child_comps.keys()))
+        evctx = get_event_handling_context()
+        if evctx is not None and self_to_be_removed:
+            evctx.delayed_callbacks.append(lambda: self._set_new_layout_delay(layout, comp_dont_need_cancel=evctx.comp_uid))
+        else:
+            await self._set_new_layout_delay(layout)
+
+    async def _set_new_layout_delay(self, layout: Union[Dict[str, Component],
+                                                 T_child_structure],
+                                                 comp_dont_need_cancel: Optional[UniqueTreeId] = None):
+        new_ev, attached, removed_uids, removed = self.set_new_layout_locally(layout)
+        for deleted, deleted_uid in zip(removed, removed_uids):
+            if comp_dont_need_cancel is not None and comp_dont_need_cancel == deleted_uid:
+                continue
             await deleted._cancel_task()
         await self.put_app_event(new_ev)
         await self._run_special_methods(attached, removed)
@@ -2377,7 +2391,6 @@ class Fragment(ContainerBase[FragmentProps, Component]):
         await self.send_and_wait(self.update_event(disabled=disabled))
 
 
-# FIXME use dataclasses_strict
 @dataclasses.dataclass
 class MatchCaseProps(ContainerBaseProps):
     condition: Union[Undefined, ValueType] = undefined

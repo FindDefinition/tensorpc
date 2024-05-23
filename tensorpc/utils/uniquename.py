@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Set
+from typing import Set, Optional
 
 
 def _make_unique_name(unique_set, name, max_count=10000) -> str:
@@ -29,9 +29,11 @@ def _make_unique_name(unique_set, name, max_count=10000) -> str:
 
 class UniqueNamePool:
 
-    def __init__(self, max_count=10000):
+    def __init__(self, max_count=10000, init_set: Optional[Set[str]] = None):
         self.max_count = max_count
         self.unique_set: Set[str] = set()
+        if init_set is not None:
+            self.unique_set.update(init_set)
 
     def __call__(self, name):
         return _make_unique_name(self.unique_set, name, self.max_count)
