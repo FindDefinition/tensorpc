@@ -13,21 +13,23 @@
 # limitations under the License.
 
 import enum
-import tensorpc.core.dataclass_dispatch as dataclasses
 from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Dict, Iterable,
                     List, Optional, Tuple, Type, TypeVar, Union)
 
-from tensorpc.core.asynctools import cancel_task
-from tensorpc.flow.flowapp.appcore import Event
-from tensorpc.flow.flowapp.components.common import (handle_standard_event)
 from typing_extensions import Literal, TypeAlias
 
+import tensorpc.core.dataclass_dispatch as dataclasses
+from tensorpc.core.asynctools import cancel_task
+from tensorpc.flow.flowapp.appcore import Event
+from tensorpc.flow.flowapp.components.common import handle_standard_event
 from tensorpc.utils.uniquename import UniqueNamePool
 
 from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     DataclassType, FrontendEventType, NumberType, UIType,
                     Undefined, undefined)
-from .mui import ContainerBaseProps, LayoutType, MUIContainerBase, MUIComponentType, Theme, MUIComponentBaseProps, MUIComponentBase, ValueType
+from .mui import (ContainerBaseProps, LayoutType, MUIComponentBase,
+                  MUIComponentBaseProps, MUIComponentType, MUIContainerBase,
+                  MUIFlexBoxProps, Theme, ValueType)
 
 
 @dataclasses.dataclass
@@ -95,7 +97,8 @@ class FlowProps(ContainerBaseProps):
     droppable: Union[bool, Undefined] = undefined
     allowedDndTypes: Union[List[str], Undefined] = undefined
     allowFile: Union[bool, Undefined] = undefined
-
+    validConnectMapIsDirected: Union[bool, Undefined] = undefined
+    validConnectMap: Union[Dict[str, List[str]], Undefined] = undefined
 
 @dataclasses.dataclass
 class XYPosition:
@@ -136,7 +139,10 @@ class Node:
     extent: Union[Undefined, Literal["parent"],
                   Tuple[Tuple[NumberType, NumberType],
                         Tuple[NumberType, NumberType]]] = undefined
-
+    sourcePosition: Union[Undefined, Literal["left", "top", "right",
+                                                "bottom"]] = undefined
+    targetPosition: Union[Undefined, Literal["left", "top", "right",
+                                                "bottom"]] = undefined
     def get_component(self) -> Optional[Component]:
         if not isinstance(self.data, Undefined):
             if not isinstance(self.data.component, Undefined):
@@ -327,7 +333,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         return self._update_props_base(propcls)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
-        print("flow event", ev.type)
+        print("flow event", ev.type, ev.data)
         return await handle_standard_event(self, ev, is_sync=is_sync, sync_state_after_change=False, change_status=False)
 
     def state_change_callback(
@@ -421,21 +427,22 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
 
 @dataclasses.dataclass
-class HandleProps(MUIComponentBaseProps):
+class HandleProps(MUIFlexBoxProps):
     type: Union[Literal["source", "target"], Undefined] = undefined
-    position: Union[Literal["left", "top", "right", "bottom"],
+    handledPosition: Union[Literal["left", "top", "right", "bottom"],
                     Undefined] = undefined
     isConnectable: Union[bool, Undefined] = undefined
     style: Union[Undefined, Any] = undefined
     id: Union[Undefined, str] = undefined
-
+    className: Union[Undefined, str] = undefined
 
 class Handle(MUIComponentBase[HandleProps]):
 
     def __init__(self, type: Literal["source", "target"],
-                 position: Literal["left", "top", "right", "bottom"]) -> None:
+                 position: Literal["left", "top", "right", "bottom"],
+                 id: Union[Undefined, str] = undefined) -> None:
         super().__init__(UIType.Handle, HandleProps, [])
-        self.prop(type=type, position=position)
+        self.prop(type=type, handledPosition=position, id=id)
 
     @property
     def prop(self):
