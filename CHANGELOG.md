@@ -1,5 +1,9 @@
 # Changelog
-# [0.11.0] - 2024-05-30
+# [0.11.1] - 2024-05-25
+### Fixed
+ - fix some flow bug
+
+# [0.11.0] - 2024-05-24
 ### Added 
 - add flow graph based on xyflow. must be used on dock mode.
 

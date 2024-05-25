@@ -4835,7 +4835,8 @@ class MenuListProps(MUIFlexBoxProps):
     anchorOrigin: Union[Undefined, Anchor] = undefined
     transformOrigin: Union[Undefined, Anchor] = undefined
     menuItems: Union[List[MenuItem], Undefined] = undefined
-
+    anchorReference: Union[Undefined, Literal["anchorEl", "anchorPosition",
+                                                "none"]] = undefined
     # @model_validator(mode='after')
     # def _validator_post_root(self) -> 'MenuListProps':
     #     assert not isinstance(self.menuItems, Undefined), "menuItems must be provided"

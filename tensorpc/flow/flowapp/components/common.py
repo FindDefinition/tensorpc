@@ -57,6 +57,9 @@ _ONEARG_SPECIAL_EVENTS = set([
     FrontendEventType.FlowNodeDelete.value,
     FrontendEventType.FlowEdgeConnection.value,
     FrontendEventType.FlowEdgeDelete.value,
+    FrontendEventType.FlowNodeContextMenu.value,
+    FrontendEventType.FlowPaneContextMenu.value,
+
 ])
 
 _ONEARG_DATAGRID_EVENTS = set([

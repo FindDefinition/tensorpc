@@ -395,6 +395,9 @@ class FrontendEventType(enum.IntEnum):
     FlowEdgeConnection = 82
     FlowEdgeDelete = 83
     FlowNodeDelete = 84
+    FlowNodeContextMenu = 85
+    FlowPaneContextMenu = 86
+
 
     PlotlyClickData = 100
     PlotlyClickAnnotation = 101
@@ -904,6 +907,9 @@ class AppEvent:
         self.sent_event = ret.sent_event
         return self
 
+@dataclasses_strict.dataclass
+class _DataclassHelper:
+    obj: Any
 
 @dataclasses_strict.dataclass
 class BasicProps(DataClassWithUndefined):
@@ -1473,7 +1479,7 @@ class Component(Generic[T_base_props, T_child]):
                                simple_event: bool = True):
         if self._flow_allowed_events:
             if not backend_only:
-                assert type in self._flow_allowed_events, f"only support events: {self._flow_allowed_events}"
+                assert type in self._flow_allowed_events, f"only support events: {self._flow_allowed_events}, but got {type}"
 
         evh = EventHandler(cb, simple_event)
         if isinstance(type, FrontendEventType):
@@ -2362,6 +2368,24 @@ class ContainerBase(Component[T_container_props, T_child]):
             assert k in self._child_comps
         return await self.update_childs(layout)
 
+    def create_comp_event(self, data: Dict[str, Any]):
+        """create component control event for
+        backend -> frontend direct communication
+        """
+        assert self._flow_uid is not None
+        if self._child_structure is not None:
+            ev_data = asdict_no_deepcopy(
+                _DataclassHelper(data),
+                dict_factory=_undefined_comp_dict_factory,
+                obj_factory=_undefined_comp_obj_factory)
+            assert isinstance(ev_data, dict)
+            ev = ComponentEvent(
+                {self._flow_uid.uid_encoded: ev_data["obj"]})
+        else:
+            ev = ComponentEvent(
+                {self._flow_uid.uid_encoded: as_dict_no_undefined(data)})
+        # uid is set in flowapp service later.
+        return AppEvent("", {AppEventType.ComponentEvent: ev})
 
 @dataclasses_strict.dataclass
 class FragmentProps(ContainerBaseProps):

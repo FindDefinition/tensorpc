@@ -29,7 +29,7 @@ from ..core import (AppEvent, AppEventType, BasicProps, Component,
                     Undefined, undefined)
 from .mui import (ContainerBaseProps, LayoutType, MUIComponentBase,
                   MUIComponentBaseProps, MUIComponentType, MUIContainerBase,
-                  MUIFlexBoxProps, Theme, ValueType)
+                  MUIFlexBoxProps, MenuItem, Theme, ValueType)
 
 
 @dataclasses.dataclass
@@ -99,6 +99,8 @@ class FlowProps(ContainerBaseProps):
     allowFile: Union[bool, Undefined] = undefined
     validConnectMapIsDirected: Union[bool, Undefined] = undefined
     validConnectMap: Union[Dict[str, List[str]], Undefined] = undefined
+    paneContextMenuItems: Union[Undefined, List[MenuItem]] = undefined
+    nodeContextMenuItems: Union[Undefined, List[MenuItem]] = undefined
 
 @dataclasses.dataclass
 class XYPosition:
@@ -233,7 +235,10 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                              FrontendEventType.FlowNodesInitialized.value,
                              FrontendEventType.FlowEdgeConnection.value,
                              FrontendEventType.FlowEdgeDelete.value,
+                             FrontendEventType.FlowNodeDelete.value,
                              FrontendEventType.Drop.value,
+                             FrontendEventType.FlowPaneContextMenu.value,
+                             FrontendEventType.FlowNodeContextMenu.value,
                          ])
         self.event_selection_change = self._create_event_slot(
             FrontendEventType.FlowSelectionChange)
@@ -246,7 +251,12 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         self.event_node_delete = self._create_event_slot(
             FrontendEventType.FlowNodeDelete)
         self.event_drop = self._create_event_slot(FrontendEventType.Drop)
+        self.event_pane_context_menu = self._create_event_slot(FrontendEventType.FlowPaneContextMenu)
+        self.event_node_context_menu = self._create_event_slot(FrontendEventType.FlowNodeContextMenu)
         self._update_graph_data()
+        # we must due with delete event because it comes earlier than change event.
+        self.event_node_delete.on(self._handle_node_delete)
+        self.event_edge_delete.on(self._handle_edge_delete)
 
         self._unique_name_pool_node = UniqueNamePool()
         self._unique_name_pool_edge = UniqueNamePool()
@@ -317,6 +327,9 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         all_edge_ids = set(self._id_to_edge.keys())
         self._unique_name_pool_edge = UniqueNamePool(init_set=all_edge_ids)
 
+    def get_node_by_id(self, node_id: str):
+        return self._id_to_node[node_id]
+
     def get_source_nodes(self, node_id: str):
         return [
             self._id_to_node[id] for id in self._node_id_to_sources[node_id]
@@ -360,6 +373,18 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             self.childs_complex.edges = _EdgesHelper(value["edges"]).edges
         self._update_graph_data()
 
+    async def _handle_node_delete(self, nodes: List[Any]):
+        return await self.delete_nodes_by_ids([n["id"] for n in nodes], _internal_dont_send_comp_event=True) 
+
+    def _handle_edge_delete(self, edges: List[Any]):
+        edge_ids_set = set([e["id"] for e in edges])
+        new_edges: List[Edge] = []
+        for edge in self.edges:
+            if edge.id in edge_ids_set:
+                continue
+            new_edges.append(edge)
+        self.childs_complex.edges = new_edges
+
     async def do_dagre_layout(self,
                               options: Optional[DagreLayoutOptions] = None,
                               fit_view: bool = False):
@@ -380,6 +405,14 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         return await self.send_and_wait(self.create_comp_event(res))
 
     async def add_nodes(self, nodes: List[Node], screen_to_flow: Optional[bool] = None):
+        """Add new nodes to the flow.
+
+        Args:
+            nodes (Node): nodes to add.
+            screen_to_flow (Optional[bool], optional): Whether the node position is in screen coordinates. Defaults to None.
+                you should use this when you use position from pane context menu or drag-drop to add a node.
+        """
+
         new_layout: Dict[str, Component] = {}
         for node in nodes:
             assert node.id not in self._id_to_node, f"node id {node.id} already exists"
@@ -402,15 +435,27 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         else:
             return await self.send_and_wait(self.create_comp_event(ev_new_node))
 
-    async def add_node(self, node: Node):
-        await self.add_nodes([node])
+    async def add_node(self, node: Node, screen_to_flow: Optional[bool] = None):
+        """Add a new node to the flow.
 
-    async def delete_nodes_by_ids(self, node_ids: List[str]):
+        Args:
+            node (Node): The node to add.
+            screen_to_flow (Optional[bool], optional): Whether the node position is in screen coordinates. Defaults to None.
+                you should use this when you use position from pane context menu or drag-drop to add a node.
+        """
+        await self.add_nodes([node], screen_to_flow)
+
+    async def delete_nodes_by_ids(self, node_ids: List[str], *, _internal_dont_send_comp_event: bool = False):
         node_ids_set = set(node_ids)
         new_nodes: List[Node] = []
+        del_node_id_with_comp: List[str] = []
         for node in self.nodes:
             if node.id not in node_ids_set:
                 new_nodes.append(node)
+            else:
+                if not isinstance(node.data, Undefined):
+                    if not isinstance(node.data.component, Undefined):
+                        del_node_id_with_comp.append(node.id)
         self.childs_complex.nodes = new_nodes
         # remove edges
         new_edges: List[Edge] = []
@@ -420,11 +465,22 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             new_edges.append(edge)
         self.childs_complex.edges = new_edges
         self._update_graph_data()
-        return await self.remove_childs_by_keys(
-            node_ids,
-            update_child_complex=False,
-            additional_ev_creator=lambda: self.update_childs_complex_event())
-
+        ev_del_node = {
+            "type": FlowControlType.DeleteNodeByIds,
+            "nodeIds": node_ids,
+        }
+        if del_node_id_with_comp:
+            if _internal_dont_send_comp_event:
+                return await self.remove_childs_by_keys(
+                    del_node_id_with_comp,
+                    update_child_complex=False)
+            else:
+                return await self.remove_childs_by_keys(
+                    del_node_id_with_comp,
+                    additional_ev_creator=lambda: self.create_comp_event(ev_del_node))
+        else:
+            if not _internal_dont_send_comp_event:
+                return await self.send_and_wait(self.create_comp_event(ev_del_node))
 
 @dataclasses.dataclass
 class HandleProps(MUIFlexBoxProps):
@@ -435,6 +491,7 @@ class HandleProps(MUIFlexBoxProps):
     style: Union[Undefined, Any] = undefined
     id: Union[Undefined, str] = undefined
     className: Union[Undefined, str] = undefined
+    connectionLimit: Union[Undefined, int] = undefined
 
 class Handle(MUIComponentBase[HandleProps]):
 
