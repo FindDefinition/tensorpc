@@ -15,5 +15,5 @@
 from .app import (App, AppEditor, AppEditorEventType, AppEditorFrontendEvent,
                   AppEditorFrontendEventType, AppEvent, EditableApp,
                   EditableLayoutApp)
-from .appcore import get_app_context, get_app_storage
-from .core import Undefined, undefined
+from ..core.appcore import get_app_context, get_app_storage
+from ..core.core import Undefined, undefined

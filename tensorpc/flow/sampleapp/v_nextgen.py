@@ -8,11 +8,11 @@ from tensorpc.flow import mui, three, plus, mark_create_layout, appctx, V, mark_
 import sys
 from tensorpc import PACKAGE_ROOT
 import numpy as np
-from tensorpc.flow.flowapp.components.plus.core import ObjectGridItemConfig
+from tensorpc.flow.components.plus.core import ObjectGridItemConfig
 
 from tensorpc.flow.marker import mark_did_mount
 from tensorpc import prim
-from tensorpc.flow.flowapp.objtree import UserObjTree, find
+from tensorpc.flow.core.objtree import UserObjTree, find
 from tensorpc.flow import observe_function
 
 

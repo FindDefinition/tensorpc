@@ -19,8 +19,8 @@ from typing import Any, Tuple, Union, List, Dict, get_origin, Generic
 import dataclasses
 import mashumaro
 import enum
-from tensorpc.flow.flowapp.components import plotly
-from tensorpc.flow.flowapp.core import as_dict_no_undefined
+from tensorpc.flow.components import plotly
+from tensorpc.flow.core.core import as_dict_no_undefined
 
 
 def get_args(t: Any) -> Tuple[Any, ...]:

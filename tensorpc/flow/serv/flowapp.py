@@ -23,17 +23,17 @@ from tensorpc.core.defs import FileDesp, FileResource
 from tensorpc.flow.coretypes import ScheduleEvent, VscodeTensorpcMessage, get_uid
 from tensorpc.core.tree_id import UniqueTreeId
 
-from tensorpc.flow.flowapp import appctx
-from tensorpc.flow.flowapp.appcore import ALL_OBSERVED_FUNCTIONS, enter_app_conetxt
-from tensorpc.flow.flowapp.components.mui import FlexBox, flex_wrapper
-from tensorpc.flow.flowapp.core import AppEditorEvent, AppEditorFrontendEvent, AppEvent, AppEventType, InitLSPClientEvent, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
+from tensorpc.flow import appctx
+from tensorpc.flow.core.appcore import ALL_OBSERVED_FUNCTIONS, enter_app_conetxt
+from tensorpc.flow.components.mui import FlexBox, flex_wrapper
+from tensorpc.flow.core.core import AppEditorEvent, AppEditorFrontendEvent, AppEvent, AppEventType, InitLSPClientEvent, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
 from tensorpc.flow.flowapp.app import App, EditableApp
 import asyncio
 from tensorpc.core import marker
 from tensorpc.core.httpclient import http_remote_call
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServiceUnit
 import tensorpc
-from tensorpc.flow.flowapp.reload import AppReloadManager, FlowSpecialMethods
+from tensorpc.flow.core.reload import AppReloadManager, FlowSpecialMethods
 
 from tensorpc.flow.langserv import close_tmux_lang_server, get_tmux_lang_server_info_may_create
 from ..client import AppLocalMeta, MasterMeta

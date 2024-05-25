@@ -71,11 +71,12 @@ from tensorpc.core.serviceunit import (ObjectReloadManager,
 from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.constants import TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
+from ..components import mui, three
 from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem, VscodeTensorpcMessage
 
-from tensorpc.flow.flowapp.components.plus.objinspect.inspector import get_exception_frame_stack
-from tensorpc.flow.flowapp.components.plus.objinspect.treeitems import TraceTreeItem
-from tensorpc.flow.flowapp.reload import (AppReloadManager,
+from tensorpc.flow.components.plus.objinspect.inspector import get_exception_frame_stack
+from tensorpc.flow.components.plus.objinspect.treeitems import TraceTreeItem
+from tensorpc.flow.core.reload import (AppReloadManager,
                                           bind_and_reset_object_methods,
                                           reload_object_methods)
 from tensorpc.flow.jsonlike import JsonLikeNode, parse_obj_to_jsonlike
@@ -86,14 +87,14 @@ from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.reload import reload_method
 from tensorpc.utils.uniquename import UniqueNamePool
 
-from .appcore import (ALL_OBSERVED_FUNCTIONS, AppContext, AppSpecialEventType,
+from ..core.appcore import (ALL_OBSERVED_FUNCTIONS, AppContext, AppSpecialEventType,
                       _CompReloadMeta, Event, EventHandlingContext, create_reload_metas, enter_event_handling_conetxt)
-from .appcore import enter_app_conetxt
-from .appcore import enter_app_conetxt as _enter_app_conetxt
-from .appcore import get_app, get_app_context
-from .components import mui, plus, three
+from ..core.appcore import enter_app_conetxt
+from ..core.appcore import enter_app_conetxt as _enter_app_conetxt
+from ..core.appcore import get_app, get_app_context
+from ..components import plus
 from tensorpc.core.tracer import FrameResult, Tracer, TraceType
-from .core import (AppComponentCore, AppEditorEvent, AppEditorEventType,
+from ..core.core import (AppComponentCore, AppEditorEvent, AppEditorEventType,
                    AppEditorFrontendEvent, AppEditorFrontendEventType,
                    AppEvent, AppEventType, BasicProps, Component,
                    ContainerBase, CopyToClipboardEvent, EventHandler,

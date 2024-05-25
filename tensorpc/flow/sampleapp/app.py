@@ -46,15 +46,15 @@ from tensorpc.flow import (App, EditableApp, EditableLayoutApp, leaflet,
                            plotly, plus, three, UserObjTree, appctx, V)
 from tensorpc.flow.client import AppClient, AsyncAppClient, add_message
 from tensorpc.flow.coretypes import MessageLevel, ScheduleEvent
-from tensorpc.flow.flowapp.appcore import observe_autorun_function, observe_function, observe_autorun_script
-from tensorpc.flow.flowapp.components.mui import (Button, HBox, ListItemButton,
+from tensorpc.flow.core.appcore import observe_autorun_function, observe_function, observe_autorun_script
+from tensorpc.flow.components.mui import (Button, HBox, ListItemButton,
                                                   ListItemText,
                                                   MUIComponentType, VBox,
                                                   VList)
-from tensorpc.flow.flowapp.components import typemetas
-from tensorpc.flow.flowapp.components.plus.config import ConfigPanel
+from tensorpc.flow.components import typemetas
+from tensorpc.flow.components.plus.config import ConfigPanel
 from tensorpc.flow.sampleapp.sample_reload_fn import func_support_reload
-from tensorpc.flow.flowapp.objtree import get_objtree_context
+from tensorpc.flow.core.objtree import get_objtree_context
 from tensorpc.flow.sampleapp.sample_preview import TestPreview0
 
 

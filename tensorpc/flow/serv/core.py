@@ -62,7 +62,7 @@ from tensorpc.flow.coretypes import (Message, MessageEvent, MessageEventType,
                                      SessionStatus, StorageDataItem,
                                      UserContentEvent, UserDataUpdateEvent,
                                      UserEvent, UserStatusEvent, get_uid)
-from tensorpc.flow.flowapp.core import (AppEvent, AppEventType, ComponentEvent,
+from tensorpc.flow.core.core import (AppEvent, AppEventType, ComponentEvent,
                                         FrontendEventType, NotifyEvent,
                                         NotifyType, ScheduleNextForApp,
                                         UIEvent, UISaveStateEvent,
