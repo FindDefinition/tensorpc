@@ -103,6 +103,7 @@ class FlowProps(ContainerBaseProps):
     paneContextMenuItems: Union[Undefined, List[MenuItem]] = undefined
     nodeContextMenuItems: Union[Undefined, List[MenuItem]] = undefined
     nodeTypeMap: Union[Undefined, Dict[str, str]] = undefined
+    preventCycle: Union[Undefined, bool] = undefined
 
 @dataclasses.dataclass
 class XYPosition:

@@ -1,7 +1,11 @@
 # Changelog
+# [0.11.2] - 2024-05-26
+### Fixed
+- refactor some code
+
 # [0.11.1] - 2024-05-25
 ### Fixed
- - fix some flow bug
+- fix some flow bug
 
 # [0.11.0] - 2024-05-24
 ### Added 
