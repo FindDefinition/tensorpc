@@ -98,8 +98,8 @@ class FlowProps(ContainerBaseProps):
     droppable: Union[bool, Undefined] = undefined
     allowedDndTypes: Union[List[str], Undefined] = undefined
     allowFile: Union[bool, Undefined] = undefined
-    validConnectMapIsDirected: Union[bool, Undefined] = undefined
-    validConnectMap: Union[Dict[str, List[str]], Undefined] = undefined
+    sourceValidConnectMap: Union[Dict[str, Dict[str, Any]], Undefined] = undefined
+    targetValidConnectMap: Union[Dict[str, Dict[str, Any]], Undefined] = undefined
     paneContextMenuItems: Union[Undefined, List[MenuItem]] = undefined
     nodeContextMenuItems: Union[Undefined, List[MenuItem]] = undefined
     nodeTypeMap: Union[Undefined, Dict[str, str]] = undefined
@@ -118,6 +118,7 @@ class NodeData:
     selectedBoxSxProps: Union[Undefined, Dict[str, Any]] = undefined
     data: Union[Undefined, Any] = undefined
     label: Union[Undefined, str] = undefined
+    sourceEdgeOverrides: Union[Undefined, Dict[str, Any]] = undefined
 
 
 @dataclasses.dataclass
@@ -268,6 +269,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         # we must due with delete event because it comes earlier than change event.
         self.event_node_delete.on(self._handle_node_delete)
         self.event_edge_delete.on(self._handle_edge_delete)
+        self.event_edge_connection.on(self._handle_new_edge)
 
         self._unique_name_pool_node = UniqueNamePool()
         self._unique_name_pool_edge = UniqueNamePool()
@@ -386,6 +388,11 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
     async def _handle_node_delete(self, nodes: List[Any]):
         return await self.delete_nodes_by_ids([n["id"] for n in nodes], _internal_dont_send_comp_event=True) 
+
+    async def _handle_new_edge(self, data: Dict[str, Any]):
+        new_edge = Edge(**data["newEdge"])
+        self.childs_complex.edges.append(new_edge)
+        self._update_graph_data()
 
     def _validate_node_ids(self, node_ids: List[str]):
         for node_id in node_ids:

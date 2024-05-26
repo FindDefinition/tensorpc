@@ -1,4 +1,8 @@
 # Changelog
+# [0.11.3] - 2024-05-26
+### Changed
+- change valid connect logic
+
 # [0.11.2] - 2024-05-26
 ### Fixed
 - refactor some code
