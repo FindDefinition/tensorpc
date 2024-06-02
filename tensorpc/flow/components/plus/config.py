@@ -20,6 +20,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, TypeVa
 import operator
 from typing_extensions import Literal, Annotated, get_origin, get_args
 from tensorpc.core.tree_id import UniqueTreeIdForTree
+from tensorpc.core.annocore import is_annotated
 
 from .. import mui
 from tensorpc.flow.components import typemetas
@@ -42,17 +43,6 @@ _BASE_TYPES = (
 #     return getattr(t, "__args__", None) or ()
 
 _BASE_TYPES = (int, float, bool, str, mui.Undefined)
-
-
-def lenient_issubclass(cls: Any,
-                       class_or_tuple: Any) -> bool:  # pragma: no cover
-    return isinstance(cls, type) and issubclass(cls, class_or_tuple)
-
-
-def is_annotated(ann_type: Any) -> bool:
-    # https://github.com/pydantic/pydantic/blob/35144d05c22e2e38fe093c533ff3a05ce9a30116/pydantic/_internal/_typing_extra.py#L99C1-L104C1
-    origin = get_origin(ann_type)
-    return origin is not None and lenient_issubclass(origin, Annotated)
 
 
 def _check_is_basic_type(tp):

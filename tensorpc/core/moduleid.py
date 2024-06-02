@@ -34,6 +34,11 @@ def get_qualname_of_type(klass: Type) -> str:
         return klass.__qualname__  # avoid outputs like 'builtins.str'
     return module + '.' + klass.__qualname__
 
+def get_module_id_of_type(klass: Type) -> str:
+    module = klass.__module__
+    if module == 'builtins':
+        return klass.__qualname__  # avoid outputs like 'builtins.str'
+    return module + '::' + "::".join(klass.__qualname__.split("."))
 
 def get_mro_qualnames_of_type(klass: Type) -> Set[str]:
     mros = inspect.getmro(klass)
@@ -263,3 +268,20 @@ def get_obj_type_meta(obj_type) -> Optional[TypeMeta]:
         module_import_path = module_path
     return TypeMeta(module_import_path, local_import_path,
                     not is_standard_module, is_in_memory)
+
+
+def get_object_type_from_module_id(module_id: str):
+    """Get object type from module id."""
+    module_key = module_id.split("::")[0]
+    mod = importlib.import_module(module_key)
+
+    local_key = "::".join(module_id.split("::")[1:])
+    module_dict = mod.__dict__
+    if module_dict is None:
+        return None
+    parts = local_key.split("::")
+    obj = module_dict[parts[0]]
+    for part in parts[1:]:
+        obj = getattr(obj, part)
+    return obj
+

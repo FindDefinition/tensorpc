@@ -51,18 +51,23 @@ class Event:
 
 class EventHandler:
 
-    def __init__(self, cb: Callable, simple_event: bool = True) -> None:
+    def __init__(self, cb: Callable, simple_event: bool = True, converter: Optional[Callable[[Any], Any]] = None) -> None:
         self.cb = cb
         self.simple_event = simple_event
+        self.converter = converter
 
     def run_event(self, event: Event) -> CORO_ANY:
         if self.simple_event:
+            if self.converter is not None:
+                return self.cb(self.converter(event.data))
             return self.cb(event.data)
         else:
             return self.cb(event)
 
     async def run_event_async(self, event: Event):
         if self.simple_event:
+            if self.converter is not None:
+                coro = self.cb(self.converter(event.data))
             coro = self.cb(event.data)
         else:
             coro = self.cb(event)

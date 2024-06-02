@@ -257,8 +257,8 @@ class Image(MUIComponentBase[ImageProps]):
                          ImageProps,
                          allowed_events=ALL_POINTER_EVENTS)
         # self.image_str: bytes = b""
-        self.event_click = self._create_event_slot(FrontendEventType.Click)
-        self.event_double_click = self._create_event_slot(
+        self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
+        self.event_double_click = self._create_event_slot_noarg(
             FrontendEventType.DoubleClick)
         self.event_pointer_enter = self._create_event_slot(
             FrontendEventType.Enter)
@@ -495,7 +495,7 @@ class Button(MUIComponentBase[ButtonProps]):
             self.register_event_handler(FrontendEventType.Click.value,
                                         callback,
                                         simple_event=True)
-        self.event_click = self._create_event_slot(FrontendEventType.Click)
+        self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
 
     async def headless_click(self):
         return await self.put_loopback_ui_event(
@@ -654,7 +654,7 @@ class IconButton(MUIComponentBase[IconButtonProps]):
             self.register_event_handler(FrontendEventType.Click.value,
                                         callback,
                                         simple_event=True)
-        self.event_click = self._create_event_slot(FrontendEventType.Click)
+        self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
 
     @staticmethod
     def encode_svg(svg: str) -> str:
@@ -1176,7 +1176,7 @@ class ListItemButton(MUIContainerBase[ListItemButtonProps, MUIComponentType]):
         if callback is not None:
             self.register_event_handler(FrontendEventType.Click.value,
                                         callback)
-        self.event_click = self._create_event_slot(FrontendEventType.Click)
+        self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
 
     async def headless_click(self):
         return await self.put_loopback_ui_event(
@@ -1220,7 +1220,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
                          ] + list(ALL_POINTER_EVENTS))
         self._wrapped_obj = wrapped_obj
         self.event_drop = self._create_event_slot(FrontendEventType.Drop)
-        self.event_click = self._create_event_slot(FrontendEventType.Click)
+        self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
         self.event_double_click = self._create_event_slot(
             FrontendEventType.DoubleClick)
         self.event_pointer_enter = self._create_event_slot(
@@ -1612,7 +1612,7 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         self.event_change = self._create_event_slot(FrontendEventType.Change)
         self.event_editor_save = self._create_event_slot(
             FrontendEventType.EditorSave)
-        self.event_editor_ready = self._create_event_slot(
+        self.event_editor_ready = self._create_event_slot_noarg(
             FrontendEventType.EditorReady)
 
     def state_change_callback(
@@ -3039,7 +3039,7 @@ class Chip(MUIComponentBase[ChipProps]):
         if delete_callback is not None:
             self.register_event_handler(FrontendEventType.Delete.value,
                                         delete_callback)
-        self.event_click = self._create_event_slot(FrontendEventType.Click)
+        self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
         self.event_delete = self._create_event_slot(FrontendEventType.Delete)
 
     def to_dict(self):
@@ -3237,6 +3237,23 @@ class Tabs(MUIContainerBase[TabsProps, MUIComponentType]):
                                            sync_status_first=False,
                                            change_status=False)
 
+    @property
+    def childs_complex(self):
+        assert isinstance(self._child_structure, Tabs.ChildDef)
+        return self._child_structure
+
+    async def update_tab_props(self, index: int, props: Dict[str, Any]):
+        # do validation
+        if "label" not in props:
+            props["label"] = self.childs_complex.tabDefs[index].label
+        if "value" not in props:
+            props["value"] = self.childs_complex.tabDefs[index].value
+        props["component"] = self.childs_complex.tabDefs[index].component
+        TabDef(**props)  
+        for k, v in props.items():
+            setattr(self.childs_complex.tabDefs[index], k, v)
+        await self.update_childs_complex()
+
 
 @dataclasses.dataclass
 class AllotmentProps(MUIFlexBoxProps):
@@ -3281,6 +3298,19 @@ class Allotment(MUIContainerBase[AllotmentProps, MUIComponentType]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+    @property
+    def childs_complex(self):
+        assert isinstance(self._child_structure, Allotment.ChildDef)
+        return self._child_structure
+
+    async def update_pane_props(self, index: int, props: Dict[str, Any]):
+        # do validation
+        props["component"] = self.childs_complex.paneDefs[index].component
+        Allotment.Pane(**props)  
+        for k, v in props.items():
+            setattr(self.childs_complex.paneDefs[index], k, v)
+        await self.update_childs_complex()
 
 
 # class AllotmentPane(MUIContainerBase[AllotmentPaneProps, MUIComponentType]):
@@ -4101,7 +4131,7 @@ class VirtualizedBox(MUIContainerBase[MUIVirtualizedBoxProps,
                          MUIVirtualizedBoxProps,
                          children,
                          allowed_events=ALL_POINTER_EVENTS)
-        self.event_click = self._create_event_slot(FrontendEventType.Click)
+        self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
         self.event_double_click = self._create_event_slot(
             FrontendEventType.DoubleClick)
         self.event_pointer_enter = self._create_event_slot(
@@ -4169,7 +4199,7 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps,
         # backend events
         self.event_item_changed = self._create_emitter_event_slot(
             FrontendEventType.DataItemChange)
-        self.event_click = self._create_event_slot(FrontendEventType.Click)
+        self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
         self.event_double_click = self._create_event_slot(
             FrontendEventType.DoubleClick)
         self.event_pointer_enter = self._create_event_slot(

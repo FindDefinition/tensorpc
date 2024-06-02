@@ -34,10 +34,8 @@ REQUIRED = [
     "requests",
     "aiohttp",
     "asyncssh",
-    "importlib_metadata; python_version < \"3.8\"",
     "mashumaro",
     "pillow",
-    "bcrypt",
     "jinja2",
     "async-timeout",
     "watchdog",
@@ -49,7 +47,7 @@ REQUIRED = [
     "libtmux",
     "humanize",
     "pyright",
-    "pydantic>=2.3,<3.0",
+    "pydantic>=2.7,<3.0",
 ]
 
 # What packages are optional?

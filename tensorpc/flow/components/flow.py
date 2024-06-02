@@ -221,6 +221,10 @@ class DagreLayoutOptions:
     ranker: Union[Undefined, Literal["network-simplex", "tight-tree",
                                      "longest-path"]] = undefined
 
+@dataclasses.dataclass
+class EventSelection:
+    nodes: List[str]
+    edges: List[str]
 
 class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
@@ -253,7 +257,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                              FrontendEventType.FlowNodeContextMenu.value,
                          ])
         self.event_selection_change = self._create_event_slot(
-            FrontendEventType.FlowSelectionChange)
+            FrontendEventType.FlowSelectionChange, lambda x: EventSelection(**x))
         self.event_nodes_initialized = self._create_event_slot(
             FrontendEventType.FlowNodesInitialized)
         self.event_edge_connection = self._create_event_slot(
@@ -408,6 +412,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
     async def update_node_props(self, node_id: str, props: Dict[str, Any]):
         self._validate_node_ids([node_id])
+        assert "data" not in props, "you can't update data via this api, use update_node_data instead"
         res = {
             "type": FlowControlType.UpdateNodeProps.value,
             "nodeId": node_id,
@@ -416,6 +421,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         return await self.send_and_wait(self.create_comp_event(res))
 
     async def update_node_data(self, node_id: str, data: Dict[str, Any]):
+        assert "component" not in data, "you can't update component via this api"
         self._validate_node_ids([node_id])
         res = {
             "type": FlowControlType.UpdateNodeData.value,

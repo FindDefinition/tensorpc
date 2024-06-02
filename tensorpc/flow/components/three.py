@@ -342,7 +342,7 @@ class Object3dWithEventBase(Object3dBase[T_o3d_prop]):
                          ] + list(allowed_events))
         self.event_double_click = self._create_event_slot(
             FrontendEventType.DoubleClick)
-        self.event_click = self._create_event_slot(FrontendEventType.Click)
+        self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
         self.event_enter = self._create_event_slot(FrontendEventType.Enter)
         self.event_leave = self._create_event_slot(FrontendEventType.Leave)
         self.event_over = self._create_event_slot(FrontendEventType.Over)
@@ -445,7 +445,7 @@ class O3dContainerWithEventBase(Object3dContainerBase[T_o3d_container_prop,
                          ] + list(allowed_events))
         self.event_double_click = self._create_event_slot(
             FrontendEventType.DoubleClick)
-        self.event_click = self._create_event_slot(FrontendEventType.Click)
+        self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
         self.event_enter = self._create_event_slot(FrontendEventType.Enter)
         self.event_leave = self._create_event_slot(FrontendEventType.Leave)
         self.event_over = self._create_event_slot(FrontendEventType.Over)
@@ -3054,7 +3054,7 @@ class Hud(ThreeContainerBase[HudProps, ThreeComponentType]):
 #         super().__init__(children)
 #         self.name = name
 #         # self.callback = callback
-#         self.event_click = self._create_event_slot(FrontendEventType.Click)
+#         self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
 
 #     def to_dict(self):
 #         res = super().to_dict()
@@ -3144,7 +3144,7 @@ class Button(Group):
 #         material.prop(color="#393939")
 #         mesh = MeshV1(RoundedRectGeometry(width, height, radius), material)
 #         mesh.register_event_handler(FrontendEventType.Click.value, callback, stop_propagation=True)
-#         self.event_click = self._create_event_slot(FrontendEventType.Click)
+#         self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
 
 #         mesh.prop(hoverColor="#222222",
 #                   clickColor="#009A63",

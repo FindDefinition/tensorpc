@@ -971,13 +971,15 @@ def _get_obj_def_path(obj):
     return _flow_comp_def_path
 
 
-class _EventSlot:
+TEventData = TypeVar("TEventData")
+
+class _EventSlotBase:
 
     def __init__(self, event_type: EventDataType, comp: "Component"):
         self.event_type = event_type
         self.comp = comp
 
-    def on_standard(self, handler: Callable[[Event], Any]) -> "_EventSlot":
+    def on_standard(self, handler: Callable[[Event], Any]) -> Self:
         """standard event means the handler must be a function with one argument of Event.
         this must be used to get template key
         if you use template layout such as table column def.
@@ -987,7 +989,47 @@ class _EventSlot:
                                          simple_event=False)
         return self
 
-    def on(self, handler: Callable) -> "_EventSlot":
+    def off(self, handler: Callable[[TEventData], Any]) -> Self:
+        self.comp.remove_event_handler(self.event_type, handler)
+        return self
+
+    def configure(self,
+                  stop_propagation: bool = False,
+                  throttle: Optional[NumberType] = None,
+                  debounce: Optional[NumberType] = None) -> Self:
+        self.comp.configure_event_handlers(self.event_type, stop_propagation,
+                                           throttle, debounce)
+        return self
+
+class _EventSlot(_EventSlotBase, Generic[TEventData]):
+
+    def __init__(self, event_type: EventDataType, comp: "Component", converter: Optional[Callable[[Any], TEventData]] = None):
+        self.event_type = event_type
+        self.comp = comp
+        self.converter = converter
+
+    def on(self, handler: Callable[[TEventData], Any]):
+        """simple event means the event data isn't Event, but the data of Event, or none for no-arg event
+        such as click.
+        """
+        self.comp.register_event_handler(self.event_type,
+                                         handler,
+                                         simple_event=True,
+                                         converter=self.converter)
+        return self
+
+    def off(self, handler: Callable[[TEventData], Any]):
+        self.comp.remove_event_handler(self.event_type, handler)
+        return self
+
+class _EventSlotZeroArg(_EventSlotBase):
+
+    def __init__(self, event_type: EventDataType, comp: "Component"):
+        self.event_type = event_type
+        self.comp = comp
+
+
+    def on(self, handler: Callable[[], Any]):
         """simple event means the event data isn't Event, but the data of Event, or none for no-arg event
         such as click.
         """
@@ -996,16 +1038,8 @@ class _EventSlot:
                                          simple_event=True)
         return self
 
-    def off(self, handler: Callable) -> "_EventSlot":
+    def off(self, handler: Callable[[], Any]):
         self.comp.remove_event_handler(self.event_type, handler)
-        return self
-
-    def configure(self,
-                  stop_propagation: bool = False,
-                  throttle: Optional[NumberType] = None,
-                  debounce: Optional[NumberType] = None) -> "_EventSlot":
-        self.comp.configure_event_handlers(self.event_type, stop_propagation,
-                                           throttle, debounce)
         return self
 
 
@@ -1144,12 +1178,21 @@ class Component(Generic[T_base_props, T_child]):
         return v
 
     def _create_event_slot(self, event_type: Union[FrontendEventType,
+                                                   EventDataType],
+                                converter: Optional[Callable[[Any], TEventData]] = None):
+        if isinstance(event_type, FrontendEventType):
+            event_type_value = event_type.value
+        else:
+            event_type_value = event_type
+        return _EventSlot(event_type_value, self, converter)
+
+    def _create_event_slot_noarg(self, event_type: Union[FrontendEventType,
                                                    EventDataType]):
         if isinstance(event_type, FrontendEventType):
             event_type_value = event_type.value
         else:
             event_type_value = event_type
-        return _EventSlot(event_type_value, self)
+        return _EventSlotZeroArg(event_type_value, self)
 
     def _create_emitter_event_slot(self, event_type: Union[FrontendEventType,
                                                            EventDataType]):
@@ -1476,12 +1519,13 @@ class Component(Generic[T_base_props, T_child]):
                                throttle: Optional[NumberType] = None,
                                debounce: Optional[NumberType] = None,
                                backend_only: bool = False,
-                               simple_event: bool = True):
+                               simple_event: bool = True,
+                               converter: Optional[Callable[[Any], Any]] = None):
         if self._flow_allowed_events:
             if not backend_only:
                 assert type in self._flow_allowed_events, f"only support events: {self._flow_allowed_events}, but got {type}"
 
-        evh = EventHandler(cb, simple_event)
+        evh = EventHandler(cb, simple_event, converter=converter)
         if isinstance(type, FrontendEventType):
             type_value = type.value
         else:
