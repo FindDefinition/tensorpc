@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import contextlib
+import contextvars
 import enum
 from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Dict, Iterable,
                     List, Optional, Tuple, Type, TypeVar, Union)
@@ -277,6 +279,8 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
         self._unique_name_pool_node = UniqueNamePool()
         self._unique_name_pool_edge = UniqueNamePool()
+
+        self.set_flow_event_context_creator(lambda: enter_flow_ui_context(self))
 
     @property
     def childs_complex(self):
@@ -544,6 +548,30 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         else:
             if not _internal_dont_send_comp_event:
                 return await self.send_and_wait(self.create_comp_event(ev_del_node))
+
+class FlowUIContext:
+
+    def __init__(self, flow: Flow) -> None:
+        self.flow = flow
+
+
+FLOW_CONTEXT_VAR: contextvars.ContextVar[
+    Optional[FlowUIContext]] = contextvars.ContextVar("simpleflowui_context",
+                                                   default=None)
+
+
+def get_flow_ui_context() -> Optional[FlowUIContext]:
+    return FLOW_CONTEXT_VAR.get()
+
+
+@contextlib.contextmanager
+def enter_flow_ui_context(flow: "Flow"):
+    ctx = FlowUIContext(flow)
+    token = FLOW_CONTEXT_VAR.set(ctx)
+    try:
+        yield ctx
+    finally:
+        FLOW_CONTEXT_VAR.reset(token)
 
 @dataclasses.dataclass
 class HandleProps(MUIFlexBoxProps):

@@ -4853,6 +4853,8 @@ class MenuItem:
     divider: Union[Undefined, bool] = undefined
     autoFocus: Union[Undefined, bool] = undefined
     disableAutoFocusItem: Union[Undefined, bool] = undefined
+    confirmMessage: Union[str, Undefined] = undefined
+    confirmTitle: Union[str, Undefined] = undefined
 
 
 @dataclasses.dataclass

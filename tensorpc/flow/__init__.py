@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from tensorpc.core.moduleid import loose_isinstance
-from .components import flow, leaflet, mui, plotly, three
+from .components import flowui, leaflet, mui, plotly, three
 
 from . import appctx, constants, marker
 from .flowapp import App, EditableApp, EditableLayoutApp

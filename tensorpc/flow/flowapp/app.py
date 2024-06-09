@@ -949,57 +949,49 @@ class App:
             if len(data) == 3 and data[2] is not None:
                 indexes = list(map(int, data[2].split(".")))
             event = Event(data[0], data[1], keys, indexes)
-            if event.type == FrontendEventType.Drop.value:
-                # TODO add event context stack here.
-                src_data = data[1]
-                src_uid = src_data["uid"]
-                src_comp = self.root._get_comp_by_uid(src_uid)
-                collect_handlers = src_comp.get_event_handlers(
-                    FrontendEventType.DragCollect.value)
-                comp = self.root._get_comp_by_uid(uid)
-                handlers = comp.get_event_handlers(data[0])
-                # print(src_uid, comp, src_comp, handler, collect_handler)
-                if handlers is not None and collect_handlers is not None:
-                    src_event = Event(FrontendEventType.DragCollect.value,
-                                    src_data["data"], keys, indexes)
-                    cbs = []
-                    for handler in handlers.handlers:
-                        cb = partial(self.__handle_dnd_event,
-                                    handler=handler,
-                                    src_handler=collect_handlers.handlers[0],
-                                    src_event=src_event)
-                        cbs.append(cb)
-                    comp._task = asyncio.create_task(
-                        comp.run_callbacks(cbs, sync_status_first=False))
-                else:
-                    # drag object already contains drag data.
-                    res[uid_original] = await comp.handle_event(
-                        event, is_sync=is_sync)
-            elif event.type == FrontendEventType.FileDrop.value:
-                # for file drop, we can't use regular drop above, so
-                # just convert it to drop event, no drag collect needed.
-                comps = self.root._get_comps_by_uid(uid)
-                ctxes = [
-                    c._flow_event_context_creator() for c in comps
-                    if c._flow_event_context_creator is not None
-                ]
-                with contextlib.ExitStack() as stack:
-                    for ctx in ctxes:
-                        stack.enter_context(ctx)
+            comps = self.root._get_comps_by_uid(uid)
+            ctxes = [
+                c._flow_event_context_creator() for c in comps
+                if c._flow_event_context_creator is not None
+            ]
+            with contextlib.ExitStack() as stack:
+                for ctx in ctxes:
+                    stack.enter_context(ctx)
+                if event.type == FrontendEventType.Drop.value:
+                    # for drop event, we only support contexts in drop component.
+                    src_data = data[1]
+                    src_uid = src_data["uid"]
+                    src_comp = self.root._get_comp_by_uid(src_uid)
+                    collect_handlers = src_comp.get_event_handlers(
+                        FrontendEventType.DragCollect.value)
+                    comp = comps[-1]
+                    handlers = comp.get_event_handlers(data[0])
+                    # print(src_uid, comp, src_comp, handler, collect_handler)
+                    if handlers is not None and collect_handlers is not None:
+                        src_event = Event(FrontendEventType.DragCollect.value,
+                                        src_data["data"], keys, indexes)
+                        cbs = []
+                        for handler in handlers.handlers:
+                            cb = partial(self.__handle_dnd_event,
+                                        handler=handler,
+                                        src_handler=collect_handlers.handlers[0],
+                                        src_event=src_event)
+                            cbs.append(cb)
+                        comp._task = asyncio.create_task(
+                            comp.run_callbacks(cbs, sync_status_first=False))
+                    else:
+                        # drag object already contains drag data.
+                        res[uid_original] = await comp.handle_event(
+                            event, is_sync=is_sync)
+                elif event.type == FrontendEventType.FileDrop.value:
+                    # for file drop, we can't use regular drop above, so
+                    # just convert it to drop event, no drag collect needed.
                     res[uid_original] = await comps[-1].handle_event(
                         Event(FrontendEventType.Drop.value, data[1], keys,
-                              indexes),
+                            indexes),
                         is_sync=is_sync)
-            else:
-                comps = self.root._get_comps_by_uid(uid)
-                ctxes = [
-                    c._flow_event_context_creator() for c in comps
-                    if c._flow_event_context_creator is not None
-                ]
-                # comps[-1].flow_event_emitter.emit(event.type, event.data)
-                with contextlib.ExitStack() as stack:
-                    for ctx in ctxes:
-                        stack.enter_context(ctx)
+                else:
+                    # comps[-1].flow_event_emitter.emit(event.type, event.data)
                     res[uid_original] = await comps[-1].handle_event(
                         event, is_sync=is_sync)
         if is_sync:
