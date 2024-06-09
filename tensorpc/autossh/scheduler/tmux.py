@@ -32,7 +32,7 @@ def get_tmux_scheduler_info_may_create():
         cfg_encoded = base64.b64encode(
             json.dumps(cfg).encode("utf-8")).decode("utf-8")
         port = get_free_ports(1)[0]
-        window_command = f"python -m tensorpc.serve --port {port} --serv_config_b64 {cfg_encoded}"
+        window_command = f"python -m tensorpc.serve --port {port} --serv_config_b64 \"{cfg_encoded}\""
         scheduler_sess_name = f"{constants.TMUX_SESSION_PREFIX}{_SPLIT}{port}{_SPLIT}{uuid_str}"
         sess = s.new_session(scheduler_sess_name,
                              window_command=window_command)

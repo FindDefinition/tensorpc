@@ -169,7 +169,7 @@ def main():
         cfg_encoded = base64.b64encode(
             json.dumps(cfg).encode("utf-8")).decode("utf-8")
         port = get_free_ports(1)[0]
-        window_command = f"python -m tensorpc.serve --port {port} --serv_config_b64 {cfg_encoded}"
+        window_command = f"python -m tensorpc.serve --port {port} --serv_config_b64 \"{cfg_encoded}\""
         scheduler_sess_name = f"{TMUX_SESSION_PREFIX}{TMUX_SESSION_NAME_SPLIT}{port}{TMUX_SESSION_NAME_SPLIT}{uuid_str}"
         print(window_command)
         sess = s.new_session(scheduler_sess_name,

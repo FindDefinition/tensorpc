@@ -1286,7 +1286,7 @@ class AppNode(CommandNode, DataStorageNodeBase):
         # TODO only use http port
         cmd = (f"python -m tensorpc.serve {serv_name} "
                f"--port={self.grpc_port} --http_port={self.http_port} "
-               f"--serv_config_b64 {cfg_encoded}")
+               f"--serv_config_b64 \"{cfg_encoded}\"")
         await self.input_queue.put(cmd + "\n")
 
 

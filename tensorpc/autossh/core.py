@@ -111,7 +111,7 @@ async def terminal_shell_type_detector(cmd_runner: Callable[[str, bool], Corouti
     parts = res.split(":")
     shell_type = parts[0]
     if shell_type == "bash" or shell_type == "zsh" or shell_type == "fish":
-        return ShellInfo(shell_type, os_type)
+        return ShellInfo("bash", os_type)
     return None
 
 def determine_hook_path_by_shell_info(shell_info: ShellInfo) -> Path:
@@ -1197,6 +1197,7 @@ class SSHClient:
                         client_ip_callback(stdout_content)
                 # assert self.encoding is None
                 init_cmd = f"bash --init-file ~/.tensorpc_hooks-bash{bash_file_path.suffix}"
+                init_cmd = "bash"
                 init_cmd_2 = ""
 
                 if shell_type.os_type == "windows":
@@ -1276,7 +1277,7 @@ class SSHClient:
                             if shell_type.os_type == "windows":
                                 cmds2.append(f"$Env:{k} = '{v}'".encode("utf-8"))
                             else:
-                                cmds2.append(f"export {k}={v}".encode("utf-8"))
+                                cmds2.append(f"export {k}=\"{v}\"".encode("utf-8"))
                         if shell_type.os_type == "windows":
                             for cmd in cmds2:
                                 stdin.write(cmd + b"\n")
@@ -1288,7 +1289,7 @@ class SSHClient:
                             if shell_type.os_type == "windows":
                                 cmds.append(f"$Env:{k} = '{v}'")
                             else:
-                                cmds.append(f"export {k}={v}")
+                                cmds.append(f"export {k}=\"{v}\"")
                         if shell_type.os_type == "windows":
                             for cmd in cmds:
                                 stdin.write(cmd + "\n")
