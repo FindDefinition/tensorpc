@@ -2,19 +2,22 @@ import abc
 import asyncio
 import bisect
 import contextlib
+import dataclasses
 import enum
 import getpass
 import io
 import os
+from pathlib import Path
 import re
 import sys
+from typing_extensions import Literal
 import warnings
 import time
 import traceback
 from asyncio.tasks import FIRST_COMPLETED
 from collections import deque
 from contextlib import suppress
-from typing import (TYPE_CHECKING, Any, AnyStr, Awaitable, Callable, Deque,
+from typing import (TYPE_CHECKING, Any, AnyStr, Awaitable, Callable, Coroutine, Deque,
                     Dict, Iterable, List, Optional, Set, Tuple, Type, Union,
                     cast)
 
@@ -70,6 +73,56 @@ ANSI_ESCAPE_REGEX_8BIT = re.compile(
 
 BASH_HOOKS_FILE_NAME = "hooks-bash-legacy.sh"
 
+@dataclasses.dataclass
+class ShellInfo:
+    type: Literal["bash", "zsh", "fish", "powershell", "cmd", "cygwin"]
+    os_type: Literal["linux", "macos", "windows"]
+
+async def terminal_shell_type_detector(cmd_runner: Callable[[str, bool], Coroutine[None, None, Optional[str]]]):
+    # TODO pwsh in linux
+    # supported shell types: bash, zsh, fish, powershell
+    # if not found, return None
+    # if found, return shell type
+    # 1. check if powershell is available
+    res = await cmd_runner("$PSVersionTable", False)
+    if res is not None and res.strip():
+        return ShellInfo("powershell", "windows")
+    # 2. use ver to check is windows cmd (default bash type for windows)
+    res = await cmd_runner("ver", False)
+    if res is not None and res.strip().startswith("Microsoft Windows"):
+        return ShellInfo("cmd", "windows")
+    # now we are in linux or macos or cygwin (windows)
+    # we can use uname to check os types 
+    res = await cmd_runner("uname -s", False)
+    if res is None:
+        return None
+    res = res.strip()
+    os_type: Literal["linux", "macos", "windows"] = "linux"
+    if res.startswith("CYGWIN"):
+        os_type = "windows"
+    elif res == "Darwin":
+        os_type = "macos"
+    # now we can check shell type
+    # we use a cmd that shoule be unknown in bash/zsh/fish
+    res = await cmd_runner("tensorpcisverygood", True)
+    if res is None:
+        return None
+    res = res.strip()
+    parts = res.split(":")
+    shell_type = parts[0]
+    if shell_type == "bash" or shell_type == "zsh" or shell_type == "fish":
+        return ShellInfo(shell_type, os_type)
+    return None
+
+def determine_hook_path_by_shell_info(shell_info: ShellInfo) -> Path:
+    if shell_info.os_type == "windows":
+        return PACKAGE_ROOT / "autossh" / "media" / "hooks-ps1.ps1"
+    if shell_info.type == "bash":
+        return PACKAGE_ROOT / "autossh" / "media" / BASH_HOOKS_FILE_NAME
+    elif shell_info.type == "zsh":
+        return PACKAGE_ROOT / "autossh" / "media" / "hooks-zsh.zsh"
+    # don't support fish
+    raise NotImplementedError
 
 class CommandEventType(enum.Enum):
     PROMPT_START = "A"
@@ -996,6 +1049,35 @@ class SSHClient:
                    target.known_hosts,
                    uid=target.uid)
 
+    async def determine_shell_type_by_conn(self, conn: asyncssh.SSHClientConnection):
+        async def _cmd_runner(cmd: str, skip_check: bool = False):
+            try:
+                result = await conn.run(cmd, check=not skip_check)
+                # print(result.stderr, result.stdout)
+                if result.stderr:
+                    stdout_content = result.stderr
+                    if isinstance(stdout_content, (bytes, bytearray)):
+                        stdout_content = stdout_content.decode(_ENCODE)
+                    elif isinstance(stdout_content, memoryview):
+                        stdout_content = stdout_content.tobytes().decode(_ENCODE)
+                    
+                    return stdout_content
+                elif result.stdout:
+                    stdout_content = result.stdout
+                    if isinstance(stdout_content, (bytes, bytearray)):
+                        stdout_content = stdout_content.decode(_ENCODE)
+                    elif isinstance(stdout_content, memoryview):
+                        stdout_content = stdout_content.tobytes().decode(_ENCODE)
+                    return stdout_content
+                else:
+                    return ""
+            except:
+                return None 
+        res = await terminal_shell_type_detector(_cmd_runner)
+        if res is None:
+            return ShellInfo("bash", "linux")
+        return res 
+
     @contextlib.asynccontextmanager
     async def simple_connect(self, init_bash: bool = True):
         conn_task = asyncssh.connection.connect(self.url_no_port,
@@ -1009,9 +1091,11 @@ class SSHClient:
         conn_ctx = await asyncio.wait_for(conn_task, timeout=10)
         async with conn_ctx as conn:
             assert isinstance(conn, asyncssh.SSHClientConnection)
+            
+            shell_info = await self.determine_shell_type_by_conn(conn)
             if (not self.bash_file_inited) and init_bash:
-                p = PACKAGE_ROOT / "autossh" / "media" / BASH_HOOKS_FILE_NAME
-                if InWindows:
+                p = determine_hook_path_by_shell_info(shell_info)
+                if shell_info.os_type == "windows":
                     # remove CRLF
                     with open(p, "r") as f:
                         content = f.readlines()
@@ -1086,36 +1170,48 @@ class SSHClient:
             conn_ctx = await asyncio.wait_for(conn_task, timeout=10)
             async with conn_ctx as conn:
                 assert isinstance(conn, asyncssh.SSHClientConnection)
+                shell_type = await self.determine_shell_type_by_conn(conn)
                 if not self.bash_file_inited:
-                    bash_file_path = PACKAGE_ROOT / "autossh" / "media" / BASH_HOOKS_FILE_NAME
+                    bash_file_path = determine_hook_path_by_shell_info(shell_type)
                     if InWindows:
                         # remove CRLF
                         with open(bash_file_path, "r") as f:
                             content = f.readlines()
-                        await conn.run(f'cat > ~/.tensorpc_hooks-bash.sh',
+                        await conn.run(f'cat > ~/.tensorpc_hooks-bash{bash_file_path.suffix}',
                                        input="\n".join(content))
                     else:
                         await asyncsshscp(str(bash_file_path),
-                                          (conn, '~/.tensorpc_hooks-bash.sh'))
+                                          (conn, f'~/.tensorpc_hooks-bash{bash_file_path.suffix}'))
                     self.bash_file_inited = True
-                if client_ip_callback is not None:
+                if client_ip_callback is not None and shell_type.os_type != "windows":
                     # TODO if fail?
                     result = await conn.run(
                         "echo $SSH_CLIENT | awk '{ print $1}'", check=True)
                     if result.stdout is not None:
                         stdout_content = result.stdout
-                        if isinstance(stdout_content, bytes):
+                        if isinstance(stdout_content, (bytes, bytearray)):
                             stdout_content = stdout_content.decode(_ENCODE)
+                        elif isinstance(stdout_content, memoryview):
+                            stdout_content = stdout_content.tobytes().decode(
+                                _ENCODE)
                         client_ip_callback(stdout_content)
                 # assert self.encoding is None
+                init_cmd = f"bash --init-file ~/.tensorpc_hooks-bash{bash_file_path.suffix}"
+                init_cmd_2 = ""
+
+                if shell_type.os_type == "windows":
+                    init_cmd = "powershell"
+                    init_cmd_2 = f". ~/.tensorpc_hooks-bash{bash_file_path.suffix}"
+                elif shell_type.type != "bash":
+                    init_cmd =shell_type.type
+                    init_cmd_2 = f"source ~/.tensorpc_hooks-bash{bash_file_path.suffix}"
                 chan, session = await conn.create_session(
                     VscodeStyleSSHClientStreamSession,
-                    "bash --init-file ~/.tensorpc_hooks-bash.sh",
+                    init_cmd,
                     request_pty="force",
                     encoding=self.encoding)  # type: ignore
                 # chan, session = await conn.create_session(
                 #             MySSHClientStreamSession, request_pty="force") # type: ignore
-
                 session.uid = self.uid
                 session.callback = callback
                 # stdin, stdout, stderr = await conn.open_session(
@@ -1127,6 +1223,9 @@ class SSHClient:
                     asyncssh.stream.SSHReader(
                         session, chan,
                         asyncssh.constants.EXTENDED_DATA_STDERR))
+                if init_cmd_2:
+                    stdin.write((init_cmd_2 + "\n").encode("utf-8"))
+
                 peer_client = PeerSSHClient(stdin,
                                             stdout,
                                             stderr,
@@ -1174,13 +1273,27 @@ class SSHClient:
                     if self.encoding is None:
                         cmds2: List[bytes] = []
                         for k, v in env.items():
-                            cmds2.append(f"export {k}={v}".encode("utf-8"))
-                        stdin.write(b" && ".join(cmds2) + b"\n")
+                            if shell_type.os_type == "windows":
+                                cmds2.append(f"$Env:{k} = '{v}'".encode("utf-8"))
+                            else:
+                                cmds2.append(f"export {k}={v}".encode("utf-8"))
+                        if shell_type.os_type == "windows":
+                            for cmd in cmds2:
+                                stdin.write(cmd + b"\n")
+                        else:
+                            stdin.write(b" && ".join(cmds2) + b"\n")
                     else:
                         cmds: List[str] = []
                         for k, v in env.items():
-                            cmds.append(f"export {k}={v}")
-                        stdin.write(" && ".join(cmds) + "\n")
+                            if shell_type.os_type == "windows":
+                                cmds.append(f"$Env:{k} = '{v}'")
+                            else:
+                                cmds.append(f"export {k}={v}")
+                        if shell_type.os_type == "windows":
+                            for cmd in cmds:
+                                stdin.write(cmd + "\n")
+                        else:
+                            stdin.write(" && ".join(cmds) + "\n")
                 while True:
                     done, pending = await asyncio.wait(
                         wait_tasks, return_when=asyncio.FIRST_COMPLETED)

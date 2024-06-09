@@ -143,9 +143,12 @@ class FlowApp:
         print(enable_lsp, self.lsp_port)
         if enable_lsp:
             assert self.lsp_port is not None
-            get_tmux_lang_server_info_may_create("pyright",
-                                                 self.master_meta.node_id,
-                                                 self.lsp_port)
+            try:
+                get_tmux_lang_server_info_may_create("pyright",
+                                                    self.master_meta.node_id,
+                                                    self.lsp_port)
+            except:
+                traceback.print_exc()
         lay = self.app._get_app_layout()
         self.app._flowapp_is_inited = True
         await self._send_loop_queue.put(

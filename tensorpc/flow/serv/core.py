@@ -1563,15 +1563,28 @@ async def _get_free_port(count: int,
     # print(res)
     stderr = ""
     async with client.simple_connect() as conn:
+        shell_type = await client.determine_shell_type_by_conn(conn)
+        print(shell_type)
         try:
             if init_cmds:
-                cmd = (
-                    f"bash -i -c "
-                    f'"{init_cmds} && python -m tensorpc.cli.free_port {count}"'
-                )
+                if shell_type.os_type == "windows":
+                    cmd = (
+                        f"powershell -c "
+                        f'"{init_cmds} ; python -m tensorpc.cli.free_port {count}"'
+                    )
+                else:
+                    cmd = (
+                        f"{shell_type.type} -i -c "
+                        f'"{init_cmds} && python -m tensorpc.cli.free_port {count}"'
+                    )
             else:
-                cmd = (f"bash -i -c "
-                       f'"python -m tensorpc.cli.free_port {count}"')
+                if shell_type.os_type == "windows":
+                    cmd = (f"powershell -c "
+                           f'"python -m tensorpc.cli.free_port {count}"')
+                else:
+                    cmd = (f"{shell_type.type} -i -c "
+                        f'"python -m tensorpc.cli.free_port {count}"')
+            print(cmd)
             result = await conn.run(cmd, check=True)
             stdout = result.stdout
             if stdout is not None:
