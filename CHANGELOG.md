@@ -1,4 +1,9 @@
 # Changelog
+# [0.11.4] - 2024-06-10
+### Fixed 
+- fix shell problem in mac os
+- add zsh default shell support
+
 # [0.11.3] - 2024-05-26
 ### Changed
 - change valid connect logic

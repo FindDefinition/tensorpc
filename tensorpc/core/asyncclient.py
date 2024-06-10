@@ -436,6 +436,7 @@ async def simple_remote_call_async(addr, key, *args, timeout=None, **kwargs):
 
 async def simple_chunk_call_async(addr, key, *args, **kwargs):
     async with AsyncRemoteManager(addr) as robj:
+        # await robj.wait_for_channel_ready()
         return await robj.chunked_remote_call(key, *args, **kwargs)
 
 

@@ -124,7 +124,7 @@ def _get_uid(graph_id: str, node_id: str):
 
 
 def _get_status_from_last_event(ev: CommandEventType):
-    if ev == CommandEventType.CURRENT_COMMAND:
+    if ev == CommandEventType.COMMAND_OUTPUT_START:
         return "running"
     elif ev == CommandEventType.COMMAND_COMPLETE:
         return "success"
@@ -1262,7 +1262,7 @@ class AppNode(CommandNode, DataStorageNodeBase):
         option = base64.b64encode(
             json.dumps(option).encode("utf-8")).decode("utf-8")
 
-        alias_cmd = f"alias appscript=\"python -m tensorpc.serve.flowapp_script {option}\""
+        alias_cmd = f"alias appscript=\"python -m tensorpc.serve.flowapp_script \"{option}\"\""
         await self.input_queue.put(alias_cmd + "\n")
 
         return True, init_event
@@ -1286,7 +1286,7 @@ class AppNode(CommandNode, DataStorageNodeBase):
         # TODO only use http port
         cmd = (f"python -m tensorpc.serve {serv_name} "
                f"--port={self.grpc_port} --http_port={self.http_port} "
-               f"--serv_config_b64 \"{cfg_encoded}\"")
+               f"--serv_config_b64 '{cfg_encoded}'")
         await self.input_queue.put(cmd + "\n")
 
 
@@ -1564,7 +1564,6 @@ async def _get_free_port(count: int,
     stderr = ""
     async with client.simple_connect() as conn:
         shell_type = await client.determine_shell_type_by_conn(conn)
-        print(shell_type)
         try:
             if init_cmds:
                 if shell_type.os_type == "windows":
@@ -1584,7 +1583,6 @@ async def _get_free_port(count: int,
                 else:
                     cmd = (f"{shell_type.type} -i -c "
                         f'"python -m tensorpc.cli.free_port {count}"')
-            print(cmd)
             result = await conn.run(cmd, check=True)
             stdout = result.stdout
             if stdout is not None:
@@ -1964,7 +1962,7 @@ class Flow:
         node, driver = self._get_app_node_and_driver(graph_id, node_id)
         if not node.is_session_started():
             return None
-        if node.last_event != CommandEventType.CURRENT_COMMAND:
+        if node.last_event != CommandEventType.COMMAND_OUTPUT_START:
             return None
         if isinstance(driver, RemoteSSHNode):
             return await driver.http_remote_call(
@@ -1992,7 +1990,7 @@ class Flow:
         node, driver = self._get_app_node_and_driver(graph_id, node_id)
         if not node.is_session_started():
             return None
-        if node.last_event != CommandEventType.CURRENT_COMMAND:
+        if node.last_event != CommandEventType.COMMAND_OUTPUT_START:
             return None
         if isinstance(driver, RemoteSSHNode):
             return {
@@ -2132,7 +2130,7 @@ class Flow:
 
             elif isinstance(event, (CommandEvent)):
                 node.last_event = event.type
-                if event.type == CommandEventType.CURRENT_COMMAND:
+                if event.type == CommandEventType.COMMAND_OUTPUT_START:
                     if isinstance(node, CommandNode):
                         if event.arg is not None:
                             current_cmd = event.arg.decode("utf-8")

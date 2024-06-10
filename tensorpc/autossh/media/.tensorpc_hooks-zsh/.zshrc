@@ -3,7 +3,7 @@
 #   Licensed under the MIT License. See License.txt in the project root for license information.
 # ---------------------------------------------------------------------------------------------
 builtin autoload -Uz add-zsh-hook
-
+export TERM=xterm-256color
 # Prevent the script recursing when setting up
 if [ -n "$VSCODE_SHELL_INTEGRATION" ]; then
 	ZDOTDIR=$USER_ZDOTDIR
@@ -13,6 +13,9 @@ fi
 # This variable allows the shell to both detect that VS Code's shell integration is enabled as well
 # as disable it by unsetting the variable.
 VSCODE_SHELL_INTEGRATION=1
+VSCODE_INJECTION=1
+# enable shell login to get same environment as manual ssh 
+VSCODE_SHELL_LOGIN=1
 
 # By default, zsh will set the $HISTFILE to the $ZDOTDIR location automatically. In the case of the
 # shell integration being injected, this means that the terminal will use a different history file

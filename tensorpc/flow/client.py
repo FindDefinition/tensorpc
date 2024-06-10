@@ -57,6 +57,9 @@ class MasterMeta:
             ssh_server = os.getenv("SSH_CLIENT")
             if ssh_server is not None:
                 ssh_server_ip = ssh_server.split(" ")[0]
+                if ssh_server_ip == "::1":
+                    # TODO mac os
+                    ssh_server_ip = "localhost"
                 if port is not None:
                     url = f"http://{ssh_server_ip}:{port}/api/rpc"
                 if gport is not None:

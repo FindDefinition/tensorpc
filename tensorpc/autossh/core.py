@@ -71,7 +71,7 @@ ANSI_ESCAPE_REGEX_8BIT = re.compile(
     )
 ''', re.VERBOSE)
 
-BASH_HOOKS_FILE_NAME = "hooks-bash-legacy.sh"
+BASH_HOOKS_FILE_NAME = "hooks-bash.sh"
 
 @dataclasses.dataclass
 class ShellInfo:
@@ -111,7 +111,7 @@ async def terminal_shell_type_detector(cmd_runner: Callable[[str, bool], Corouti
     parts = res.split(":")
     shell_type = parts[0]
     if shell_type == "bash" or shell_type == "zsh" or shell_type == "fish":
-        return ShellInfo("bash", os_type)
+        return ShellInfo(shell_type, os_type)
     return None
 
 def determine_hook_path_by_shell_info(shell_info: ShellInfo) -> Path:
@@ -120,7 +120,7 @@ def determine_hook_path_by_shell_info(shell_info: ShellInfo) -> Path:
     if shell_info.type == "bash":
         return PACKAGE_ROOT / "autossh" / "media" / BASH_HOOKS_FILE_NAME
     elif shell_info.type == "zsh":
-        return PACKAGE_ROOT / "autossh" / "media" / "hooks-zsh.zsh"
+        return PACKAGE_ROOT / "autossh" / "media" / ".tensorpc_hooks-zsh/.zshrc"
     # don't support fish
     raise NotImplementedError
 
@@ -695,7 +695,6 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
 
                         if not recv_buf[0]:
                             recv_buf.pop(0)
-                        print("RTX")
                         self._maybe_resume_reading()
                         return buf
 
@@ -707,7 +706,6 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
                     self._recv_buf_len -= buflen
                     self._maybe_resume_reading()
                     raise asyncio.IncompleteReadError(cast(bytes, buf), None)
-                print("WTF")
                 await self._block_read(datatype)
 
 
@@ -1171,8 +1169,8 @@ class SSHClient:
             async with conn_ctx as conn:
                 assert isinstance(conn, asyncssh.SSHClientConnection)
                 shell_type = await self.determine_shell_type_by_conn(conn)
+                bash_file_path = determine_hook_path_by_shell_info(shell_type)
                 if not self.bash_file_inited:
-                    bash_file_path = determine_hook_path_by_shell_info(shell_type)
                     if InWindows:
                         # remove CRLF
                         with open(bash_file_path, "r") as f:
@@ -1180,8 +1178,12 @@ class SSHClient:
                         await conn.run(f'cat > ~/.tensorpc_hooks-bash{bash_file_path.suffix}',
                                        input="\n".join(content))
                     else:
-                        await asyncsshscp(str(bash_file_path),
-                                          (conn, f'~/.tensorpc_hooks-bash{bash_file_path.suffix}'))
+                        if shell_type.type == "zsh":
+                            await asyncsshscp(str(bash_file_path.parent),
+                                            (conn, f'~/'), recurse=True)
+                        else:
+                            await asyncsshscp(str(bash_file_path),
+                                            (conn, f'~/.tensorpc_hooks-bash{bash_file_path.suffix}'))
                     self.bash_file_inited = True
                 if client_ip_callback is not None and shell_type.os_type != "windows":
                     # TODO if fail?
@@ -1194,22 +1196,32 @@ class SSHClient:
                         elif isinstance(stdout_content, memoryview):
                             stdout_content = stdout_content.tobytes().decode(
                                 _ENCODE)
+                        if stdout_content.strip() == "::1":
+                            stdout_content = "localhost"
                         client_ip_callback(stdout_content)
                 # assert self.encoding is None
                 init_cmd = f"bash --init-file ~/.tensorpc_hooks-bash{bash_file_path.suffix}"
-                init_cmd = "bash"
                 init_cmd_2 = ""
-
+                init_env: Optional[Dict[str, Any]] = None
                 if shell_type.os_type == "windows":
-                    init_cmd = "powershell"
+                    pwsh_win_cmds = ['-l', '-noexit', '-command', 'try { . ~/.tensorpc_hooks-bash{bash_file_path.suffix} } catch {}{}']
+                    init_cmd = f"powershell {' '.join(pwsh_win_cmds)}"
                     init_cmd_2 = f". ~/.tensorpc_hooks-bash{bash_file_path.suffix}"
-                elif shell_type.type != "bash":
+                    init_cmd_2 = ""                
+                elif shell_type.type != "bash" and shell_type.type != "zsh":
                     init_cmd =shell_type.type
                     init_cmd_2 = f"source ~/.tensorpc_hooks-bash{bash_file_path.suffix}"
+                elif shell_type.type == "zsh":
+                    init_cmd_2 = ""
+                    user_zdotdir = os.getenv("ZDOTDIR", "$HOME")
+                    init_cmd = f"export ZDOTDIR=~/.tensorpc_hooks-zsh && export USER_ZDOTDIR={user_zdotdir} && zsh -il"
+                    # init_cmd_2 = f"source ~/.tensorpc_hooks-zsh/.zshrc"
+
                 chan, session = await conn.create_session(
                     VscodeStyleSSHClientStreamSession,
                     init_cmd,
                     request_pty="force",
+                    env=init_env,
                     encoding=self.encoding)  # type: ignore
                 # chan, session = await conn.create_session(
                 #             MySSHClientStreamSession, request_pty="force") # type: ignore
@@ -1363,7 +1375,6 @@ async def main2():
         await asyncsshscp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
         stdin, stdout, stderr = await conn.open_session(
             "bash --init-file ~/.tensorpc_hooks-bash.sh", request_pty="force")
-        print(stdin, stdout, stderr)
         peer_client = PeerSSHClient(stdin, stdout, stderr)
 
         q = asyncio.Queue()
