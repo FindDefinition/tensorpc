@@ -397,6 +397,8 @@ class FrontendEventType(enum.IntEnum):
     FlowNodeDelete = 84
     FlowNodeContextMenu = 85
     FlowPaneContextMenu = 86
+    FlowNodeLogicChange = 87
+    FlowEdgeLogicChange = 88
 
 
     PlotlyClickData = 100
@@ -476,6 +478,11 @@ class UserMessage:
     @classmethod
     def create_error(cls, uid: str, error: str, detail: str):
         return cls(uid, error, MessageLevel.Error, detail)
+
+    @classmethod
+    def from_exception(cls, uid: str, exc: BaseException):
+        lines = traceback.format_exception(exc)
+        return cls(uid, str(exc), MessageLevel.Error, "\n".join(lines))
 
     @classmethod
     def create_warning(cls, uid: str, error: str, detail: str):
@@ -961,7 +968,7 @@ def _get_obj_def_path(obj):
             _flow_comp_def_path = str(
                 Path(inspect.getfile(builtins.type(obj))).resolve())
     except:
-        traceback.print_exc()
+        # traceback.print_exc()
         _flow_comp_def_path = ""
     if is_dynamic_path:
         return _flow_comp_def_path
@@ -1652,6 +1659,19 @@ class Component(Generic[T_base_props, T_child]):
         # uid is set in flowapp service later.
         ev = AppEditorEvent(type, data)
         return AppEvent("", {AppEventType.AppEditor: ev})
+
+    def send_error(self, title: str, detail: str):
+        assert self._flow_uid is not None
+        user_exc = UserMessage.create_error(self._flow_uid.uid_encoded, title,
+                                            detail)
+        return self.put_app_event(self.create_user_msg_event(user_exc))
+
+    def send_exception(self, e: BaseException):
+        ss = io.StringIO()
+        traceback.print_exc(file=ss)
+        assert self._flow_uid is not None
+        return self.put_app_event(self.create_user_msg_event(UserMessage.from_exception(
+                                    self._flow_uid_encoded, e)))
 
     async def __event_emitter_on_exc(self, exc_param: ExceptionParam):
         traceback.print_exc()

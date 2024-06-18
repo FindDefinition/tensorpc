@@ -847,7 +847,7 @@ class DataStorageNodeBase(abc.ABC):
             self.stored_data[key] = item
         else:
             self.stored_data[key] = StorageDataItem(bytes(), meta)
-
+        
     def read_meta_dict(self, key: str) -> dict:
         if key in self.stored_data:
             data_item = self.stored_data[key]
@@ -931,6 +931,12 @@ class DataStorageNodeBase(abc.ABC):
                     self.stored_data[key] = StorageDataItem(bytes(), meta)
                 return data_item
         raise FileNotFoundError(f"{path} not exists")
+
+    def has_data_item(self, key: str):
+        if key in self.stored_data:
+            return True
+        path = self.get_save_path(key)
+        return path.exists()
 
     def need_update(self, key: str, timestamp: int):
         return self.stored_data[key].timestamp != timestamp
@@ -2651,6 +2657,12 @@ class Flow:
         node = node_desp.node
         assert isinstance(node, DataStorageNodeBase)
         return node.get_items()
+
+    async def has_data_item(self, graph_id: str, node_id: str, key: str):
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node
+        assert isinstance(node, DataStorageNodeBase)
+        return node.has_data_item(key)
 
     async def query_all_data_node_ids(self, graph_id: str):
         assert graph_id in self.flow_dict, f"can't find graph {graph_id}"

@@ -140,10 +140,12 @@ class FlexComponentBaseProps(BasicProps):
     fontSize: Union[ValueType, Undefined] = undefined
     fontFamily: Union[str, Undefined] = undefined
     border: Union[str, Undefined] = undefined
+    borderWidth: Union[ValueType, Undefined] = undefined
     borderTop: Union[ValueType, Undefined] = undefined
     borderLeft: Union[ValueType, Undefined] = undefined
     borderRight: Union[ValueType, Undefined] = undefined
     borderBottom: Union[ValueType, Undefined] = undefined
+    borderStyle: Union[str, Undefined] = undefined 
     borderColor: Union[str, Undefined] = undefined
     borderRadius: Union[ValueType, Undefined] = undefined
     borderImage: Union[str, Undefined] = undefined
@@ -155,6 +157,8 @@ class FlexComponentBaseProps(BasicProps):
                      Undefined] = undefined
     pointerEvents: Union[PointerEventsProperties, Undefined] = undefined
     transform: Union[str, Undefined] = undefined
+
+    boxShadow: Union[ValueType, Undefined] = undefined
 
 
 @dataclasses.dataclass
@@ -187,6 +191,7 @@ class FlexBoxProps(FlexComponentBaseProps):
     flexWrap: Union[Literal["nowrap", "wrap", "wrap-reverse"],
                     Undefined] = undefined
     flexFlow: Union[str, Undefined] = undefined
+    className: Union[str, Undefined] = undefined
 
 
 # we can't let mui use three component.
@@ -206,7 +211,6 @@ class MUIFlexBoxWithDndProps(MUIFlexBoxProps):
     dragData: Union[Dict[str, Any], Undefined] = undefined
     dragInChild: Union[bool, Undefined] = undefined
     takeDragRef: Union[bool, Undefined] = undefined
-    className: Union[str, Undefined] = undefined
 
     @field_validator('sxOverDrop')
     def sx_over_drop_validator(cls, v: Union[Dict[str, Any], Undefined]):
@@ -1266,8 +1270,18 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
         metas = reload_mgr.query_type_method_meta(type(user_obj),
                                                   no_code=True,
                                                   include_base=True)
-        res = FlowSpecialMethods(metas)
-        res.bind(user_obj)
+        if type(user_obj) is not type(self):
+            self_metas = reload_mgr.query_type_method_meta(type(self),
+                                                      no_code=True,
+                                                      include_base=True)
+            res = FlowSpecialMethods(self_metas)
+            res.bind(self)
+            user_res = FlowSpecialMethods(metas)
+            user_res.bind(user_obj)
+            res.override_special_methods(user_res)
+        else:
+            res = FlowSpecialMethods(metas)
+            res.bind(user_obj)
         return res
 
     def _get_user_object(self):
@@ -2771,6 +2785,7 @@ class TypographyProps(MUIComponentBaseProps):
     tooltipEnterDelay: Union[Undefined, NumberType] = undefined
     tooltipEnterNextDelay: Union[Undefined, NumberType] = undefined
     tooltipLeaveDelay: Union[Undefined, NumberType] = undefined
+    className: Union[Undefined, str] = undefined
 
 
 @dataclasses.dataclass

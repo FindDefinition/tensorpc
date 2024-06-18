@@ -15,8 +15,8 @@
 import contextlib
 import contextvars
 import enum
-from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Dict, Iterable,
-                    List, Optional, Tuple, Type, TypeVar, Union)
+from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Dict, Generic, Iterable,
+                    List, Optional, Set, Tuple, Type, TypeVar, Union)
 
 from typing_extensions import Literal, TypeAlias
 
@@ -33,6 +33,7 @@ from .mui import (ContainerBaseProps, LayoutType, MUIComponentBase,
                   MUIComponentBaseProps, MUIComponentType, MUIContainerBase,
                   MUIFlexBoxProps, MenuItem, Theme, ValueType)
 
+_T = TypeVar("_T", bound=Component)
 
 @dataclasses.dataclass
 class FlowFitViewOptions:
@@ -159,6 +160,14 @@ class Node:
                 return self.data.component
         return None
 
+    def get_component_checked(self, type: Type[_T]) -> _T:
+        if not isinstance(self.data, Undefined):
+            if not isinstance(self.data.component, Undefined):
+                if isinstance(self.data.component, type):
+                    return self.data.component
+        raise ValueError(f"node don't contain component with type {type}")
+
+
 
 @dataclasses.dataclass
 class EdgeMarker:
@@ -257,7 +266,11 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                              FrontendEventType.Drop.value,
                              FrontendEventType.FlowPaneContextMenu.value,
                              FrontendEventType.FlowNodeContextMenu.value,
+                             FrontendEventType.FlowNodeLogicChange.value,
                          ])
+
+        self.event_change = self._create_event_slot(
+            FrontendEventType.Change)
         self.event_selection_change = self._create_event_slot(
             FrontendEventType.FlowSelectionChange, lambda x: EventSelection(**x))
         self.event_nodes_initialized = self._create_event_slot(
@@ -268,6 +281,9 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             FrontendEventType.FlowEdgeDelete)
         self.event_node_delete = self._create_event_slot(
             FrontendEventType.FlowNodeDelete)
+        self.event_node_logic_change = self._create_event_slot(
+            FrontendEventType.FlowNodeLogicChange)
+
         self.event_drop = self._create_event_slot(FrontendEventType.Drop)
         self.event_pane_context_menu = self._create_event_slot(FrontendEventType.FlowPaneContextMenu)
         self.event_node_context_menu = self._create_event_slot(FrontendEventType.FlowNodeContextMenu)
@@ -276,6 +292,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         self.event_node_delete.on(self._handle_node_delete)
         self.event_edge_delete.on(self._handle_edge_delete)
         self.event_edge_connection.on(self._handle_new_edge)
+        self.event_node_logic_change.on(self._handle_node_logic_change)
 
         self._unique_name_pool_node = UniqueNamePool()
         self._unique_name_pool_edge = UniqueNamePool()
@@ -332,13 +349,13 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         assert len(self._id_to_edge) == len(self.edges)
         self._source_id_to_edge = {edge.source: edge for edge in self.edges}
         self._target_id_to_edge = {edge.target: edge for edge in self.edges}
-        self._node_id_to_sources = {node.id: [] for node in self.nodes}
-        self._node_id_to_targets = {node.id: [] for node in self.nodes}
+        self._node_id_to_sources: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = {node.id: [] for node in self.nodes}
+        self._node_id_to_targets: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = {node.id: [] for node in self.nodes}
         for edge in self.edges:
-            self._node_id_to_sources[edge.source].append(
-                self._id_to_node[edge.target].id)
-            self._node_id_to_targets[edge.target].append(
-                self._id_to_node[edge.source].id)
+            self._node_id_to_targets[edge.source].append(
+                (self._id_to_node[edge.target].id, edge.sourceHandle, edge.targetHandle))
+            self._node_id_to_sources[edge.target].append(
+                (self._id_to_node[edge.source].id, edge.sourceHandle, edge.targetHandle))
         # TODO detection cycle
         for n in self.nodes:
             if not isinstance(n, Undefined):
@@ -351,15 +368,44 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
     def get_node_by_id(self, node_id: str):
         return self._id_to_node[node_id]
 
+    def has_node_id(self, node_id: str):
+        return node_id in self._id_to_node 
+
     def get_source_nodes(self, node_id: str):
         return [
-            self._id_to_node[id] for id in self._node_id_to_sources[node_id]
+            self._id_to_node[idh[0]] for idh in self._node_id_to_sources[node_id]
         ]
 
     def get_target_nodes(self, node_id: str):
         return [
-            self._id_to_node[id] for id in self._node_id_to_targets[node_id]
+            self._id_to_node[idh[0]] for idh in self._node_id_to_targets[node_id]
         ]
+
+    def get_source_node_and_handles(self, node_id: str):
+        return [
+            (self._id_to_node[idh[0]], idh[1], idh[2]) for idh in self._node_id_to_sources[node_id]
+        ]
+
+    def get_target_node_and_handles(self, node_id: str):
+        return [
+            (self._id_to_node[idh[0]], idh[1], idh[2]) for idh in self._node_id_to_targets[node_id]
+        ]
+
+    def get_all_nodes_in_connected_graph(self, node: Node):
+        visited: Set[str] = set()
+        stack = [node]
+        res: List[Node] = []
+        while stack:
+            cur = stack.pop()
+            if cur.id in visited:
+                continue
+            visited.add(cur.id)
+            res.append(cur)
+            all_connected = self.get_source_nodes(cur.id) + self.get_target_nodes(
+                cur.id)
+            for n in all_connected:
+                stack.append(n)
+        return res
 
     @property
     def update_event(self):
@@ -369,6 +415,22 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
     async def handle_event(self, ev: Event, is_sync: bool = False):
         print("flow event", ev.type, ev.data)
         return await handle_standard_event(self, ev, is_sync=is_sync, sync_state_after_change=False, change_status=False)
+   
+    def _handle_node_logic_change(self, nodes: List[Any]):
+        cur_id_to_comp: Dict[str, Component] = {}
+        for n in self.nodes:
+            if not isinstance(n.data, Undefined) and not isinstance(
+                    n.data.component, Undefined):
+                assert n.data.component._flow_uid is not None
+                cur_id_to_comp[n.data.component._flow_uid.
+                               uid_encoded] = n.data.component
+        for node_raw in nodes:
+            if "data" in node_raw:
+                data = node_raw["data"]
+                if "component" in data:
+                    assert data["component"] in cur_id_to_comp
+                    data["component"] = cur_id_to_comp[data["component"]]
+        self.childs_complex.nodes = _NodesHelper(nodes).nodes
 
     def state_change_callback(
             self,
@@ -395,6 +457,8 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         self._update_graph_data()
 
     async def _handle_node_delete(self, nodes: List[Any]):
+        """triggered when you use frontend api to delete nodes such as deleteKeyCode
+        """
         return await self.delete_nodes_by_ids([n["id"] for n in nodes], _internal_dont_send_comp_event=True) 
 
     async def _handle_new_edge(self, data: Dict[str, Any]):
@@ -544,6 +608,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             else:
                 return await self.remove_childs_by_keys(
                     del_node_id_with_comp,
+                    update_child_complex=False,
                     additional_ev_creator=lambda: self.create_comp_event(ev_del_node))
         else:
             if not _internal_dont_send_comp_event:

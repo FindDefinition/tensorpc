@@ -423,6 +423,23 @@ class App:
                                       node_id, key, data_enc, meta,
                                       item.timestamp)
 
+    async def data_storage_has_item(self,
+                                key: str,
+                                node_id: Optional[str] = None,
+                                graph_id: Optional[str] = None):
+        meta = self.__flowapp_master_meta
+        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
+        if graph_id is None:
+            graph_id = self.__flowapp_master_meta.graph_id
+        if node_id is None:
+            node_id = self.__flowapp_master_meta.node_id
+        if key in self.__flowapp_storage_cache:
+            return True 
+        else:
+            return await simple_chunk_call_async(
+                meta.grpc_url, serv_names.FLOW_DATA_HAS_ITEM, graph_id, node_id,
+                key) 
+    
     async def read_data_storage(self,
                                 key: str,
                                 node_id: Optional[str] = None,

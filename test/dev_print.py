@@ -1,12 +1,19 @@
-from tensorpc.flow.jsonlike import JsonLikeNode
-from tensorpc.core.tree_id import UniqueTreeIdForTree
+import asyncio 
+async def agen():
 
-x = JsonLikeNode(**{
-    # "id": UniqueTreeIdForTree("4|root"),
-    "id": "4|root",
+    for i in range(5):
+        yield i
+        # if i == 3:
+        #     raise ValueError("Exception!")
 
-    "name": "wtf",
-    "type": 1
-})
+async def awaitable_to_coro(aw):
+    return await aw
 
-print(x.id)
+async def main():
+    aaitter = aiter(agen())
+    while True:
+        i = await anext(aaitter)
+        print(i)
+
+if __name__ == "__main__":
+    asyncio.run(main())

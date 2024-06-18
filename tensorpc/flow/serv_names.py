@@ -201,6 +201,13 @@ class _ServiceNames:
                                        Flow.read_data_from_storage.__name__)
 
     @property
+    def FLOW_DATA_HAS_ITEM(self):
+        from tensorpc.flow.serv.core import Flow
+        return get_service_key_by_type(Flow,
+                                       Flow.has_data_item.__name__)
+
+
+    @property
     def FLOW_DATA_LIST_ITEM_METAS(self):
         from tensorpc.flow.serv.core import Flow
         return get_service_key_by_type(Flow, Flow.query_data_attrs.__name__)

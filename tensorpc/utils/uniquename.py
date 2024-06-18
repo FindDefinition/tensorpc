@@ -19,8 +19,18 @@ def _make_unique_name(unique_set, name, max_count=10000) -> str:
     if name not in unique_set:
         unique_set.add(name)
         return name
-    for i in range(max_count):
-        new_name = name + "_{}".format(i)
+    name_without_tail = name 
+    tail = 0 
+    if "_" in name and name[0] != "_":
+        parts = name.split("_")
+        try:
+            tail = int(parts[-1])
+            name_without_tail = "_".join(parts[:-1])
+        except ValueError:
+            pass
+        
+    for i in range(tail, tail + max_count):
+        new_name = name_without_tail + "_{}".format(i)
         if new_name not in unique_set:
             unique_set.add(new_name)
             return new_name

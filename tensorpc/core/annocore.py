@@ -1,5 +1,5 @@
 
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, TypeVar, TypedDict, Union, Generic
+from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Set, Tuple, Type, TypeVar, TypedDict, Union, Generic
 from typing_extensions import Literal, Annotated, get_origin, get_args, get_type_hints
 from dataclasses import dataclass
 import inspect
@@ -12,6 +12,15 @@ def is_annotated(ann_type: Any) -> bool:
     # https://github.com/pydantic/pydantic/blob/35144d05c22e2e38fe093c533ff3a05ce9a30116/pydantic/_internal/_typing_extra.py#L99C1-L104C1
     origin = get_origin(ann_type)
     return origin is not None and lenient_issubclass(origin, Annotated)
+
+def is_optional(ann_type: Any) -> bool:
+    origin = get_origin(ann_type)
+    return origin is not None and lenient_issubclass(origin, Optional)
+
+def is_async_gen(ann_type: Any) -> bool:
+    # https://github.com/pydantic/pydantic/blob/35144d05c22e2e38fe093c533ff3a05ce9a30116/pydantic/_internal/_typing_extra.py#L99C1-L104C1
+    origin = get_origin(ann_type)
+    return origin is not None and lenient_issubclass(origin, AsyncGenerator)
 
 @dataclass
 class AnnotatedArg:

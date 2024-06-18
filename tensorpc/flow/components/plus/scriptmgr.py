@@ -207,8 +207,10 @@ class ScriptManager(mui.FlexBox):
             },
                                       init_str=self._init_scripts["python"])
 
-    async def _on_run_script(self):
-        await self.code_editor.save()
+    async def _on_run_script(self, do_save: bool = True):
+        if do_save:
+            print("EDITOR SAVE")
+            await self.code_editor.save()
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
             item = await appctx.read_data_storage(label,
@@ -299,11 +301,12 @@ class ScriptManager(mui.FlexBox):
                 self.code_editor.update_event(
                     language=_LANG_TO_VSCODE_MAPPING[value],
                     value=item.get_code()))
+            await appctx.save_data_storage(label, item, self._storage_node_rid,
+                                           self._graph_id)
             if value == "app":
                 # TODO add better option
                 await self._on_run_script()
-            await appctx.save_data_storage(label, item, self._storage_node_rid,
-                                           self._graph_id)
+
         else:
             await self.send_and_wait(
                 self.code_editor.update_event(
@@ -320,10 +323,11 @@ class ScriptManager(mui.FlexBox):
             if not isinstance(item.code, dict):
                 item.code = self._init_scripts.copy()
             item.code[item.lang] = value
+            
             await appctx.save_data_storage(label, item, self._storage_node_rid,
                                            self._graph_id)
             if item.lang == "app":
-                await self._on_run_script()
+                await self._on_run_script(do_save=False)
             # if self._enable_save_watch.checked:
             #     await self._run_button.headless_click()
 
@@ -345,6 +349,9 @@ class ScriptManager(mui.FlexBox):
                 language=_LANG_TO_VSCODE_MAPPING[lang],
                 value=script.get_code(),
                 path=script.label))
+        # if value == "app":
+        #     # TODO add better option
+        #     await self._on_run_script()
 
     async def _on_script_delete(self):
         if self.scripts.value is not None:

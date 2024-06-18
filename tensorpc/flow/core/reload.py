@@ -74,6 +74,22 @@ class FlowSpecialMethods:
                 elif m.user_app_meta.type == AppFuncType.Effect:
                     self.effects.append(m)
 
+    def override_special_methods(self, other: "FlowSpecialMethods"):
+        if other.create_layout is not None:
+            self.create_layout = other.create_layout
+        if other.did_mount is not None:
+            self.did_mount = other.did_mount
+        if other.will_unmount is not None:
+            self.will_unmount = other.will_unmount
+        if other.create_object is not None:
+            self.create_object = other.create_object
+        if other.create_preview_layout is not None:
+            self.create_preview_layout = other.create_preview_layout
+        if other.auto_runs:
+            self.auto_runs = other.auto_runs
+        if other.effects:
+            self.effects = other.effects
+
     def contains_special_method(self):
         res = self.create_layout is not None
         res |= self.did_mount is not None

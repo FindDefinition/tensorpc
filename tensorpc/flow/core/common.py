@@ -59,6 +59,8 @@ _ONEARG_SPECIAL_EVENTS = set([
     FrontendEventType.FlowEdgeDelete.value,
     FrontendEventType.FlowNodeContextMenu.value,
     FrontendEventType.FlowPaneContextMenu.value,
+    FrontendEventType.FlowNodeLogicChange.value, 
+    
 
 ])
 

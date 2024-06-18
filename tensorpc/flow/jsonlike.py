@@ -285,6 +285,16 @@ def _asdict_inner(obj, dict_factory, obj_factory=None):
             obj = obj_factory(obj)
         return obj
 
+def as_dict_no_undefined_no_deepcopy(obj,
+                                     *,
+                                     obj_factory: Optional[Callable[[Any], Any]] = None):
+    if not dataclasses.is_dataclass(obj):
+        raise TypeError("asdict() should be called on dataclass instances")
+    res = asdict_no_deepcopy(obj,
+                              dict_factory=undefined_dict_factory,
+                              obj_factory=obj_factory)
+    assert isinstance(res, dict)
+    return res
 
 @dataclasses.dataclass
 class DataClassWithUndefined:

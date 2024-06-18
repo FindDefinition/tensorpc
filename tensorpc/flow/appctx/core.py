@@ -75,7 +75,7 @@ async def rename_data_storage_item(key: str,
     return await app.rename_data_storage_item(key, newname, node_id, graph_id)
 
 
-async def list_data_storage(node_id: str, graph_id: Optional[str] = None):
+async def list_data_storage(node_id: Optional[str] = None, graph_id: Optional[str] = None):
     app = get_app()
     return await app.list_data_storage(node_id, graph_id)
 
@@ -85,6 +85,9 @@ async def list_all_data_storage_nodes(
     app = get_app()
     return await app.list_all_data_storage_nodes(graph_id)
 
+async def data_storage_has_item(key: str, node_id: Optional[str] = None, graph_id: Optional[str] = None):
+    app = get_app()
+    return await app.data_storage_has_item(key, node_id, graph_id)
 
 def set_app_z_index(z_index: int):
     app = get_app()
