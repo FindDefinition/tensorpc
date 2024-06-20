@@ -1,4 +1,10 @@
 # Changelog
+# [0.11.5] - 2024-06-20
+### Added 
+- add compute flow
+### Fixed 
+- fix lots of bugs
+
 # [0.11.4] - 2024-06-10
 ### Fixed 
 - fix shell problem in mac os

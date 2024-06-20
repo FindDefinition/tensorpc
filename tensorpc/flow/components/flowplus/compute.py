@@ -1,29 +1,49 @@
 import abc
-from collections import deque
+import asyncio
 import contextlib
 import contextvars
 import enum
 import inspect
+from pathlib import Path
 import threading
 import traceback
+from collections import deque
 from types import NoneType
-from typing import Any, AsyncGenerator, AsyncIterator, Awaitable, Coroutine, Deque, Dict, List, Literal, Mapping, Optional, Type, TypeVar, TypedDict, Union, get_origin
+from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator,
+                    Awaitable, Coroutine, Deque, Dict, List, Literal, Mapping,
+                    Optional, Type, TypedDict, TypeVar, Union, get_origin)
+
 from arrow import get
-from typing_extensions import get_type_hints, is_typeddict
 from pyparsing import abstractmethod
-from tensorpc.core.asynctools import cancel_task
+from typing_extensions import get_type_hints, is_typeddict
+
 import tensorpc.core.dataclass_dispatch as dataclasses
-import asyncio
-from tensorpc.core.annocore import extract_annotated_type_and_meta, is_async_gen, is_optional, parse_annotated_function, lenient_issubclass, get_args
-from tensorpc.core.moduleid import get_module_id_of_type, get_object_type_from_module_id, get_qualname_of_type
+from tensorpc.core.annocore import (extract_annotated_type_and_meta, get_args,
+                                    is_async_gen, is_optional,
+                                    lenient_issubclass,
+                                    parse_annotated_function)
+from tensorpc.core.asynctools import cancel_task
+from tensorpc.core.moduleid import (get_module_id_of_type,
+                                    get_object_type_from_module_id,
+                                    get_qualname_of_type)
 from tensorpc.flow import marker
+from tensorpc.flow.appctx.core import (data_storage_has_item,
+                                       read_data_storage,
+                                       read_data_storage_by_glob_prefix,
+                                       save_data_storage)
 from tensorpc.flow.components import flowui, mui
 from tensorpc.flow.core.appcore import CORO_ANY
 from tensorpc.flow.core.core import AppEvent, UserMessage
-from tensorpc.flow.jsonlike import as_dict_no_undefined, as_dict_no_undefined_no_deepcopy
-from tensorpc.flow.appctx.core import data_storage_has_item, read_data_storage, save_data_storage
+from tensorpc.flow.jsonlike import (as_dict_no_undefined,
+                                    as_dict_no_undefined_no_deepcopy)
+if TYPE_CHECKING:
+    from tensorpc.flow.components.flowplus.customnode import CustomNode
 
 TENSORPC_FLOWUI_NODEDATA_KEY = "__tensorpc_flowui_nodedata_key"
+
+
+def get_cflow_template_key(template_key: str):
+    return f"__cflow_templates/{template_key}"
 
 
 @dataclasses.dataclass
@@ -40,6 +60,15 @@ class ComputeFlowClasses:
     InputHandle = "ComputeFlowInputHandle"
     OutputHandle = "ComputeFlowOutputHandle"
     NodeItem = "ComputeFlowNodeItem"
+    CodeTypography = "ComputeFlowCodeTypography"
+
+
+class ReservedNodeTypes:
+    Custom = "tensorpc.cflow.CustomNode"
+    AsyncGenCustom = "tensorpc.cflow.AsyncGenCustomNode"
+    JsonInput = "tensorpc.cflow.JsonInputNode"
+    ObjectTreeViewer = "tensorpc.cflow.ObjectTreeViewerNode"
+    Expr = "tensorpc.cflow.ExprNode"
 
 
 def _default_compute_flow_css():
@@ -48,13 +77,14 @@ def _default_compute_flow_css():
             "borderTopLeftRadius": "7px",
             "borderTopRightRadius": "7px",
             "justifyContent": "center",
-            "backgroundColor": "#ddd"
+            "backgroundColor": "#eee",
+            "alignItems": "center",
         },
         f".{ComputeFlowClasses.NodeWrapper}": {
             "flexDirection": "column",
             "borderRadius": "7px",
             "alignItems": "stretch",
-            "minWidth": "200px",
+            "minWidth": "150px",
             "background": "white",
         },
         f".{ComputeFlowClasses.InputHandle}": {
@@ -67,6 +97,10 @@ def _default_compute_flow_css():
             "position": "relative",
             "minHeight": "24px",
         },
+        f".{ComputeFlowClasses.CodeTypography}": {
+            "fontFamily": "IBMPlexMono,SFMono-Regular,Consolas,Liberation Mono,Menlo,Courier,monospace",
+        },
+
         f".{ComputeFlowClasses.OutputHandle}": {
             "position": "absolute",
             "top": "50%",
@@ -144,15 +178,37 @@ class ContextMenuItemNames:
     CopyNode = "Copy node"
     DeleteNode = "Delete node"
 
+@dataclasses.dataclass
+class NodeConfig:
+    width: Optional[int] = None
+    height: Optional[int] = None
+
+
+@dataclasses.dataclass
+class WrapperConfig:
+    boxProps: Optional[mui.FlexBoxProps] = None
+
+T_cnode = TypeVar("T_cnode", bound="ComputeNode")
 
 class ComputeNode:
     def __init__(self,
                  id: str,
                  name: str,
                  node_type: Optional[str] = None,
-                 init_pos: Optional[flowui.XYPosition] = None) -> None:
-        self.name = name
+                 init_cfg: Optional[NodeConfig] = None,
+                 init_pos: Optional[flowui.XYPosition] = None,
+                 icon_cfg: Optional[mui.IconProps] = None) -> None:
+        self._name = name
         self.id = id
+        if node_type is None:
+            node_type = type(self).__name__
+        self._node_type = node_type
+        self._init_cfg = init_cfg
+        self._icon_cfg = icon_cfg
+        self._init_pos = init_pos
+        self.init_node()
+        # check after init node because some init node may change the compute function
+        # e.g. CustomNode
         annos = self.get_compute_annotation()
         ranno = annos[1]
         if ranno is None or (not is_typeddict_or_typeddict_async_gen(
@@ -164,17 +220,35 @@ class ComputeNode:
             assert is_async_gen(
                 ranno.type
             ), "you must anno AsyncGenerator if your func is async gen"
-        if node_type is None:
-            node_type = type(self).__name__
-        self._node_type = node_type
-        self._init_pos = init_pos
-        self.init_node()
 
-    @property 
+    @property
     def is_async_gen(self):
         return inspect.isasyncgenfunction(self.compute)
 
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def icon_cfg(self) -> Optional[mui.IconProps]:
+        return self._icon_cfg
+
+    @property
+    def init_cfg(self) -> Optional[NodeConfig]:
+        return self._init_cfg
+
+    @property
+    def init_wrapper_config(self) -> Optional[WrapperConfig]:
+        return None
+
     def init_node(self):
+        """init node, you can override this method to do some init work."""
+        pass
+
+    async def init_node_async(self, is_node_mounted: bool):
+        """init node when compute flow mount, you can override 
+        this method to do some async init work.
+        """
         pass
 
     @abc.abstractmethod
@@ -191,22 +265,42 @@ class ComputeNode:
         return None
 
     def state_dict(self) -> Dict[str, Any]:
+        init_cfg_dict = None 
+        if self._init_cfg is not None:
+            init_cfg_dict = dataclasses.asdict(self._init_cfg)
         return {
             TENSORPC_FLOWUI_NODEDATA_KEY: {
                 "id": self.id,
                 "name": self.name,
                 "module_id": get_module_id_of_type(type(self)),
                 "node_type": self._node_type,
+                "init_cfg": init_cfg_dict,
+                "init_pos": self._init_pos,
             }
         }
 
     def get_compute_annotation(self):
         return parse_annotated_function(self.compute)
 
+    def get_compute_function(self):
+        """get the compute function of the node.
+        usually be used if you use a wrapped function as compute function.
+        """
+        return self.compute
+
+    @staticmethod 
+    def from_state_dict_default(data: Dict[str, Any], cls: Type[T_cnode]) -> T_cnode:
+        internal = data[TENSORPC_FLOWUI_NODEDATA_KEY]
+        init_cfg = None 
+        if "init_cfg" in internal:
+            if internal["init_cfg"] is not None:
+                init_cfg = NodeConfig(**internal["init_cfg"])
+        return cls(internal["id"], internal["name"], internal["node_type"],
+                   init_cfg, internal["init_pos"])
+
     @classmethod
     async def from_state_dict(cls, data: Dict[str, Any]):
-        internal = data[TENSORPC_FLOWUI_NODEDATA_KEY]
-        return cls(internal["id"], internal["name"])
+        return ComputeNode.from_state_dict_default(data, cls)
 
     # async def handle_connection_change(self, node: "ComputeNode", handle_id: str, is_delete: bool):
     #     pass
@@ -227,7 +321,7 @@ class ComputeNode:
                                   arg_anno.name, is_optional_val, handle_meta)
             inp_iohandles.append(iohandle)
         ranno_obj = annos[1]
-        assert ranno_obj is not None 
+        assert ranno_obj is not None
         ranno = ranno_obj.type
         if ranno is NoneType:
             return inp_iohandles, out_iohandles
@@ -251,7 +345,7 @@ class ComputeNode:
 @dataclasses.dataclass
 class ComputeNodeRegistryItem:
     type: Type[ComputeNode]
-    icon: Optional[Union[str, mui.IconType]] = None
+    icon_cfg: Optional[mui.IconProps] = None
     name: str = ""
     node_type: Optional[str] = None
 
@@ -269,7 +363,7 @@ class ComputeNodeRegistry:
                  *,
                  key: Optional[str] = None,
                  name: Optional[str] = None,
-                 icon: Optional[Union[str, mui.IconType]] = None,
+                 icon_cfg: Optional[mui.IconProps] = None,
                  node_type: Optional[str] = None):
         def wrapper(func: T) -> T:
             key_ = key
@@ -281,7 +375,7 @@ class ComputeNodeRegistry:
             if not self.allow_duplicate and key_ in self.global_dict:
                 raise KeyError("key {} already exists".format(key_))
             self.global_dict[key_] = ComputeNodeRegistryItem(
-                type=func, name=name_, icon=icon, node_type=node_type)
+                type=func, name=name_, icon_cfg=icon_cfg, node_type=node_type)
             return func
 
         if func is None:
@@ -306,12 +400,14 @@ def register_compute_node(func=None,
                           *,
                           key: Optional[str] = None,
                           name: Optional[str] = None,
-                          icon: Optional[Union[str, mui.IconType]] = None,
+                          icon_cfg: Optional[mui.IconProps] = None,
                           node_type: Optional[str] = None):
+    if node_type is None:
+        node_type = key
     return NODE_REGISTRY.register(func,
                                   key=key,
                                   name=name,
-                                  icon=icon,
+                                  icon_cfg=icon_cfg,
                                   node_type=node_type)
 
 
@@ -330,11 +426,12 @@ class IOHandle(mui.FlexBox):
         handle_classes = ComputeFlowClasses.InputHandle if is_input else ComputeFlowClasses.OutputHandle
         layout: mui.LayoutType = [
             flowui.Handle(htype, hpos, self.id).prop(className=handle_classes),
-            mui.Typography(name).prop(variant="body2",
+            mui.Typography(name).prop(variant="caption",
                                       flex=1,
                                       marginLeft="8px",
                                       marginRight="8px",
-                                      textAlign="start" if is_input else "end")
+                                      textAlign="start" if is_input else "end",
+                                      className=ComputeFlowClasses.CodeTypography)
         ]
         if not is_input:
             layout = layout[::-1]
@@ -352,8 +449,20 @@ class IOHandle(mui.FlexBox):
 class ComputeNodeWrapper(mui.FlexBox):
     def __init__(self, cnode: ComputeNode):
         self.header = mui.Typography(cnode.name).prop(variant="body1")
+        self.icon_container = mui.Fragment([])
+        icon_cfg = cnode.icon_cfg
+        if icon_cfg is None:
+            if cnode._node_type is not None and cnode._node_type in NODE_REGISTRY:
+                icon_cfg = NODE_REGISTRY[cnode._node_type].icon_cfg
+        if icon_cfg is not None:
+            self.icon_container = mui.Fragment([
+                mui.Icon(mui.IconType.Add).prop(
+                    iconSize="small",
+                    icon=icon_cfg.icon,
+                    muiColor=icon_cfg.muiColor)
+            ])
         self.header_container = mui.HBox([
-            self.header
+            self.icon_container, self.header
         ]).prop(className=
                 f"{ComputeFlowClasses.Header} {ComputeFlowClasses.NodeItem}")
 
@@ -374,7 +483,7 @@ class ComputeNodeWrapper(mui.FlexBox):
         ]).prop(className=f"{ComputeFlowClasses.NodeItem}")
         self.middle_node_container = mui.Fragment(([
             mui.VBox([self.middle_node_layout]).prop(
-                className=ComputeFlowClasses.NodeItem)
+                className=ComputeFlowClasses.NodeItem, flex=1)
         ] if self.middle_node_layout is not None else []))
         super().__init__([
             self.header_container, self.input_args, self.middle_node_container,
@@ -388,22 +497,59 @@ class ComputeNodeWrapper(mui.FlexBox):
 
         self.status = NodeStatus.Ready
 
-    async def set_cnode(self, cnode: ComputeNode):
-        inp_handles, out_handles = self._func_anno_to_ioargs(cnode)
-        self.inp_handles = inp_handles
-        self.out_handles = out_handles
-        node_layout = cnode.get_node_layout()
-        if node_layout is not None:
-            self.middle_node_layout = node_layout
-        self.cnode = cnode
-        await self.header.write(cnode.name)
-        await self.input_args.set_new_layout([*inp_handles])
-        await self.output_args.set_new_layout([*inp_handles])
-        if node_layout is not None:
-            await self.middle_node_container.set_new_layout([
-                mui.HBox([node_layout
-                          ]).prop(className=ComputeFlowClasses.NodeItem)
-            ])
+    async def update_header(self, new_header: str):
+        await self.header.write(new_header)
+
+    async def update_icon_cfg(self, icon_cfg: mui.IconProps):
+        icon =  mui.Icon(mui.IconType.Add).prop(
+                    iconSize="small",
+                    icon=icon_cfg.icon,
+                    muiColor=icon_cfg.muiColor)
+        await self.icon_container.set_new_layout([icon])
+
+    async def set_cnode(self,
+                        cnode: ComputeNode,
+                        raise_on_fail: bool = False,
+                        do_cnode_init_async: bool = True):
+        prev_cnode = self.cnode
+        try:
+            inp_handles, out_handles = self._func_anno_to_ioargs(cnode)
+            self.inp_handles = inp_handles
+            self.out_handles = out_handles
+            node_layout = cnode.get_node_layout()
+            if node_layout is not None:
+                self.middle_node_layout = node_layout
+            self.cnode = cnode
+            await self.header.write(cnode.name)
+            await self.input_args.set_new_layout([*inp_handles])
+            await self.output_args.set_new_layout([*out_handles])
+            icon_cfg = cnode.icon_cfg 
+            if icon_cfg is None:
+                if cnode._node_type is not None and cnode._node_type in NODE_REGISTRY:
+                    icon_cfg = NODE_REGISTRY[cnode._node_type].icon_cfg
+            if icon_cfg is not None:
+                icon =  mui.Icon(mui.IconType.Add).prop(
+                    iconSize="small",
+                    icon=icon_cfg.icon,
+                    muiColor=icon_cfg.muiColor)
+                await self.icon_container.set_new_layout([icon])
+            if node_layout is not None:
+                await self.middle_node_container.set_new_layout([
+                    mui.HBox([node_layout
+                              ]).prop(className=ComputeFlowClasses.NodeItem, flex=1)
+                ])
+            if do_cnode_init_async:
+                await cnode.init_node_async(True)
+            return raise_on_fail
+        except Exception as exc:
+            if raise_on_fail:
+                raise exc
+            else:
+                traceback.print_exc()
+                await self.send_exception(exc)
+                return await self.set_cnode(prev_cnode,
+                                            raise_on_fail=True,
+                                            do_cnode_init_async=False)
 
     def _func_anno_to_ioargs(self, cnode: ComputeNode):
         inp_ahandles, out_ahandles = cnode.func_anno_to_handle()
@@ -500,17 +646,14 @@ class ComputeFlow(mui.FlexBox):
             edges = []
         if type_to_cnode_cls is None:
             type_to_cnode_cls = {}
-        self.type_to_cnode_cls = type_to_cnode_cls
+        self.type_to_cnode_cls = {
+            ReservedNodeTypes.Custom:
+            NODE_REGISTRY[ReservedNodeTypes.Custom].type
+        }
+        self.type_to_cnode_cls.update(type_to_cnode_cls)
         nodes: List[flowui.Node] = []
         for cnode in cnodes:
-            cnode_wrapper = ComputeNodeWrapper(cnode)
-            node = flowui.Node(cnode.id,
-                               flowui.NodeData(cnode_wrapper),
-                               type="app")
-            node.dragHandle = f".{ComputeFlowClasses.Header}"
-            if cnode._init_pos is not None:
-                node.position = cnode._init_pos
-
+            node = self._cnode_to_node(cnode)
             nodes.append(node)
         self.storage_key = storage_key
         self.graph = flowui.Flow(
@@ -543,8 +686,7 @@ class ComputeFlow(mui.FlexBox):
             }
         }
         self.prop(width="100%", height="100%", overflow="hidden")
-        self.graph.prop(targetValidConnectMap=target_conn_valid_map,
-                        deleteKeyCode=None)
+        self.graph.prop(targetValidConnectMap=target_conn_valid_map)
         menu_items = [
             mui.MenuItem(ContextMenuItemNames.Run,
                          ContextMenuItemNames.Run,
@@ -565,10 +707,13 @@ class ComputeFlow(mui.FlexBox):
         ]
         pane_menu_items: List[mui.MenuItem] = []
         for k, v in NODE_REGISTRY.items():
-            icon = v.icon
-            if icon is None:
-                icon = mui.undefined
+            icon_cfg = v.icon_cfg
+            icon = mui.undefined
+            if icon_cfg is not None:
+                icon = icon_cfg.icon
             pane_menu_items.append(mui.MenuItem(k, v.name, icon=icon))
+
+        self.registry_pane_items = pane_menu_items
         self.graph.prop(nodeContextMenuItems=menu_items,
                         paneContextMenuItems=pane_menu_items)
         self.graph.event_node_context_menu.on(self._on_node_contextment)
@@ -587,11 +732,88 @@ class ComputeFlow(mui.FlexBox):
         cnode_wrapper = ComputeNodeWrapper(cnode)
         node = flowui.Node(cnode.id,
                            flowui.NodeData(cnode_wrapper),
-                           type="app")
+                           type="app",
+                           deletable=False)
         node.dragHandle = f".{ComputeFlowClasses.Header}"
         if cnode._init_pos is not None:
             node.position = cnode._init_pos
+
+        if cnode.init_cfg is not None:
+            if cnode.init_cfg.width is not None:
+                node.width = cnode.init_cfg.width
+            if cnode.init_cfg.height is not None:
+                node.height = cnode.init_cfg.height
         return node
+
+    async def update_cnode_header(self, node_id: str, new_header: str):
+        node = self.graph.get_node_by_id(node_id)
+        wrapper = node.get_component_checked(ComputeNodeWrapper)
+        await wrapper.update_header(new_header)
+
+    async def update_cnode_icon_cfg(self, node_id: str, icon_cfg: mui.IconProps):
+        node = self.graph.get_node_by_id(node_id)
+        wrapper = node.get_component_checked(ComputeNodeWrapper)
+        await wrapper.update_icon_cfg(icon_cfg)
+
+    async def update_templates(self):
+        glob_prefix = get_cflow_template_key("*")
+        res = await read_data_storage_by_glob_prefix(glob_prefix)
+        menu_items: List[mui.MenuItem] = []
+        for k in res.keys():
+            k_path = Path(k)
+            k_name = k_path.name
+            menu_items.append(mui.MenuItem(k, k_name))
+        if menu_items:
+            final_pane_menu_items = self.registry_pane_items + [
+                mui.MenuItem("divider_template", divider=True)
+            ]
+            final_pane_menu_items.extend(menu_items)
+            await self.graph.send_and_wait(
+                self.graph.update_event(
+                    paneContextMenuItems=final_pane_menu_items))
+
+    async def update_cnode(self,
+                           node_id: str,
+                           cnode: ComputeNode,
+                           unchange_when_length_equal: bool = True):
+        prev_node = self.graph.get_node_by_id(node_id)
+        wrapper = prev_node.get_component_checked(ComputeNodeWrapper)
+        prev_inp_handles = wrapper.inp_handles
+        prev_inp_handle_ids = [h.id for h in prev_inp_handles]
+        prev_out_handles = wrapper.out_handles
+        prev_out_handle_ids = [h.id for h in prev_out_handles]
+        set_failed = await wrapper.set_cnode(cnode)
+        if set_failed:
+            # cnode remain unchanged, so just return
+            return
+        cur_inp_handles = wrapper.inp_handles
+        cur_inp_handle_ids = [h.id for h in cur_inp_handles]
+        cur_out_handles = wrapper.out_handles
+        cur_out_handle_ids = [h.id for h in cur_out_handles]
+        # check inp handles
+        edge_id_to_be_removed: List[str] = []
+        if not unchange_when_length_equal or (
+                unchange_when_length_equal
+                and len(prev_inp_handles) != len(cur_inp_handles)):
+            # if not equal, we assign new edge by handle id. if id not exist, we remove the edge
+            for handle_id in prev_inp_handle_ids:
+                if handle_id not in cur_inp_handle_ids:
+                    prev_edges = self.graph.get_edges_by_node_and_handle_id(
+                        node_id, handle_id)
+                    edge_id_to_be_removed.extend([e.id for e in prev_edges])
+
+        # check out handles
+        if not unchange_when_length_equal or (
+                unchange_when_length_equal
+                and len(prev_out_handles) != len(cur_out_handles)):
+            for handle_id in prev_out_handle_ids:
+                if handle_id not in cur_out_handle_ids:
+                    prev_edges = self.graph.get_edges_by_node_and_handle_id(
+                        node_id, handle_id)
+                    edge_id_to_be_removed.extend([e.id for e in prev_edges])
+
+        await self.graph.update_node_internals([node_id])
+        await self.graph.delete_edges_by_ids(edge_id_to_be_removed)
 
     async def _on_node_contextment(self, data):
         item_id = data["itemId"]
@@ -606,63 +828,97 @@ class ComputeFlow(mui.FlexBox):
         item_id = data["itemId"]
         mouse_x = data["clientOffset"]["x"]
         mouse_y = data["clientOffset"]["y"]
-        item = NODE_REGISTRY[item_id]
-        new_id = self.graph.create_unique_node_id(item.name)
-        cnode = item.type(new_id,
-                          item.name,
-                          node_type=item.node_type,
-                          init_pos=flowui.XYPosition(mouse_x, mouse_y))
-        node = self._cnode_to_node(cnode)
+        if item_id in NODE_REGISTRY:
+            item = NODE_REGISTRY[item_id]
+            new_id = self.graph.create_unique_node_id(item.name)
+            cnode = item.type(new_id,
+                              item.name,
+                              node_type=item.node_type,
+                              init_pos=flowui.XYPosition(mouse_x, mouse_y),
+                              icon_cfg=item.icon_cfg)
+            node = self._cnode_to_node(cnode)
+        else:
+            assert item_id.startswith(get_cflow_template_key(""))
+            item_path = Path(item_id)
+            template_key = item_path.name
+            new_id = self.graph.create_unique_node_id(template_key)
+
+            # should be template node
+            custom_node_item = NODE_REGISTRY[ReservedNodeTypes.Custom]
+            custom_node_cls = custom_node_item.type
+            cnode = custom_node_cls(new_id,
+                                    template_key,
+                                    node_type=ReservedNodeTypes.Custom,
+                                    init_pos=flowui.XYPosition(
+                                        mouse_x, mouse_y),
+                                    icon_cfg=custom_node_item.icon_cfg)
+            cnode._template_key = template_key  # type: ignore
+            node = self._cnode_to_node(cnode)
         await self.graph.add_node(node, screen_to_flow=True)
 
     @marker.mark_did_mount
     async def _on_flow_mount(self):
-        # TODO read flow from appstorage and start scheduler
-        if not self._dont_read_from_storage and (await (data_storage_has_item(
-                self.storage_key))):
-            data = await read_data_storage(self.storage_key)
-            graph_props = data["graph"]
-            node_states = data["node_id_to_state"]
-            node_id_to_remove: List[str] = []
-            remain_node_datas: List[Dict[str, Any]] = []
-            for node in graph_props["nodes"]:
-                node_id = node["id"]
-                if node_id in node_states:
-                    state = node_states[node_id]
-                    assert "data" in node
-                    internals = state["cnode"][TENSORPC_FLOWUI_NODEDATA_KEY]
-                    node_type = internals["node_type"]
-                    node_module_id = internals["module_id"]
-                    if node_type in self.type_to_cnode_cls:
-                        cnode_cls = self.type_to_cnode_cls[node_type]
-                    else:
-                        cnode_cls = get_object_type_from_module_id(
-                            node_module_id)
-                        if cnode_cls is None:
+        with enter_flow_ui_context_object(self.graph_ctx):
+            if not self._dont_read_from_storage and (await
+                                                     (data_storage_has_item(
+                                                         self.storage_key))):
+                data = await read_data_storage(self.storage_key)
+                graph_props = data["graph"]
+                node_states = data["node_id_to_state"]
+                node_id_to_remove: List[str] = []
+                for node in graph_props["nodes"]:
+                    node["deletable"] = False
+                    node_id = node["id"]
+                    if node_id in node_states:
+                        state = node_states[node_id]
+                        assert "data" in node
+                        internals = state["cnode"][
+                            TENSORPC_FLOWUI_NODEDATA_KEY]
+                        node_type = internals["node_type"]
+                        node_module_id = internals["module_id"]
+                        if node_type in self.type_to_cnode_cls:
+                            cnode_cls = self.type_to_cnode_cls[node_type]
+                        else:
+                            cnode_cls = get_object_type_from_module_id(
+                                node_module_id)
+                            if cnode_cls is None:
+                                node_id_to_remove.append(node_id)
+                                continue
+                        try:
+                            wrapper = await ComputeNodeWrapper.from_state_dict(
+                                state, cnode_cls)
+                            await wrapper.cnode.init_node_async(False)
+                        except Exception as e:
                             node_id_to_remove.append(node_id)
+                            await self.send_exception(e)
+                            traceback.print_exc()
                             continue
-                    try:
-                        wrapper = await ComputeNodeWrapper.from_state_dict(
-                            state, cnode_cls)
-                    except Exception as e:
-                        node_id_to_remove.append(node_id)
-                        await self.send_exception(e)
-                        traceback.print_exc()
+                        node_data = node["data"]
+                        node_data["component"] = wrapper
+                    else:
+                        if node["type"] == "app":
+                            node_id_to_remove.append(node_id)
+                graph_child_def = flowui.Flow.ChildDef(**graph_props)
+                # remove edges that connect to removed nodes
+                remain_edges: List[flowui.Edge] = []
+                for edge in graph_child_def.edges:
+                    if edge.source in node_id_to_remove or edge.target in node_id_to_remove:
                         continue
-                    node_data = node["data"]
-                    node_data["component"] = wrapper
-                remain_node_datas.append(node)
-            graph_child_def = flowui.Flow.ChildDef(**graph_props)
-            # remove edges that connect to removed nodes
-            remain_edges: List[flowui.Edge] = []
-            for edge in graph_child_def.edges:
-                if edge.source in node_id_to_remove or edge.target in node_id_to_remove:
-                    continue
-                remain_edges.append(edge)
-            graph_child_def.edges = remain_edges
-            self.graph.childs_complex.nodes = graph_child_def.nodes
-            self.graph.childs_complex.edges = graph_child_def.edges
-            await self.graph.set_new_layout(self.graph.childs_complex)
+                    remain_edges.append(edge)
+                graph_child_def.edges = remain_edges
+                # remove nodes that failed to init
+                print("node_id_to_remove", node_id_to_remove)
+                graph_child_def.nodes = [
+                    n for n in graph_child_def.nodes if n.id not in node_id_to_remove
+                ]
+                self.graph.childs_complex.nodes = graph_child_def.nodes
+                self.graph.childs_complex.edges = graph_child_def.edges
+                await self.graph.set_new_layout(self.graph.childs_complex)
+            else:
+                for node in self.graph.nodes:
+                    wrapper = node.get_component_checked(ComputeNodeWrapper)
+                    await wrapper.cnode.init_node_async(True)
+        await self.update_templates()
         self._shutdown_ev = asyncio.Event()
 
     @marker.mark_will_unmount
@@ -681,13 +937,12 @@ class ComputeFlow(mui.FlexBox):
     async def _on_selection(self, selection: flowui.EventSelection):
         if selection.nodes:
             node = self.graph.get_node_by_id(selection.nodes[0])
-            await self.side_container.set_new_layout([
-                mui.VBox([
-                    mui.Typography(f"Node {node.id}"),
-                    mui.Typography(f"Type: {node.type}"),
-                ]).prop(flex=1)
-            ])
-            await self.global_container.update_pane_props(1, {"visible": True})
+            wrapper = node.get_component_checked(ComputeNodeWrapper)
+            side_layout = wrapper.cnode.get_side_layout()
+            if side_layout is not None:
+                await self.side_container.set_new_layout([side_layout])
+                await self.global_container.update_pane_props(
+                    1, {"visible": True})
         else:
             await self.side_container.set_new_layout([])
             await self.global_container.update_pane_props(
@@ -801,9 +1056,10 @@ class ComputeFlow(mui.FlexBox):
                     node_inp = cur_node_inputs.get(n.id, {})
                     wrapper = n.get_component_checked(ComputeNodeWrapper)
                     await wrapper.update_status(NodeStatus.Running)
+                    compute_func = wrapper.cnode.get_compute_function()
                     if wrapper.cnode.is_async_gen and inspect.isasyncgenfunction(
-                            wrapper.cnode.compute):
-                        node_aiter = wrapper.cnode.compute(**node_inp)
+                            compute_func):
+                        node_aiter = compute_func(**node_inp)
                         cur_anode_iters[n.id] = node_aiter
                         task = asyncio.create_task(_awaitable_to_coro(
                             anext(node_aiter)),
@@ -812,7 +1068,7 @@ class ComputeFlow(mui.FlexBox):
                         task_to_noded[task] = n
                     else:
                         try:
-                            data = wrapper.cnode.compute(**node_inp)
+                            data = compute_func(**node_inp)
                         except Exception as exc:
                             await wrapper.update_status(NodeStatus.Error)
                             traceback.print_exc()
@@ -963,7 +1219,6 @@ def enter_flow_ui_context_object(ctx: ComputeFlowContext):
         COMPUTE_FLOW_CONTEXT_VAR.reset(token)
 
 
-@register_compute_node
 class CNodeTest1(ComputeNode):
     class OutputDict(TypedDict):
         c: int
@@ -972,7 +1227,6 @@ class CNodeTest1(ComputeNode):
         return {"c": a + b}
 
 
-@register_compute_node
 class CNodeSourceTest1(ComputeNode):
     class OutputDict(TypedDict):
         a: int
@@ -987,7 +1241,6 @@ class CNodeSourceTest1(ComputeNode):
         return mui.HBox([self.ui_input])
 
 
-@register_compute_node
 class CNodeViewer(ComputeNode):
     def init_node(self):
         self.md = mui.Markdown()
@@ -999,7 +1252,6 @@ class CNodeViewer(ComputeNode):
         return mui.HBox([self.md])
 
 
-@register_compute_node
 class AsyncSource(ComputeNode):
     class OutputDict(TypedDict):
         a: int
@@ -1020,10 +1272,10 @@ def _get_test_cflow():
     cnode1 = CNodeTest1("1", "Test1", init_pos=flowui.XYPosition(100, 100))
     cnode2 = CNodeViewer("2", "Viewer", init_pos=flowui.XYPosition(400, 100))
     cflow = ComputeFlow("test_develop", [
-        snode,
-        asnode,
-        cnode1,
-        cnode2,
+        # snode,
+        # asnode,
+        # cnode1,
+        # cnode2,
     ],
-                        dont_read_from_storage=True)
+                        dont_read_from_storage=False)
     return cflow

@@ -23,10 +23,11 @@ from typing_extensions import ParamSpec
 
 from tensorpc.core.serviceunit import ObservedFunctionRegistryProtocol
 from tensorpc.flow.core.appcore import (enter_app_conetxt, find_component,
-                                           find_component_by_uid, get_app,
-                                           get_app_context, get_editable_app,
-                                           get_reload_manager, is_inside_app,
-                                           observe_function, enqueue_delayed_callback)
+                                        find_component_by_uid, get_app,
+                                        find_all_components, get_app_context,
+                                        get_editable_app, get_reload_manager,
+                                        is_inside_app, observe_function,
+                                        enqueue_delayed_callback)
 from tensorpc.flow.components import plus
 from tensorpc.flow.components.plus.objinspect.controllers import ThreadLocker
 
@@ -47,17 +48,29 @@ async def save_data_storage(key: str,
                             data: Any,
                             node_id: Optional[str] = None,
                             graph_id: Optional[str] = None,
-                            in_memory_limit: int = 100):
+                            in_memory_limit: int = 100,
+                            raise_if_exist: bool = False):
     app = get_app()
-    await app.save_data_storage(key, data, node_id, graph_id, in_memory_limit)
+    await app.save_data_storage(key, data, node_id, graph_id, in_memory_limit,
+                                raise_if_exist)
 
 
 async def read_data_storage(key: str,
                             node_id: Optional[str] = None,
                             graph_id: Optional[str] = None,
-                            in_memory_limit: int = 100) -> Any:
+                            in_memory_limit: int = 100,
+                            raise_if_not_found: bool = True) -> Any:
     app = get_app()
-    return await app.read_data_storage(key, node_id, graph_id, in_memory_limit)
+    return await app.read_data_storage(key, node_id, graph_id, in_memory_limit,
+                                       raise_if_not_found)
+
+
+async def read_data_storage_by_glob_prefix(glob_prefix: str,
+                                           node_id: Optional[str] = None,
+                                           graph_id: Optional[str] = None):
+    app = get_app()
+    return await app.read_data_storage_by_glob_prefix(glob_prefix, node_id,
+                                                      graph_id)
 
 
 async def remove_data_storage(key: Optional[str],
@@ -75,7 +88,8 @@ async def rename_data_storage_item(key: str,
     return await app.rename_data_storage_item(key, newname, node_id, graph_id)
 
 
-async def list_data_storage(node_id: Optional[str] = None, graph_id: Optional[str] = None):
+async def list_data_storage(node_id: Optional[str] = None,
+                            graph_id: Optional[str] = None):
     app = get_app()
     return await app.list_data_storage(node_id, graph_id)
 
@@ -85,9 +99,13 @@ async def list_all_data_storage_nodes(
     app = get_app()
     return await app.list_all_data_storage_nodes(graph_id)
 
-async def data_storage_has_item(key: str, node_id: Optional[str] = None, graph_id: Optional[str] = None):
+
+async def data_storage_has_item(key: str,
+                                node_id: Optional[str] = None,
+                                graph_id: Optional[str] = None):
     app = get_app()
     return await app.data_storage_has_item(key, node_id, graph_id)
+
 
 def set_app_z_index(z_index: int):
     app = get_app()
@@ -121,8 +139,8 @@ def _run_func_with_app(app, func: Callable[P, T], *args: P.args,
         return func(*args, **kwargs)
 
 
-async def run_in_executor_with_exception_inspect(func: Callable[P, T], *args:
-                                                 P.args,
+async def run_in_executor_with_exception_inspect(func: Callable[P, T],
+                                                 *args: P.args,
                                                  **kwargs: P.kwargs) -> T:
     """run a sync function in executor with exception inspect.
     """

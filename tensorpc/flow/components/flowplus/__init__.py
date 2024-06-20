@@ -1,2 +1,2 @@
-from .compute import register_compute_node, ComputeFlow, ComputeNode 
-from . import customnode
+from . import customnode, defaultnodes
+from .compute import ComputeFlow, ComputeNode, register_compute_node

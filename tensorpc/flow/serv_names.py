@@ -199,6 +199,11 @@ class _ServiceNames:
         from tensorpc.flow.serv.core import Flow
         return get_service_key_by_type(Flow,
                                        Flow.read_data_from_storage.__name__)
+    @property
+    def FLOW_DATA_READ_GLOB_PREFIX(self):
+        from tensorpc.flow.serv.core import Flow
+        return get_service_key_by_type(Flow,
+                                       Flow.read_data_from_storage_by_glob_prefix.__name__)
 
     @property
     def FLOW_DATA_HAS_ITEM(self):

@@ -13,14 +13,13 @@
 # limitations under the License.
 
 from tensorpc.core.moduleid import loose_isinstance
-from .components import flowui, leaflet, mui, plotly, three
 
 from . import appctx, constants, marker
-from .flowapp import App, EditableApp, EditableLayoutApp
-from .core.appcore import observe_function, AppSpecialEventType
-from .components import plus
+from .components import flowplus, flowui, leaflet, mui, plotly, plus, three
+from .components.plus.vis import vapi_core as V
+from .core.appcore import AppSpecialEventType, observe_function
 from .core.objtree import UserObjTree
+from .flowapp import App, EditableApp, EditableLayoutApp
 from .marker import (mark_autorun, mark_create_layout, mark_create_object,
                      mark_create_preview_layout, mark_did_mount,
                      mark_will_unmount)
-from .components.plus.vis import vapi_core as V

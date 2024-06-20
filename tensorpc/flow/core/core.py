@@ -104,7 +104,7 @@ class UIType(enum.IntEnum):
     Select = 0x3
     Slider = 0x4
     RadioGroup = 0x5
-    CodeEditor = 0x6
+    # CodeEditor = 0x6
     Button = 0x7
     ListItemButton = 0x8
     ListItemText = 0x9
@@ -159,6 +159,7 @@ class UIType(enum.IntEnum):
     TanstackJsonLikeTreeView = 0x39
     MenuList = 0x3a
     MatrixDataGrid = 0x3b
+    SimpleEditor = 0x3c
 
     GridLayout = 0x40
 
@@ -996,10 +997,6 @@ class _EventSlotBase:
                                          simple_event=False)
         return self
 
-    def off(self, handler: Callable[[TEventData], Any]) -> Self:
-        self.comp.remove_event_handler(self.event_type, handler)
-        return self
-
     def configure(self,
                   stop_propagation: bool = False,
                   throttle: Optional[NumberType] = None,
@@ -1008,7 +1005,7 @@ class _EventSlotBase:
                                            throttle, debounce)
         return self
 
-class _EventSlot(_EventSlotBase, Generic[TEventData]):
+class EventSlot(_EventSlotBase, Generic[TEventData]):
 
     def __init__(self, event_type: EventDataType, comp: "Component", converter: Optional[Callable[[Any], TEventData]] = None):
         self.event_type = event_type
@@ -1029,7 +1026,7 @@ class _EventSlot(_EventSlotBase, Generic[TEventData]):
         self.comp.remove_event_handler(self.event_type, handler)
         return self
 
-class _EventSlotZeroArg(_EventSlotBase):
+class EventSlotZeroArg(_EventSlotBase):
 
     def __init__(self, event_type: EventDataType, comp: "Component"):
         self.event_type = event_type
@@ -1050,21 +1047,21 @@ class _EventSlotZeroArg(_EventSlotBase):
         return self
 
 
-class _EmitterEventSlot:
+class EventSlotEmitter:
     # TODO remove this
     def __init__(self, event_type: EventDataType,
                  emitter: "AsyncIOEventEmitter[EventDataType, Event]"):
         self.event_type = event_type
         self.emitter = emitter
 
-    def on(self, handler: Callable[[Event], Any]) -> "_EmitterEventSlot":
+    def on(self, handler: Callable[[Event], Any]) -> "EventSlotEmitter":
         """simple event means the event data isn't Event, but the data of Event, or none for no-arg event
         such as click.
         """
         self.emitter.on(self.event_type, handler)
         return self
 
-    def off(self, handler: Callable) -> "_EmitterEventSlot":
+    def off(self, handler: Callable) -> "EventSlotEmitter":
         self.emitter.remove_listener(self.event_type, handler)
         return self
 
@@ -1191,7 +1188,7 @@ class Component(Generic[T_base_props, T_child]):
             event_type_value = event_type.value
         else:
             event_type_value = event_type
-        return _EventSlot(event_type_value, self, converter)
+        return EventSlot(event_type_value, self, converter)
 
     def _create_event_slot_noarg(self, event_type: Union[FrontendEventType,
                                                    EventDataType]):
@@ -1199,18 +1196,18 @@ class Component(Generic[T_base_props, T_child]):
             event_type_value = event_type.value
         else:
             event_type_value = event_type
-        return _EventSlotZeroArg(event_type_value, self)
+        return EventSlotZeroArg(event_type_value, self)
 
     def _create_emitter_event_slot(self, event_type: Union[FrontendEventType,
                                                            EventDataType]):
         if isinstance(event_type, FrontendEventType):
             event_type_value = event_type.value
             assert event_type.value < 0, "only support backend events"
-            return _EmitterEventSlot(event_type_value,
+            return EventSlotEmitter(event_type_value,
                                      self._flow_event_emitter)
         else:
             event_type_value = event_type
-        return _EmitterEventSlot(event_type_value, self._flow_event_emitter)
+        return EventSlotEmitter(event_type_value, self._flow_event_emitter)
 
     @property
     def flow_event_emitter(self) -> AsyncIOEventEmitter[EventDataType, Event]:
@@ -1313,7 +1310,7 @@ class Component(Generic[T_base_props, T_child]):
 
         return wrapper
 
-    async def handle_event(self, ev: Event, is_sync: bool = False):
+    async def handle_event(self, ev: Event, is_sync: bool = False) -> Any:
         pass
 
     def __repr__(self):
@@ -1574,7 +1571,7 @@ class Component(Generic[T_base_props, T_child]):
         return res
 
     def state_change_callback(self,
-                              data: Any,
+                              value: Any,
                               type: ValueType = FrontendEventType.Change.value
                               ):
         pass

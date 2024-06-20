@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, TypedDict
+from typing import Any, AsyncGenerator, Dict, Optional, TypedDict
 
 from tensorpc.flow import flowplus, flowui, mui, plus, three
 
@@ -7,16 +7,21 @@ class OutputDict(TypedDict):
     output: int
 
 
-class MyCustomNode(flowplus.ComputeNode):
+class MyAsyncGeneratorCustomNode(flowplus.ComputeNode):
     def init_node(self):
         pass
 
     # we use annotation to specify the input and output handle/type.
-    async def compute(self, a: int, b: int) -> OutputDict:
-        return {'output': a + b}
+    # if you use AsyncGenerator, you can yield the output multiple times,
+    # special schedule rules will be applied to handle the output.
+    async def compute(self, a: int,
+                      b: int) -> AsyncGenerator[OutputDict, None]:
+
+        for i in range(10):
+            yield {'output': a + b + i}
 
     def get_node_layout(self) -> Optional[mui.FlexBox]:
-        return mui.HBox([mui.Typography("Custom Node")])
+        return mui.HBox([mui.Typography("AsyncGen Custom Node")])
 
     def state_dict(self) -> Dict[str, Any]:
         # save state here, can be used to restore state such as textfield.

@@ -399,7 +399,9 @@ class App:
                                 data: Any,
                                 node_id: Optional[str] = None,
                                 graph_id: Optional[str] = None,
-                                in_memory_limit: int = 1000):
+                                in_memory_limit: int = 1000,
+                                raise_if_exist: bool = False):
+        Path(key) # check key is valid path
         data_enc = pickle.dumps(data)
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
@@ -421,12 +423,14 @@ class App:
         await simple_chunk_call_async(self.__flowapp_master_meta.grpc_url,
                                       serv_names.FLOW_DATA_SAVE, graph_id,
                                       node_id, key, data_enc, meta,
-                                      item.timestamp)
+                                      item.timestamp,
+                                      raise_if_exist=raise_if_exist)
 
     async def data_storage_has_item(self,
                                 key: str,
                                 node_id: Optional[str] = None,
                                 graph_id: Optional[str] = None):
+        Path(key) # check key is valid path
         meta = self.__flowapp_master_meta
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
@@ -444,7 +448,9 @@ class App:
                                 key: str,
                                 node_id: Optional[str] = None,
                                 graph_id: Optional[str] = None,
-                                in_memory_limit: int = 100):
+                                in_memory_limit: int = 100,
+                                raise_if_not_found: bool = True):
+        Path(key) # check key is valid path
         meta = self.__flowapp_master_meta
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
@@ -453,28 +459,55 @@ class App:
             node_id = self.__flowapp_master_meta.node_id
         if key in self.__flowapp_storage_cache:
             item_may_invalid = self.__flowapp_storage_cache[key]
-            res = await simple_chunk_call_async(meta.grpc_url,
+            res: Optional[StorageDataItem] = await simple_chunk_call_async(meta.grpc_url,
                                                 serv_names.FLOW_DATA_READ,
                                                 graph_id, node_id, key,
-                                                item_may_invalid.timestamp)
+                                                item_may_invalid.timestamp,
+                                                raise_if_not_found=raise_if_not_found)
+            if raise_if_not_found:
+                assert res is not None 
             if res is None:
+                return None 
+            if res.empty():
                 return pickle.loads(item_may_invalid.data)
             else:
                 return pickle.loads(res.data)
         else:
-            res: StorageDataItem = await simple_chunk_call_async(
+            res: Optional[StorageDataItem] = await simple_chunk_call_async(
                 meta.grpc_url, serv_names.FLOW_DATA_READ, graph_id, node_id,
-                key)
+                key, raise_if_not_found=raise_if_not_found)
+            if raise_if_not_found:
+                assert res is not None 
+            if res is None:
+                return None 
             in_memory_limit_bytes = in_memory_limit * 1024 * 1024
             data = pickle.loads(res.data)
             if len(res.data) <= in_memory_limit_bytes:
                 self.__flowapp_storage_cache[key] = res
             return data
 
+    async def read_data_storage_by_glob_prefix(self,
+                                key: str,
+                                node_id: Optional[str] = None,
+                                graph_id: Optional[str] = None):
+        Path(key) # check key is valid path
+        meta = self.__flowapp_master_meta
+        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
+        if graph_id is None:
+            graph_id = self.__flowapp_master_meta.graph_id
+        if node_id is None:
+            node_id = self.__flowapp_master_meta.node_id
+        res: Dict[str, StorageDataItem] = await simple_chunk_call_async(
+            meta.grpc_url, serv_names.FLOW_DATA_READ_GLOB_PREFIX, graph_id, node_id,
+            key)
+        return {k: pickle.loads(d.data) for k, d in res.items()}
+
     async def remove_data_storage_item(self,
                                        key: Optional[str],
                                        node_id: Optional[str] = None,
                                        graph_id: Optional[str] = None):
+        if key is not None:
+            Path(key)
         meta = self.__flowapp_master_meta
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
@@ -495,6 +528,7 @@ class App:
                                        newname: str,
                                        node_id: Optional[str] = None,
                                        graph_id: Optional[str] = None):
+        Path(key)
         meta = self.__flowapp_master_meta
         assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:

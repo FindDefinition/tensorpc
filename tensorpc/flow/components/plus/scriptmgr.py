@@ -242,10 +242,10 @@ class ScriptManager(mui.FlexBox):
                     code,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE)
-                await asyncio.wait([
+                await asyncio.gather(
                     _read_stream(proc.stdout, print),
                     _read_stream(proc.stderr, print)
-                ])
+                )
                 await proc.wait()
                 print(f'[cmd exited with {proc.returncode}]')
                 # if stdout:

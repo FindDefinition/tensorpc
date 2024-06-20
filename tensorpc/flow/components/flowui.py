@@ -29,7 +29,7 @@ from tensorpc.utils.uniquename import UniqueNamePool
 from ..core.core import (AppEvent, AppEventType, BasicProps, Component,
                     DataclassType, FrontendEventType, NumberType, UIType,
                     Undefined, undefined)
-from .mui import (ContainerBaseProps, LayoutType, MUIComponentBase,
+from .mui import (ContainerBaseProps, LayoutType, MUIBasicProps, MUIComponentBase,
                   MUIComponentBaseProps, MUIComponentType, MUIContainerBase,
                   MUIFlexBoxProps, MenuItem, Theme, ValueType)
 
@@ -217,7 +217,7 @@ class FlowControlType(enum.IntEnum):
     UpdateNodeProps = 5
     UpdateNodeData = 6
     UpdateNodeStyle = 7
-
+    DeleteEdgeByIds = 8
 
 @dataclasses.dataclass
 class DagreLayoutOptions:
@@ -351,11 +351,19 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         self._target_id_to_edge = {edge.target: edge for edge in self.edges}
         self._node_id_to_sources: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = {node.id: [] for node in self.nodes}
         self._node_id_to_targets: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = {node.id: [] for node in self.nodes}
+        self._node_id_to_handle_to_edges: Dict[str, Dict[Optional[str], List[Edge]]] = {node.id: {} for node in self.nodes}
         for edge in self.edges:
             self._node_id_to_targets[edge.source].append(
                 (self._id_to_node[edge.target].id, edge.sourceHandle, edge.targetHandle))
             self._node_id_to_sources[edge.target].append(
                 (self._id_to_node[edge.source].id, edge.sourceHandle, edge.targetHandle))
+            if edge.sourceHandle not in self._node_id_to_handle_to_edges[edge.source]:
+                self._node_id_to_handle_to_edges[edge.source][edge.sourceHandle] = []
+            self._node_id_to_handle_to_edges[edge.source][edge.sourceHandle].append(edge)
+            if edge.targetHandle not in self._node_id_to_handle_to_edges[edge.target]:
+                self._node_id_to_handle_to_edges[edge.target][edge.targetHandle] = []
+            self._node_id_to_handle_to_edges[edge.target][edge.targetHandle].append(edge)
+
         # TODO detection cycle
         for n in self.nodes:
             if not isinstance(n, Undefined):
@@ -391,6 +399,9 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             (self._id_to_node[idh[0]], idh[1], idh[2]) for idh in self._node_id_to_targets[node_id]
         ]
 
+    def get_edges_by_node_and_handle_id(self, node_id: str, handle_id: Optional[str]):
+        return self._node_id_to_handle_to_edges[node_id][handle_id]
+
     def get_all_nodes_in_connected_graph(self, node: Node):
         visited: Set[str] = set()
         stack = [node]
@@ -413,7 +424,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         return self._update_props_base(propcls)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
-        print("flow event", ev.type, ev.data)
+        # print("flow event", ev.type, ev.data)
         return await handle_standard_event(self, ev, is_sync=is_sync, sync_state_after_change=False, change_status=False)
    
     def _handle_node_logic_change(self, nodes: List[Any]):
@@ -614,6 +625,20 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             if not _internal_dont_send_comp_event:
                 return await self.send_and_wait(self.create_comp_event(ev_del_node))
 
+    async def delete_edges_by_ids(self, edge_ids: List[str]):
+        edge_ids_set = set(edge_ids)
+        new_edges: List[Edge] = []
+        for edge in self.edges:
+            if edge.id not in edge_ids_set:
+                new_edges.append(edge)
+        self.childs_complex.edges = new_edges
+        self._update_graph_data()
+        ev_del_edge = {
+            "type": FlowControlType.DeleteEdgeByIds.value,
+            "edgeIds": edge_ids,
+        }
+        return await self.send_and_wait(self.create_comp_event(ev_del_edge))
+
 class FlowUIContext:
 
     def __init__(self, flow: Flow) -> None:
@@ -679,7 +704,7 @@ class NodeColorMap:
 
 
 @dataclasses.dataclass
-class MiniMapProps(MUIComponentBaseProps):
+class MiniMapProps(MUIBasicProps):
     nodeColorMap: Union[Undefined, NodeColorMap] = undefined
     nodeStrokeColorMap: Union[Undefined, NodeColorMap] = undefined
     nodeBorderRadius: Union[Undefined, int] = undefined
@@ -714,7 +739,7 @@ class MiniMap(MUIComponentBase[MiniMapProps]):
 
 
 @dataclasses.dataclass
-class ControlsProps(MUIComponentBaseProps):
+class ControlsProps(MUIBasicProps):
     position: Union[Undefined, Literal["top-left", "top-right", "bottom-left",
                                        "bottom-right", "top-center",
                                        "bottom-center"]] = undefined
@@ -741,7 +766,7 @@ class Controls(MUIComponentBase[ControlsProps]):
 
 
 @dataclasses.dataclass
-class BackgroundProps(MUIComponentBaseProps):
+class BackgroundProps(MUIBasicProps):
     id: Union[Undefined, str] = undefined
     variant: Union[Undefined, Literal["lines", "dots", "cross"]] = undefined
     color: Union[Undefined, str] = undefined
@@ -768,7 +793,7 @@ class Background(MUIComponentBase[BackgroundProps]):
 
 
 @dataclasses.dataclass
-class NodeResizerProps(MUIComponentBaseProps):
+class NodeResizerProps(MUIBasicProps):
     minWidth: Union[Undefined, NumberType] = undefined
     minHeight: Union[Undefined, NumberType] = undefined
     keepAspectRatio: Union[Undefined, bool] = undefined

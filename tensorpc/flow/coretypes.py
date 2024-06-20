@@ -21,7 +21,7 @@ class StorageDataItem:
         assert not isinstance(self.meta.userdata, Undefined)
 
     def empty(self):
-        return len(self.data) > 0
+        return len(self.data) == 0
 
     @property
     def timestamp(self):
@@ -33,6 +33,9 @@ class StorageDataItem:
 
     def get_meta_dict(self):
         return as_dict_no_undefined(self.meta)
+
+    def shallow_copy(self):
+        return StorageDataItem(self.data, self.meta)
 
 
 class MessageItemType(enum.Enum):

@@ -28,7 +28,7 @@ import uuid
 
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterable,
                     Awaitable, Callable, Coroutine, Dict, Iterable, List,
-                    Optional, Set, Tuple, Type, TypeVar, Union)
+                    Optional, Sequence, Set, Tuple, Type, TypeVar, Union)
 
 import numpy as np
 from PIL import Image as PILImage
@@ -48,7 +48,7 @@ from tensorpc.flow.core.reload import AppReloadManager
 from ..jsonlike import JsonLikeType, BackendOnlyProp, ContextMenuData, JsonLikeNode, as_dict_no_undefined
 from ..core import colors
 from ..core.core import (AppComponentCore, AppEvent, AppEventType, BasicProps,
-                    Component, ContainerBase, ContainerBaseProps, EventHandler,
+                    Component, ContainerBase, ContainerBaseProps, EventHandler, EventSlot,
                     SimpleEventType, FlowSpecialMethods, Fragment,
                     FrontendEventType, NumberType, T_base_props, T_child,
                     T_container_props, TaskLoopEvent, UIEvent, UIRunStatus,
@@ -234,6 +234,8 @@ _StdColor: TypeAlias = Literal['default', 'primary', 'secondary', 'error',
 
 _StdColorNoDefault: TypeAlias = Literal['primary', 'secondary', 'error',
                                         'info', 'success', 'warning']
+_IconColorNoDefault: TypeAlias = Literal['primary', 'secondary', 'error',
+                                        'info', 'success', 'warning', "action", "disabled"]
 
 MUIComponentType: TypeAlias = Union[MUIComponentBase, MUIContainerBase,
                                     Fragment, MatchCase]
@@ -574,7 +576,7 @@ class IconType(enum.IntEnum):
 
 @dataclasses.dataclass
 class IconBaseProps:
-    icon: Union[int, str] = 0
+    icon: Union[IconType, str] = IconType.RestartAlt
     iconSize: Union[Literal["small", "medium", "large", "inherit"],
                     Undefined] = undefined
     iconFontSize: Union[ValueType, Undefined] = undefined
@@ -594,6 +596,7 @@ class IconBaseProps:
 @dataclasses.dataclass
 class IconProps(BasicProps, IconBaseProps):
     takeDragRef: Union[Undefined, bool] = undefined
+    muiColor: Union[_IconColorNoDefault, Undefined] = undefined
 
 
 class Icon(MUIComponentBase[IconProps]):
@@ -601,7 +604,7 @@ class Icon(MUIComponentBase[IconProps]):
     def __init__(self, icon: Union[IconType, str]) -> None:
         super().__init__(UIType.Icon, IconProps)
         if isinstance(icon, IconType):
-            self.props.icon = icon.value
+            self.props.icon = icon
         else:
             self.prop(icon=self.encode_svg(icon))
 
@@ -651,7 +654,7 @@ class IconButton(MUIComponentBase[IconButtonProps]):
         super().__init__(UIType.IconButton, IconButtonProps,
                          [FrontendEventType.Click.value])
         if isinstance(icon, IconType):
-            self.props.icon = icon.value
+            self.props.icon = icon
         else:
             self.prop(icon=self.encode_svg(icon))
         if callback is not None:
@@ -698,7 +701,7 @@ class ListItemIcon(MUIComponentBase[ListItemIconProps]):
     def __init__(self, icon: Union[IconType, str]) -> None:
         super().__init__(UIType.ListItemIcon, ListItemIconProps)
         if isinstance(icon, IconType):
-            self.props.icon = icon.value
+            self.props.icon = icon
         else:
             self.prop(icon=Icon.encode_svg(icon))
 
@@ -876,7 +879,7 @@ class ButtonGroup(MUIContainerBase[ButtonGroupProps, Button]):
 
 @dataclasses.dataclass
 class ToggleButtonProps(MUIComponentBaseProps, IconBaseProps):
-    icon: Union[int, str, Undefined] = undefined
+    icon: Union[IconType, str, Undefined] = undefined
 
     value: ValueType = ""
     name: str = ""
@@ -908,7 +911,7 @@ class ToggleButton(MUIComponentBase[ToggleButtonProps]):
         if isinstance(icon, Undefined):
             assert name != "", "if icon not provided, you must provide a valid name"
         elif isinstance(icon, IconType):
-            self.props.icon = icon.value
+            self.props.icon = icon
         else:
             self.props.icon = Icon.encode_svg(icon)
         self.props.name = name
@@ -925,9 +928,9 @@ class ToggleButton(MUIComponentBase[ToggleButtonProps]):
 
     def state_change_callback(
             self,
-            data: bool,
+            value: bool,
             type: ValueType = FrontendEventType.Change.value):
-        self.props.selected = data
+        self.props.selected = value
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -1141,9 +1144,9 @@ class Accordion(MUIContainerBase[AccordionProps, Union[AccordionDetails,
 
     def state_change_callback(
             self,
-            data: bool,
+            value: bool,
             type: ValueType = FrontendEventType.Change.value):
-        self.props.expanded = data
+        self.props.expanded = value
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
@@ -1383,10 +1386,10 @@ class RadioGroup(MUIComponentBase[RadioGroupProps]):
         self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     def state_change_callback(self,
-                              data: str,
+                              value: str,
                               type: ValueType = FrontendEventType.Change.value
                               ):
-        self.props.value = data
+        self.props.value = value
 
     def validate_props(self, props: Dict[str, Any]):
         if "names" in props:
@@ -1476,10 +1479,10 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
         return self.props.value
 
     def state_change_callback(self,
-                              data: str,
+                              value: str,
                               type: ValueType = FrontendEventType.Change.value
                               ):
-        self.props.value = data
+        self.props.value = value
 
     async def headless_write(self, content: str):
         uiev = UIEvent({
@@ -1624,16 +1627,16 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
                                     self._default_on_query_state)
 
         self.event_change = self._create_event_slot(FrontendEventType.Change)
-        self.event_editor_save = self._create_event_slot(
+        self.event_editor_save: EventSlot[str] = self._create_event_slot(
             FrontendEventType.EditorSave)
         self.event_editor_ready = self._create_event_slot_noarg(
             FrontendEventType.EditorReady)
 
     def state_change_callback(
             self,
-            data: Tuple[str, int, Any],
+            value: Tuple[str, int, Any],
             type: ValueType = FrontendEventType.Change.value):
-        self.value = data[0]
+        self.props.value = value[0]
 
     def _default_on_save_state(self, state):
         self.view_state = state
@@ -1669,7 +1672,55 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         })
         await self.send_and_wait(ev)
 
+@dataclasses.dataclass
+class SimpleCodeEditorProps(MUIComponentBaseProps):
+    value: str = ""
+    language: Union[Literal["cpp", "python", "json"], Undefined] = undefined
+    debounce: Union[NumberType, Undefined] = undefined
+    tabSize: Union[NumberType, Undefined] = undefined
+    insertSpaces: Union[bool, Undefined] = undefined
+    ignoreTabKey: Union[bool, Undefined] = undefined
+    editorPadding: Union[NumberType, Undefined] = undefined
+    textareaId: Union[str, Undefined] = undefined
+    textareaClassName: Union[str, Undefined] = undefined
+    preClassName: Union[str, Undefined] = undefined
+    
+class SimpleCodeEditor(MUIComponentBase[SimpleCodeEditorProps]):
 
+    def __init__(self, value: str, language: Literal["cpp", "python", "json"]) -> None:
+        all_evs = [
+            FrontendEventType.Change.value,
+        ]
+        super().__init__(UIType.SimpleEditor, SimpleCodeEditorProps, all_evs)
+        self.props.language = language
+        self.props.value = value
+        self.view_state = None
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
+        return res
+
+    def state_change_callback(
+            self,
+            value: str,
+            type: ValueType = FrontendEventType.Change.value):
+        self.props.value = value
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        sync_state_after_change = isinstance(self.props.debounce, Undefined)
+        return await handle_standard_event(self, ev, is_sync=is_sync, sync_state_after_change=sync_state_after_change)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 @dataclasses.dataclass
 class SwitchProps(MUIComponentBaseProps):
     label: Union[str, Undefined] = undefined
@@ -1714,9 +1765,9 @@ class SwitchBase(MUIComponentBase[SwitchProps]):
 
     def state_change_callback(
             self,
-            data: bool,
+            value: bool,
             type: ValueType = FrontendEventType.Change.value):
-        self.props.checked = data
+        self.props.checked = value
 
     async def headless_write(self, checked: bool):
         uiev = UIEvent({
@@ -1782,7 +1833,7 @@ class SelectBaseProps:
 
 @dataclasses.dataclass
 class SelectProps(MUIComponentBaseProps, SelectBaseProps):
-    items: List[Tuple[str,
+    items: Sequence[Tuple[str,
                       ValueType]] = dataclasses.field(default_factory=list)
     value: ValueType = ""
     autoWidth: Union[Undefined, bool] = undefined
@@ -1792,7 +1843,7 @@ class Select(MUIComponentBase[SelectProps]):
 
     def __init__(self,
                  label: str,
-                 items: List[Tuple[str, ValueType]],
+                 items: Sequence[Tuple[str, ValueType]],
                  callback: Optional[Callable[[ValueType], _CORO_NONE]] = None,
                  init_value: Optional[ValueType] = None) -> None:
         super().__init__(UIType.Select, SelectProps,
@@ -1948,9 +1999,9 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
 
     def state_change_callback(
             self,
-            values: List[ValueType],
+            value: List[ValueType],
             type: ValueType = FrontendEventType.Change.value):
-        self.props.values = values
+        self.props.values = value
 
     async def headless_select(self, values: List[ValueType]):
         uiev = UIEvent(
@@ -1975,7 +2026,7 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
 @dataclasses.dataclass
 class AutocompletePropsBase(MUIComponentBaseProps, SelectBaseProps):
     # input_value: str = ""
-    options: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
+    options: Sequence[Dict[str, Any]] = dataclasses.field(default_factory=list)
 
     disableClearable: Union[Undefined, bool] = undefined
     disableCloseOnSelect: Union[Undefined, bool] = undefined
@@ -2016,7 +2067,7 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
     def __init__(
         self,
         label: str,
-        options: List[Dict[str, Any]],
+        options: Sequence[Dict[str, Any]],
         callback: Optional[Callable[[Dict[str, Any]],
                                     _CORO_NONE]] = None) -> None:
         super().__init__(UIType.AutoComplete, AutocompleteProps, [
@@ -2120,7 +2171,7 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
 
 @dataclasses.dataclass
 class MultipleAutocompleteProps(AutocompletePropsBase):
-    value: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
+    value: Sequence[Dict[str, Any]] = dataclasses.field(default_factory=list)
 
 
 class MultipleAutocomplete(MUIComponentBase[MultipleAutocompleteProps]):
@@ -2128,7 +2179,7 @@ class MultipleAutocomplete(MUIComponentBase[MultipleAutocompleteProps]):
     def __init__(
         self,
         label: str,
-        options: List[Dict[str, Any]],
+        options: Sequence[Dict[str, Any]],
         callback: Optional[Callable[[Dict[str, Any]],
                                     _CORO_NONE]] = None) -> None:
         super().__init__(UIType.MultipleAutoComplete,
@@ -3232,7 +3283,7 @@ class Tabs(MUIContainerBase[TabsProps, MUIComponentType]):
         res["value"] = self.props.value
         return res
 
-    def state_change_callback(self, value: str, type: ValueType):
+    def state_change_callback(self, value: str, type: ValueType = FrontendEventType.Change.value):
         self.props.value = value
 
     @property
@@ -3764,6 +3815,7 @@ def _default_json_node():
 
 class _TreeControlType(enum.IntEnum):
     UpdateSubTree = 0
+    ExpandAll = 1
 
 
 @dataclasses.dataclass
@@ -3875,6 +3927,15 @@ class JsonLikeTreeBase(MUIComponentBase[T_tview_base_props]):
                 "tree": node,
             }))
 
+    def get_all_expandable_node_ids(self, nodes: List[JsonLikeNode]):
+        res: List[str] = []
+        stack: List[JsonLikeNode] = nodes.copy()
+        while stack:
+            node = stack.pop()
+            if node.children:
+                res.append(node.id.uid_encoded)
+                stack.extend(node.children)
+        return res
 
 class JsonLikeTree(JsonLikeTreeBase[JsonLikeTreeProps]):
 
@@ -3921,7 +3982,16 @@ class JsonLikeTree(JsonLikeTreeBase[JsonLikeTreeProps]):
     async def select(self, ids: List[str]):
         await self.send_and_wait(self.update_event(rowSelection=ids))
 
-
+    async def expand_all(self):
+        if self.props.ignoreRoot == True:
+            all_expandable = self.get_all_expandable_node_ids(self.props.tree.children)
+        else:
+            all_expandable = self.get_all_expandable_node_ids([self.props.tree])
+        self.props.expanded = all_expandable
+        return await self.send_and_wait(
+            self.create_comp_event({
+                "type": _TreeControlType.ExpandAll,
+            }))
 class TanstackJsonLikeTree(JsonLikeTreeBase[TanstackJsonLikeTreeProps]):
 
     def __init__(self, tree: Optional[JsonLikeNode] = None) -> None:
@@ -3972,6 +4042,16 @@ class TanstackJsonLikeTree(JsonLikeTreeBase[TanstackJsonLikeTreeProps]):
             self.update_event(rowSelection={k: True
                                             for k in ids}))
 
+    async def expand_all(self):
+        if self.props.ignoreRoot == True:
+            all_expandable = self.get_all_expandable_node_ids(self.props.tree.children)
+        else:
+            all_expandable = self.get_all_expandable_node_ids([self.props.tree])
+        self.props.expanded = {k: True for k in all_expandable}
+        return await self.send_and_wait(
+            self.create_comp_event({
+                "type": _TreeControlType.ExpandAll,
+            }))
 
 class ControlNodeType(enum.IntEnum):
     Number = 0
@@ -4885,6 +4965,7 @@ class MenuListProps(MUIFlexBoxProps):
     menuItems: Union[List[MenuItem], Undefined] = undefined
     anchorReference: Union[Undefined, Literal["anchorEl", "anchorPosition",
                                                 "none"]] = undefined
+    stopPropagation: Union[Undefined, bool] = undefined
     # @model_validator(mode='after')
     # def _validator_post_root(self) -> 'MenuListProps':
     #     assert not isinstance(self.menuItems, Undefined), "menuItems must be provided"

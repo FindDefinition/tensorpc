@@ -29,7 +29,7 @@ def _make_unique_name(unique_set, name, max_count=10000) -> str:
         except ValueError:
             pass
         
-    for i in range(tail, tail + max_count):
+    for i in range(tail + 1, tail + max_count):
         new_name = name_without_tail + "_{}".format(i)
         if new_name not in unique_set:
             unique_set.add(new_name)

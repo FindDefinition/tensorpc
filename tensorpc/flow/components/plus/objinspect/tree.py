@@ -12,6 +12,7 @@ from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
 import numpy as np
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 
+from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.components import mui
 from tensorpc.flow import appctx
 from tensorpc.flow.core.appcore import AppSpecialEventType
@@ -42,6 +43,7 @@ _DEFAULT_OBJ_NAME = "default"
 _DEFAULT_BUILTINS_NAME = "builtins"
 _DEFAULT_DATA_STORAGE_NAME = "flowStorage"
 _DEFAULT_OBSERVED_FUNC_NAME = "observedFuncs"
+_DEFAULT_APP_STORAGE_NAME = "appStorage"
 
 _ROOT = "root"
 
@@ -64,96 +66,6 @@ class ButtonType(enum.Enum):
     Delete = "delete"
     Watch = "watch"
     Record = "record"
-
-
-# _SHOULD_EXPAND_TYPES = {mui.JsonLikeType.List.value, mui.JsonLikeType.Tuple.value,
-#                         mui.JsonLikeType.Dict.value, mui.JsonLikeType.Object.value,
-#                             mui.JsonLikeType.ListFolder.value, mui.JsonLikeType.DictFolder.value,
-#                             mui.JsonLikeType.Layout.value}
-
-# def _check_is_valid(obj_type, cared_types: Set[Type],
-#                     ignored_types: Set[Type]):
-#     valid = True
-#     if len(cared_types) != 0:
-#         valid &= obj_type in cared_types
-#     if len(ignored_types) != 0:
-#         valid &= obj_type not in ignored_types
-#     return valid
-
-# def _get_root_tree(obj,
-#                    checker: Callable[[Type], bool],
-#                    key: str,
-#                    obj_meta_cache=None):
-#     obj_dict = get_obj_dict(obj, checker)
-#     root_node = parse_obj_item(obj, key, key, checker, obj_meta_cache)
-#     root_node.children = parse_obj_dict_to_nodes(obj_dict, key, checker, obj_meta_cache)
-#     for (k, o), c in zip(obj_dict.items(), root_node.children):
-#         obj_child_dict = get_obj_dict(o, checker)
-#         c.drag = False
-#         c.children = parse_obj_dict_to_nodes(obj_child_dict, c.id, checker,
-#                                     obj_meta_cache)
-#     root_node.cnt = len(obj_dict)
-#     return root_node
-
-# async def _parse_obj_to_node(obj,
-#                        node: mui.JsonLikeNode,
-#                        checker: Callable[[Type], bool],
-#                        cached_lazy_expand_ids: Set[str],
-#                        obj_meta_cache=None,
-#                        total_expand_level: int = 0):
-#     if node.type not in _SHOULD_EXPAND_TYPES:
-#         return
-#     if isinstance(obj, TreeItem):
-#         obj_dict = await obj.get_child_desps(node.id)  # type: ignore
-#         tree_children = list(obj_dict.values())
-#     else:
-#         obj_dict = get_obj_dict(obj, checker)
-#         tree_children = parse_obj_dict_to_nodes(obj_dict, node.id, checker, obj_meta_cache)
-#     node.children = tree_children
-#     node.cnt = len(obj_dict)
-#     for (k, v), child_node in zip(obj_dict.items(), node.children):
-#         should_expand = child_node.id in cached_lazy_expand_ids or total_expand_level > 0
-#         if isinstance(v, TreeItem) and v.default_expand():
-#             should_expand = True
-#         if should_expand:
-#             await _parse_obj_to_node(v, child_node, checker, cached_lazy_expand_ids,
-#                                obj_meta_cache, total_expand_level - 1)
-
-# async def _get_obj_tree(obj,
-#                   checker: Callable[[Type], bool],
-#                   key: str,
-#                   parent_id: str,
-#                   obj_meta_cache=None,
-#                   cached_lazy_expand_ids: Optional[List[str]] = None,
-#                   total_expand_level: int = 0):
-#     if parent_id == "":
-#         obj_id = key
-#     else:
-#         obj_id = f"{parent_id}{GLOBAL_SPLIT}{key}"
-#     assert total_expand_level >= 0
-#     root_node = parse_obj_item(obj, key, obj_id, checker, obj_meta_cache)
-#     if cached_lazy_expand_ids is None:
-#         cached_lazy_expand_ids = []
-#     cached_lazy_expand_ids_set = set(cached_lazy_expand_ids)
-#     # TODO determine auto-expand limits
-#     if root_node.type == mui.JsonLikeType.Object.value:
-
-#         await _parse_obj_to_node(obj, root_node, checker, cached_lazy_expand_ids_set,
-#                            obj_meta_cache)
-#         # obj_dict = get_obj_dict(obj, checker)
-#         # root_node.children = parse_obj_dict_to_nodes(obj_dict, obj_id, checker,
-#         #                                     obj_meta_cache)
-#         # root_node.cnt = len(obj_dict)
-#     else:
-#         should_expand = obj_id in cached_lazy_expand_ids_set or total_expand_level >= 0
-#         if isinstance(obj, TreeItem) and obj.default_expand():
-#             should_expand = True
-#         if should_expand:
-#             await _parse_obj_to_node(obj, root_node, checker,
-#                                cached_lazy_expand_ids_set, obj_meta_cache, total_expand_level=total_expand_level)
-
-#     return root_node
-
 
 class DataStorageTreeItem(TreeItem):
 
@@ -345,7 +257,7 @@ class BasicObjectTree(mui.FlexBox):
         super().__init__([
             self.tree.prop(ignoreRoot=True, fixedSize=fixed_size),
         ])
-        self.prop(overflow="auto")
+        self.prop(overflow="auto", flexDirection="column")
         self._tree_parser = ObjectTreeParser(
             cared_types,
             ignored_types,
@@ -421,6 +333,9 @@ class BasicObjectTree(mui.FlexBox):
     @property
     def _objinspect_root(self):
         return self.tree.props.tree
+
+    async def expand_all(self):
+        return await self.tree.expand_all()
 
     async def _get_obj_by_uid(self, uid: UniqueTreeIdForTree,
                               tree_node_trace: List[mui.JsonLikeNode]):
@@ -927,7 +842,10 @@ class ObjectTree(BasicObjectTree):
             fixed_size: bool = False,
             custom_tree_handler: Optional[CustomTreeItemHandler] = None
     ) -> None:
+        master_meta = MasterMeta()
         self._default_data_storage_nodes: Dict[str, DataStorageTreeItem] = {}
+        self._default_app_storage_nodes = DataStorageTreeItem(master_meta.node_id, "appStorage")
+
         self._default_obs_funcs = ObservedFunctionTree()
         default_builtins = {
             _DEFAULT_BUILTINS_NAME: {
@@ -942,6 +860,7 @@ class ObjectTree(BasicObjectTree):
                 "markdown": MarkdownViewer(),
             },
             _DEFAULT_DATA_STORAGE_NAME: self._default_data_storage_nodes,
+            _DEFAULT_APP_STORAGE_NAME: self._default_app_storage_nodes,
             _DEFAULT_OBSERVED_FUNC_NAME: self._default_obs_funcs,
         }
         self._data_storage_uid = UniqueTreeIdForTree.from_parts(

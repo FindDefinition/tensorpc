@@ -157,7 +157,7 @@ class TaskCard(mui.FlexBox):
         self._expanded = not self._expanded
         icon = mui.IconType.ExpandLess if self._expanded else mui.IconType.ExpandMore
         await self.send_and_wait(
-            self.collapse_btn.update_event(icon=icon.value) +
+            self.collapse_btn.update_event(icon=icon) +
             self.detail.update_event(triggered=self._expanded))
 
     async def _on_schedule_task(self):

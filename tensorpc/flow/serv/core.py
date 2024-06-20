@@ -774,7 +774,8 @@ class EnvNode(Node):
     def value(self):
         return self.node_data["value"]
 
-
+class DataStorageKeyError(KeyError):
+    pass 
 class DataStorageNodeBase(abc.ABC):
     """storage: 
     """
@@ -782,6 +783,12 @@ class DataStorageNodeBase(abc.ABC):
     def __init__(self) -> None:
         self.stored_data: Dict[str, StorageDataItem] = {}
 
+    def _check_and_split_key(self, key: str):
+        key_to_path = Path(key)
+        for p in key_to_path.parts:
+            assert len(p) > 0, f"{key} contains empty part."
+        return key_to_path.parts 
+        
     @abc.abstractmethod
     def get_node_id(self) -> str:
         raise NotImplementedError
@@ -791,7 +798,7 @@ class DataStorageNodeBase(abc.ABC):
         raise NotImplementedError
 
     def get_data_attrs(self):
-        items = self.get_item_metas()
+        items = self.get_items()
         res = []
         for item in items:
             data = self.read_meta_dict(item)
@@ -802,42 +809,59 @@ class DataStorageNodeBase(abc.ABC):
     def count(self):
         return sum(map(len, self.stored_data.values()), start=0)
 
-    def get_items(self):
+    def get_items(self, glob_prefix: Optional[str] = None):
         res: List[str] = []
-        if not (FLOW_FOLDER_DATA_PATH / self.get_node_id()).exists():
+        root = FLOW_FOLDER_DATA_PATH / self.get_node_id()
+        if not root.exists():
             return res
-        for p in (FLOW_FOLDER_DATA_PATH / self.get_node_id()).glob("*.pkl"):
+        if glob_prefix is not None:
+            glob_prefix = f"{glob_prefix}.pkl"
+        else:
+            glob_prefix = "*.pkl"
+        for p in root.rglob(glob_prefix):
             if (p.parent / f"{p.stem}.json").exists():
-                res.append(p.stem)
+                relative_path = p.relative_to(root)
+                relative_path_no_suffix = relative_path.with_suffix("")
+                res.append(str(relative_path_no_suffix))
         return res
 
-    def get_item_metas(self):
-        res: List[str] = []
-        if not (FLOW_FOLDER_DATA_PATH / self.get_node_id()).exists():
-            return res
-        for p in (FLOW_FOLDER_DATA_PATH / self.get_node_id()).glob("*.json"):
-            if (p.parent / f"{p.stem}.pkl").exists():
-                res.append(p.stem)
-        return res
+    # def get_item_metas(self, glob_prefix: Optional[str] = None):
+    #     res: List[str] = []
+    #     root = FLOW_FOLDER_DATA_PATH / self.get_node_id()
+    #     if not root.exists():
+    #         return res
+    #     for p in root.rglob("*.json"):
+    #         if (p.parent / f"{p.stem}.pkl").exists():
+    #             relative_path = p.relative_to(root)
+    #             relative_path_no_suffix = relative_path.with_suffix("")
+    #             res.append(str(relative_path_no_suffix))
+    #     return res
+
+    def _get_and_create_storage_root_path(self, key: str):
+        root = FLOW_FOLDER_DATA_PATH / self.get_node_id()
+        parts = self._check_and_split_key(key)
+        for part in parts[:-1]:
+            root = root / part
+        if not root.exists():
+            root.mkdir(mode=0o755, parents=True)
+        return root, parts[-1]
 
     def get_save_path(self, key: str):
-        root = FLOW_FOLDER_DATA_PATH / self.get_node_id()
-        if not root.exists():
-            root.mkdir(mode=0o755, parents=True)
-        return FLOW_FOLDER_DATA_PATH / self.get_node_id() / f"{key}.pkl"
+        root, last = self._get_and_create_storage_root_path(key) 
+        return root / f"{last}.pkl"
 
     def get_meta_path(self, key: str):
-        root = FLOW_FOLDER_DATA_PATH / self.get_node_id()
-        if not root.exists():
-            root.mkdir(mode=0o755, parents=True)
-        return FLOW_FOLDER_DATA_PATH / self.get_node_id() / f"{key}.json"
+        root, last = self._get_and_create_storage_root_path(key) 
+        return root / f"{last}.json"
 
     def save_data(self, key: str, data: bytes, meta: JsonLikeNode,
-                  timestamp: int):
+                  timestamp: int, raise_if_exist: bool = False):
         meta.userdata = {
             "timestamp": timestamp,
             "fileSize": len(data),
         }
+        if self.has_data_item(key) and raise_if_exist:
+            raise DataStorageKeyError(f"{key} already exists")
         item = StorageDataItem(data, meta)
         with self.get_save_path(key).open("wb") as f:
             pickle.dump(item.data, f)
@@ -862,7 +886,7 @@ class DataStorageNodeBase(abc.ABC):
                 with meta_path.open("w") as f:
                     json.dump(meta_dict, f)
             return meta_dict
-        raise FileNotFoundError(f"{meta_path} not exists")
+        raise DataStorageKeyError(f"{key}({meta_path}) not exists")
 
     def remove_data(self, key: Optional[str]):
         if key is None:
@@ -903,6 +927,13 @@ class DataStorageNodeBase(abc.ABC):
         # self.save_data(new_name, item.data, item.meta, item.timestamp)
         return True
 
+    def read_data_by_glob_prefix(self, glob_prefix: str):
+        res: Dict[str, StorageDataItem] = {}
+        keys = self.get_items(glob_prefix)
+        for key in keys:
+            res[key] = self.read_data(key)
+        return res 
+
     def read_data(self, key: str) -> StorageDataItem:
         if key in self.stored_data:
             data_item = self.stored_data[key]
@@ -930,7 +961,7 @@ class DataStorageNodeBase(abc.ABC):
                 else:
                     self.stored_data[key] = StorageDataItem(bytes(), meta)
                 return data_item
-        raise FileNotFoundError(f"{path} not exists")
+        raise DataStorageKeyError(f"{key}({path}) not exists")
 
     def has_data_item(self, key: str):
         if key in self.stored_data:
@@ -942,9 +973,16 @@ class DataStorageNodeBase(abc.ABC):
         return self.stored_data[key].timestamp != timestamp
 
     def read_data_if_need_update(self, key: str, timestamp: int):
-        if self.need_update(key, timestamp):
+        if key not in self.stored_data:
             return self.read_data(key)
-        return None
+        else:
+            if self.need_update(key, timestamp):
+                return self.read_data(key)
+            else:
+                res = self.stored_data[key]
+                res = res.shallow_copy()
+                res.data = bytes()
+                return res 
 
 
 @ALL_NODES.register
@@ -2675,11 +2713,12 @@ class Flow:
 
     async def save_data_to_storage(self, graph_id: str, node_id: str, key: str,
                                    data: bytes, meta: JsonLikeNode,
-                                   timestamp: int):
+                                   timestamp: int,
+                                   raise_if_exist: bool = False):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
         assert isinstance(node, DataStorageNodeBase)
-        res = node.save_data(key, data, meta, timestamp)
+        res = node.save_data(key, data, meta, timestamp, raise_if_exist)
         if isinstance(node, DataStorageNode):
             await self._user_ev_q.put(
                 (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
@@ -2689,14 +2728,32 @@ class Flow:
                                      graph_id: str,
                                      node_id: str,
                                      key: str,
-                                     timestamp: Optional[int] = None):
+                                     timestamp: Optional[int] = None,
+                                     raise_if_not_found: bool = True):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
         assert isinstance(node, DataStorageNodeBase)
-        if timestamp is not None:
-            return node.read_data_if_need_update(key, timestamp)
+        if raise_if_not_found:
+            if timestamp is not None:
+                return node.read_data_if_need_update(key, timestamp)
+            else:
+                return node.read_data(key)
         else:
-            return node.read_data(key)
+            try:
+                if timestamp is not None:
+                    return node.read_data_if_need_update(key, timestamp)
+                else:
+                    return node.read_data(key)
+            except DataStorageKeyError:
+                return None 
+
+    async def read_data_from_storage_by_glob_prefix(self, graph_id: str,
+                                     node_id: str,
+                                     glob_prefix: str):
+        node_desp = self._get_node_desp(graph_id, node_id)
+        node = node_desp.node
+        assert isinstance(node, DataStorageNodeBase)
+        return node.read_data_by_glob_prefix(glob_prefix)
 
     async def query_data_attrs(self, graph_id: str, node_id: str):
         node_desp = self._get_node_desp(graph_id, node_id)
