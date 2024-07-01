@@ -24,6 +24,7 @@ import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.flow.core.appcore import Event
 from tensorpc.flow.core.common import handle_standard_event
+from tensorpc.flow.jsonlike import merge_props_not_undefined
 from tensorpc.utils.uniquename import UniqueNamePool
 
 from ..core.core import (AppEvent, AppEventType, BasicProps, Component,
@@ -107,6 +108,9 @@ class FlowProps(ContainerBaseProps):
     nodeContextMenuItems: Union[Undefined, List[MenuItem]] = undefined
     nodeTypeMap: Union[Undefined, Dict[str, str]] = undefined
     preventCycle: Union[Undefined, bool] = undefined
+
+    invisiblizeAllResizer: Union[Undefined, bool] = undefined
+    invisiblizeAllToolbar: Union[Undefined, bool] = undefined
 
 @dataclasses.dataclass
 class XYPosition:
@@ -218,6 +222,7 @@ class FlowControlType(enum.IntEnum):
     UpdateNodeData = 6
     UpdateNodeStyle = 7
     DeleteEdgeByIds = 8
+    UpdatePaneContextMenuItem = 9
 
 @dataclasses.dataclass
 class DagreLayoutOptions:
@@ -546,6 +551,22 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             "fitView": True,
         }
         return await self.send_and_wait(self.create_comp_event(res))
+
+    async def update_pane_context_menu_items(self, items: List[MenuItem]):
+        """Update pane context menu items based on id.
+        this function won't add or remove items, only update the existing items.
+        """
+        if not isinstance(self.props.paneContextMenuItems, Undefined):
+            all_item_id_to_items = {item.id: item for item in self.props.paneContextMenuItems}
+            for item in items:
+                if item.id not in all_item_id_to_items:
+                    raise ValueError(f"item id {item.id} not exists")
+                merge_props_not_undefined(all_item_id_to_items[item.id], item)
+            res = {
+                "type": FlowControlType.UpdatePaneContextMenuItem,
+                "menuItems": items,
+            }
+            return await self.send_and_wait(self.create_comp_event(res))
 
     async def add_nodes(self, nodes: List[Node], screen_to_flow: Optional[bool] = None):
         """Add new nodes to the flow.

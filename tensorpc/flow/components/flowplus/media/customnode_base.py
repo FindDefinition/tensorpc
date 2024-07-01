@@ -16,7 +16,7 @@ class MyCustomNode(flowplus.ComputeNode):
         return {'output': a + b}
 
     def get_node_layout(self) -> Optional[mui.FlexBox]:
-        return mui.HBox([mui.Typography("Custom Node")])
+        return mui.HBox([mui.Typography(self.name)])
 
     def state_dict(self) -> Dict[str, Any]:
         # save state here, can be used to restore state such as textfield.

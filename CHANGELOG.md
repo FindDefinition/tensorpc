@@ -1,4 +1,13 @@
 # Changelog
+# [0.11.7] - 2024-07-01
+### Added 
+- add actions to monaco editor
+- add pane context menu item update to simple flow
+### Changed
+- refine some compute flow logic 
+### Fixed 
+- fix python 3.8 compatibility issue
+
 # [0.11.6] - 2024-06-30
 ### Fixed 
 - fix some bug

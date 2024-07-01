@@ -1,3 +1,4 @@
+from dataclasses import is_dataclass
 import enum
 
 from typing import Any, Callable, Dict, Generic, Hashable, List, Optional, TypeVar, Union, Tuple
@@ -22,7 +23,7 @@ NumberType: TypeAlias = Union[int, float]
 
 STRING_LENGTH_LIMIT = 500
 T = TypeVar("T")
-
+Tsrc = TypeVar("Tsrc")
 
 def flatten_dict(d: MutableMapping,
                  parent_key: str = '',
@@ -65,6 +66,9 @@ class Undefined:
     def __hash__(self) -> int:
         # for python 3.11
         return 0
+
+    def bool(self):
+        return False
 
 
 class BackendOnlyProp(Generic[T]):
@@ -718,3 +722,13 @@ class TreeItem(abc.ABC):
 
     def default_expand(self) -> bool:
         return True
+
+def merge_props_not_undefined(dst: T, src: T):
+    assert is_dataclass(dst)
+    assert is_dataclass(src)
+    for src_field in dataclasses.fields(src):
+        src_field_value = getattr(src, src_field.name)
+        if not isinstance(src_field_value, Undefined):
+            setattr(dst, src_field.name, src_field_value)
+        if is_dataclass(src_field_value):
+            merge_props_not_undefined(getattr(dst, src_field.name), src_field_value)

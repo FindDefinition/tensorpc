@@ -379,6 +379,7 @@ class FrontendEventType(enum.IntEnum):
     EditorQueryState = 52
     EditorSaveState = 53
     EditorReady = 54
+    EditorAction = 55
 
     # leaflet events
     MapZoom = 60
@@ -481,8 +482,8 @@ class UserMessage:
         return cls(uid, error, MessageLevel.Error, detail)
 
     @classmethod
-    def from_exception(cls, uid: str, exc: BaseException):
-        lines = traceback.format_exception(exc)
+    def from_exception(cls, uid: str, exc: BaseException, tb=None):
+        lines = traceback.format_exception(None, value=exc, tb=tb)
         return cls(uid, str(exc), MessageLevel.Error, "\n".join(lines))
 
     @classmethod
@@ -1717,12 +1718,14 @@ class Component(Generic[T_base_props, T_child]):
                                             detail)
         return self.put_app_event(self.create_user_msg_event(user_exc))
 
-    def send_exception(self, e: BaseException):
+    def send_exception(self, e: BaseException, tb=None, tb_from_sys: bool = True):
         ss = io.StringIO()
         traceback.print_exc(file=ss)
         assert self._flow_uid is not None
+        if tb_from_sys:
+            tb = sys.exc_info()[2]
         return self.put_app_event(self.create_user_msg_event(UserMessage.from_exception(
-                                    self._flow_uid_encoded, e)))
+                                    self._flow_uid_encoded, e, tb)))
 
     async def __event_emitter_on_exc(self, exc_param: ExceptionParam):
         traceback.print_exc()
