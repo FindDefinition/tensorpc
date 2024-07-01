@@ -1,4 +1,8 @@
 # Changelog
+# [0.11.6] - 2024-06-30
+### Fixed 
+- fix some bug
+
 # [0.11.5] - 2024-06-20
 ### Added 
 - add compute flow
