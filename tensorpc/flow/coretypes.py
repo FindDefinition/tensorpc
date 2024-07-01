@@ -291,8 +291,8 @@ class ScheduleEvent:
 class VscodeTensorpcMessageType(enum.IntEnum):
     UpdateActiveTab = 0
     UpdateCursorPosition = 1
-	ShowFunctionArguments = 2
-	ShowFunctionLocals = 3
+    ShowFunctionArguments = 2
+    ShowFunctionLocals = 3
 
 
 @dataclass_dispatch.dataclass

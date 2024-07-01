@@ -26,7 +26,7 @@ class JsonInputNode(ComputeNode):
     def get_node_layout(self) -> mui.FlexBox | None:
         return mui.VBox([
             self._editor.prop(editorPadding=5)
-        ]).prop(width="200px", maxHeight="300px")
+        ]).prop(width="200px", maxHeight="300px", overflow="auto")
 
     async def compute(self) -> OutputDict:
         data = json.loads(self._editor.props.value)
@@ -60,12 +60,12 @@ class ObjectTreeViewerNode(ComputeNode):
     def get_node_layout(self) -> mui.FlexBox | None:
         res = mui.VBox([
             self.item_tree.prop(width="100%", height="100%", flex=1)
-        ]).prop(flex=1, minWidth="250px", minHeight="300px", height="300px", overflow="hidden")
+        ]).prop(flex=1, minWidth="250px", minHeight="300px")
         # if we use virtual tree, we need to set height
         if isinstance(self.item_tree.tree, mui.TanstackJsonLikeTree):
-            res.prop(minHeight="300px", height="300px")
+            res.prop(minHeight="300px", height="300px", overflow="hidden")
         else:
-            res.prop(minHeight="100px")
+            res.prop(minHeight="100px", maxHeight="300px", overflow="hidden")
         return res
 
     def _expand_validator(self, node: Any):
