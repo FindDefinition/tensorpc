@@ -233,10 +233,11 @@ class ObjectTreeParser:
     async def parse_obj_to_tree(self,
                                 obj,
                                 node: mui.JsonLikeNode,
-                                total_expand_level: int = 0):
+                                total_expand_level: int = 0,
+                                validator: Optional[Callable[[Any], bool]] = None):
         """parse object to json like tree.
         """
-        if not self._should_expand_node(obj, node, total_expand_level):
+        if not self._should_expand_node(obj, node, total_expand_level, validator):
             return
         if isinstance(obj, TreeItem):
             obj_dict = await obj.get_child_desps(node.id)
@@ -255,12 +256,15 @@ class ObjectTreeParser:
             # if isinstance(v, TreeItem) and v.default_expand():
             #     should_expand = True
             # if should_expand:
-            await self.parse_obj_to_tree(v, child_node, total_expand_level - 1)
+            await self.parse_obj_to_tree(v, child_node, total_expand_level - 1, validator)
 
     def _should_expand_node(self, obj, node: mui.JsonLikeNode,
-                            total_expand_level: int):
+                            total_expand_level: int, validator: Optional[Callable[[Any], bool]] = None):
         if node.type not in _SHOULD_EXPAND_TYPES:
             return False
+        if validator is not None:
+            if not validator(obj):
+                return False 
         should_expand = node.id in self._cached_lazy_expand_uids or total_expand_level > 0
         if isinstance(obj, TreeItem) and obj.default_expand():
             should_expand = True
@@ -449,13 +453,14 @@ class ObjectTreeParser:
                             obj_root,
                             root_name: str,
                             expand_level: int,
-                            ns: UniqueTreeIdForTree = UniqueTreeIdForTree("")):
+                            ns: UniqueTreeIdForTree = UniqueTreeIdForTree(""),
+                            validator: Optional[Callable[[Any], bool]] = None):
         root_node = await self.parse_obj_to_tree_node(obj_root, root_name,
                                                       self._obj_meta_cache)
         if not ns.empty():
             # root_node.id = f"{ns}{GLOBAL_SPLIT}{root_node.id}"
             root_node.id = ns + root_node.id
-        await self.parse_obj_to_tree(obj_root, root_node, expand_level)
+        await self.parse_obj_to_tree(obj_root, root_node, expand_level, validator)
         return root_node
 
 

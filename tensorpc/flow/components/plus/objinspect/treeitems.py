@@ -2,7 +2,7 @@ import ast
 import sys
 import tokenize
 from tensorpc.core.funcid import find_toplevel_func_node_by_lineno
-from tensorpc.core.tracer import FrameResult, TraceType
+from tensorpc.core.tracers.tracer import FrameResult, TraceEventType
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.flow import appctx
 from tensorpc.flow.components import mui
@@ -35,14 +35,14 @@ def parse_frame_result_to_trace_item(frame_results: List[FrameResult],
     res: List[TraceTreeItem] = []
     # print([(x.qualname, x.type, x.depth) for x in frame_results])
     for fr in frame_results:
-        if fr.type == TraceType.Call:
+        if fr.type == TraceEventType.Call:
             item = TraceTreeItem(fr)
             if fr_stack:
                 prev = fr_stack[-1][1]
                 item.parent_cls_name = prev.cls_name
             fr_stack.append((fr, item))
 
-        elif fr.type == TraceType.Return:
+        elif fr.type == TraceEventType.Return:
             poped = fr_stack.pop()
             if use_return_locals:
                 poped[1].set_return_frame_result(fr)

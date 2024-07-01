@@ -400,7 +400,8 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         ]
 
     def get_edges_by_node_and_handle_id(self, node_id: str, handle_id: Optional[str]):
-        return self._node_id_to_handle_to_edges[node_id][handle_id]
+        content = self._node_id_to_handle_to_edges[node_id]
+        return content.get(handle_id, [])
 
     def get_all_nodes_in_connected_graph(self, node: Node):
         visited: Set[str] = set()

@@ -472,7 +472,7 @@ class ComplexCanvas(mui.FlexBox):
             custom_tree_handler=self.custom_tree_handler,
             default_expand_level=1000,
             use_fast_tree=True)
-        self.item_tree.event_async_select_single.on(self._on_tree_select)
+        self.item_tree.event_async_select_single.on_standard(self._on_tree_select)
         self.init_add_layout([*self._layout_func()])
         self.prop(
             droppable=True,

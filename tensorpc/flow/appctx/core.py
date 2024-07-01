@@ -1,4 +1,4 @@
-# Copyright 2023 Yan Yan
+# Copyright 2024 Yan Yan
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
 from typing_extensions import ParamSpec
 
 from tensorpc.core.serviceunit import ObservedFunctionRegistryProtocol
-from tensorpc.flow.core.appcore import (enter_app_conetxt, find_component,
+from tensorpc.flow.core.appcore import (AppSpecialEventType, enter_app_conetxt, find_component,
                                         find_component_by_uid, get_app,
                                         find_all_components, get_app_context,
                                         get_editable_app, get_reload_manager,
@@ -167,3 +167,13 @@ def run_coro_sync(coro: Coroutine) -> Any:
         # we can wait fut here.
         fut = asyncio.run_coroutine_threadsafe(coro, loop)
         return fut.result()
+
+def register_app_special_event_handler(event: AppSpecialEventType,
+                                             handler: Callable):
+    app = get_app()
+    return app.register_app_special_event_handler(event, handler)
+
+def unregister_app_special_event_handler(event: AppSpecialEventType,
+                                           handler: Callable):
+    app = get_app()
+    return app.unregister_app_special_event_handler(event, handler)

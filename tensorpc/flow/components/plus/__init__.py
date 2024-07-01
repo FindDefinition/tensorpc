@@ -29,5 +29,5 @@ from .options import CommonOptions
 from .scriptmgr import ScriptManager
 from .scheduler import TmuxScheduler, Task, SSHTarget
 from .tutorials import AppInMemory, MarkdownTutorial
-
+from .vscodetracer import VscodeTracerBox, CodeFragTracerResult
 from . import handlers as _handlers

@@ -19,7 +19,7 @@ from typing_extensions import ParamSpec
 from tensorpc.core.inspecttools import get_members
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServFunctionMeta
-from tensorpc.core.tracer import FrameResult, TraceType, Tracer
+from tensorpc.core.tracers.tracer import FrameResult, TraceEventType, Tracer
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.flow.core.appcore import Event, get_app, get_editable_app
 from tensorpc.flow.components import mui
@@ -62,7 +62,7 @@ def get_exception_frame_stack() -> Dict[str, TraceTreeItem]:
     _, _, exc_traceback = sys.exc_info()
     frame_stacks: Dict[str, TraceTreeItem] = {}
     for tb_frame, tb_lineno in traceback.walk_tb(exc_traceback):
-        fr = Tracer.get_frame_result(TraceType.Return, tb_frame)
+        fr = Tracer.get_frame_result(TraceEventType.Return, tb_frame)
         frame_stacks[fr.get_unique_id()] = TraceTreeItem(fr)
     return frame_stacks
 

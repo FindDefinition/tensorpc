@@ -18,7 +18,8 @@ from pyparsing import abstractmethod
 from typing_extensions import get_type_hints, is_typeddict
 
 import tensorpc.core.dataclass_dispatch as dataclasses
-from tensorpc.core.annocore import (extract_annotated_type_and_meta, get_args,
+from tensorpc.core.annocore import (AnnotatedArg, AnnotatedReturn,
+                                    extract_annotated_type_and_meta, get_args,
                                     is_async_gen, is_optional,
                                     lenient_issubclass,
                                     parse_annotated_function)
@@ -98,9 +99,9 @@ def _default_compute_flow_css():
             "minHeight": "24px",
         },
         f".{ComputeFlowClasses.CodeTypography}": {
-            "fontFamily": "IBMPlexMono,SFMono-Regular,Consolas,Liberation Mono,Menlo,Courier,monospace",
+            "fontFamily":
+            "IBMPlexMono,SFMono-Regular,Consolas,Liberation Mono,Menlo,Courier,monospace",
         },
-
         f".{ComputeFlowClasses.OutputHandle}": {
             "position": "absolute",
             "top": "50%",
@@ -154,12 +155,13 @@ def is_typeddict_or_typeddict_async_gen(type):
     return False
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
 class AnnoHandle:
     type: Literal["source", "target"]
     prefix: str
     name: str
     is_optional: bool
+    anno: AnnotatedArg
     meta: Optional[HandleMeta] = None
 
 
@@ -178,6 +180,7 @@ class ContextMenuItemNames:
     CopyNode = "Copy node"
     DeleteNode = "Delete node"
 
+
 @dataclasses.dataclass
 class NodeConfig:
     width: Optional[int] = None
@@ -188,7 +191,9 @@ class NodeConfig:
 class WrapperConfig:
     boxProps: Optional[mui.FlexBoxProps] = None
 
+
 T_cnode = TypeVar("T_cnode", bound="ComputeNode")
+
 
 class ComputeNode:
     def __init__(self,
@@ -265,7 +270,7 @@ class ComputeNode:
         return None
 
     def state_dict(self) -> Dict[str, Any]:
-        init_cfg_dict = None 
+        init_cfg_dict = None
         if self._init_cfg is not None:
             init_cfg_dict = dataclasses.asdict(self._init_cfg)
         return {
@@ -288,10 +293,11 @@ class ComputeNode:
         """
         return self.compute
 
-    @staticmethod 
-    def from_state_dict_default(data: Dict[str, Any], cls: Type[T_cnode]) -> T_cnode:
+    @staticmethod
+    def from_state_dict_default(data: Dict[str, Any],
+                                cls: Type[T_cnode]) -> T_cnode:
         internal = data[TENSORPC_FLOWUI_NODEDATA_KEY]
-        init_cfg = None 
+        init_cfg = None
         if "init_cfg" in internal:
             if internal["init_cfg"] is not None:
                 init_cfg = NodeConfig(**internal["init_cfg"])
@@ -312,13 +318,15 @@ class ComputeNode:
         out_iohandles: List[AnnoHandle] = []
         for arg_anno in arg_annos:
             param = arg_anno.param
+            assert param is not None
             is_optional_val = param.default is not param.empty
             handle_meta = None
             if arg_anno.annometa is not None and isinstance(
                     arg_anno.annometa, HandleMeta):
                 handle_meta = arg_anno.annometa
             iohandle = AnnoHandle("source", HandleTypePrefix.Input,
-                                  arg_anno.name, is_optional_val, handle_meta)
+                                  arg_anno.name, is_optional_val, arg_anno,
+                                  handle_meta)
             inp_iohandles.append(iohandle)
         ranno_obj = annos[1]
         assert ranno_obj is not None
@@ -336,8 +344,10 @@ class ComputeNode:
             handle_meta = None
             if anno_meta is not None and isinstance(anno_meta, HandleMeta):
                 handle_meta = anno_meta
-            ohandle = AnnoHandle("target", HandleTypePrefix.Output, k,
-                                 is_optional(v), handle_meta)
+            ohandle = AnnoHandle(
+                "target", HandleTypePrefix.Output, k, is_optional(v),
+                AnnotatedArg("", None, ranno_obj.type, ranno_obj.annometa),
+                handle_meta)
             out_iohandles.append(ohandle)
         return inp_iohandles, out_iohandles
 
@@ -412,38 +422,48 @@ def register_compute_node(func=None,
 
 
 class IOHandle(mui.FlexBox):
-    def __init__(self,
-                 prefix: str,
-                 name: str,
-                 is_input: bool,
-                 is_optional: bool,
-                 handle_meta: Optional[HandleMeta] = None):
+    def __init__(self, prefix: str, name: str, is_input: bool,
+                 annohandle: AnnoHandle):
         self._is_input = is_input
         self.name = name
         self.id = f"{prefix}-{name}"
         htype = "target" if is_input else "source"
         hpos = "left" if is_input else "right"
         handle_classes = ComputeFlowClasses.InputHandle if is_input else ComputeFlowClasses.OutputHandle
+        if annohandle.is_optional and is_input:
+            handle_style = {"border": "1px solid #4caf50"}
+            param = annohandle.anno.param
+            assert param is not None
+            default = param.default
+            if isinstance(default, (int, float, bool)):
+                name = f"{name} = {default}"
+            elif default is None:
+                name = f"{name} = None"
+        else:
+            handle_style = mui.undefined
         layout: mui.LayoutType = [
-            flowui.Handle(htype, hpos, self.id).prop(className=handle_classes),
-            mui.Typography(name).prop(variant="caption",
-                                      flex=1,
-                                      marginLeft="8px",
-                                      marginRight="8px",
-                                      textAlign="start" if is_input else "end",
-                                      className=ComputeFlowClasses.CodeTypography)
+            flowui.Handle(htype, hpos, self.id).prop(className=handle_classes,
+                                                     style=handle_style),
+            mui.Typography(name).prop(
+                variant="caption",
+                flex=1,
+                marginLeft="8px",
+                marginRight="8px",
+                textAlign="start" if is_input else "end",
+                className=ComputeFlowClasses.CodeTypography)
         ]
         if not is_input:
             layout = layout[::-1]
-        self.is_optional = is_optional
         super().__init__(layout)
-        if handle_meta is None:
-            handle_meta = HandleMeta()
-        self.handle_meta = handle_meta
+        self.annohandle = annohandle
         self.prop(
             className=
             f"{ComputeFlowClasses.IOHandleContainer} {ComputeFlowClasses.NodeItem}"
         )
+
+    @property
+    def is_optional(self):
+        return self.annohandle.is_optional
 
 
 class ComputeNodeWrapper(mui.FlexBox):
@@ -456,10 +476,9 @@ class ComputeNodeWrapper(mui.FlexBox):
                 icon_cfg = NODE_REGISTRY[cnode._node_type].icon_cfg
         if icon_cfg is not None:
             self.icon_container = mui.Fragment([
-                mui.Icon(mui.IconType.Add).prop(
-                    iconSize="small",
-                    icon=icon_cfg.icon,
-                    muiColor=icon_cfg.muiColor)
+                mui.Icon(mui.IconType.Add).prop(iconSize="small",
+                                                icon=icon_cfg.icon,
+                                                muiColor=icon_cfg.muiColor)
             ])
         self.header_container = mui.HBox([
             self.icon_container, self.header
@@ -501,10 +520,9 @@ class ComputeNodeWrapper(mui.FlexBox):
         await self.header.write(new_header)
 
     async def update_icon_cfg(self, icon_cfg: mui.IconProps):
-        icon =  mui.Icon(mui.IconType.Add).prop(
-                    iconSize="small",
-                    icon=icon_cfg.icon,
-                    muiColor=icon_cfg.muiColor)
+        icon = mui.Icon(mui.IconType.Add).prop(iconSize="small",
+                                               icon=icon_cfg.icon,
+                                               muiColor=icon_cfg.muiColor)
         await self.icon_container.set_new_layout([icon])
 
     async def set_cnode(self,
@@ -523,12 +541,12 @@ class ComputeNodeWrapper(mui.FlexBox):
             await self.header.write(cnode.name)
             await self.input_args.set_new_layout([*inp_handles])
             await self.output_args.set_new_layout([*out_handles])
-            icon_cfg = cnode.icon_cfg 
+            icon_cfg = cnode.icon_cfg
             if icon_cfg is None:
                 if cnode._node_type is not None and cnode._node_type in NODE_REGISTRY:
                     icon_cfg = NODE_REGISTRY[cnode._node_type].icon_cfg
             if icon_cfg is not None:
-                icon =  mui.Icon(mui.IconType.Add).prop(
+                icon = mui.Icon(mui.IconType.Add).prop(
                     iconSize="small",
                     icon=icon_cfg.icon,
                     muiColor=icon_cfg.muiColor)
@@ -536,7 +554,8 @@ class ComputeNodeWrapper(mui.FlexBox):
             if node_layout is not None:
                 await self.middle_node_container.set_new_layout([
                     mui.HBox([node_layout
-                              ]).prop(className=ComputeFlowClasses.NodeItem, flex=1)
+                              ]).prop(className=ComputeFlowClasses.NodeItem,
+                                      flex=1)
                 ])
             if do_cnode_init_async:
                 await cnode.init_node_async(True)
@@ -556,18 +575,12 @@ class ComputeNodeWrapper(mui.FlexBox):
         inp_iohandles: List[IOHandle] = []
         out_iohandles: List[IOHandle] = []
         for ahandle in inp_ahandles:
-            iohandle = IOHandle(HandleTypePrefix.Input,
-                                ahandle.name,
-                                True,
-                                ahandle.is_optional,
-                                handle_meta=ahandle.meta)
+            iohandle = IOHandle(HandleTypePrefix.Input, ahandle.name, True,
+                                ahandle)
             inp_iohandles.append(iohandle)
         for ahandle in out_ahandles:
-            iohandle = IOHandle(HandleTypePrefix.Output,
-                                ahandle.name,
-                                False,
-                                ahandle.is_optional,
-                                handle_meta=ahandle.meta)
+            iohandle = IOHandle(HandleTypePrefix.Output, ahandle.name, False,
+                                ahandle)
             out_iohandles.append(iohandle)
         return inp_iohandles, out_iohandles
 
@@ -660,7 +673,9 @@ class ComputeFlow(mui.FlexBox):
             nodes, edges,
             [flowui.MiniMap(),
              flowui.Controls(),
-             flowui.Background()])
+             flowui.Background()]).prop(zoomActivationKeyCode="z",
+                                        disableKeyboardA11y=True,
+                                        zoomOnScroll=False)
         self.side_container = mui.VBox([]).prop(height="100%",
                                                 width="100%",
                                                 overflow="hidden")
@@ -750,7 +765,8 @@ class ComputeFlow(mui.FlexBox):
         wrapper = node.get_component_checked(ComputeNodeWrapper)
         await wrapper.update_header(new_header)
 
-    async def update_cnode_icon_cfg(self, node_id: str, icon_cfg: mui.IconProps):
+    async def update_cnode_icon_cfg(self, node_id: str,
+                                    icon_cfg: mui.IconProps):
         node = self.graph.get_node_by_id(node_id)
         wrapper = node.get_component_checked(ComputeNodeWrapper)
         await wrapper.update_icon_cfg(icon_cfg)
@@ -909,7 +925,8 @@ class ComputeFlow(mui.FlexBox):
                 # remove nodes that failed to init
                 print("node_id_to_remove", node_id_to_remove)
                 graph_child_def.nodes = [
-                    n for n in graph_child_def.nodes if n.id not in node_id_to_remove
+                    n for n in graph_child_def.nodes
+                    if n.id not in node_id_to_remove
                 ]
                 self.graph.childs_complex.nodes = graph_child_def.nodes
                 self.graph.childs_complex.edges = graph_child_def.edges
@@ -978,11 +995,33 @@ class ComputeFlow(mui.FlexBox):
                 continue
             roots.append(node)
         if self._schedule_task is not None:
-            self.graph_ctx._wait_list.extend(roots)
+            self.graph_ctx._wait_node_inputs.update({n.id: {} for n in roots})
         else:
             with enter_flow_ui_context_object(self.graph_ctx):
                 self._schedule_task = asyncio.create_task(
                     self._schedule(roots, {}, self._shutdown_ev))
+
+    async def schedule_next(self, node_id: str, node_output: Dict[str, Any]):
+        node_inputs = self._get_next_node_inputs({node_id: node_output})
+        if self._schedule_task is not None:
+            self.graph_ctx._wait_node_inputs.update(node_inputs)
+        else:
+            with enter_flow_ui_context_object(self.graph_ctx):
+                self._schedule_task = asyncio.create_task(
+                    self._schedule([
+                        self.graph.get_node_by_id(i)
+                        for i in node_inputs.keys()
+                    ], node_inputs, self._shutdown_ev))
+
+    async def schedule_node(self, node_id: str, node_inputs: Dict[str, Any]):
+        node = self.graph.get_node_by_id(node_id)
+        if self._schedule_task is not None:
+            self.graph_ctx._wait_node_inputs.update({node.id: node_inputs})
+        else:
+            with enter_flow_ui_context_object(self.graph_ctx):
+                self._schedule_task = asyncio.create_task(
+                    self._schedule([node], {node_id: node_inputs},
+                                   self._shutdown_ev))
 
     def _filter_node_cant_schedule(self, nodes: List[flowui.Node],
                                    node_inputs: Dict[str, Dict[str, Any]],
@@ -1007,15 +1046,32 @@ class ComputeFlow(mui.FlexBox):
             new_nodes.append(n)
         return new_nodes
 
+    def _get_next_node_inputs(self, node_id_to_outputs: Dict[str, Dict[str,
+                                                                       Any]]):
+        new_node_inputs: Dict[str, Dict[str, Any]] = {}
+        for node_id, output in node_id_to_outputs.items():
+            # TODO handle array/dict handle
+            node_target_and_handles = self.graph.get_target_node_and_handles(
+                node_id)
+            for target_node, source_handle, target_handle in node_target_and_handles:
+                assert source_handle is not None and target_handle is not None
+                source_handle_name = source_handle.split("-")[1]
+                target_handle_name = target_handle.split("-")[1]
+                if target_node.id not in new_node_inputs:
+                    new_node_inputs[target_node.id] = {}
+                new_node_inputs[target_node.id][target_handle_name] = output[
+                    source_handle_name]
+        return new_node_inputs
+
     async def _schedule(self, nodes: List[flowui.Node],
                         node_inputs: Dict[str, Dict[str, Any]],
                         shutdown_ev: asyncio.Event):
         nodes_to_schedule: List[flowui.Node] = nodes
         ctx = get_compute_flow_context()
         if ctx is not None:
-            nodes_to_schedule = nodes_to_schedule + ctx._wait_list
-            ctx._wait_list.clear()
-
+            wait_nodes, wait_inputs = ctx.fetch_wait_nodes_and_inputs()
+            nodes_to_schedule = nodes_to_schedule + wait_nodes
+            node_inputs = {**node_inputs, **wait_inputs}
         cur_node_inputs = node_inputs.copy()
         cur_anode_iters: Dict[str, AsyncIterator] = {}
         shutdown_task = asyncio.create_task(shutdown_ev.wait())
@@ -1031,8 +1087,10 @@ class ComputeFlow(mui.FlexBox):
                     break
                 ctx = get_compute_flow_context()
                 if ctx is not None:
-                    valid_nodes = valid_nodes + ctx._wait_list
-                    ctx._wait_list.clear()
+                    wait_nodes, wait_inputs = ctx.fetch_wait_nodes_and_inputs()
+
+                    valid_nodes = valid_nodes + wait_nodes
+                    cur_node_inputs = {**cur_node_inputs, **wait_inputs}
                 # 2. remove duplicate nodes
                 valid_nodes_id_set = set(n.id for n in valid_nodes)
                 new_valid_nodes: List[flowui.Node] = []
@@ -1151,18 +1209,8 @@ class ComputeFlow(mui.FlexBox):
                     else:
                         await wrapper.update_status(NodeStatus.Error)
                 print("Node Outputs", node_outputs)
-                for node_id, output in node_outputs.items():
-                    # TODO handle array/dict handle
-                    node_target_and_handles = self.graph.get_target_node_and_handles(
-                        node_id)
-                    for target_node, source_handle, target_handle in node_target_and_handles:
-                        assert source_handle is not None and target_handle is not None
-                        source_handle_name = source_handle.split("-")[1]
-                        target_handle_name = target_handle.split("-")[1]
-                        if target_node.id not in new_node_inputs:
-                            new_node_inputs[target_node.id] = {}
-                        new_node_inputs[target_node.id][
-                            target_handle_name] = output[source_handle_name]
+                new_node_inputs.update(
+                    self._get_next_node_inputs(node_outputs))
                 for node_id in new_node_inputs.keys():
                     node = self.graph.get_node_by_id(node_id)
                     new_nodes_to_schedule.append(node)
@@ -1185,10 +1233,16 @@ class ComputeFlowContext:
         self.cflow = cflow
         self.schedule_next_lock = threading.Lock()
 
-        self._wait_list: List[flowui.Node] = []
+        self._wait_node_inputs: Dict[str, Dict[str, Any]] = {}
 
-    # def schedule_next(self, ):
-    #     pass
+    def fetch_wait_nodes_and_inputs(self):
+        wait_nodes: List[flowui.Node] = [
+            self.cflow.graph.get_node_by_id(nid)
+            for nid in self._wait_node_inputs.keys()
+        ]
+        res = self._wait_node_inputs.copy()
+        self._wait_node_inputs.clear()
+        return wait_nodes, res
 
 
 COMPUTE_FLOW_CONTEXT_VAR: contextvars.ContextVar[
@@ -1271,11 +1325,13 @@ def _get_test_cflow():
                          init_pos=flowui.XYPosition(-150, 300))
     cnode1 = CNodeTest1("1", "Test1", init_pos=flowui.XYPosition(100, 100))
     cnode2 = CNodeViewer("2", "Viewer", init_pos=flowui.XYPosition(400, 100))
-    cflow = ComputeFlow("test_develop", [
-        # snode,
-        # asnode,
-        # cnode1,
-        # cnode2,
-    ],
-                        dont_read_from_storage=False)
+    cflow = ComputeFlow(
+        "test_develop",
+        [
+            # snode,
+            # asnode,
+            # cnode1,
+            # cnode2,
+        ],
+        dont_read_from_storage=False)
     return cflow

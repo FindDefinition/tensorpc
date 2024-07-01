@@ -25,7 +25,7 @@ def is_async_gen(ann_type: Any) -> bool:
 @dataclass
 class AnnotatedArg:
     name: str 
-    param: inspect.Parameter 
+    param: Optional[inspect.Parameter] 
     type: Any 
     annometa: Optional[Any] = None 
 
@@ -58,7 +58,9 @@ def parse_annotated_function(func: Callable) -> Tuple[List[AnnotatedArg], Option
 
             arg_anno = AnnotatedArg(name, param, anno, annotated_metas)
             anno_args.append(arg_anno)
-
+    for name, param in name_to_parameter.items():
+        if name not in annos and param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD):
+            anno_args.append(AnnotatedArg(name, param, Any))
     return anno_args, return_anno
 
 class WTF(TypedDict):

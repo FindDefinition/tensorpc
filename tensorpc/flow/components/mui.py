@@ -1692,8 +1692,7 @@ class SimpleCodeEditor(MUIComponentBase[SimpleCodeEditorProps]):
             FrontendEventType.Change.value,
         ]
         super().__init__(UIType.SimpleEditor, SimpleCodeEditorProps, all_evs)
-        self.props.language = language
-        self.props.value = value
+        self.prop(language=language, value=value)
         self.view_state = None
         self.event_change = self._create_event_slot(FrontendEventType.Change)
 
@@ -4580,7 +4579,7 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         self.event_proxy_lazy_load = self._create_event_slot(
             FrontendEventType.DataGridProxyLazyLoadRange)
 
-        self.event_before_mount.on(self._proxy_init)
+        self.event_before_mount.on_standard(self._proxy_init)
         self.event_proxy_lazy_load.on(self._data_lazy_load)
         self.prop(customHeaderDatas=customHeaderDatas,
                   customFooterDatas=customFooterDatas)

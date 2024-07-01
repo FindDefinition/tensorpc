@@ -48,6 +48,7 @@ REQUIRED = [
     "humanize",
     "pyright",
     "pydantic>=2.7,<3.0",
+    "setproctitle",
 ]
 
 # What packages are optional?

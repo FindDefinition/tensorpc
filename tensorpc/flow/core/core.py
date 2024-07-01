@@ -1046,22 +1046,65 @@ class EventSlotZeroArg(_EventSlotBase):
         self.comp.remove_event_handler(self.event_type, handler)
         return self
 
+class _EventSlotEmitterBase:
 
-class EventSlotEmitter:
+    def __init__(self, event_type: EventDataType,
+                 emitter: "AsyncIOEventEmitter[EventDataType, Event]"):
+        self.event_type = event_type
+        self.emitter = emitter
+
+    def on_standard(self, handler: Callable[[Event], Any]) -> Self:
+        """standard event means the handler must be a function with one argument of Event.
+        this must be used to get template key
+        if you use template layout such as table column def.
+        """
+        self.emitter.on(self.event_type, handler)
+        return self
+
+class EventSlotEmitter(_EventSlotEmitterBase, Generic[TEventData]):
+    # TODO remove this
+    def __init__(self, event_type: EventDataType,
+                 emitter: "AsyncIOEventEmitter[EventDataType, Event]",
+                 converter: Optional[Callable[[Any], TEventData]] = None):
+        self.event_type = event_type
+        self.emitter = emitter
+        self.converter = converter
+
+    def on(self, handler: Callable[[TEventData], Any]) -> "EventSlotEmitter":
+        """simple event means the event data isn't Event, but the data of Event, or none for no-arg event
+        such as click.
+        """
+        # use f_key as correct key instead of partial.
+        self.emitter.on(self.event_type, partial(self._handle_event, handler=handler), f_key=handler)
+        return self
+
+    def _handle_event(self, event: Event, handler: Callable[[TEventData], Any]):
+        if self.converter is not None:
+            return handler(self.converter(event.data))
+        return handler(event.data)
+
+    def off(self, handler: Callable) -> "EventSlotEmitter":
+        self.emitter.remove_listener(self.event_type, handler)
+        return self
+
+class EventSlotNoArgEmitter(_EventSlotEmitterBase):
     # TODO remove this
     def __init__(self, event_type: EventDataType,
                  emitter: "AsyncIOEventEmitter[EventDataType, Event]"):
         self.event_type = event_type
         self.emitter = emitter
 
-    def on(self, handler: Callable[[Event], Any]) -> "EventSlotEmitter":
+    def on(self, handler: Callable[[], Any]) -> Self:
         """simple event means the event data isn't Event, but the data of Event, or none for no-arg event
         such as click.
         """
-        self.emitter.on(self.event_type, handler)
+        self.emitter.on(self.event_type, partial(self._handle_event, handler=handler), f_key=handler)
         return self
 
-    def off(self, handler: Callable) -> "EventSlotEmitter":
+    def _handle_event(self, event: Event, handler: Callable[[], Any]):
+        return handler()
+
+    def off(self, handler: Callable) -> Self:
         self.emitter.remove_listener(self.event_type, handler)
         return self
 
@@ -1153,9 +1196,9 @@ class Component(Generic[T_base_props, T_child]):
             EventDataType, Event] = AsyncIOEventEmitter()
         self._flow_event_emitter.add_exception_listener(
             self.__event_emitter_on_exc)
-        self.event_before_mount = self._create_emitter_event_slot(
+        self.event_before_mount = self._create_emitter_event_slot_noarg(
             FrontendEventType.BeforeMount)
-        self.event_before_unmount = self._create_emitter_event_slot(
+        self.event_before_unmount = self._create_emitter_event_slot_noarg(
             FrontendEventType.BeforeUnmount)
 
     def use_effect(self,
@@ -1208,6 +1251,17 @@ class Component(Generic[T_base_props, T_child]):
         else:
             event_type_value = event_type
         return EventSlotEmitter(event_type_value, self._flow_event_emitter)
+
+    def _create_emitter_event_slot_noarg(self, event_type: Union[FrontendEventType,
+                                                           EventDataType]):
+        if isinstance(event_type, FrontendEventType):
+            event_type_value = event_type.value
+            assert event_type.value < 0, "only support backend events"
+            return EventSlotNoArgEmitter(event_type_value,
+                                     self._flow_event_emitter)
+        else:
+            event_type_value = event_type
+        return EventSlotNoArgEmitter(event_type_value, self._flow_event_emitter)
 
     @property
     def flow_event_emitter(self) -> AsyncIOEventEmitter[EventDataType, Event]:

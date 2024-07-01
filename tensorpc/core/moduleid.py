@@ -66,7 +66,8 @@ else:
 
 
 def loose_isinstance(obj, _class_or_tuple: _ClassInfo):
-    """for reloaded code, the type of obj may be different from the type of the class in the current module.
+    """for reloaded code, the type of obj may be different from the 
+    type of the class in the current module.
     """
     obj_qnames = get_mro_qualnames_of_type(type(obj))
     if not isinstance(_class_or_tuple, (list, tuple)):

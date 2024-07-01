@@ -198,7 +198,7 @@ class CustomNode(ComputeNode):
 @register_compute_node(key=ReservedNodeTypes.AsyncGenCustom, name="Async Gen Custom Node", icon_cfg=mui.IconProps(icon=mui.IconType.Code))
 class AsyncGenCustomNode(CustomNode):
     def init_node(self):
-        base_code_path = _MEDIA_ROOT / "asynccystom_base.py"
+        base_code_path = _MEDIA_ROOT / "asynccustom_base.py"
         with open(base_code_path, "r") as f:
             base_code = f.read()
         self._code_editor = mui.MonacoEditor(base_code, "python",

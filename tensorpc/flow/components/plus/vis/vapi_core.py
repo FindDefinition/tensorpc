@@ -596,13 +596,13 @@ async def _install_table_before_mount(ev: three.Event, obj: three.Component,
 
 def _install_obj_event_handlers(obj: three.Component, canvas: ComplexCanvas):
     if isinstance(obj, three.Group):
-        obj.event_before_mount.on(
+        obj.event_before_mount.on_standard(
             partial(_install_table_before_mount, obj=obj, canvas=canvas))
-        obj.event_before_unmount.on(
+        obj.event_before_unmount.on_standard(
             partial(_uninstall_table_when_unmount, obj=obj, canvas=canvas))
-    obj.event_before_mount.on(
+    obj.event_before_mount.on_standard(
         partial(_install_detail_before_mount, obj=obj, canvas=canvas))
-    obj.event_before_unmount.on(
+    obj.event_before_unmount.on_standard(
         partial(_uninstall_detail_when_unmount, obj=obj, canvas=canvas))
 
 

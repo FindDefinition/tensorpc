@@ -1163,7 +1163,8 @@ class FunctionUserMeta:
         assert self._event_name != ""
         return self._event_name
 
-
+def identity_wrapper(func):
+    return func
 class EventProvider:
 
     def __init__(self,
@@ -1335,7 +1336,10 @@ class ServiceUnit(DynamicClass):
     def get_all_event_providers(self):
         return self.name_to_events
 
-    def get_service_unit_ids(self):
+    @identity_wrapper
+    def get_service_unit_ids(self) -> List[str]:
+        a = 1 + 3
+        c = a + 4
         if self.alias is not None:
             return [self.module_key, self.alias]
         else:

@@ -619,15 +619,16 @@ class BasicObjectTree(mui.FlexBox):
     async def set_object(self,
                          obj,
                          key: str = _DEFAULT_OBJ_NAME,
-                         expand_level: int = 1):
+                         expand_level: int = 1,
+                         validator: Optional[Callable[[Any], bool]] = None):
         key_in_root = key in self.root
         self.root[key] = obj
         with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree,
                                             self)):
             obj_tree = await self._tree_parser.get_root_tree(
-                obj, key, expand_level, ns=self.tree.props.tree.id)
-            await self._tree_parser.parse_obj_to_tree(obj, obj_tree,
-                                                      expand_level)
+                obj, key, expand_level, ns=self.tree.props.tree.id, validator=validator)
+            # await self._tree_parser.parse_obj_to_tree(obj, obj_tree,
+            #                                           expand_level, validator)
         # obj_tree = await _get_obj_tree(obj, self._checker, key,
         #                          self.tree.props.tree.id, self._obj_meta_cache,
         #                          self._cached_lazy_expand_uids,

@@ -1,4 +1,4 @@
-# Copyright 2023 Yan Yan
+# Copyright 2024 Yan Yan
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -248,10 +248,6 @@ class ScriptManager(mui.FlexBox):
                 )
                 await proc.wait()
                 print(f'[cmd exited with {proc.returncode}]')
-                # if stdout:
-                #     print(f'[stdout]\n{stdout.decode()}')
-                # if stderr:
-                #     print(f'[stderr]\n{stderr.decode()}')
             elif item.lang == "cpp":
                 import ccimport
                 from ccimport.utils import tempdir
@@ -274,7 +270,7 @@ class ScriptManager(mui.FlexBox):
                                                load_library=False,
                                                verbose=False)
                     subprocess.check_call([str(source)])
-            if item.lang == "app":
+            elif item.lang == "app":
                 mod_dict = {}
                 code_comp = compile(code, fname, "exec")
                 exec(code_comp, mod_dict)

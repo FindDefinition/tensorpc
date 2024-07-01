@@ -10,30 +10,19 @@ from types import CodeType, FrameType
 from typing import Any, Callable, Dict, Mapping, Optional, Set, Tuple, Type
 from tensorpc import compat
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
+from .core import TraceEventType, FrameEventBase
+
 
 THREAD_GLOBALS = threading.local()
 
-
-class TraceType(enum.Enum):
-    Call = 0
-    Return = 1
-
-
 @dataclass
-class FrameResult:
-    type: TraceType
-    qualname: str
-    filename: str
-    lineno: int
+class FrameResult(FrameEventBase):
     local_vars: Mapping[str, Any]
     # depth only available when trace return (slower mode).
     depth: int = -1
     module_qname: str = ""
     timestamp: int = -1
     c_call_obj: Optional[object] = None
-
-    def get_unique_id(self):
-        return f"{self.filename}@:{self.lineno}{self.qualname}"
 
 
 class Tracer(object):
@@ -186,11 +175,11 @@ class Tracer(object):
             THREAD_GLOBALS.depth -= 1
             # print(event, frame.f_code.co_name, "THREAD_GLOBALS.depth", THREAD_GLOBALS.depth)
             self.callback(
-                self.get_frame_result(TraceType.Return, frame,
+                self.get_frame_result(TraceEventType.Return, frame,
                                       THREAD_GLOBALS.depth))
 
     @staticmethod
-    def get_frame_result(trace_type: TraceType,
+    def get_frame_result(trace_type: TraceEventType,
                          frame: FrameType,
                          depth: int = -1,
                          c_call_obj: Optional[object] = None):
@@ -240,7 +229,7 @@ class Tracer(object):
         if not self._filter_frame(frame):
             return None
         if event == "call":
-            self.callback(self.get_frame_result(TraceType.Call, frame))
+            self.callback(self.get_frame_result(TraceEventType.Call, frame))
         return None
 
     def trace_return_func(self, frame: FrameType, event, arg):
@@ -274,7 +263,7 @@ class Tracer(object):
             return None
         if event == "call":
             self.callback(
-                self.get_frame_result(TraceType.Call, frame,
+                self.get_frame_result(TraceEventType.Call, frame,
                                       THREAD_GLOBALS.depth))
             # print("THREAD_GLOBALS.depth CALL", THREAD_GLOBALS.depth)
 

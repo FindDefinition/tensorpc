@@ -15,9 +15,6 @@
 Reload System
 
 Layout Instance: App itself and layout objects created on AnyFlexLayout.
-
-
-
 """
 import ast
 import asyncio
@@ -55,6 +52,7 @@ from watchdog.observers.api import ObservedWatch
 from tensorpc import simple_chunk_call_async
 from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.constants import PACKAGE_ROOT, TENSORPC_FILE_NAME_PREFIX, TENSORPC_FLOW_FUNC_META_KEY, TENSORPC_OBSERVED_FUNCTION_ATTR
+from tensorpc.core.astex.astcache import AstCache
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.defs import FileResource
 from tensorpc.core.funcid import remove_common_indent_from_code
@@ -68,6 +66,7 @@ from tensorpc.core.serviceunit import (ObjectReloadManager,
                                        ReloadableDynamicClass,
                                        ServFunctionMeta, ServiceUnit,
                                        SimpleCodeManager, get_qualname_to_code)
+from tensorpc.core.tracers.codefragtracer import get_trace_infos_from_coderange_item
 from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.constants import TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
@@ -93,7 +92,7 @@ from ..core.appcore import enter_app_conetxt
 from ..core.appcore import enter_app_conetxt as _enter_app_conetxt
 from ..core.appcore import get_app, get_app_context
 from ..components import plus
-from tensorpc.core.tracer import FrameResult, Tracer, TraceType
+from tensorpc.core.tracers.tracer import FrameResult, Tracer, TraceEventType
 from ..core.core import (AppComponentCore, AppEditorEvent, AppEditorEventType,
                    AppEditorFrontendEvent, AppEditorFrontendEventType,
                    AppEvent, AppEventType, BasicProps, Component,
@@ -1055,6 +1054,27 @@ class App:
         return res 
 
     async def run_vscode_event(self, data: VscodeTensorpcMessage):
+        # print(data)
+        # print("WTF", data.selections is not None and len(data.selections) > 0 )
+        # try:
+        #     if data.selections is not None and len(data.selections) > 0 and data.currentUri.startswith("file://"):
+        #         path = data.currentUri[7:]
+        #         sel = data.selections[0]
+        #         lineno = sel.start.line + 1
+        #         col = sel.start.character
+        #         end_lineno = sel.end.line + 1
+        #         end_col = sel.end.character
+        #         cache = AstCache()
+        #         print(lineno, col, end_lineno, end_col)
+        #         code_range = lineno, col, end_lineno, end_col
+        #         item = cache.query_path(Path(path))
+        #         print(item.query_code_range_nodes(lineno, col, end_lineno, end_col))
+        #         # print(cache.query_path(Path(path)).code_range_to_nodes)
+        #         trace_info = get_trace_infos_from_coderange_item(item, code_range)
+        #         print(trace_info)
+        # except:
+        #     traceback.print_exc()
+        #     raise
         return await self._flowapp_special_eemitter.emit_async(
             AppSpecialEventType.VscodeTensorpcMessage, data)
 

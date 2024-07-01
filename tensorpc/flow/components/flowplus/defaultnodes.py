@@ -24,9 +24,9 @@ class JsonInputNode(ComputeNode):
         self._saved_value = value
 
     def get_node_layout(self) -> mui.FlexBox | None:
-        return mui.HBox([
-            self._editor.prop(width="100%", height="100%", editorPadding=5)
-        ]).prop(flex=1, minWidth="150px", maxWidth="300px")
+        return mui.VBox([
+            self._editor.prop(editorPadding=5)
+        ]).prop(width="200px", maxHeight="300px")
 
     async def compute(self) -> OutputDict:
         data = json.loads(self._editor.props.value)
@@ -58,12 +58,25 @@ class ObjectTreeViewerNode(ComputeNode):
             use_fast_tree=False)
 
     def get_node_layout(self) -> mui.FlexBox | None:
-        return mui.VBox([
+        res = mui.VBox([
             self.item_tree.prop(width="100%", height="100%", flex=1)
         ]).prop(flex=1, minWidth="250px", minHeight="300px", height="300px", overflow="hidden")
+        # if we use virtual tree, we need to set height
+        if isinstance(self.item_tree.tree, mui.TanstackJsonLikeTree):
+            res.prop(minHeight="300px", height="300px")
+        else:
+            res.prop(minHeight="100px")
+        return res
+
+    def _expand_validator(self, node: Any):
+        if isinstance(node, (dict, )):
+            return len(node) < 30
+        if isinstance(node, (list, tuple, set)):
+            return len(node) < 10
+        return False
 
     async def compute(self, obj: Any) -> None:
-        await self.item_tree.set_object(obj, key="obj", expand_level=1)
+        await self.item_tree.set_object(obj, key="obj", expand_level=1000, validator=self._expand_validator)
         await self.item_tree.expand_all()
 
 @register_compute_node(key=ReservedNodeTypes.Expr, name="Eval Expr")

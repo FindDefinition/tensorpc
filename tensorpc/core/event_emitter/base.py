@@ -38,7 +38,6 @@ class EventEmitter(Generic[KT, Unpack[VTs]]):
     raised exceptions are not automatically handled for you---you must catch
     your own exceptions, and treat them accordingly.
     """
-
     def __init__(self) -> None:
         self._events: Dict[
             KT,
@@ -61,7 +60,8 @@ class EventEmitter(Generic[KT, Unpack[VTs]]):
     def on(
         self,
         event: KT,
-        f: Optional[Callable[[Unpack[VTs]], Any]] = None
+        f: Optional[Callable[[Unpack[VTs]], Any]] = None,
+        f_key: Optional[Callable[..., Any]] = None,
     ) -> Union[Callable[[Unpack[VTs]], Any], Callable[
         [Callable[[Unpack[VTs]], Any]], Callable[[Unpack[VTs]], Any]]]:
         """Registers the function `f` to the event name `event`, if provided.
@@ -93,7 +93,7 @@ class EventEmitter(Generic[KT, Unpack[VTs]]):
         if f is None:
             return self.listens_to(event)
         else:
-            return self.add_listener(event, f)
+            return self.add_listener(event, f, f_key)
 
     def listens_to(
         self, event: KT
@@ -111,17 +111,21 @@ class EventEmitter(Generic[KT, Unpack[VTs]]):
         By only supporting the decorator use case, this method has improved
         type safety over `EventEmitter#on`.
         """
-
-        def on(f: Callable[[Unpack[VTs]],
-                           Any]) -> Callable[[Unpack[VTs]], Any]:
-            self._add_event_handler(event, f, f)
+        def on(
+            f: Callable[[Unpack[VTs]], Any],
+            f_key: Optional[Callable[..., Any]] = None,
+        ) -> Callable[[Unpack[VTs]], Any]:
+            self._add_event_handler(event, f if f_key is None else f_key, f)
             return f
 
         return on
 
     def add_listener(
-            self, event: KT, f: Callable[[Unpack[VTs]],
-                                         Any]) -> Callable[[Unpack[VTs]], Any]:
+        self,
+        event: KT,
+        f: Callable[[Unpack[VTs]], Any],
+        f_key: Optional[Callable[..., Any]] = None
+    ) -> Callable[[Unpack[VTs]], Any]:
         """Register the function `f` to the event name `event`:
 
         ```
@@ -134,7 +138,7 @@ class EventEmitter(Generic[KT, Unpack[VTs]]):
         By not supporting the decorator use case, this method has improved
         type safety over `EventEmitter#on`.
         """
-        self._add_event_handler(event, f, f)
+        self._add_event_handler(event, f if f_key is None else f_key, f)
         return f
 
     def listens_to_exception(
@@ -153,7 +157,6 @@ class EventEmitter(Generic[KT, Unpack[VTs]]):
         By only supporting the decorator use case, this method has improved
         type safety over `EventEmitter#on`.
         """
-
         def on(
             f: Callable[[ExceptionParam],
                         Any]) -> Callable[[ExceptionParam], Any]:
@@ -364,11 +367,9 @@ class EventEmitter(Generic[KT, Unpack[VTs]]):
         """The same as `ee.on`, except that the listener is automatically
         removed after being called.
         """
-
         def _wrapper(
                 f: Callable[[Unpack[VTs]],
                             Any]) -> Callable[[Unpack[VTs]], Any]:
-
             def g(*args: Unpack[VTs], ) -> Any:
                 with self._lock:
                     # Check that the event wasn't removed already right
