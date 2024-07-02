@@ -45,7 +45,7 @@ class SimpleFileReader(mui.FlexBox):
                   justifyContent="center",
                   alignItems="center")
 
-        self.register_event_handler(FrontendEventType.Drop.value,
+        self.register_event_handler(FrontendEventType.FileDrop.value,
                                     self.on_drop_file)
 
     async def on_drop_file(self, file: File):

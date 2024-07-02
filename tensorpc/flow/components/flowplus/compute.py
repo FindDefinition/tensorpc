@@ -193,6 +193,7 @@ class NodeContextMenuItemNames:
     CopyNode = "Copy node"
     DeleteNode = "Delete node"
     RenameNode = "Rename node"
+    DebugUpdateNodeInternals = "Debug Update Internals"
 
 
 class PaneContextMenuItemNames:
@@ -526,7 +527,7 @@ class ComputeNodeWrapper(mui.FlexBox):
         ]).prop(className=f"{ComputeFlowClasses.NodeItem}")
         self.middle_node_container = mui.Fragment(([
             mui.VBox([self.middle_node_layout]).prop(
-                className=ComputeFlowClasses.NodeItem, flex=1)
+                className=ComputeFlowClasses.NodeItem, flex=1, overflow="hidden")
         ] if self.middle_node_layout is not None else []))
         resizer = flowui.NodeResizer()
         self.resizers: mui.LayoutType = []
@@ -668,9 +669,20 @@ class ComputeNodeWrapper(mui.FlexBox):
         res.update_status_locally(data["status"])
         return res
 
+@dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
+class _ComputeTaskResult:
+    result: Any 
+    exception: Optional[BaseException] = None 
+    exc_msg: Optional[UserMessage] = None 
 
 async def _awaitable_to_coro(aw: Awaitable):
-    return await aw
+    try:
+        return _ComputeTaskResult(result=await aw)
+    except Exception as exc:
+        tb = sys.exc_info()[2]
+        traceback.print_exc()
+        exc_msg = UserMessage.from_exception("", exc, tb)
+        return _ComputeTaskResult(result=None, exception=exc, exc_msg=exc_msg)
 
 
 class ComputeFlow(mui.FlexBox):
@@ -772,14 +784,17 @@ class ComputeFlow(mui.FlexBox):
             mui.MenuItem(NodeContextMenuItemNames.RenameNode,
                          NodeContextMenuItemNames.RenameNode,
                          inset=True),
+            mui.MenuItem(NodeContextMenuItemNames.DebugUpdateNodeInternals,
+                         NodeContextMenuItemNames.DebugUpdateNodeInternals,
+                         inset=True),
         ]
         self.view_pane_menu_items = [
             mui.MenuItem(PaneContextMenuItemNames.SideLayout,
-                         PaneContextMenuItemNames.SideLayout,
+                         "Side Layout",
                          icon=mui.IconType.Done,
                          inset=False),
             mui.MenuItem(PaneContextMenuItemNames.DisableAllResizer,
-                         PaneContextMenuItemNames.DisableAllResizer,
+                         "Disable All Resizer",
                          icon=None,
                          inset=True),
 
@@ -867,7 +882,9 @@ class ComputeFlow(mui.FlexBox):
     async def update_cnode(self,
                            node_id: str,
                            cnode: ComputeNode,
-                           unchange_when_length_equal: bool = True):
+                           unchange_when_length_equal: bool = False):
+        if unchange_when_length_equal:
+            raise NotImplementedError("unchange_when_length_equal not implemented, wait for reactflow 12.")
         prev_node = self.graph.get_node_by_id(node_id)
         wrapper = prev_node.get_component_checked(ComputeNodeWrapper)
         prev_inp_handles = wrapper.inp_handles
@@ -893,17 +910,16 @@ class ComputeFlow(mui.FlexBox):
                     prev_edges = self.graph.get_edges_by_node_and_handle_id(
                         node_id, handle_id)
                     edge_id_to_be_removed.extend([e.id for e in prev_edges])
-
         # check out handles
         if not unchange_when_length_equal or (
                 unchange_when_length_equal
                 and len(prev_out_handles) != len(cur_out_handles)):
             for handle_id in prev_out_handle_ids:
                 if handle_id not in cur_out_handle_ids:
+                    print("WTF")
                     prev_edges = self.graph.get_edges_by_node_and_handle_id(
                         node_id, handle_id)
                     edge_id_to_be_removed.extend([e.id for e in prev_edges])
-
         await self.graph.update_node_internals([node_id])
         await self.graph.delete_edges_by_ids(edge_id_to_be_removed)
 
@@ -923,6 +939,8 @@ class ComputeFlow(mui.FlexBox):
             await self._node_setting_dialog.set_open(True,
                                                      {"node_id": node_id})
             await save_data_storage(self.storage_key, self.state_dict())
+        elif item_id == NodeContextMenuItemNames.DebugUpdateNodeInternals:
+            await self.graph.update_node_internals([node_id])
 
     async def _on_pane_contextment(self, data):
         item_id = data["itemId"]
@@ -947,7 +965,7 @@ class ComputeFlow(mui.FlexBox):
                 self.flow_options.enable_side_layout_view = True
         elif item_id == PaneContextMenuItemNames.DisableAllResizer:
             if self.flow_options.disable_all_resizer:
-                await self.graph.send_and_wait(self.graph.update_event(invisiblizeAllResizer=True))
+                await self.graph.send_and_wait(self.graph.update_event(invisiblizeAllResizer=False))
                 await self.graph.update_pane_context_menu_items([
                     mui.MenuItem(PaneContextMenuItemNames.DisableAllResizer,
                                     icon=None,
@@ -955,7 +973,7 @@ class ComputeFlow(mui.FlexBox):
                 ])
                 self.flow_options.disable_all_resizer = False
             else:
-                await self.graph.send_and_wait(self.graph.update_event(invisiblizeAllResizer=False))
+                await self.graph.send_and_wait(self.graph.update_event(invisiblizeAllResizer=True))
                 await self.graph.update_pane_context_menu_items([
                     mui.MenuItem(PaneContextMenuItemNames.DisableAllResizer,
                                     icon=mui.IconType.Done,
@@ -1196,10 +1214,11 @@ class ComputeFlow(mui.FlexBox):
                 assert source_handle is not None and target_handle is not None
                 source_handle_name = source_handle.split("-")[1]
                 target_handle_name = target_handle.split("-")[1]
-                if target_node.id not in new_node_inputs:
-                    new_node_inputs[target_node.id] = {}
-                new_node_inputs[target_node.id][target_handle_name] = output[
-                    source_handle_name]
+                if source_handle_name in output:
+                    if target_node.id not in new_node_inputs:
+                        new_node_inputs[target_node.id] = {}
+                    new_node_inputs[target_node.id][target_handle_name] = output[
+                        source_handle_name]
         return new_node_inputs
 
     async def _schedule(self, nodes: List[flowui.Node],
@@ -1210,26 +1229,26 @@ class ComputeFlow(mui.FlexBox):
         if ctx is not None:
             wait_nodes, wait_inputs = ctx.fetch_wait_nodes_and_inputs()
             nodes_to_schedule = nodes_to_schedule + wait_nodes
-            node_inputs = {**node_inputs, **wait_inputs}
+            node_inputs = {**wait_inputs, **node_inputs}
+
         cur_node_inputs = node_inputs.copy()
         cur_anode_iters: Dict[str, AsyncIterator] = {}
         shutdown_task = asyncio.create_task(shutdown_ev.wait())
         try:
-            while nodes_to_schedule:
+            ctx = get_compute_flow_context()
+            while (nodes_to_schedule or (ctx is not None and ctx._wait_node_inputs)):
                 new_nodes_to_schedule: List[flowui.Node] = []
                 new_node_inputs: Dict[str, Dict[str, Any]] = {}
                 # 1. validate node inputs, all input handle (not optional) must be
                 #    provided in node inputs
+                if ctx is not None:
+                    wait_nodes, wait_inputs = ctx.fetch_wait_nodes_and_inputs()
+                    nodes_to_schedule = nodes_to_schedule + wait_nodes
+                    cur_node_inputs = {**cur_node_inputs, **wait_inputs}
                 valid_nodes = self._filter_node_cant_schedule(
                     nodes_to_schedule, cur_node_inputs, cur_anode_iters)
                 if not valid_nodes:
                     break
-                ctx = get_compute_flow_context()
-                if ctx is not None:
-                    wait_nodes, wait_inputs = ctx.fetch_wait_nodes_and_inputs()
-
-                    valid_nodes = valid_nodes + wait_nodes
-                    cur_node_inputs = {**cur_node_inputs, **wait_inputs}
                 # 2. remove duplicate nodes
                 valid_nodes_id_set = set(n.id for n in valid_nodes)
                 new_valid_nodes: List[flowui.Node] = []
@@ -1272,7 +1291,7 @@ class ComputeFlow(mui.FlexBox):
                             await self.send_exception(exc)
                             continue
                         if inspect.iscoroutine(data):
-                            task = asyncio.create_task(data,
+                            task = asyncio.create_task(_awaitable_to_coro(data),
                                                        name=f"node-{n.id}")
                             tasks.append(task)
                             task_to_noded[task] = n
@@ -1311,17 +1330,23 @@ class ComputeFlow(mui.FlexBox):
                     else:
                         results.append(task.result())
                 # results = await asyncio.gather(*tasks, return_exceptions=True)
-                for (tk, res) in zip(tasks, results):
+                for (tk, task_res) in zip(tasks, results):
                     node = task_to_noded[tk]
                     node_id = node.id
                     wrapper = node.get_component_checked(ComputeNodeWrapper)
-                    if isinstance(res, StopAsyncIteration):
+                    assert isinstance(task_res, _ComputeTaskResult)
+                    res = task_res.result
+                    exc = task_res.exception
+                    if isinstance(exc, StopAsyncIteration):
                         cur_anode_iters.pop(node_id)
                         await wrapper.update_status(NodeStatus.Ready)
                         continue
-                    if isinstance(res, BaseException):
+                    if isinstance(exc, BaseException):
                         await wrapper.update_status(NodeStatus.Error)
-                        await self.send_exception(res)
+                        exc_msg = task_res.exc_msg
+                        assert exc_msg is not None 
+                        exc_msg.uid = self._flow_uid_encoded
+                        await self.put_app_event(self.create_user_msg_event(exc_msg))
                         continue
                     if res is None:
                         res = {}  # for node without output, we support None.
@@ -1347,7 +1372,7 @@ class ComputeFlow(mui.FlexBox):
                             await wrapper.update_status(NodeStatus.Ready)
                     else:
                         await wrapper.update_status(NodeStatus.Error)
-                print("Node Outputs", node_outputs)
+                # print("Node Outputs", node_outputs)
                 new_node_inputs.update(
                     self._get_next_node_inputs(node_outputs))
                 for node_id in new_node_inputs.keys():
@@ -1411,6 +1436,19 @@ def enter_flow_ui_context_object(ctx: ComputeFlowContext):
     finally:
         COMPUTE_FLOW_CONTEXT_VAR.reset(token)
 
+async def schedule_next(node_id: str, node_output: Dict[str, Any]):
+    """schedule next nodes by current node id and current node output
+    """
+    ctx = get_compute_flow_context()
+    assert ctx is not None, "you must enter flow ui context before call this function"
+    await ctx.cflow.schedule_next(node_id, node_output)
+
+async def schedule_node(node_id: str, node_inputs: Dict[str, Any]):
+    """schedule current node by node id and current node inputs
+    """
+    ctx = get_compute_flow_context()
+    assert ctx is not None, "you must enter flow ui context before call this function"
+    await ctx.cflow.schedule_node(node_id, node_inputs)
 
 class CNodeTest1(ComputeNode):
     class OutputDict(TypedDict):

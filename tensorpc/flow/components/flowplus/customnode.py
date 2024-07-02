@@ -20,12 +20,13 @@ class CustomNode(ComputeNode):
         base_code_path = _MEDIA_ROOT / "customnode_base.py"
         with open(base_code_path, "r") as f:
             base_code = f.read()
+        self._base_code = base_code
         actions = [
             mui.MonacoEditorAction(id=CustomNodeEditorActionNames.CreateTemplate, 
                 label="Create Node Template", contextMenuGroupId="tensorpc-flow-editor-action", contextMenuOrder=1.5)
         ]
         self._code_editor = mui.MonacoEditor(base_code, "python",
-                                             "test").prop(flex=1, actions=actions)
+                                             f"<tensorpc-flow-cflow-{self.id}>").prop(flex=1, actions=actions)
         self._template_key: Optional[str] = None
         self._cnode = self._get_cnode_cls_from_code(base_code)
         self._code_editor.event_editor_save.on(self.handle_code_editor_save)
@@ -99,9 +100,10 @@ class CustomNode(ComputeNode):
         return cnode
 
     async def handle_code_editor_save(self,
-                                      value: str,
+                                      save_ev: mui.MonacoEditorSaveEvent,
                                       update_editor: bool = False,
                                       check_template_key: bool = True):
+        value = save_ev.value
         ctx = get_compute_flow_context()
         assert ctx is not None, "can't find compute flow context!"
         new_cnode = self._get_cnode_cls_from_code(value)
@@ -121,7 +123,7 @@ class CustomNode(ComputeNode):
                                 CustomNode) and wrapper.cnode is not self:
                             if wrapper.cnode._template_key == self._template_key:
                                 await wrapper.cnode.handle_code_editor_save(
-                                    value,
+                                    save_ev,
                                     update_editor=True,
                                     check_template_key=False)
         with self.disable_template_fetch():
@@ -143,10 +145,10 @@ class CustomNode(ComputeNode):
             await self._setting_dialog.set_open(True)
 
     def _get_side_layouts(self):
-        layouts: mui.LayoutType = [
-            self._setting_dialog,
-            self._code_editor,
-        ]
+        layouts: mui.LayoutType = {
+            "dialog": self._setting_dialog,
+            f"editor-{self.id}": self._code_editor,
+        }
         return layouts
 
     def get_side_layout(self) -> Optional[mui.FlexBox]:
@@ -170,7 +172,7 @@ class CustomNode(ComputeNode):
             await ctx.cflow.update_cnode_icon_cfg(self.id, self.icon_cfg)
             if self._side_container.is_mounted():
                 # update side layout if is mounted
-                await self._side_container.set_new_layout([*self._get_side_layouts()])
+                await self._side_container.set_new_layout({**self._get_side_layouts()})
         else:
             if self._side_container.is_mounted():
                 await self._side_container.send_error("Template already created!", self.name)
@@ -193,7 +195,11 @@ class CustomNode(ComputeNode):
     @classmethod
     async def from_state_dict(cls, data: Dict[str, Any]):
         res = ComputeNode.from_state_dict_default(data, cls)
-        res._cnode = res._get_cnode_cls_from_code(data["__custom_node_code"])
+        try:
+            res._cnode = res._get_cnode_cls_from_code(data["__custom_node_code"])
+        except:
+            traceback.print_exc()
+            res._cnode = res._get_cnode_cls_from_code(res._base_code)
         res._code_editor.prop(value=data["__custom_node_code"])
         res._template_key = data["__template_key"]
         return res
@@ -207,6 +213,7 @@ class AsyncGenCustomNode(CustomNode):
             base_code = f.read()
         self._code_editor = mui.MonacoEditor(base_code, "python",
                                              "test").prop(flex=1)
+        self._base_code = base_code
         self._template_key: Optional[str] = None
         self._cnode = self._get_cnode_cls_from_code(base_code)
         self._code_editor.event_editor_save.on(self.handle_code_editor_save)

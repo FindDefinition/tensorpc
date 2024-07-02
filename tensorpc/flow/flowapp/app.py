@@ -1037,7 +1037,7 @@ class App:
                     # for file drop, we can't use regular drop above, so
                     # just convert it to drop event, no drag collect needed.
                     res[uid_original] = await comps[-1].handle_event(
-                        Event(FrontendEventType.Drop.value, data[1], keys,
+                        Event(FrontendEventType.FileDrop.value, data[1], keys,
                             indexes),
                         is_sync=is_sync)
                 else:

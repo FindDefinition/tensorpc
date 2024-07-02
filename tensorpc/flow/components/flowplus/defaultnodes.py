@@ -63,16 +63,20 @@ class ObjectTreeViewerNode(ComputeNode):
 
     @property
     def init_wrapper_config(self) -> Optional[WrapperConfig]:
-        return WrapperConfig(resizerProps=flowui.NodeResizerProps(
-            minWidth=250, minHeight=200),
-                             boxProps=mui.FlexBoxProps(width="100%",
-                                                       height="100%",
-                                                       minWidth="250px !important",
-                                                       minHeight=200))
+        return WrapperConfig(
+            resizerProps=flowui.NodeResizerProps(minWidth=250, minHeight=200),
+            boxProps=mui.FlexBoxProps(width="100%",
+                                      height="100%",
+                                      minWidth="250px !important",
+                                      minHeight=200))
+
+    @property
+    def init_cfg(self):
+        return NodeConfig(250, 200)
 
     def get_node_layout(self) -> Optional[mui.FlexBox]:
         res = mui.VBox(
-            [self.item_tree.prop(width="100%", height="100%", flex=1)]
+            [self.item_tree.prop(flex=1, overflow="auto")]
         )  # .prop(flex=1, minWidth="250px", minHeight="300px", maxWidth="500px")
         # if we use virtual tree, we need to set height
         # if isinstance(self.item_tree.tree, mui.TanstackJsonLikeTree):

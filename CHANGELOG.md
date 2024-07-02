@@ -1,4 +1,10 @@
 # Changelog
+# [0.11.8] - 2024-07-02
+### Changed 
+- change monaco editor save event format
+### Fixed 
+- fix some bug in compute flow
+
 # [0.11.7] - 2024-07-01
 ### Added 
 - add actions to monaco editor

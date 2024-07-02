@@ -1215,7 +1215,8 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
                          app_comp_core=app_comp_core,
                          allowed_events=[
                              FrontendEventType.Drop.value,
-                             FrontendEventType.DragCollect.value
+                             FrontendEventType.DragCollect.value,
+                             FrontendEventType.FileDrop.value,
                          ] + list(ALL_POINTER_EVENTS))
         self._wrapped_obj = wrapped_obj
         self.event_drop = self._create_event_slot(FrontendEventType.Drop)
@@ -1603,6 +1604,10 @@ class _MonacoEditorControlType(enum.IntEnum):
     SetLineNumber = 0
     Save = 1
 
+@dataclasses.dataclass
+class MonacoEditorSaveEvent:
+    value: str 
+    saveVersionId: int
 
 class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
     def __init__(self, value: str, language: str, path: str) -> None:
@@ -1618,20 +1623,21 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         self.props.language = language
         self.props.path = path
         self.props.value = value
-        self.view_state = None
-
+        self._view_state = None
+        self._save_version_id: Optional[int] = None
         self.register_event_handler(FrontendEventType.EditorSaveState.value,
                                     self._default_on_save_state)
         self.register_event_handler(FrontendEventType.EditorQueryState.value,
                                     self._default_on_query_state)
 
         self.event_change = self._create_event_slot(FrontendEventType.Change)
-        self.event_editor_save: EventSlot[str] = self._create_event_slot(
-            FrontendEventType.EditorSave)
+        self.event_editor_save = self._create_event_slot(
+            FrontendEventType.EditorSave, converter=lambda x: MonacoEditorSaveEvent(**x))
         self.event_editor_ready = self._create_event_slot_noarg(
             FrontendEventType.EditorReady)
         self.event_editor_action = self._create_event_slot(
             FrontendEventType.EditorAction)
+        self.event_editor_save.on(self._default_on_editor_save)
 
     def state_change_callback(
             self,
@@ -1640,10 +1646,19 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         self.props.value = value[0]
 
     def _default_on_save_state(self, state):
-        self.view_state = state
+        self._view_state = state["viewState"]
+        self._save_version_id = state.get("saveVersionId", None)
+
+    def _default_on_editor_save(self, ev: MonacoEditorSaveEvent):
+        self._save_version_id = ev.saveVersionId
 
     def _default_on_query_state(self):
-        return self.view_state
+        res = {}
+        if self._view_state is not None:
+            res["viewState"] = self._view_state
+        if self._save_version_id is not None:
+            res["saveVersionId"] = self._save_version_id
+        return res
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
