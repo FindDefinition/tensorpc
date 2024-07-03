@@ -1,8 +1,9 @@
 import inspect
+import abc 
 import json
 import traceback
 from pathlib import Path
-from typing import Any, Dict, Optional, Type, TypedDict
+from typing import Any, Dict, Optional, Tuple, Type, TypedDict
 
 from tensorpc.flow.components import flowui, mui
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
@@ -52,23 +53,31 @@ class JsonInputNode(ComputeNode):
         return res
 
 
+class ResizeableNodeBase(ComputeNode):
+    @property
+    def init_wrapper_config(self) -> Optional[WrapperConfig]:
+        init_cfg = self.init_cfg
+        assert init_cfg is not None, (f"you need to set init_cfg and set fixed "
+                                       "width/height as init value for resizer.")
+        assert init_cfg.width is not None and init_cfg.height is not None, (
+            "you need to set fixed width/height as init value for resizer.")
+        return WrapperConfig(
+            resizerProps=flowui.NodeResizerProps(minWidth=init_cfg.width, minHeight=init_cfg.height),
+            boxProps=mui.FlexBoxProps(width="100%",
+                                      height="100%",
+                                      minWidth=f"{init_cfg.width} !important",
+                                      minHeight=init_cfg.height))
+
+
+
 @register_compute_node(key=ReservedNodeTypes.ObjectTreeViewer,
                        name="Object Viewer",
                        icon_cfg=mui.IconProps(icon=mui.IconType.Visibility))
-class ObjectTreeViewerNode(ComputeNode):
+class ObjectTreeViewerNode(ResizeableNodeBase):
     def init_node(self):
         self.item_tree = BasicObjectTree(use_init_as_root=True,
                                          default_expand_level=1000,
                                          use_fast_tree=False)
-
-    @property
-    def init_wrapper_config(self) -> Optional[WrapperConfig]:
-        return WrapperConfig(
-            resizerProps=flowui.NodeResizerProps(minWidth=250, minHeight=200),
-            boxProps=mui.FlexBoxProps(width="100%",
-                                      height="100%",
-                                      minWidth="250px !important",
-                                      minHeight=200))
 
     @property
     def init_cfg(self):
@@ -87,7 +96,7 @@ class ObjectTreeViewerNode(ComputeNode):
 
     def _expand_validator(self, node: Any):
         if isinstance(node, (dict, )):
-            return len(node) < 30
+            return len(node) < 15
         if isinstance(node, (list, tuple, set)):
             return len(node) < 10
         return False

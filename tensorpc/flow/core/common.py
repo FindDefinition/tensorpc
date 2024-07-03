@@ -47,6 +47,7 @@ _ONEARG_COMPLEXL_EVENTS = set([
 _ONEARG_EDITOR_EVENTS = set([
     FrontendEventType.EditorSave.value,
     FrontendEventType.EditorSaveState.value,
+    FrontendEventType.EditorAction.value
 ])
 
 _ONEARG_SPECIAL_EVENTS = set([

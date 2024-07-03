@@ -1,4 +1,10 @@
 # Changelog
+# [0.11.9] - 2024-07-03
+### Fixed 
+- fix bugs of templates in compute flow
+### Added 
+- add a template manager for delete in compute flow
+
 # [0.11.8] - 2024-07-02
 ### Changed 
 - change monaco editor save event format

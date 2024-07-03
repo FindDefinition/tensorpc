@@ -4,6 +4,7 @@ import contextlib
 import contextvars
 import enum
 import inspect
+from os import read
 from pathlib import Path
 import sys
 import threading
@@ -11,11 +12,13 @@ import traceback
 from collections import deque
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator,
                     Awaitable, Coroutine, Deque, Dict, List, Literal, Mapping,
-                    Optional, Type, TypedDict, TypeVar, Union, get_origin)
+                    Optional, Tuple, Type, TypedDict, TypeVar, Union,
+                    get_origin)
 
 from colorama import init
 from typing_extensions import get_type_hints, is_typeddict
 
+from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.annocore import (AnnotatedArg, AnnotatedReturn,
                                     extract_annotated_type_and_meta, get_args,
@@ -30,12 +33,13 @@ from tensorpc.flow import marker
 from tensorpc.flow.appctx.core import (data_storage_has_item,
                                        read_data_storage,
                                        read_data_storage_by_glob_prefix,
-                                       save_data_storage)
+                                       remove_data_storage, save_data_storage)
 from tensorpc.flow.components import flowui, mui
-from tensorpc.flow.core.appcore import CORO_ANY
+from tensorpc.flow.core.appcore import CORO_ANY, find_all_components
 from tensorpc.flow.core.core import AppEvent, UserMessage
 from tensorpc.flow.jsonlike import (as_dict_no_undefined,
-                                    as_dict_no_undefined_no_deepcopy, merge_props_not_undefined)
+                                    as_dict_no_undefined_no_deepcopy,
+                                    merge_props_not_undefined)
 if TYPE_CHECKING:
     from tensorpc.flow.components.flowplus.customnode import CustomNode
 
@@ -163,10 +167,12 @@ def is_typeddict_or_typeddict_async_gen(type):
 class NodeSideLayoutOptions:
     vertical: Union[bool, mui.Undefined] = mui.undefined
 
+
 @dataclasses.dataclass
 class FlowOptions:
     enable_side_layout_view: bool = True
     disable_all_resizer: bool = False
+
 
 @dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
 class AnnoHandle:
@@ -199,6 +205,7 @@ class NodeContextMenuItemNames:
 class PaneContextMenuItemNames:
     SideLayout = "SideLayoutVisible"
     DisableAllResizer = "DisableAllResizer"
+    ManageTemplates = "ManageTemplates"
 
 
 @dataclasses.dataclass
@@ -527,18 +534,18 @@ class ComputeNodeWrapper(mui.FlexBox):
         ]).prop(className=f"{ComputeFlowClasses.NodeItem}")
         self.middle_node_container = mui.Fragment(([
             mui.VBox([self.middle_node_layout]).prop(
-                className=ComputeFlowClasses.NodeItem, flex=1, overflow="hidden")
+                className=ComputeFlowClasses.NodeItem,
+                flex=1,
+                overflow="hidden")
         ] if self.middle_node_layout is not None else []))
-        resizer = flowui.NodeResizer()
+        resizer = self._get_resizer_from_cnode(cnode)
         self.resizers: mui.LayoutType = []
-        if cnode.init_wrapper_config is not None:
-            if cnode.init_wrapper_config.resizerProps is not None:
-                merge_props_not_undefined(resizer.props,
-                                          cnode.init_wrapper_config.resizerProps)
-                self.resizers = [resizer]
+        if resizer is not None:
+            self.resizers = [resizer]
+        self._resizer_container = mui.Fragment([*self.resizers])
         super().__init__([
             self.header_container, self.input_args, self.middle_node_container,
-            self.output_args, self.status_box, *self.resizers
+            self.output_args, self.status_box, self._resizer_container
         ])
         self.prop(
             className=
@@ -546,9 +553,21 @@ class ComputeNodeWrapper(mui.FlexBox):
         )
         self.prop(borderWidth="1px", borderStyle="solid", borderColor="black")
         if cnode.init_wrapper_config is not None and cnode.init_wrapper_config.boxProps is not None:
-            merge_props_not_undefined(self.props, cnode.init_wrapper_config.boxProps)
+            merge_props_not_undefined(self.props,
+                                      cnode.init_wrapper_config.boxProps)
 
         self.status = NodeStatus.Ready
+
+    def _get_resizer_from_cnode(
+            self, cnode: ComputeNode) -> Optional[flowui.NodeResizer]:
+        if cnode.init_wrapper_config is not None:
+            if cnode.init_wrapper_config.resizerProps is not None:
+                resizer = flowui.NodeResizer()
+
+                merge_props_not_undefined(
+                    resizer.props, cnode.init_wrapper_config.resizerProps)
+                return resizer
+        return None
 
     async def update_header(self, new_header: str):
         await self.header.write(new_header)
@@ -576,6 +595,9 @@ class ComputeNodeWrapper(mui.FlexBox):
             await self.header.write(cnode.name)
             await self.input_args.set_new_layout([*inp_handles])
             await self.output_args.set_new_layout([*out_handles])
+            resizer = self._get_resizer_from_cnode(cnode)
+            if resizer is not None:
+                await self._resizer_container.set_new_layout([resizer])
             icon_cfg = cnode.icon_cfg
             if icon_cfg is None:
                 if cnode._node_type is not None and cnode._node_type in NODE_REGISTRY:
@@ -588,9 +610,10 @@ class ComputeNodeWrapper(mui.FlexBox):
                 await self.icon_container.set_new_layout([icon])
             if node_layout is not None:
                 await self.middle_node_container.set_new_layout([
-                    mui.HBox([node_layout
+                    mui.VBox([node_layout
                               ]).prop(className=ComputeFlowClasses.NodeItem,
-                                      flex=1)
+                                      flex=1,
+                                      overflow="hidden")
                 ])
             if do_cnode_init_async:
                 await cnode.init_node_async(True)
@@ -665,15 +688,89 @@ class ComputeNodeWrapper(mui.FlexBox):
     async def from_state_dict(cls, data: Dict[str, Any],
                               cnode_cls: Type[ComputeNode]):
         cnode = await (cnode_cls.from_state_dict(data["cnode"]))
+        await cnode.init_node_async(False)
         res = cls(cnode)
         res.update_status_locally(data["status"])
         return res
 
+
+class TemplateRemoveManager(mui.FlexBox):
+    def __init__(self, items: List[Tuple[str, mui.ValueType]], init_code: str, init_path: str):
+        self._template_select = mui.Select("template", items,
+                                           self._handle_template_select)
+        self._del_btn = mui.IconButton(
+            mui.IconType.Delete, self._remove_template).prop(
+                confirmTitle="Remove Template",
+                confirmMessage="Are you sure to remove this template?")
+        self._code_editor = mui.MonacoEditor(init_code, "python",
+                                             init_path).prop(flex=1, readOnly=True)
+        super().__init__([
+            mui.HBox([self._template_select.prop(flex=1),
+                      self._del_btn]).prop(padding="8px"),
+            self._code_editor,
+        ])
+        self.prop(height="70vh", flexDirection="column")
+        self.event_before_mount.on(self._handle_mount)
+
+    @staticmethod 
+    async def create_from_app_storage():
+        items, code, path = await TemplateRemoveManager._get_template_items_and_code()
+        return TemplateRemoveManager(items, code, path)
+
+    @staticmethod 
+    async def _get_template_items_and_code():
+        all_templates = await read_data_storage_by_glob_prefix(
+            "__cflow_templates/*")
+        items: List[Tuple[str, mui.ValueType]] = []
+        for template_key_path in all_templates:
+            template_key = template_key_path.split("/")[-1]
+            items.append((template_key, template_key_path))
+        code = ""
+        path = ""
+        if items:
+            code = await read_data_storage(str(items[0][1]))
+            path = f"<{TENSORPC_FILE_NAME_PREFIX}-cflow-{items[0][1]}>"
+        return items, code, path
+
+    async def _handle_mount(self):
+        items, code, path = await self._get_template_items_and_code()
+        await self._template_select.update_items(items, 0)
+        await self._code_editor.send_and_wait(
+            self._code_editor.update_event(
+                value=code, path=path))
+
+    async def _remove_template(self):
+        from tensorpc.flow.components.flowplus.customnode import CustomNode
+        if self._template_select.props.items:
+            template_key_path = str(self._template_select.props.value)
+            template_key = template_key_path.split("/")[-1]
+            await remove_data_storage(template_key_path)
+            all_cflows = find_all_components(ComputeFlow)
+            for cflow in all_cflows:
+                with enter_flow_ui_context_object(cflow.graph_ctx):
+                    for node in cflow.graph.nodes:
+                        wrapper = node.get_component_checked(
+                            ComputeNodeWrapper)
+                        if isinstance(wrapper.cnode, CustomNode):
+                            if wrapper.cnode._template_key == template_key:
+                                await wrapper.cnode.detach_from_template()
+                await cflow.update_templates()
+            # fetch all templates again
+            await self._handle_mount()
+
+    async def _handle_template_select(self, value: mui.ValueType):
+        template_key_path = str(value)
+        template_code = await read_data_storage(template_key_path)
+        await self._code_editor.send_and_wait(
+            self._code_editor.update_event(value=template_code, path=f"<{TENSORPC_FILE_NAME_PREFIX}-cflow-{template_key_path}>"))
+
+
 @dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
 class _ComputeTaskResult:
-    result: Any 
-    exception: Optional[BaseException] = None 
-    exc_msg: Optional[UserMessage] = None 
+    result: Any
+    exception: Optional[BaseException] = None
+    exc_msg: Optional[UserMessage] = None
+
 
 async def _awaitable_to_coro(aw: Awaitable):
     try:
@@ -736,10 +833,13 @@ class ComputeFlow(mui.FlexBox):
         self._node_setting_dialog = mui.Dialog([self._node_setting],
                                                self._handle_dialog_close)
         self._node_setting_dialog.prop(title="Node Setting")
-        self.graph_container = mui.HBox(
-            [self.graph, self._node_setting_dialog]).prop(width="100%",
-                                                          height="100%",
-                                                          overflow="hidden")
+        self._template_manage_dialog = mui.Dialog([]).prop(
+            maxWidth="xl", fullWidth=True, title="Manage Templates")
+        self._template_manage_dialog.event_modal_close.on(
+            lambda x: self._template_manage_dialog.set_new_layout([]))
+        self.graph_container = mui.HBox([
+            self.graph, self._node_setting_dialog, self._template_manage_dialog
+        ]).prop(width="100%", height="100%", overflow="hidden")
         self.graph_container.update_sx_props(_default_compute_flow_css())
         self._graph_with_bottom_container = mui.Allotment(
             mui.Allotment.ChildDef([
@@ -789,6 +889,10 @@ class ComputeFlow(mui.FlexBox):
                          inset=True),
         ]
         self.view_pane_menu_items = [
+            mui.MenuItem(PaneContextMenuItemNames.ManageTemplates,
+                         "Manage Templates",
+                         inset=True),
+            mui.MenuItem("divider_system", divider=True),
             mui.MenuItem(PaneContextMenuItemNames.SideLayout,
                          "Side Layout",
                          icon=mui.IconType.Done,
@@ -797,7 +901,6 @@ class ComputeFlow(mui.FlexBox):
                          "Disable All Resizer",
                          icon=None,
                          inset=True),
-
             mui.MenuItem("divider_view", divider=True),
         ]
         pane_menu_items: List[mui.MenuItem] = []
@@ -827,7 +930,7 @@ class ComputeFlow(mui.FlexBox):
 
     async def _handle_dialog_close(self, value: mui.DialogCloseEvent):
         if value.ok:
-            assert value.userData is not None
+            assert not isinstance(value.userData, mui.Undefined)
             node_id = value.userData["node_id"]
             new_name = self._node_setting_name.str()
             if new_name:
@@ -848,7 +951,7 @@ class ComputeFlow(mui.FlexBox):
                 style["width"] = cnode.init_cfg.width
             if cnode.init_cfg.height is not None:
                 style["height"] = cnode.init_cfg.height
-            node.style = style     
+            node.style = style
         return node
 
     async def update_cnode_header(self, node_id: str, new_header: str):
@@ -884,7 +987,9 @@ class ComputeFlow(mui.FlexBox):
                            cnode: ComputeNode,
                            unchange_when_length_equal: bool = False):
         if unchange_when_length_equal:
-            raise NotImplementedError("unchange_when_length_equal not implemented, wait for reactflow 12.")
+            raise NotImplementedError(
+                "unchange_when_length_equal not implemented, wait for reactflow 12."
+            )
         prev_node = self.graph.get_node_by_id(node_id)
         wrapper = prev_node.get_component_checked(ComputeNodeWrapper)
         prev_inp_handles = wrapper.inp_handles
@@ -895,6 +1000,14 @@ class ComputeFlow(mui.FlexBox):
         if set_failed:
             # cnode remain unchanged, so just return
             return
+        node_cfg = cnode.init_cfg
+        if node_cfg is not None:
+            style = {}
+            if node_cfg.width is not None:
+                style["width"] = node_cfg.width
+            if node_cfg.height is not None:
+                style["height"] = node_cfg.height
+            await self.graph.update_node_style(node_id, style)
         cur_inp_handles = wrapper.inp_handles
         cur_inp_handle_ids = [h.id for h in cur_inp_handles]
         cur_out_handles = wrapper.out_handles
@@ -952,43 +1065,51 @@ class ComputeFlow(mui.FlexBox):
                 await self._update_side_layout_visible(False, False)
                 await self.graph.update_pane_context_menu_items([
                     mui.MenuItem(PaneContextMenuItemNames.SideLayout,
-                                    icon=None,
-                                    inset=True)
+                                 icon=None,
+                                 inset=True)
                 ])
                 self.flow_options.enable_side_layout_view = False
             else:
                 await self.graph.update_pane_context_menu_items([
                     mui.MenuItem(PaneContextMenuItemNames.SideLayout,
-                                    icon=mui.IconType.Done,
-                                    inset=False)
+                                 icon=mui.IconType.Done,
+                                 inset=False)
                 ])
                 self.flow_options.enable_side_layout_view = True
         elif item_id == PaneContextMenuItemNames.DisableAllResizer:
             if self.flow_options.disable_all_resizer:
-                await self.graph.send_and_wait(self.graph.update_event(invisiblizeAllResizer=False))
+                await self.graph.send_and_wait(
+                    self.graph.update_event(invisiblizeAllResizer=False))
                 await self.graph.update_pane_context_menu_items([
                     mui.MenuItem(PaneContextMenuItemNames.DisableAllResizer,
-                                    icon=None,
-                                    inset=True)
+                                 icon=None,
+                                 inset=True)
                 ])
                 self.flow_options.disable_all_resizer = False
             else:
-                await self.graph.send_and_wait(self.graph.update_event(invisiblizeAllResizer=True))
+                await self.graph.send_and_wait(
+                    self.graph.update_event(invisiblizeAllResizer=True))
                 await self.graph.update_pane_context_menu_items([
                     mui.MenuItem(PaneContextMenuItemNames.DisableAllResizer,
-                                    icon=mui.IconType.Done,
-                                    inset=False)
+                                 icon=mui.IconType.Done,
+                                 inset=False)
                 ])
                 self.flow_options.disable_all_resizer = True
+        elif item_id == PaneContextMenuItemNames.ManageTemplates:
+            manager = await TemplateRemoveManager.create_from_app_storage()
+            await self._template_manage_dialog.set_new_layout(
+                [manager])
+            await self._template_manage_dialog.set_open(True)
         else:
             if item_id in NODE_REGISTRY:
                 item = NODE_REGISTRY[item_id]
                 new_id = self.graph.create_unique_node_id(item.name)
                 cnode = item.type(new_id,
-                                item.name,
-                                node_type=item.node_type,
-                                init_pos=flowui.XYPosition(mouse_x, mouse_y),
-                                icon_cfg=item.icon_cfg)
+                                  item.name,
+                                  node_type=item.node_type,
+                                  init_pos=flowui.XYPosition(mouse_x, mouse_y),
+                                  icon_cfg=item.icon_cfg)
+                await cnode.init_node_async(False)
                 node = self._cnode_to_node(cnode)
             else:
                 assert item_id.startswith(get_cflow_template_key(""))
@@ -1006,6 +1127,7 @@ class ComputeFlow(mui.FlexBox):
                                             mouse_x, mouse_y),
                                         icon_cfg=custom_node_item.icon_cfg)
                 cnode._template_key = template_key  # type: ignore
+                await cnode.init_node_async(False)
                 node = self._cnode_to_node(cnode)
             await self.graph.add_node(node, screen_to_flow=True)
 
@@ -1040,7 +1162,6 @@ class ComputeFlow(mui.FlexBox):
                         try:
                             wrapper = await ComputeNodeWrapper.from_state_dict(
                                 state, cnode_cls)
-                            await wrapper.cnode.init_node_async(False)
                         except Exception as e:
                             node_id_to_remove.append(node_id)
                             await self.send_exception(e)
@@ -1098,7 +1219,7 @@ class ComputeFlow(mui.FlexBox):
     async def _on_selection(self, selection: flowui.EventSelection):
         if selection.nodes:
             if not self.flow_options.enable_side_layout_view:
-                return 
+                return
             node = self.graph.get_node_by_id(selection.nodes[0])
             wrapper = node.get_component_checked(ComputeNodeWrapper)
             side_layout = wrapper.cnode.get_side_layout()
@@ -1217,13 +1338,14 @@ class ComputeFlow(mui.FlexBox):
                 if source_handle_name in output:
                     if target_node.id not in new_node_inputs:
                         new_node_inputs[target_node.id] = {}
-                    new_node_inputs[target_node.id][target_handle_name] = output[
-                        source_handle_name]
+                    new_node_inputs[target_node.id][
+                        target_handle_name] = output[source_handle_name]
         return new_node_inputs
 
     async def _schedule(self, nodes: List[flowui.Node],
                         node_inputs: Dict[str, Dict[str, Any]],
                         shutdown_ev: asyncio.Event):
+        await save_data_storage(self.storage_key, self.state_dict())
         nodes_to_schedule: List[flowui.Node] = nodes
         ctx = get_compute_flow_context()
         if ctx is not None:
@@ -1236,7 +1358,8 @@ class ComputeFlow(mui.FlexBox):
         shutdown_task = asyncio.create_task(shutdown_ev.wait())
         try:
             ctx = get_compute_flow_context()
-            while (nodes_to_schedule or (ctx is not None and ctx._wait_node_inputs)):
+            while (nodes_to_schedule
+                   or (ctx is not None and ctx._wait_node_inputs)):
                 new_nodes_to_schedule: List[flowui.Node] = []
                 new_node_inputs: Dict[str, Dict[str, Any]] = {}
                 # 1. validate node inputs, all input handle (not optional) must be
@@ -1291,8 +1414,8 @@ class ComputeFlow(mui.FlexBox):
                             await self.send_exception(exc)
                             continue
                         if inspect.iscoroutine(data):
-                            task = asyncio.create_task(_awaitable_to_coro(data),
-                                                       name=f"node-{n.id}")
+                            task = asyncio.create_task(
+                                _awaitable_to_coro(data), name=f"node-{n.id}")
                             tasks.append(task)
                             task_to_noded[task] = n
                         else:
@@ -1344,9 +1467,10 @@ class ComputeFlow(mui.FlexBox):
                     if isinstance(exc, BaseException):
                         await wrapper.update_status(NodeStatus.Error)
                         exc_msg = task_res.exc_msg
-                        assert exc_msg is not None 
+                        assert exc_msg is not None
                         exc_msg.uid = self._flow_uid_encoded
-                        await self.put_app_event(self.create_user_msg_event(exc_msg))
+                        await self.put_app_event(
+                            self.create_user_msg_event(exc_msg))
                         continue
                     if res is None:
                         res = {}  # for node without output, we support None.
@@ -1436,6 +1560,7 @@ def enter_flow_ui_context_object(ctx: ComputeFlowContext):
     finally:
         COMPUTE_FLOW_CONTEXT_VAR.reset(token)
 
+
 async def schedule_next(node_id: str, node_output: Dict[str, Any]):
     """schedule next nodes by current node id and current node output
     """
@@ -1443,12 +1568,14 @@ async def schedule_next(node_id: str, node_output: Dict[str, Any]):
     assert ctx is not None, "you must enter flow ui context before call this function"
     await ctx.cflow.schedule_next(node_id, node_output)
 
+
 async def schedule_node(node_id: str, node_inputs: Dict[str, Any]):
     """schedule current node by node id and current node inputs
     """
     ctx = get_compute_flow_context()
     assert ctx is not None, "you must enter flow ui context before call this function"
     await ctx.cflow.schedule_node(node_id, node_inputs)
+
 
 class CNodeTest1(ComputeNode):
     class OutputDict(TypedDict):

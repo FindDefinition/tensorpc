@@ -181,12 +181,12 @@ class ScriptManager(mui.FlexBox):
                   width="100%",
                   height="100%",
                   overflow="hidden")
-        self.code_editor.register_event_handler(
-            FrontendEventType.EditorSave.value, self._on_editor_save)
-        self.scripts.register_event_handler(
-            FrontendEventType.SelectNewItem.value, self._on_new_script)
-        self.code_editor.register_event_handler(
-            FrontendEventType.EditorReady.value, self._on_editor_ready)
+        self.code_editor.event_editor_save.on(
+            self._on_editor_save)
+        self.code_editor.event_editor_ready.on(
+            self._on_editor_ready)
+        self.scripts.event_select_new_item.on(
+            self._on_new_script)
 
     async def _on_editor_ready(self):
         items = await appctx.list_data_storage(self._storage_node_rid,
@@ -308,7 +308,8 @@ class ScriptManager(mui.FlexBox):
                 self.code_editor.update_event(
                     language=_LANG_TO_VSCODE_MAPPING[value]))
 
-    async def _on_editor_save(self, value: str):
+    async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
+        value = ev.value
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
             item = await appctx.read_data_storage(label,

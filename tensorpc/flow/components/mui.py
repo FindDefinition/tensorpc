@@ -727,7 +727,7 @@ class DialogProps(MUIFlexBoxProps):
 @dataclasses.dataclass
 class DialogCloseEvent:
     ok: bool 
-    userData: Any
+    userData: Union[Any, Undefined] = undefined
 
 class Dialog(MUIContainerBase[DialogProps, MUIComponentType]):
     def __init__(
@@ -1909,10 +1909,10 @@ class Select(MUIComponentBase[SelectProps]):
         await self.put_app_event(
             self.create_update_event({
                 "items": items,
-                "value": items[selected][1]
+                "value": items[selected][1] if items else ""
             }))
         self.props.items = items
-        self.props.value = items[selected][1]
+        self.props.value = items[selected][1] if items else ""
 
     async def update_value(self, value: ValueType):
         assert value in [x[1] for x in self.props.items]
