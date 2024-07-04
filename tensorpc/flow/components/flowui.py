@@ -524,6 +524,16 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         }
         return await self.send_and_wait(self.create_comp_event(res))
 
+    async def set_node_style(self, node_id: str, data: Dict[str, Any]):
+        self._validate_node_ids([node_id])
+        res = {
+            "type": FlowControlType.UpdateNodeStyle.value,
+            "nodeId": node_id,
+            "data": data,
+            "override": True,
+        }
+        return await self.send_and_wait(self.create_comp_event(res))
+
     def _handle_edge_delete(self, edges: List[Any]):
         edge_ids_set = set([e["id"] for e in edges])
         new_edges: List[Edge] = []

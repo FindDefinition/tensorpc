@@ -9,7 +9,13 @@ class OutputDict(TypedDict):
 
 class MyAsyncGeneratorCustomNode(flowplus.ComputeNode):
     def init_node(self):
-        pass
+        self._layout_root = mui.VBox([mui.Typography(self.name)])
+        disable_event_propagation = False 
+        if disable_event_propagation:
+            self._layout_root.event_click.disable_and_stop_propagation()
+            self._layout_root.event_double_click.disable_and_stop_propagation()
+            self._layout_root.event_pointer_up.disable_and_stop_propagation()
+            self._layout_root.event_pointer_down.disable_and_stop_propagation()
 
     # we use annotation to specify the input and output handle/type.
     # if you use AsyncGenerator, you can yield the output multiple times,
@@ -21,7 +27,7 @@ class MyAsyncGeneratorCustomNode(flowplus.ComputeNode):
             yield {'output': a + b + i}
 
     def get_node_layout(self) -> Optional[mui.FlexBox]:
-        return mui.HBox([mui.Typography(self.name)])
+        return self._layout_root
 
     def state_dict(self) -> Dict[str, Any]:
         # save state here, can be used to restore state such as textfield.

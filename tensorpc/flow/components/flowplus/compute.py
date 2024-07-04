@@ -2,11 +2,14 @@ import abc
 import asyncio
 import contextlib
 import contextvars
+import datetime
 import enum
 import inspect
 from os import read
 from pathlib import Path
 import sys
+import time
+import humanize
 import threading
 import traceback
 from collections import deque
@@ -66,6 +69,7 @@ class ComputeFlowClasses:
     OutputHandle = "ComputeFlowOutputHandle"
     NodeItem = "ComputeFlowNodeItem"
     CodeTypography = "ComputeFlowCodeTypography"
+    BottomStatus = "ComputeFlowBottomStatus"
 
 
 class ReservedNodeTypes:
@@ -115,6 +119,10 @@ def _default_compute_flow_css():
         },
         f".{ComputeFlowClasses.NodeItem}:last-child": {
             "borderBottom": "none",
+        },
+        f".{ComputeFlowClasses.BottomStatus}": {
+            "justifyContent": "center",
+            "alignItems": "center",
         },
         ".react-flow__node.selected": {
             f".{ComputeFlowClasses.NodeWrappedSelected}": {
@@ -528,10 +536,10 @@ class ComputeNodeWrapper(mui.FlexBox):
         if node_layout is not None:
             self.middle_node_layout = node_layout
         self.cnode = cnode
-        self._run_status = mui.Typography("run").prop(variant="caption")
+        self._run_status = mui.Typography("ready").prop(variant="caption")
         self.status_box = mui.HBox([
             self._run_status,
-        ]).prop(className=f"{ComputeFlowClasses.NodeItem}")
+        ]).prop(className=f"{ComputeFlowClasses.NodeItem} {ComputeFlowClasses.BottomStatus}")
         self.middle_node_container = mui.Fragment(([
             mui.VBox([self.middle_node_layout]).prop(
                 className=ComputeFlowClasses.NodeItem,
@@ -557,6 +565,7 @@ class ComputeNodeWrapper(mui.FlexBox):
                                       cnode.init_wrapper_config.boxProps)
 
         self.status = NodeStatus.Ready
+        self._last_duration: Optional[float] = None
 
     def _get_resizer_from_cnode(
             self, cnode: ComputeNode) -> Optional[flowui.NodeResizer]:
@@ -598,6 +607,12 @@ class ComputeNodeWrapper(mui.FlexBox):
             resizer = self._get_resizer_from_cnode(cnode)
             if resizer is not None:
                 await self._resizer_container.set_new_layout([resizer])
+            else:
+                await self._resizer_container.set_new_layout([])
+            if cnode.init_wrapper_config is not None and cnode.init_wrapper_config.boxProps is not None:
+                await self.send_and_wait(self.create_update_event(as_dict_no_undefined(cnode.init_wrapper_config.boxProps)))
+            # if cnode.init_cfg is None and prev_cnode.init_cfg is not None:
+                # await 
             icon_cfg = cnode.icon_cfg
             if icon_cfg is None:
                 if cnode._node_type is not None and cnode._node_type in NODE_REGISTRY:
@@ -642,47 +657,64 @@ class ComputeNodeWrapper(mui.FlexBox):
             out_iohandles.append(iohandle)
         return inp_iohandles, out_iohandles
 
-    def update_status_event(self, status: NodeStatus) -> AppEvent:
+    def update_status_event(self, status: NodeStatus, duration: Optional[float] = None) -> AppEvent:
         self.status = status
+        self._last_duration = duration
         ev = AppEvent("", {})
+        if duration is not None:
+            dt = datetime.timedelta(seconds=duration)
+            ev += self._run_status.update_event(value=humanize.precisedelta(dt, minimum_unit="milliseconds"))
         if status == NodeStatus.Ready:
             ev += self.update_event(borderColor="black",
                                     boxShadow=mui.undefined)
-            ev += self._run_status.update_event(value="Ready")
+            if duration is None:
+                ev += self._run_status.update_event(value="Ready")
         elif status == NodeStatus.Running:
             ev += self.update_event(borderColor="green",
                                     boxShadow="0px 0px 10px 0px green")
-            ev += self._run_status.update_event(value="Running")
+            if duration is None:
+                ev += self._run_status.update_event(value="Running")
         elif status == NodeStatus.Error:
             ev += self.update_event(borderColor="red", boxShadow=mui.undefined)
-            ev += self._run_status.update_event(value="Error")
+            if duration is None:
+
+                ev += self._run_status.update_event(value="Error")
         elif status == NodeStatus.Done:
             ev += self.update_event(borderColor="black",
                                     boxShadow=mui.undefined)
-            ev += self._run_status.update_event(value="Ready")
+            if duration is None:
+                ev += self._run_status.update_event(value="Ready")
         return ev
 
-    def update_status_locally(self, status: NodeStatus) -> None:
+    def update_status_locally(self, status: NodeStatus, duration: Optional[float] = None) -> None:
         self.status = status
+        self._last_duration = duration
+        if duration is not None:
+            dt = datetime.timedelta(seconds=duration)
+            self._run_status.prop(value=humanize.naturaldelta(dt, minimum_unit="milliseconds"))
         if status == NodeStatus.Ready:
             self.prop(borderColor="black", boxShadow=mui.undefined)
-            self._run_status.prop(value="Ready")
+            if duration is None:
+                self._run_status.prop(value="Ready")
         elif status == NodeStatus.Running:
             self.prop(borderColor="green", boxShadow="0px 0px 10px 0px green")
-            self._run_status.prop(value="Running")
+            if duration is None:
+                self._run_status.prop(value="Running")
         elif status == NodeStatus.Error:
             self.prop(borderColor="red", boxShadow=mui.undefined)
-            self._run_status.prop(value="Error")
+            if duration is None:
+                self._run_status.prop(value="Error")
         elif status == NodeStatus.Done:
             self.prop(borderColor="black", boxShadow=mui.undefined)
-            self._run_status.prop(value="Ready")
+            if duration is None:
+                self._run_status.prop(value="Ready")
 
-    async def update_status(self, status: NodeStatus):
-        return await self.send_and_wait(self.update_status_event(status))
+    async def update_status(self, status: NodeStatus, duration: Optional[float] = None):
+        return await self.send_and_wait(self.update_status_event(status, duration))
 
     def state_dict(self) -> Dict[str, Any]:
         res = self.cnode.state_dict()
-        return {"cnode": res, "status": int(self.status)}
+        return {"cnode": res, "status": int(self.status), "last_duration": self._last_duration}
 
     @classmethod
     async def from_state_dict(cls, data: Dict[str, Any],
@@ -690,7 +722,10 @@ class ComputeNodeWrapper(mui.FlexBox):
         cnode = await (cnode_cls.from_state_dict(data["cnode"]))
         await cnode.init_node_async(False)
         res = cls(cnode)
-        res.update_status_locally(data["status"])
+        duration: Optional[float] = None
+        if "last_duration" in data:
+            duration = data["last_duration"]
+        res.update_status_locally(data["status"], duration)
         return res
 
 
@@ -770,11 +805,14 @@ class _ComputeTaskResult:
     result: Any
     exception: Optional[BaseException] = None
     exc_msg: Optional[UserMessage] = None
+    duration: Optional[float] = None
 
 
 async def _awaitable_to_coro(aw: Awaitable):
     try:
-        return _ComputeTaskResult(result=await aw)
+        t = time.time()
+        res = await aw
+        return _ComputeTaskResult(result=res, duration=time.time() - t)
     except Exception as exc:
         tb = sys.exc_info()[2]
         traceback.print_exc()
@@ -992,6 +1030,7 @@ class ComputeFlow(mui.FlexBox):
             )
         prev_node = self.graph.get_node_by_id(node_id)
         wrapper = prev_node.get_component_checked(ComputeNodeWrapper)
+        prev_cnode = wrapper.cnode
         prev_inp_handles = wrapper.inp_handles
         prev_inp_handle_ids = [h.id for h in prev_inp_handles]
         prev_out_handles = wrapper.out_handles
@@ -1001,13 +1040,13 @@ class ComputeFlow(mui.FlexBox):
             # cnode remain unchanged, so just return
             return
         node_cfg = cnode.init_cfg
+        style = {}
         if node_cfg is not None:
-            style = {}
             if node_cfg.width is not None:
                 style["width"] = node_cfg.width
             if node_cfg.height is not None:
                 style["height"] = node_cfg.height
-            await self.graph.update_node_style(node_id, style)
+        await self.graph.set_node_style(node_id, style)
         cur_inp_handles = wrapper.inp_handles
         cur_inp_handle_ids = [h.id for h in cur_inp_handles]
         cur_out_handles = wrapper.out_handles
@@ -1462,7 +1501,7 @@ class ComputeFlow(mui.FlexBox):
                     exc = task_res.exception
                     if isinstance(exc, StopAsyncIteration):
                         cur_anode_iters.pop(node_id)
-                        await wrapper.update_status(NodeStatus.Ready)
+                        await wrapper.update_status(NodeStatus.Ready, task_res.duration)
                         continue
                     if isinstance(exc, BaseException):
                         await wrapper.update_status(NodeStatus.Error)
@@ -1475,7 +1514,7 @@ class ComputeFlow(mui.FlexBox):
                     if res is None:
                         res = {}  # for node without output, we support None.
                     if not isinstance(res, dict):
-                        await wrapper.update_status(NodeStatus.Error)
+                        await wrapper.update_status(NodeStatus.Error, task_res.duration)
                         await self.send_error(
                             f"Node {node_id} compute return type must be dict",
                             f"{type(res)}")
@@ -1493,9 +1532,9 @@ class ComputeFlow(mui.FlexBox):
                     if node_out_valid:
                         node_outputs[node_id] = res
                         if node_id not in cur_anode_iters:
-                            await wrapper.update_status(NodeStatus.Ready)
+                            await wrapper.update_status(NodeStatus.Ready, task_res.duration)
                     else:
-                        await wrapper.update_status(NodeStatus.Error)
+                        await wrapper.update_status(NodeStatus.Error, task_res.duration)
                 # print("Node Outputs", node_outputs)
                 new_node_inputs.update(
                     self._get_next_node_inputs(node_outputs))

@@ -999,11 +999,16 @@ class _EventSlotBase:
         return self
 
     def configure(self,
-                  stop_propagation: bool = False,
+                  stop_propagation: Optional[bool] = None,
                   throttle: Optional[NumberType] = None,
-                  debounce: Optional[NumberType] = None) -> Self:
+                  debounce: Optional[NumberType] = None,
+                  dont_send_to_backend: Optional[bool] = None) -> Self:
         self.comp.configure_event_handlers(self.event_type, stop_propagation,
-                                           throttle, debounce)
+                                           throttle, debounce, dont_send_to_backend=dont_send_to_backend)
+        return self
+
+    def disable_and_stop_propagation(self) -> Self:
+        self.comp.configure_event_handlers(self.event_type, stop_propagation=True, dont_send_to_backend=True)
         return self
 
 class EventSlot(_EventSlotBase, Generic[TEventData]):
@@ -1445,10 +1450,11 @@ class Component(Generic[T_base_props, T_child]):
         evs = []
         for k, v in self._flow_event_handlers.items():
             if not isinstance(v,
-                              Undefined) and not v.backend_only and v.handlers:
-                d = v.to_dict()
-                d["type"] = k
-                evs.append(d)
+                              Undefined) and not v.backend_only:
+                if v.handlers or (v.stop_propagation and v.dont_send_to_backend):
+                    d = v.to_dict()
+                    d["type"] = k
+                    evs.append(d)
         return evs
 
     def _to_dict_with_sync_props(self):
@@ -1554,10 +1560,11 @@ class Component(Generic[T_base_props, T_child]):
 
     def configure_event_handlers(self,
                                  type: Union[FrontendEventType, EventDataType],
-                                 stop_propagation: bool = False,
+                                 stop_propagation: Optional[bool] = False,
                                  throttle: Optional[NumberType] = None,
                                  debounce: Optional[NumberType] = None,
-                                 backend_only: bool = False):
+                                 backend_only: Optional[bool] = False,
+                                 dont_send_to_backend: Optional[bool] = False):
         if isinstance(type, FrontendEventType):
             type_value = type.value
         else:
@@ -1565,10 +1572,16 @@ class Component(Generic[T_base_props, T_child]):
         if type_value not in self._flow_event_handlers:
             self._flow_event_handlers[type_value] = EventHandlers([])
         handlers = self._flow_event_handlers[type_value]
-        handlers.stop_propagation = stop_propagation
+        if dont_send_to_backend:
+            assert not handlers, "you can't set dont_send_to_backend when handlers is not empty"
+        if stop_propagation is not None:
+            handlers.stop_propagation = stop_propagation
         handlers.throttle = throttle
         handlers.debounce = debounce
-        handlers.backend_only = backend_only
+        if backend_only is not None:
+            handlers.backend_only = backend_only
+        if dont_send_to_backend is not None:
+            handlers.dont_send_to_backend = dont_send_to_backend
         return
 
     def register_event_handler(self,
@@ -1592,6 +1605,8 @@ class Component(Generic[T_base_props, T_child]):
         if type_value not in self._flow_event_handlers:
             self._flow_event_handlers[type_value] = EventHandlers([])
         handlers = self._flow_event_handlers[type_value]
+        if handlers.dont_send_to_backend:
+            raise ValueError("you can't add any handler when dont_send_to_backend is True")
         if type == FrontendEventType.DragCollect:
             assert len(
                 handlers.handlers) == 0, "DragCollect only support one handler"

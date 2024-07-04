@@ -1,4 +1,11 @@
 # Changelog
+# [0.11.10] - 2024-07-04
+### Fixed 
+- fix some compute flow small bug
+### Added 
+- add duration display to compute flow node
+- add style override for node style
+
 # [0.11.9] - 2024-07-03
 ### Fixed 
 - fix bugs of templates in compute flow

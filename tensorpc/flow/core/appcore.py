@@ -92,7 +92,8 @@ class EventHandlers:
                  throttle: Optional[NumberType] = None,
                  debounce: Optional[NumberType] = None,
                  backend_only: bool = False,
-                 simple_event: bool = True) -> None:
+                 simple_event: bool = True,
+                 dont_send_to_backend: bool = False) -> None:
 
         self.handlers = handlers
         self.stop_propagation = stop_propagation
@@ -100,6 +101,7 @@ class EventHandlers:
         self.throttle = throttle
         self.backend_only = backend_only
         self.simple_event = simple_event
+        self.dont_send_to_backend = dont_send_to_backend
 
     def to_dict(self):
         res: Dict[str, Any] = {
@@ -109,6 +111,8 @@ class EventHandlers:
             res["debounce"] = self.debounce
         if self.throttle is not None:
             res["throttle"] = self.throttle
+        if self.dont_send_to_backend:
+            res["dontSendToBackend"] = True
         return res
 
     def get_bind_event_handlers(self, event: Event):
