@@ -567,6 +567,10 @@ class IconType(enum.IntEnum):
     Dashboard = 44
     DashboardCustomize = 45
     Check = 46
+    ContentCopy = 47
+    ContentPaste = 48
+    ContentCut = 49
+    TableView = 50
 
 
 @dataclasses.dataclass
@@ -1608,6 +1612,7 @@ class _MonacoEditorControlType(enum.IntEnum):
 class MonacoEditorSaveEvent:
     value: str 
     saveVersionId: int
+    viewState: Any
 
 class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
     def __init__(self, value: str, language: str, path: str) -> None:
@@ -1644,6 +1649,7 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
             value: Tuple[str, int, Any],
             type: ValueType = FrontendEventType.Change.value):
         self.props.value = value[0]
+        self._view_state = value[-1]
 
     def _default_on_save_state(self, state):
         self._view_state = state["viewState"]
@@ -1651,6 +1657,7 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
 
     def _default_on_editor_save(self, ev: MonacoEditorSaveEvent):
         self._save_version_id = ev.saveVersionId
+        self._view_state = ev.viewState
 
     def _default_on_query_state(self):
         res = {}
@@ -2317,10 +2324,9 @@ class Slider(MUIComponentBase[SliderProps]):
         if init_value is None:
             init_value = begin
         self.props.value = init_value
-        if callback is not None:
-            self.register_event_handler(FrontendEventType.Change.value,
-                                        callback)
         self.event_change = self._create_event_slot(FrontendEventType.Change)
+        if callback is not None:
+            self.event_change.on(callback)
 
     @property
     def value(self):

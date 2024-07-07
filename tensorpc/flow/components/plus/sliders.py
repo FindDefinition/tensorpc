@@ -38,9 +38,12 @@ class ListSlider(mui.Slider, Generic[T]):
                                     backend_only=True)
         self.obj_list: List[T] = init
 
+        self._prev_init_data: Optional[int] = None
+
     async def update_list(self, objs: List[T]):
         self.obj_list = objs
         await self.update_ranges(0, len(objs) - 1, 1)
+        self._prev_init_data = None 
 
     async def _callback(self, value: mui.NumberType):
         handlers = self.get_event_handlers(self.__callback_key)
@@ -53,7 +56,13 @@ class ListSlider(mui.Slider, Generic[T]):
                 coro = handler.cb(obj)
                 if inspect.iscoroutine(coro):
                     await coro
+        self._prev_init_data = int(value)
 
+    async def rerun_prev_data(self):
+        if self._prev_init_data is not None:
+            await self._callback(self._prev_init_data)
+            return True 
+        return False
 
 class BlenderListSlider(mui.BlenderSlider, Generic[T]):
     """a slider that used for list.

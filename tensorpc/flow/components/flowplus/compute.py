@@ -78,6 +78,7 @@ class ReservedNodeTypes:
     JsonInput = "tensorpc.cflow.JsonInputNode"
     ObjectTreeViewer = "tensorpc.cflow.ObjectTreeViewerNode"
     Expr = "tensorpc.cflow.ExprNode"
+    TensorViewer = "TensorViewer"
 
 
 def _default_compute_flow_css():
@@ -808,18 +809,6 @@ class _ComputeTaskResult:
     duration: Optional[float] = None
 
 
-async def _awaitable_to_coro(aw: Awaitable):
-    try:
-        t = time.time()
-        res = await aw
-        return _ComputeTaskResult(result=res, duration=time.time() - t)
-    except Exception as exc:
-        tb = sys.exc_info()[2]
-        traceback.print_exc()
-        exc_msg = UserMessage.from_exception("", exc, tb)
-        return _ComputeTaskResult(result=None, exception=exc, exc_msg=exc_msg)
-
-
 class ComputeFlow(mui.FlexBox):
     def __init__(self,
                  storage_key: str,
@@ -856,7 +845,8 @@ class ComputeFlow(mui.FlexBox):
              flowui.Controls(),
              flowui.Background()]).prop(zoomActivationKeyCode="z",
                                         disableKeyboardA11y=True,
-                                        zoomOnScroll=False)
+                                        zoomOnScroll=False,
+                                        preventCycle=True)
         self.side_container = mui.VBox([]).prop(height="100%",
                                                 width="100%",
                                                 overflow="hidden")
@@ -1344,6 +1334,7 @@ class ComputeFlow(mui.FlexBox):
                                    node_inputs: Dict[str, Dict[str, Any]],
                                    anode_iters: Dict[str, AsyncIterator]):
         new_nodes: List[flowui.Node] = []
+        nodes_dont_have_enough_inp: List[flowui.Node] = []
         for n in nodes:
             wrapper = n.get_component_checked(ComputeNodeWrapper)
             if n.id in anode_iters:
@@ -1359,9 +1350,22 @@ class ComputeFlow(mui.FlexBox):
                     not_found = True
                     break
             if not_found:
+                nodes_dont_have_enough_inp.append(n)
                 continue
             new_nodes.append(n)
-        return new_nodes
+        new_nodes_ids = set(n.id for n in new_nodes)
+        node_inputs_sched_in_future: Dict[str, Dict[str, Any]] = {}
+        for node in nodes_dont_have_enough_inp:
+            all_parents = self.graph.get_all_parent_nodes(node.id)
+            for parent in all_parents:
+                if parent.id in new_nodes_ids:
+                    if node.id not in node_inputs:
+                        node_inputs_sched_in_future[node.id] = {}
+                    else:
+                        node_inputs_sched_in_future[node.id] = node_inputs[
+                            node.id]
+                    break
+        return new_nodes, node_inputs_sched_in_future
 
     def _get_next_node_inputs(self, node_id_to_outputs: Dict[str, Dict[str,
                                                                        Any]]):
@@ -1380,6 +1384,25 @@ class ComputeFlow(mui.FlexBox):
                     new_node_inputs[target_node.id][
                         target_handle_name] = output[source_handle_name]
         return new_node_inputs
+
+    async def _awaitable_to_coro(self, node: flowui.Node, aw: Awaitable):
+        wrapper = node.get_component_checked(ComputeNodeWrapper)
+        t = time.time()
+        try:
+            await wrapper.update_status(NodeStatus.Running)
+            res = await aw
+            cp_res = _ComputeTaskResult(result=res, duration=time.time() - t)
+            await wrapper.update_status(NodeStatus.Ready, cp_res.duration)
+            return cp_res 
+        except StopAsyncIteration as exc:
+            cp_res = _ComputeTaskResult(result=None,exception=exc,  duration=time.time() - t)
+            await wrapper.update_status(NodeStatus.Ready, cp_res.duration)
+            return cp_res
+        except Exception as exc:
+            tb = sys.exc_info()[2]
+            traceback.print_exc()
+            exc_msg = UserMessage.from_exception("", exc, tb)
+            return _ComputeTaskResult(result=None, exception=exc, exc_msg=exc_msg)
 
     async def _schedule(self, nodes: List[flowui.Node],
                         node_inputs: Dict[str, Dict[str, Any]],
@@ -1407,9 +1430,10 @@ class ComputeFlow(mui.FlexBox):
                     wait_nodes, wait_inputs = ctx.fetch_wait_nodes_and_inputs()
                     nodes_to_schedule = nodes_to_schedule + wait_nodes
                     cur_node_inputs = {**cur_node_inputs, **wait_inputs}
-                valid_nodes = self._filter_node_cant_schedule(
+                valid_nodes, node_inputs_in_future = self._filter_node_cant_schedule(
                     nodes_to_schedule, cur_node_inputs, cur_anode_iters)
-                if not valid_nodes:
+                # print([n.id for n in nodes_to_schedule], [n.id for n in valid_nodes], [n.id for n in nodes_in_future],)
+                if not valid_nodes and not node_inputs_in_future:
                     break
                 # 2. remove duplicate nodes
                 valid_nodes_id_set = set(n.id for n in valid_nodes)
@@ -1425,27 +1449,29 @@ class ComputeFlow(mui.FlexBox):
                 for n in valid_nodes:
                     if n.id in cur_anode_iters:
                         node_aiter = cur_anode_iters[n.id]
-                        task = asyncio.create_task(_awaitable_to_coro(
-                            anext(node_aiter)),
+                        task = asyncio.create_task(self._awaitable_to_coro(
+                            n, anext(node_aiter)),
                                                    name=f"node-{n.id}")
                         tasks.append(task)
                         task_to_noded[task] = n
                         continue
                     node_inp = cur_node_inputs.get(n.id, {})
                     wrapper = n.get_component_checked(ComputeNodeWrapper)
-                    await wrapper.update_status(NodeStatus.Running)
                     compute_func = wrapper.cnode.get_compute_function()
                     if wrapper.cnode.is_async_gen and inspect.isasyncgenfunction(
                             compute_func):
                         node_aiter = compute_func(**node_inp)
                         cur_anode_iters[n.id] = node_aiter
-                        task = asyncio.create_task(_awaitable_to_coro(
-                            anext(node_aiter)),
+                        task = asyncio.create_task(self._awaitable_to_coro(
+                            n, anext(node_aiter)),
                                                    name=f"node-{n.id}")
                         tasks.append(task)
                         task_to_noded[task] = n
                     else:
+                        if not inspect.iscoroutinefunction(compute_func):
+                            await wrapper.update_status(NodeStatus.Running)
                         try:
+                            t1 = time.time()
                             data = compute_func(**node_inp)
                         except Exception as exc:
                             await wrapper.update_status(NodeStatus.Error)
@@ -1454,12 +1480,12 @@ class ComputeFlow(mui.FlexBox):
                             continue
                         if inspect.iscoroutine(data):
                             task = asyncio.create_task(
-                                _awaitable_to_coro(data), name=f"node-{n.id}")
+                                self._awaitable_to_coro(n, data), name=f"node-{n.id}")
                             tasks.append(task)
                             task_to_noded[task] = n
                         else:
                             assert isinstance(data, dict)
-                            await wrapper.update_status(NodeStatus.Ready)
+                            await wrapper.update_status(NodeStatus.Ready, time.time() - t1)
                             node_outputs[n.id] = data
                 is_shutdown = False
                 print("Waiting")
@@ -1501,7 +1527,6 @@ class ComputeFlow(mui.FlexBox):
                     exc = task_res.exception
                     if isinstance(exc, StopAsyncIteration):
                         cur_anode_iters.pop(node_id)
-                        await wrapper.update_status(NodeStatus.Ready, task_res.duration)
                         continue
                     if isinstance(exc, BaseException):
                         await wrapper.update_status(NodeStatus.Error)
@@ -1538,6 +1563,13 @@ class ComputeFlow(mui.FlexBox):
                 # print("Node Outputs", node_outputs)
                 new_node_inputs.update(
                     self._get_next_node_inputs(node_outputs))
+                for node_id, node_inp in node_inputs_in_future.items():
+                    if node_id in new_node_inputs:
+                        new_node_inp = node_inp.copy()
+                        new_node_inp.update(new_node_inputs[node_id])
+                        new_node_inputs[node_id] = new_node_inp
+                    else:
+                        new_node_inputs[node_id] = node_inp
                 for node_id in new_node_inputs.keys():
                     node = self.graph.get_node_by_id(node_id)
                     new_nodes_to_schedule.append(node)

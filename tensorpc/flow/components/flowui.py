@@ -408,6 +408,21 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         content = self._node_id_to_handle_to_edges[node_id]
         return content.get(handle_id, [])
 
+    def get_all_parent_nodes(self, node_id: str):
+        res: List[Node] = []
+        accessed: Set[str] = set()
+        cur_parents = self.get_source_nodes(node_id)
+        while cur_parents:
+            res.extend(cur_parents)
+            new_parents = []
+            for parent in cur_parents:
+                if parent.id in accessed:
+                    continue
+                accessed.add(parent.id)
+                new_parents.extend(self.get_source_nodes(parent.id))
+            cur_parents = new_parents
+        return res
+
     def get_all_nodes_in_connected_graph(self, node: Node):
         visited: Set[str] = set()
         stack = [node]

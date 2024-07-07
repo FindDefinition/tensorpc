@@ -1,4 +1,10 @@
 # Changelog
+# [0.11.11] - 2024-07-07
+### Fixed 
+- fix wrong schedule result in a certain case in compute flow
+### Added 
+- add TensorViewer in compute flow
+
 # [0.11.10] - 2024-07-04
 ### Fixed 
 - fix some compute flow small bug

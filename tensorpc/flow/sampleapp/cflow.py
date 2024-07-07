@@ -4,7 +4,7 @@ from tensorpc.flow import mark_create_layout
 from tensorpc.flow import appctx
 import sys 
 from tensorpc import PACKAGE_ROOT
-
+import numpy as np 
 class ComputeFlowApp:
 
     @mark_create_layout
@@ -16,6 +16,8 @@ class ComputeFlowApp:
             str(PACKAGE_ROOT.parent),
         ]
         self.cflow = ComputeFlow("tensorpc_default_cflow")
-        self.panel = plus.InspectPanel({}, use_fast_tree=True, init_layout=self.cflow)
+        self.panel = plus.InspectPanel({
+            "a": np.zeros((100, 3))
+        }, use_fast_tree=True, init_layout=self.cflow)
         return self.panel.prop(width="100%", height="100%", overflow="hidden")
 

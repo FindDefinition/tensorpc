@@ -3,10 +3,15 @@ import abc
 import json
 import traceback
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Type, TypedDict
+from typing import Any, Dict, Optional, Tuple, Type, TypedDict, Union
+
+import numpy as np
 
 from tensorpc.flow.components import flowui, mui
+from tensorpc.flow.components.plus.arraycommon import can_cast_to_np_array, try_cast_to_np_array
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
+from tensorpc.flow.components.plus.arraygrid import NumpyArrayGridTable
+from tensorpc.flow.core.coretypes import TreeDragTarget
 
 from .compute import (ComputeNode, NodeConfig, ReservedNodeTypes,
                       WrapperConfig, register_compute_node)
@@ -108,6 +113,41 @@ class ObjectTreeViewerNode(ResizeableNodeBase):
                                         validator=self._expand_validator)
         await self.item_tree.expand_all()
 
+@register_compute_node(key=ReservedNodeTypes.TensorViewer,
+                       name="Tensor Viewer",
+                       icon_cfg=mui.IconProps(icon=mui.IconType.DataArray))
+class TensorViewerNode(ComputeNode):
+    def init_node(self):
+        self.array_viewer = NumpyArrayGridTable()
+        self._layout_root = mui.VBox([self.array_viewer.prop(overflow="auto")])
+        self._layout_root.event_drop.on(self._on_drop)
+        self._layout_root.prop(droppable=True, border="2px solid transparent", sxOverDrop={"border": "2px solid green"})
+        self._layout_root.prop(overflow="hidden", height="300px", width="500px")
+
+    async def _on_drop(self, data: Any):
+        if isinstance(data, TreeDragTarget):
+            obj = data.obj 
+            if can_cast_to_np_array(obj):
+                arr = try_cast_to_np_array(obj)
+                if arr is not None:
+                    await self.array_viewer.update_array_items({
+                        "dropped": arr
+                    })
+
+    def get_node_layout(self) -> Optional[mui.FlexBox]:
+        return self._layout_root
+
+    async def compute(self, obj: Union[dict, np.ndarray]) -> None:
+        if isinstance(obj, np.ndarray):
+            obj = {
+                "array": obj,
+            }
+        assert isinstance(obj, dict)
+        new_inp_dict = {}
+        for k, v in obj.items():
+            if self.array_viewer.is_valid_data_item(v):
+                new_inp_dict[k] = v
+        await self.array_viewer.set_new_array_items(new_inp_dict)
 
 @register_compute_node(key=ReservedNodeTypes.Expr, name="Eval Expr")
 class ExprEvaluatorNode(ComputeNode):
@@ -150,3 +190,4 @@ class ExprEvaluatorNode(ComputeNode):
             res._editor.props.value = data["value"]
             res._saved_value = data["value"]
         return res
+

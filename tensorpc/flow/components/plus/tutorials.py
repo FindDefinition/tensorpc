@@ -155,7 +155,8 @@ class AppInMemory(mui.FlexBox):
         wobj = layout.get_wrapped_obj()
         await self.show_box.update_childs({"layout": layout_flex})
 
-    async def _on_editor_save(self, value: str):
+    async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
+        value = ev.value
         reload_mgr = self.flow_app_comp_core.reload_mgr
         reload_mgr.in_memory_fs.modify_file(self.path, value)
         if self._external_onsave is not None:

@@ -401,7 +401,7 @@ class NumpyArrayGridTable(mui.FlexBox):
         super().__init__()
         self.max_columns = max_columns
         self.max_size_row_split = max_size_row_split
-        btn = mui.Button("Viewer").prop(size="small", loading=False)
+        btn = mui.IconButton(mui.IconType.TableView).prop(size="small")
         self.grid_container = mui.HBox([])
         dialog = mui.Dialog([
             self.grid_container.prop(flex=1, height="70vh", width="100%")
@@ -424,10 +424,10 @@ class NumpyArrayGridTable(mui.FlexBox):
             mui.DataGrid.ColumnDef("name", accessorKey="name"),
             mui.DataGrid.ColumnDef("dtype", accessorKey="dtype"),
             mui.DataGrid.ColumnDef("shape", accessorKey="shape"),
+            mui.DataGrid.ColumnDef("value", cell=value_cell),
             mui.DataGrid.ColumnDef("contiguous",
                                    accessorKey="contiguous",
                                    cell=cbox),
-            mui.DataGrid.ColumnDef("value", cell=value_cell),
         ]
         self.array_items: Dict[str, Union[Dict[str, np.ndarray], np.ndarray,
                                           int, float, bool]] = {}
@@ -447,6 +447,13 @@ class NumpyArrayGridTable(mui.FlexBox):
         self.init_add_layout([dgrid.prop(flex=1), dialog])
         self.dgrid = dgrid
         self.prop(width="100%", height="100%", overflow="hidden")
+
+    def is_valid_data_item(self, obj: Any):
+        if isinstance(obj, np.ndarray):
+            return True
+        if isinstance(obj, (int, float, bool)):
+            return True
+        return False
 
     async def update_array_items(self,
                                  array_items: Dict[str, Union[Dict[str,
