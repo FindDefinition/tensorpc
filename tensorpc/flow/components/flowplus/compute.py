@@ -222,6 +222,9 @@ class NodeConfig:
     width: Optional[int] = None
     height: Optional[int] = None
 
+class DontSchedule:
+    def __repr__(self) -> str:
+        return "DontSchedule"
 
 @dataclasses.dataclass
 class WrapperConfig:
@@ -568,6 +571,8 @@ class ComputeNodeWrapper(mui.FlexBox):
         self.status = NodeStatus.Ready
         self._last_duration: Optional[float] = None
 
+        self._cached_inputs: Optional[Dict[str, Any]] = None
+
     def _get_resizer_from_cnode(
             self, cnode: ComputeNode) -> Optional[flowui.NodeResizer]:
         if cnode.init_wrapper_config is not None:
@@ -723,10 +728,11 @@ class ComputeNodeWrapper(mui.FlexBox):
         cnode = await (cnode_cls.from_state_dict(data["cnode"]))
         await cnode.init_node_async(False)
         res = cls(cnode)
-        duration: Optional[float] = None
-        if "last_duration" in data:
-            duration = data["last_duration"]
-        res.update_status_locally(data["status"], duration)
+        # TODO should we recover status here?
+        # duration: Optional[float] = None
+        # if "last_duration" in data:
+        #     duration = data["last_duration"]
+        # res.update_status_locally(data["status"], duration)
         return res
 
 
@@ -962,7 +968,12 @@ class ComputeFlow(mui.FlexBox):
             node_id = value.userData["node_id"]
             new_name = self._node_setting_name.str()
             if new_name:
+                node = self.graph.get_node_by_id(node_id)
+                wrapper = node.get_component_checked(ComputeNodeWrapper)
+                wrapper.cnode.name = new_name
                 await self.update_cnode_header(node_id, new_name)
+                await save_data_storage(self.storage_key, self.state_dict())
+
 
     def _cnode_to_node(self, cnode: ComputeNode) -> flowui.Node:
         cnode_wrapper = ComputeNodeWrapper(cnode)
@@ -1064,6 +1075,7 @@ class ComputeFlow(mui.FlexBox):
                     edge_id_to_be_removed.extend([e.id for e in prev_edges])
         await self.graph.update_node_internals([node_id])
         await self.graph.delete_edges_by_ids(edge_id_to_be_removed)
+        await save_data_storage(self.storage_key, self.state_dict())
 
     async def _on_node_contextment(self, data):
         item_id = data["itemId"]

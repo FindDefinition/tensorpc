@@ -695,7 +695,7 @@ class TreeItem(abc.ABC):
     async def get_child(self, key: str) -> Any:
         raise NotImplementedError
 
-    def get_json_like_node(self) -> Optional[JsonLikeNode]:
+    def get_json_like_node(self, id: UniqueTreeIdForTree) -> Optional[JsonLikeNode]:
         """name and id is determined by parent, only root node use name provided
         by this method.
         """

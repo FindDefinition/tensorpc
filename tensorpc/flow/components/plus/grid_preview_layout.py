@@ -177,6 +177,7 @@ class GridPreviewLayout(mui.FlexBox):
                             DataClassesType]
                 if handler_type is not None:
                     handler = handler_type()
+                    self._type_to_handler_object[obj_type] = handler
         if preview_layout is not None:
             preview_grid_item = preview_layout.find_user_meta_by_type(
                 ObjectGridItemConfig)

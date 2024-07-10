@@ -1573,7 +1573,7 @@ class Component(Generic[T_base_props, T_child]):
             self._flow_event_handlers[type_value] = EventHandlers([])
         handlers = self._flow_event_handlers[type_value]
         if dont_send_to_backend:
-            assert not handlers, "you can't set dont_send_to_backend when handlers is not empty"
+            assert not handlers.handlers, "you can't set dont_send_to_backend when handlers is not empty"
         if stop_propagation is not None:
             handlers.stop_propagation = stop_propagation
         handlers.throttle = throttle

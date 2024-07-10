@@ -10,7 +10,9 @@ from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
                     Set, Tuple, Type, Union)
 
 import watchdog
+import dataclasses
 
+from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import AppFuncType, ServFunctionMeta
 from tensorpc.flow.core.appcore import (AppSpecialEventType,
                                            _run_zeroarg_func,
@@ -19,7 +21,8 @@ from tensorpc.flow.core.appcore import (AppSpecialEventType,
 from tensorpc.flow.components import mui, three
 from tensorpc.flow.components import plus
 from tensorpc.flow.components.plus.core import (
-    ALL_OBJECT_LAYOUT_HANDLERS, ObjectLayoutCreator)
+    ALL_OBJECT_LAYOUT_HANDLERS, ObjectLayoutCreator, ObjectLayoutHandler,
+    DataClassesType)
 from tensorpc.flow.core.core import (AppEditorFrontendEvent,
                                         FlowSpecialMethods, FrontendEventType,
                                         _get_obj_def_path)
@@ -59,6 +62,7 @@ class AnyFlexLayout(mui.FlexLayout):
         # self._layout_to_watchdog: Dict[str, Tuple[]]
         self._current_bind_code_id = None
         self.prop(font=mui.FlexLayoutFontProps(size="14px"))
+        self._type_to_handler_object: Dict[Type[Any], ObjectLayoutHandler] = {}
 
     async def _handle_reload_layout(self, layout: mui.FlexBox,
                                     create_layout: ServFunctionMeta,
@@ -106,14 +110,33 @@ class AnyFlexLayout(mui.FlexLayout):
                         wrapped_obj = mui.flex_wrapper(
                             obj, reload_mgr=self.flow_app_comp_core.reload_mgr)
                     else:
-                        if type(obj) in ALL_OBJECT_LAYOUT_HANDLERS:
-                            handler_cls = ALL_OBJECT_LAYOUT_HANDLERS[type(obj)]
-                            wrapped_obj = handler_cls.from_object(obj)
-                            assert type(obj) == handler_cls and isinstance(
-                                wrapped_obj, mui.FlexBox)
+                        handler: Optional[ObjectLayoutHandler] = None
+                        obj_type = type(obj)
+                        is_dcls = dataclasses.is_dataclass(obj)
+
+                        if obj_type in self._type_to_handler_object:
+                            handler = self._type_to_handler_object[obj_type]
+                        elif is_dcls and DataClassesType in self._type_to_handler_object:
+                            handler = self._type_to_handler_object[DataClassesType]
                         else:
-                            raise ValueError("this shouldn't happen", obj,
-                                             type(obj))
+                            obj_qualname = get_qualname_of_type(type(obj))
+                            handler_type: Optional[Type[ObjectLayoutHandler]] = None
+                            if obj is not None:
+                                # check standard type first, if not found, check datasetclass type.
+                                if obj_type in ALL_OBJECT_LAYOUT_HANDLERS:
+                                    handler_type = ALL_OBJECT_LAYOUT_HANDLERS[obj_type]
+                                elif obj_qualname in ALL_OBJECT_LAYOUT_HANDLERS:
+                                    handler_type = ALL_OBJECT_LAYOUT_HANDLERS[obj_qualname]
+                                elif is_dcls and DataClassesType in ALL_OBJECT_LAYOUT_HANDLERS:
+                                    handler_type = ALL_OBJECT_LAYOUT_HANDLERS[
+                                        DataClassesType]
+                            if handler_type is not None:
+                                handler = handler_type()
+                                self._type_to_handler_object[obj_type] = handler
+                        if handler is not None:
+                            wrapped_obj = handler.create_layout(obj)
+                        else:
+                            return 
                 else:
                     wrapped_obj = obj
             wrapped_obj.set_flow_event_context_creator(target.context_creator)

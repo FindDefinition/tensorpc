@@ -232,7 +232,7 @@ class SimpleCanvas(mui.FlexBox):
         self._image_dict: Dict[str, three.Image] = {}
         self._segment_dict: Dict[str, three.Segments] = {}
         self._box_dict: Dict[str, three.BoundingBox] = {}
-        self._voxels_dict: Dict[str, three.VoxelMesh] = {}
+        self._voxels_dict: Dict[str, Union[three.VoxelMesh, three.InstancedMesh]] = {}
 
         self._random_colors: Dict[str, str] = {}
 
@@ -615,26 +615,27 @@ class SimpleCanvas(mui.FlexBox):
             encode_method = self.cfg.point.encode_method
         if encode_scale is None:
             encode_scale = self.cfg.point.encode_scale
+        color_map = three.ColorMap(
+                                min=points[:, 2].min(),
+                                max=points[:, 2].max())
+        if points.shape[1] == 4:
+            # with intensity
+            color_map = mui.undefined
         if key not in self._point_dict:
             if encode_method is not None:
                 if attrs is None:
                     ui = three.Points(limit).prop(encodeMethod=encode_method,
                                                   encodeScale=encode_scale,
-                                                  colorMap=three.ColorMap(
-                                                      min=points[:, 2].min(),
-                                                      max=points[:, 2].max()))
+                                                  colorMap=color_map)
                 else:
                     assert attr_fields is not None
                     ui = three.Points(limit).prop(encodeMethod=encode_method,
                                                   encodeScale=encode_scale,
                                                   attrs=attrs,
                                                   attrFields=attr_fields,
-                                                  colorMap=three.ColorMap(
-                                                      min=points[:, 2].min(),
-                                                      max=points[:, 2].max()))
+                                                  colorMap=color_map)
             else:
-                ui = three.Points(limit).prop(colorMap=three.ColorMap(
-                    min=points[:, 2].min(), max=points[:, 2].max()))
+                ui = three.Points(limit).prop(colorMap=color_map)
             self._point_dict[key] = ui
             await self._dynamic_pcs.update_childs({key: ui})
         point_ui = self._point_dict[key]
@@ -648,7 +649,8 @@ class SimpleCanvas(mui.FlexBox):
             encode_method=encode_method,
             encode_scale=encode_scale,
             attrs=attrs,
-            attr_fields=attr_fields)
+            attr_fields=attr_fields,
+            color_map=color_map)
         return point_ui
 
     async def clear_points(self, clear_keys: Optional[List[str]] = None):

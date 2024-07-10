@@ -698,7 +698,7 @@ class App:
                 ]).prop(autoClear=False),
                 three.Mesh([
                     three.BoxGeometry(),
-                    three.Edges(),
+                    # three.Edges(),
                     three.MeshStandardMaterial().prop(color="orange",
                                                       transparent=True),
                 ]).prop(

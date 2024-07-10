@@ -1,4 +1,9 @@
 # Changelog
+# [0.11.12] - 2024-07-10
+### Fixed 
+- fix some bug in compute flow
+- fix bug in annocore
+
 # [0.11.11] - 2024-07-07
 ### Fixed 
 - fix wrong schedule result in a certain case in compute flow

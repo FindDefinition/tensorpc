@@ -12,14 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 from functools import partial
 import inspect
 import io
+import os
 from pathlib import Path
 import pickle
 from runpy import run_path
 from typing import Any, Dict, List, Optional
 from tensorpc.core.defs import FileDesp, FileResource
+from tensorpc.flow.constants import TENSORPC_LSP_EXTRA_PATH
 from tensorpc.flow.coretypes import ScheduleEvent, VscodeTensorpcMessage, get_uid
 from tensorpc.core.tree_id import UniqueTreeId
 
@@ -35,6 +38,7 @@ from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, Servi
 import tensorpc
 from tensorpc.flow.core.reload import AppReloadManager, FlowSpecialMethods
 
+from tensorpc.flow.jsonlike import Undefined
 from tensorpc.flow.langserv import close_tmux_lang_server, get_tmux_lang_server_info_may_create
 from ..client import AppLocalMeta, MasterMeta
 from tensorpc import prim
@@ -158,13 +162,20 @@ class FlowApp:
             AppEventType.Notify: NotifyEvent(NotifyType.AppStart)
         }
         if self.lsp_fwd_port is not None and enable_lsp:
+            cfg = copy.deepcopy(self.app._flowapp_internal_lsp_config)
+            extra_path = os.getenv(TENSORPC_LSP_EXTRA_PATH, None)
+            if extra_path is not None:
+                extra_paths = extra_path.split(":")
+                if not isinstance(cfg.python.analysis.extraPaths, Undefined):
+                    cfg.python.analysis.extraPaths.extend(extra_paths)
+                else:
+                    cfg.python.analysis.extraPaths = extra_paths
             init_event[AppEventType.InitLSPClient] = InitLSPClientEvent(
                 self.lsp_fwd_port,
-                self.app._flowapp_internal_lsp_config.get_dict())
+                cfg.get_dict())
         await self._send_loop_queue.put(AppEvent("", init_event))
         if self.external_argv is not None:
             with enter_app_conetxt(self.app):
-                print("??????????????????????????", self.external_argv)
                 self._external_argv_task = asyncio.create_task(
                     appctx.run_in_executor_with_exception_inspect(
                         partial(self._run_app_script,

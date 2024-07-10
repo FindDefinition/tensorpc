@@ -573,7 +573,8 @@ class Points(Object3dWithEventBase[PointProps]):
                                                                   "int16"],
                                                           Undefined]] = None,
                             encode_scale: Optional[Union[NumberType,
-                                                         Undefined]] = 50):
+                                                         Undefined]] = 50,
+                            color_map: Optional[ColorMap] = None):
         # TODO better check, we must handle all errors before sent to frontend.
         assert points.ndim == 2 and points.shape[1] in [
             3, 4
@@ -604,6 +605,8 @@ class Points(Object3dWithEventBase[PointProps]):
             }
         if size is not None:
             upd["size"] = size
+        if color_map is not None:
+            upd["colorMap"] = color_map
         if sizes is not None:
             if not isinstance(sizes, Undefined):
                 assert sizes.shape[0] == points.shape[

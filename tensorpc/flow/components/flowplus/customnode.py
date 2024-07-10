@@ -1,8 +1,11 @@
 import contextlib
 import inspect
 from pathlib import Path
+import sys
 import traceback
+import types
 from typing import Any, Dict, Optional, Type
+import uuid
 
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 
@@ -33,6 +36,8 @@ class CustomNode(ComputeNode):
         self._code_editor = mui.MonacoEditor(base_code, "python",
                                              f"<tensorpc-flow-cflow-{self.id}>").prop(flex=1, actions=actions)
         self._template_key: Optional[str] = None
+        self._module: Optional[types.ModuleType] = None
+
         self._cnode = self._get_cnode_cls_from_code(base_code)
         self._code_editor.event_editor_save.on(self.handle_code_editor_save)
         self._code_editor.event_editor_action.on(self._handle_editor_action)
@@ -44,6 +49,7 @@ class CustomNode(ComputeNode):
         self._setting_dialog = mui.Dialog(
             [self._setting_template_name], lambda x: self._create_template(self._setting_template_name.str())
             if x.ok else None)
+
 
     @property
     def icon_cfg(self):
@@ -92,11 +98,18 @@ class CustomNode(ComputeNode):
             self._disable_template_fetch = False
 
     def _get_cnode_cls_from_code(self, code: str):
-        mod_dict = {}
-        code_comp = compile(code, f"{TENSORPC_FILE_NAME_PREFIX}-cflow-node-{self.id}", "exec")
-        exec(code_comp, mod_dict)
+        # if self._module is not None:
+        #     sys.modules.pop(self._module.__name__)
+        key = f"{TENSORPC_FILE_NAME_PREFIX}-cflow-node-{self.id}"
+        mod_name = f"<{key}-{uuid.uuid4().hex}>"
+        module = types.ModuleType(mod_name)
+        module.__file__ = f"<{key}>"
+        self._module = module
+        codeobj = compile(code,  module.__file__, "exec")
+        # sys.modules[mod_name] = module
+        exec(codeobj, module.__dict__)
         cnode_cls: Optional[Type[ComputeNode]] = None
-        for v in mod_dict.values():
+        for v in module.__dict__.values():
             if inspect.isclass(v) and v is not ComputeNode and issubclass(
                     v, ComputeNode):
                 cnode_cls = v

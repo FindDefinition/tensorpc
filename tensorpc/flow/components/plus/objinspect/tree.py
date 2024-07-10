@@ -408,8 +408,8 @@ class BasicObjectTree(mui.FlexBox):
         uid_obj = UniqueTreeIdForTree(uid)
         with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree,
                                             self)):
-            objs, found = await self._tree_parser.get_obj_by_uid_trace(
-                self.root, uid_obj)
+            nodes = self._objinspect_root._get_node_by_uid_trace(uid_obj.parts)
+            objs, found = await self._get_obj_by_uid_trace(uid_obj, nodes)
         if not found:
             return None
         tab_id = ""
