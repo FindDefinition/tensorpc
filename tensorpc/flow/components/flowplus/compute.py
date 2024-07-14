@@ -70,6 +70,7 @@ class ComputeFlowClasses:
     NodeItem = "ComputeFlowNodeItem"
     CodeTypography = "ComputeFlowCodeTypography"
     BottomStatus = "ComputeFlowBottomStatus"
+    HeaderIcons = "ComputeFlowHeaderIcons"
 
 
 class ReservedNodeTypes:
@@ -86,8 +87,15 @@ def _default_compute_flow_css():
         f".{ComputeFlowClasses.Header}": {
             "borderTopLeftRadius": "7px",
             "borderTopRightRadius": "7px",
-            "justifyContent": "center",
+            # "justifyContent": "center",
+            "paddingLeft": "4px",
             "backgroundColor": "#eee",
+            "alignItems": "center",
+        },
+        f".{ComputeFlowClasses.HeaderIcons}": {
+            "flex": 1,
+            "justifyContent": "end",
+            "paddingRight": "4px",
             "alignItems": "center",
         },
         f".{ComputeFlowClasses.NodeWrapper}": {
@@ -200,14 +208,22 @@ class NodeStatus(enum.IntEnum):
     Done = 3
 
 
-class NodeContextMenuItemNames:
-    Run = "Run"
-    RunThisNode = "Run this node"
-    StopGraphRun = "Stop graph run"
+@dataclasses.dataclass
+class ComputeNodeWrapperState:
+    status: NodeStatus
+    duration: Optional[float] = None
+    is_cached_node: bool = False
 
-    CopyNode = "Copy node"
-    DeleteNode = "Delete node"
-    RenameNode = "Rename node"
+
+class NodeContextMenuItemNames:
+    Run = "Run Sub Graph"
+    RunThisNode = "Run Cached Node"
+    StopGraphRun = "Stop Graph Run"
+
+    CopyNode = "Copy Node"
+    DeleteNode = "Delete Node"
+    RenameNode = "Rename Node"
+    ToggleCached = "Toggle Cached Inputs"
     DebugUpdateNodeInternals = "Debug Update Internals"
 
 
@@ -222,9 +238,11 @@ class NodeConfig:
     width: Optional[int] = None
     height: Optional[int] = None
 
+
 class DontSchedule:
     def __repr__(self) -> str:
         return "DontSchedule"
+
 
 @dataclasses.dataclass
 class WrapperConfig:
@@ -511,7 +529,9 @@ class IOHandle(mui.FlexBox):
 
 
 class ComputeNodeWrapper(mui.FlexBox):
-    def __init__(self, cnode: ComputeNode):
+    def __init__(self,
+                 cnode: ComputeNode,
+                 init_state: Optional[ComputeNodeWrapperState] = None):
         self.header = mui.Typography(cnode.name).prop(variant="body1")
         self.icon_container = mui.Fragment([])
         icon_cfg = cnode.icon_cfg
@@ -524,8 +544,18 @@ class ComputeNodeWrapper(mui.FlexBox):
                                                 icon=icon_cfg.icon,
                                                 muiColor=icon_cfg.muiColor)
             ])
+        self.header_icons = mui.HBox(
+            []).prop(className=ComputeFlowClasses.HeaderIcons)
+        if init_state is not None:
+            if init_state.is_cached_node:
+                self.header_icons.init_add_layout({
+                    "cached_icon":
+                    mui.Icon(mui.IconType.Cached).prop(iconSize="small")
+                })
         self.header_container = mui.HBox([
-            self.icon_container, self.header
+            self.icon_container,
+            self.header,
+            self.header_icons,
         ]).prop(className=
                 f"{ComputeFlowClasses.Header} {ComputeFlowClasses.NodeItem}")
 
@@ -543,7 +573,9 @@ class ComputeNodeWrapper(mui.FlexBox):
         self._run_status = mui.Typography("ready").prop(variant="caption")
         self.status_box = mui.HBox([
             self._run_status,
-        ]).prop(className=f"{ComputeFlowClasses.NodeItem} {ComputeFlowClasses.BottomStatus}")
+        ]).prop(
+            className=
+            f"{ComputeFlowClasses.NodeItem} {ComputeFlowClasses.BottomStatus}")
         self.middle_node_container = mui.Fragment(([
             mui.VBox([self.middle_node_layout]).prop(
                 className=ComputeFlowClasses.NodeItem,
@@ -568,10 +600,44 @@ class ComputeNodeWrapper(mui.FlexBox):
             merge_props_not_undefined(self.props,
                                       cnode.init_wrapper_config.boxProps)
 
-        self.status = NodeStatus.Ready
-        self._last_duration: Optional[float] = None
-
+        if init_state is not None:
+            self._state = init_state
+        else:
+            self._state = ComputeNodeWrapperState(NodeStatus.Ready)
         self._cached_inputs: Optional[Dict[str, Any]] = None
+
+    @property
+    def is_cached_node(self):
+        return self._state.is_cached_node
+
+    async def set_cached(self, enable: bool):
+        self._state.is_cached_node = enable
+        if enable:
+            await self.header_icons.set_new_layout({
+                "cached_icon":
+                mui.Icon(mui.IconType.Cached).prop(iconSize="small")
+            })
+        else:
+            self._cached_inputs = None
+            await self.header_icons.set_new_layout([])
+
+    async def set_cache_inputs(self, inputs: Optional[Dict[str, Any]] = None):
+        if self.is_cached_node:
+            if self._cached_inputs is not None:
+                if inputs is None:
+                    if "cached_icon" in self.header_icons:
+                        icon = self.header_icons.get_item_type_checked(
+                            "cached_icon", mui.Icon)
+                        await self.send_and_wait(
+                            icon.update_event(muiColor=mui.undefined))
+            else:
+                if inputs is not None:
+                    if "cached_icon" in self.header_icons:
+                        icon = self.header_icons.get_item_type_checked(
+                            "cached_icon", mui.Icon)
+                        await self.send_and_wait(
+                            icon.update_event(muiColor="success"))
+            self._cached_inputs = inputs
 
     def _get_resizer_from_cnode(
             self, cnode: ComputeNode) -> Optional[flowui.NodeResizer]:
@@ -616,9 +682,12 @@ class ComputeNodeWrapper(mui.FlexBox):
             else:
                 await self._resizer_container.set_new_layout([])
             if cnode.init_wrapper_config is not None and cnode.init_wrapper_config.boxProps is not None:
-                await self.send_and_wait(self.create_update_event(as_dict_no_undefined(cnode.init_wrapper_config.boxProps)))
+                await self.send_and_wait(
+                    self.create_update_event(
+                        as_dict_no_undefined(
+                            cnode.init_wrapper_config.boxProps)))
             # if cnode.init_cfg is None and prev_cnode.init_cfg is not None:
-                # await 
+            # await
             icon_cfg = cnode.icon_cfg
             if icon_cfg is None:
                 if cnode._node_type is not None and cnode._node_type in NODE_REGISTRY:
@@ -663,13 +732,16 @@ class ComputeNodeWrapper(mui.FlexBox):
             out_iohandles.append(iohandle)
         return inp_iohandles, out_iohandles
 
-    def update_status_event(self, status: NodeStatus, duration: Optional[float] = None) -> AppEvent:
-        self.status = status
-        self._last_duration = duration
+    def update_status_event(self,
+                            status: NodeStatus,
+                            duration: Optional[float] = None) -> AppEvent:
+        self._state.status = status
+        self._state.duration = duration
         ev = AppEvent("", {})
         if duration is not None:
             dt = datetime.timedelta(seconds=duration)
-            ev += self._run_status.update_event(value=humanize.precisedelta(dt, minimum_unit="milliseconds"))
+            ev += self._run_status.update_event(
+                value=humanize.precisedelta(dt, minimum_unit="milliseconds"))
         if status == NodeStatus.Ready:
             ev += self.update_event(borderColor="black",
                                     boxShadow=mui.undefined)
@@ -692,12 +764,15 @@ class ComputeNodeWrapper(mui.FlexBox):
                 ev += self._run_status.update_event(value="Ready")
         return ev
 
-    def update_status_locally(self, status: NodeStatus, duration: Optional[float] = None) -> None:
-        self.status = status
-        self._last_duration = duration
+    def update_status_locally(self,
+                              status: NodeStatus,
+                              duration: Optional[float] = None) -> None:
+        self._state.status = status
+        self._state.duration = duration
         if duration is not None:
             dt = datetime.timedelta(seconds=duration)
-            self._run_status.prop(value=humanize.naturaldelta(dt, minimum_unit="milliseconds"))
+            self._run_status.prop(
+                value=humanize.naturaldelta(dt, minimum_unit="milliseconds"))
         if status == NodeStatus.Ready:
             self.prop(borderColor="black", boxShadow=mui.undefined)
             if duration is None:
@@ -715,29 +790,66 @@ class ComputeNodeWrapper(mui.FlexBox):
             if duration is None:
                 self._run_status.prop(value="Ready")
 
-    async def update_status(self, status: NodeStatus, duration: Optional[float] = None):
-        return await self.send_and_wait(self.update_status_event(status, duration))
+    async def update_status(self,
+                            status: NodeStatus,
+                            duration: Optional[float] = None):
+        return await self.send_and_wait(
+            self.update_status_event(status, duration))
 
     def state_dict(self) -> Dict[str, Any]:
         res = self.cnode.state_dict()
-        return {"cnode": res, "status": int(self.status), "last_duration": self._last_duration}
+        return {"cnode": res, "state": dataclasses.asdict(self._state)}
 
     @classmethod
     async def from_state_dict(cls, data: Dict[str, Any],
                               cnode_cls: Type[ComputeNode]):
         cnode = await (cnode_cls.from_state_dict(data["cnode"]))
         await cnode.init_node_async(False)
-        res = cls(cnode)
-        # TODO should we recover status here?
-        # duration: Optional[float] = None
-        # if "last_duration" in data:
-        #     duration = data["last_duration"]
-        # res.update_status_locally(data["status"], duration)
+        init_state: Optional[ComputeNodeWrapperState] = None
+        if "state" in data:
+            init_state = ComputeNodeWrapperState(**data["state"])
+            # TODO should we recover status here?
+            init_state.status = NodeStatus.Ready
+        res = cls(cnode, init_state)
         return res
+
+    def get_context_menus(self):
+        disable_run_cached_node = not (self.is_cached_node and self._cached_inputs is not None)
+        return [
+            mui.MenuItem(NodeContextMenuItemNames.Run,
+                         NodeContextMenuItemNames.Run,
+                         icon=mui.IconType.PlayArrow),
+            mui.MenuItem(NodeContextMenuItemNames.RunThisNode,
+                         NodeContextMenuItemNames.RunThisNode,
+                         icon=mui.IconType.Cached,
+                         disabled=disable_run_cached_node),
+            mui.MenuItem(NodeContextMenuItemNames.StopGraphRun,
+                         NodeContextMenuItemNames.StopGraphRun,
+                         icon=mui.IconType.Stop),
+            mui.MenuItem("divider0", divider=True),
+            mui.MenuItem(NodeContextMenuItemNames.CopyNode,
+                         NodeContextMenuItemNames.CopyNode,
+                         inset=True),
+            mui.MenuItem(NodeContextMenuItemNames.DeleteNode,
+                         NodeContextMenuItemNames.DeleteNode,
+                         icon=mui.IconType.Delete),
+            mui.MenuItem(NodeContextMenuItemNames.RenameNode,
+                         NodeContextMenuItemNames.RenameNode,
+                         inset=True),
+            mui.MenuItem(
+                NodeContextMenuItemNames.ToggleCached,
+                NodeContextMenuItemNames.ToggleCached,
+                icon=mui.IconType.Done if self.is_cached_node else None,
+                inset=True if not self.is_cached_node else False),
+            mui.MenuItem(NodeContextMenuItemNames.DebugUpdateNodeInternals,
+                         NodeContextMenuItemNames.DebugUpdateNodeInternals,
+                         inset=True),
+        ]
 
 
 class TemplateRemoveManager(mui.FlexBox):
-    def __init__(self, items: List[Tuple[str, mui.ValueType]], init_code: str, init_path: str):
+    def __init__(self, items: List[Tuple[str, mui.ValueType]], init_code: str,
+                 init_path: str):
         self._template_select = mui.Select("template", items,
                                            self._handle_template_select)
         self._del_btn = mui.IconButton(
@@ -745,7 +857,8 @@ class TemplateRemoveManager(mui.FlexBox):
                 confirmTitle="Remove Template",
                 confirmMessage="Are you sure to remove this template?")
         self._code_editor = mui.MonacoEditor(init_code, "python",
-                                             init_path).prop(flex=1, readOnly=True)
+                                             init_path).prop(flex=1,
+                                                             readOnly=True)
         super().__init__([
             mui.HBox([self._template_select.prop(flex=1),
                       self._del_btn]).prop(padding="8px"),
@@ -754,12 +867,13 @@ class TemplateRemoveManager(mui.FlexBox):
         self.prop(height="70vh", flexDirection="column")
         self.event_before_mount.on(self._handle_mount)
 
-    @staticmethod 
+    @staticmethod
     async def create_from_app_storage():
-        items, code, path = await TemplateRemoveManager._get_template_items_and_code()
+        items, code, path = await TemplateRemoveManager._get_template_items_and_code(
+        )
         return TemplateRemoveManager(items, code, path)
 
-    @staticmethod 
+    @staticmethod
     async def _get_template_items_and_code():
         all_templates = await read_data_storage_by_glob_prefix(
             "__cflow_templates/*")
@@ -778,8 +892,7 @@ class TemplateRemoveManager(mui.FlexBox):
         items, code, path = await self._get_template_items_and_code()
         await self._template_select.update_items(items, 0)
         await self._code_editor.send_and_wait(
-            self._code_editor.update_event(
-                value=code, path=path))
+            self._code_editor.update_event(value=code, path=path))
 
     async def _remove_template(self):
         from tensorpc.flow.components.flowplus.customnode import CustomNode
@@ -804,7 +917,10 @@ class TemplateRemoveManager(mui.FlexBox):
         template_key_path = str(value)
         template_code = await read_data_storage(template_key_path)
         await self._code_editor.send_and_wait(
-            self._code_editor.update_event(value=template_code, path=f"<{TENSORPC_FILE_NAME_PREFIX}-cflow-{template_key_path}>"))
+            self._code_editor.update_event(
+                value=template_code,
+                path=f"<{TENSORPC_FILE_NAME_PREFIX}-cflow-{template_key_path}>"
+            ))
 
 
 @dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
@@ -898,7 +1014,7 @@ class ComputeFlow(mui.FlexBox):
         }
         self.prop(width="100%", height="100%", overflow="hidden")
         self.graph.prop(targetValidConnectMap=target_conn_valid_map)
-        menu_items = [
+        self._node_menu_items = [
             mui.MenuItem(NodeContextMenuItemNames.Run,
                          NodeContextMenuItemNames.Run,
                          icon=mui.IconType.PlayArrow),
@@ -946,7 +1062,7 @@ class ComputeFlow(mui.FlexBox):
             pane_menu_items.append(mui.MenuItem(k, v.name, icon=icon))
 
         self.registry_pane_items = pane_menu_items
-        self.graph.prop(nodeContextMenuItems=menu_items,
+        self.graph.prop(nodeContextMenuItems=self._node_menu_items,
                         paneContextMenuItems=self.view_pane_menu_items +
                         pane_menu_items)
         self.graph.event_node_context_menu.on(self._on_node_contextment)
@@ -972,13 +1088,14 @@ class ComputeFlow(mui.FlexBox):
                 wrapper = node.get_component_checked(ComputeNodeWrapper)
                 wrapper.cnode.name = new_name
                 await self.update_cnode_header(node_id, new_name)
-                await save_data_storage(self.storage_key, self.state_dict())
-
+                await self.save_graph()
 
     def _cnode_to_node(self, cnode: ComputeNode) -> flowui.Node:
         cnode_wrapper = ComputeNodeWrapper(cnode)
         node = flowui.Node(cnode.id,
-                           flowui.NodeData(cnode_wrapper),
+                           flowui.NodeData(
+                               cnode_wrapper,
+                               contextMenuItems=self._node_menu_items),
                            type="app",
                            deletable=False)
         node.dragHandle = f".{ComputeFlowClasses.Header}"
@@ -1040,6 +1157,7 @@ class ComputeFlow(mui.FlexBox):
         if set_failed:
             # cnode remain unchanged, so just return
             return
+        # always remove cache when cnode changed
         node_cfg = cnode.init_cfg
         style = {}
         if node_cfg is not None:
@@ -1063,6 +1181,14 @@ class ComputeFlow(mui.FlexBox):
                     prev_edges = self.graph.get_edges_by_node_and_handle_id(
                         node_id, handle_id)
                     edge_id_to_be_removed.extend([e.id for e in prev_edges])
+        if edge_id_to_be_removed:
+            # ifinput handle remain unchanged, we don't need to clear cache
+            # if only order change, edge won't be removed, so cache
+            # won't be cleared.
+            await wrapper.set_cache_inputs(None)
+            await self.graph.update_node_data(node_id, {
+                "contextMenuItems": wrapper.get_context_menus()
+            })
         # check out handles
         if not unchange_when_length_equal or (
                 unchange_when_length_equal
@@ -1075,16 +1201,31 @@ class ComputeFlow(mui.FlexBox):
                     edge_id_to_be_removed.extend([e.id for e in prev_edges])
         await self.graph.update_node_internals([node_id])
         await self.graph.delete_edges_by_ids(edge_id_to_be_removed)
-        await save_data_storage(self.storage_key, self.state_dict())
+        await self.save_graph()
+
+    async def run_cached_node(self, node_id: str):
+        node = self.graph.get_node_by_id(node_id)
+        wrapper = node.get_component_checked(ComputeNodeWrapper)
+        if wrapper.is_cached_node:
+            if wrapper._cached_inputs is not None:
+                return await self.schedule_node(node_id, wrapper._cached_inputs)
+            else:
+                return await self.send_error("Node Context Error", "you must use run cached node when inputs are cached.")
+
 
     async def _on_node_contextment(self, data):
         item_id = data["itemId"]
         node_id = data["nodeId"]
         if item_id == NodeContextMenuItemNames.Run:
-            await self._schedule_roots_by_node_id(node_id)
+            # if node is cached, only run it from cached input
+            await self._schedule_roots_by_node_id_or_run_cache(node_id)
+        elif item_id == NodeContextMenuItemNames.RunThisNode:
+            await self.run_cached_node(node_id)
+        elif item_id == NodeContextMenuItemNames.StopGraphRun:
+            self._shutdown_ev.set()
         elif item_id == NodeContextMenuItemNames.DeleteNode:
             await self.graph.delete_nodes_by_ids([node_id])
-            await save_data_storage(self.storage_key, self.state_dict())
+            await self.save_graph()
         elif item_id == NodeContextMenuItemNames.RenameNode:
             node = self.graph.get_node_by_id(node_id)
             wrapper = node.get_component_checked(ComputeNodeWrapper)
@@ -1092,9 +1233,31 @@ class ComputeFlow(mui.FlexBox):
                 self._node_setting_name.update_event(value=wrapper.cnode.name))
             await self._node_setting_dialog.set_open(True,
                                                      {"node_id": node_id})
-            await save_data_storage(self.storage_key, self.state_dict())
+            await self.save_graph()
+        elif item_id == NodeContextMenuItemNames.ToggleCached:
+            node = self.graph.get_node_by_id(node_id)
+            wrapper = node.get_component_checked(ComputeNodeWrapper)
+            await wrapper.set_cached(not wrapper.is_cached_node)
+            if wrapper.is_cached_node:
+                await self.graph.update_node_context_menu_items(
+                    node_id, [
+                        mui.MenuItem(NodeContextMenuItemNames.ToggleCached,
+                                     icon=mui.IconType.Done)
+                    ])
+            else:
+                await self.graph.update_node_context_menu_items(
+                    node_id, [
+                        mui.MenuItem(NodeContextMenuItemNames.ToggleCached,
+                                     icon=None,
+                                     inset=True)
+                    ])
+
+            await self.save_graph()
         elif item_id == NodeContextMenuItemNames.DebugUpdateNodeInternals:
             await self.graph.update_node_internals([node_id])
+
+    async def save_graph(self, save_node_state: bool = True):
+        await save_data_storage(self.storage_key, self.state_dict())
 
     async def _on_pane_contextment(self, data):
         item_id = data["itemId"]
@@ -1138,8 +1301,7 @@ class ComputeFlow(mui.FlexBox):
                 self.flow_options.disable_all_resizer = True
         elif item_id == PaneContextMenuItemNames.ManageTemplates:
             manager = await TemplateRemoveManager.create_from_app_storage()
-            await self._template_manage_dialog.set_new_layout(
-                [manager])
+            await self._template_manage_dialog.set_new_layout([manager])
             await self._template_manage_dialog.set_open(True)
         else:
             if item_id in NODE_REGISTRY:
@@ -1227,6 +1389,12 @@ class ComputeFlow(mui.FlexBox):
                     n for n in graph_child_def.nodes
                     if n.id not in node_id_to_remove
                 ]
+                for node in graph_child_def.nodes:
+                    if not isinstance(node.data, mui.Undefined):
+                        # context menu are runtime state, not saved,
+                        # so we set them here based on wrapper state.
+                        node.data.contextMenuItems = node.get_component_checked(
+                            ComputeNodeWrapper).get_context_menus()
                 self.graph.childs_complex.nodes = graph_child_def.nodes
                 self.graph.childs_complex.edges = graph_child_def.edges
                 await self.graph.set_new_layout(self.graph.childs_complex)
@@ -1240,15 +1408,15 @@ class ComputeFlow(mui.FlexBox):
     @marker.mark_will_unmount
     async def _on_flow_unmount(self):
         self._shutdown_ev.set()
-        await save_data_storage(self.storage_key, self.state_dict())
+        await self.save_graph()
         if self._schedule_task is not None:
             await self._schedule_task
 
     async def _handle_edge_delete(self, edges: List[Any]):
-        await save_data_storage(self.storage_key, self.state_dict())
+        await self.save_graph()
 
     async def _handle_new_edge(self, data: Dict[str, Any]):
-        await save_data_storage(self.storage_key, self.state_dict())
+        await self.save_graph()
 
     async def _update_side_layout_visible(self, bottom: bool, right: bool):
         ev = self.global_container.update_pane_props_event(
@@ -1303,7 +1471,7 @@ class ComputeFlow(mui.FlexBox):
             "node_id_to_state": node_id_to_state,
         }
 
-    async def _schedule_roots_by_node_id(self, node_id: str):
+    async def _schedule_roots_by_node_id_or_run_cache(self, node_id: str):
         if not self.graph.has_node_id(node_id):
             return
         node = self.graph.get_node_by_id(node_id)
@@ -1405,21 +1573,26 @@ class ComputeFlow(mui.FlexBox):
             res = await aw
             cp_res = _ComputeTaskResult(result=res, duration=time.time() - t)
             await wrapper.update_status(NodeStatus.Ready, cp_res.duration)
-            return cp_res 
+            return cp_res
         except StopAsyncIteration as exc:
-            cp_res = _ComputeTaskResult(result=None,exception=exc,  duration=time.time() - t)
+            cp_res = _ComputeTaskResult(result=None,
+                                        exception=exc,
+                                        duration=time.time() - t)
             await wrapper.update_status(NodeStatus.Ready, cp_res.duration)
             return cp_res
         except Exception as exc:
             tb = sys.exc_info()[2]
             traceback.print_exc()
             exc_msg = UserMessage.from_exception("", exc, tb)
-            return _ComputeTaskResult(result=None, exception=exc, exc_msg=exc_msg)
+            return _ComputeTaskResult(result=None,
+                                      exception=exc,
+                                      exc_msg=exc_msg)
 
     async def _schedule(self, nodes: List[flowui.Node],
                         node_inputs: Dict[str, Dict[str, Any]],
                         shutdown_ev: asyncio.Event):
-        await save_data_storage(self.storage_key, self.state_dict())
+        await self.save_graph()
+        self._shutdown_ev.clear()
         nodes_to_schedule: List[flowui.Node] = nodes
         ctx = get_compute_flow_context()
         if ctx is not None:
@@ -1469,6 +1642,11 @@ class ComputeFlow(mui.FlexBox):
                         continue
                     node_inp = cur_node_inputs.get(n.id, {})
                     wrapper = n.get_component_checked(ComputeNodeWrapper)
+                    if wrapper.is_cached_node:
+                        await wrapper.set_cache_inputs(node_inp)
+                        await self.graph.update_node_data(n.id, {
+                            "contextMenuItems": wrapper.get_context_menus()
+                        })
                     compute_func = wrapper.cnode.get_compute_function()
                     if wrapper.cnode.is_async_gen and inspect.isasyncgenfunction(
                             compute_func):
@@ -1491,13 +1669,16 @@ class ComputeFlow(mui.FlexBox):
                             await self.send_exception(exc)
                             continue
                         if inspect.iscoroutine(data):
-                            task = asyncio.create_task(
-                                self._awaitable_to_coro(n, data), name=f"node-{n.id}")
+                            task = asyncio.create_task(self._awaitable_to_coro(
+                                n, data),
+                                                       name=f"node-{n.id}")
                             tasks.append(task)
                             task_to_noded[task] = n
                         else:
                             assert isinstance(data, dict)
-                            await wrapper.update_status(NodeStatus.Ready, time.time() - t1)
+                            await wrapper.update_status(
+                                NodeStatus.Ready,
+                                time.time() - t1)
                             node_outputs[n.id] = data
                 is_shutdown = False
                 print("Waiting")
@@ -1551,7 +1732,8 @@ class ComputeFlow(mui.FlexBox):
                     if res is None:
                         res = {}  # for node without output, we support None.
                     if not isinstance(res, dict):
-                        await wrapper.update_status(NodeStatus.Error, task_res.duration)
+                        await wrapper.update_status(NodeStatus.Error,
+                                                    task_res.duration)
                         await self.send_error(
                             f"Node {node_id} compute return type must be dict",
                             f"{type(res)}")
@@ -1569,9 +1751,11 @@ class ComputeFlow(mui.FlexBox):
                     if node_out_valid:
                         node_outputs[node_id] = res
                         if node_id not in cur_anode_iters:
-                            await wrapper.update_status(NodeStatus.Ready, task_res.duration)
+                            await wrapper.update_status(
+                                NodeStatus.Ready, task_res.duration)
                     else:
-                        await wrapper.update_status(NodeStatus.Error, task_res.duration)
+                        await wrapper.update_status(NodeStatus.Error,
+                                                    task_res.duration)
                 # print("Node Outputs", node_outputs)
                 new_node_inputs.update(
                     self._get_next_node_inputs(node_outputs))

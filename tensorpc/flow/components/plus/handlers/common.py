@@ -22,6 +22,7 @@ _MAX_STRING_IN_DETAIL = 10000
 
 @ALL_OBJECT_PREVIEW_HANDLERS.register(np.ndarray)
 @ALL_OBJECT_PREVIEW_HANDLERS.register(CommonQualNames.TorchTensor)
+@ALL_OBJECT_PREVIEW_HANDLERS.register(CommonQualNames.TorchParameter)
 @ALL_OBJECT_PREVIEW_HANDLERS.register(CommonQualNames.TVTensor)
 class TensorHandler(ObjectPreviewHandler):
 
@@ -84,6 +85,8 @@ class TensorHandler(ObjectPreviewHandler):
             return
         if get_qualname_of_type(type(res)) == CommonQualNames.TVTensor:
             res = res.cpu().numpy()
+        if get_qualname_of_type(type(res)) == CommonQualNames.TorchParameter:
+            res = res.data.cpu().numpy()
         else:
             res = res
         await self.data_print.write(str(res))
@@ -124,6 +127,13 @@ class TensorHandler(ObjectPreviewHandler):
             is_contig = obj.is_contiguous()
             hasnan = torch.isnan(obj).any().item()
             hasinf = torch.isinf(obj).any().item()
+        elif get_qualname_of_type(type(obj)) == CommonQualNames.TorchParameter:
+            import torch
+            qualname = "torch.Parameter"
+            device = obj.data.device.type
+            is_contig = obj.data.is_contiguous()
+            hasnan = torch.isnan(obj.data).any().item()
+            hasinf = torch.isinf(obj.data).any().item()
 
         elif get_qualname_of_type(type(obj)) == CommonQualNames.TVTensor:
             from cumm.dtypes import get_dtype_from_tvdtype

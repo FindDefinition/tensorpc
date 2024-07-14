@@ -107,6 +107,87 @@ class ObjectLayoutHandlerRegistry(
         return qname in self
 
 
+class ObjectLayoutHandleManager:
+    def __init__(self):
+        self._type_to_handler_object: Dict[Type[Any], ObjectLayoutHandler] = {}
+
+    def is_in_cache(self, obj: Any) -> bool:
+        obj_type = type(obj)
+        is_dcls = dataclasses.is_dataclass(obj)
+        if obj_type in self._type_to_handler_object:
+            return True 
+        elif is_dcls and DataClassesType in self._type_to_handler_object:
+            return True 
+        return False 
+
+    def query_handler(self, obj: Any) -> Optional[ObjectLayoutHandler]:
+        obj_type = type(obj)
+        is_dcls = dataclasses.is_dataclass(obj)
+        handler: Optional[ObjectLayoutHandler] = None
+        if obj_type in self._type_to_handler_object:
+            handler = self._type_to_handler_object[obj_type]
+        elif is_dcls and DataClassesType in self._type_to_handler_object:
+            handler = self._type_to_handler_object[DataClassesType]
+        else:
+            obj_qualname = get_qualname_of_type(type(obj))
+            handler_type: Optional[Type[ObjectLayoutHandler]] = None
+            modified_obj_type = obj_type
+
+            if obj is not None:
+                # check standard type first, if not found, check datasetclass type.
+                if obj_type in ALL_OBJECT_LAYOUT_HANDLERS:
+                    handler_type = ALL_OBJECT_LAYOUT_HANDLERS[obj_type]
+                elif obj_qualname in ALL_OBJECT_LAYOUT_HANDLERS:
+                    handler_type = ALL_OBJECT_LAYOUT_HANDLERS[obj_qualname]
+                elif is_dcls and DataClassesType in ALL_OBJECT_LAYOUT_HANDLERS:
+                    handler_type = ALL_OBJECT_LAYOUT_HANDLERS[
+                        DataClassesType]
+                    modified_obj_type = DataClassesType
+            if handler_type is not None:
+                handler = handler_type()
+                self._type_to_handler_object[modified_obj_type] = handler
+        return handler
+class ObjectPreviewLayoutHandleManager:
+    def __init__(self):
+        self._type_to_handler_object: Dict[Type[Any], ObjectPreviewHandler] = {}
+
+    def is_in_cache(self, obj: Any) -> bool:
+        obj_type = type(obj)
+        is_dcls = dataclasses.is_dataclass(obj)
+        if obj_type in self._type_to_handler_object:
+            return True 
+        elif is_dcls and DataClassesType in self._type_to_handler_object:
+            return True 
+        return False 
+
+    def query_handler(self, obj: Any) -> Optional[ObjectPreviewHandler]:
+        obj_type = type(obj)
+        is_dcls = dataclasses.is_dataclass(obj)
+        handler: Optional[ObjectPreviewHandler] = None
+        if obj_type in self._type_to_handler_object:
+            handler = self._type_to_handler_object[obj_type]
+        elif is_dcls and DataClassesType in self._type_to_handler_object:
+            handler = self._type_to_handler_object[DataClassesType]
+        else:
+            obj_qualname = get_qualname_of_type(type(obj))
+            handler_type: Optional[Type[ObjectPreviewHandler]] = None
+            modified_obj_type = obj_type
+
+            if obj is not None:
+                # check standard type first, if not found, check datasetclass type.
+                if obj_type in ALL_OBJECT_PREVIEW_HANDLERS:
+                    handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_type]
+                elif obj_qualname in ALL_OBJECT_PREVIEW_HANDLERS:
+                    handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_qualname]
+                elif is_dcls and DataClassesType in ALL_OBJECT_PREVIEW_HANDLERS:
+                    handler_type = ALL_OBJECT_PREVIEW_HANDLERS[
+                        DataClassesType]
+                    modified_obj_type = DataClassesType
+            if handler_type is not None:
+                handler = handler_type()
+                self._type_to_handler_object[modified_obj_type] = handler
+        return handler
+
 ALL_OBJECT_PREVIEW_HANDLERS: HashableRegistryKeyOnly[
     Type[ObjectPreviewHandler]] = HashableRegistryKeyOnly(allow_duplicate=True)
 

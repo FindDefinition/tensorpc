@@ -30,7 +30,7 @@ from tensorpc.flow.core.core import FlowSpecialMethods, FrontendEventType, _get_
 from tensorpc.flow.core.objtree import UserObjTreeProtocol
 from ..handlers.common import DefaultHandler
 from ..core import (ALL_OBJECT_PREVIEW_HANDLERS, USER_OBJ_TREE_TYPES,
-                    ObjectPreviewHandler, DataClassesType)
+                    ObjectPreviewHandler, DataClassesType, ObjectPreviewLayoutHandleManager)
 from .tree import _DEFAULT_OBJ_NAME, FOLDER_TYPES, ObjectTree
 from tensorpc.core import inspecttools
 
@@ -177,8 +177,9 @@ class ObjectInspector(mui.FlexBox):
         if with_detail:
             self.tree.tree.register_event_handler(
                 FrontendEventType.TreeItemSelectChange.value, self._on_select)
-        self._type_to_handler_object: Dict[Type[Any],
-                                           ObjectPreviewHandler] = {}
+        # self._type_to_handler_object: Dict[Type[Any],
+        #                                    ObjectPreviewHandler] = {}
+        self._cached_preview_handler = ObjectPreviewLayoutHandleManager()
         self._current_preview_layout: Optional[mui.FlexBox] = None
 
     async def get_object_by_uid(self, uid: str):
@@ -226,10 +227,9 @@ class ObjectInspector(mui.FlexBox):
                 break
 
         # preview layout is checked firstly, then preview handler.
-        if obj_type in self._type_to_handler_object:
-            handler = self._type_to_handler_object[obj_type]
-        elif is_dcls and DataClassesType in self._type_to_handler_object:
-            handler = self._type_to_handler_object[DataClassesType]
+        if self._cached_preview_handler.is_in_cache(obj):
+            handler = self._cached_preview_handler.query_handler(obj)
+            assert handler is not None
         else:
             metas = self.flow_app_comp_core.reload_mgr.query_type_method_meta(
                 obj_type, True, include_base=True)
@@ -250,25 +250,9 @@ class ObjectInspector(mui.FlexBox):
                                 obj, metas, self.flow_app_comp_core.reload_mgr)
                 handler = self.default_handler
             else:
-                obj_qualname = get_qualname_of_type(type(obj))
-                handler_type: Optional[Type[ObjectPreviewHandler]] = None
-                modified_obj_type = obj_type
-                if obj is not None:
-                    # check standard type first, if not found, check datasetclass type.
-                    if obj_type in ALL_OBJECT_PREVIEW_HANDLERS:
-                        handler_type = ALL_OBJECT_PREVIEW_HANDLERS[obj_type]
-                    elif obj_qualname in ALL_OBJECT_PREVIEW_HANDLERS:
-                        handler_type = ALL_OBJECT_PREVIEW_HANDLERS[
-                            obj_qualname]
-                    elif is_dcls and DataClassesType in ALL_OBJECT_PREVIEW_HANDLERS:
-                        modified_obj_type = DataClassesType
-                        handler_type = ALL_OBJECT_PREVIEW_HANDLERS[
-                            DataClassesType]
-                if handler_type is not None:
-                    handler = handler_type()
-                else:
+                handler = self._cached_preview_handler.query_handler(obj)
+                if handler is None:
                     handler = self.default_handler
-                self._type_to_handler_object[modified_obj_type] = handler
             # if preview_layout is None:
             #     self._type_to_handler_object[modified_obj_type] = handler
         if preview_layout is not None:

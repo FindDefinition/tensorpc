@@ -70,7 +70,7 @@ from tensorpc.flow.constants import TENSORPC_FLOW_COMP_UID_STRUCTURE_SPLIT
 class DataclassType(Protocol):
     # as already noted in comments, checking for this attribute is currently
     # the most reliable way to ascertain that something is a dataclass
-    __dataclass_fields__: ClassVar[Dict]
+    __dataclass_fields__: ClassVar[Dict[str, Any]]
 
 
 ALL_APP_EVENTS = HashableRegistry()
@@ -2183,6 +2183,12 @@ class ContainerBase(Component[T_container_props, T_child]):
         self._child_comps.clear()
         await super()._clear()
         self._pool.unique_set.clear()
+
+    def get_item_type_checked(self, key: str, check_type: Type[T]) -> T:
+        assert key in self._child_comps, f"{key}, {self._child_comps.keys()}"
+        res = self._child_comps[key]
+        assert isinstance(res, check_type)
+        return res
 
     def __getitem__(self, key: str):
         assert key in self._child_comps, f"{key}, {self._child_comps.keys()}"

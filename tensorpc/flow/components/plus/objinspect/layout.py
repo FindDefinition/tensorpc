@@ -21,7 +21,7 @@ from tensorpc.flow.core.appcore import (AppSpecialEventType,
 from tensorpc.flow.components import mui, three
 from tensorpc.flow.components import plus
 from tensorpc.flow.components.plus.core import (
-    ALL_OBJECT_LAYOUT_HANDLERS, ObjectLayoutCreator, ObjectLayoutHandler,
+    ALL_OBJECT_LAYOUT_HANDLERS, ObjectLayoutCreator, ObjectLayoutHandleManager, ObjectLayoutHandler,
     DataClassesType)
 from tensorpc.flow.core.core import (AppEditorFrontendEvent,
                                         FlowSpecialMethods, FrontendEventType,
@@ -63,6 +63,8 @@ class AnyFlexLayout(mui.FlexLayout):
         self._current_bind_code_id = None
         self.prop(font=mui.FlexLayoutFontProps(size="14px"))
         self._type_to_handler_object: Dict[Type[Any], ObjectLayoutHandler] = {}
+
+        self._cached_obj_layout_handler = ObjectLayoutHandleManager()
 
     async def _handle_reload_layout(self, layout: mui.FlexBox,
                                     create_layout: ServFunctionMeta,
@@ -110,29 +112,7 @@ class AnyFlexLayout(mui.FlexLayout):
                         wrapped_obj = mui.flex_wrapper(
                             obj, reload_mgr=self.flow_app_comp_core.reload_mgr)
                     else:
-                        handler: Optional[ObjectLayoutHandler] = None
-                        obj_type = type(obj)
-                        is_dcls = dataclasses.is_dataclass(obj)
-
-                        if obj_type in self._type_to_handler_object:
-                            handler = self._type_to_handler_object[obj_type]
-                        elif is_dcls and DataClassesType in self._type_to_handler_object:
-                            handler = self._type_to_handler_object[DataClassesType]
-                        else:
-                            obj_qualname = get_qualname_of_type(type(obj))
-                            handler_type: Optional[Type[ObjectLayoutHandler]] = None
-                            if obj is not None:
-                                # check standard type first, if not found, check datasetclass type.
-                                if obj_type in ALL_OBJECT_LAYOUT_HANDLERS:
-                                    handler_type = ALL_OBJECT_LAYOUT_HANDLERS[obj_type]
-                                elif obj_qualname in ALL_OBJECT_LAYOUT_HANDLERS:
-                                    handler_type = ALL_OBJECT_LAYOUT_HANDLERS[obj_qualname]
-                                elif is_dcls and DataClassesType in ALL_OBJECT_LAYOUT_HANDLERS:
-                                    handler_type = ALL_OBJECT_LAYOUT_HANDLERS[
-                                        DataClassesType]
-                            if handler_type is not None:
-                                handler = handler_type()
-                                self._type_to_handler_object[obj_type] = handler
+                        handler = self._cached_obj_layout_handler.query_handler(obj)
                         if handler is not None:
                             wrapped_obj = handler.create_layout(obj)
                         else:

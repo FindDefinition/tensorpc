@@ -572,6 +572,12 @@ class IconType(enum.IntEnum):
     ContentCut = 49
     TableView = 50
 
+@dataclasses.dataclass
+class TooltipBaseProps:
+    tooltipPlacement: Union[_TooltipPlacement, Undefined] = undefined
+    tooltipEnterDelay: Union[Undefined, NumberType] = undefined
+    tooltipEnterNextDelay: Union[Undefined, NumberType] = undefined
+    tooltipLeaveDelay: Union[Undefined, NumberType] = undefined
 
 @dataclasses.dataclass
 class IconBaseProps:
@@ -593,8 +599,9 @@ class IconBaseProps:
 
 
 @dataclasses.dataclass
-class IconProps(BasicProps, IconBaseProps):
+class IconProps(BasicProps, IconBaseProps, TooltipBaseProps):
     takeDragRef: Union[Undefined, bool] = undefined
+    tooltip: Union[str, Undefined] = undefined
     muiColor: Union[_IconColorNoDefault, Undefined] = undefined
 
 
@@ -626,7 +633,7 @@ class Icon(MUIComponentBase[IconProps]):
 
 
 @dataclasses.dataclass
-class IconButtonProps(MUIComponentBaseProps, IconBaseProps):
+class IconButtonProps(MUIComponentBaseProps, IconBaseProps, TooltipBaseProps):
 
     muiColor: Union[_BtnGroupColor, Undefined] = undefined
     disabled: Union[bool, Undefined] = undefined
@@ -634,9 +641,6 @@ class IconButtonProps(MUIComponentBaseProps, IconBaseProps):
     edge: Union[Literal["start", "end"], Undefined] = undefined
 
     tooltip: Union[str, Undefined] = undefined
-    tooltipPlacement: Union[_TooltipPlacement, Undefined] = undefined
-    tooltipMultiline: Union[bool, Undefined] = undefined
-
     progressColor: Union[_BtnGroupColor, Undefined] = undefined
     progressSize: Union[NumberType, Undefined] = undefined
     # if defined, will show a confirm dialog before executing the callback
@@ -1582,11 +1586,17 @@ class Input(_InputBaseComponent[InputProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+class MonacoKeyMod(enum.IntEnum):
+    CtrlCmd = 0
+    Alt = 1
+    Shift = 2
+    WinCtrl = 3
+
 @dataclasses.dataclass
 class MonacoEditorAction:
     id: str
     label: str
-    keybindings: Optional[List[int]] = None
+    keybindings: Optional[List[Tuple[List[MonacoKeyMod], int]]] = None
     precondition: Optional[str] = None
     keybindingContext: Optional[str] = None
     contextMenuGroupId: Optional[str] = None
@@ -2849,7 +2859,7 @@ class TypographyProps(MUIComponentBaseProps):
     # tooltipEnterNextDelay?: TooltipProps['enterNextDelay']
     # tooltipLeaveDelay?: TooltipProps['leaveDelay']
     enableTooltipWhenOverflow: Union[Undefined, bool] = undefined
-    placement: Union[_TooltipPlacement, Undefined] = undefined
+    tooltipPlacement: Union[_TooltipPlacement, Undefined] = undefined
     tooltipEnterDelay: Union[Undefined, NumberType] = undefined
     tooltipEnterNextDelay: Union[Undefined, NumberType] = undefined
     tooltipLeaveDelay: Union[Undefined, NumberType] = undefined
@@ -3261,6 +3271,10 @@ class TabDef:
                     Undefined] = undefined
     iconFontSize: Union[ValueType, Undefined] = undefined
     tooltip: Union[str, Undefined] = undefined
+    tooltipPlacement: Union[_TooltipPlacement, Undefined] = undefined
+    tooltipMultiline: Union[bool, Undefined] = undefined
+    tooltipEnterDelay: Union[NumberType, Undefined] = undefined
+    tooltipLeaveDelay: Union[NumberType, Undefined] = undefined
     labelComponent: Union[Component, Undefined] = undefined
 
 
@@ -4959,6 +4973,7 @@ class MenuItem:
     disableAutoFocusItem: Union[Undefined, bool] = undefined
     confirmMessage: Union[str, Undefined] = undefined
     confirmTitle: Union[str, Undefined] = undefined
+    disabled: Union[Undefined, bool] = undefined
 
 
 @dataclasses.dataclass

@@ -471,12 +471,14 @@ class BasicObjectTree(mui.FlexBox):
                 # real_node = self._objinspect_root._get_node_by_uid(node.realId)
                 real_obj, found = await self._get_obj_by_uid(
                     node.realId, nodes)
+                start_for_list = 0
                 if node.type == mui.JsonLikeType.ListFolder.value:
+                    start_for_list = node.start
                     data = real_obj[node.start:node.start + node.cnt]
                 else:
                     assert not isinstance(node.keys, mui.Undefined)
                     data = {k: real_obj[k] for k in node.keys.data}
-                obj_dict = {**(await self._tree_parser.expand_object(data))}
+                obj_dict = {**(await self._tree_parser.expand_object(data, start_for_list=start_for_list))}
                 tree = await self._tree_parser.parse_obj_dict_to_nodes(
                     obj_dict, node.id)
                 node.children = tree

@@ -1,6 +1,8 @@
 import contextlib
+import dataclasses
 import inspect
 from pathlib import Path
+from re import M
 import sys
 import traceback
 import types
@@ -19,6 +21,12 @@ _MEDIA_ROOT = Path(__file__).parent / "media"
 class CustomNodeEditorActionNames:
     CreateTemplate = "Create Template"
     DetachFromTemplate = "Detach From Template"
+    RunCached = "Run Cached Node"
+
+@dataclasses.dataclass
+class ModuleWithCode:
+    module: types.ModuleType
+    code: str
 
 @register_compute_node(key=ReservedNodeTypes.Custom, name="Custom Node", icon_cfg=mui.IconProps(icon=mui.IconType.Code))
 class CustomNode(ComputeNode):
@@ -27,18 +35,24 @@ class CustomNode(ComputeNode):
         with open(base_code_path, "r") as f:
             base_code = f.read()
         self._base_code = base_code
+        self._init_custom_node()
+
+    def _init_custom_node(self):
         actions = [
             mui.MonacoEditorAction(id=CustomNodeEditorActionNames.CreateTemplate, 
                 label="Create Node Template", contextMenuGroupId="tensorpc-flow-editor-action", contextMenuOrder=1.5),
             mui.MonacoEditorAction(id=CustomNodeEditorActionNames.DetachFromTemplate,
-                label="Detach From Template", contextMenuGroupId="tensorpc-flow-editor-action", contextMenuOrder=1.5)
+                label="Detach From Template", contextMenuGroupId="tensorpc-flow-editor-action", contextMenuOrder=1.5),
+            mui.MonacoEditorAction(id=CustomNodeEditorActionNames.RunCached,
+                label="Run with Cached Inputs", keybindings=[([mui.MonacoKeyMod.Shift], 3)],
+                contextMenuGroupId="tensorpc-flow-editor-action", contextMenuOrder=1.5)
         ]
-        self._code_editor = mui.MonacoEditor(base_code, "python",
+        self._code_editor = mui.MonacoEditor(self._base_code, "python",
                                              f"<tensorpc-flow-cflow-{self.id}>").prop(flex=1, actions=actions)
         self._template_key: Optional[str] = None
-        self._module: Optional[types.ModuleType] = None
+        self._module: Optional[ModuleWithCode] = None
 
-        self._cnode = self._get_cnode_cls_from_code(base_code)
+        self._cnode = self._get_cnode_cls_from_code(self._base_code)
         self._code_editor.event_editor_save.on(self.handle_code_editor_save)
         self._code_editor.event_editor_action.on(self._handle_editor_action)
         self._disable_template_fetch: bool = False
@@ -49,7 +63,6 @@ class CustomNode(ComputeNode):
         self._setting_dialog = mui.Dialog(
             [self._setting_template_name], lambda x: self._create_template(self._setting_template_name.str())
             if x.ok else None)
-
 
     @property
     def icon_cfg(self):
@@ -98,15 +111,12 @@ class CustomNode(ComputeNode):
             self._disable_template_fetch = False
 
     def _get_cnode_cls_from_code(self, code: str):
-        # if self._module is not None:
-        #     sys.modules.pop(self._module.__name__)
         key = f"{TENSORPC_FILE_NAME_PREFIX}-cflow-node-{self.id}"
         mod_name = f"<{key}-{uuid.uuid4().hex}>"
         module = types.ModuleType(mod_name)
         module.__file__ = f"<{key}>"
-        self._module = module
+        self._module = ModuleWithCode(module, code)
         codeobj = compile(code,  module.__file__, "exec")
-        # sys.modules[mod_name] = module
         exec(codeobj, module.__dict__)
         cnode_cls: Optional[Type[ComputeNode]] = None
         for v in module.__dict__.values():
@@ -172,6 +182,10 @@ class CustomNode(ComputeNode):
             await self._setting_dialog.set_open(True)
         elif act == CustomNodeEditorActionNames.DetachFromTemplate:
             await self.detach_from_template()
+        elif act == CustomNodeEditorActionNames.RunCached:
+            ctx = get_compute_flow_context()
+            assert ctx is not None, "can't find compute flow context!"
+            await ctx.cflow.run_cached_node(self.id)
 
     def _get_side_layouts(self):
         layouts: mui.LayoutType = {
@@ -197,6 +211,7 @@ class CustomNode(ComputeNode):
                                     raise_if_exist=True)
             self._template_key = template_key
             # use new icon color to indicate template node
+            await ctx.cflow.update_cnode_header(self.id, template_key)
             await ctx.cflow.update_cnode_icon_cfg(self.id, self.icon_cfg)
             await ctx.cflow.update_templates()
             if self._side_container.is_mounted():
@@ -240,13 +255,4 @@ class AsyncGenCustomNode(CustomNode):
         base_code_path = _MEDIA_ROOT / "asynccustom_base.py"
         with open(base_code_path, "r") as f:
             base_code = f.read()
-        self._code_editor = mui.MonacoEditor(base_code, "python",
-                                             "test").prop(flex=1)
-        self._base_code = base_code
-        self._template_key: Optional[str] = None
-        self._cnode = self._get_cnode_cls_from_code(base_code)
-        self._code_editor.event_editor_save.on(self.handle_code_editor_save)
-        self._disable_template_fetch: bool = False
-        self._side_container = mui.VBox([]).prop(width="100%",
-                                      height="100%",
-                                      overflow="hidden")
+        self._init_custom_node()

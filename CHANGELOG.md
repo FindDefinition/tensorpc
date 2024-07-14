@@ -1,4 +1,13 @@
 # Changelog
+# [0.11.13] - 2024-07-14
+### Changed 
+- change tooltip prop for some component
+- change keybinding format in action for monaco editor
+### Added 
+- add cache input to compute flow node
+- add context menu per node in flowui
+- add process pool executor support for compute flow custom node
+
 # [0.11.12] - 2024-07-10
 ### Fixed 
 - fix some bug in compute flow

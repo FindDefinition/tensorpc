@@ -92,6 +92,17 @@ def _get_tensor_meta(obj):
         min_value = obj.min().item()
         max_value = obj.max().item()
         is_float = obj.is_floating_point()
+    elif get_qualname_of_type(type(obj)) == CommonQualNames.TorchParameter:
+        import torch
+        qualname = "torch.Parameter"
+        device = obj.device.type
+        is_contig = obj.is_contiguous()
+        hasnan = bool(torch.isnan(obj).any().item())
+        hasinf = bool(torch.isinf(obj).any().item())
+        min_value = obj.min().item()
+        max_value = obj.max().item()
+        is_float = obj.is_floating_point()
+
     elif get_qualname_of_type(type(obj)) == CommonQualNames.TVTensor:
         from cumm.dtypes import get_npdtype_from_tvdtype
         qualname = "tv.Tensor"

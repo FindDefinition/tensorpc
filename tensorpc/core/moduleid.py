@@ -50,6 +50,8 @@ def is_lambda(obj: Callable):
         return False
     return obj.__qualname__ == "<lambda>"
 
+def is_tensorpc_fname(fname: str):
+    return fname.startswith(f"<{TENSORPC_FILE_NAME_PREFIX}") and fname.endswith(">")
 
 def is_valid_function(obj: Callable):
     return inspect.isfunction(obj) or inspect.ismethod(obj)

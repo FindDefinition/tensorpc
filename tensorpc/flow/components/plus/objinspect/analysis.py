@@ -106,7 +106,7 @@ class ObjectTreeParser:
     def _valid_check(self, obj_type):
         return True
 
-    async def expand_object(self, obj, check_obj: bool = True):
+    async def expand_object(self, obj, check_obj: bool = True, start_for_list: int = 0):
         if not self.parseable(obj, check_obj):
             return {}
         res: Dict[Any, Any] = {}
@@ -116,7 +116,7 @@ class ObjectTreeParser:
                 obj_list = list(obj)[:SET_CONTAINER_LIMIT_SIZE]
             else:
                 obj_list = obj
-            return {str(i): obj_list[i] for i in range(len(obj))}
+            return {str(i + start_for_list): obj_list[i] for i in range(len(obj))}
         elif isinstance(obj, dict):
             # return {k: v for k, v in obj.items() if not _is_obj_builtin_or_module(v)}
             return obj

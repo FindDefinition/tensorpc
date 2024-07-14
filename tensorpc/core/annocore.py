@@ -6,19 +6,16 @@ import inspect
 import sys 
 import typing 
 import types
+
 if sys.version_info < (3, 10):
 
-    def origin_is_union(tp: type[Any] | None) -> bool:
+    def origin_is_union(tp: Optional[type[Any]]) -> bool:
         return tp is typing.Union
-
-    WithArgsTypes = (TypingGenericAlias,)
 
 else:
 
-    def origin_is_union(tp: type[Any] | None) -> bool:
+    def origin_is_union(tp: Optional[type[Any]]) -> bool:
         return tp is typing.Union or tp is types.UnionType  # noqa: E721
-
-    WithArgsTypes = typing._GenericAlias, types.GenericAlias, types.UnionType  # type: ignore[attr-defined]
 
 def lenient_issubclass(cls: Any,
                        class_or_tuple: Any) -> bool:  # pragma: no cover

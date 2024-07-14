@@ -126,6 +126,7 @@ class NodeData:
     data: Union[Undefined, Any] = undefined
     label: Union[Undefined, str] = undefined
     sourceEdgeOverrides: Union[Undefined, Dict[str, Any]] = undefined
+    contextMenuItems: Union[Undefined, List[MenuItem]] = undefined
 
 
 @dataclasses.dataclass
@@ -592,6 +593,21 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                 "menuItems": items,
             }
             return await self.send_and_wait(self.create_comp_event(res))
+
+    async def update_node_context_menu_items(self, node_id: str, items: List[MenuItem]):
+        """Update node context menu items based on id.
+        this function won't add or remove items, only update the existing items.
+        """
+        node = self._id_to_node[node_id]
+        if isinstance(node.data, Undefined):
+            return 
+        if not isinstance(node.data.contextMenuItems, Undefined):
+            all_item_id_to_items = {item.id: item for item in node.data.contextMenuItems}
+            for item in items:
+                if item.id not in all_item_id_to_items:
+                    raise ValueError(f"item id {item.id} not exists")
+                merge_props_not_undefined(all_item_id_to_items[item.id], item)
+            return await self.update_node_data(node_id, {"contextMenuItems": items})
 
     async def add_nodes(self, nodes: List[Node], screen_to_flow: Optional[bool] = None):
         """Add new nodes to the flow.

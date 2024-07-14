@@ -377,6 +377,7 @@ class DataClassWithUndefined:
 class CommonQualNames:
     TorchTensor = "torch.Tensor"
     TVTensor = "cumm.core_cc.tensorview_bind.Tensor"
+    TorchParameter = "torch.nn.parameter.Parameter"
 
 
 class TensorType(enum.Enum):
@@ -384,6 +385,7 @@ class TensorType(enum.Enum):
     NpArray = "numpy.ndarray"
     TorchTensor = "torch.Tensor"
     TVTensor = "cumm.core_cc.tensorview_bind.Tensor"
+    TorchParameter = "torch.nn.parameter.Parameter"
 
 
 class JsonLikeType(enum.Enum):
@@ -664,6 +666,15 @@ def parse_obj_to_jsonlike(obj, name: str, id: UniqueTreeIdForTree):
                             t.value,
                             typeStr="torch.Tensor",
                             value=f"[{shape_short}]{obj.dtype}",
+                            drag=True)
+    elif get_qualname_of_type(obj_type) == CommonQualNames.TorchParameter:
+        t = JsonLikeType.Tensor
+        shape_short = ",".join(map(str, obj.data.shape))
+        return JsonLikeNode(id,
+                            name,
+                            t.value,
+                            typeStr="torch.Parameter",
+                            value=f"[{shape_short}]{obj.data.dtype}",
                             drag=True)
     elif get_qualname_of_type(obj_type) == CommonQualNames.TVTensor:
         t = JsonLikeType.Tensor
