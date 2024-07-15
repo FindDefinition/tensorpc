@@ -21,6 +21,7 @@ from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator,
 from colorama import init
 from typing_extensions import get_type_hints, is_typeddict
 
+from tensorpc import compat
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.annocore import (AnnotatedArg, AnnotatedReturn,
@@ -269,6 +270,7 @@ class ComputeNode:
         self._init_cfg = init_cfg
         self._icon_cfg = icon_cfg
         self._init_pos = init_pos
+        self._is_dynamic_class = False
         self.init_node()
         # check after init node because some init node may change the compute function
         # e.g. CustomNode
@@ -283,6 +285,14 @@ class ComputeNode:
             assert is_async_gen(
                 ranno.type
             ), "you must anno AsyncGenerator if your func is async gen"
+
+    @property
+    def is_dynamic_class(self):
+        return self._is_dynamic_class
+    
+    @is_dynamic_class.setter
+    def is_dynamic_class(self, value):
+        self._is_dynamic_class = value
 
     @property
     def is_async_gen(self):
@@ -347,7 +357,7 @@ class ComputeNode:
         }
 
     def get_compute_annotation(self):
-        return parse_annotated_function(self.compute)
+        return parse_annotated_function(self.compute, self._is_dynamic_class)
 
     def get_compute_function(self):
         """get the compute function of the node.
@@ -396,11 +406,15 @@ class ComputeNode:
         if ranno is NoneType:
             return inp_iohandles, out_iohandles
         assert is_typeddict_or_typeddict_async_gen(ranno)
+        global_ns = None
+        if not compat.Python3_10AndLater:
+            global_ns = {}
         if is_async_gen(ranno):
             tdict_annos = get_type_hints(get_args(ranno)[0],
-                                         include_extras=True)
+                                         include_extras=True,
+                                         globalns=global_ns)
         else:
-            tdict_annos = get_type_hints(ranno, include_extras=True)
+            tdict_annos = get_type_hints(ranno, include_extras=True, globalns=global_ns)
         for k, v in tdict_annos.items():
             v, anno_meta = extract_annotated_type_and_meta(v)
             handle_meta = None
@@ -907,7 +921,7 @@ class TemplateRemoveManager(mui.FlexBox):
                         wrapper = node.get_component_checked(
                             ComputeNodeWrapper)
                         if isinstance(wrapper.cnode, CustomNode):
-                            if wrapper.cnode._template_key == template_key:
+                            if wrapper.cnode._shared_key == template_key:
                                 await wrapper.cnode.detach_from_template()
                 await cflow.update_templates()
             # fetch all templates again
@@ -983,12 +997,12 @@ class ComputeFlow(mui.FlexBox):
         self._node_setting_dialog = mui.Dialog([self._node_setting],
                                                self._handle_dialog_close)
         self._node_setting_dialog.prop(title="Node Setting")
-        self._template_manage_dialog = mui.Dialog([]).prop(
-            maxWidth="xl", fullWidth=True, title="Manage Templates")
-        self._template_manage_dialog.event_modal_close.on(
-            lambda x: self._template_manage_dialog.set_new_layout([]))
+        self._shared_manage_dialog = mui.Dialog([]).prop(
+            maxWidth="xl", fullWidth=True, title="Manage Shared Nodes")
+        self._shared_manage_dialog.event_modal_close.on(
+            lambda x: self._shared_manage_dialog.set_new_layout([]))
         self.graph_container = mui.HBox([
-            self.graph, self._node_setting_dialog, self._template_manage_dialog
+            self.graph, self._node_setting_dialog, self._shared_manage_dialog
         ]).prop(width="100%", height="100%", overflow="hidden")
         self.graph_container.update_sx_props(_default_compute_flow_css())
         self._graph_with_bottom_container = mui.Allotment(
@@ -1242,7 +1256,8 @@ class ComputeFlow(mui.FlexBox):
                 await self.graph.update_node_context_menu_items(
                     node_id, [
                         mui.MenuItem(NodeContextMenuItemNames.ToggleCached,
-                                     icon=mui.IconType.Done)
+                                     icon=mui.IconType.Done,
+                                     inset=False)
                     ])
             else:
                 await self.graph.update_node_context_menu_items(
@@ -1301,8 +1316,8 @@ class ComputeFlow(mui.FlexBox):
                 self.flow_options.disable_all_resizer = True
         elif item_id == PaneContextMenuItemNames.ManageTemplates:
             manager = await TemplateRemoveManager.create_from_app_storage()
-            await self._template_manage_dialog.set_new_layout([manager])
-            await self._template_manage_dialog.set_open(True)
+            await self._shared_manage_dialog.set_new_layout([manager])
+            await self._shared_manage_dialog.set_open(True)
         else:
             if item_id in NODE_REGISTRY:
                 item = NODE_REGISTRY[item_id]
@@ -1329,7 +1344,7 @@ class ComputeFlow(mui.FlexBox):
                                         init_pos=flowui.XYPosition(
                                             mouse_x, mouse_y),
                                         icon_cfg=custom_node_item.icon_cfg)
-                cnode._template_key = template_key  # type: ignore
+                cnode._shared_key = template_key  # type: ignore
                 await cnode.init_node_async(False)
                 node = self._cnode_to_node(cnode)
             await self.graph.add_node(node, screen_to_flow=True)

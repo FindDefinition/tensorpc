@@ -48,6 +48,7 @@ import watchdog.events
 from typing_extensions import ParamSpec
 from watchdog.observers import Observer
 from watchdog.observers.api import ObservedWatch
+from tensorpc.core import dataclass_dispatch
 
 from tensorpc import simple_chunk_call_async
 from tensorpc.autossh.coretypes import SSHTarget
@@ -68,17 +69,17 @@ from tensorpc.core.serviceunit import (ObjectReloadManager,
                                        SimpleCodeManager, get_qualname_to_code)
 from tensorpc.core.tracers.codefragtracer import get_trace_infos_from_coderange_item
 from tensorpc.flow.client import MasterMeta
-from tensorpc.flow.constants import TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
+from tensorpc.flow.constants import TENSORPC_APP_STORAGE_VSCODE_TRACE_PATH, TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from ..components import mui, three
-from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem, VscodeTensorpcMessage
+from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem, VscodeTensorpcMessage, VscodeTensorpcQuery, VscodeTensorpcQueryType, VscodeTraceItem, VscodeTraceQueries, VscodeTraceQuery, VscodeTraceQueryResult
 
 from tensorpc.flow.components.plus.objinspect.inspector import get_exception_frame_stack
 from tensorpc.flow.components.plus.objinspect.treeitems import TraceTreeItem
 from tensorpc.flow.core.reload import (AppReloadManager,
                                           bind_and_reset_object_methods,
                                           reload_object_methods)
-from tensorpc.flow.jsonlike import JsonLikeNode, parse_obj_to_jsonlike
+from tensorpc.flow.jsonlike import JsonLikeNode, as_dict_no_undefined, parse_obj_to_jsonlike
 from tensorpc.flow.langserv.pyrightcfg import LanguageServerConfig
 from tensorpc.flow.marker import AppFunctionMeta, AppFuncType
 from tensorpc.flow.serv_names import serv_names
@@ -110,15 +111,57 @@ T = TypeVar('T')
 
 T_comp = TypeVar("T_comp")
 
-
-def _run_func_with_app(app, func: Callable[P, T], *args: P.args,
-                       **kwargs: P.kwargs) -> T:
-    with _enter_app_conetxt(app):
-        return func(*args, **kwargs)
-
-
 _ROOT = "root"
 
+@dataclass_dispatch.dataclass
+class AppDataStorageForVscodeBase:
+    """Vscode can only interact with app, not component.
+    so we store all vscode data in app.
+    """
+    trace_trees: Dict[str, VscodeTraceItem] 
+
+    def add_or_update_trace_tree(self, key: str, items: List[VscodeTraceItem]):
+        self.trace_trees[key] = VscodeTraceItem("", items, "", -1, timestamp=time.time_ns(), rootKey=key)
+
+    def remove_trace_tree(self, key: str):
+        self.trace_trees.pop(key, None)
+
+    def handle_vscode_trace_query(self, queries: VscodeTraceQueries) -> VscodeTraceQueryResult:
+        updates: List[VscodeTraceItem] = []
+        deleted: List[str] = []
+        all_query_ids = set()            
+        for query in queries.queries:
+            assert not isinstance(query.timestamp, Undefined)
+            assert not isinstance(query.rootKey, Undefined)
+            all_query_ids.add(query.rootKey)
+            if query.rootKey in self.trace_trees:
+                item = self.trace_trees[query.rootKey]
+                if item.timestamp != query.timestamp:
+                    updates.append(item)
+            else:
+                deleted.append(query.rootKey)
+        for k, v in self.trace_trees.items():
+            if k not in all_query_ids:
+                updates.append(v)
+        return VscodeTraceQueryResult(updates, deleted)   
+
+    def to_dict(self):
+        return as_dict_no_undefined(self)     
+        
+@dataclass_dispatch.dataclass
+class AppDataStorageForVscode(AppDataStorageForVscodeBase):
+    async def add_or_update_trace_tree_with_update(self, key: str, items: List[VscodeTraceItem]):
+        self.add_or_update_trace_tree(key, items)
+        await self._update_vscode_storage()
+
+    async def remove_trace_tree_with_update(self, key: str):
+        self.remove_trace_tree(key)
+        await self._update_vscode_storage()
+
+    async def _update_vscode_storage(self):
+        app = get_app()
+        print("SAVE DATASTORAGE")
+        await app.save_data_storage(TENSORPC_APP_STORAGE_VSCODE_TRACE_PATH, self.to_dict())
 
 class AppEditor:
 
@@ -301,7 +344,7 @@ class App:
         self._app_dynamic_cls: Optional[ReloadableDynamicClass] = None
         # other app can call app methods via service_unit
         self._app_service_unit: Optional[ServiceUnit] = None
-
+        self._flowapp_vscode_workspace_root: Optional[str] = None 
         # loaded if you connect app node with a full data storage
         self._data_storage: Dict[str, Any] = {}
 
@@ -318,7 +361,7 @@ class App:
         self.__flowapp_storage_cache: Dict[str, StorageDataItem] = {}
         # for app and dynamic layout in AnyFlexLayout
         self._flowapp_change_observers: Dict[str, _WatchDogWatchEntry] = {}
-
+        self._flowapp_vscode_storage: Optional[AppDataStorageForVscode] = None
         self._flowapp_is_inited: bool = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._flowapp_enable_lsp: bool = False
@@ -361,10 +404,38 @@ class App:
         """
         return self._flowapp_internal_lsp_config
 
+    async def get_vscode_storage_lazy(self):
+        if self._flowapp_vscode_storage is None:
+            data = await self.read_data_storage(TENSORPC_APP_STORAGE_VSCODE_TRACE_PATH, raise_if_not_found=False)
+            if data is not None:
+                self._flowapp_vscode_storage = AppDataStorageForVscode(**data)
+            else:
+                self._flowapp_vscode_storage = AppDataStorageForVscode(trace_trees={})
+        return self._flowapp_vscode_storage
+
     def set_observed_func_registry(self,
                                    registry: ObservedFunctionRegistryProtocol):
         self._flowapp_observed_func_registry = registry
         self._flow_reload_manager.update_observed_registry(registry)
+
+    def set_vscode_workspace_root(self, root: str):
+        self._flowapp_vscode_workspace_root = root
+
+    def _is_app_workspace_child_of_vscode_workspace_root(self, vscode_root: str):
+        # if app workspace root is child of vscode workspace root or
+        # equal to vscode workspace root, return True
+        # used to filter all vscode query.
+        app_root_path = self._flowapp_vscode_workspace_root
+        if app_root_path is None and self._app_service_unit is not None:
+            app_root_path = self._app_service_unit.file_path 
+            if app_root_path == "":
+                return False 
+            try:
+                Path(app_root_path).relative_to(vscode_root)
+            except ValueError:
+                return False
+            return True 
+        return False 
 
     def register_app_special_event_handler(self, type: AppSpecialEventType,
                                            handler: Callable[[Any],
@@ -1053,30 +1124,33 @@ class App:
             res = await self.handle_event(ev, is_sync)
         return res 
 
-    async def run_vscode_event(self, data: VscodeTensorpcMessage):
-        # print(data)
-        # print("WTF", data.selections is not None and len(data.selections) > 0 )
-        # try:
-        #     if data.selections is not None and len(data.selections) > 0 and data.currentUri.startswith("file://"):
-        #         path = data.currentUri[7:]
-        #         sel = data.selections[0]
-        #         lineno = sel.start.line + 1
-        #         col = sel.start.character
-        #         end_lineno = sel.end.line + 1
-        #         end_col = sel.end.character
-        #         cache = AstCache()
-        #         print(lineno, col, end_lineno, end_col)
-        #         code_range = lineno, col, end_lineno, end_col
-        #         item = cache.query_path(Path(path))
-        #         print(item.query_code_range_nodes(lineno, col, end_lineno, end_col))
-        #         # print(cache.query_path(Path(path)).code_range_to_nodes)
-        #         trace_info = get_trace_infos_from_coderange_item(item, code_range)
-        #         print(trace_info)
-        # except:
-        #     traceback.print_exc()
-        #     raise
-        return await self._flowapp_special_eemitter.emit_async(
-            AppSpecialEventType.VscodeTensorpcMessage, data)
+    async def handle_vscode_event(self, data: VscodeTensorpcMessage):
+        with _enter_app_conetxt(self):
+
+            return await self._flowapp_special_eemitter.emit_async(
+                AppSpecialEventType.VscodeTensorpcMessage, data)
+
+    async def handle_vscode_query(self, event: VscodeTensorpcQuery) -> Optional[dict]:
+        # print("VSCODE QUERY", event)
+        with _enter_app_conetxt(self):
+            try:
+                workspace = event.get_workspace_path()
+                if workspace is None:
+                    return None 
+                if not self._is_app_workspace_child_of_vscode_workspace_root(str(workspace)):
+                    return None
+                storage = await self.get_vscode_storage_lazy()
+                if event.type == VscodeTensorpcQueryType.TraceTrees:
+                    queries = VscodeTraceQueries(**event.data)
+                    res = as_dict_no_undefined(storage.handle_vscode_trace_query(queries))
+                    return res 
+                elif event.type == VscodeTensorpcQueryType.DeleteTraceTree:
+                    await storage.remove_trace_tree_with_update(event.data)
+                    return None
+            except:
+                traceback.print_exc()
+                raise
+        return None 
 
     async def _run_autorun(self, cb: Callable):
         try:

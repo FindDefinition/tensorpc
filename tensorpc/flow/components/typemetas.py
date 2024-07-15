@@ -1,6 +1,7 @@
 import inspect
 from typing import Callable, List, Optional, Tuple, Any, Union
 from typing_extensions import Annotated
+from tensorpc import compat
 from tensorpc.core.dataclass_dispatch import dataclass
 from typing_extensions import TypeAlias, get_type_hints
 from dataclasses import Field, make_dataclass, field
@@ -63,8 +64,11 @@ Vector2Type: TypeAlias = Tuple[float, float]
 Vector3Type: TypeAlias = Tuple[float, float, float]
 
 
-def annotated_function_to_dataclass(func: Callable):
-    annos = get_type_hints(func, include_extras=True)
+def annotated_function_to_dataclass(func: Callable, is_dynamic_class: bool = False):
+    if compat.Python3_10AndLater:
+        annos = get_type_hints(func, include_extras=True)
+    else:
+        annos = get_type_hints(func, include_extras=True, globalns={} if is_dynamic_class else None)
     specs = inspect.signature(func)
     name_to_parameter = {p.name: p for p in specs.parameters.values()}
     fields: List[Tuple[str, Any, Field]] = []

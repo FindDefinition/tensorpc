@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple, Typ
 from tensorpc.core.astex.astcache import AstCache, AstCacheItem
 from tensorpc.core.moduleid import get_module_id_of_type
 from .calltracer import CallTracerContext
-from .core import TraceEventType, FrameEventBase
+from .core import FrameEventCall, TraceEventType, FrameEventBase
 
 
 class TraceType(enum.IntEnum):
@@ -292,7 +292,7 @@ class TracerContext(object):
 
 
 class CursorFuncTracer:
-    def __init__(self, ) -> None:
+    def __init__(self) -> None:
         self._ast_cache = AstCache()
         self._cached_trace_file: Dict[str, Set[Path]] = {}
 
@@ -306,9 +306,11 @@ class CursorFuncTracer:
             self,
             func: Callable,
             args: Tuple,
-            kwargs: Dict[str, Any]) -> List[FrameEventBase]:
+            kwargs: Dict[str, Any],
+            traced_folders: Optional[Set[Union[str, Path]]] = None,
+            max_depth: int = 10000) -> List[FrameEventCall]:
         func_id = self._get_func_id(func)
-        with CallTracerContext() as ctx:
+        with CallTracerContext(max_depth=max_depth, traced_folders=traced_folders) as ctx:
             func(*args, **kwargs)
         self._cached_trace_file[func_id] = {
             Path(o.filename).resolve()

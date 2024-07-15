@@ -5,22 +5,28 @@ import ast
 from dataclasses import dataclass
 import enum
 import inspect
+import os
 from pathlib import Path
 import sys
 import threading
+import time
 import traceback
 from types import FrameType
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple, Type, Union
 
 from tensorpc.core.astex.astcache import AstCache, AstCacheItem
 from tensorpc.core.moduleid import get_module_id_of_type
-from .core import TraceEventType, FrameEventBase
+from .core import TraceEventType, FrameEventBase, FrameEventCall
+
+THREAD_GLOBALS = threading.local()
 
 
 class CallTracerContext(object):
     def __init__(self,
                  trace_call_only: bool = True,
-                 frame_isvalid_func: Optional[Callable[[FrameType],
+                 max_depth: int = 10000,
+                 traced_folders: Optional[Set[Union[str, Path]]] = None,
+                 frame_isvalid_func: Optional[Callable[[FrameType, int],
                                                        bool]] = None,
                  *,
                  _frame_cnt: int = 1):
@@ -30,11 +36,22 @@ class CallTracerContext(object):
         self._frame_cnt = _frame_cnt
         self._inner_frame_fnames: Set[str] = set(
             [CallTracerContext.__enter__.__code__.co_filename])
-        self.result_call_stack: List[FrameEventBase] = []
+        self.result_call_stack: List[FrameEventCall] = []
         self._frame_isvalid_func = frame_isvalid_func
         self._trace_call_only = trace_call_only
+        self._max_depth = max_depth
+
+        traced_folders_absolute: List[str] = []
+        if traced_folders is not None:
+            for folder in traced_folders:
+                if isinstance(folder, str):
+                    traced_folders_absolute.append(os.path.abspath(folder))
+                else:
+                    traced_folders_absolute.append(str(folder.absolute()))
+        self._traced_folders_tuple = tuple(traced_folders_absolute)
 
     def __enter__(self):
+        THREAD_GLOBALS.__dict__.setdefault('depth', 0)
         cur_frame = inspect.currentframe()
         self._expr_found = False
         self._trace_cur_assign_range = None
@@ -80,17 +97,21 @@ class CallTracerContext(object):
         self.target_frames.discard(calling_frame)
 
     def _is_internal_frame(self, frame: FrameType):
-        return frame.f_code.co_filename in self._inner_frame_fnames
+        res = frame.f_code.co_filename in self._inner_frame_fnames
+        if self._traced_folders_tuple:
+            res |= not frame.f_code.co_filename.startswith(
+                self._traced_folders_tuple)
+        return res 
 
     def trace_call_func(self, frame: FrameType, event, arg):
         if not (frame in self.target_frames):
             if self._is_internal_frame(frame):
                 return None
         if self._frame_isvalid_func is not None and not self._frame_isvalid_func(
-                frame):
+                frame, -1):
             return None
         self.result_call_stack.append(
-            FrameEventBase(
+            FrameEventCall(
                 type=TraceEventType.Call,
                 qualname=frame.f_code.co_name,
                 filename=frame.f_code.co_filename,
@@ -100,12 +121,15 @@ class CallTracerContext(object):
 
     def _trace_ret_only_func(self, frame: FrameType, event, arg):
         if event == "return":
+            THREAD_GLOBALS.depth -= 1
             self.result_call_stack.append(
-                FrameEventBase(
+                FrameEventCall(
                     type=TraceEventType.Return,
-                    qualname=frame.f_code.co_name,
+                    qualname=frame.f_code.co_qualname,
                     filename=frame.f_code.co_filename,
                     lineno=frame.f_lineno,
+                    timestamp=time.time_ns(),
+                    depth=THREAD_GLOBALS.depth,
                 ))
 
     def trace_call_ret_func(self, frame: FrameType, event, arg):
@@ -113,15 +137,20 @@ class CallTracerContext(object):
             if self._is_internal_frame(frame):
                 return None
         if event == "call":
+            THREAD_GLOBALS.depth += 1
+            if THREAD_GLOBALS.depth >= self._max_depth:
+                return None
             if self._frame_isvalid_func is not None and not self._frame_isvalid_func(
-                    frame):
+                    frame, THREAD_GLOBALS.depth):
                 return None
             self.result_call_stack.append(
-                FrameEventBase(
+                FrameEventCall(
                     type=TraceEventType.Call,
-                    qualname=frame.f_code.co_name,
+                    qualname=frame.f_code.co_qualname,
                     filename=frame.f_code.co_filename,
                     lineno=frame.f_lineno,
+                    depth=THREAD_GLOBALS.depth,
+                    timestamp=time.time_ns(),
                 ))
             frame.f_trace_lines = False
         return self._trace_ret_only_func

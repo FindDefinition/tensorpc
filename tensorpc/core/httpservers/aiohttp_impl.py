@@ -170,7 +170,7 @@ class HttpService:
             pb_data.data = json.dumps(data["data"])
             pb_data.service_key = data["service_key"]
             pb_data.flags = rpc_message_pb2.JsonArray
-            res = await self.service_core.remote_json_call_async(pb_data)
+            res = await self.service_core.remote_json_call_async(pb_data, json_only=True)
             res_json_str = res.data
 
         except Exception as e:

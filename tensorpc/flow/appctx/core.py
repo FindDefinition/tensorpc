@@ -106,6 +106,9 @@ async def data_storage_has_item(key: str,
     app = get_app()
     return await app.data_storage_has_item(key, node_id, graph_id)
 
+async def get_vscode_storage():
+    app = get_app()
+    return await app.get_vscode_storage_lazy()
 
 def set_app_z_index(z_index: int):
     app = get_app()

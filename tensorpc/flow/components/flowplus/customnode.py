@@ -19,8 +19,8 @@ from tensorpc.flow.appctx import read_data_storage, save_data_storage, find_all_
 _MEDIA_ROOT = Path(__file__).parent / "media"
 
 class CustomNodeEditorActionNames:
-    CreateTemplate = "Create Template"
-    DetachFromTemplate = "Detach From Template"
+    CreateTemplate = "Make Shared"
+    DetachFromTemplate = "Detach From Shared"
     RunCached = "Run Cached Node"
 
 @dataclasses.dataclass
@@ -31,6 +31,7 @@ class ModuleWithCode:
 @register_compute_node(key=ReservedNodeTypes.Custom, name="Custom Node", icon_cfg=mui.IconProps(icon=mui.IconType.Code))
 class CustomNode(ComputeNode):
     def init_node(self):
+        self.is_dynamic_class = True # affect annotation parse
         base_code_path = _MEDIA_ROOT / "customnode_base.py"
         with open(base_code_path, "r") as f:
             base_code = f.read()
@@ -40,16 +41,16 @@ class CustomNode(ComputeNode):
     def _init_custom_node(self):
         actions = [
             mui.MonacoEditorAction(id=CustomNodeEditorActionNames.CreateTemplate, 
-                label="Create Node Template", contextMenuGroupId="tensorpc-flow-editor-action", contextMenuOrder=1.5),
+                label="Make Node Shared", contextMenuGroupId="tensorpc-flow-editor-action", contextMenuOrder=1.5),
             mui.MonacoEditorAction(id=CustomNodeEditorActionNames.DetachFromTemplate,
-                label="Detach From Template", contextMenuGroupId="tensorpc-flow-editor-action", contextMenuOrder=1.5),
+                label="Detach From Shared", contextMenuGroupId="tensorpc-flow-editor-action", contextMenuOrder=1.5),
             mui.MonacoEditorAction(id=CustomNodeEditorActionNames.RunCached,
                 label="Run with Cached Inputs", keybindings=[([mui.MonacoKeyMod.Shift], 3)],
                 contextMenuGroupId="tensorpc-flow-editor-action", contextMenuOrder=1.5)
         ]
         self._code_editor = mui.MonacoEditor(self._base_code, "python",
                                              f"<tensorpc-flow-cflow-{self.id}>").prop(flex=1, actions=actions)
-        self._template_key: Optional[str] = None
+        self._shared_key: Optional[str] = None
         self._module: Optional[ModuleWithCode] = None
 
         self._cnode = self._get_cnode_cls_from_code(self._base_code)
@@ -59,14 +60,14 @@ class CustomNode(ComputeNode):
         self._side_container = mui.VBox([]).prop(width="100%",
                                       height="100%",
                                       overflow="hidden")
-        self._setting_template_name = mui.TextField("Template Name")
+        self._setting_template_name = mui.TextField("Shared Node Name")
         self._setting_dialog = mui.Dialog(
-            [self._setting_template_name], lambda x: self._create_template(self._setting_template_name.str())
+            [self._setting_template_name], lambda x: self._create_shared(self._setting_template_name.str())
             if x.ok else None)
 
     @property
     def icon_cfg(self):
-        if self._template_key is not None:
+        if self._shared_key is not None:
             return mui.IconProps(icon=mui.IconType.Code, muiColor="primary")
         else:
             return mui.IconProps(icon=mui.IconType.Code)
@@ -82,9 +83,9 @@ class CustomNode(ComputeNode):
     async def init_node_async(self, is_node_mounted: bool):
         await self._cnode.init_node_async(is_node_mounted)
         if not self._disable_template_fetch:
-            if self._template_key is not None:
+            if self._shared_key is not None:
                 template_code = await read_data_storage(
-                    get_cflow_template_key(self._template_key),
+                    get_cflow_template_key(self._shared_key),
                     raise_if_not_found=False)
                 if template_code is not None:
                     try:
@@ -137,10 +138,10 @@ class CustomNode(ComputeNode):
         assert ctx is not None, "can't find compute flow context!"
         new_cnode = self._get_cnode_cls_from_code(value)
         self._cnode = new_cnode
-        if self._template_key is not None and check_template_key:
+        if self._shared_key is not None and check_template_key:
             # update all nodes that use this template
             await save_data_storage(
-                get_cflow_template_key(self._template_key), value)
+                get_cflow_template_key(self._shared_key), value)
             all_cflows = find_all_components(ComputeFlow)
             for cflow in all_cflows:
                 with enter_flow_ui_context_object(cflow.graph_ctx):
@@ -150,7 +151,7 @@ class CustomNode(ComputeNode):
                         if isinstance(
                                 wrapper.cnode,
                                 CustomNode) and wrapper.cnode is not self:
-                            if wrapper.cnode._template_key == self._template_key:
+                            if wrapper.cnode._shared_key == self._shared_key:
                                 await wrapper.cnode.handle_code_editor_save(
                                     save_ev,
                                     update_editor=True,
@@ -170,10 +171,10 @@ class CustomNode(ComputeNode):
         return inspect.isasyncgenfunction(self._cnode.compute)
 
     async def detach_from_template(self):
-        if self._template_key is not None:
+        if self._shared_key is not None:
             ctx = get_compute_flow_context()
             assert ctx is not None, "can't find compute flow context!"
-            self._template_key = None
+            self._shared_key = None
             await ctx.cflow.update_cnode_icon_cfg(self.id, self.icon_cfg)
 
     async def _handle_editor_action(self, act: str):
@@ -202,14 +203,14 @@ class CustomNode(ComputeNode):
         self._side_container.set_user_meta_by_type(NodeSideLayoutOptions(vertical=True))
         return self._side_container
 
-    async def _create_template(self, template_key: str):
-        if self._template_key is None:
+    async def _create_shared(self, template_key: str):
+        if self._shared_key is None:
             ctx = get_compute_flow_context()
             assert ctx is not None, "can't find compute flow context!"
             await save_data_storage(get_cflow_template_key(template_key),
                                     self._code_editor.props.value,
                                     raise_if_exist=True)
-            self._template_key = template_key
+            self._shared_key = template_key
             # use new icon color to indicate template node
             await ctx.cflow.update_cnode_header(self.id, template_key)
             await ctx.cflow.update_cnode_icon_cfg(self.id, self.icon_cfg)
@@ -227,7 +228,7 @@ class CustomNode(ComputeNode):
     def state_dict(self) -> Dict[str, Any]:
         res = self._cnode.state_dict()
         res["__custom_node_code"] = self._code_editor.props.value
-        res["__template_key"] = self._template_key
+        res["__template_key"] = self._shared_key
         return res
 
     def get_compute_annotation(self):
@@ -245,7 +246,7 @@ class CustomNode(ComputeNode):
             traceback.print_exc()
             res._cnode = res._get_cnode_cls_from_code(res._base_code)
         res._code_editor.prop(value=data["__custom_node_code"])
-        res._template_key = data["__template_key"]
+        res._shared_key = data["__template_key"]
         return res
 
 

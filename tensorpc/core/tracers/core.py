@@ -17,3 +17,10 @@ class FrameEventBase:
     def get_unique_id(self):
         return f"{self.filename}@:{self.lineno}{self.qualname}"
 
+@dataclasses.dataclass
+class FrameEventCall(FrameEventBase):
+    depth: int = -1
+    timestamp: int = -1
+    def get_unique_id(self):
+        return f"{self.filename}@:{self.lineno}{self.qualname}"
+

@@ -607,7 +607,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                 if item.id not in all_item_id_to_items:
                     raise ValueError(f"item id {item.id} not exists")
                 merge_props_not_undefined(all_item_id_to_items[item.id], item)
-            return await self.update_node_data(node_id, {"contextMenuItems": items})
+            return await self.update_node_data(node_id, {"contextMenuItems": node.data.contextMenuItems})
 
     async def add_nodes(self, nodes: List[Node], screen_to_flow: Optional[bool] = None):
         """Add new nodes to the flow.

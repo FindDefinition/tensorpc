@@ -1,12 +1,13 @@
 import enum
 
+from pathlib import Path
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable,
                     Coroutine, Dict, Generic, Iterable, List, Optional, Set,
                     Tuple, Type, TypeVar, Union)
 from tensorpc.autossh.core import Event, event_from_dict
 from tensorpc.core import dataclass_dispatch
 from tensorpc.core.moduleid import get_qualname_of_type
-from .jsonlike import JsonLikeNode, as_dict_no_undefined, Undefined
+from .jsonlike import JsonLikeNode, as_dict_no_undefined, Undefined, undefined
 
 
 def get_uid(graph_id: str, node_id: str):
@@ -294,6 +295,9 @@ class VscodeTensorpcMessageType(enum.IntEnum):
     ShowFunctionArguments = 2
     ShowFunctionLocals = 3
 
+class VscodeTensorpcQueryType(enum.IntEnum):
+    TraceTrees = 0
+    DeleteTraceTree = 1
 
 @dataclass_dispatch.dataclass
 class Position:
@@ -315,3 +319,52 @@ class VscodeTensorpcMessage:
     currentUri: str
     workspaceUri: str
     selections: Optional[List[Selection]] = None
+
+    def get_workspace_path(self):
+        if self.workspaceUri == "":
+            return None 
+        # workspaceUri: file:///home/xxx/xxx/xxx
+        if self.workspaceUri.startswith("file://"):
+            return Path(self.workspaceUri[7:])
+        return None
+
+@dataclass_dispatch.dataclass
+class VscodeTensorpcQuery:
+    type: VscodeTensorpcQueryType
+    workspaceUri: str
+    data: Any
+
+    def get_workspace_path(self):
+        if self.workspaceUri == "":
+            return None 
+        # workspaceUri: file:///home/xxx/xxx/xxx
+        if self.workspaceUri.startswith("file://"):
+            return Path(self.workspaceUri[7:])
+        return None
+
+@dataclass_dispatch.dataclass
+class VscodeTraceItem:
+    qualname: str
+    childs: List["VscodeTraceItem"]
+    path: str
+    lineno: int
+    duration: float = -1
+    timestamp: Union[int, Undefined] = undefined
+    rootKey: Union[str, Undefined] = undefined
+
+@dataclass_dispatch.dataclass
+class VscodeTraceQuery:
+    timestamp: Union[int, Undefined] = undefined
+    rootKey: Union[str, Undefined] = undefined
+
+@dataclass_dispatch.dataclass
+class VscodeTraceQueries:
+    queries: List[VscodeTraceQuery]
+
+
+@dataclass_dispatch.dataclass
+class VscodeTraceQueryResult:
+    updates: List[VscodeTraceItem]
+    deleted: List[str]
+
+

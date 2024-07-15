@@ -414,7 +414,7 @@ class ProtobufServiceCore(ServiceCore):
                                                flags=flags)
 
     async def remote_json_call_async(
-            self, request: rpc_msg_pb2.RemoteJsonCallRequest):
+            self, request: rpc_msg_pb2.RemoteJsonCallRequest, json_only: bool = False):
         self._reset_timeout()
         flags = request.flags
         args, kwargs = core_io.data_from_json(request.arrays, request.data,
@@ -425,6 +425,10 @@ class ProtobufServiceCore(ServiceCore):
                                                        json_call=True)
         if is_exc:
             return rpc_msg_pb2.RemoteJsonCallReply(exception=res)
+        if json_only:
+            return rpc_msg_pb2.RemoteJsonCallReply(arrays=[],
+                                                data=json.dumps(res),
+                                                flags=flags)
         res = [res]
         arrays, decoupled = core_io.data_to_json(res, flags)
         return rpc_msg_pb2.RemoteJsonCallReply(arrays=arrays,

@@ -23,7 +23,7 @@ from runpy import run_path
 from typing import Any, Dict, List, Optional
 from tensorpc.core.defs import FileDesp, FileResource
 from tensorpc.flow.constants import TENSORPC_LSP_EXTRA_PATH
-from tensorpc.flow.coretypes import ScheduleEvent, VscodeTensorpcMessage, get_uid
+from tensorpc.flow.coretypes import ScheduleEvent, VscodeTensorpcMessage, VscodeTensorpcQuery, get_uid
 from tensorpc.core.tree_id import UniqueTreeId
 
 from tensorpc.flow import appctx
@@ -244,7 +244,24 @@ class FlowApp:
             workspaceUri=data["workspaceUri"],
             selections=data["selections"] if "selections" in data else None,
         )
-        await self.app.run_vscode_event(ev)
+        await self.app.handle_vscode_event(ev)
+
+    async def handle_vscode_query(self, data: dict):
+        """run event come from vscode, you need to install vscode-tensorpc-bridge extension first,
+        then enable it in machine which run this app.
+        """
+        ev = VscodeTensorpcQuery(
+            type=data["type"],
+            workspaceUri=data["workspaceUri"],
+            data=data["data"],
+        )
+        res = await self.app.handle_vscode_query(ev)
+        if res is not None:
+            return {
+                "queryResult": res,
+                "appNodeId": self.master_meta.node_readable_id
+            }
+        return None
 
     def get_layout(self, editor_only: bool = False):
         if editor_only:

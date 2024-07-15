@@ -1,4 +1,8 @@
 # Changelog
+# [0.11.14] - 2024-07-15
+### Added 
+- add vscode trace tree query, user can run trace and send result to vscode. requires vscode-tensorpc-bridge extension >= 0.2.0
+
 # [0.11.13] - 2024-07-14
 ### Changed 
 - change tooltip prop for some component

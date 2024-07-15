@@ -39,7 +39,7 @@ REQUIRED = [
     "jinja2",
     "async-timeout",
     "watchdog",
-    "typing_extensions>=4.8.0",
+    "typing_extensions>=4.12.2",
     # to avoid a serious problem
     "pyOpenSSL>=23.0.0",
     "cryptography>=39.0.0",

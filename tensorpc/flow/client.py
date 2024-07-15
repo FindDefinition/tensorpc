@@ -106,7 +106,8 @@ class MasterMeta:
         app_meta = AppLocalMeta()
         app_gport = app_meta.grpc_port if app_meta.grpc_port else 0
         app_port = app_meta.http_port if app_meta.http_port else 0
-        return f"{constants.TENSORPC_FLOW_PROCESS_NAME_PREFIX}-{gport}-{port}-{app_gport}-{app_port}"
+        readable_id = self.node_readable_id
+        return f"{constants.TENSORPC_FLOW_PROCESS_NAME_PREFIX}-{gport}-{port}-{app_gport}-{app_port}-{readable_id}"
 
 
 class AppLocalMeta:

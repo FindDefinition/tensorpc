@@ -7,14 +7,16 @@ import sys
 import typing 
 import types
 
+from tensorpc import compat
+
 if sys.version_info < (3, 10):
 
-    def origin_is_union(tp: Optional[type[Any]]) -> bool:
+    def origin_is_union(tp: Optional[Type[Any]]) -> bool:
         return tp is typing.Union
 
 else:
 
-    def origin_is_union(tp: Optional[type[Any]]) -> bool:
+    def origin_is_union(tp: Optional[Type[Any]]) -> bool:
         return tp is typing.Union or tp is types.UnionType  # noqa: E721
 
 def lenient_issubclass(cls: Any,
@@ -54,8 +56,11 @@ def extract_annotated_type_and_meta(ann_type: Any) -> Tuple[Any, Optional[Any]]:
         return ann_type, annometa
     return ann_type, None
 
-def parse_annotated_function(func: Callable) -> Tuple[List[AnnotatedArg], Optional[AnnotatedReturn]]:
-    annos = get_type_hints(func, include_extras=True)
+def parse_annotated_function(func: Callable, is_dynamic_class: bool = False) -> Tuple[List[AnnotatedArg], Optional[AnnotatedReturn]]:
+    if compat.Python3_10AndLater:
+        annos = get_type_hints(func, include_extras=True)
+    else:
+        annos = get_type_hints(func, include_extras=True, globalns={} if is_dynamic_class else None)
     
     specs = inspect.signature(func)
     name_to_parameter = {p.name: p for p in specs.parameters.values()}
