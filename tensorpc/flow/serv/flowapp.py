@@ -23,13 +23,13 @@ from runpy import run_path
 from typing import Any, Dict, List, Optional
 from tensorpc.core.defs import FileDesp, FileResource
 from tensorpc.flow.constants import TENSORPC_LSP_EXTRA_PATH
-from tensorpc.flow.coretypes import ScheduleEvent, VscodeTensorpcMessage, VscodeTensorpcQuery, get_uid
+from tensorpc.flow.coretypes import ScheduleEvent, get_uid
 from tensorpc.core.tree_id import UniqueTreeId
-
+from tensorpc.flow.vscode.coretypes import VscodeTensorpcMessage, VscodeTensorpcQuery
 from tensorpc.flow import appctx
 from tensorpc.flow.core.appcore import ALL_OBSERVED_FUNCTIONS, enter_app_conetxt
 from tensorpc.flow.components.mui import FlexBox, flex_wrapper
-from tensorpc.flow.core.core import AppEditorEvent, AppEditorFrontendEvent, AppEvent, AppEventType, InitLSPClientEvent, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
+from tensorpc.flow.core.component import AppEditorEvent, AppEditorFrontendEvent, AppEvent, AppEventType, InitLSPClientEvent, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
 from tensorpc.flow.flowapp.app import App, EditableApp
 import asyncio
 from tensorpc.core import marker

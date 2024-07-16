@@ -37,7 +37,7 @@ from typing_extensions import ParamSpec, TypeAlias, Annotated
 
 from tensorpc.utils.uniquename import UniqueNamePool
 from .typemetas import RangedFloat, RangedInt, Vector3Type
-from ..core.core import (AppEvent, AppEventType, BasicProps, Component,
+from ..core.component import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, ContainerBaseProps, EventHandler,
                     SimpleEventType, Fragment, FrontendEventType, NumberType,
                     T_base_props, T_child, T_container_props, TaskLoopEvent,

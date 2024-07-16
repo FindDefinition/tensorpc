@@ -25,7 +25,7 @@ from tensorpc.flow.components import mui
 from tensorpc.flow.core.appcore import find_component_by_uid_with_type_check
 from tensorpc.flow.components import three
 from tensorpc.flow.components.plus.config import ConfigPanel, ConfigPanelV2
-from tensorpc.flow.core.core import FrontendEventType
+from tensorpc.flow.core.component import FrontendEventType
 from tensorpc.flow.core.coretypes import TreeDragTarget
 from tensorpc.flow.core import colors
 from tensorpc.flow.jsonlike import TreeItem

@@ -40,7 +40,7 @@ from tensorpc.flow.appctx.core import (data_storage_has_item,
                                        remove_data_storage, save_data_storage)
 from tensorpc.flow.components import flowui, mui
 from tensorpc.flow.core.appcore import CORO_ANY, find_all_components
-from tensorpc.flow.core.core import AppEvent, UserMessage
+from tensorpc.flow.core.component import AppEvent, UserMessage
 from tensorpc.flow.jsonlike import (as_dict_no_undefined,
                                     as_dict_no_undefined_no_deepcopy,
                                     merge_props_not_undefined)
@@ -1252,21 +1252,7 @@ class ComputeFlow(mui.FlexBox):
             node = self.graph.get_node_by_id(node_id)
             wrapper = node.get_component_checked(ComputeNodeWrapper)
             await wrapper.set_cached(not wrapper.is_cached_node)
-            if wrapper.is_cached_node:
-                await self.graph.update_node_context_menu_items(
-                    node_id, [
-                        mui.MenuItem(NodeContextMenuItemNames.ToggleCached,
-                                     icon=mui.IconType.Done,
-                                     inset=False)
-                    ])
-            else:
-                await self.graph.update_node_context_menu_items(
-                    node_id, [
-                        mui.MenuItem(NodeContextMenuItemNames.ToggleCached,
-                                     icon=None,
-                                     inset=True)
-                    ])
-
+            await self.graph.set_node_context_menu_items(node_id, wrapper.get_context_menus())
             await self.save_graph()
         elif item_id == NodeContextMenuItemNames.DebugUpdateNodeInternals:
             await self.graph.update_node_internals([node_id])

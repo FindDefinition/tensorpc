@@ -874,11 +874,11 @@ class SampleDataControlApp(EditableApp):
         }
 
     async def add_data(self):
-        await self.save_data_storage("default_flow.Data.arr0",
+        await self.app_storage.save_data_storage("default_flow.Data.arr0",
                                      np.zeros((500, 3)))
 
     async def read_data(self):
-        print(await self.read_data_storage("Data.arr0"))
+        print(await self.app_storage.read_data_storage("Data.arr0"))
 
 
 class AutoComputeApp:

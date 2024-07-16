@@ -9,6 +9,7 @@ from pydantic import (
 class UniqueTreeId:
     # format: length1,length2,length3|part1::part2::part3
     # part names may contains splitter '::', so we need lengths to split
+    # splitter is only used for better readability, it's not necessary.
     def __init__(self, uid: str, splitter_length: int = 1) -> None:
         self.uid_encoded = uid
         # init_parts = uid.split("|")

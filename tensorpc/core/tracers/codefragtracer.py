@@ -308,15 +308,16 @@ class CursorFuncTracer:
             args: Tuple,
             kwargs: Dict[str, Any],
             traced_folders: Optional[Set[Union[str, Path]]] = None,
-            max_depth: int = 10000) -> List[FrameEventCall]:
+            max_depth: int = 10000) -> Tuple[List[FrameEventCall], Any]:
         func_id = self._get_func_id(func)
         with CallTracerContext(max_depth=max_depth, traced_folders=traced_folders) as ctx:
-            func(*args, **kwargs)
+            func_res = func(*args, **kwargs)
+        
         self._cached_trace_file[func_id] = {
             Path(o.filename).resolve()
             for o in ctx.result_call_stack
         }
-        return ctx.result_call_stack
+        return ctx.result_call_stack, func_res
 
     def run_trace_from_code_range(
             self,

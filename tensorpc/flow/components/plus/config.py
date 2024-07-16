@@ -24,7 +24,7 @@ from tensorpc.core.annocore import is_annotated
 
 from .. import mui
 from tensorpc.flow.components import typemetas
-from tensorpc.flow.core.core import AppEvent
+from tensorpc.flow.core.component import AppEvent
 from .. import three
 import inspect
 

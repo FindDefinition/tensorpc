@@ -1,4 +1,10 @@
 # Changelog
+# [0.11.15] - 2024-07-16
+### Changed 
+- refine some app feature impl
+- better vscode trace info
+- change base component file name and many import stmts.
+
 # [0.11.14] - 2024-07-15
 ### Added 
 - add vscode trace tree query, user can run trace and send result to vscode. requires vscode-tensorpc-bridge extension >= 0.2.0

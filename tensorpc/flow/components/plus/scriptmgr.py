@@ -30,7 +30,7 @@ from tensorpc.flow import appctx
 from tensorpc.flow import marker
 from tensorpc.flow.components import three
 from tensorpc.flow.components.plus.tutorials import AppInMemory
-from tensorpc.flow.core.core import FrontendEventType
+from tensorpc.flow.core.component import FrontendEventType
 from .options import CommonOptions
 
 from tensorpc.flow.client import MasterMeta
@@ -338,6 +338,8 @@ class ScriptManager(mui.FlexBox):
         script = Script(new_item_name, self._init_scripts, lang)
         await appctx.save_data_storage(new_item_name, script,
                                        self._storage_node_rid, self._graph_id)
+        if lang != "app":
+            await self.app_show_box.set_new_layout({})
         await self.send_and_wait(
             self.app_show_box.update_event(
                 flex=1 if lang == "app" else mui.undefined))

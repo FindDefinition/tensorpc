@@ -15,7 +15,6 @@ import dataclasses
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import AppFuncType, ServFunctionMeta
 from tensorpc.flow.core.appcore import (AppSpecialEventType,
-                                           _run_zeroarg_func,
                                            create_reload_metas, get_app,
                                            get_reload_manager)
 from tensorpc.flow.components import mui, three
@@ -23,7 +22,7 @@ from tensorpc.flow.components import plus
 from tensorpc.flow.components.plus.core import (
     ALL_OBJECT_LAYOUT_HANDLERS, ObjectLayoutCreator, ObjectLayoutHandleManager, ObjectLayoutHandler,
     DataClassesType)
-from tensorpc.flow.core.core import (AppEditorFrontendEvent,
+from tensorpc.flow.core.component import (AppEditorFrontendEvent,
                                         FlowSpecialMethods, FrontendEventType,
                                         _get_obj_def_path)
 from tensorpc.flow.core.coretypes import TreeDragTarget

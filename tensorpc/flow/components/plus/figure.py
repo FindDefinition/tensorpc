@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Literal
 from ..mui import FlexBox, Component, NumberType, AppEvent
 from .. import plotly
-from ...core.core import DataClassWithUndefined, NumberType, Undefined, ValueType, undefined, as_dict_no_undefined
+from ...core.component import DataClassWithUndefined, NumberType, Undefined, ValueType, undefined, as_dict_no_undefined
 import dataclasses
 
 

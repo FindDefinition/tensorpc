@@ -71,9 +71,10 @@ from tensorpc.core.tracers.codefragtracer import get_trace_infos_from_coderange_
 from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.constants import TENSORPC_APP_STORAGE_VSCODE_TRACE_PATH, TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
+from tensorpc.flow.flowapp.appstorage import AppStorage
 from ..components import mui, three
-from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem, VscodeTensorpcMessage, VscodeTensorpcQuery, VscodeTensorpcQueryType, VscodeTraceItem, VscodeTraceQueries, VscodeTraceQuery, VscodeTraceQueryResult
-
+from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem
+from tensorpc.flow.vscode.coretypes import VscodeTensorpcMessage, VscodeTensorpcQuery, VscodeTensorpcQueryType, VscodeTraceItem, VscodeTraceQueries, VscodeTraceQuery, VscodeTraceQueryResult
 from tensorpc.flow.components.plus.objinspect.inspector import get_exception_frame_stack
 from tensorpc.flow.components.plus.objinspect.treeitems import TraceTreeItem
 from tensorpc.flow.core.reload import (AppReloadManager,
@@ -86,7 +87,7 @@ from tensorpc.flow.serv_names import serv_names
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.reload import reload_method
 from tensorpc.utils.uniquename import UniqueNamePool
-
+from tensorpc.flow.vscode.storage import AppDataStorageForVscode
 from ..core.appcore import (ALL_OBSERVED_FUNCTIONS, AppContext, AppSpecialEventType,
                       _CompReloadMeta, Event, EventHandlingContext, create_reload_metas, enter_event_handling_conetxt)
 from ..core.appcore import enter_app_conetxt
@@ -94,7 +95,7 @@ from ..core.appcore import enter_app_conetxt as _enter_app_conetxt
 from ..core.appcore import get_app, get_app_context
 from ..components import plus
 from tensorpc.core.tracers.tracer import FrameResult, Tracer, TraceEventType
-from ..core.core import (AppComponentCore, AppEditorEvent, AppEditorEventType,
+from ..core.component import (AppComponentCore, AppEditorEvent, AppEditorEventType,
                    AppEditorFrontendEvent, AppEditorFrontendEventType,
                    AppEvent, AppEventType, BasicProps, Component,
                    ContainerBase, CopyToClipboardEvent, EventHandler,
@@ -112,56 +113,6 @@ T = TypeVar('T')
 T_comp = TypeVar("T_comp")
 
 _ROOT = "root"
-
-@dataclass_dispatch.dataclass
-class AppDataStorageForVscodeBase:
-    """Vscode can only interact with app, not component.
-    so we store all vscode data in app.
-    """
-    trace_trees: Dict[str, VscodeTraceItem] 
-
-    def add_or_update_trace_tree(self, key: str, items: List[VscodeTraceItem]):
-        self.trace_trees[key] = VscodeTraceItem("", items, "", -1, timestamp=time.time_ns(), rootKey=key)
-
-    def remove_trace_tree(self, key: str):
-        self.trace_trees.pop(key, None)
-
-    def handle_vscode_trace_query(self, queries: VscodeTraceQueries) -> VscodeTraceQueryResult:
-        updates: List[VscodeTraceItem] = []
-        deleted: List[str] = []
-        all_query_ids = set()            
-        for query in queries.queries:
-            assert not isinstance(query.timestamp, Undefined)
-            assert not isinstance(query.rootKey, Undefined)
-            all_query_ids.add(query.rootKey)
-            if query.rootKey in self.trace_trees:
-                item = self.trace_trees[query.rootKey]
-                if item.timestamp != query.timestamp:
-                    updates.append(item)
-            else:
-                deleted.append(query.rootKey)
-        for k, v in self.trace_trees.items():
-            if k not in all_query_ids:
-                updates.append(v)
-        return VscodeTraceQueryResult(updates, deleted)   
-
-    def to_dict(self):
-        return as_dict_no_undefined(self)     
-        
-@dataclass_dispatch.dataclass
-class AppDataStorageForVscode(AppDataStorageForVscodeBase):
-    async def add_or_update_trace_tree_with_update(self, key: str, items: List[VscodeTraceItem]):
-        self.add_or_update_trace_tree(key, items)
-        await self._update_vscode_storage()
-
-    async def remove_trace_tree_with_update(self, key: str):
-        self.remove_trace_tree(key)
-        await self._update_vscode_storage()
-
-    async def _update_vscode_storage(self):
-        app = get_app()
-        print("SAVE DATASTORAGE")
-        await app.save_data_storage(TENSORPC_APP_STORAGE_VSCODE_TRACE_PATH, self.to_dict())
 
 class AppEditor:
 
@@ -358,7 +309,8 @@ class App:
         self._flow_app_is_headless = False
 
         self.__flowapp_master_meta = MasterMeta()
-        self.__flowapp_storage_cache: Dict[str, StorageDataItem] = {}
+        # self.__flowapp_storage_cache: Dict[str, StorageDataItem] = {}
+        self.app_storage = AppStorage(self.__flowapp_master_meta)
         # for app and dynamic layout in AnyFlexLayout
         self._flowapp_change_observers: Dict[str, _WatchDogWatchEntry] = {}
         self._flowapp_vscode_storage: Optional[AppDataStorageForVscode] = None
@@ -406,7 +358,7 @@ class App:
 
     async def get_vscode_storage_lazy(self):
         if self._flowapp_vscode_storage is None:
-            data = await self.read_data_storage(TENSORPC_APP_STORAGE_VSCODE_TRACE_PATH, raise_if_not_found=False)
+            data = await self.app_storage.read_data_storage(TENSORPC_APP_STORAGE_VSCODE_TRACE_PATH, raise_if_not_found=False)
             if data is not None:
                 self._flowapp_vscode_storage = AppDataStorageForVscode(**data)
             else:
@@ -463,183 +415,6 @@ class App:
 
     def _is_wrapped_obj(self):
         return self._is_external_root and self.root._wrapped_obj is not None
-
-    async def save_data_storage(self,
-                                key: str,
-                                data: Any,
-                                node_id: Optional[str] = None,
-                                graph_id: Optional[str] = None,
-                                in_memory_limit: int = 1000,
-                                raise_if_exist: bool = False):
-        Path(key) # check key is valid path
-        data_enc = pickle.dumps(data)
-        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
-        if graph_id is None:
-            graph_id = self.__flowapp_master_meta.graph_id
-        if node_id is None:
-            node_id = self.__flowapp_master_meta.node_id
-        meta = parse_obj_to_jsonlike(data, key,
-                                     UniqueTreeIdForTree.from_parts([key]))
-        in_memory_limit_bytes = in_memory_limit * 1024 * 1024
-        meta.userdata = {
-            "timestamp": time.time_ns(),
-        }
-        item = StorageDataItem(data_enc, meta)
-        if len(data_enc) <= in_memory_limit_bytes:
-            self.__flowapp_storage_cache[key] = item
-        if len(data_enc) > in_memory_limit_bytes:
-            raise ValueError("you can't store object more than 1GB size",
-                             len(data_enc))
-        await simple_chunk_call_async(self.__flowapp_master_meta.grpc_url,
-                                      serv_names.FLOW_DATA_SAVE, graph_id,
-                                      node_id, key, data_enc, meta,
-                                      item.timestamp,
-                                      raise_if_exist=raise_if_exist)
-
-    async def data_storage_has_item(self,
-                                key: str,
-                                node_id: Optional[str] = None,
-                                graph_id: Optional[str] = None):
-        Path(key) # check key is valid path
-        meta = self.__flowapp_master_meta
-        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
-        if graph_id is None:
-            graph_id = self.__flowapp_master_meta.graph_id
-        if node_id is None:
-            node_id = self.__flowapp_master_meta.node_id
-        if key in self.__flowapp_storage_cache:
-            return True 
-        else:
-            return await simple_chunk_call_async(
-                meta.grpc_url, serv_names.FLOW_DATA_HAS_ITEM, graph_id, node_id,
-                key) 
-    
-    async def read_data_storage(self,
-                                key: str,
-                                node_id: Optional[str] = None,
-                                graph_id: Optional[str] = None,
-                                in_memory_limit: int = 100,
-                                raise_if_not_found: bool = True):
-        Path(key) # check key is valid path
-        meta = self.__flowapp_master_meta
-        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
-        if graph_id is None:
-            graph_id = self.__flowapp_master_meta.graph_id
-        if node_id is None:
-            node_id = self.__flowapp_master_meta.node_id
-        if key in self.__flowapp_storage_cache:
-            item_may_invalid = self.__flowapp_storage_cache[key]
-            res: Optional[StorageDataItem] = await simple_chunk_call_async(meta.grpc_url,
-                                                serv_names.FLOW_DATA_READ,
-                                                graph_id, node_id, key,
-                                                item_may_invalid.timestamp,
-                                                raise_if_not_found=raise_if_not_found)
-            if raise_if_not_found:
-                assert res is not None 
-            if res is None:
-                return None 
-            if res.empty():
-                return pickle.loads(item_may_invalid.data)
-            else:
-                return pickle.loads(res.data)
-        else:
-            res: Optional[StorageDataItem] = await simple_chunk_call_async(
-                meta.grpc_url, serv_names.FLOW_DATA_READ, graph_id, node_id,
-                key, raise_if_not_found=raise_if_not_found)
-            if raise_if_not_found:
-                assert res is not None 
-            if res is None:
-                return None 
-            in_memory_limit_bytes = in_memory_limit * 1024 * 1024
-            data = pickle.loads(res.data)
-            if len(res.data) <= in_memory_limit_bytes:
-                self.__flowapp_storage_cache[key] = res
-            return data
-
-    async def read_data_storage_by_glob_prefix(self,
-                                key: str,
-                                node_id: Optional[str] = None,
-                                graph_id: Optional[str] = None):
-        Path(key) # check key is valid path
-        meta = self.__flowapp_master_meta
-        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
-        if graph_id is None:
-            graph_id = self.__flowapp_master_meta.graph_id
-        if node_id is None:
-            node_id = self.__flowapp_master_meta.node_id
-        res: Dict[str, StorageDataItem] = await simple_chunk_call_async(
-            meta.grpc_url, serv_names.FLOW_DATA_READ_GLOB_PREFIX, graph_id, node_id,
-            key)
-        return {k: pickle.loads(d.data) for k, d in res.items()}
-
-    async def remove_data_storage_item(self,
-                                       key: Optional[str],
-                                       node_id: Optional[str] = None,
-                                       graph_id: Optional[str] = None):
-        if key is not None:
-            Path(key)
-        meta = self.__flowapp_master_meta
-        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
-        if graph_id is None:
-            graph_id = self.__flowapp_master_meta.graph_id
-        if node_id is None:
-            node_id = self.__flowapp_master_meta.node_id
-        await simple_chunk_call_async(meta.grpc_url,
-                                      serv_names.FLOW_DATA_DELETE_ITEM,
-                                      graph_id, node_id, key)
-        if key is None:
-            self.__flowapp_storage_cache.clear()
-        else:
-            if key in self.__flowapp_storage_cache:
-                self.__flowapp_storage_cache.pop(key)
-
-    async def rename_data_storage_item(self,
-                                       key: str,
-                                       newname: str,
-                                       node_id: Optional[str] = None,
-                                       graph_id: Optional[str] = None):
-        Path(key)
-        meta = self.__flowapp_master_meta
-        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
-        if graph_id is None:
-            graph_id = self.__flowapp_master_meta.graph_id
-        if node_id is None:
-            node_id = self.__flowapp_master_meta.node_id
-        await simple_chunk_call_async(meta.grpc_url,
-                                      serv_names.FLOW_DATA_RENAME_ITEM,
-                                      graph_id, node_id, key, newname)
-        if key in self.__flowapp_storage_cache:
-            if newname not in self.__flowapp_storage_cache:
-                item = self.__flowapp_storage_cache.pop(key)
-                self.__flowapp_storage_cache[newname] = item
-
-    async def list_data_storage(self,
-                                node_id: Optional[str] = None,
-                                graph_id: Optional[str] = None):
-        meta = self.__flowapp_master_meta
-        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
-        if graph_id is None:
-            graph_id = self.__flowapp_master_meta.graph_id
-        if node_id is None:
-            node_id = self.__flowapp_master_meta.node_id
-        res: List[dict] = await simple_chunk_call_async(
-            meta.grpc_url, serv_names.FLOW_DATA_LIST_ITEM_METAS, graph_id,
-            node_id)
-        for x in res:
-            # TODO remove this (old style uid compat)
-            if "|" not in x["id"]:
-                x["id"] = UniqueTreeId.from_parts([x["id"]]).uid_encoded
-        return [JsonLikeNode(**x) for x in res]
-
-    async def list_all_data_storage_nodes(self,
-                                          graph_id: Optional[str] = None):
-        meta = self.__flowapp_master_meta
-        assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
-        if graph_id is None:
-            graph_id = self.__flowapp_master_meta.graph_id
-        res: List[str] = await simple_chunk_call_async(
-            meta.grpc_url, serv_names.FLOW_DATA_QUERY_DATA_NODE_IDS, graph_id)
-        return res
 
     async def get_ssh_node_data(self, node_id: str):
         meta = self.__flowapp_master_meta
@@ -1848,11 +1623,3 @@ class EditableLayoutApp(EditableApp):
                          external_root=external_root,
                          reload_manager=reload_manager)
 
-
-async def _run_zeroarg_func(cb: Callable):
-    try:
-        coro = cb()
-        if inspect.iscoroutine(coro):
-            await coro
-    except:
-        traceback.print_exc()

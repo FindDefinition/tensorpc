@@ -47,7 +47,7 @@ from tensorpc.flow.core.common import (handle_standard_event)
 from tensorpc.flow.core.reload import AppReloadManager
 from ..jsonlike import JsonLikeType, BackendOnlyProp, ContextMenuData, JsonLikeNode, as_dict_no_undefined
 from ..core import colors
-from ..core.core import (
+from ..core.component import (
     AppComponentCore, AppEvent, AppEventType, BasicProps, Component,
     ContainerBase, ContainerBaseProps, EventHandler, EventSlot,
     SimpleEventType, FlowSpecialMethods, Fragment, FrontendEventType,
@@ -2282,8 +2282,8 @@ class MultipleAutocomplete(MUIComponentBase[MultipleAutocompleteProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    async def handle_event(self, data: Event, is_sync: bool = False):
-        return await handle_standard_event(self, data, is_sync=is_sync)
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync=is_sync)
 
     @property
     def prop(self):

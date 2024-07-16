@@ -31,7 +31,7 @@ from tensorpc.flow import appctx
 from tensorpc.flow import marker
 from tensorpc.flow.components import three
 from tensorpc.flow.components.mui import LayoutType
-from tensorpc.flow.core.core import AppComponentCore, Component, FrontendEventType, UIType
+from tensorpc.flow.core.component import AppComponentCore, Component, FrontendEventType, UIType
 from .options import CommonOptions
 
 from tensorpc.autossh.scheduler import SchedulerClient

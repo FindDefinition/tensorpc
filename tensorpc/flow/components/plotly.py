@@ -24,7 +24,7 @@ from tensorpc.flow.core.appcore import Event
 from tensorpc.flow.core.common import (handle_standard_event)
 from typing_extensions import Literal, TypeAlias
 
-from ..core.core import (AppEvent, AppEventType, BasicProps, Component,
+from ..core.component import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, FrontendEventType, NumberType, T_child,
                     TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
                     undefined, as_dict_no_undefined)

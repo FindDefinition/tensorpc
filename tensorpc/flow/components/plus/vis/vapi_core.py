@@ -43,7 +43,7 @@ from ... import mui
 from tensorpc.flow import appctx
 from tensorpc.flow.core.appcore import get_app
 from tensorpc.flow.components.plus.config import ConfigPanelV2
-from tensorpc.flow.core.core import AppEvent
+from tensorpc.flow.core.component import AppEvent
 from tensorpc.utils.typeutils import take_annotation_from
 from ... import three
 from ...typemetas import (ColorRGB, ColorRGBA, RangedFloat, RangedInt,

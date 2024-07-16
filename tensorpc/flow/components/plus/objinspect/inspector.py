@@ -26,7 +26,7 @@ from tensorpc.flow.components import mui
 from tensorpc.flow.components import three
 from tensorpc.flow.components.plus.objinspect.treeitems import TraceTreeItem, parse_frame_result_to_trace_item
 from tensorpc.flow.components.plus.reload_utils import preview_layout_reload
-from tensorpc.flow.core.core import FlowSpecialMethods, FrontendEventType, _get_obj_def_path
+from tensorpc.flow.core.component import FlowSpecialMethods, FrontendEventType, _get_obj_def_path
 from tensorpc.flow.core.objtree import UserObjTreeProtocol
 from ..handlers.common import DefaultHandler
 from ..core import (ALL_OBJECT_PREVIEW_HANDLERS, USER_OBJ_TREE_TYPES,

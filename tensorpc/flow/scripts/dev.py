@@ -20,7 +20,7 @@ import dataclasses
 import mashumaro
 import enum
 from tensorpc.flow.components import plotly
-from tensorpc.flow.core.core import as_dict_no_undefined
+from tensorpc.flow.core.component import as_dict_no_undefined
 
 
 def get_args(t: Any) -> Tuple[Any, ...]:

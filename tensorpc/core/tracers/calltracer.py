@@ -15,6 +15,7 @@ from types import FrameType
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple, Type, Union
 
 from tensorpc.core.astex.astcache import AstCache, AstCacheItem
+from tensorpc.core.inspecttools import get_co_qualname_from_frame
 from tensorpc.core.moduleid import get_module_id_of_type
 from .core import TraceEventType, FrameEventBase, FrameEventCall
 
@@ -125,7 +126,7 @@ class CallTracerContext(object):
             self.result_call_stack.append(
                 FrameEventCall(
                     type=TraceEventType.Return,
-                    qualname=frame.f_code.co_qualname,
+                    qualname=get_co_qualname_from_frame(frame),
                     filename=frame.f_code.co_filename,
                     lineno=frame.f_lineno,
                     timestamp=time.time_ns(),
@@ -146,11 +147,12 @@ class CallTracerContext(object):
             self.result_call_stack.append(
                 FrameEventCall(
                     type=TraceEventType.Call,
-                    qualname=frame.f_code.co_qualname,
+                    qualname=get_co_qualname_from_frame(frame),
                     filename=frame.f_code.co_filename,
                     lineno=frame.f_lineno,
                     depth=THREAD_GLOBALS.depth,
                     timestamp=time.time_ns(),
+                    caller_lineno=-1 if frame.f_back is None else frame.f_back.f_lineno
                 ))
             frame.f_trace_lines = False
         return self._trace_ret_only_func

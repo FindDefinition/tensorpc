@@ -23,7 +23,7 @@ from tensorpc.flow.client import is_inside_app_session
 
 if TYPE_CHECKING:
     from ..flowapp.app import App, EditableApp
-    from .core import Component
+    from .component import Component
 
 CORO_NONE = Union[Coroutine[None, None, None], None]
 CORO_ANY: TypeAlias = Union[Coroutine[None, None, Any], Any]
@@ -204,7 +204,6 @@ def get_app_storage():
 def enqueue_delayed_callback(cb: Callable[[], CORO_ANY]):
     ctx = get_event_handling_context()
     assert ctx is not None
-    print("EVCTX", id(ctx))
     ctx.delayed_callbacks.append(cb)
 
 def find_component(
@@ -309,15 +308,6 @@ def create_reload_metas(uid_to_comp: Dict[str, "Component"], path: str):
                     _CompReloadMeta(k, handler, cb_file, cb_real,
                                     cb_real.__qualname__))
     return metas
-
-
-async def _run_zeroarg_func(cb: Callable):
-    try:
-        coro = cb()
-        if inspect.iscoroutine(coro):
-            await coro
-    except:
-        traceback.print_exc()
 
 
 class AppObservedFunctionRegistry(ObservedFunctionRegistry):

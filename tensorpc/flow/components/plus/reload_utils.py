@@ -2,7 +2,7 @@ from typing import Any, Callable, Coroutine
 from tensorpc.core.serviceunit import AppFuncType, ServFunctionMeta
 from tensorpc.flow.components import mui
 from tensorpc.flow.components import three
-from tensorpc.flow.core.core import FlowSpecialMethods, FrontendEventType, _get_obj_def_path
+from tensorpc.flow.core.component import FlowSpecialMethods, FrontendEventType, _get_obj_def_path
 from tensorpc.flow.core.appcore import Event, get_app, get_editable_app
 from functools import partial
 

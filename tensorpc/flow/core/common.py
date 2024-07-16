@@ -15,7 +15,7 @@
 from functools import partial
 from typing import Any, Tuple, Union
 import asyncio
-from tensorpc.flow.core.core import Component, Event, create_ignore_usr_msg, Undefined, UIRunStatus, FrontendEventType, ALL_POINTER_EVENTS
+from tensorpc.flow.core.component import Component, Event, create_ignore_usr_msg, Undefined, UIRunStatus, FrontendEventType, ALL_POINTER_EVENTS
 
 _STATE_CHANGE_EVENTS = set([
     FrontendEventType.Change.value,

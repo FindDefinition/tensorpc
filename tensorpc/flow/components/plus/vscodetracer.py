@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from pathlib import Path
 import tempfile
 import asyncio
 import dataclasses
@@ -27,8 +28,9 @@ from tensorpc.core.tracers.codefragtracer import CursorFuncTracer, CodeFragTrace
 from tensorpc.flow.components import mui
 from tensorpc.flow import appctx
 from tensorpc.flow.core.appcore import AppSpecialEventType
-from tensorpc.flow.core.core import EventSlotEmitter
-from tensorpc.flow.coretypes import VscodeTensorpcMessage, VscodeTensorpcMessageType
+from tensorpc.flow.core.component import EventSlotEmitter
+from tensorpc.flow.vscode.coretypes import VscodeTensorpcMessage, VscodeTensorpcMessageType
+from tensorpc.flow.vscode.tracer import parse_frame_result_to_trace_item
 
 
 @dataclasses.dataclass
@@ -44,7 +46,10 @@ class VscodeTracerBox(mui.FlexBox):
         TraceStart = "vscode_tracer_box_trace_start"
         TraceEnd = "vscode_tracer_box_trace_end"
 
-    def __init__(self, children: Optional[mui.LayoutType] = None):
+    def __init__(self,
+                 children: Optional[mui.LayoutType] = None,
+                 traced_folders: Optional[Set[Union[str, Path]]] = None,
+                 max_depth: int = 10000):
         super().__init__(children)
 
         self.event_trace_start = self._create_emitter_event_slot_noarg(
@@ -58,13 +63,16 @@ class VscodeTracerBox(mui.FlexBox):
         self._trace_data: Optional[VscodeTracerData] = None
         self._is_tracing = False
         self.event_before_unmount.on(self.unset_trace_data)
+        self._traced_folders = traced_folders
+        self._max_depth = max_depth
 
     async def _handle_vscode_message(self, data: VscodeTensorpcMessage):
         if data.type == VscodeTensorpcMessageType.UpdateCursorPosition:
             if self._trace_data is None or self._is_tracing:
                 return
             if data.selections is not None and len(
-                    data.selections) > 0 and data.currentUri.startswith("file://"):
+                    data.selections) > 0 and data.currentUri.startswith(
+                        "file://"):
                 path = data.currentUri[7:]
                 sel = data.selections[0]
                 lineno = sel.start.line + 1
@@ -77,7 +85,7 @@ class VscodeTracerBox(mui.FlexBox):
                     await self.flow_event_emitter.emit_async(
                         VscodeTracerBox.EventType.TraceStart.value,
                         mui.Event(VscodeTracerBox.EventType.TraceStart.value,
-                                None))
+                                  None))
                     if self._trace_data.run_in_executor:
                         res = await asyncio.get_running_loop().run_in_executor(
                             None, self._tracer.run_trace_from_code_range,
@@ -89,7 +97,8 @@ class VscodeTracerBox(mui.FlexBox):
                             self._trace_data.kwargs, path, code_range)
                     await self.flow_event_emitter.emit_async(
                         VscodeTracerBox.EventType.TraceEnd.value,
-                        mui.Event(VscodeTracerBox.EventType.TraceEnd.value, res))
+                        mui.Event(VscodeTracerBox.EventType.TraceEnd.value,
+                                  res))
                 except BaseException as exc:
                     traceback.print_exc()
                     await self.send_exception(exc)
@@ -97,21 +106,30 @@ class VscodeTracerBox(mui.FlexBox):
                     self._is_tracing = False
 
     async def prepare_trace(self,
-                       func: Callable,
-                       args: Tuple,
-                       kwargs: Dict,
-                       run_in_executor: bool = False):
+                            func: Callable,
+                            args: Tuple,
+                            kwargs: Dict,
+                            save_key: Optional[str] = None,
+                            run_in_executor: bool = False):
         try:
             self._is_tracing = True
             await self.flow_event_emitter.emit_async(
                 VscodeTracerBox.EventType.TraceStart.value,
-                mui.Event(VscodeTracerBox.EventType.TraceStart.value,
-                            None))
+                mui.Event(VscodeTracerBox.EventType.TraceStart.value, None))
             if run_in_executor:
-                await asyncio.get_running_loop().run_in_executor(
-                    None, self._tracer.prepare_func_trace, func, args, kwargs)
+                trace_res, _ = await asyncio.get_running_loop(
+                ).run_in_executor(None, self._tracer.prepare_func_trace, func,
+                                  args, kwargs, self._traced_folders,
+                                  self._max_depth)
             else:
-                self._tracer.prepare_func_trace(func, args, kwargs)
+                trace_res, _ = self._tracer.prepare_func_trace(
+                    func, args, kwargs, self._traced_folders, self._max_depth)
+            if save_key is not None:
+                app = appctx.get_app()
+                storage = await app.get_vscode_storage_lazy()
+                vscode_trace_res = parse_frame_result_to_trace_item(trace_res)
+                await storage.add_or_update_trace_tree_with_update(
+                    save_key, vscode_trace_res)
             await self.flow_event_emitter.emit_async(
                 VscodeTracerBox.EventType.TraceEnd.value,
                 mui.Event(VscodeTracerBox.EventType.TraceEnd.value, None))

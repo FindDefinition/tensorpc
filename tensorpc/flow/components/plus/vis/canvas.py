@@ -25,7 +25,7 @@ from tensorpc.flow.components.plus.grid_preview_layout import GridPreviewLayout
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree, SelectSingleEvent
 from .core import UNKNOWN_KEY_SPLIT, UNKNOWN_VIS_KEY, UserTreeItemCard, VContext, get_canvas_item_cfg, get_or_create_canvas_item_cfg, _VapiObjects, is_reserved_uid
 from tensorpc.flow.components.typemetas import RangedFloat
-from tensorpc.flow.core.core import Component, ContainerBase, FrontendEventType
+from tensorpc.flow.core.component import Component, ContainerBase, FrontendEventType
 from tensorpc.flow.core.coretypes import TreeDragTarget
 from tensorpc.flow import appctx
 from tensorpc.flow.jsonlike import TreeItem

@@ -51,7 +51,7 @@ async def save_data_storage(key: str,
                             in_memory_limit: int = 100,
                             raise_if_exist: bool = False):
     app = get_app()
-    await app.save_data_storage(key, data, node_id, graph_id, in_memory_limit,
+    await app.app_storage.save_data_storage(key, data, node_id, graph_id, in_memory_limit,
                                 raise_if_exist)
 
 
@@ -61,7 +61,7 @@ async def read_data_storage(key: str,
                             in_memory_limit: int = 100,
                             raise_if_not_found: bool = True) -> Any:
     app = get_app()
-    return await app.read_data_storage(key, node_id, graph_id, in_memory_limit,
+    return await app.app_storage.read_data_storage(key, node_id, graph_id, in_memory_limit,
                                        raise_if_not_found)
 
 
@@ -69,7 +69,7 @@ async def read_data_storage_by_glob_prefix(glob_prefix: str,
                                            node_id: Optional[str] = None,
                                            graph_id: Optional[str] = None):
     app = get_app()
-    return await app.read_data_storage_by_glob_prefix(glob_prefix, node_id,
+    return await app.app_storage.read_data_storage_by_glob_prefix(glob_prefix, node_id,
                                                       graph_id)
 
 
@@ -77,7 +77,7 @@ async def remove_data_storage(key: Optional[str],
                               node_id: Optional[str] = None,
                               graph_id: Optional[str] = None) -> Any:
     app = get_app()
-    return await app.remove_data_storage_item(key, node_id, graph_id)
+    return await app.app_storage.remove_data_storage_item(key, node_id, graph_id)
 
 
 async def rename_data_storage_item(key: str,
@@ -85,26 +85,26 @@ async def rename_data_storage_item(key: str,
                                    node_id: Optional[str] = None,
                                    graph_id: Optional[str] = None) -> Any:
     app = get_app()
-    return await app.rename_data_storage_item(key, newname, node_id, graph_id)
+    return await app.app_storage.rename_data_storage_item(key, newname, node_id, graph_id)
 
 
 async def list_data_storage(node_id: Optional[str] = None,
                             graph_id: Optional[str] = None):
     app = get_app()
-    return await app.list_data_storage(node_id, graph_id)
+    return await app.app_storage.list_data_storage(node_id, graph_id)
 
 
 async def list_all_data_storage_nodes(
         graph_id: Optional[str] = None) -> List[str]:
     app = get_app()
-    return await app.list_all_data_storage_nodes(graph_id)
+    return await app.app_storage.list_all_data_storage_nodes(graph_id)
 
 
 async def data_storage_has_item(key: str,
                                 node_id: Optional[str] = None,
                                 graph_id: Optional[str] = None):
     app = get_app()
-    return await app.data_storage_has_item(key, node_id, graph_id)
+    return await app.app_storage.data_storage_has_item(key, node_id, graph_id)
 
 async def get_vscode_storage():
     app = get_app()

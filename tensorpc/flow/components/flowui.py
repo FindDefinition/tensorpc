@@ -27,7 +27,7 @@ from tensorpc.flow.core.common import handle_standard_event
 from tensorpc.flow.jsonlike import merge_props_not_undefined
 from tensorpc.utils.uniquename import UniqueNamePool
 
-from ..core.core import (AppEvent, AppEventType, BasicProps, Component,
+from ..core.component import (AppEvent, AppEventType, BasicProps, Component,
                     DataclassType, FrontendEventType, NumberType, UIType,
                     Undefined, undefined)
 from .mui import (ContainerBaseProps, LayoutType, MUIBasicProps, MUIComponentBase,
@@ -608,6 +608,13 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                     raise ValueError(f"item id {item.id} not exists")
                 merge_props_not_undefined(all_item_id_to_items[item.id], item)
             return await self.update_node_data(node_id, {"contextMenuItems": node.data.contextMenuItems})
+    
+    async def set_node_context_menu_items(self, node_id: str, items: List[MenuItem]):
+        """set node context menu items based on id.
+        """
+        await self.update_node_data(node_id, {
+            "contextMenuItems": items,
+        })
 
     async def add_nodes(self, nodes: List[Node], screen_to_flow: Optional[bool] = None):
         """Add new nodes to the flow.

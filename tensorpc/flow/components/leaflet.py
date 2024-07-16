@@ -34,7 +34,7 @@ import numpy as np
 from tensorpc.utils.uniquename import UniqueNamePool
 from typing_extensions import ParamSpec, TypeAlias
 
-from ..core.core import (BasicProps, Component, SimpleEventType, ContainerBase,
+from ..core.component import (BasicProps, Component, SimpleEventType, ContainerBase,
                     FrontendEventType, NumberType, T_base_props, T_child,
                     UIRunStatus, UIType, Undefined, undefined,
                     ContainerBaseProps, T_container_props, Fragment,

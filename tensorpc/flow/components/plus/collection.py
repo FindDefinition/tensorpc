@@ -9,7 +9,7 @@ from tensorpc.core.defs import File
 from tensorpc.flow.components import mui
 from tensorpc.flow.core import colors
 from tensorpc.flow.components import three
-from tensorpc.flow.core.core import FrontendEventType
+from tensorpc.flow.core.component import FrontendEventType
 from tensorpc.flow import appctx
 import io
 import json

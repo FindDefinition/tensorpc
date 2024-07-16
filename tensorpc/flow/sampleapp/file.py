@@ -14,7 +14,7 @@
 
 from typing import Dict
 from tensorpc.flow import App, EditableApp, EditableLayoutApp, mui
-from tensorpc.flow.core.core import Component
+from tensorpc.flow.core.component import Component
 
 from tensorpc.autossh import SSHClient
 import asyncssh

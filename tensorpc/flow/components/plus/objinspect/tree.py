@@ -27,7 +27,7 @@ from tensorpc.flow.components.plus.core import (
     ALL_OBJECT_LAYOUT_HANDLERS, ALL_OBJECT_PREVIEW_HANDLERS,
     USER_OBJ_TREE_TYPES, ContextMenuType, CustomTreeItemHandler,
     ObjectLayoutCreator, ObjectLayoutHandler)
-from tensorpc.flow.core.core import FlowSpecialMethods, FrontendEventType
+from tensorpc.flow.core.component import FlowSpecialMethods, FrontendEventType
 from tensorpc.flow.core.coretypes import TreeDragTarget
 from tensorpc.flow.core.objtree import UserObjTree, UserObjTreeProtocol
 from tensorpc.flow.core.reload import reload_object_methods

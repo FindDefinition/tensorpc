@@ -15,7 +15,7 @@ from tensorpc.flow.components import three
 
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 from tensorpc.flow.marker import mark_did_mount, mark_will_unmount
-from tensorpc.flow.core.core import (_get_obj_def_path)
+from tensorpc.flow.core.component import (_get_obj_def_path)
 import yaml
 
 

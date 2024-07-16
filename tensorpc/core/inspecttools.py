@@ -1,4 +1,5 @@
 import inspect
+import sys
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Type, Union
 
 import types
@@ -133,3 +134,12 @@ def get_function_defined_type(func: Callable):
         cur_obj = cur_obj[part]
         res = cur_obj
     return res
+
+def get_co_qualname_from_frame(frame: types.FrameType):
+    qname = frame.f_code.co_name
+    if sys.version_info[:2] >= (3, 11):
+        qname = frame.f_code.co_qualname  # type: ignore
+    else:
+        if "self" in frame.f_locals:
+            qname = type(frame.f_locals["self"]).__qualname__ + "." + qname
+    return qname 

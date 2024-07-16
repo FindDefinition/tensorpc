@@ -16,7 +16,7 @@ from tensorpc.flow.components import mui
 from tensorpc.flow.components.plus.core import (
     ALL_OBJECT_LAYOUT_HANDLERS, USER_OBJ_TREE_TYPES, CustomTreeItemHandler,
     ObjectLayoutCreator)
-from tensorpc.flow.core.core import FlowSpecialMethods
+from tensorpc.flow.core.component import FlowSpecialMethods
 from tensorpc.flow.jsonlike import (IconButtonData, TreeItem,
                                     parse_obj_to_jsonlike)
 # GLOBAL_SPLIT = "::"

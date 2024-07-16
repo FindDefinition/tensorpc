@@ -297,7 +297,9 @@ async def serve_app(app,
                     url=None,
                     ssl_context=None):
     loop = asyncio.get_running_loop()
-    runner = web.AppRunner(app)
+    # if access_log is not None (default) and config base log config to info/debug
+    # aiohttp will display much annoying message.
+    runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     site = web.TCPSite(runner, host=url, port=port, ssl_context=ssl_context)
     await site.start()
