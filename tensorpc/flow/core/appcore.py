@@ -1,8 +1,10 @@
+import asyncio
 import contextlib
 import contextvars
 import dataclasses
 import enum
 import inspect
+import threading
 import traceback
 from functools import partial
 from pathlib import Path
@@ -332,3 +334,19 @@ def observe_autorun_script(func: Callable):
     return ALL_OBSERVED_FUNCTIONS.register(func,
                                            autorun_when_changed=True,
                                            autorun_block_symbol=r"#%%")
+
+
+
+def run_coro_sync(coro: Coroutine) -> Any:
+    loop = get_app()._loop
+    assert loop is not None
+    if get_app()._flowapp_thread_id == threading.get_ident():
+        # we can't wait fut here
+        task = asyncio.create_task(coro)
+        # we can't wait fut here
+        return task
+        # return fut
+    else:
+        # we can wait fut here.
+        fut = asyncio.run_coroutine_threadsafe(coro, loop)
+        return fut.result()

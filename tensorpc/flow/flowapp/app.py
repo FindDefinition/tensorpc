@@ -72,6 +72,7 @@ from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.constants import TENSORPC_APP_STORAGE_VSCODE_TRACE_PATH, TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from tensorpc.flow.flowapp.appstorage import AppStorage
+from tensorpc.utils.wait_tools import debounce
 from ..components import mui, three
 from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem
 from tensorpc.flow.vscode.coretypes import VscodeTensorpcMessage, VscodeTensorpcQuery, VscodeTensorpcQueryType, VscodeTraceItem, VscodeTraceQueries, VscodeTraceQuery, VscodeTraceQueryResult
@@ -1027,7 +1028,8 @@ class _WatchDogForAppFile(watchdog.events.FileSystemEventHandler):
         self._on_modified = on_modified
 
     def on_modified(self, event: _WATCHDOG_MODIFY_EVENT_TYPES):
-        return self._on_modified(event)
+        if isinstance(event, watchdog.events.FileModifiedEvent):
+            return self._on_modified(event)
 
 
 class EditableApp(App):
@@ -1061,6 +1063,9 @@ class EditableApp(App):
         self._flow_observed_files = observed_files
         self._init_observe_paths: Set[str] = set()
         self._protect_app_observe_call: bool = False
+        # some network based fs modify event may trigger multiple times
+        # during write, so we need to debounce it to avoid incomplete write.
+        self._fs_event_debounce = 0.1
 
     @contextlib.contextmanager
     def _flowapp_protect_app_observe_call(self, ctx: _FlowAppObserveContext):
@@ -1100,7 +1105,7 @@ class EditableApp(App):
         if not self._flow_app_is_headless:
             observer = Observer()
             self._watchdog_watcher = _WatchDogForAppFile(
-                self._watchdog_on_modified)
+                debounce(self._fs_event_debounce)(self._watchdog_on_modified))
             if self._flow_observed_files is not None:
                 for p in self._flow_observed_files:
                     assert Path(p).exists(), f"{p} must exist"

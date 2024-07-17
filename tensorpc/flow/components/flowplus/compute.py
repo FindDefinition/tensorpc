@@ -18,8 +18,8 @@ from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator,
                     Optional, Tuple, Type, TypedDict, TypeVar, Union,
                     get_origin)
 
-from colorama import init
 from typing_extensions import get_type_hints, is_typeddict
+from tensorpc.flow.core.appcore import run_coro_sync
 
 from tensorpc import compat
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
@@ -263,7 +263,7 @@ class ComputeNode:
                  init_pos: Optional[flowui.XYPosition] = None,
                  icon_cfg: Optional[mui.IconProps] = None) -> None:
         self._name = name
-        self.id = id
+        self.__compute_node_id = id
         if node_type is None:
             node_type = type(self).__name__
         self._node_type = node_type
@@ -285,6 +285,10 @@ class ComputeNode:
             assert is_async_gen(
                 ranno.type
             ), "you must anno AsyncGenerator if your func is async gen"
+
+    @property 
+    def id(self):
+        return self.__compute_node_id
 
     @property
     def is_dynamic_class(self):
@@ -541,6 +545,26 @@ class IOHandle(mui.FlexBox):
     def is_optional(self):
         return self.annohandle.is_optional
 
+class ComputeFlowNodeContext:
+    def __init__(self, node_id: str) -> None:
+        self.node_id = node_id
+
+COMPUTE_FLOW_NODE_CONTEXT_VAR: contextvars.ContextVar[
+    Optional[ComputeFlowNodeContext]] = contextvars.ContextVar(
+        "computeflow_node_context", default=None)
+
+
+def get_compute_flow_node_context() -> Optional[ComputeFlowNodeContext]:
+    return COMPUTE_FLOW_NODE_CONTEXT_VAR.get()
+
+
+@contextlib.contextmanager
+def enter_flow_ui_node_context_object(ctx: ComputeFlowNodeContext):
+    token = COMPUTE_FLOW_NODE_CONTEXT_VAR.set(ctx)
+    try:
+        yield ctx
+    finally:
+        COMPUTE_FLOW_NODE_CONTEXT_VAR.reset(token)
 
 class ComputeNodeWrapper(mui.FlexBox):
     def __init__(self,
@@ -619,6 +643,9 @@ class ComputeNodeWrapper(mui.FlexBox):
         else:
             self._state = ComputeNodeWrapperState(NodeStatus.Ready)
         self._cached_inputs: Optional[Dict[str, Any]] = None
+
+        self._ctx = ComputeFlowNodeContext(self.cnode.id)
+        self.set_flow_event_context_creator(lambda: enter_flow_ui_node_context_object(self._ctx))
 
     @property
     def is_cached_node(self):
@@ -1649,38 +1676,39 @@ class ComputeFlow(mui.FlexBox):
                             "contextMenuItems": wrapper.get_context_menus()
                         })
                     compute_func = wrapper.cnode.get_compute_function()
-                    if wrapper.cnode.is_async_gen and inspect.isasyncgenfunction(
-                            compute_func):
-                        node_aiter = compute_func(**node_inp)
-                        cur_anode_iters[n.id] = node_aiter
-                        task = asyncio.create_task(self._awaitable_to_coro(
-                            n, anext(node_aiter)),
-                                                   name=f"node-{n.id}")
-                        tasks.append(task)
-                        task_to_noded[task] = n
-                    else:
-                        if not inspect.iscoroutinefunction(compute_func):
-                            await wrapper.update_status(NodeStatus.Running)
-                        try:
-                            t1 = time.time()
-                            data = compute_func(**node_inp)
-                        except Exception as exc:
-                            await wrapper.update_status(NodeStatus.Error)
-                            traceback.print_exc()
-                            await self.send_exception(exc)
-                            continue
-                        if inspect.iscoroutine(data):
+                    with enter_flow_ui_node_context_object(wrapper._ctx):
+                        if wrapper.cnode.is_async_gen and inspect.isasyncgenfunction(
+                                compute_func):
+                            node_aiter = compute_func(**node_inp)
+                            cur_anode_iters[n.id] = node_aiter
                             task = asyncio.create_task(self._awaitable_to_coro(
-                                n, data),
-                                                       name=f"node-{n.id}")
+                                n, anext(node_aiter)),
+                                                    name=f"node-{n.id}")
                             tasks.append(task)
                             task_to_noded[task] = n
                         else:
-                            assert isinstance(data, dict)
-                            await wrapper.update_status(
-                                NodeStatus.Ready,
-                                time.time() - t1)
-                            node_outputs[n.id] = data
+                            if not inspect.iscoroutinefunction(compute_func):
+                                await wrapper.update_status(NodeStatus.Running)
+                            try:
+                                t1 = time.time()
+                                data = compute_func(**node_inp)
+                            except Exception as exc:
+                                await wrapper.update_status(NodeStatus.Error)
+                                traceback.print_exc()
+                                await self.send_exception(exc)
+                                continue
+                            if inspect.iscoroutine(data):
+                                task = asyncio.create_task(self._awaitable_to_coro(
+                                    n, data),
+                                                        name=f"node-{n.id}")
+                                tasks.append(task)
+                                task_to_noded[task] = n
+                            else:
+                                assert isinstance(data, dict)
+                                await wrapper.update_status(
+                                    NodeStatus.Ready,
+                                    time.time() - t1)
+                                node_outputs[n.id] = data
                 is_shutdown = False
                 print("Waiting")
                 cur_node_tasks = tasks
@@ -1844,6 +1872,33 @@ async def schedule_node(node_id: str, node_inputs: Dict[str, Any]):
     assert ctx is not None, "you must enter flow ui context before call this function"
     await ctx.cflow.schedule_node(node_id, node_inputs)
 
+async def schedule_next_inside(node_output: Dict[str, Any]):
+    """schedule next nodes by current node id and current node output
+    """
+    ctx = get_compute_flow_context()
+    assert ctx is not None, "you must enter flow ui context before call this function"
+    ctx_node = get_compute_flow_node_context()
+    assert ctx_node is not None, "you must use this function in node layout or compute"
+    await ctx.cflow.schedule_next(ctx_node.node_id, node_output)
+
+async def schedule_node_inside(node_inputs: Dict[str, Any]):
+    """schedule current node by node id and current node inputs
+    """
+    ctx = get_compute_flow_context()
+    assert ctx is not None, "you must enter flow ui context before call this function"
+    ctx_node = get_compute_flow_node_context()
+    assert ctx_node is not None, "you must use this function in node layout or compute"
+    await ctx.cflow.schedule_node(ctx_node.node_id, node_inputs)
+
+def schedule_next_inside_sync(node_output: Dict[str, Any]):
+    """schedule next nodes by current node id and current node output
+    """
+    return run_coro_sync(schedule_next_inside(node_output))
+
+def schedule_node_inside_sync(node_inputs: Dict[str, Any]):
+    """schedule current node by node id and current node inputs
+    """
+    return run_coro_sync(schedule_node_inside(node_inputs))
 
 class CNodeTest1(ComputeNode):
     class OutputDict(TypedDict):

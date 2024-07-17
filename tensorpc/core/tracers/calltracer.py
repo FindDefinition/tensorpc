@@ -98,7 +98,7 @@ class CallTracerContext(object):
         self.target_frames.discard(calling_frame)
 
     def _is_internal_frame(self, frame: FrameType):
-        res = frame.f_code.co_filename in self._inner_frame_fnames
+        res = frame.f_code.co_filename in self._inner_frame_fnames or frame.f_code.co_name.startswith("<")
         if self._traced_folders_tuple:
             res |= not frame.f_code.co_filename.startswith(
                 self._traced_folders_tuple)

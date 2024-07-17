@@ -27,7 +27,7 @@ from tensorpc.flow.core.appcore import (AppSpecialEventType, enter_app_conetxt, 
                                         find_all_components, get_app_context,
                                         get_editable_app, get_reload_manager,
                                         is_inside_app, observe_function,
-                                        enqueue_delayed_callback)
+                                        enqueue_delayed_callback, run_coro_sync)
 from tensorpc.flow.components import plus
 from tensorpc.flow.components.plus.objinspect.controllers import ThreadLocker
 
@@ -156,20 +156,6 @@ async def run_in_executor_with_exception_inspect(func: Callable[P, T],
     return await comp.run_in_executor_with_exception_inspect(
         _run_func_with_app, get_app(), func, *args, **kwargs)
 
-
-def run_coro_sync(coro: Coroutine) -> Any:
-    loop = get_app()._loop
-    assert loop is not None
-    if get_app()._flowapp_thread_id == threading.get_ident():
-        # we can't wait fut here
-        task = asyncio.create_task(coro)
-        # we can't wait fut here
-        return task
-        # return fut
-    else:
-        # we can wait fut here.
-        fut = asyncio.run_coroutine_threadsafe(coro, loop)
-        return fut.result()
 
 def register_app_special_event_handler(event: AppSpecialEventType,
                                              handler: Callable):

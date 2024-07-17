@@ -1,4 +1,11 @@
 # Changelog
+
+# [0.11.16] - 2024-07-17
+### Added
+- add node context for compute flow, user can access node id in node layout callback or compute.
+### Changed
+- file watchdog now enable debounce (0.1s) by default to avoid incomplete write.
+
 # [0.11.15] - 2024-07-16
 ### Changed 
 - refine some app feature impl
