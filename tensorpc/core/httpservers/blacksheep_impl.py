@@ -243,9 +243,11 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
                                   ws_backup_name="/api/ws_backup/{client_id}"):
     http_service = HttpService(server_core)
     ctx = contextlib.nullcontext()
+    ctx2 = contextlib.nullcontext()
     if standalone:
         ctx = server_core.enter_global_context()
-    with ctx:
+        ctx2 = server_core.enter_exec_context()
+    with ctx, ctx2:
         if standalone:
             await server_core._init_async_members()
             await server_core.run_event_async(ServiceEventType.Init)

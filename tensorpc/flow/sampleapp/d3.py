@@ -187,15 +187,16 @@ class BufferMeshDevApp:
                 # three.Wireframe(),
             ],
             colors=random_pc_colors).prop(receiveShadow=True, castShadow=True)
+        scales =np.random.uniform(0.5, 1.5, size=[random_pcs.shape[0], 3]).astype(np.float32)
         instanced_voxel_mesh = three.InstancedMesh(
             random_pcs.astype(np.float32) * voxel_size,
             random_pcs.shape[0],
             [
                 # three.MeshPhongMaterial().prop(vertexColors=True, color="aqua", specular="#ffffff", shininess=250, transparent=True),
                 three.BoxGeometry(voxel_size, voxel_size, voxel_size),
-                three.MeshStandardMaterial().prop(vertexColors=False),
+                three.MeshStandardMaterial(),
             ],
-            colors=random_pc_colors).prop(receiveShadow=True, castShadow=True)
+            colors=random_pc_colors).prop(receiveShadow=True, castShadow=True, scales=scales)
         self.voxel_mesh = instanced_voxel_mesh
         self.canvas = plus.SimpleCanvas(
             cam,

@@ -677,6 +677,12 @@ class App:
                         special_methods.will_unmount.get_binded_fn(),
                         sync_status_first=False,
                         change_status=False)
+                for k, unmount_effects in v.effects._flow_unmounted_effects.items():
+                    for unmount_effect in unmount_effects:
+                        await v.run_callback(unmount_effect,
+                                            sync_status_first=False,
+                                            change_status=False)
+                    unmount_effects.clear()
 
     def app_create_layout(self) -> mui.LayoutType:
         """override this in EditableApp to support reloadable layout

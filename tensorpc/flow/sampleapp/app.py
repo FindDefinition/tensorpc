@@ -1031,10 +1031,14 @@ class PointCloudApp:
         sizes = np.random.uniform(0.5, 10.5, size=[1000]).astype(
             np.float32) * 1
 
+        labels = np.random.randint(0, 10, size=[1000]).astype(np.uint8)
+
         await self.canvas.show_points(
             "key0",
             points,
             limit=100000,
+            size=10,
+            labels=labels,
             #   colors=colors,
             #   attrs=points,
             #   attr_fields=["x", "y", "z"]

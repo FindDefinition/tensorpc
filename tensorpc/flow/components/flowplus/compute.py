@@ -26,7 +26,7 @@ from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.annocore import (AnnotatedArg, AnnotatedReturn,
                                     extract_annotated_type_and_meta, get_args,
-                                    is_async_gen, is_optional,
+                                    is_async_gen, is_not_required, is_optional,
                                     lenient_issubclass,
                                     parse_annotated_function)
 from tensorpc.core.asynctools import cancel_task
@@ -41,6 +41,7 @@ from tensorpc.flow.appctx.core import (data_storage_has_item,
 from tensorpc.flow.components import flowui, mui
 from tensorpc.flow.core.appcore import CORO_ANY, find_all_components
 from tensorpc.flow.core.component import AppEvent, UserMessage
+from tensorpc.flow.core.context import ALL_APP_CONTEXT_GETTERS
 from tensorpc.flow.jsonlike import (as_dict_no_undefined,
                                     as_dict_no_undefined_no_deepcopy,
                                     merge_props_not_undefined)
@@ -286,14 +287,14 @@ class ComputeNode:
                 ranno.type
             ), "you must anno AsyncGenerator if your func is async gen"
 
-    @property 
+    @property
     def id(self):
         return self.__compute_node_id
 
     @property
     def is_dynamic_class(self):
         return self._is_dynamic_class
-    
+
     @is_dynamic_class.setter
     def is_dynamic_class(self, value):
         self._is_dynamic_class = value
@@ -418,14 +419,16 @@ class ComputeNode:
                                          include_extras=True,
                                          globalns=global_ns)
         else:
-            tdict_annos = get_type_hints(ranno, include_extras=True, globalns=global_ns)
+            tdict_annos = get_type_hints(ranno,
+                                         include_extras=True,
+                                         globalns=global_ns)
         for k, v in tdict_annos.items():
             v, anno_meta = extract_annotated_type_and_meta(v)
             handle_meta = None
             if anno_meta is not None and isinstance(anno_meta, HandleMeta):
                 handle_meta = anno_meta
             ohandle = AnnoHandle(
-                "target", HandleTypePrefix.Output, k, is_optional(v),
+                "target", HandleTypePrefix.Output, k, is_not_required(v),
                 AnnotatedArg("", None, ranno_obj.type, ranno_obj.annometa),
                 handle_meta)
             out_iohandles.append(ohandle)
@@ -545,9 +548,11 @@ class IOHandle(mui.FlexBox):
     def is_optional(self):
         return self.annohandle.is_optional
 
+
 class ComputeFlowNodeContext:
     def __init__(self, node_id: str) -> None:
         self.node_id = node_id
+
 
 COMPUTE_FLOW_NODE_CONTEXT_VAR: contextvars.ContextVar[
     Optional[ComputeFlowNodeContext]] = contextvars.ContextVar(
@@ -565,6 +570,7 @@ def enter_flow_ui_node_context_object(ctx: ComputeFlowNodeContext):
         yield ctx
     finally:
         COMPUTE_FLOW_NODE_CONTEXT_VAR.reset(token)
+
 
 class ComputeNodeWrapper(mui.FlexBox):
     def __init__(self,
@@ -645,7 +651,8 @@ class ComputeNodeWrapper(mui.FlexBox):
         self._cached_inputs: Optional[Dict[str, Any]] = None
 
         self._ctx = ComputeFlowNodeContext(self.cnode.id)
-        self.set_flow_event_context_creator(lambda: enter_flow_ui_node_context_object(self._ctx))
+        self.set_flow_event_context_creator(
+            lambda: enter_flow_ui_node_context_object(self._ctx))
 
     @property
     def is_cached_node(self):
@@ -855,7 +862,8 @@ class ComputeNodeWrapper(mui.FlexBox):
         return res
 
     def get_context_menus(self):
-        disable_run_cached_node = not (self.is_cached_node and self._cached_inputs is not None)
+        disable_run_cached_node = not (self.is_cached_node
+                                       and self._cached_inputs is not None)
         return [
             mui.MenuItem(NodeContextMenuItemNames.Run,
                          NodeContextMenuItemNames.Run,
@@ -1106,8 +1114,8 @@ class ComputeFlow(mui.FlexBox):
         self.graph.prop(nodeContextMenuItems=self._node_menu_items,
                         paneContextMenuItems=self.view_pane_menu_items +
                         pane_menu_items)
-        self.graph.event_node_context_menu.on(self._on_node_contextment)
-        self.graph.event_pane_context_menu.on(self._on_pane_contextment)
+        self.graph.event_node_context_menu.on(self._on_node_contextmenu)
+        self.graph.event_pane_context_menu.on(self._on_pane_contextmenu)
 
         self.graph_ctx = ComputeFlowContext(self)
         self.flow_options = FlowOptions()
@@ -1133,12 +1141,13 @@ class ComputeFlow(mui.FlexBox):
 
     def _cnode_to_node(self, cnode: ComputeNode) -> flowui.Node:
         cnode_wrapper = ComputeNodeWrapper(cnode)
-        node = flowui.Node(cnode.id,
-                           flowui.NodeData(
-                               cnode_wrapper,
-                               contextMenuItems=self._node_menu_items),
-                           type="app",
-                           deletable=False)
+        node = flowui.Node(
+            cnode.id,
+            flowui.NodeData(
+                cnode_wrapper,
+                contextMenuItems=cnode_wrapper.get_context_menus()),
+            type="app",
+            deletable=False)
         node.dragHandle = f".{ComputeFlowClasses.Header}"
         if cnode._init_pos is not None:
             node.position = cnode._init_pos
@@ -1222,14 +1231,15 @@ class ComputeFlow(mui.FlexBox):
                     prev_edges = self.graph.get_edges_by_node_and_handle_id(
                         node_id, handle_id)
                     edge_id_to_be_removed.extend([e.id for e in prev_edges])
-        if edge_id_to_be_removed:
+        if edge_id_to_be_removed or len(cur_inp_handles) != len(
+                prev_inp_handles):
+            # TODO if new handle have default, don't need to remove cache inputs
             # ifinput handle remain unchanged, we don't need to clear cache
             # if only order change, edge won't be removed, so cache
             # won't be cleared.
             await wrapper.set_cache_inputs(None)
-            await self.graph.update_node_data(node_id, {
-                "contextMenuItems": wrapper.get_context_menus()
-            })
+            await self.graph.update_node_data(
+                node_id, {"contextMenuItems": wrapper.get_context_menus()})
         # check out handles
         if not unchange_when_length_equal or (
                 unchange_when_length_equal
@@ -1249,12 +1259,14 @@ class ComputeFlow(mui.FlexBox):
         wrapper = node.get_component_checked(ComputeNodeWrapper)
         if wrapper.is_cached_node:
             if wrapper._cached_inputs is not None:
-                return await self.schedule_node(node_id, wrapper._cached_inputs)
+                return await self.schedule_node(node_id,
+                                                wrapper._cached_inputs)
             else:
-                return await self.send_error("Node Context Error", "you must use run cached node when inputs are cached.")
+                return await self.send_error(
+                    "Node Context Error",
+                    "you must use run cached node when inputs are cached.")
 
-
-    async def _on_node_contextment(self, data):
+    async def _on_node_contextmenu(self, data):
         item_id = data["itemId"]
         node_id = data["nodeId"]
         if item_id == NodeContextMenuItemNames.Run:
@@ -1279,7 +1291,8 @@ class ComputeFlow(mui.FlexBox):
             node = self.graph.get_node_by_id(node_id)
             wrapper = node.get_component_checked(ComputeNodeWrapper)
             await wrapper.set_cached(not wrapper.is_cached_node)
-            await self.graph.set_node_context_menu_items(node_id, wrapper.get_context_menus())
+            await self.graph.set_node_context_menu_items(
+                node_id, wrapper.get_context_menus())
             await self.save_graph()
         elif item_id == NodeContextMenuItemNames.DebugUpdateNodeInternals:
             await self.graph.update_node_internals([node_id])
@@ -1287,7 +1300,7 @@ class ComputeFlow(mui.FlexBox):
     async def save_graph(self, save_node_state: bool = True):
         await save_data_storage(self.storage_key, self.state_dict())
 
-    async def _on_pane_contextment(self, data):
+    async def _on_pane_contextmenu(self, data):
         item_id = data["itemId"]
         mouse_x = data["clientOffset"]["x"]
         mouse_y = data["clientOffset"]["y"]
@@ -1360,6 +1373,7 @@ class ComputeFlow(mui.FlexBox):
                 cnode._shared_key = template_key  # type: ignore
                 await cnode.init_node_async(False)
                 node = self._cnode_to_node(cnode)
+
             await self.graph.add_node(node, screen_to_flow=True)
 
     @marker.mark_did_mount
@@ -1516,27 +1530,41 @@ class ComputeFlow(mui.FlexBox):
                 self._schedule_task = asyncio.create_task(
                     self._schedule(roots, {}, self._shutdown_ev))
 
-    async def schedule_next(self, node_id: str, node_output: Dict[str, Any]):
+    async def schedule_next(self,
+                            node_id: str,
+                            node_output: Dict[str, Any],
+                            sync: bool = False):
         node_inputs = self._get_next_node_inputs({node_id: node_output})
-        if self._schedule_task is not None:
+        if self._schedule_task is not None and not sync:
             self.graph_ctx._wait_node_inputs.update(node_inputs)
         else:
             with enter_flow_ui_context_object(self.graph_ctx):
-                self._schedule_task = asyncio.create_task(
+                _schedule_task = asyncio.create_task(
                     self._schedule([
                         self.graph.get_node_by_id(i)
                         for i in node_inputs.keys()
                     ], node_inputs, self._shutdown_ev))
+                if sync:
+                    await _schedule_task
+                else:
+                    self._schedule_task = _schedule_task
 
-    async def schedule_node(self, node_id: str, node_inputs: Dict[str, Any]):
+    async def schedule_node(self,
+                            node_id: str,
+                            node_inputs: Dict[str, Any],
+                            sync: bool = False):
         node = self.graph.get_node_by_id(node_id)
-        if self._schedule_task is not None:
+        if self._schedule_task is not None and not sync:
             self.graph_ctx._wait_node_inputs.update({node.id: node_inputs})
         else:
             with enter_flow_ui_context_object(self.graph_ctx):
-                self._schedule_task = asyncio.create_task(
+                _schedule_task = asyncio.create_task(
                     self._schedule([node], {node_id: node_inputs},
                                    self._shutdown_ev))
+                if sync:
+                    await _schedule_task
+                else:
+                    self._schedule_task = _schedule_task
 
     def _filter_node_cant_schedule(self, nodes: List[flowui.Node],
                                    node_inputs: Dict[str, Dict[str, Any]],
@@ -1672,9 +1700,9 @@ class ComputeFlow(mui.FlexBox):
                     wrapper = n.get_component_checked(ComputeNodeWrapper)
                     if wrapper.is_cached_node:
                         await wrapper.set_cache_inputs(node_inp)
-                        await self.graph.update_node_data(n.id, {
-                            "contextMenuItems": wrapper.get_context_menus()
-                        })
+                        await self.graph.update_node_data(
+                            n.id,
+                            {"contextMenuItems": wrapper.get_context_menus()})
                     compute_func = wrapper.cnode.get_compute_function()
                     with enter_flow_ui_node_context_object(wrapper._ctx):
                         if wrapper.cnode.is_async_gen and inspect.isasyncgenfunction(
@@ -1683,7 +1711,7 @@ class ComputeFlow(mui.FlexBox):
                             cur_anode_iters[n.id] = node_aiter
                             task = asyncio.create_task(self._awaitable_to_coro(
                                 n, anext(node_aiter)),
-                                                    name=f"node-{n.id}")
+                                                       name=f"node-{n.id}")
                             tasks.append(task)
                             task_to_noded[task] = n
                         else:
@@ -1698,9 +1726,9 @@ class ComputeFlow(mui.FlexBox):
                                 await self.send_exception(exc)
                                 continue
                             if inspect.iscoroutine(data):
-                                task = asyncio.create_task(self._awaitable_to_coro(
-                                    n, data),
-                                                        name=f"node-{n.id}")
+                                task = asyncio.create_task(
+                                    self._awaitable_to_coro(n, data),
+                                    name=f"node-{n.id}")
                                 tasks.append(task)
                                 task_to_noded[task] = n
                             else:
@@ -1857,48 +1885,65 @@ def enter_flow_ui_context_object(ctx: ComputeFlowContext):
         COMPUTE_FLOW_CONTEXT_VAR.reset(token)
 
 
-async def schedule_next(node_id: str, node_output: Dict[str, Any]):
+ALL_APP_CONTEXT_GETTERS.add(
+    (get_compute_flow_context, enter_flow_ui_context_object))
+ALL_APP_CONTEXT_GETTERS.add(
+    (get_compute_flow_node_context, enter_flow_ui_node_context_object))
+
+
+async def schedule_next(node_id: str,
+                        node_output: Dict[str, Any],
+                        sync: bool = False):
     """schedule next nodes by current node id and current node output
     """
     ctx = get_compute_flow_context()
     assert ctx is not None, "you must enter flow ui context before call this function"
-    await ctx.cflow.schedule_next(node_id, node_output)
+    await ctx.cflow.schedule_next(node_id, node_output, sync)
 
 
-async def schedule_node(node_id: str, node_inputs: Dict[str, Any]):
+async def schedule_node(node_id: str,
+                        node_inputs: Dict[str, Any],
+                        sync: bool = False):
     """schedule current node by node id and current node inputs
     """
     ctx = get_compute_flow_context()
     assert ctx is not None, "you must enter flow ui context before call this function"
-    await ctx.cflow.schedule_node(node_id, node_inputs)
+    await ctx.cflow.schedule_node(node_id, node_inputs, sync)
 
-async def schedule_next_inside(node_output: Dict[str, Any]):
+
+async def schedule_next_inside(node_output: Dict[str, Any],
+                               sync: bool = False):
     """schedule next nodes by current node id and current node output
     """
     ctx = get_compute_flow_context()
     assert ctx is not None, "you must enter flow ui context before call this function"
     ctx_node = get_compute_flow_node_context()
     assert ctx_node is not None, "you must use this function in node layout or compute"
-    await ctx.cflow.schedule_next(ctx_node.node_id, node_output)
+    await ctx.cflow.schedule_next(ctx_node.node_id, node_output, sync)
 
-async def schedule_node_inside(node_inputs: Dict[str, Any]):
+
+async def schedule_node_inside(node_inputs: Dict[str, Any],
+                               sync: bool = False):
     """schedule current node by node id and current node inputs
     """
     ctx = get_compute_flow_context()
     assert ctx is not None, "you must enter flow ui context before call this function"
     ctx_node = get_compute_flow_node_context()
     assert ctx_node is not None, "you must use this function in node layout or compute"
-    await ctx.cflow.schedule_node(ctx_node.node_id, node_inputs)
+    await ctx.cflow.schedule_node(ctx_node.node_id, node_inputs, sync)
 
-def schedule_next_inside_sync(node_output: Dict[str, Any]):
+
+def schedule_next_inside_sync(node_output: Dict[str, Any], sync: bool = False):
     """schedule next nodes by current node id and current node output
     """
-    return run_coro_sync(schedule_next_inside(node_output))
+    return run_coro_sync(schedule_next_inside(node_output, sync))
 
-def schedule_node_inside_sync(node_inputs: Dict[str, Any]):
+
+def schedule_node_inside_sync(node_inputs: Dict[str, Any], sync: bool = False):
     """schedule current node by node id and current node inputs
     """
-    return run_coro_sync(schedule_node_inside(node_inputs))
+    return run_coro_sync(schedule_node_inside(node_inputs, sync))
+
 
 class CNodeTest1(ComputeNode):
     class OutputDict(TypedDict):

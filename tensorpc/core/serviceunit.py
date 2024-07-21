@@ -194,7 +194,7 @@ class ServFunctionMeta:
     def bind(self, obj):
         if not self.is_static:
             if self.is_binded and self.binded_fn is not None:
-                if self.binded_fn.__self__ is not obj:
+                if hasattr(self.binded_fn, "__self__") and getattr(self.binded_fn, "__self__") is not obj:
                     self.is_binded = False
 
         if not self.is_binded:
@@ -261,8 +261,9 @@ class ObservedFunctionRegistryProtocol(Protocol):
     def is_enabled(self) -> bool:
         ...
 
-    # def register(self, func=None) -> Any:
-    #     ...
+    def register(self, func=None,
+                 userdata: Optional[Any] = None) -> Any:
+        ...
 
     def __contains__(self, key: str) -> bool:
         ...
@@ -311,8 +312,8 @@ class ObservedFunctionRegistry:
 
     def register(self,
                  func=None,
-                 autorun_when_changed: bool = False,
                  userdata: Optional[Any] = None,
+                 autorun_when_changed: bool = False,
                  autorun_block_symbol: str = ""):
 
         def wrapper(func):
@@ -755,7 +756,7 @@ class ObjectReloadManager:
         return ObjectReloadResultWithType(self.module_cache[path], True,
                                           self.file_cache[path], meta)
 
-    def get_type_unique_id(self, type: Type):
+    def get_type_unique_id(self, type: Union[Type, ModuleType]):
         return (self._inspect_get_file_resolved(type), type.__qualname__)
 
     def query_type_method_meta(

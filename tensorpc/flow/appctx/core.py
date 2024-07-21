@@ -16,7 +16,7 @@ import asyncio
 import contextlib
 from functools import partial
 import threading
-from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
+from typing import (Any, AsyncGenerator, Awaitable, Callable, ContextManager, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
 
 from typing_extensions import ParamSpec
@@ -30,6 +30,7 @@ from tensorpc.flow.core.appcore import (AppSpecialEventType, enter_app_conetxt, 
                                         enqueue_delayed_callback, run_coro_sync)
 from tensorpc.flow.components import plus
 from tensorpc.flow.components.plus.objinspect.controllers import ThreadLocker
+from tensorpc.flow.core.context import ALL_APP_CONTEXT_GETTERS
 
 P = ParamSpec('P')
 
@@ -142,6 +143,18 @@ def _run_func_with_app(app, func: Callable[P, T], *args: P.args,
         return func(*args, **kwargs)
 
 
+def _run_func_with_context_creators(ctx_creators: List[Callable[[], Optional[ContextManager]]], func: Callable[P, T], *args: P.args,
+                       **kwargs: P.kwargs) -> T:
+    ctxes = [
+        c() for c in ctx_creators
+    ]
+    with contextlib.ExitStack() as stack:
+        for ctx in ctxes:
+            if ctx is not None:
+                stack.enter_context(ctx)
+        return func(*args, **kwargs)
+
+
 async def run_in_executor_with_exception_inspect(func: Callable[P, T],
                                                  *args: P.args,
                                                  **kwargs: P.kwargs) -> T:
@@ -156,6 +169,37 @@ async def run_in_executor_with_exception_inspect(func: Callable[P, T],
     return await comp.run_in_executor_with_exception_inspect(
         _run_func_with_app, get_app(), func, *args, **kwargs)
 
+
+def _ctx_creator(ctx: Any, ctx_enterer: Callable[[Any], ContextManager]):
+    return ctx_enterer(ctx)
+
+async def run_in_executor(func: Callable[P, T],
+                            *args: P.args,
+                            **kwargs: P.kwargs) -> T:
+    """run a sync function in executor with all app context entered.
+    default run_in_executor don't enter contexts such app context 
+    and compute flow context.
+    """
+    creators: List[Callable[[], Optional[ContextManager]]] = []
+    for v in ALL_APP_CONTEXT_GETTERS:
+        ctx = v[0]()
+        if ctx is not None:
+            creators.append(partial(_ctx_creator, ctx, v[1]))
+
+    return await asyncio.get_running_loop().run_in_executor(
+        None, _run_func_with_context_creators, creators, func, *args, # type: ignore
+        **kwargs)  
+
+async def run_in_executor_with_contexts(func: Callable[P, T],
+                        ctx_creators: List[Callable[[], Optional[ContextManager]]],
+                            *args: P.args,
+                            **kwargs: P.kwargs) -> T:
+    """run a sync function in executor.
+    """
+    app = get_app()
+    return await asyncio.get_running_loop().run_in_executor(
+        None, _run_func_with_context_creators, [lambda: enter_app_conetxt(app)] + ctx_creators, func, *args, # type: ignore
+        **kwargs)  
 
 def register_app_special_event_handler(event: AppSpecialEventType,
                                              handler: Callable):

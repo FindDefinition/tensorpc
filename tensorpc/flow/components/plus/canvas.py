@@ -576,6 +576,7 @@ class SimpleCanvas(mui.FlexBox):
         await self._dynamic_images.set_new_layout({})
         await self._dynamic_boxes.set_new_layout({})
         await self._dynamic_voxels.set_new_layout({})
+        await self._dynamic_custom_objs.set_new_layout({})
 
         for uid in self._dnd_trees:
             tree = find_component_by_uid_with_type_check(uid, BasicObjectTree)
@@ -603,6 +604,7 @@ class SimpleCanvas(mui.FlexBox):
         limit: int,
         colors: Optional[Union[np.ndarray, str]] = None,
         sizes: Optional[Union[mui.Undefined, np.ndarray]] = None,
+        labels: Optional[Union[mui.Undefined, np.ndarray]] = None,
         size_attenuation: bool = False,
         size: Optional[float] = None,
         encode_method: Optional[Union[Literal["none", "int16"],
@@ -618,7 +620,7 @@ class SimpleCanvas(mui.FlexBox):
         color_map = three.ColorMap(
                                 min=points[:, 2].min(),
                                 max=points[:, 2].max())
-        if points.shape[1] == 4:
+        if points.shape[1] == 4 or colors is not None:
             # with intensity
             color_map = mui.undefined
         if key not in self._point_dict:
@@ -650,6 +652,7 @@ class SimpleCanvas(mui.FlexBox):
             encode_scale=encode_scale,
             attrs=attrs,
             attr_fields=attr_fields,
+            labels=labels,
             color_map=color_map)
         return point_ui
 
@@ -704,14 +707,15 @@ class SimpleCanvas(mui.FlexBox):
                          key: str,
                          lines: np.ndarray,
                          limit: int,
-                         color: str = "green"):
+                         color: str = "green",
+                         colors: Optional[np.ndarray] = None):
         if key not in self._segment_dict:
             ui = three.Segments(limit).prop(color=color)
             self._segment_dict[key] = ui
             await self._dynamic_lines.update_childs({key: ui})
         ui = self._segment_dict[key]
 
-        await ui.update_lines(lines, limit=limit)
+        await ui.update_lines(lines, colors=colors, limit=limit)
 
     async def clear_all_lines(self):
         # TODO currently no way to clear lines without unmount

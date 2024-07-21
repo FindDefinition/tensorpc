@@ -96,17 +96,17 @@ class RemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
                 request.callback)()
             context.add_callback(callback)
 
-    def ChunkedRemoteCall(self, request_iter, context):
-        yield from self.server_core.chunked_remote_call(request_iter)
+    def ChunkedRemoteCall(self, request_iterator, context):
+        yield from self.server_core.chunked_remote_call(request_iterator)
 
-    def RemoteStreamCall(self, request_iter, context):
-        yield from self.server_core.remote_stream_call(request_iter)
+    def RemoteStreamCall(self, request_iterator, context):
+        yield from self.server_core.remote_stream_call(request_iterator)
 
-    def ClientStreamRemoteCall(self, request_iter, context):
-        return self.server_core.client_stream(request_iter)
+    def ClientStreamRemoteCall(self, request_iterator, context):
+        return self.server_core.client_stream(request_iterator)
 
-    def BiStreamRemoteCall(self, request_iter, context):
-        yield from self.server_core.bi_stream(request_iter)
+    def BiStreamRemoteCall(self, request_iterator, context):
+        yield from self.server_core.bi_stream(request_iterator)
 
     def ServerShutdown(self, request, context):
         print("Shutdown message received")
@@ -142,7 +142,7 @@ def serve_service(service: RemoteObjectService,
             # lock process to cpu to increase performance.
             LOGGER.info("lock worker {} to core {}".format(
                 process_id, process_id))
-            os.sched_setaffinity(0, [process_id])
+            getattr(os, "sched_setaffinity")(0, [process_id])
     wait_interval = _ONE_DAY_IN_SECONDS
     if wait_time > 0:
         wait_interval = wait_time
@@ -208,7 +208,8 @@ def serve(service_def: ServiceDef,
     smeta = ServerMeta(port=port, http_port=-1)
     server_core = ProtobufServiceCore(url, service_def, True, smeta)
     with server_core.enter_global_context():
-        server_core.run_event(ServiceEventType.Init)
+        with server_core.enter_exec_context():
+            server_core.run_event(ServiceEventType.Init)
         service = RemoteObjectService(server_core, is_local, length)
         return serve_service(service, wait_time, port, length, is_local,
                              max_threads, process_id, credentials)
@@ -232,7 +233,8 @@ def serve_with_http(service_def: ServiceDef,
     server_core = ProtobufServiceCore(url, service_def, True, smeta)
     service = RemoteObjectService(server_core, is_local, length)
     with server_core.enter_global_context():
-        server_core.run_event(ServiceEventType.Init)
+        with server_core.enter_exec_context():
+            server_core.run_event(ServiceEventType.Init)
         kwargs = {
             "service": service,
             "wait_time": wait_time,
@@ -249,7 +251,7 @@ def serve_with_http(service_def: ServiceDef,
         thread.start()
         threads.append(thread)
         try:
-            httpserver.serve_service_core(server_core, http_port, None)
+            httpserver.serve_service_core(server_core, http_port)
         finally:
             server_core.shutdown_event.set()
             # loop = asyncio.get_running_loop()

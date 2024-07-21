@@ -40,6 +40,27 @@ class HashableRegistry(Generic[T]):
         else:
             return wrapper(func)
 
+    def register_no_key(self, func: T):
+
+        def wrapper(func: T) -> T:
+            key_ = func.__name__
+            if not self.allow_duplicate and key_ in self.global_dict:
+                raise KeyError("key {} already exists".format(key_))
+            self.global_dict[key_] = func
+            return func
+
+        return wrapper(func)
+
+    def register_with_key(self, key: str):
+        def wrapper(func: T) -> T:
+            key_ = key
+            if not self.allow_duplicate and key_ in self.global_dict:
+                raise KeyError("key {} already exists".format(key_))
+            self.global_dict[key_] = func
+            return func
+
+        return wrapper
+
     def __contains__(self, key: Hashable):
         return key in self.global_dict
 

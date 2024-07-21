@@ -70,6 +70,7 @@ class FlowApp:
         self.shutdown_ev = asyncio.Event()
         self.master_meta = MasterMeta()
         self.app_meta = AppLocalMeta()
+        assert not prim.get_server_is_sync(), "only support async server"
         process_title = self.master_meta.process_title
         try:
             import setproctitle  # type: ignore

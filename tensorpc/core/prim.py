@@ -54,6 +54,8 @@ def get_local_url():
 def get_server_meta():
     return get_global_context().server_meta
 
+def get_server_is_sync():
+    return get_global_context().is_sync
 
 def get_server_grpc_port():
     return get_server_meta().port

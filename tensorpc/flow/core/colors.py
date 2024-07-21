@@ -188,7 +188,7 @@ CSS_COLORS = list(CSS_COLORS_TO_HEX.keys())
 HEX_COLOR_PATTERN = re.compile(r"#(?:[0-9a-fA-F]{3}){1,2}")
 
 
-def hex_to_rgb(hex_value: str) -> Tuple[int, int, int]:
+def hex_to_rgb(hex_value: str) -> Tuple[int, ...]:
     hex_value = hex_value.lstrip('#')
     hlen = len(hex_value)
     return tuple(
@@ -198,7 +198,8 @@ def hex_to_rgb(hex_value: str) -> Tuple[int, int, int]:
 def _hex_to_rgb_tuple(table: Dict[str, str]):
     res: Dict[str, Tuple[int, int, int]] = {}
     for k, v in table.items():
-        res[k] = hex_to_rgb(v)
+        rgb = hex_to_rgb(v)
+        res[k] = (rgb[0], rgb[1], rgb[2])
     return res
 
 

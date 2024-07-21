@@ -326,9 +326,11 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
     # client_max_size 4MB is enough for most image upload.
     http_service = HttpService(server_core)
     ctx = contextlib.nullcontext()
+    ctx2 = contextlib.nullcontext()
     if standalone:
         ctx = server_core.enter_global_context()
-    with ctx:
+        ctx2 = server_core.enter_exec_context()
+    with ctx, ctx2:
         if standalone:
             await server_core._init_async_members()
             await server_core.run_event_async(ServiceEventType.Init)
@@ -365,3 +367,22 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
                       server_core.async_shutdown_event,
                       is_sync,
                       ssl_context=ssl_context), loop_task)
+
+def serve_service_core(server_core: ProtobufServiceCore,
+                                  port=50052,
+                                  rpc_name="/api/rpc",
+                                  ws_name="/api/ws/{client_id}",
+                                  is_sync: bool = False,
+                                  rpc_pickle_name: str = "/api/rpc_pickle",
+                                  client_max_size: int = 16 * 1024**2,
+                                  standalone: bool = True,
+                                  ssl_key_path: str = "",
+                                  ssl_crt_path: str = "",
+                                  simple_json_rpc_name="/api/simple_json_rpc",
+                                  ws_backup_name="/api/ws_backup/{client_id}"):
+    http_task = serve_service_core_task(server_core, port, rpc_name, ws_name, is_sync, rpc_pickle_name, client_max_size, standalone, ssl_key_path, ssl_crt_path, simple_json_rpc_name, ws_backup_name)
+    try:
+        asyncio.run(http_task)
+    except KeyboardInterrupt:
+
+        print("shutdown by keyboard interrupt")

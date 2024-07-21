@@ -135,7 +135,7 @@ class UniqueTreeIdForTree(UniqueTreeId):
         return UniqueTreeIdForTree.from_parts(self.parts[:-1])
 
     def __add__(
-            self, other: Union["UniqueTreeIdForTree",
+            self, other: Union["UniqueTreeIdForTree", UniqueTreeId,
                                str]) -> "UniqueTreeIdForTree":
         if isinstance(other, str):
             return UniqueTreeIdForTree.from_parts(self.parts + [other], ":")

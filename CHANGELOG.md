@@ -1,4 +1,12 @@
 # Changelog
+# [0.11.17] - 2024-07-19
+### Added
+- add controlled loop that can make loop in sync functions controllable via `ControlledLoop` component.
+- add label render support for points
+### Fixed
+- fix caller lineno in call tracer
+- fix small bug in compute flow
+- fix some bug in shutdown logic
 
 # [0.11.16] - 2024-07-17
 ### Added

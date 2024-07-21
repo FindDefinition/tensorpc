@@ -1248,15 +1248,16 @@ class Component(Generic[T_base_props, T_child]):
         return EventSlotZeroArg(event_type_value, self)
 
     def _create_emitter_event_slot(self, event_type: Union[FrontendEventType,
-                                                           EventDataType]):
+                                                           EventDataType],
+                                        converter: Optional[Callable[[Any], TEventData]] = None):
         if isinstance(event_type, FrontendEventType):
             event_type_value = event_type.value
             assert event_type.value < 0, "only support backend events"
             return EventSlotEmitter(event_type_value,
-                                     self._flow_event_emitter)
+                                     self._flow_event_emitter, converter)
         else:
             event_type_value = event_type
-        return EventSlotEmitter(event_type_value, self._flow_event_emitter)
+        return EventSlotEmitter(event_type_value, self._flow_event_emitter, converter)
 
     def _create_emitter_event_slot_noarg(self, event_type: Union[FrontendEventType,
                                                            EventDataType]):

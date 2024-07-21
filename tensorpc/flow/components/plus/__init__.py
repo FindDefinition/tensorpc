@@ -30,4 +30,5 @@ from .scriptmgr import ScriptManager
 from .scheduler import TmuxScheduler, Task, SSHTarget
 from .tutorials import AppInMemory, MarkdownTutorial
 from .vscodetracer import VscodeTracerBox, CodeFragTracerResult
+from .ctrlloop import controlled_loop, ControlledLoop
 from . import handlers as _handlers

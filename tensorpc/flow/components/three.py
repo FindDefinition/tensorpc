@@ -19,7 +19,7 @@ import io
 import json
 import time
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
-                    Iterable, List, Optional, Tuple, Type, TypeVar, Union)
+                    Iterable, List, Optional, Sequence, Tuple, Type, TypeVar, Union)
 import urllib.request
 
 from pydantic import field_validator
@@ -29,7 +29,7 @@ from tensorpc.flow.core.appcore import Event, EventDataType
 from tensorpc.flow.components.threecore import TextureFormat, TextureMappingType, TextureType, TextureWrappingMode
 from tensorpc.flow.jsonlike import DataClassWithUndefined
 from typing_extensions import Literal
-
+from tensorpc.flow.core import colors
 import tensorpc.core.dataclass_dispatch as dataclasses
 
 import numpy as np
@@ -472,7 +472,9 @@ class PointProps(Object3dBaseProps):
     points: Union[np.ndarray, Undefined] = undefined
     colors: Union[np.ndarray, str, Undefined] = undefined
     attrs: Union[np.ndarray, Undefined] = undefined
-    attrFields: Union[List[str], Undefined] = undefined
+    attrFields: Union[Sequence[str], Undefined] = undefined
+    labels: Union[np.ndarray, Undefined] = undefined
+    labelColorArray: Union[Sequence[Vector3Type], Undefined] = undefined
     sizeAttenuation: bool = False
     size: float = 3.0
     sizes: Union[np.ndarray, Undefined] = undefined
@@ -488,6 +490,11 @@ class PointProps(Object3dBaseProps):
             assert v.ndim == 2 and v.shape[1] in [3, 4]
         return v
 
+    @field_validator('labelColorArray')
+    def label_color_array_validator(cls, v: Union[Sequence[Vector3Type], Undefined]):
+        if not isinstance(v, Undefined):
+            assert len(v) <= 20, "max 20 label color"
+        return v
 
 class PointsControlType(enum.Enum):
     SetColors = 0
@@ -503,11 +510,16 @@ class Points(Object3dWithEventBase[PointProps]):
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
         res["points"] = self.props.points
+        res["labels"] = self.props.labels
         res["colors"] = self.props.colors
         res["sizes"] = self.props.sizes
         res["attrs"] = self.props.attrs
         res["attrFields"] = self.props.attrFields
+        res["labelColorArray"] = self.props.labelColorArray
         return res
+
+    def _get_ui_label_color_array(self):
+        return [colors.str_to_rgb_float(color) for color in colors.RANDOM_COLORS_FOR_UI]
 
     def validate_props(self, props: Dict[str, Any]):
         if "points" in props:
@@ -574,7 +586,10 @@ class Points(Object3dWithEventBase[PointProps]):
                                                           Undefined]] = None,
                             encode_scale: Optional[Union[NumberType,
                                                          Undefined]] = 50,
-                            color_map: Optional[ColorMap] = None):
+                            color_map: Optional[Union[ColorMap, Undefined]] = None,
+                            labels: Optional[Union[np.ndarray,
+                                                         Undefined]] = None,
+                            label_color_array: Optional[Union[List[Tuple[Vector3Type]], Undefined]] = None):
         # TODO better check, we must handle all errors before sent to frontend.
         assert points.ndim == 2 and points.shape[1] in [
             3, 4
@@ -607,12 +622,26 @@ class Points(Object3dWithEventBase[PointProps]):
             upd["size"] = size
         if color_map is not None:
             upd["colorMap"] = color_map
+        if label_color_array is not None:
+            if not isinstance(label_color_array, Undefined):
+                assert len(label_color_array) <= 20, "max 20 label color"
+            upd["labelColorArray"] = label_color_array
+
         if sizes is not None:
             if not isinstance(sizes, Undefined):
                 assert sizes.shape[0] == points.shape[
                     0] and sizes.dtype == np.float32
             upd["sizes"] = sizes
             self.props.sizes = sizes
+        if labels is not None:
+            if not isinstance(labels, Undefined):
+                assert labels.shape[0] == points.shape[
+                    0] and (labels.dtype == np.int32 or labels.dtype == np.uint8)
+                if label_color_array is None and isinstance(self.props.labelColorArray, Undefined):
+                    self.props.labelColorArray = self._get_ui_label_color_array()
+                    upd["labelColorArray"] = self.props.labelColorArray
+            upd["labels"] = labels
+            self.props.labels = labels
 
         if colors is not None:
             upd["colors"] = colors
@@ -3590,10 +3619,23 @@ class InstancedMesh(O3dContainerWithEventBase[InstancedMeshProps,
                  limit: int,
                  children: ThreeLayoutType,
                  colors: Union[np.ndarray, Undefined] = undefined) -> None:
+        """
+        Args:
+            transforms: (n, 4, 4) or (n, 7) or (n, 3) array, 
+                for (n, 4, 4) array, each 4x4 matrix is a transform.
+                for (n, 7) array, each row is [x, y, z, qx, qy, qz, qw].
+                for (n, 3) array, each row is [x, y, z].
+            colors: (n, 3) array, each row is a color.
+        """
         if not isinstance(colors, Undefined):
             assert transforms.shape[0] == colors.shape[
                 0], "centers and colors must have same length"
         assert transforms.shape[0] <= limit
+        assert transforms.ndim == 2 or transforms.ndim == 3
+        if transforms.ndim == 2:
+            assert transforms.shape[1] == 3 or transforms.shape[1] == 7
+        if transforms.ndim == 3:
+            assert transforms.shape[1] == 4 and transforms.shape[2] == 4
         if transforms.dtype != np.float32:
             transforms = transforms.astype(np.float32)
         # TODO children must be material or Edges

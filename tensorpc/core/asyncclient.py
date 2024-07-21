@@ -417,8 +417,9 @@ class AsyncRemoteManager(AsyncRemoteObject):
             self._channel = None
 
     async def shutdown(self):
-        await super().shutdown()
+        res = await super().shutdown()
         self.close()
+        return res
 
     async def __aenter__(self):
         return self

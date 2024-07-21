@@ -81,10 +81,10 @@ SERVER_RPC_CONTEXT = {}
 CONTEXT_LOCK = threading.Lock()
 
 # we need contextvars to support service context in asyncio
-SERVER_RPC_CONTEXT_VAR = contextvars.ContextVar("service_rpc_context",
+SERVER_RPC_CONTEXT_VAR: contextvars.ContextVar[Optional[ServerContext]] = contextvars.ContextVar("service_rpc_context",
                                                 default=None)
 # we need contextvars to support service context in asyncio
-SERVER_GLOBAL_CONTEXT_VAR = contextvars.ContextVar("service_context",
+SERVER_GLOBAL_CONTEXT_VAR: contextvars.ContextVar[Optional[ServerGlobalContext]] = contextvars.ContextVar("service_context",
                                                    default=None)
 
 
@@ -161,6 +161,10 @@ class ServiceCore(object):
 
         self._global_context = ServerGlobalContext(self.local_url, is_sync,
                                                    server_meta)
+        # protect run_event_async ServiceEventType.Exit
+        self._shutdown_handler_lock = asyncio.Lock()
+        self._is_exit_async_run = False
+
 
     async def _init_async_members(self):
         # in future python versions, asyncio event can't be created if no event loop running.
@@ -199,29 +203,23 @@ class ServiceCore(object):
         return self.service_units.get_all_service_metas_json()
 
     @contextlib.contextmanager
-    def _enter_exec_context(self, service_key=None, json_call=False):
+    def enter_exec_context(self, service_key=None, json_call=False):
         ctx = ServerContext(self._exposed_props, service_key, json_call)
-        if compat.Python3_7AndLater:
-            # we need contextvars in async code. so we drop websocket
-            # support before python 3.7.
-            assert SERVER_RPC_CONTEXT_VAR is not None
+        assert SERVER_RPC_CONTEXT_VAR is not None
+        try:
             token = SERVER_RPC_CONTEXT_VAR.set(ctx)
             yield ctx
+        finally:
             SERVER_RPC_CONTEXT_VAR.reset(token)
-        else:
-            tid = threading.get_ident()
-            with CONTEXT_LOCK:
-                SERVER_RPC_CONTEXT[tid] = ctx
-            yield ctx
-            with CONTEXT_LOCK:
-                SERVER_RPC_CONTEXT[tid] = None
 
     @contextlib.contextmanager
     def enter_global_context(self):
         assert SERVER_GLOBAL_CONTEXT_VAR is not None
-        token = SERVER_GLOBAL_CONTEXT_VAR.set(self._global_context)
-        yield self._global_context
-        SERVER_GLOBAL_CONTEXT_VAR.reset(token)
+        try:
+            token = SERVER_GLOBAL_CONTEXT_VAR.set(self._global_context)
+            yield self._global_context
+        finally:
+            SERVER_GLOBAL_CONTEXT_VAR.reset(token)
 
     def execute_service(self,
                         service_key,
@@ -233,7 +231,7 @@ class ServiceCore(object):
         try:
             # no lock here, user must use 'get_exec_lock' to get global lock
             # or create lock by themselves.
-            with self._enter_exec_context(service_key, json_call) as ctx:
+            with self.enter_exec_context(service_key, json_call) as ctx:
                 # all services are lazy-loaded,
                 # so we need to put get_service in try block
                 func, meta = self.service_units.get_service_and_meta(
@@ -258,7 +256,7 @@ class ServiceCore(object):
         try:
             # no lock here, user must use 'get_exec_lock' to get global lock
             # or create lock by themselves.
-            with self._enter_exec_context(service_key, json_call) as ctx:
+            with self.enter_exec_context(service_key, json_call) as ctx:
                 # all services are lazy-loaded,
                 # so we need to put get_service in try block
                 func, meta = self.service_units.get_service_and_meta(
@@ -286,7 +284,7 @@ class ServiceCore(object):
         try:
             # no lock here, user must use 'get_exec_lock' to get lock
             # or create lock by themselves.
-            with self._enter_exec_context(service_key,
+            with self.enter_exec_context(service_key,
                                           json_call=json_call) as ctx:
                 # all services are lazy-loaded,
                 # so we need to put get_service in try block
@@ -313,7 +311,7 @@ class ServiceCore(object):
         try:
             # no lock here, user must use 'get_exec_lock' to get lock
             # or create lock by themselves.
-            with self._enter_exec_context(service_key,
+            with self.enter_exec_context(service_key,
                                           json_call=json_call) as ctx:
                 # all services are lazy-loaded,
                 # so we need to put get_service in try block

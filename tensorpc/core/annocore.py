@@ -1,6 +1,6 @@
 
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Set, Tuple, Type, TypeVar, TypedDict, Union, Generic
-from typing_extensions import Literal, Annotated, get_origin, get_args, get_type_hints
+from typing_extensions import Literal, Annotated, NotRequired, get_origin, get_args, get_type_hints
 from dataclasses import dataclass
 import inspect
 import sys 
@@ -27,6 +27,11 @@ def is_annotated(ann_type: Any) -> bool:
     # https://github.com/pydantic/pydantic/blob/35144d05c22e2e38fe093c533ff3a05ce9a30116/pydantic/_internal/_typing_extra.py#L99C1-L104C1
     origin = get_origin(ann_type)
     return origin is not None and lenient_issubclass(origin, Annotated)
+
+def is_not_required(ann_type: Any) -> bool:
+    # https://github.com/pydantic/pydantic/blob/35144d05c22e2e38fe093c533ff3a05ce9a30116/pydantic/_internal/_typing_extra.py#L99C1-L104C1
+    origin = get_origin(ann_type)
+    return origin is not None and origin is NotRequired
 
 def is_optional(ann_type: Any) -> bool:
     origin = get_origin(ann_type)
@@ -103,3 +108,6 @@ if __name__ == "__main__":
     print(parse_annotated_function(a.add_stc))
     print(is_optional(Optional[int]))
     print(is_async_gen(AsyncGenerator[int, None]))
+    print(is_not_required(NotRequired[int])) # type: ignore
+    print(is_not_required(Optional[int]))
+

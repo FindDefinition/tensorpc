@@ -53,6 +53,8 @@ class CallTracerContext(object):
 
     def __enter__(self):
         THREAD_GLOBALS.__dict__.setdefault('depth', 0)
+        THREAD_GLOBALS.__dict__.setdefault('frame_lineno_stack', [[None, -1]])
+
         cur_frame = inspect.currentframe()
         self._expr_found = False
         self._trace_cur_assign_range = None
@@ -82,6 +84,7 @@ class CallTracerContext(object):
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
         # print("EXIT", self._frame_cnt, self._inner_frame_fnames, self.target_frames)
+        THREAD_GLOBALS.frame_lineno_stack = [[None, -1]]
         stack = self.thread_local.original_trace_functions
         sys.settrace(stack.pop())
         cur_frame = inspect.currentframe()
@@ -123,6 +126,7 @@ class CallTracerContext(object):
     def _trace_ret_only_func(self, frame: FrameType, event, arg):
         if event == "return":
             THREAD_GLOBALS.depth -= 1
+            THREAD_GLOBALS.frame_lineno_stack.pop()
             self.result_call_stack.append(
                 FrameEventCall(
                     type=TraceEventType.Return,
@@ -134,16 +138,31 @@ class CallTracerContext(object):
                 ))
 
     def trace_call_ret_func(self, frame: FrameType, event, arg):
+        caller_lineno = -1 if frame.f_back is None else frame.f_back.f_lineno 
+        back_frame_id = None if frame.f_back is None else id(frame.f_back)
         if not (frame in self.target_frames):
             if self._is_internal_frame(frame):
+                last_fid = THREAD_GLOBALS.frame_lineno_stack[-1][0]
+                if last_fid == back_frame_id:
+                    THREAD_GLOBALS.frame_lineno_stack[-1][1] = caller_lineno
                 return None
         if event == "call":
-            THREAD_GLOBALS.depth += 1
             if THREAD_GLOBALS.depth >= self._max_depth:
+                last_fid = THREAD_GLOBALS.frame_lineno_stack[-1][0]
+                if last_fid == back_frame_id:
+                    THREAD_GLOBALS.frame_lineno_stack[-1][1] = caller_lineno
                 return None
             if self._frame_isvalid_func is not None and not self._frame_isvalid_func(
                     frame, THREAD_GLOBALS.depth):
+                last_fid = THREAD_GLOBALS.frame_lineno_stack[-1][0]
+                if last_fid == back_frame_id:
+                    THREAD_GLOBALS.frame_lineno_stack[-1][1] = caller_lineno
                 return None
+            last_fid = THREAD_GLOBALS.frame_lineno_stack[-1][0]
+            if last_fid == back_frame_id:
+                THREAD_GLOBALS.frame_lineno_stack[-1][1] = caller_lineno
+
+            THREAD_GLOBALS.depth += 1
             self.result_call_stack.append(
                 FrameEventCall(
                     type=TraceEventType.Call,
@@ -152,7 +171,8 @@ class CallTracerContext(object):
                     lineno=frame.f_lineno,
                     depth=THREAD_GLOBALS.depth,
                     timestamp=time.time_ns(),
-                    caller_lineno=-1 if frame.f_back is None else frame.f_back.f_lineno
+                    caller_lineno=THREAD_GLOBALS.frame_lineno_stack[-1][1],
                 ))
+            THREAD_GLOBALS.frame_lineno_stack.append([id(frame), -1])
             frame.f_trace_lines = False
         return self._trace_ret_only_func

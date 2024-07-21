@@ -1386,6 +1386,7 @@ class FlowGraph:
 
     def __init__(self, flow_data: Dict[str, Any], graph_id: str = "") -> None:
         graph_data = flow_data
+        assert not prim.get_server_is_sync(), "only support async server"
 
         nodes = [
             _TYPE_TO_NODE_CLS[d["type"]](d, graph_id)

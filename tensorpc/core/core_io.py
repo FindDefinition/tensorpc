@@ -3,7 +3,7 @@ import pickle
 from collections import abc
 from enum import Enum
 from functools import reduce
-from typing import Any, Callable, Dict, Hashable, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, Dict, Hashable, List, Optional, Sequence, Tuple, TypeVar, Union
 from typing_extensions import Literal
 
 import msgpack
@@ -489,7 +489,7 @@ def data_to_json(data, method: int) -> Tuple[List[arraybuf_pb2.ndarray], str]:
     return arrays, json.dumps(decoupled)
 
 
-def data_from_json(bufs: List[arraybuf_pb2.ndarray], data: str, method: int):
+def data_from_json(bufs: Sequence[arraybuf_pb2.ndarray], data: str, method: int):
     arrays = [pb2data(b) for b in bufs]
     data_skeleton = json.loads(data)
     method &= _ENCODE_METHOD_MASK

@@ -183,6 +183,14 @@ class EventEmitter(Generic[KT, Unpack[VTs]]):
         self._add_exception_event_handler(f, f)
         return f
 
+    def has_event_handlers(self, event: KT) -> bool:
+        """Check if there are any handlers for `event`."""
+        with self._lock:
+            if event in self._events:
+                return bool(self._events[event])
+            else:
+                return False
+                
     def _add_event_handler(self, event: KT, k: Callable[[Unpack[VTs]], Any],
                            v: Callable[[Unpack[VTs]], Any]):
         # Fire 'new_listener' *before* adding the new listener!

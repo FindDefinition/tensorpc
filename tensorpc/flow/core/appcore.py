@@ -19,6 +19,7 @@ from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
                                     is_valid_function)
 from tensorpc.core.tree_id import UniqueTreeId
 
+from tensorpc.flow.core.context import ALL_APP_CONTEXT_GETTERS
 from tensorpc.flow.jsonlike import Undefined, BackendOnlyProp, undefined
 from tensorpc.core.serviceunit import ObservedFunction, ObservedFunctionRegistry, ObservedFunctionRegistryProtocol
 from tensorpc.flow.client import is_inside_app_session
@@ -190,6 +191,16 @@ def enter_app_conetxt(app: "App"):
         APP_CONTEXT_VAR.reset(token)
 
 @contextlib.contextmanager
+def enter_app_conetxt_obj(ctx: AppContext):
+    token = APP_CONTEXT_VAR.set(ctx)
+    try:
+        yield ctx
+    finally:
+        APP_CONTEXT_VAR.reset(token)
+
+ALL_APP_CONTEXT_GETTERS.add((get_app_context, enter_app_conetxt_obj))
+
+@contextlib.contextmanager
 def enter_event_handling_conetxt(uid: UniqueTreeId):
     ctx = EventHandlingContext(uid)
     token = EVENT_HANDLING_CONTEXT_VAR.set(ctx)
@@ -327,20 +338,24 @@ def observe_function(func: Callable):
 
 
 def observe_autorun_function(func: Callable):
+    assert isinstance(ALL_OBSERVED_FUNCTIONS, AppObservedFunctionRegistry)
     return ALL_OBSERVED_FUNCTIONS.register(func, autorun_when_changed=True)
 
 
 def observe_autorun_script(func: Callable):
+    assert isinstance(ALL_OBSERVED_FUNCTIONS, AppObservedFunctionRegistry)
     return ALL_OBSERVED_FUNCTIONS.register(func,
                                            autorun_when_changed=True,
                                            autorun_block_symbol=r"#%%")
 
 
 
-def run_coro_sync(coro: Coroutine) -> Any:
+def run_coro_sync(coro: Coroutine, allow_current_thread: bool = True) -> Any:
     loop = get_app()._loop
     assert loop is not None
     if get_app()._flowapp_thread_id == threading.get_ident():
+        if not allow_current_thread:
+            raise RuntimeError("can't use run_coro_sync in current thread")
         # we can't wait fut here
         task = asyncio.create_task(coro)
         # we can't wait fut here
