@@ -11,7 +11,7 @@ import uuid
 
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 
-from .compute import ComputeFlow, NodeSideLayoutOptions, ComputeNode, ComputeNodeWrapper, NodeConfig, ReservedNodeTypes, WrapperConfig, enter_flow_ui_context_object, get_compute_flow_context, register_compute_node, get_cflow_template_key
+from .compute import TENSORPC_FLOWUI_NODEDATA_KEY, ComputeFlow, NodeSideLayoutOptions, ComputeNode, ComputeNodeWrapper, NodeConfig, ReservedNodeTypes, WrapperConfig, enter_flow_ui_context_object, get_compute_flow_context, register_compute_node, get_cflow_template_key
 
 from tensorpc.flow.components import flowui, mui
 from tensorpc.flow.appctx import read_data_storage, save_data_storage, find_all_components
@@ -58,8 +58,7 @@ class CustomNode(ComputeNode):
         self._code_editor.event_editor_action.on(self._handle_editor_action)
         self._disable_template_fetch: bool = False
         self._side_container = mui.VBox([]).prop(width="100%",
-                                      height="100%",
-                                      overflow="hidden")
+                                      height="100%")
         self._setting_template_name = mui.TextField("Shared Node Name")
         self._setting_dialog = mui.Dialog(
             [self._setting_template_name], lambda x: self._create_shared(self._setting_template_name.str())
@@ -227,6 +226,9 @@ class CustomNode(ComputeNode):
 
     def state_dict(self) -> Dict[str, Any]:
         res = self._cnode.state_dict()
+        this_state_dict = super().state_dict()
+        # internal data use this
+        res[TENSORPC_FLOWUI_NODEDATA_KEY] = this_state_dict[TENSORPC_FLOWUI_NODEDATA_KEY]
         res["__custom_node_code"] = self._code_editor.props.value
         res["__template_key"] = self._shared_key
         return res

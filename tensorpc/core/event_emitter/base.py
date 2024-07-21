@@ -19,7 +19,7 @@ class PyeeException(Exception):
 
 KT = TypeVar(name="KT")
 VTs = TypeVarTuple(name="VTs")
-Handler = TypeVar(name="Handler", bound=Callable)
+Handler = TypeVar("Handler", bound=Callable)
 
 
 @dataclasses.dataclass

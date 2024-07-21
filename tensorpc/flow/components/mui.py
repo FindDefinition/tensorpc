@@ -2877,13 +2877,16 @@ class LinkProps(MUIComponentBaseProps):
     target: Union[Undefined, str] = undefined
     download: Union[Undefined, str] = undefined
     isTensoRPCUri: Union[Undefined, bool] = undefined
+    isButton: Union[Undefined, bool] = undefined
 
 
 class Link(MUIComponentBase[LinkProps]):
     def __init__(self, value: str, href: str = "#") -> None:
-        super().__init__(UIType.Link, LinkProps)
+        super().__init__(UIType.Link, LinkProps, [FrontendEventType.Click.value])
         self.props.value = value
         self.props.href = href
+        self.event_click = self._create_event_slot_noarg(
+            FrontendEventType.Click)
 
     @property
     def prop(self):

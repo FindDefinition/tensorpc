@@ -11,6 +11,7 @@ import contextlib
 from typing_extensions import ParamSpec
 from tensorpc.core import prim
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
+from tensorpc.core.inspecttools import get_co_qualname_from_frame
 from tensorpc.flow import marker
 from tensorpc.flow.appctx.core import run_in_executor
 from tensorpc.flow.components import mui
@@ -99,6 +100,10 @@ class ControlledLoopItem(mui.FlexBox):
             self.prog,
             self._btn,
         ])
+        self._detail_info = mui.Typography().prop(variant="caption", enableTooltipWhenOverflow=True)
+        self.detail_info_container = mui.HBox([
+            self._detail_info
+        ]).prop(alignItems="center", maxWidth="200px")
         self.prog_container.prop(position="relative")
         self._stop_btm = mui.IconButton(mui.IconType.Stop,
                                         self._stop_cb).prop(size="small",
@@ -116,8 +121,11 @@ class ControlledLoopItem(mui.FlexBox):
         self._loop_state = LoopState.Idle
         self._btn_group = mui.ButtonGroup(inc_btns)
         super().__init__(
-            [self.prog_container, self._stop_btm, self._btn_group])
-        self.prop(flexDirection="row", alignItems="center")
+            [
+                mui.HBox([self.prog_container, self._stop_btm, self._btn_group]).prop(alignItems="center"),
+                self.detail_info_container,
+            ])
+        self.prop(flexDirection="column")
         self._pause_event = asyncio.Event()
         self._cur_inc_remain = -1
         self._event_emitter = self.flow_event_emitter
@@ -221,6 +229,7 @@ class ControlledLoopItem(mui.FlexBox):
         try:
             cnt = 0
             last_report_ts = time.time()
+            await self._detail_info.write(get_co_qualname_from_frame(caller_frame))
             await self._event_emitter.emit_async(
                 ControlledEventType.Start.value,
                 mui.Event(ControlledEventType.Start.value, loop_ev))

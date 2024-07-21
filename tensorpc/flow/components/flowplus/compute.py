@@ -623,8 +623,7 @@ class ComputeNodeWrapper(mui.FlexBox):
         self.middle_node_container = mui.Fragment(([
             mui.VBox([self.middle_node_layout]).prop(
                 className=ComputeFlowClasses.NodeItem,
-                flex=1,
-                overflow="hidden")
+                flex=1)
         ] if self.middle_node_layout is not None else []))
         resizer = self._get_resizer_from_cnode(cnode)
         self.resizers: mui.LayoutType = []
@@ -750,8 +749,7 @@ class ComputeNodeWrapper(mui.FlexBox):
                 await self.middle_node_container.set_new_layout([
                     mui.VBox([node_layout
                               ]).prop(className=ComputeFlowClasses.NodeItem,
-                                      flex=1,
-                                      overflow="hidden")
+                                      flex=1)
                 ])
             if do_cnode_init_async:
                 await cnode.init_node_async(True)
@@ -1020,10 +1018,10 @@ class ComputeFlow(mui.FlexBox):
                                         preventCycle=True)
         self.side_container = mui.VBox([]).prop(height="100%",
                                                 width="100%",
-                                                overflow="hidden")
+                                                overflow="auto")
         self.side_container_bottom = mui.VBox([]).prop(height="100%",
                                                        width="100%",
-                                                       overflow="hidden")
+                                                       overflow="auto")
 
         self._node_setting_name = mui.TextField("Node Name")
         self._node_setting = mui.VBox([

@@ -1,4 +1,9 @@
 # Changelog
+# [0.11.18] - 2024-07-22
+### Changed
+- change overflow in compute flow node
+- refine controlled loop impl
+
 # [0.11.17] - 2024-07-19
 ### Added
 - add controlled loop that can make loop in sync functions controllable via `ControlledLoop` component.
