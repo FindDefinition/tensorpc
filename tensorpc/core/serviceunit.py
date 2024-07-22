@@ -377,8 +377,8 @@ class ObservedFunctionRegistry:
 
             @wraps(func)
             def wrapped_func(*args, **kwargs):
-                if qname in self.global_dict:
-                    entry = self.global_dict[qname]
+                entry = self.global_dict.get(qname, None) # thread safe
+                if entry is not None:
                     if entry.enable_args_record:
                         entry.recorded_data = (args, kwargs)
                         # self.handle_record(entry, args, kwargs)

@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional, Tuple, Type, TypedDict, Union
 
 import numpy as np
 
+from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.flow.components import flowui, mui
 from tensorpc.flow.components.plus.arraycommon import can_cast_to_np_array, try_cast_to_np_array
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
@@ -14,7 +15,7 @@ from tensorpc.flow.components.plus.arraygrid import NumpyArrayGridTable
 from tensorpc.flow.core.coretypes import TreeDragTarget
 
 from .compute import (ComputeNode, NodeConfig, ReservedNodeTypes,
-                      WrapperConfig, register_compute_node)
+                      WrapperConfig, register_compute_node, SpecialHandleDict)
 
 
 @register_compute_node(key=ReservedNodeTypes.JsonInput,
@@ -88,6 +89,13 @@ class ObjectTreeViewerNode(ResizeableNodeBase):
     def init_cfg(self):
         return NodeConfig(250, 200)
 
+    @property
+    def init_wrapper_config(self) -> Optional[WrapperConfig]:
+        cfg = super().init_wrapper_config
+        assert cfg is not None 
+        cfg.nodeMiddleLayoutOverflow = "hidden"
+        return cfg
+
     def get_node_layout(self) -> Optional[mui.FlexBox]:
         res = mui.VBox(
             [self.item_tree.prop(flex=1, overflow="auto")]
@@ -106,9 +114,8 @@ class ObjectTreeViewerNode(ResizeableNodeBase):
             return len(node) < 10
         return False
 
-    async def compute(self, obj: Any) -> None:
-        await self.item_tree.set_object(obj,
-                                        key="obj",
+    async def compute(self, obj: SpecialHandleDict[Any]) -> None:
+        await self.item_tree.set_object_dict(obj,
                                         expand_level=1000,
                                         validator=self._expand_validator)
         await self.item_tree.expand_all()
@@ -127,11 +134,12 @@ class TensorViewerNode(ComputeNode):
     async def _on_drop(self, data: Any):
         if isinstance(data, TreeDragTarget):
             obj = data.obj 
+            uid_obj = UniqueTreeIdForTree(data.tree_id)
             if can_cast_to_np_array(obj):
                 arr = try_cast_to_np_array(obj)
                 if arr is not None:
                     await self.array_viewer.update_array_items({
-                        "dropped": arr
+                        f"drop-{uid_obj.parts[-1]}": arr
                     })
 
     def get_node_layout(self) -> Optional[mui.FlexBox]:

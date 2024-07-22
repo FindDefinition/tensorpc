@@ -50,7 +50,7 @@ from watchdog.observers import Observer
 from watchdog.observers.api import ObservedWatch
 from tensorpc.core import dataclass_dispatch
 
-from tensorpc import simple_chunk_call_async
+from tensorpc import compat, simple_chunk_call_async
 from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.constants import PACKAGE_ROOT, TENSORPC_FILE_NAME_PREFIX, TENSORPC_FLOW_FUNC_META_KEY, TENSORPC_OBSERVED_FUNCTION_ATTR
 from tensorpc.core.astex.astcache import AstCache
@@ -524,13 +524,13 @@ class App:
                         "state": user_state,
                     }
         if reload:
-            detached = self.root._detach()
-            # make sure did_mount is called from root to leaf (breadth first order)
+            detached = self.root._detach_child()
+            # make sure will_unmount is called from leaf to root (reverse breadth first order)
             detached_items = list(detached.items())
-            detached_items.sort(key=lambda x: len(x[0].parts), reverse=False)
+            detached_items.sort(key=lambda x: len(x[0].parts), reverse=True)
 
             await self.root._run_special_methods(
-                [], [x[1] for x in detached_items], self._flow_reload_manager)
+                [], {x[0] : x[1] for x in detached_items}, self._flow_reload_manager)
             del detached
         root_uid = UniqueTreeId.from_parts([_ROOT])
 
@@ -540,7 +540,7 @@ class App:
         new_is_flex = False
         res: mui.LayoutType = {}
         wrapped_obj = self.root._wrapped_obj
-        attached: Dict[str, Component] = {}
+        attached: Dict[UniqueTreeId, Component] = {}
         try:
             with _enter_app_conetxt(self):
                 if decorator_fn is not None:
@@ -621,11 +621,11 @@ class App:
             if reload:
                 # make sure did_mount is called from leaf to root (reversed breadth first order)
                 attached_items = list(attached.items())
-                attached_items.sort(key=lambda x: len(x[0].split(".")),
+                attached_items.sort(key=lambda x: len(x[0].parts),
                                     reverse=True)
 
                 await self.root._run_special_methods(
-                    [x[1] for x in attached_items], [],
+                    [x[1] for x in attached_items], {},
                     self._flow_reload_manager)
 
     def app_initialize(self):
@@ -1125,10 +1125,9 @@ class EditableApp(App):
             self._init_observe_paths.update(paths)
             self._flowapp_code_mgr = SimpleCodeManager(list(paths))
             paths = set(self._flowapp_code_mgr.file_to_entry.keys())
-            # print(paths)
             # add all observed function paths
             for p in paths:
-                observer.schedule(self._watchdog_watcher, p, recursive=False)
+                observer.schedule(self._watchdog_watcher, p, recursive=True if compat.InMacOS else False)
             observer.start()
             self._watchdog_observer = observer
         else:
@@ -1185,7 +1184,7 @@ class EditableApp(App):
             # no need to schedule watchdog.
             if path_resolved not in self._init_observe_paths:
                 watch = self._watchdog_observer.schedule(
-                    self._watchdog_watcher, path, False)
+                    self._watchdog_watcher, path, recursive=True if compat.InMacOS else False)
                 obentry.watch = watch
         assert self._flowapp_code_mgr is not None
         if not self._flowapp_code_mgr._check_path_exists(path):

@@ -3,12 +3,14 @@ import contextvars
 import dataclasses
 import enum
 from functools import partial
+import gc
 import inspect
 import time
 from types import FrameType
 from typing import AsyncGenerator, Awaitable, Callable, ContextManager, Coroutine, Iterable, Optional, List, Any, TypeVar
 import contextlib
 from typing_extensions import ParamSpec
+from tensorpc import compat
 from tensorpc.core import prim
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 from tensorpc.core.inspecttools import get_co_qualname_from_frame
@@ -76,6 +78,7 @@ T = TypeVar('T')
 class ControlledEventType(enum.Enum):
     Start = "ControlledEventStart"
     Stop = "ControlledEventStop"
+    Paused = "ControlledEventPaused"
     IterationEnd = "ControlledEventIterationEnd"
 
 
@@ -140,6 +143,10 @@ class ControlledLoopItem(mui.FlexBox):
         self.event_loop_iter_end: EventSlotEmitter[
             LoopEvent] = self._create_emitter_event_slot(
                 ControlledEventType.IterationEnd.value)
+        self.event_loop_paused: EventSlotEmitter[
+            LoopEvent] = self._create_emitter_event_slot(
+                ControlledEventType.Paused.value)
+
         self._lock = asyncio.Lock()
 
         self._need_to_stop = False
@@ -229,7 +236,11 @@ class ControlledLoopItem(mui.FlexBox):
         try:
             cnt = 0
             last_report_ts = time.time()
-            await self._detail_info.write(get_co_qualname_from_frame(caller_frame))
+            caller_qname = get_co_qualname_from_frame(caller_frame)
+            if self.key is None:
+                await self._detail_info.write(caller_qname)
+            else:
+                await self._detail_info.write(f"{self.key}|{caller_qname}")
             await self._event_emitter.emit_async(
                 ControlledEventType.Start.value,
                 mui.Event(ControlledEventType.Start.value, loop_ev))
@@ -241,16 +252,24 @@ class ControlledLoopItem(mui.FlexBox):
                     # trigger pause
                     await self._ctrl_btn_cb()
                 yield data
+                loop_ev = loop_ev.copy()
+                loop_ev.index = cnt
+
                 if self._event_emitter.has_event_handlers(
                         ControlledEventType.IterationEnd.value):
-                    loop_ev = loop_ev.copy()
-                    loop_ev.index = cnt
                     await self._event_emitter.emit_async(
                         ControlledEventType.IterationEnd.value,
                         mui.Event(ControlledEventType.IterationEnd.value,
                                   loop_ev))
 
-                await asyncio.sleep(0)
+                # await asyncio.sleep(0)
+                if not self._pause_event.is_set(): 
+                    if self._event_emitter.has_event_handlers(
+                        ControlledEventType.Paused.value):
+                        await self._event_emitter.emit_async(
+                            ControlledEventType.Paused.value,
+                            mui.Event(ControlledEventType.Paused.value,
+                                    loop_ev))
                 done, pending = await asyncio.wait(
                     [
                         shutdown_ev_task,
@@ -282,8 +301,12 @@ class ControlledLoopItem(mui.FlexBox):
             shutdown_ev_task.cancel()
             self._loop_state = LoopState.Idle
             # remain progress unclear to indicate user the last state of this task.
-            await self._set_ui_based_on_state(LoopState.Idle,
-                                              clear_prog_when_idle=False)
+            if self.is_mounted():
+                # due to unspecific order of generator free,
+                # the ui may be unmounted when enter finally.
+                # so we need to check it.
+                await self._set_ui_based_on_state(LoopState.Idle,
+                                                clear_prog_when_idle=False)
             self._cur_inc_remain = -1
             self._need_to_stop = False
 
@@ -325,8 +348,14 @@ class ControlledLoop(mui.FlexBox):
         """run a sync function in executor.
         """
         stev = prim.get_async_shutdown_event()
-        with self.enter_controlled_loop_ctx(stev):
-            return await run_in_executor(func, *args, **kwargs)
+        try:
+            with self.enter_controlled_loop_ctx(stev):
+                return await run_in_executor(func, *args, **kwargs)
+        finally:
+            # if caller of ctrl loop raises, we can't capture
+            # exception until the generator instance free,
+            # so we run gc collect to force generator free here.
+            gc.collect()
 
     async def _ctrl_loop(
         self,
@@ -381,29 +410,30 @@ def controlled_loop(iterator: Iterable[T],
         iterator: the iterator to be wrapped.
         total: the total number of items in the iterator.
     """
-    cur_frame = inspect.currentframe()
-    assert cur_frame is not None, "shouldn't happen"
-
-    back_frame = cur_frame.f_back
-    assert back_frame is not None, "shouldn't happen"
     ctx = get_controlled_loop_context()
-    if ctx is None:
+    if ctx is not None and ctx.loop_comp.is_mounted():
+        cur_frame = inspect.currentframe()
+        assert cur_frame is not None, "shouldn't happen"
+
+        back_frame = cur_frame.f_back
+        assert back_frame is not None, "shouldn't happen"
+        aiter_obj = ctx.loop_comp._ctrl_loop(iterator,
+                                            ctx.shutdown_ev,
+                                            back_frame,
+                                            total,
+                                            default_pause,
+                                            key=key)
+        while True:
+            try:
+                if compat.Python3_10AndLater:
+                    yield run_coro_sync(_awaitable(anext(aiter_obj)),
+                                        allow_current_thread=False)
+                else:
+                    yield run_coro_sync(_awaitable(aiter_obj.__anext__()),
+                                        allow_current_thread=False)
+            except StopAsyncIteration:
+                break
+    else:
         for x in iterator:
             yield x
         return
-    if not ctx.loop_comp.is_mounted():
-        for x in iterator:
-            yield x
-        return
-    aiter_obj = ctx.loop_comp._ctrl_loop(iterator,
-                                         ctx.shutdown_ev,
-                                         back_frame,
-                                         total,
-                                         default_pause,
-                                         key=key)
-    while True:
-        try:
-            yield run_coro_sync(_awaitable(anext(aiter_obj)),
-                                allow_current_thread=False)
-        except StopAsyncIteration:
-            break

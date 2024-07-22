@@ -1307,7 +1307,7 @@ class Component(Generic[T_base_props, T_child]):
         for k, v in prop_dict.items():
             setattr(self.__props, k, v)
 
-    def _attach(self, uid: UniqueTreeId, comp_core: AppComponentCore) -> dict:
+    def _attach(self, uid: UniqueTreeId, comp_core: AppComponentCore) -> Dict[UniqueTreeId, "Component"]:
         if self._flow_reference_count == 0:
             self._flow_uid = uid
             self._flow_comp_core = comp_core
@@ -1810,9 +1810,7 @@ class Component(Generic[T_base_props, T_child]):
                 traceback.print_exc()
                 ss = io.StringIO()
                 traceback.print_exc(file=ss)
-                assert self._flow_uid is not None
-
-                user_exc = UserMessage.create_error(self._flow_uid.uid_encoded,
+                user_exc = UserMessage.create_error(self._flow_uid.uid_encoded if self._flow_uid is not None else "",
                                                     repr(e), ss.getvalue())
                 await self.put_app_event(self.create_user_msg_event(user_exc))
                 app = get_app()
@@ -2141,7 +2139,7 @@ class ContainerBase(Component[T_container_props, T_child]):
     def _attach_child(self,
                       comp_core: AppComponentCore,
                       childs: Optional[List[str]] = None):
-        atached_uids: Dict[str, Component] = {}
+        atached_uids: Dict[UniqueTreeId, Component] = {}
         assert self._flow_uid is not None
         if childs is None:
             childs = list(self._child_comps.keys())
@@ -2152,7 +2150,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         return atached_uids
 
     def _attach(self, uid: UniqueTreeId, comp_core: AppComponentCore):
-        attached: Dict[str, Component] = super()._attach(uid, comp_core)
+        attached: Dict[UniqueTreeId, Component] = super()._attach(uid, comp_core)
         assert self._flow_uid is not None
         for k, v in self._child_comps.items():
             attached.update(v._attach(self._flow_uid.append_part(k),
@@ -2262,41 +2260,65 @@ class ContainerBase(Component[T_container_props, T_child]):
     async def _run_special_methods(
             self,
             attached: List[Component],
-            detached: List[Component],
+            detached: Dict[UniqueTreeId, Component],
             reload_mgr: Optional[AppReloadManager] = None):
+        """Run lifecycle methods.
+        All methods must run in leaf-to-root order, include attach
+        and detach.
+        """
         if reload_mgr is None:
             reload_mgr = self.flow_app_comp_core.reload_mgr
+        # all lifecycle method must run in leaf-to-root order.
+        # this can resolve nested layout-change problem.
+        # when we run lifecycle methods of a component,
+        # we can ensure layout change process of all childs are finished.
+        # so it's safe to call any nested layout change func in this component.
+        # NOTE: we assume all lifecycle method only handle child components, 
+        # don't use functions such as `find_component` to affect other
+        # component, which will cause undefined behavior.
+        sort_items: List[Tuple[Tuple[str, ...], int, Component]] = []
+        for att in attached:
+            uid = att._flow_uid
+            assert uid is not None 
+            sort_items.append((tuple(uid.parts), False, att))
+        for uid, det in detached.items():
+            sort_items.append((tuple(uid.parts), True, det))
 
-        for deleted in detached:
-            special_methods = deleted.get_special_methods(reload_mgr)
-            if special_methods.will_unmount is not None:
-                await self.run_callback(
-                    special_methods.will_unmount.get_binded_fn(),
-                    sync_status_first=False,
-                    change_status=False)
-            for k, unmount_effects in deleted.effects._flow_unmounted_effects.items(
-            ):
-                for unmount_effect in unmount_effects:
-                    await self.run_callback(unmount_effect,
-                                            sync_status_first=False,
-                                            change_status=False)
-                unmount_effects.clear()
-        for attach in attached:
-            special_methods = attach.get_special_methods(reload_mgr)
-            if special_methods.did_mount is not None:
-                await self.run_callback(
-                    special_methods.did_mount.get_binded_fn(),
-                    sync_status_first=False,
-                    change_status=False)
-            # run effects
-            for k, effects in attach.effects._flow_effects.items():
-                for effect in effects:
-                    res = await self.run_callback(effect,
-                                                  sync_status_first=False,
-                                                  change_status=False)
-                    if res is not None:
-                        # res is effect
-                        attach.effects._flow_unmounted_effects[k].append(res)
+        sort_items.sort(reverse=True)
+        for _, is_detach, comp in sort_items:
+            if is_detach:
+                deleted = comp
+                special_methods = deleted.get_special_methods(reload_mgr)
+                if special_methods.will_unmount is not None:
+                    await self.run_callback(
+                        special_methods.will_unmount.get_binded_fn(),
+                        sync_status_first=False,
+                        change_status=False)
+                for k, unmount_effects in deleted.effects._flow_unmounted_effects.items(
+                ):
+                    for unmount_effect in unmount_effects:
+                        await self.run_callback(unmount_effect,
+                                                sync_status_first=False,
+                                                change_status=False)
+                    unmount_effects.clear()
+            else:
+                attach = comp
+                special_methods = attach.get_special_methods(reload_mgr)
+                if special_methods.did_mount is not None:
+                    await self.run_callback(
+                        special_methods.did_mount.get_binded_fn(),
+                        sync_status_first=False,
+                        change_status=False)
+                # run effects
+                for k, effects in attach.effects._flow_effects.items():
+                    for effect in effects:
+                        res = await self.run_callback(effect,
+                                                    sync_status_first=False,
+                                                    change_status=False)
+                        if res is not None:
+                            # res is effect
+                            attach.effects._flow_unmounted_effects[k].append(res)
+
 
     def set_new_layout_locally(self, layout: Union[Dict[str, Component],
                                                    T_child_structure]):
@@ -2334,9 +2356,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         update_ev = self.create_update_event(update_msg)
         deleted = [x.uid_encoded for x in detached_uid_to_comp.keys()]
         return update_ev + self.create_update_comp_event(
-            comps_frontend_dict, deleted), list(attached.values()), list(
-                detached_uid_to_comp.keys()), list(
-                detached_uid_to_comp.values())
+            comps_frontend_dict, deleted), list(attached.values()), detached_uid_to_comp
 
     async def set_new_layout(self, layout: Union[Dict[str, Component],
                                                  List[Component],
@@ -2354,13 +2374,13 @@ class ContainerBase(Component[T_container_props, T_child]):
     async def _set_new_layout_delay(self, layout: Union[Dict[str, Component],
                                                  T_child_structure],
                                                  comp_dont_need_cancel: Optional[UniqueTreeId] = None):
-        new_ev, attached, removed_uids, removed = self.set_new_layout_locally(layout)
-        for deleted, deleted_uid in zip(removed, removed_uids):
+        new_ev, attached, removed_dict = self.set_new_layout_locally(layout)
+        for deleted_uid, deleted in removed_dict.items():
             if comp_dont_need_cancel is not None and comp_dont_need_cancel == deleted_uid:
                 continue
             await deleted._cancel_task()
         await self.put_app_event(new_ev)
-        await self._run_special_methods(attached, removed)
+        await self._run_special_methods(attached, removed_dict)
 
     def _check_ctx_contains_self(self, keys: Union[List[str], Set[str]]):
         evctx = get_event_handling_context()
@@ -2407,8 +2427,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         if additional_ev_creator is not None:
             ev = ev + additional_ev_creator()
         await self.put_app_event(ev)
-        await self._run_special_methods([],
-                                        list(detached_uid_to_comp.values()))
+        await self._run_special_methods([], detached_uid_to_comp)
 
     def update_childs_complex_event(self):
         update_msg: Dict[str, Any] = {}
@@ -2457,10 +2476,8 @@ class ContainerBase(Component[T_container_props, T_child]):
                 obj_factory=_undefined_comp_obj_factory)
         update_ev = self.create_update_event(update_msg)
         deleted = [x.uid_encoded for x in detached.keys()]
-
         return update_ev + self.create_update_comp_event(
-            comps_frontend_dict, deleted), list(attached.values()), list(detached.keys()), list(
-                detached.values())
+            comps_frontend_dict, deleted), list(attached.values()), detached
 
     async def update_childs(
             self,
@@ -2491,16 +2508,16 @@ class ContainerBase(Component[T_container_props, T_child]):
                                     update_child_complex: bool = True, 
                                    additional_ev_creator: Optional[Callable[[], AppEvent]] = None,
                                    comp_dont_need_cancel: Optional[UniqueTreeId] = None):
-        new_ev, attached, removed_uids, removed = self.update_childs_locally(
+        new_ev, attached, removed_dict = self.update_childs_locally(
             layout, update_child_complex)
-        for deleted, deleted_uid in zip(removed, removed_uids):
+        for deleted_uid, deleted in removed_dict.items():
             if comp_dont_need_cancel == deleted_uid:
                 continue
             await deleted._cancel_task()
         if additional_ev_creator is not None:
             new_ev = new_ev + additional_ev_creator()
         await self.put_app_event(new_ev)
-        await self._run_special_methods(attached, removed)
+        await self._run_special_methods(attached, removed_dict)
 
     async def replace_childs(self, layout: Dict[str, Component]):
         self.__check_child_structure_is_none()

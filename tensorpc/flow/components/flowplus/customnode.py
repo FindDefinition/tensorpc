@@ -11,7 +11,7 @@ import uuid
 
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 
-from .compute import TENSORPC_FLOWUI_NODEDATA_KEY, ComputeFlow, NodeSideLayoutOptions, ComputeNode, ComputeNodeWrapper, NodeConfig, ReservedNodeTypes, WrapperConfig, enter_flow_ui_context_object, get_compute_flow_context, register_compute_node, get_cflow_template_key
+from .compute import TENSORPC_FLOWUI_NODEDATA_KEY, ComputeFlow, NodeSideLayoutOptions, ComputeNode, ComputeNodeWrapper, NodeConfig, ReservedNodeTypes, WrapperConfig, enter_flow_ui_context_object, get_compute_flow_context, register_compute_node, get_cflow_shared_node_key
 
 from tensorpc.flow.components import flowui, mui
 from tensorpc.flow.appctx import read_data_storage, save_data_storage, find_all_components
@@ -84,7 +84,7 @@ class CustomNode(ComputeNode):
         if not self._disable_template_fetch:
             if self._shared_key is not None:
                 template_code = await read_data_storage(
-                    get_cflow_template_key(self._shared_key),
+                    get_cflow_shared_node_key(self._shared_key),
                     raise_if_not_found=False)
                 if template_code is not None:
                     try:
@@ -140,7 +140,7 @@ class CustomNode(ComputeNode):
         if self._shared_key is not None and check_template_key:
             # update all nodes that use this template
             await save_data_storage(
-                get_cflow_template_key(self._shared_key), value)
+                get_cflow_shared_node_key(self._shared_key), value)
             all_cflows = find_all_components(ComputeFlow)
             for cflow in all_cflows:
                 with enter_flow_ui_context_object(cflow.graph_ctx):
@@ -206,7 +206,7 @@ class CustomNode(ComputeNode):
         if self._shared_key is None:
             ctx = get_compute_flow_context()
             assert ctx is not None, "can't find compute flow context!"
-            await save_data_storage(get_cflow_template_key(template_key),
+            await save_data_storage(get_cflow_shared_node_key(template_key),
                                     self._code_editor.props.value,
                                     raise_if_exist=True)
             self._shared_key = template_key

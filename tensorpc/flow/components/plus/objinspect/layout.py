@@ -124,8 +124,7 @@ class AnyFlexLayout(mui.FlexLayout):
             await self.update_childs({uid: wrapped_obj})
 
     async def _on_tab_close(self, data):
-        # print("TAB CLOSE", data)
-        name = data["complexLayoutTabNodeId"]
+        name = data["id"]
         if name in self._child_comps:
             comp = self._child_comps[name]
             await self.remove_childs_by_keys([name])

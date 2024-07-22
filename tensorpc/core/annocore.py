@@ -47,12 +47,12 @@ class AnnotatedArg:
     name: str 
     param: Optional[inspect.Parameter] 
     type: Any 
-    annometa: Optional[Any] = None 
+    annometa: Optional[Tuple[Any, ...]] = None 
 
 @dataclass
 class AnnotatedReturn:
     type: Any 
-    annometa: Optional[Any] = None 
+    annometa: Optional[Tuple[Any, ...]] = None 
 
 def extract_annotated_type_and_meta(ann_type: Any) -> Tuple[Any, Optional[Any]]:
     if is_annotated(ann_type):

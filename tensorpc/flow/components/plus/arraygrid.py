@@ -402,6 +402,7 @@ class NumpyArrayGridTable(mui.FlexBox):
         self.max_columns = max_columns
         self.max_size_row_split = max_size_row_split
         btn = mui.IconButton(mui.IconType.TableView).prop(size="small")
+        remove_btn = mui.IconButton(mui.IconType.Delete).prop(size="small")
         self.grid_container = mui.HBox([])
         dialog = mui.Dialog([
             self.grid_container.prop(flex=1, height="70vh", width="100%")
@@ -413,6 +414,9 @@ class NumpyArrayGridTable(mui.FlexBox):
         self.dialog = dialog
         btn.event_click.on_standard(
             self._on_btn_select).configure(stop_propagation=True)
+        remove_btn.event_click.on_standard(
+            self._on_remove_btn).configure(
+                stop_propagation=True)
         value_cell = mui.MatchCase([
             mui.MatchCase.ExprCase("x != \"scalar\"", btn),
             mui.MatchCase.Case(
@@ -425,9 +429,10 @@ class NumpyArrayGridTable(mui.FlexBox):
             mui.DataGrid.ColumnDef("dtype", accessorKey="dtype"),
             mui.DataGrid.ColumnDef("shape", accessorKey="shape"),
             mui.DataGrid.ColumnDef("value", cell=value_cell),
-            mui.DataGrid.ColumnDef("contiguous",
+            mui.DataGrid.ColumnDef("contig",
                                    accessorKey="contiguous",
                                    cell=cbox),
+            mui.DataGrid.ColumnDef("remove", cell=remove_btn),
         ]
         self.array_items: Dict[str, Union[Dict[str, np.ndarray], np.ndarray,
                                           int, float, bool]] = {}
@@ -473,6 +478,13 @@ class NumpyArrayGridTable(mui.FlexBox):
         self.array_items = new_array_items
         item_datas = self._extract_table_data_from_array_items()
         await self.send_and_wait(self.dgrid.update_event(dataList=item_datas))
+
+    async def remove_array_items(self, keys: Iterable[str]):
+        for k in keys:
+            self.array_items.pop(k, None)
+        await self.send_and_wait(
+            self.dgrid.update_event(dataList=self._extract_table_data_from_array_items(
+            )))
 
     async def clear_array_items(self):
         self.array_items = {}
@@ -523,3 +535,8 @@ class NumpyArrayGridTable(mui.FlexBox):
                                                          overflow="hidden")
         ])
         await self.dialog.set_open(True)
+
+    async def _on_remove_btn(self, event: mui.Event):
+        keys = event.keys
+        assert not isinstance(keys, mui.Undefined)
+        await self.remove_array_items([keys[0]])

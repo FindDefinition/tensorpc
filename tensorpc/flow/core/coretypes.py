@@ -12,3 +12,5 @@ class TreeDragTarget:
     source_comp_uid: str = ""
 
     context_creator: Optional[Callable[[], ContextManager]] = None
+
+    userdata: Any = None

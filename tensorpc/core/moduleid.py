@@ -209,12 +209,15 @@ class TypeMeta:
 
 
 def get_obj_type_meta(obj_type) -> Optional[TypeMeta]:
-    qualname = get_qualname_of_type(obj_type)
-    spec = importlib.util.find_spec(qualname.split(".")[0])
+    module_id = get_module_id_of_type(obj_type)
+    # qualname = get_qualname_of_type(obj_type)
+    # spec = importlib.util.find_spec(qualname.split(".")[0])
+    spec = importlib.util.find_spec(module_id.split("::")[0])
+
     is_standard_module = True
     is_in_memory = False
     module_path = ""
-    if spec is None or spec.origin is None:
+    if spec is None:
         is_standard_module = False
         try:
             path = inspect.getfile(obj_type)
@@ -237,6 +240,9 @@ def get_obj_type_meta(obj_type) -> Optional[TypeMeta]:
         if "<" in spec.name:
             is_standard_module = False
             module_path = spec.origin
+    if spec is not None and spec.origin is None:
+        # this module don't have a init file, do nothing currently.
+        pass 
     # else:
     #     try:
     #         module_path_p =  Path(inspect.getfile(obj_type)).resolve()
@@ -247,26 +253,28 @@ def get_obj_type_meta(obj_type) -> Optional[TypeMeta]:
     #             is_standard_module = False
     #     except:
     #         return None
-    parts = qualname.split(".")
-    res_import_path = ""
-    res_import_idx = -1
-    cur_mod_import_path = parts[0]
-    # cur_mod = None
-    if cur_mod_import_path in sys.modules:
-        # cur_mod = sys.modules[cur_mod_import_path]
-        res_import_path = cur_mod_import_path
-        res_import_idx = 1
-    count = 1
-    for part in parts[1:]:
-        cur_mod_import_path += f".{part}"
-        if cur_mod_import_path in sys.modules:
-            # cur_mod = sys.modules[cur_mod_import_path]
-            res_import_path = cur_mod_import_path
-            res_import_idx = count + 1
-        count += 1
-    assert res_import_path is not None
+    # parts = qualname.split(".")
+    res_import_path = module_id.split("::")[0]
+    local_import_path = "::".join(module_id.split("::")[1:])
+    # res_import_path = ""
+    # res_import_idx = -1
+    # cur_mod_import_path = parts[0]
+    # # cur_mod = None
+    # if cur_mod_import_path in sys.modules:
+    #     # cur_mod = sys.modules[cur_mod_import_path]
+    #     res_import_path = cur_mod_import_path
+    #     res_import_idx = 1
+    # count = 1
+    # for part in parts[1:]:
+    #     cur_mod_import_path += f".{part}"
+    #     if cur_mod_import_path in sys.modules:
+    #         # cur_mod = sys.modules[cur_mod_import_path]
+    #         res_import_path = cur_mod_import_path
+    #         res_import_idx = count + 1
+    #     count += 1
+    # assert res_import_path is not None
     module_import_path = res_import_path
-    local_import_path = "::".join(parts[res_import_idx:])
+    # local_import_path = "::".join(parts[res_import_idx:])
     if not is_standard_module:
         module_import_path = module_path
     return TypeMeta(module_import_path, local_import_path,

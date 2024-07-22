@@ -249,7 +249,8 @@ class BasicObjectTree(mui.FlexBox):
                  default_expand_level: int = 2,
                  fixed_size: bool = False,
                  custom_tree_handler: Optional[CustomTreeItemHandler] = None,
-                 use_init_as_root: bool = False) -> None:
+                 use_init_as_root: bool = False,
+                 drag_userdata: Any = None) -> None:
         if use_fast_tree:
             self.tree = mui.TanstackJsonLikeTree()
         else:
@@ -257,6 +258,7 @@ class BasicObjectTree(mui.FlexBox):
         super().__init__([
             self.tree.prop(ignoreRoot=True, fixedSize=fixed_size),
         ])
+        self._drag_userdata = drag_userdata
         self.prop(overflow="auto", flexDirection="column")
         self._tree_parser = ObjectTreeParser(
             cared_types,
@@ -425,7 +427,7 @@ class BasicObjectTree(mui.FlexBox):
             return TreeDragTarget(objs[-1], uid, tab_id,
                                   self._flow_uid_encoded,
                                   lambda: root.enter_context(root))
-        return TreeDragTarget(objs[-1], uid, tab_id, self._flow_uid_encoded)
+        return TreeDragTarget(objs[-1], uid, tab_id, self._flow_uid_encoded, userdata=self._drag_userdata)
 
     async def _on_select_single(self, uid_list: Union[List[str], str,
                                                       Dict[str, bool]]):
@@ -623,30 +625,41 @@ class BasicObjectTree(mui.FlexBox):
                          key: str = _DEFAULT_OBJ_NAME,
                          expand_level: int = 1,
                          validator: Optional[Callable[[Any], bool]] = None):
-        key_in_root = key in self.root
-        self.root[key] = obj
-        with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree,
-                                            self)):
-            obj_tree = await self._tree_parser.get_root_tree(
-                obj, key, expand_level, ns=self.tree.props.tree.id, validator=validator)
-            # await self._tree_parser.parse_obj_to_tree(obj, obj_tree,
-            #                                           expand_level, validator)
-        # obj_tree = await _get_obj_tree(obj, self._checker, key,
-        #                          self.tree.props.tree.id, self._obj_meta_cache,
-        #                          self._cached_lazy_expand_uids,
-        #                          total_expand_level=expand_level)
-        if key_in_root:
-            for i, node in enumerate(self.tree.props.tree.children):
-                if node.name == key:
-                    self.tree.props.tree.children[i] = obj_tree
-                    break
-        else:
-            self.tree.props.tree.children.append(obj_tree)
+        return await self.set_object_dict({key: obj}, expand_level, validator)
+
+    async def set_object_dict(self,
+                         obj_dict: Dict[str, Any],
+                         expand_level: int = 1,
+                         validator: Optional[Callable[[Any], bool]] = None):
+        obj_key_to_tree: Dict[str, mui.JsonLikeNode] = {}
+        for key, obj in obj_dict.items():
+
+            key_in_root = key in self.root
+            self.root[key] = obj
+            with enter_tree_conetxt(TreeContext(self._tree_parser, self.tree,
+                                                self)):
+                obj_tree = await self._tree_parser.get_root_tree(
+                    obj, key, expand_level, ns=self.tree.props.tree.id, validator=validator)
+                # await self._tree_parser.parse_obj_to_tree(obj, obj_tree,
+                #                                           expand_level, validator)
+            # obj_tree = await _get_obj_tree(obj, self._checker, key,
+            #                          self.tree.props.tree.id, self._obj_meta_cache,
+            #                          self._cached_lazy_expand_uids,
+            #                          total_expand_level=expand_level)
+            if key_in_root:
+                for i, node in enumerate(self.tree.props.tree.children):
+                    if node.name == key:
+                        self.tree.props.tree.children[i] = obj_tree
+                        break
+            else:
+                self.tree.props.tree.children.append(obj_tree)
+            obj_key_to_tree[key] = obj_tree
         # self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
         #                                       _ROOT, self._obj_meta_cache)
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
-        await self._do_when_tree_updated(obj_tree.id)
+        for obj_tree in obj_key_to_tree.values():
+            await self._do_when_tree_updated(obj_tree.id)
 
     async def update_tree(self,
                           wait: bool = True,

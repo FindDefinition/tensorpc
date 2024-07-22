@@ -15,10 +15,10 @@ import traceback
 from collections import deque
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator,
                     Awaitable, Coroutine, Deque, Dict, List, Literal, Mapping,
-                    Optional, Tuple, Type, TypedDict, TypeVar, Union,
+                    Optional, Tuple, Type, TypeAlias, TypedDict, TypeVar, Union,
                     get_origin)
 
-from typing_extensions import get_type_hints, is_typeddict
+from typing_extensions import get_type_hints, is_typeddict, Annotated
 from tensorpc.flow.core.appcore import run_coro_sync
 
 from tensorpc import compat
@@ -52,14 +52,15 @@ TENSORPC_FLOWUI_NODEDATA_KEY = "__tensorpc_flowui_nodedata_key"
 NoneType = type(None)
 
 
-def get_cflow_template_key(template_key: str):
-    return f"__cflow_templates/{template_key}"
+def get_cflow_shared_node_key(shared_key: str):
+    """all compute flow instance of a app share single shared storage.
+    """
+    return f"__cflow_templates/{shared_key}"
 
 
 @dataclasses.dataclass
 class HandleMeta:
-    is_array: bool = False
-    is_dict: bool = False
+    is_handle_dict: bool = False
 
 
 class ComputeFlowClasses:
@@ -169,9 +170,7 @@ def _default_compute_flow_css():
 class HandleTypePrefix:
     Input = "inp"
     Output = "out"
-    Control = "ctrl"
-    Option = "opt"
-
+    SpecialDict = "specialdict"
 
 def is_typeddict_or_typeddict_async_gen(type):
     is_tdict = is_typeddict(type)
@@ -195,13 +194,16 @@ class FlowOptions:
 
 @dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
 class AnnoHandle:
-    type: Literal["source", "target"]
+    type: Literal["source", "target", "handledictsource"]
     prefix: str
     name: str
     is_optional: bool
     anno: AnnotatedArg
     meta: Optional[HandleMeta] = None
 
+T_handle = TypeVar("T_handle")
+
+SpecialHandleDict: TypeAlias = Annotated[Dict[str, T_handle], HandleMeta(True)]
 
 class NodeStatus(enum.IntEnum):
     Ready = 0
@@ -232,7 +234,8 @@ class NodeContextMenuItemNames:
 class PaneContextMenuItemNames:
     SideLayout = "SideLayoutVisible"
     DisableAllResizer = "DisableAllResizer"
-    ManageTemplates = "ManageTemplates"
+    ManageComputeFlow = "ManageComputeFlow"
+    ClearGraph = "ClearGraph"
 
 
 @dataclasses.dataclass
@@ -250,6 +253,7 @@ class DontSchedule:
 class WrapperConfig:
     boxProps: Optional[mui.FlexBoxProps] = None
     resizerProps: Optional[flowui.NodeResizerProps] = None
+    nodeMiddleLayoutOverflow: Optional[Union[mui.Undefined, mui._OverflowType]] = None
 
 
 T_cnode = TypeVar("T_cnode", bound="ComputeNode")
@@ -398,10 +402,17 @@ class ComputeNode:
             assert param is not None
             is_optional_val = param.default is not param.empty
             handle_meta = None
-            if arg_anno.annometa is not None and isinstance(
-                    arg_anno.annometa, HandleMeta):
-                handle_meta = arg_anno.annometa
-            iohandle = AnnoHandle("source", HandleTypePrefix.Input,
+            if arg_anno.annometa is not None and arg_anno.annometa:
+                if isinstance(
+                    arg_anno.annometa[0], HandleMeta):
+                    handle_meta = arg_anno.annometa[0]
+            if handle_meta is not None and handle_meta.is_handle_dict:
+                handle_type = "handledictsource"
+                prefix = HandleTypePrefix.SpecialDict
+            else:
+                handle_type = "source"
+                prefix = HandleTypePrefix.Input
+            iohandle = AnnoHandle(handle_type, prefix,
                                   arg_anno.name, is_optional_val, arg_anno,
                                   handle_meta)
             inp_iohandles.append(iohandle)
@@ -512,6 +523,8 @@ class IOHandle(mui.FlexBox):
         self.id = f"{prefix}-{name}"
         htype = "target" if is_input else "source"
         hpos = "left" if is_input else "right"
+        if annohandle.type == "handledictsource":
+            name = f"{{}}{name}"
         handle_classes = ComputeFlowClasses.InputHandle if is_input else ComputeFlowClasses.OutputHandle
         if annohandle.is_optional and is_input:
             handle_style = {"border": "1px solid #4caf50"}
@@ -604,8 +617,12 @@ class ComputeNodeWrapper(mui.FlexBox):
                 f"{ComputeFlowClasses.Header} {ComputeFlowClasses.NodeItem}")
 
         inp_handles, out_handles = self._func_anno_to_ioargs(cnode)
-        self.inp_handles = inp_handles
-        self.out_handles = out_handles
+        self.inp_handles: List[IOHandle] = []
+        self.out_handles: List[IOHandle] = []
+        self.handle_name_to_inp_handle: Dict[str, IOHandle] = {}
+        self.handle_name_to_out_handle: Dict[str, IOHandle] = {}
+
+        self._set_handles(inp_handles, out_handles)
         self.input_args = mui.Fragment([*inp_handles])
         self.output_args = mui.Fragment([*out_handles])
 
@@ -620,10 +637,16 @@ class ComputeNodeWrapper(mui.FlexBox):
         ]).prop(
             className=
             f"{ComputeFlowClasses.NodeItem} {ComputeFlowClasses.BottomStatus}")
+        moddle_node_overflow = mui.undefined 
+        if cnode.init_wrapper_config is not None:
+            if cnode.init_wrapper_config.nodeMiddleLayoutOverflow is not None:
+                moddle_node_overflow = cnode.init_wrapper_config.nodeMiddleLayoutOverflow
+        
         self.middle_node_container = mui.Fragment(([
             mui.VBox([self.middle_node_layout]).prop(
                 className=ComputeFlowClasses.NodeItem,
-                flex=1)
+                flex=1,
+                overflow=moddle_node_overflow)
         ] if self.middle_node_layout is not None else []))
         resizer = self._get_resizer_from_cnode(cnode)
         self.resizers: mui.LayoutType = []
@@ -639,9 +662,10 @@ class ComputeNodeWrapper(mui.FlexBox):
             f"{ComputeFlowClasses.NodeWrapper} {ComputeFlowClasses.NodeWrappedSelected}"
         )
         self.prop(borderWidth="1px", borderStyle="solid", borderColor="black")
-        if cnode.init_wrapper_config is not None and cnode.init_wrapper_config.boxProps is not None:
-            merge_props_not_undefined(self.props,
-                                      cnode.init_wrapper_config.boxProps)
+        if cnode.init_wrapper_config is not None:
+            if  cnode.init_wrapper_config.boxProps is not None:
+                merge_props_not_undefined(self.props,
+                                        cnode.init_wrapper_config.boxProps)
 
         if init_state is not None:
             self._state = init_state
@@ -656,6 +680,12 @@ class ComputeNodeWrapper(mui.FlexBox):
     @property
     def is_cached_node(self):
         return self._state.is_cached_node
+
+    def _set_handles(self, inp_handles: List[IOHandle], out_handles: List[IOHandle]):
+        self.inp_handles = inp_handles
+        self.out_handles = out_handles 
+        self.handle_name_to_inp_handle = {h.name: h for h in inp_handles}
+        self.handle_name_to_out_handle = {h.name: h for h in out_handles}
 
     async def set_cached(self, enable: bool):
         self._state.is_cached_node = enable
@@ -714,8 +744,7 @@ class ComputeNodeWrapper(mui.FlexBox):
         prev_cnode = self.cnode
         try:
             inp_handles, out_handles = self._func_anno_to_ioargs(cnode)
-            self.inp_handles = inp_handles
-            self.out_handles = out_handles
+            self._set_handles(inp_handles, out_handles)
             node_layout = cnode.get_node_layout()
             if node_layout is not None:
                 self.middle_node_layout = node_layout
@@ -746,10 +775,15 @@ class ComputeNodeWrapper(mui.FlexBox):
                     muiColor=icon_cfg.muiColor)
                 await self.icon_container.set_new_layout([icon])
             if node_layout is not None:
+                moddle_node_overflow = mui.undefined 
+                if cnode.init_wrapper_config is not None:
+                    if cnode.init_wrapper_config.nodeMiddleLayoutOverflow is not None:
+                        moddle_node_overflow = cnode.init_wrapper_config.nodeMiddleLayoutOverflow
                 await self.middle_node_container.set_new_layout([
                     mui.VBox([node_layout
                               ]).prop(className=ComputeFlowClasses.NodeItem,
-                                      flex=1)
+                                      flex=1,
+                                      overflow=moddle_node_overflow)
                 ])
             if do_cnode_init_async:
                 await cnode.init_node_async(True)
@@ -769,11 +803,11 @@ class ComputeNodeWrapper(mui.FlexBox):
         inp_iohandles: List[IOHandle] = []
         out_iohandles: List[IOHandle] = []
         for ahandle in inp_ahandles:
-            iohandle = IOHandle(HandleTypePrefix.Input, ahandle.name, True,
+            iohandle = IOHandle(ahandle.prefix, ahandle.name, True,
                                 ahandle)
             inp_iohandles.append(iohandle)
         for ahandle in out_ahandles:
-            iohandle = IOHandle(HandleTypePrefix.Output, ahandle.name, False,
+            iohandle = IOHandle(ahandle.prefix, ahandle.name, False,
                                 ahandle)
             out_iohandles.append(iohandle)
         return inp_iohandles, out_iohandles
@@ -894,7 +928,7 @@ class ComputeNodeWrapper(mui.FlexBox):
         ]
 
 
-class TemplateRemoveManager(mui.FlexBox):
+class ComputeFlowManager(mui.FlexBox):
     def __init__(self, items: List[Tuple[str, mui.ValueType]], init_code: str,
                  init_path: str):
         self._template_select = mui.Select("template", items,
@@ -916,9 +950,9 @@ class TemplateRemoveManager(mui.FlexBox):
 
     @staticmethod
     async def create_from_app_storage():
-        items, code, path = await TemplateRemoveManager._get_template_items_and_code(
+        items, code, path = await ComputeFlowManager._get_template_items_and_code(
         )
-        return TemplateRemoveManager(items, code, path)
+        return ComputeFlowManager(items, code, path)
 
     @staticmethod
     async def _get_template_items_and_code():
@@ -1056,8 +1090,11 @@ class ComputeFlow(mui.FlexBox):
                 # each input (target) can only connect one output (source)
                 HandleTypePrefix.Output:
                 1
-                # TODO deal with array/dict handle
-            }
+            },
+            HandleTypePrefix.SpecialDict: {
+                # inf number of handle
+                HandleTypePrefix.Output: -1
+            },
         }
         self.prop(width="100%", height="100%", overflow="hidden")
         self.graph.prop(targetValidConnectMap=target_conn_valid_map)
@@ -1086,8 +1123,8 @@ class ComputeFlow(mui.FlexBox):
                          inset=True),
         ]
         self.view_pane_menu_items = [
-            mui.MenuItem(PaneContextMenuItemNames.ManageTemplates,
-                         "Manage Templates",
+            mui.MenuItem(PaneContextMenuItemNames.ManageComputeFlow,
+                         "Manage Compute Flow",
                          inset=True),
             mui.MenuItem("divider_system", divider=True),
             mui.MenuItem(PaneContextMenuItemNames.SideLayout,
@@ -1170,7 +1207,7 @@ class ComputeFlow(mui.FlexBox):
         await wrapper.update_icon_cfg(icon_cfg)
 
     async def update_templates(self):
-        glob_prefix = get_cflow_template_key("*")
+        glob_prefix = get_cflow_shared_node_key("*")
         res = await read_data_storage_by_glob_prefix(glob_prefix)
         menu_items: List[mui.MenuItem] = []
         for k in res.keys():
@@ -1244,7 +1281,6 @@ class ComputeFlow(mui.FlexBox):
                 and len(prev_out_handles) != len(cur_out_handles)):
             for handle_id in prev_out_handle_ids:
                 if handle_id not in cur_out_handle_ids:
-                    print("WTF")
                     prev_edges = self.graph.get_edges_by_node_and_handle_id(
                         node_id, handle_id)
                     edge_id_to_be_removed.extend([e.id for e in prev_edges])
@@ -1296,7 +1332,11 @@ class ComputeFlow(mui.FlexBox):
             await self.graph.update_node_internals([node_id])
 
     async def save_graph(self, save_node_state: bool = True):
-        await save_data_storage(self.storage_key, self.state_dict())
+        print("SAVE GRAPH", len(self.graph.nodes))
+        if self.graph.nodes:
+            # avoid some serious problem that cause node cleared.
+            # TODO better option
+            await save_data_storage(self.storage_key, self.state_dict())
 
     async def _on_pane_contextmenu(self, data):
         item_id = data["itemId"]
@@ -1338,8 +1378,8 @@ class ComputeFlow(mui.FlexBox):
                                  inset=False)
                 ])
                 self.flow_options.disable_all_resizer = True
-        elif item_id == PaneContextMenuItemNames.ManageTemplates:
-            manager = await TemplateRemoveManager.create_from_app_storage()
+        elif item_id == PaneContextMenuItemNames.ManageComputeFlow:
+            manager = await ComputeFlowManager.create_from_app_storage()
             await self._shared_manage_dialog.set_new_layout([manager])
             await self._shared_manage_dialog.set_open(True)
         else:
@@ -1354,7 +1394,7 @@ class ComputeFlow(mui.FlexBox):
                 await cnode.init_node_async(False)
                 node = self._cnode_to_node(cnode)
             else:
-                assert item_id.startswith(get_cflow_template_key(""))
+                assert item_id.startswith(get_cflow_shared_node_key(""))
                 item_path = Path(item_id)
                 template_key = item_path.name
                 new_id = self.graph.create_unique_node_id(template_key)
@@ -1613,10 +1653,17 @@ class ComputeFlow(mui.FlexBox):
                 source_handle_name = source_handle.split("-")[1]
                 target_handle_name = target_handle.split("-")[1]
                 if source_handle_name in output:
+                    target_node_wrapper = target_node.get_component_checked(ComputeNodeWrapper)
                     if target_node.id not in new_node_inputs:
                         new_node_inputs[target_node.id] = {}
-                    new_node_inputs[target_node.id][
-                        target_handle_name] = output[source_handle_name]
+                    # for SpecialHandleDict, we need to accumulate the dict
+                    if target_node_wrapper.handle_name_to_inp_handle[target_handle_name].annohandle.type == "handledictsource":
+                        if target_handle_name not in new_node_inputs[target_node.id]:
+                            new_node_inputs[target_node.id][target_handle_name] = {}
+                        new_node_inputs[target_node.id][target_handle_name][source_handle_name] = output[source_handle_name]
+                    else:
+                        new_node_inputs[target_node.id][
+                            target_handle_name] = output[source_handle_name]
         return new_node_inputs
 
     async def _awaitable_to_coro(self, node: flowui.Node, aw: Awaitable):

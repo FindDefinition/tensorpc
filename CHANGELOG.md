@@ -1,4 +1,12 @@
 # Changelog
+# [0.11.19] - 2024-07-23
+### Added 
+- add a special handle type in compute flow.
+### Fixed
+- fix a serious bug when user use nested layout-change method.
+- fix watchdog problem in mac os
+- fix exception handling in ctrl loop.
+
 # [0.11.18] - 2024-07-22
 ### Changed
 - change overflow in compute flow node
