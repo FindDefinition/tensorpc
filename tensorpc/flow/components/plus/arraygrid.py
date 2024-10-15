@@ -38,12 +38,25 @@ _SLICE_THEME = mui.Theme(typography={"fontSize": 14},
                                  "styleOverrides": {
                                      "input": {
                                          "fontSize": "12px",
+                                        "fontFamily":
+                                        "IBMPlexMono,SFMono-Regular,Consolas,Liberation Mono,Menlo,Courier,monospace",
+
                                      },
                                      "root": {
                                          "padding": "0 2px 0 2px"
                                      }
                                  }
+                             },
+                             "MuiTypography": {
+                                 "styleOverrides": {
+                                     "root": {
+                                         "fontSize": "12px",
+                                        "fontFamily":
+                                        "IBMPlexMono,SFMono-Regular,Consolas,Liberation Mono,Menlo,Courier,monospace",
+                                     }
+                                 }
                              }
+
                          })
 
 
@@ -51,7 +64,8 @@ def _get_slice_inputs_from_shape(
     shape: List[int], callback: Callable[[str], Any]
 ) -> Tuple[mui.Component, List[mui.Input], mui.Typography]:
     slice_inputs = []
-    slice_inputs.append(mui.Typography(f"shape = {shape}, slice = ["))
+    shape_str = ",".join([str(i) for i in shape])
+    slice_inputs.append(mui.Typography(f"shape=[{shape_str}], slice=["))
     slices: List[mui.Input] = []
     for i in range(len(shape) - 2):
         inp = mui.Input("", init="0", callback=callback).prop(
@@ -190,7 +204,11 @@ class NumpyArrayGrid(mui.FlexBox):
                    virtualized=True,
                    size="small",
                    enableFilter=True,
-                   tableLayout="fixed")
+                   tableLayout="fixed",
+                   headerMenuItems=[
+                       mui.MenuItem("Scroll To Nan")
+                   ])
+        dgrid.event_header_menu_item_click.on(self._on_header_menu_item_click)
         dgrid.prop(tableSxProps={
             '& .MuiTableCell-sizeSmall': {
                 "padding": '2px 2px',
@@ -204,15 +222,21 @@ class NumpyArrayGrid(mui.FlexBox):
         if num_columns_split > 1:
             init_layout["column_split_slider"] = self.column_split_slider
         self.scroll_to_index_input = mui.Input("index", init="0")
-        init_layout["toolbar"] = mui.HBox([
-            self.scroll_to_index_input,
-            mui.Button("scroll to row", callback=self._on_scroll_to_index),
-            mui.Button("scroll to first nan",
-                       callback=self._on_scroll_to_first_nan),
-        ])
+        # init_layout["toolbar"] = mui.HBox([
+        #     self.scroll_to_index_input,
+        #     mui.Button("scroll to row", callback=self._on_scroll_to_index),
+        #     # mui.Button("scroll to first nan",
+        #     #            callback=self._on_scroll_to_first_nan),
+        # ])
         init_layout["grid"] = dgrid
 
         return init_layout
+
+    async def _on_header_menu_item_click(self, id_col: Tuple[str, str]):
+        menu_item_id = id_col[0]
+        column = id_col[1]
+        if menu_item_id == "Scroll To Nan":
+            await self._on_scroll_to_first_nan()
 
     def _get_array_min_maxs(self, obj_flatted_3d: Dict[str, np.ndarray]):
         obj_flatted_min_maxs: Dict[str, ArrayMeta] = {}

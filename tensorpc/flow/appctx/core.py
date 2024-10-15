@@ -198,8 +198,7 @@ async def run_in_executor_with_contexts(func: Callable[P, T],
     """
     app = get_app()
     return await asyncio.get_running_loop().run_in_executor(
-        None, _run_func_with_context_creators, [lambda: enter_app_conetxt(app)] + ctx_creators, func, *args, # type: ignore
-        **kwargs)  
+        None, _run_func_with_context_creators, [lambda: enter_app_conetxt(app)] + ctx_creators, partial(func, **kwargs), *args) # type: ignore
 
 def register_app_special_event_handler(event: AppSpecialEventType,
                                              handler: Callable):

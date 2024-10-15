@@ -175,6 +175,7 @@ class CustomNode(ComputeNode):
             assert ctx is not None, "can't find compute flow context!"
             self._shared_key = None
             await ctx.cflow.update_cnode_icon_cfg(self.id, self.icon_cfg)
+            await ctx.cflow.update_templates()
 
     async def _handle_editor_action(self, act: str):
         if act == CustomNodeEditorActionNames.CreateTemplate:

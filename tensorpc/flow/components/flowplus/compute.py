@@ -15,10 +15,10 @@ import traceback
 from collections import deque
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator,
                     Awaitable, Coroutine, Deque, Dict, List, Literal, Mapping,
-                    Optional, Tuple, Type, TypeAlias, TypedDict, TypeVar, Union,
+                    Optional, Tuple, Type, TypedDict, TypeVar, Union,
                     get_origin)
 
-from typing_extensions import get_type_hints, is_typeddict, Annotated
+from typing_extensions import get_type_hints, is_typeddict, Annotated, TypeAlias
 from tensorpc.flow.core.appcore import run_coro_sync
 
 from tensorpc import compat
@@ -83,6 +83,7 @@ class ReservedNodeTypes:
     ObjectTreeViewer = "tensorpc.cflow.ObjectTreeViewerNode"
     Expr = "tensorpc.cflow.ExprNode"
     TensorViewer = "TensorViewer"
+    ImageViewer = "ImageViewer"
 
 
 def _default_compute_flow_css():
@@ -154,12 +155,12 @@ def _default_compute_flow_css():
         ".react-flow__handle.valid": {
             "background": "#55dd99"
         },
-        ".react-flow__handle-left": {
-            "left": "-6px",
-        },
-        ".react-flow__handle-right": {
-            "right": "-6px",
-        },
+        # ".react-flow__handle-left": {
+        #     "left": "-6px",
+        # },
+        # ".react-flow__handle-right": {
+        #     "right": "-6px",
+        # },
         ".react-flow__resize-control.handle": {
             "width": "8px",
             "height": "8px",
@@ -1187,12 +1188,12 @@ class ComputeFlow(mui.FlexBox):
         if cnode._init_pos is not None:
             node.position = cnode._init_pos
         if cnode.init_cfg is not None:
-            style = {}
+            # style = {}
             if cnode.init_cfg.width is not None:
-                style["width"] = cnode.init_cfg.width
+                node.width = cnode.init_cfg.width
             if cnode.init_cfg.height is not None:
-                style["height"] = cnode.init_cfg.height
-            node.style = style
+                node.height = cnode.init_cfg.height
+            # node.style = style
         return node
 
     async def update_cnode_header(self, node_id: str, new_header: str):
@@ -1250,7 +1251,8 @@ class ComputeFlow(mui.FlexBox):
                 style["width"] = node_cfg.width
             if node_cfg.height is not None:
                 style["height"] = node_cfg.height
-        await self.graph.set_node_style(node_id, style)
+        await self.graph.update_node_props(node_id, style)
+        # await self.graph.set_node_style(node_id, style)
         cur_inp_handles = wrapper.inp_handles
         cur_inp_handle_ids = [h.id for h in cur_inp_handles]
         cur_out_handles = wrapper.out_handles
@@ -1536,6 +1538,10 @@ class ComputeFlow(mui.FlexBox):
         data = as_dict_no_undefined_no_deepcopy(self.graph.childs_complex)
         node_id_to_state: Dict[str, dict] = {}
         for node in data["nodes"]:
+            # if "width" in node:
+            #     node.pop("width")
+            # if "height" in node:
+            #     node.pop("height")
             if "data" in node:
                 node_data = node["data"]
                 if "component" in node_data:

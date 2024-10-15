@@ -571,6 +571,27 @@ class IconType(enum.IntEnum):
     ContentPaste = 48
     ContentCut = 49
     TableView = 50
+    Image = 51
+
+@dataclasses.dataclass
+class MenuItem:
+    id: str
+    label: Union[Undefined, str] = undefined
+    # null icon has same effect as undefined,
+    # the only difference is we ignore undefined by default,
+    # so you can't use undefined to remove icon.
+    icon: Optional[Union[IconType, Undefined, str]] = undefined
+    inset: Union[Undefined, bool] = undefined
+    iconSize: Union[Undefined, Literal["inherit", "large", "medium",
+                                       "small"]] = undefined
+    iconFontSize: Union[Undefined, NumberType, str] = undefined
+    divider: Union[Undefined, bool] = undefined
+    autoFocus: Union[Undefined, bool] = undefined
+    disableAutoFocusItem: Union[Undefined, bool] = undefined
+    confirmMessage: Union[str, Undefined] = undefined
+    confirmTitle: Union[str, Undefined] = undefined
+    disabled: Union[Undefined, bool] = undefined
+
 
 @dataclasses.dataclass
 class TooltipBaseProps:
@@ -4129,24 +4150,6 @@ class ControlNode:
 
 
 @dataclasses.dataclass
-class ControlDesp:
-    type: int
-    initValue: Union[Undefined, NumberType, bool, str, ControlColorRGBA,
-                     Vector3Type, List[NumberType]] = undefined
-    # for range
-    min: Union[Undefined, NumberType] = undefined
-    max: Union[Undefined, NumberType] = undefined
-    step: Union[Undefined, NumberType] = undefined
-    # for select
-    selects: Union[Undefined, List[Tuple[str, ValueType]]] = undefined
-    # for string
-    rows: Union[Undefined, bool, int] = undefined
-    # for vectorN
-    count: Union[Undefined, int] = undefined
-    isInteger: Union[Undefined, bool] = undefined
-
-
-@dataclasses.dataclass
 class DynamicControlsProps(MUIFlexBoxProps):
     nodes: List[ControlNode] = dataclasses.field(default_factory=list)
     # use_leva_style: bool = True
@@ -4521,6 +4524,8 @@ class DataGridPropsBase:
     customHeaderDatas: Union[Undefined, List[Dict[str, Any]]] = undefined
     customFooterDatas: Union[Undefined, List[Dict[str, Any]]] = undefined
 
+    headerMenuItems: Union[Undefined, List[MenuItem]] = undefined
+
 
 @dataclasses.dataclass
 class DataGridProps(MUIFlexBoxProps, DataGridPropsBase):
@@ -4589,6 +4594,7 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
                 FrontendEventType.DataGridRowSelection.value,
                 FrontendEventType.DataGridRowRangeChanged.value,
                 FrontendEventType.DataGridProxyLazyLoadRange.value,
+                FrontendEventType.ContextMenuSelect.value,
             ])
         # TODO check set_new_layout argument, it must be DataGrid.ChildDef
         if init_data_list is not None:
@@ -4597,6 +4603,9 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
             FrontendEventType.DataGridFetchDetail)
         self.event_row_selection = self._create_event_slot(
             FrontendEventType.DataGridRowSelection)
+        self.event_header_menu_item_click = self._create_event_slot(
+            FrontendEventType.ContextMenuSelect)
+
         # backend events
         self.event_item_changed = self._create_emitter_event_slot(
             FrontendEventType.DataItemChange)
@@ -4758,6 +4767,7 @@ class MatrixDataGrid(MUIContainerBase[MatrixDataGridProps, MUIComponentType]):
                 FrontendEventType.DataGridRowSelection.value,
                 FrontendEventType.DataGridRowRangeChanged.value,
                 FrontendEventType.DataGridProxyLazyLoadRange.value,
+                FrontendEventType.ContextMenuSelect.value,
             ])
         # TODO check set_new_layout argument, it must be DataGrid.ChildDef
         data_list: Dict[str, MatrixDataGridItem] = {}
@@ -4770,6 +4780,8 @@ class MatrixDataGrid(MUIContainerBase[MatrixDataGridProps, MUIComponentType]):
         self.props.dataList = data_list
         self.event_row_selection = self._create_event_slot(
             FrontendEventType.DataGridRowSelection)
+        self.event_header_menu_item_click: EventSlot[Tuple[str, str]] = self._create_event_slot(
+            FrontendEventType.ContextMenuSelect)
         # backend events
         self.prop(customHeaderDatas=customHeaderDatas,
                   customFooterDatas=customFooterDatas)
@@ -4957,26 +4969,6 @@ class GridLayout(MUIContainerBase[GridLayoutProps, MUIComponentType]):
 class Anchor:
     vertical: Literal["top", "center", "bottom"]
     horizontal: Literal["left", "center", "right"]
-
-
-@dataclasses.dataclass
-class MenuItem:
-    id: str
-    label: Union[Undefined, str] = undefined
-    # null icon has same effect as undefined,
-    # the only difference is we ignore undefined by default,
-    # so you can't use undefined to remove icon.
-    icon: Optional[Union[IconType, Undefined, str]] = undefined
-    inset: Union[Undefined, bool] = undefined
-    iconSize: Union[Undefined, Literal["inherit", "large", "medium",
-                                       "small"]] = undefined
-    iconFontSize: Union[Undefined, NumberType, str] = undefined
-    divider: Union[Undefined, bool] = undefined
-    autoFocus: Union[Undefined, bool] = undefined
-    disableAutoFocusItem: Union[Undefined, bool] = undefined
-    confirmMessage: Union[str, Undefined] = undefined
-    confirmTitle: Union[str, Undefined] = undefined
-    disabled: Union[Undefined, bool] = undefined
 
 
 @dataclasses.dataclass

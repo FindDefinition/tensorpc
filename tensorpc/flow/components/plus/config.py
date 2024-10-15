@@ -379,9 +379,9 @@ def parse_to_control_nodes(origin_obj,
                         getter, setter, comparer)
                     continue
             elif isinstance(first_anno_meta,
-                            (typemetas.RangedVector3, typemetas.Vector3)):
+                            (typemetas.RangedVector3, typemetas.Vector3, typemetas.RangedVector2, typemetas.Vector2)):
                 child_node.type = mui.ControlNodeType.VectorN.value
-                child_node.count = 3
+                child_node.count = 3 if isinstance(first_anno_meta, (typemetas.RangedVector3, typemetas.Vector3)) else 2
                 val = getattr(current_obj, f.name)
                 if not isinstance(val, mui.Undefined):
                     if isinstance(val, (int, float)):
@@ -391,7 +391,7 @@ def parse_to_control_nodes(origin_obj,
                 else:
                     if first_anno_meta.default is not None:
                         child_node.initValue = first_anno_meta.default
-                if isinstance(first_anno_meta, typemetas.RangedVector3):
+                if isinstance(first_anno_meta, (typemetas.RangedVector3, typemetas.RangedVector2)):
                     child_node.min = first_anno_meta.lo
                     child_node.max = first_anno_meta.hi
                 child_node.step = mui.undefined if first_anno_meta.step is None else first_anno_meta.step
@@ -460,7 +460,7 @@ def control_nodes_v1_to_v2(
         control_nodes_v1_to_v2(c, uid_to_json_like_node)
         for c in ctrl_node_v1.children
     ]
-    ctrl_desp = mui.ControlDesp(type=ctrl_node_v1.type,
+    ctrl_desp = ControlDesp(type=ctrl_node_v1.type,
                                 initValue=ctrl_node_v1.initValue,
                                 min=ctrl_node_v1.min,
                                 max=ctrl_node_v1.max,
@@ -553,6 +553,23 @@ class ConfigPanel(mui.DynamicControls):
             _CONFIG_META_KEY: SliderMeta(begin=begin, end=end, alias=alias)
         }
 
+@dataclasses.dataclass
+class ControlDesp:
+    type: int
+    initValue: Union[mui.Undefined, mui.NumberType, bool, str, mui.ControlColorRGBA,
+                     mui.Vector3Type, List[mui.NumberType]] = mui.undefined
+    # for range
+    min: Union[mui.Undefined, mui.NumberType] = mui.undefined
+    max: Union[mui.Undefined, mui.NumberType] = mui.undefined
+    step: Union[mui.Undefined, mui.NumberType] =mui.undefined
+    # for select
+    selects: Union[mui.Undefined, List[Tuple[str,mui.ValueType]]] = mui.undefined
+    # for string
+    rows: Union[mui.Undefined, bool, int] = mui.undefined
+    # for vectorN
+    count: Union[mui.Undefined, int] = mui.undefined
+    isInteger: Union[mui.Undefined, bool] = mui.undefined
+
 
 class ConfigPanelV2(mui.SimpleControls):
 
@@ -594,7 +611,7 @@ class ConfigPanelV2(mui.SimpleControls):
             # based on tanstack table.
             assert uid in self.uid_to_json_like_node
             userdata = self.uid_to_json_like_node[uid].userdata
-            assert isinstance(userdata, mui.ControlDesp)
+            assert isinstance(userdata, ControlDesp)
             cmeta.setter(value[1])
             userdata.initValue = value[1]
             handlers = self.get_event_handlers(self.__callback_key)

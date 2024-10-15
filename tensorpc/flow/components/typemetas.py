@@ -51,6 +51,13 @@ class RangedVector3:
     alias: Optional[str] = None
     default: Optional[Tuple[float, float, float]] = None
 
+@dataclass
+class RangedVector2:
+    lo: float
+    hi: float
+    step: Optional[float] = None
+    alias: Optional[str] = None
+    default: Optional[Tuple[float, float]] = None
 
 @dataclass
 class Vector3:
@@ -58,6 +65,11 @@ class Vector3:
     alias: Optional[str] = None
     default: Optional[Tuple[float, float, float]] = None
 
+@dataclass
+class Vector2:
+    step: Optional[float] = None
+    alias: Optional[str] = None
+    default: Optional[Tuple[float, float]] = None
 
 Vector2Type: TypeAlias = Tuple[float, float]
 

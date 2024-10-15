@@ -199,3 +199,31 @@ class ExprEvaluatorNode(ComputeNode):
             res._saved_value = data["value"]
         return res
 
+@register_compute_node(key=ReservedNodeTypes.ImageViewer,
+                       name="Image Viewer",
+                       icon_cfg=mui.IconProps(icon=mui.IconType.Image))
+class ImageViewerNode(ResizeableNodeBase):
+    def init_node(self):
+        self.img = mui.Image()
+        self.img.event_pointer_context_menu.disable_and_stop_propagation()
+        self.img.prop(height="100%", width="100%", overflow="hidden")
+        self.img.update_sx_props({
+            "object-fit": "contain",
+        })
+    @property
+    def init_wrapper_config(self) -> Optional[WrapperConfig]:
+        cfg = super().init_wrapper_config
+        assert cfg is not None 
+        cfg.nodeMiddleLayoutOverflow = "hidden"
+        return cfg
+
+    @property
+    def init_cfg(self):
+        return NodeConfig(300, 250)
+
+    def get_node_layout(self) -> Optional[mui.FlexBox]:
+        return mui.VBox([self.img]).prop(width="100%", height="100%", overflow="hidden")
+
+    async def compute(self, obj: np.ndarray) -> None:
+        await self.img.show(obj)
+        return None 

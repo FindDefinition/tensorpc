@@ -11,12 +11,9 @@ class OutputDict(TypedDict):
 class MyCustomNode(flowplus.ComputeNode):
     def init_node(self):
         self._layout_root = mui.VBox([mui.Typography(self.name)])
-        disable_event_propagation = False 
+        disable_event_propagation = True 
         if disable_event_propagation:
             self._layout_root.event_click.disable_and_stop_propagation()
-            self._layout_root.event_double_click.disable_and_stop_propagation()
-            self._layout_root.event_pointer_up.disable_and_stop_propagation()
-            self._layout_root.event_pointer_down.disable_and_stop_propagation()
 
     # we use annotation to specify the input and output handle/type.
     async def compute(self, a: int, b: int) -> OutputDict:
