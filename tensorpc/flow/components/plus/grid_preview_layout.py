@@ -82,6 +82,7 @@ class GridPreviewContainer(mui.FlexBox):
                   height="100%",
                   overflowY="auto")
         self.prop(border="1px solid black")
+        self.event_pointer_context_menu.disable_and_stop_propagation()
 
 
 @dataclasses.dataclass

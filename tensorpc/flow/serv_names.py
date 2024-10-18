@@ -179,6 +179,18 @@ class _ServiceNames:
                                        FlowApp.run_single_event.__name__)
 
     @property
+    def APP_RELAY_APP_EVENT_FROM_REMOTE(self):
+        from tensorpc.flow.serv.flowapp import FlowApp
+        return get_service_key_by_type(FlowApp,
+                                       FlowApp.relay_app_event_from_remote_component.__name__)
+
+    @property
+    def APP_RELAY_APP_STORAGE_FROM_REMOTE(self):
+        from tensorpc.flow.serv.flowapp import FlowApp
+        return get_service_key_by_type(FlowApp,
+                                       FlowApp.relay_app_storage_from_remote_comp.__name__)
+
+    @property
     def APP_GET_LAYOUT(self):
         from tensorpc.flow.serv.flowapp import FlowApp
         return get_service_key_by_type(FlowApp, FlowApp.get_layout.__name__)
@@ -240,5 +252,39 @@ class _ServiceNames:
         from tensorpc.flow.serv.core import Flow
         return get_service_key_by_type(Flow, Flow.get_ssh_node_data.__name__)
 
+    @property
+    def REMOTE_COMP_RUN_SINGLE_EVENT(self):
+        from tensorpc.flow.serv.remote_comp import RemoteComponentService
+        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.run_single_event.__name__)
+    
+    @property
+    def REMOTE_COMP_MOUNT_APP(self):
+        from tensorpc.flow.serv.remote_comp import RemoteComponentService
+        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.mount_app.__name__)
+
+    @property
+    def REMOTE_COMP_UNMOUNT_APP(self):
+        from tensorpc.flow.serv.remote_comp import RemoteComponentService
+        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.unmount_app.__name__)
+
+    @property
+    def REMOTE_COMP_GET_LAYOUT(self):
+        from tensorpc.flow.serv.remote_comp import RemoteComponentService
+        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.get_layout_dict.__name__)
+    
+    @property
+    def REMOTE_COMP_SET_LAYOUT_OBJECT(self):
+        from tensorpc.flow.serv.remote_comp import RemoteComponentService
+        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.set_layout_object.__name__)
+    
+    @property
+    def REMOTE_COMP_REMOVE_LAYOUT_OBJECT(self):
+        from tensorpc.flow.serv.remote_comp import RemoteComponentService
+        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.remove_layout_object.__name__)
+
+    @property
+    def REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY(self):
+        from tensorpc.flow.serv.remote_comp import RemoteComponentService
+        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.get_layout_root_by_key.__name__)
 
 serv_names = _ServiceNames()

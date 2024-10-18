@@ -8,7 +8,7 @@ import sys
 from tensorpc import PACKAGE_ROOT
 from tensorpc.flow.marker import mark_did_mount
 
-
+import numpy as np 
 class MarkdownTutorialsTree:
 
     @mark_create_layout
@@ -39,7 +39,9 @@ class MarkdownTutorialsTree:
                                                         height="100%",
                                                         overflow="auto")
         self.tutorials = tutorials
-        self.panel = plus.InspectPanel({}, use_fast_tree=True)
+        self.panel = plus.InspectPanel({
+            "points": np.random.uniform(-10, 10, size=[100, 3])
+        }, use_fast_tree=True)
         return self.panel.prop(width="100%", height="100%", overflow="hidden")
 
     @mark_did_mount

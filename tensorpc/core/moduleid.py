@@ -125,8 +125,9 @@ class InMemoryFS:
         return self.fs_dict[path]
 
     def load_in_memory_module(self, path: str):
+        # assert "." not in path, "dynamic loaded path can't have ."
         module = types.ModuleType(path)
-        spec = importlib.machinery.ModuleSpec(path, None)
+        spec = importlib.machinery.ModuleSpec(path, None, origin=path)
         module.__file__ = path
         module.__spec__ = spec
         code_comp = compile(self[path].content, path, "exec")
@@ -240,9 +241,13 @@ def get_obj_type_meta(obj_type) -> Optional[TypeMeta]:
         if "<" in spec.name:
             is_standard_module = False
             module_path = spec.origin
+            if spec.origin.startswith(f"<{TENSORPC_FILE_NAME_PREFIX}"):
+                is_in_memory = True
+
     if spec is not None and spec.origin is None:
         # this module don't have a init file, do nothing currently.
-        pass 
+        if "<" in spec.name:
+            is_standard_module = False
     # else:
     #     try:
     #         module_path_p =  Path(inspect.getfile(obj_type)).resolve()

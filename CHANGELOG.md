@@ -1,4 +1,9 @@
 # Changelog
+# [0.12.0] - 2024-10-2x
+### Added 
+- add remote component support.
+- add `tensorpc.dbg` package for debug-with-ui purpose.
+
 # [0.11.19] - 2024-07-23
 ### Added 
 - add a special handle type in compute flow.

@@ -16,6 +16,7 @@ from tensorpc.flow.components import mui
 from tensorpc.flow.components.plus.core import (
     ALL_OBJECT_LAYOUT_HANDLERS, USER_OBJ_TREE_TYPES, CustomTreeItemHandler,
     ObjectLayoutCreator)
+from tensorpc.flow.components.three import is_three_component
 from tensorpc.flow.core.component import FlowSpecialMethods
 from tensorpc.flow.jsonlike import (IconButtonData, TreeItem,
                                     parse_obj_to_jsonlike)
@@ -90,6 +91,11 @@ class ObjectTreeParser:
             return False, None
         try:
             v = getattr(obj, attr_name)
+            if isinstance(v, types.ModuleType):
+                return False, None
+            if inspect.isfunction(v) or inspect.ismethod(
+                    v) or inspect.isbuiltin(v):
+                return False, None
             isinstance(v, TreeItem)
         except:
             return False, None
@@ -188,13 +194,13 @@ class ObjectTreeParser:
                         print("ERROR", obj_type)
                 obj_meta_cache[obj_type] = is_layout
             is_draggable = is_layout
-            if isinstance(obj, mui.Component):
+            if isinstance(obj, mui.Component) and not is_three_component(obj):
                 is_layout = True
                 is_draggable = obj._flow_reference_count == 0
             if isinstance(obj, ObjectLayoutCreator):
                 is_draggable = True
                 is_layout = True
-            is_draggable = True
+            # is_draggable = True
             if is_layout:
                 t = mui.JsonLikeType.Layout
             return mui.JsonLikeNode(
@@ -496,7 +502,7 @@ def get_tree_context_noexcept() -> TreeContext:
 
 
 @contextlib.contextmanager
-def enter_tree_conetxt(ctx: TreeContext):
+def enter_tree_context(ctx: TreeContext):
     """expose tree apis for user defined tree items.
     """
     token = TREE_CONTEXT_VAR.set(ctx)

@@ -22,10 +22,10 @@ from tensorpc.core.tree_id import UniqueTreeIdForTree
 
 from tensorpc.flow import marker
 from tensorpc.flow.components import mui
-from tensorpc.flow.core.appcore import find_component_by_uid_with_type_check
+from tensorpc.flow.core.appcore import find_component_by_uid
 from tensorpc.flow.components import three
 from tensorpc.flow.components.plus.config import ConfigPanel, ConfigPanelV2
-from tensorpc.flow.core.component import FrontendEventType
+from tensorpc.flow.core.component import FrontendEventType, RemoteComponentBase
 from tensorpc.flow.core.coretypes import TreeDragTarget
 from tensorpc.flow.core import colors
 from tensorpc.flow.jsonlike import TreeItem
@@ -336,7 +336,7 @@ class SimpleCanvas(mui.FlexBox):
                        f"use dolly (wheel) to\n"
                        f"simulate first-persion")
 
-        layout: mui.LayoutType = [
+        layout = [
             self.canvas.prop(zIndex=1),
             mui.HBox([
                 mui.VBox([
@@ -548,9 +548,11 @@ class SimpleCanvas(mui.FlexBox):
             success = await self._unknown_visualization(data.tree_id, obj)
             if success:
                 # register to tree
-                tree = find_component_by_uid_with_type_check(
-                    data.source_comp_uid, BasicObjectTree)
-                if tree is not None:
+
+                tree = find_component_by_uid(
+                    data.source_comp_uid)
+                if tree is not None and not isinstance(tree, RemoteComponentBase):
+                    assert isinstance(tree, BasicObjectTree)
                     tree._register_dnd_uid(UniqueTreeIdForTree(data.tree_id),
                                            self._dnd_cb)
                     self._dnd_trees.add(data.source_comp_uid)
@@ -579,8 +581,9 @@ class SimpleCanvas(mui.FlexBox):
         await self._dynamic_custom_objs.set_new_layout({})
 
         for uid in self._dnd_trees:
-            tree = find_component_by_uid_with_type_check(uid, BasicObjectTree)
-            if tree is not None:
+            tree = find_component_by_uid(uid)
+            if tree is not None and not isinstance(tree, RemoteComponentBase):
+                assert isinstance(tree, BasicObjectTree)
                 tree._unregister_all_dnd_uid()
         self._dnd_trees.clear()
         self._random_colors.clear()
@@ -723,8 +726,7 @@ class SimpleCanvas(mui.FlexBox):
         await self._dynamic_lines.set_new_layout({})
 
     async def show_voxels(self, key: str, centers: np.ndarray,
-                          colors: Union[np.ndarray,
-                                        str], size: float, limit: int):
+                          colors: np.ndarray, size: float, limit: int):
         if key not in self._voxels_dict:
             # ui = three.VoxelMesh(centers, size, limit, [
             #     three.MeshStandardMaterial().prop(vertexColors=isinstance(colors, np.ndarray), color=colors if isinstance(colors, str) else mui.undefined),
@@ -749,12 +751,12 @@ class SimpleCanvas(mui.FlexBox):
         if isinstance(ui, three.InstancedMesh):
             if limit <= limit_prev:
                 await ui.send_and_wait(
-                    ui.update_event(size=size,
+                    ui.update_event(scale=size,
                                     colors=colors,
                                     transforms=centers))
             else:
                 await ui.send_and_wait(
-                    ui.update_event(size=size,
+                    ui.update_event(scale=size,
                                     colors=colors,
                                     transforms=centers,
                                     limit=limit))

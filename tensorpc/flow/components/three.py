@@ -1097,7 +1097,7 @@ class Group(O3dContainerWithEventBase[GroupProps, ThreeComponentType]):
         self, children: Union[Dict[str, ThreeComponentType],
                               List[ThreeComponentType]]
     ) -> None:
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ThreeGroup, GroupProps, children)
 
@@ -1198,7 +1198,7 @@ class PerspectiveCamera(Object3dContainerBase[PerspectiveCameraProps,
     ) -> None:
         if children is None:
             children = {}
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ThreePerspectiveCamera, PerspectiveCameraProps,
                          children)
@@ -1244,7 +1244,7 @@ class OrthographicCamera(Object3dContainerBase[OrthographicCameraProps,
     ) -> None:
         if children is None:
             children = {}
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ThreeOrthographicCamera,
                          OrthographicCameraProps, children)
@@ -1773,7 +1773,7 @@ class Canvas(MUIContainerBase[ThreeCanvasProps, ThreeComponentType]):
                  children: Union[List[ThreeComponentType],
                                  Dict[str, ThreeComponentType]],
                  background: Union[str, Undefined] = undefined) -> None:
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ThreeCanvas,
                          ThreeCanvasProps,
@@ -1805,7 +1805,7 @@ class View(MUIContainerBase[ThreeViewProps, ThreeComponentType]):
         self, children: Union[List[ThreeComponentType],
                               Dict[str, ThreeComponentType]]
     ) -> None:
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ThreeView,
                          ThreeViewProps,
@@ -1836,7 +1836,7 @@ class ViewCanvas(MUIContainerBase[ThreeCanvasProps, MUIComponentType]):
                  children: Union[List[MUIComponentType],
                                  Dict[str, MUIComponentType]],
                  background: Union[str, Undefined] = undefined) -> None:
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ThreeCanvas, ThreeCanvasProps, children)
         self.props.threeBackgroundColor = background
@@ -2959,7 +2959,7 @@ class Mesh(O3dContainerWithEventBase[PrimitiveMeshProps, ThreeComponentType]):
     """
 
     def __init__(self, children: ThreeLayoutType) -> None:
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
 
         super().__init__(UIType.ThreePrimitiveMesh,
@@ -3240,7 +3240,7 @@ class PivotControls(ThreeContainerBase[PivotControlsProps,
                  debounce: float = 100) -> None:
         if children is None:
             children = []
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
 
         super().__init__(UIType.ThreePivotControl,
@@ -3495,7 +3495,7 @@ class BufferMesh(O3dContainerWithEventBase[BufferMeshProps,
             if v.dtype == np.float16 or v.dtype == np.float64:
                 initial_buffers[k] = v.astype(np.float32)
         # TODO children must be material or Edges
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
 
         super().__init__(UIType.ThreeBufferMesh, BufferMeshProps, children)
@@ -3583,7 +3583,7 @@ class VoxelMesh(O3dContainerWithEventBase[VoxelMeshProps, ThreeComponentType]):
         if centers.dtype != np.float32:
             centers = centers.astype(np.float32)
         # TODO children must be material or Edges
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
 
         super().__init__(UIType.ThreeVoxelMesh, VoxelMeshProps, children)
@@ -3639,7 +3639,7 @@ class InstancedMesh(O3dContainerWithEventBase[InstancedMeshProps,
         if transforms.dtype != np.float32:
             transforms = transforms.astype(np.float32)
         # TODO children must be material or Edges
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
 
         super().__init__(UIType.ThreeInstancedMesh, InstancedMeshProps,
@@ -3712,7 +3712,7 @@ class Environment(ThreeContainerBase[EnvironmentProps, ThreeComponentType]):
     def __init__(self, children: Optional[ThreeLayoutType] = None) -> None:
         if children is None:
             children = {}
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
 
         super().__init__(UIType.ThreeEnvironment, EnvironmentProps,
@@ -3755,7 +3755,7 @@ class URILoaderContext(ThreeContainerBase[LoaderContextProps,
                  children: Optional[ThreeLayoutType] = None) -> None:
         if children is None:
             children = {}
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
 
         super().__init__(UIType.ThreeURILoaderContext, LoaderContextProps,
@@ -3791,7 +3791,7 @@ class CubeCamera(Object3dContainerBase[CubeCameraProps, ThreeComponentType]):
     def __init__(self, children: ThreeLayoutType) -> None:
         if children is None:
             children = {}
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
         assert children, "CubeCamera must have children"
         super().__init__(UIType.ThreeCubeCamera, CubeCameraProps, {**children})
@@ -3898,7 +3898,7 @@ class SelectionContext(ThreeContainerBase[SelectionContextProps,
             callback: Optional[Callable[[Any], _CORO_NONE]] = None) -> None:
         if children is None:
             children = {}
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
 
         super().__init__(UIType.ThreeSelectionContext,
@@ -3994,7 +3994,7 @@ class EffectComposer(ThreeContainerBase[EffectComposerProps, ThreeEffectBase]):
     def __init__(self, children: ThreeEffectType) -> None:
         if children is None:
             children = {}
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
         for v in children.values():
             assert isinstance(

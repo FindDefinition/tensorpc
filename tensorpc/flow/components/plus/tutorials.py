@@ -95,6 +95,8 @@ class AppInMemory(mui.FlexBox):
         self.editor = mui.MonacoEditor(code, "python",
                                        wrapped_path).prop(minWidth=0,
                                                           minHeight=0)
+        # importlib.reload don't support module name with dot.
+        wrapped_path = wrapped_path.replace(".", "_")
         self.path = wrapped_path
         self.code = code
         self.app_cls_name = "App"
@@ -152,7 +154,6 @@ class AppInMemory(mui.FlexBox):
             layout_flex, mui.FlexBox
         ), f"create_layout must return a flexbox when use anylayout"
         layout_flex.set_wrapped_obj(layout.get_wrapped_obj())
-        wobj = layout.get_wrapped_obj()
         await self.show_box.update_childs({"layout": layout_flex})
 
     async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
@@ -186,8 +187,8 @@ class CodeBlock(mui.FlexBox):
         self.prop(flexFlow="column")
         self.editor.event_editor_save.on(self._on_editor_save)
 
-    async def _on_editor_save(self, value: str):
-        self.code = value
+    async def _on_editor_save(self, value: mui.MonacoEditorSaveEvent):
+        self.code = value.value
 
     async def _on_run(self):
         code_comp = compile(self.code, f"", "exec")

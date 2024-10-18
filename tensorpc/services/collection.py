@@ -157,6 +157,9 @@ class ProcessObserver:
             })
         return res
 
+    @marker.mark_server_event(event_type=ServiceEventType.Exit)
+    async def on_exit(self):
+        print("EXIT!!!")
 
 class ProcessObserveManager:
 

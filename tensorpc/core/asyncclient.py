@@ -271,24 +271,29 @@ class AsyncRemoteObject(object):
             self,
             key: str,
             stream_iter,
-            rpc_flags: int = rpc_message_pb2.PickleArray
+            rpc_flags: int = rpc_message_pb2.PickleArray,
+            rpc_timeout: Optional[int] = None,
     ) -> AsyncIterator[Any]:
         # assert key in self.func_dict
         flags = rpc_flags
 
         def stream_generator():
             for data in stream_iter:
-                arrays, data_skeleton = core_io.extract_arrays_from_data(data)
-                data_to_be_send = arrays + [
-                    core_io.dumps_method(data_skeleton, flags)
-                ]
-                stream = core_io.to_protobuf_stream(data_to_be_send, key,
-                                                    flags)
+                try:
+                    arrays, data_skeleton = core_io.extract_arrays_from_data(data)
+                    data_to_be_send = arrays + [
+                        core_io.dumps_method(data_skeleton, flags)
+                    ]
+                    stream = core_io.to_protobuf_stream(data_to_be_send, key,
+                                                        flags)
+                except:
+                    traceback.print_exc()
+                    continue
                 for s in stream:
                     yield s
 
         from_stream = core_io.FromBufferStream()
-        async for response in self.stub.ChunkedRemoteCall(stream_generator()):
+        async for response in self.stub.ChunkedRemoteCall(stream_generator(), timeout=rpc_timeout):
             self._check_remote_exception(response.exception)
             res = from_stream(response)
             if res is not None:
@@ -307,6 +312,7 @@ class AsyncRemoteObject(object):
                                   key,
                                   *args,
                                   rpc_flags: int = rpc_message_pb2.PickleArray,
+                                  rpc_timeout: Optional[int] = None,
                                   **kwargs) -> Any:
 
         def stream_generator():
@@ -316,7 +322,8 @@ class AsyncRemoteObject(object):
         res: Optional[_PlaceHolder] = _PlaceHolder()
         async for res in self.chunked_stream_remote_call(key,
                                                          stream_generator(),
-                                                         rpc_flags=rpc_flags):
+                                                         rpc_flags=rpc_flags,
+                                                         rpc_timeout=rpc_timeout):
             count += 1
         assert count == 1
         assert not isinstance(res, _PlaceHolder)
@@ -368,11 +375,11 @@ class AsyncRemoteManager(AsyncRemoteObject):
         self.url = url
         if enabled:
             self._channel = channel
-        atexit.register(self.close)
+        # atexit.register(self.close)
         super().__init__(channel, name, print_stdout)
 
     async def reconnect(self, timeout=10, max_retries=20):
-        self.close()
+        await self.close()
         if self.credentials is not None:
             self._channel = grpc.aio.secure_channel(
                 self.url, self.credentials, options=self._channel_options)
@@ -389,7 +396,7 @@ class AsyncRemoteManager(AsyncRemoteObject):
         assert self._channel is not None
         wait_for_ready = True
         try:
-            await self.health_check(wait_for_ready)
+            await self.health_check(wait_for_ready, timeout)
         except grpc.aio.AioRpcError as rpc_error:
             traceback.print_exc()
             assert rpc_error.code() == grpc.StatusCode.UNAVAILABLE
@@ -408,17 +415,18 @@ class AsyncRemoteManager(AsyncRemoteObject):
         except TimeoutError:
             return False
 
-    def close(self):
+    async def close(self, close_channel: bool = False):
         if self._channel is not None:
             # if we shutdown remote and close channel,
             # will raise strange error.
-            # self.channel.close()
+            if close_channel:
+                await self._channel.close()
             del self._channel
             self._channel = None
 
     async def shutdown(self):
         res = await super().shutdown()
-        self.close()
+        await self.close()
         return res
 
     async def __aenter__(self):
@@ -427,7 +435,7 @@ class AsyncRemoteManager(AsyncRemoteObject):
     async def __aexit__(self, exc_type, exc_value, exc_traceback):
         if self._channel is not None:
             await self._channel.__aexit__(exc_type, exc_value, exc_traceback)
-        return self.close()
+        return await self.close()
 
 
 async def simple_remote_call_async(addr, key, *args, timeout=None, **kwargs):

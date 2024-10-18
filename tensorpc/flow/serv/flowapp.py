@@ -21,15 +21,18 @@ from pathlib import Path
 import pickle
 from runpy import run_path
 from typing import Any, Dict, List, Optional
+
+import async_timeout
+from tensorpc.core.asyncclient import simple_chunk_call_async
 from tensorpc.core.defs import FileDesp, FileResource
-from tensorpc.flow.constants import TENSORPC_LSP_EXTRA_PATH
-from tensorpc.flow.coretypes import ScheduleEvent, get_uid
+from tensorpc.flow.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_LSP_EXTRA_PATH
+from tensorpc.flow.coretypes import ScheduleEvent, get_unique_node_id
 from tensorpc.core.tree_id import UniqueTreeId
 from tensorpc.flow.vscode.coretypes import VscodeTensorpcMessage, VscodeTensorpcQuery
 from tensorpc.flow import appctx
 from tensorpc.flow.core.appcore import ALL_OBSERVED_FUNCTIONS, enter_app_conetxt
 from tensorpc.flow.components.mui import FlexBox, flex_wrapper
-from tensorpc.flow.core.component import AppEditorEvent, AppEditorFrontendEvent, AppEvent, AppEventType, InitLSPClientEvent, LayoutEvent, NotifyEvent, NotifyType, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
+from tensorpc.flow.core.component import AppEditorEvent, AppEditorFrontendEvent, AppEvent, AppEventType, InitLSPClientEvent, LayoutEvent, NotifyEvent, NotifyType, RemoteComponentBase, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
 from tensorpc.flow.flowapp.app import App, EditableApp
 import asyncio
 from tensorpc.core import marker
@@ -84,7 +87,7 @@ class FlowApp:
         self._need_to_send_env: Optional[AppEvent] = None
         self.shutdown_ev.clear()
         if not headless:
-            self._uid = get_uid(self.master_meta.graph_id,
+            self._uid = get_unique_node_id(self.master_meta.graph_id,
                                 self.master_meta.node_id)
         else:
             self._uid = ""
@@ -139,7 +142,7 @@ class FlowApp:
             if not layout_created:
                 await self.app._app_run_layout_function()
         else:
-            self.app.root._attach(UniqueTreeId.from_parts(["root"]),
+            self.app.root._attach(UniqueTreeId.from_parts([TENSORPC_APP_ROOT_COMP]),
                                   self.app._flow_app_comp_core)
         # print(lay["layout"])
         self.app.app_initialize()
@@ -263,6 +266,26 @@ class FlowApp:
                 "appNodeId": self.master_meta.node_readable_id
             }
         return None
+
+    async def relay_app_event_from_remote_component(self, app_event_dict: Dict[str, Any]):
+        assert "remotePrefixes" in app_event_dict
+        prefixes = app_event_dict["remotePrefixes"]
+        uid = UniqueTreeId.from_parts(prefixes)
+        # sync some state from remote component
+        for ev_type, ev_dict in app_event_dict["typeToEvents"]:
+            if ev_type == AppEventType.UpdateComponents:
+                # when layout in remote changed, we must keep comp uids in main app.
+                assert "remoteComponentAllChilds" in ev_dict
+                remote_comp = self.app.root._get_comp_by_uid(uid.uid_encoded)
+                assert isinstance(remote_comp, RemoteComponentBase)
+                remote_comp.set_cur_child_uids(ev_dict["remoteComponentAllChilds"])
+        app_ev = AppEvent.from_dict(app_event_dict)
+        # print("relay_app_event_from_remote_component", app_event_dict)
+        await self._send_loop_queue.put(app_ev)
+
+    async def relay_app_storage_from_remote_comp(self, serv_name: str, args, kwargs):
+        return await simple_chunk_call_async(self.master_meta.grpc_url,
+                                             serv_name, *args, **kwargs)
 
     def get_layout(self, editor_only: bool = False):
         if editor_only:
@@ -430,7 +453,6 @@ class FlowApp:
                         # print("SEND", ev.type)
                         # await self._send_http_event(ev)
                         await self._send_grpc_event_large(ev, robj)
-
                         # print("SEND", ev.type, "FINISH")
                     except Exception as e:
                         traceback.print_exc()

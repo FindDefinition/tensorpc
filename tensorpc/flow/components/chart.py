@@ -15,6 +15,7 @@
 import asyncio
 import base64
 import enum
+from tensorpc.core import core_io
 import tensorpc.core.dataclass_dispatch as dataclasses
 from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Dict, Iterable,
                     List, Optional, Tuple, Type, TypeVar, Union)
@@ -28,7 +29,7 @@ from ..core.component import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, FrontendEventType, NumberType, T_child,
                     TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
                     undefined, as_dict_no_undefined)
-from .mui import MUIComponentBase
+from .mui import IFrame, MUIComponentBase
 
 
 @dataclasses.dataclass
@@ -365,3 +366,33 @@ class Plotly(MUIComponentBase[PlotlyProps]):
                     trace.labels, Undefined):
                 trace.labels.extend(update.labels)
         await self.send_and_wait(ev)
+
+
+class Perfetto(IFrame):
+    def __init__(self, data: bytes, title: str):
+        assert isinstance(data, bytes)
+        # debug = {
+        #     "perfetto": {
+        #         "buffer": core_io.JSArrayBuffer(data),
+        #         "title": title,
+        #     }
+        # }
+        # enc = core_io.SocketMessageEncoder(debug)
+        # for c in enc.get_message_chunks(core_io.SocketMsgType.Chunk, core_io.wsdef_pb2.Header(), 65536):
+        #     pass 
+        # print("DATA LENGTH", len(data))
+        super().__init__("https://ui.perfetto.dev", {
+            "perfetto": {
+                "buffer": core_io.JSArrayBuffer(data),
+                "title": title,
+            }
+        })
+
+    async def set_trace_data(self, data: bytes, title: str):
+        assert isinstance(data, bytes)
+        await self.post_message({
+            "perfetto": {
+                "buffer": core_io.JSArrayBuffer(data),
+                "title": title,
+            }
+        })

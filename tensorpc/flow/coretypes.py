@@ -10,9 +10,12 @@ from tensorpc.core.moduleid import get_qualname_of_type
 from .jsonlike import JsonLikeNode, as_dict_no_undefined, Undefined, undefined
 
 
-def get_uid(graph_id: str, node_id: str):
+def get_unique_node_id(graph_id: str, node_id: str):
     return f"{graph_id}@{node_id}"
 
+def split_unique_node_id(node_uid: str):
+    gid, nid = node_uid.split("@")
+    return gid, nid
 
 class StorageDataItem:
 
@@ -81,7 +84,7 @@ class Message:
         self.level = level
 
     def get_node_uid(self):
-        return get_uid(self.graph_id, self.node_id)
+        return get_unique_node_id(self.graph_id, self.node_id)
 
     def __hash__(self) -> int:
         return hash(self.uid)

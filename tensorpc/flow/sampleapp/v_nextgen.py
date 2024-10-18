@@ -90,7 +90,7 @@ class DevApp:
                 mui.Button("Test custom layout", self.on_custom_gv_layout),
                 mui.Button("Test gv locals", self.on_gv_locals_layout),
             ]),
-            plus.InspectPanel(self, canvas).prop(width="100%", height="100%"),
+            plus.InspectPanel(self, canvas, use_fast_tree=True).prop(width="100%", height="100%"),
         ])
 
     async def on_test_tree(self):
@@ -143,7 +143,7 @@ class DevApp:
             mesh.event_change.on(lambda x: print(x))
 
             V.three_ui(mesh)
-            box = three.BoundingBox([2, 2, 2]).prop(
+            box = three.BoundingBox((2, 2, 2)).prop(
                 position=(4, 0, 0),
                 enableSelect=True,
                 enablePivotControl=True,

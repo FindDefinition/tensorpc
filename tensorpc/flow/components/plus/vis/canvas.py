@@ -15,7 +15,7 @@ from tensorpc.flow import marker
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from tensorpc.flow.components import mui
 from tensorpc.flow.core import colors
-from tensorpc.flow.core.appcore import find_component_by_uid_with_type_check
+from tensorpc.flow.core.appcore import find_component_by_uid
 from tensorpc.flow.components import three
 from tensorpc.flow.components.plus.arraycommon import can_cast_to_np_array, try_cast_to_np_array
 from tensorpc.flow.components.plus.arraygrid import NumpyArrayGridTable
@@ -25,7 +25,7 @@ from tensorpc.flow.components.plus.grid_preview_layout import GridPreviewLayout
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree, SelectSingleEvent
 from .core import UNKNOWN_KEY_SPLIT, UNKNOWN_VIS_KEY, UserTreeItemCard, VContext, get_canvas_item_cfg, get_or_create_canvas_item_cfg, _VapiObjects, is_reserved_uid
 from tensorpc.flow.components.typemetas import RangedFloat
-from tensorpc.flow.core.component import Component, ContainerBase, FrontendEventType
+from tensorpc.flow.core.component import Component, ContainerBase, FrontendEventType, RemoteComponentBase
 from tensorpc.flow.core.coretypes import TreeDragTarget
 from tensorpc.flow import appctx
 from tensorpc.flow.jsonlike import TreeItem
@@ -624,12 +624,12 @@ class ComplexCanvas(mui.FlexBox):
                                self.array_table,
                                icon=mui.IconType.Dataset,
                                tooltip="numpy array table"),
-                    mui.TabDef("",
-                               "6",
-                               ScriptManager(
-                                   init_scripts={"python": _EXAMPLE_SCRIPT}),
-                               icon=mui.IconType.Code,
-                               tooltip="python script playground"),
+                    # mui.TabDef("",
+                    #            "6",
+                    #            ScriptManager(
+                    #                init_scripts={"python": _EXAMPLE_SCRIPT}),
+                    #            icon=mui.IconType.Code,
+                    #            tooltip="python script playground"),
                 ], "2").prop(panelProps=mui.FlexBoxProps(width="100%",
                                                          padding=0),
                              orientation="vertical",
@@ -752,13 +752,13 @@ class ComplexCanvas(mui.FlexBox):
 
     async def _show_visible_groups_of_objtree(self):
         app_ev = mui.AppEvent("", {})
-        all_attached, all_removed = [], []
+        all_attached, all_removed = [], {}
         for k1, meta in self._user_obj_tree_item_to_meta.items():
             group = meta.vctx.root
-            new_ev, attached, removed = group.set_new_layout_locally(
+            new_ev, attached, removed = await group.set_new_layout_locally(
                 {**meta.childs})
             all_attached.extend(attached)
-            all_removed.extend(removed)
+            all_removed.update(removed)
             mdprints = meta.md_prints.copy()
             meta.md_prints.clear()
             app_ev += new_ev
@@ -967,7 +967,6 @@ class ComplexCanvas(mui.FlexBox):
                         self._cur_detail_layout_uid = data.nodes[-1].id
                         self._cur_detail_layout_object_id = obj._flow_uid
                         await self.prop_container.set_new_layout([panel])
-
                 else:
                     await self.prop_container.set_new_layout([])
                     self._cur_detail_layout_uid = None
@@ -1211,8 +1210,11 @@ class ComplexCanvas(mui.FlexBox):
             success = await self._unknown_visualization(data.tree_id, obj)
             if success:
                 # register to tree
-                tree = find_component_by_uid_with_type_check(
-                    data.source_comp_uid, BasicObjectTree)
+                tree = find_component_by_uid(
+                    data.source_comp_uid)
+                if isinstance(tree, RemoteComponentBase):
+                    return 
+                assert isinstance(tree, BasicObjectTree)
                 if tree is not None:
                     tree._register_dnd_uid(UniqueTreeIdForTree(data.tree_id),
                                            self._dnd_cb)

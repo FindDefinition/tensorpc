@@ -61,10 +61,12 @@ class ServerContext(object):
     def __init__(self,
                  exposed_props: _ExposedServerProps,
                  service_key=None,
-                 json_call=False):
+                 json_call=False,
+                 is_loopback_call: bool = False):
         self.exposed_props = exposed_props
         self.service_key = service_key
         self.json_call = json_call
+        self.is_loopback_call = is_loopback_call
 
 
 class ServerGlobalContext(object):
@@ -153,6 +155,7 @@ class ServiceCore(object):
         self.is_sync = is_sync
         self._register_exit_lock = threading.Lock()
         self._exit_funcs = {}
+        self.server_meta = server_meta
         self._exposed_props = _ExposedServerProps(self._exec_lock,
                                                   self.service_units,
                                                   self.shutdown_event,
@@ -164,6 +167,8 @@ class ServiceCore(object):
         # protect run_event_async ServiceEventType.Exit
         self._shutdown_handler_lock = asyncio.Lock()
         self._is_exit_async_run = False
+
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
 
     async def _init_async_members(self):
@@ -203,11 +208,11 @@ class ServiceCore(object):
         return self.service_units.get_all_service_metas_json()
 
     @contextlib.contextmanager
-    def enter_exec_context(self, service_key=None, json_call=False):
-        ctx = ServerContext(self._exposed_props, service_key, json_call)
+    def enter_exec_context(self, service_key=None, json_call=False, is_loopback_call: bool = False):
+        ctx = ServerContext(self._exposed_props, service_key, json_call, is_loopback_call)
         assert SERVER_RPC_CONTEXT_VAR is not None
+        token = SERVER_RPC_CONTEXT_VAR.set(ctx)
         try:
-            token = SERVER_RPC_CONTEXT_VAR.set(ctx)
             yield ctx
         finally:
             SERVER_RPC_CONTEXT_VAR.reset(token)
@@ -215,8 +220,8 @@ class ServiceCore(object):
     @contextlib.contextmanager
     def enter_global_context(self):
         assert SERVER_GLOBAL_CONTEXT_VAR is not None
+        token = SERVER_GLOBAL_CONTEXT_VAR.set(self._global_context)
         try:
-            token = SERVER_GLOBAL_CONTEXT_VAR.set(self._global_context)
             yield self._global_context
         finally:
             SERVER_GLOBAL_CONTEXT_VAR.reset(token)
@@ -273,6 +278,30 @@ class ServiceCore(object):
             res = self._remote_exception_json(e)
             is_exception = True
         return res, is_exception
+
+    async def execute_async_service_locally(
+            self,
+            service_key,
+            args,
+            kwargs,
+            service_type=serviceunit.ServiceType.Normal,
+            json_call=False):
+        # no lock here, user must use 'get_exec_lock' to get global lock
+        # or create lock by themselves.
+        with self.enter_exec_context(service_key, json_call, is_loopback_call=True) as ctx:
+            # all services are lazy-loaded,
+            # so we need to put get_service in try block
+            func, meta = self.service_units.get_service_and_meta(
+                service_key)
+            assert service_type == meta.type
+            # client code can call primitives to get server contents.
+            assert not meta.is_gen
+            if meta.is_async:
+                res = await func(*args, **kwargs)
+            else:
+                res = func(*args, **kwargs)
+        return res
+
 
     def execute_generator_service(self,
                                   service_key,

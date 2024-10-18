@@ -41,9 +41,10 @@ from tensorpc.autossh.scheduler.core import TaskType
 from tensorpc.core import prim
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.inspecttools import get_all_members_by_type
+from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY
 from tensorpc.flow import (App, EditableApp, EditableLayoutApp, leaflet,
                            mark_autorun, mark_create_layout, marker, mui,
-                           plotly, plus, three, UserObjTree, appctx, V)
+                           chart, plus, three, UserObjTree, appctx, V)
 from tensorpc.flow.client import AppClient, AsyncAppClient, add_message
 from tensorpc.flow.coretypes import MessageLevel, ScheduleEvent
 from tensorpc.flow.core.appcore import observe_autorun_function, observe_function, observe_autorun_script
@@ -1076,19 +1077,19 @@ class PlotApp:
 
     @mark_create_layout
     def my_layout(self):
-        self.plot = plotly.Plotly().prop(
+        self.plot = chart.Plotly().prop(
             data=[
-                plotly.Trace(x=[1, 2, 3],
+                chart.Trace(x=[1, 2, 3],
                              y=[2, 7, 3],
                              type="scatter",
                              mode="lines")
             ],
-            layout=plotly.Layout(
+            layout=chart.Layout(
                 height=240,
                 autosize=True,
-                margin=plotly.Margin(l=0, r=0, b=0, t=0),
-                xaxis=plotly.Axis(automargin=True),
-                yaxis=plotly.Axis(automargin=True),
+                margin=chart.Margin(l=0, r=0, b=0, t=0),
+                xaxis=chart.Axis(automargin=True),
+                yaxis=chart.Axis(automargin=True),
             ))
         return mui.VBox([
             self.plot,
@@ -1097,18 +1098,18 @@ class PlotApp:
 
     async def _show_plot(self):
         data = [
-            plotly.Trace(x=[1, 2, 3],
+            chart.Trace(x=[1, 2, 3],
                          y=[6, 2, 3],
                          type="scatter",
                          mode="lines",
-                         marker=plotly.Marker(color="red"))
+                         marker=chart.Marker(color="red"))
         ]
-        layout = plotly.Layout(
+        layout = chart.Layout(
             height=240,
             autosize=True,
-            margin=plotly.Margin(l=0, r=0, b=0, t=0),
-            xaxis=plotly.Axis(automargin=True),
-            yaxis=plotly.Axis(automargin=True),
+            margin=chart.Margin(l=0, r=0, b=0, t=0),
+            xaxis=chart.Axis(automargin=True),
+            yaxis=chart.Axis(automargin=True),
         )
         await self.plot.show_raw(data, layout)
 
@@ -1760,8 +1761,6 @@ class GridPreviewLayoutApp:
     @mark_create_layout
     def my_layout(self):
         root = TestNodeRoot()
-        reload_mgr = appctx.get_reload_manager()
-
         return mui.HBox([
             plus.GridPreviewLayout({
                 "root": root,
@@ -1769,6 +1768,22 @@ class GridPreviewLayoutApp:
             })
         ]).prop(width="100%")
 
+class RemoteComponentDevApp:
+    @mark_create_layout
+    def my_layout(self):
+        from tensorpc.examples.tutorials import MarkdownTutorialsTree
+
+        return mui.HBox([
+            mui.RemoteBoxGrpc("localhost", 52051, "complex_dev").prop(flex=1),
+            mui.flex_wrapper(MarkdownTutorialsTree()).prop(flex=1),
+        ]).prop(width="100%")
+
+class RemoteDebugDevApp:
+    @mark_create_layout
+    def my_layout(self):
+        return mui.HBox([
+            mui.RemoteBoxGrpc("localhost", 54321, TENSORPC_DBG_FRAME_INSPECTOR_KEY).prop(flex=1),
+        ]).prop(width="100%")
 
 if __name__ == "__main__":
     from pydantic import (

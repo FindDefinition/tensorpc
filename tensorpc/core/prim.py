@@ -35,6 +35,11 @@ def is_json_call():
     """
     return get_server_context().json_call
 
+def is_loopback_call():
+    """tell service whether rpc is a loopback call, 
+    i.e. call from the same process without RPC/socket.
+    """
+    return get_server_context().is_loopback_call
 
 def get_service(key):
     get_service_func = get_server_exposed_props().service_units.get_service

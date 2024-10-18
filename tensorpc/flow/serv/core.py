@@ -60,7 +60,7 @@ from tensorpc.flow.coretypes import (Message, MessageEvent, MessageEventType,
                                      MessageLevel, ScheduleEvent,
                                      SessionStatus, StorageDataItem,
                                      UserContentEvent, UserDataUpdateEvent,
-                                     UserEvent, UserStatusEvent, get_uid)
+                                     UserEvent, UserStatusEvent, get_unique_node_id)
 from tensorpc.flow.core.component import (AppEvent, AppEventType, ComponentEvent,
                                         FrontendEventType, NotifyEvent,
                                         NotifyType, ScheduleNextForApp,
@@ -120,7 +120,7 @@ def _extract_graph_node_id(uid: str):
 
 
 def _get_uid(graph_id: str, node_id: str):
-    return get_uid(graph_id, node_id)
+    return get_unique_node_id(graph_id, node_id)
 
 
 def _get_status_from_last_event(ev: CommandEventType):
@@ -2044,8 +2044,6 @@ class Flow:
                 "is_remote": True,
                 "module_name": node.module_name,
             }
-            return (driver.worker_grpc_url, driver.worker_http_url, True,
-                    node.module_name)
         else:
             http_port = node.http_port
             grpc_port = node.grpc_port

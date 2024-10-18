@@ -214,6 +214,19 @@ def serve(service_def: ServiceDef,
         return serve_service(service, wait_time, port, length, is_local,
                              max_threads, process_id, credentials)
 
+def serve_service_core(service_core: ProtobufServiceCore,
+          wait_time=-1,
+          length=-1,
+          is_local=False,
+          max_threads=10,
+          process_id=-1,
+          credentials=None):
+    with service_core.enter_global_context():
+        with service_core.enter_exec_context():
+            service_core.run_event(ServiceEventType.Init)
+        service = RemoteObjectService(service_core, is_local, length)
+        return serve_service(service, wait_time, service_core.server_meta.port, length, is_local,
+                             max_threads, process_id, credentials)
 
 def serve_with_http(service_def: ServiceDef,
                     wait_time=-1,

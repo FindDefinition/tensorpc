@@ -48,13 +48,13 @@ def process_func2(q, ev):
     print("EXIT")
 
 def multiprocess_main():
-    # ctx = multiprocessing.
+    ctx = multiprocessing.get_context("spawn")
     procs: List[Tuple[multiprocessing.Process, multiprocessing.Event]] = []
     robjs: List["RemoteManager"] = []
     for i in range(2):
-        q = multiprocessing.Queue()
-        ev = multiprocessing.Event()
-        p = multiprocessing.Process(target=process_func if i == 0 else process_func2, args=(q, ev))
+        q = ctx.Queue()
+        ev = ctx.Event()
+        p = ctx.Process(target=process_func if i == 0 else process_func2, args=(q, ev))
         p.start()
         port = q.get()
         print(port)
@@ -84,14 +84,14 @@ def main():
     from tensorpc import RemoteManager
     robj = RemoteManager(f"localhost:{BACKGROUND_SERVER.port}")
     fts = []
-    for i in range(5):
+    for i in range(1):
         future = robj.remote_call_future("tensorpc.services.collection::Simple.sleep", 2)
         print("GET FUTURE")
         fts.append(future)
     for ft in fts:
         print(ft.result())
     # time.sleep(10)
-    BACKGROUND_SERVER.stop()
+    # BACKGROUND_SERVER.stop()
 
 if __name__ == "__main__":
     main()

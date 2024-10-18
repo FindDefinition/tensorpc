@@ -10,7 +10,7 @@ import threading
 import traceback
 import types
 from functools import partial
-from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
+from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional, Sequence,
                     Set, Tuple, Type, TypeVar, Union)
 
 import numpy as np
@@ -77,7 +77,9 @@ class ObjectInspector(mui.FlexBox):
                  use_allotment: bool = True,
                  enable_exception_inspect: bool = True,
                  use_fast_tree: bool = False,
-                 fixed_size: bool = False) -> None:
+                 fixed_size: bool = False,
+                 show_terminal: bool = True,
+                 default_sizes: Optional[List[mui.NumberType]] = None) -> None:
         self.preview_container = mui.HBox([]).prop(overflow="auto",
                                                    padding="3px",
                                                    flex=1,
@@ -102,29 +104,34 @@ class ObjectInspector(mui.FlexBox):
                 }
             })
 
+        tabdefs = [
+            mui.TabDef("",
+                        "1",
+                        self.preview_container,
+                        icon=mui.IconType.Preview,
+                        tooltip="preview layout of item"),
+            mui.TabDef(
+                "",
+                "2",
+                self.fast_layout_container,
+                icon=mui.IconType.ManageAccounts,
+                tooltip=
+                "custom layout (appctx.inspector.set_custom_layout_sync)"
+            ),
+        ]
+        default_tab = "2"
+        if show_terminal:
+            tabdefs.append(mui.TabDef("",
+                        "3",
+                        mui.AppTerminal(),
+                        icon=mui.IconType.Terminal,
+                        tooltip="app terminal (read only)"),
+            )
+            default_tab = "3"
         self.detail_container = mui.HBox([
             mui.ThemeProvider([
-                mui.Tabs([
-                    mui.TabDef("",
-                               "1",
-                               self.preview_container,
-                               icon=mui.IconType.Preview,
-                               tooltip="preview layout of item"),
-                    mui.TabDef("",
-                               "2",
-                               mui.AppTerminal(),
-                               icon=mui.IconType.Terminal,
-                               tooltip="app terminal (read only)"),
-                    mui.TabDef(
-                        "",
-                        "3",
-                        self.fast_layout_container,
-                        icon=mui.IconType.ManageAccounts,
-                        tooltip=
-                        "custom layout (appctx.inspector.set_custom_layout_sync)"
-                    ),
-                ],
-                         init_value="2").prop(panelProps=mui.FlexBoxProps(
+                mui.Tabs(tabdefs,
+                         init_value=default_tab).prop(panelProps=mui.FlexBoxProps(
                              width="100%", padding=0),
                                               orientation="vertical",
                                               borderRight=1,
@@ -144,16 +151,16 @@ class ObjectInspector(mui.FlexBox):
                                ignored_types,
                                use_fast_tree=use_fast_tree,
                                fixed_size=fixed_size)
+        layout: List[mui.MUIComponentType] = []
         if use_allotment:
-            layout: mui.LayoutType = [
+            layout.append(
                 self.tree.prop(
                     overflow="auto",
                     height="100%",
                 )
-            ]
+            )
         else:
-            layout: mui.LayoutType = [self.tree.prop(flex=1)]
-
+            layout.append(self.tree.prop(flex=1))
         if with_detail:
             if not use_allotment:
                 layout.append(mui.Divider())
@@ -161,10 +168,12 @@ class ObjectInspector(mui.FlexBox):
         self.default_handler = DefaultHandler()
         final_layout: mui.LayoutType = layout
         if use_allotment:
+            if default_sizes is None:
+                default_sizes = [1.5, 1]
             final_layout = [
                 mui.Allotment(final_layout).prop(
                     overflow="hidden",
-                    defaultSizes=[1.5, 1] if with_detail else [1],
+                    defaultSizes=default_sizes if with_detail else [1],
                     vertical=True)
             ]
         super().__init__(final_layout)
@@ -276,7 +285,6 @@ class ObjectInspector(mui.FlexBox):
                             obj_id=id(obj)))
             self._current_preview_layout = preview_layout
             self._cached_preview_layouts[uid] = (preview_layout, id(obj))
-
             # self.__install_preview_event_listeners(preview_layout)
             await self.preview_container.set_new_layout([preview_layout])
         else:

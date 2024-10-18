@@ -19,7 +19,7 @@ from typing import Any, Tuple, Union, List, Dict, get_origin, Generic
 import dataclasses
 import mashumaro
 import enum
-from tensorpc.flow.components import plotly
+from tensorpc.flow.components import chart
 from tensorpc.flow.core.component import as_dict_no_undefined
 
 
@@ -84,9 +84,9 @@ if __name__ == "__main__":
     #     # if f.name == "b":
     #     print(f.type, get_origin(f.type), get_origin(f.type) is Union, get_origin(f.type) is Literal, type(get_origin(f.type)), _check_is_basic_type(f.type))
     # breakpoint()
-    l = plotly.Layout(autosize=True,
-                      margin=plotly.Margin(l=0, r=0, b=0, t=0),
-                      xaxis=plotly.Axis(automargin=True),
-                      yaxis=plotly.Axis(automargin=True))
+    l = chart.Layout(autosize=True,
+                      margin=chart.Margin(l=0, r=0, b=0, t=0),
+                      xaxis=chart.Axis(automargin=True),
+                      yaxis=chart.Axis(automargin=True))
 
     print(as_dict_no_undefined(l))

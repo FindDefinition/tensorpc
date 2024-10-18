@@ -23,3 +23,5 @@ TENSORPC_FILE_NAME_PREFIX = "__tensorpc_inmemory_fname"
 TENSORPC_OBSERVED_FUNCTION_ATTR = "__tensorpc_observed_function__"
 
 TENSORPC_PORT_MAX_TRY = 15
+
+TENSORPC_BG_PROCESS_NAME_PREFIX = "__tensorpc_bg_server"

@@ -642,7 +642,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         if new_layout:
             return await self.update_childs(new_layout,
                                             update_child_complex=False,
-                                            additional_ev_creator=lambda: self.
+                                            post_ev_creator=lambda: self.
                                             create_comp_event(ev_new_node))
         else:
             return await self.send_and_wait(self.create_comp_event(ev_new_node))
@@ -690,7 +690,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                 return await self.remove_childs_by_keys(
                     del_node_id_with_comp,
                     update_child_complex=False,
-                    additional_ev_creator=lambda: self.create_comp_event(ev_del_node))
+                    post_ev_creator=lambda: self.create_comp_event(ev_del_node))
         else:
             if not _internal_dont_send_comp_event:
                 return await self.send_and_wait(self.create_comp_event(ev_del_node))

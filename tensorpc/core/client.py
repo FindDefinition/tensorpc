@@ -140,7 +140,7 @@ class RemoteObject(object):
     def remote_call(self,
                     key: str,
                     *args,
-                    timeout: Optional[int] = None,
+                    rpc_timeout: Optional[int] = None,
                     rpc_callback="",
                     rpc_flags: int = rpc_msg_pb2.PickleArray,
                     **kwargs) -> Any:
@@ -150,12 +150,12 @@ class RemoteObject(object):
                                          rpc_flags=rpc_flags,
                                          **kwargs)
         # return future.result(timeout)
-        return self.parse_remote_response(future.result(timeout))
+        return self.parse_remote_response(future.result(rpc_timeout))
 
     def remote_json_call(self,
                          key: str,
                          *args,
-                         timeout: Optional[int] = None,
+                         rpc_timeout: Optional[int] = None,
                          rpc_callback="",
                          rpc_flags: int = rpc_msg_pb2.JsonArray,
                          **kwargs) -> Any:
@@ -164,7 +164,7 @@ class RemoteObject(object):
                                               rpc_callback=rpc_callback,
                                               rpc_flags=rpc_flags,
                                               **kwargs)
-        return self.parse_remote_json_response(future.result(timeout))
+        return self.parse_remote_json_response(future.result(rpc_timeout))
 
     def parse_remote_json_response(self, response):
         self._check_remote_exception(response.exception)
@@ -271,9 +271,8 @@ class RemoteObject(object):
         for response in responses:
             yield self.parse_remote_response(response)
 
-    def shutdown(self) -> str:
-        response = self.stub.ServerShutdown(rpc_msg_pb2.HealthCheckRequest())
-        return response.data
+    def shutdown(self) -> None:
+        self.stub.ServerShutdown(rpc_msg_pb2.HealthCheckRequest())
 
     def health_check(self) -> Dict[str, float]:
         t = time.time()
@@ -288,7 +287,8 @@ class RemoteObject(object):
             self,
             key: str,
             stream_iter,
-            rpc_flags: int = rpc_msg_pb2.PickleArray) -> Iterator[Any]:
+            rpc_flags: int = rpc_msg_pb2.PickleArray,
+            rpc_timeout: Optional[int] = None) -> Iterator[Any]:
         # assert key in self.func_dict
         flags = rpc_flags
 
@@ -303,7 +303,7 @@ class RemoteObject(object):
                 for s in stream:
                     yield s
 
-        responses = self.stub.ChunkedRemoteCall(stream_generator())
+        responses = self.stub.ChunkedRemoteCall(stream_generator(), timeout=rpc_timeout)
         from_stream = core_io.FromBufferStream()
         for response in responses:
             self._check_remote_exception(response.exception)
@@ -324,6 +324,7 @@ class RemoteObject(object):
                             key,
                             *args,
                             rpc_flags: int = rpc_msg_pb2.PickleArray,
+                            rpc_timeout: Optional[int] = None,
                             **kwargs) -> Any:
 
         def stream_generator():
@@ -333,7 +334,8 @@ class RemoteObject(object):
         res: Optional[_PlaceHolder] = _PlaceHolder()
         for res in self.chunked_stream_remote_call(key,
                                                    stream_generator(),
-                                                   rpc_flags=rpc_flags):
+                                                   rpc_flags=rpc_flags,
+                                                   rpc_timeout=rpc_timeout):
             count += 1
         assert count == 1
         assert not isinstance(res, _PlaceHolder)
@@ -416,11 +418,12 @@ class RemoteManager(RemoteObject):
         except TimeoutError:
             return False
 
-    def close(self):
+    def close(self, close_channel: bool = False):
         if self._channel is not None:
             # if we shutdown remote and close channel,
             # will raise strange error.
-            # self.channel.close()
+            if close_channel:
+                self.channel.close()
             del self._channel
             self._channel = None
 
@@ -443,11 +446,11 @@ def simple_client(addr):
         yield robj
 
 
-def simple_remote_call(addr, key, *args, timeout=None, **kwargs):
+def simple_remote_call(addr, key, *args, rpc_timeout=None, **kwargs):
     with RemoteManager(addr) as robj:
-        return robj.remote_call(key, *args, timeout=timeout, **kwargs)
+        return robj.remote_call(key, *args, rpc_timeout=rpc_timeout, **kwargs)
 
 
-def simple_chunk_call(addr, key, *args, **kwargs):
+def simple_chunk_call(addr, key, *args, rpc_timeout: Optional[int] = None, **kwargs):
     with RemoteManager(addr) as robj:
-        return robj.chunked_remote_call(key, *args, **kwargs)
+        return robj.chunked_remote_call(key, *args, rpc_timeout=rpc_timeout, **kwargs)

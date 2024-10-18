@@ -19,6 +19,7 @@ Layout Instance: App itself and layout objects created on AnyFlexLayout.
 import ast
 import asyncio
 import base64
+from collections.abc import Mapping, Sequence
 import contextlib
 import contextvars
 import dataclasses
@@ -69,7 +70,7 @@ from tensorpc.core.serviceunit import (ObjectReloadManager,
                                        SimpleCodeManager, get_qualname_to_code)
 from tensorpc.core.tracers.codefragtracer import get_trace_infos_from_coderange_item
 from tensorpc.flow.client import MasterMeta
-from tensorpc.flow.constants import TENSORPC_APP_STORAGE_VSCODE_TRACE_PATH, TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
+from tensorpc.flow.constants import TENSORPC_APP_DND_SRC_KEY, TENSORPC_APP_ROOT_COMP, TENSORPC_APP_STORAGE_VSCODE_TRACE_PATH, TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from tensorpc.flow.flowapp.appstorage import AppStorage
 from tensorpc.utils.wait_tools import debounce
@@ -101,9 +102,9 @@ from ..core.component import (AppComponentCore, AppEditorEvent, AppEditorEventTy
                    AppEvent, AppEventType, BasicProps, Component,
                    ContainerBase, CopyToClipboardEvent, EventHandler,
                    FlowSpecialMethods, ForEachResult, FrontendEventType,
-                   LayoutEvent, TaskLoopEvent, UIEvent, UIExceptionEvent,
+                   LayoutEvent, RemoteComponentBase, TaskLoopEvent, UIEvent, UIExceptionEvent,
                    UIRunStatus, UIType, UIUpdateEvent, Undefined, UserMessage,
-                   ValueType, undefined)
+                   ValueType, component_dict_to_serializable_dict, undefined)
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 
 ALL_APP_EVENTS = HashableRegistry()
@@ -113,7 +114,7 @@ T = TypeVar('T')
 
 T_comp = TypeVar("T_comp")
 
-_ROOT = "root"
+_ROOT = TENSORPC_APP_ROOT_COMP
 
 class AppEditor:
 
@@ -244,14 +245,15 @@ class App:
                  enable_value_cache: bool = False,
                  external_root: Optional[mui.FlexBox] = None,
                  external_wrapped_obj: Optional[Any] = None,
-                 reload_manager: Optional[AppReloadManager] = None) -> None:
+                 reload_manager: Optional[AppReloadManager] = None,
+                 is_remote_component: bool = False) -> None:
         # self._uid_to_comp: Dict[str, Component] = {}
         self._queue: "asyncio.Queue[AppEvent]" = asyncio.Queue(
             maxsize=maxqsize)
         if reload_manager is None:
             reload_manager = AppReloadManager(ALL_OBSERVED_FUNCTIONS)
         # self._flow_reload_manager = reload_manager
-
+        self._is_remote_component = is_remote_component
         self._flow_app_comp_core = AppComponentCore(self._queue,
                                                     reload_manager)
         self._send_callback: Optional[Callable[[AppEvent],
@@ -311,7 +313,7 @@ class App:
 
         self.__flowapp_master_meta = MasterMeta()
         # self.__flowapp_storage_cache: Dict[str, StorageDataItem] = {}
-        self.app_storage = AppStorage(self.__flowapp_master_meta)
+        self.app_storage = AppStorage(self.__flowapp_master_meta, is_remote_component)
         # for app and dynamic layout in AnyFlexLayout
         self._flowapp_change_observers: Dict[str, _WatchDogWatchEntry] = {}
         self._flowapp_vscode_storage: Optional[AppDataStorageForVscode] = None
@@ -585,9 +587,9 @@ class App:
                     }))
             return
         if not new_is_flex:
-            if isinstance(res, list):
+            if isinstance(res, Sequence):
                 res = {str(i): v for i, v in enumerate(res)}
-            res_anno: Dict[str, Component] = {**res}
+            res_anno: Mapping[str, Component] = {**res}
             self.root.add_layout(res_anno)
             attached = self.root._attach(root_uid, self._flow_app_comp_core)
         uid_to_comp = self.root._get_uid_encoded_to_comp_dict()
@@ -706,6 +708,8 @@ class App:
         return self._app_dynamic_cls
 
     def __repr__(self):
+        if self._app_dynamic_cls is None:
+            return f"App"
         return f"App[{self._get_app_dynamic_cls().module_path}]"
 
     def _get_app_service_unit(self):
@@ -715,11 +719,10 @@ class App:
     def _get_app_layout(self, with_code_editor: bool = True):
         uid_to_comp = self.root._get_uid_encoded_to_comp_dict()
         # print({k: v._flow_uid for k, v in uid_to_comp.items()})
+        layout_dict = component_dict_to_serializable_dict(uid_to_comp)
+        # print("????????????????", layout_dict)
         res = {
-            "layout": {
-                u: c.to_dict()
-                for u, c in uid_to_comp.items()
-            },
+            "layout": layout_dict,
             "enableEditor": self._enable_editor,
             "fallback": "",
         }
@@ -828,7 +831,7 @@ class App:
     async def __handle_dnd_event(handler: EventHandler,
                                  src_handler: EventHandler, src_event: Event):
         res = await src_handler.run_event_async(src_event)
-        ev_res = Event(FrontendEventType.Drop.value, res, src_event.keys)
+        ev_res = Event(FrontendEventType.Drop.value, res, src_event.keys, src_event.indexes)
         await handler.run_event_async(ev_res)
 
     def _is_editable_app(self):
@@ -849,10 +852,54 @@ class App:
                 uid = parts[0]
                 keys = parts[1:]
             indexes = undefined
+            indexes_raw = None
             if len(data) == 3 and data[2] is not None:
+                indexes_raw = data[2]
                 indexes = list(map(int, data[2].split(".")))
             event = Event(data[0], data[1], keys, indexes)
             comps = self.root._get_comps_by_uid(uid)
+            last_comp = comps[-1]
+            if isinstance(last_comp, RemoteComponentBase) and last_comp.is_remote_mounted:
+                if event.type == FrontendEventType.Drop.value:
+                    # we know drop component is remote, we need to check src component.
+                    src_data = data[1]
+                    src_uid = src_data[TENSORPC_APP_DND_SRC_KEY]
+                    src_comp = self.root._get_comp_by_uid(src_uid)
+                    src_event = Event(FrontendEventType.DragCollect.value,
+                                    src_data["data"], keys, indexes)
+                    uievent_for_remote = UIEvent({
+                        src_uid: (FrontendEventType.DragCollect.value, src_event, indexes_raw)
+                    })
+                    # shortcut for internal dnd
+                    if isinstance(src_comp, RemoteComponentBase):
+                        if src_comp is last_comp:
+                            # internal dnd inside remote comp
+                            res[uid_original] = await last_comp.handle_remote_event((uid_original, data), is_sync)
+                            continue 
+                    if isinstance(src_comp, RemoteComponentBase):
+                        # collect drag data from remote comp
+                        # TODO if collect_drag_source_data fail, should we call drop handler?
+                        collect_res = await src_comp.collect_drag_source_data(uievent_for_remote)
+                    else:
+                        # collect drag data from local
+                        collect_handlers = src_comp.get_event_handlers(
+                            FrontendEventType.DragCollect.value)
+                        if collect_handlers is None:
+                            # no need to call DragCollect
+                            collect_res = None
+                        else:
+                            collect_res = await src_comp.run_callback(partial(collect_handlers.handlers[0].run_event_async, event=src_event))
+                    if collect_res is None:
+                        src_data.pop(TENSORPC_APP_DND_SRC_KEY)
+                        res[uid_original] = await last_comp.handle_remote_event((uid_original, data), is_sync)
+                    else:
+                        ev_data = (FrontendEventType.DropFromRemoteComp.value, collect_res, indexes_raw)
+                        res[uid_original] = await last_comp.handle_remote_event((uid_original, ev_data), is_sync)
+                    continue 
+                else:
+                    # handle another remote event here.
+                    res[uid_original] = await last_comp.handle_remote_event((uid_original, data), is_sync)
+                    continue
             ctxes = [
                 c._flow_event_context_creator() for c in comps
                 if c._flow_event_context_creator is not None
@@ -860,23 +907,67 @@ class App:
             with contextlib.ExitStack() as stack:
                 for ctx in ctxes:
                     stack.enter_context(ctx)
-                if event.type == FrontendEventType.Drop.value:
-                    # for drop event, we only support contexts in drop component.
-                    src_data = data[1]
-                    src_uid = src_data["uid"]
+                if event.type == FrontendEventType.DragCollect.value:
+                    # WARNING: only used in remote comp dnd
+                    # frontend shouldn't send this event.
+                    # print("WTF1", uid, data)
+                    src_uid = uid 
+                    src_event = data[1]
                     src_comp = self.root._get_comp_by_uid(src_uid)
                     collect_handlers = src_comp.get_event_handlers(
                         FrontendEventType.DragCollect.value)
+                    if collect_handlers is not None:
+                        collect_res = await src_comp.run_callback(partial(collect_handlers.handlers[0].run_event_async, event=src_event))
+                    else:
+                        collect_res = None 
+                    # print("WTF2", collect_res)
+
+                    res[uid] = collect_res
+                elif event.type == FrontendEventType.DropFromRemoteComp.value:
+                    event = dataclasses.replace(event, type=FrontendEventType.Drop)
                     comp = comps[-1]
+                    res[uid_original] = await comp.handle_event(
+                        event, is_sync=is_sync)
+                elif event.type == FrontendEventType.Drop.value:
+                    # for drop event, we only support contexts in drop component.
+                    src_data = data[1]
+                    comp = comps[-1]
+                    if TENSORPC_APP_DND_SRC_KEY not in src_data:
+                        # if uid not in data, means no drag collect needed.
+                        # 'uid' field is included by default. but
+                        # we may remove it for remote comp dnd.
+                        # so don't rely on this field.
+                        # TODO change 'uid' to better name
+                        res[uid_original] = await comp.handle_event(
+                            event, is_sync=is_sync)
+                        continue
+                    src_uid = src_data[TENSORPC_APP_DND_SRC_KEY]
+                    src_comp = self.root._get_comp_by_uid(src_uid)
+                    src_event = Event(FrontendEventType.DragCollect.value,
+                                    src_data["data"], keys, indexes)
+                    if isinstance(src_comp, RemoteComponentBase):
+                        # remote comp drop to local comp
+                        uievent_for_remote = UIEvent({
+                            src_uid: (FrontendEventType.DragCollect.value, src_event, indexes_raw)
+                        })
+                        collect_res = await src_comp.collect_drag_source_data(uievent_for_remote)
+                        ev_res = event
+                        if collect_res is not None:
+                            ev_res = dataclasses.replace(event, data=collect_res)
+                        res[uid_original] = await comp.handle_event(
+                            ev_res, is_sync=is_sync)
+                        continue 
+                    collect_handlers = src_comp.get_event_handlers(
+                        FrontendEventType.DragCollect.value)
                     handlers = comp.get_event_handlers(data[0])
                     # print(src_uid, comp, src_comp, handler, collect_handler)
                     if handlers is not None and collect_handlers is not None:
-                        src_event = Event(FrontendEventType.DragCollect.value,
-                                        src_data["data"], keys, indexes)
                         cbs = []
                         for handler in handlers.handlers:
                             cb = partial(self.__handle_dnd_event,
                                         handler=handler,
+                                        # only first collect handler valid.
+                                        # TODO limit number of collect handlers.
                                         src_handler=collect_handlers.handlers[0],
                                         src_event=src_event)
                             cbs.append(cb)
@@ -887,6 +978,7 @@ class App:
                         res[uid_original] = await comp.handle_event(
                             event, is_sync=is_sync)
                 elif event.type == FrontendEventType.FileDrop.value:
+                    # TODO remote component support
                     # for file drop, we can't use regular drop above, so
                     # just convert it to drop event, no drag collect needed.
                     res[uid_original] = await comps[-1].handle_event(
@@ -894,7 +986,6 @@ class App:
                             indexes),
                         is_sync=is_sync)
                 else:
-                    # comps[-1].flow_event_emitter.emit(event.type, event.data)
                     res[uid_original] = await comps[-1].handle_event(
                         event, is_sync=is_sync)
         if is_sync:
@@ -908,7 +999,6 @@ class App:
 
     async def handle_vscode_event(self, data: VscodeTensorpcMessage):
         with _enter_app_conetxt(self):
-
             return await self._flowapp_special_eemitter.emit_async(
                 AppSpecialEventType.VscodeTensorpcMessage, data)
 
@@ -1048,12 +1138,14 @@ class EditableApp(App):
                  observed_files: Optional[List[str]] = None,
                  external_root: Optional[mui.FlexBox] = None,
                  external_wrapped_obj: Optional[Any] = None,
-                 reload_manager: Optional[AppReloadManager] = None) -> None:
+                 reload_manager: Optional[AppReloadManager] = None,
+                 is_remote_component: bool = False) -> None:
         super().__init__(flex_flow,
                          maxqsize,
                          external_root=external_root,
                          external_wrapped_obj=external_wrapped_obj,
-                         reload_manager=reload_manager)
+                         reload_manager=reload_manager,
+                         is_remote_component=is_remote_component)
         self._use_app_editor = use_app_editor
         if use_app_editor:
             obj = type(self._get_user_app_object())
@@ -1084,8 +1176,6 @@ class EditableApp(App):
 
     def app_initialize(self):
         super().app_initialize()
-        dcls = self._get_app_dynamic_cls()
-        path = dcls.file_path
         user_obj = self._get_user_app_object()
         metas_dict = self._flow_reload_manager.query_type_method_meta_dict(
             type(user_obj))
@@ -1104,7 +1194,11 @@ class EditableApp(App):
                 obentry.obmetas[meta_type_uid] = obmeta
         # obentry = _WatchDogWatchEntry(
         #     [_LayoutObserveMeta(self, qualname_prefix, metas, None)], None)
-        self._flowapp_change_observers[path] = obentry
+        path = ""
+        if not self._is_remote_component:
+            dcls = self._get_app_dynamic_cls()
+            path = dcls.file_path
+            self._flowapp_change_observers[path] = obentry
         self._watchdog_watcher = None
         self._watchdog_observer = None
         registry = self.get_observed_func_registry()
@@ -1118,8 +1212,8 @@ class EditableApp(App):
                 paths = set(self._flow_observed_files)
             else:
                 paths = set(self.__get_default_observe_paths())
-            paths.add(str(Path(path).resolve()))
-
+            if not self._is_remote_component:
+                paths.add(str(Path(path).resolve()))
             for p in registry.get_path_to_qname().keys():
                 paths.add(str(Path(p).resolve()))
             self._init_observe_paths.update(paths)
@@ -1251,7 +1345,8 @@ class EditableApp(App):
             except:
                 pass
             res.add(v_file)
-        res.add(self._get_app_dynamic_cls().file_path)
+        if not self._is_remote_component:
+            res.add(self._get_app_dynamic_cls().file_path)
         return res
 
     def __get_callback_metas_in_file(self, change_file: str,
@@ -1271,7 +1366,7 @@ class EditableApp(App):
         """
         assert self._flowapp_code_mgr is not None
         resolved_path = self._flowapp_code_mgr._resolve_path(path)
-        if self._use_app_editor:
+        if self._use_app_editor and not self._is_remote_component:
             dcls = self._get_app_dynamic_cls()
             resolved_app_path = self._flowapp_code_mgr._resolve_path(
                 dcls.file_path)
@@ -1361,8 +1456,9 @@ class EditableApp(App):
                                     )
                                     # self._get_app_dynamic_cls(
                                     # ).reload_obj_methods(user_obj, {}, self._flow_reload_manager)
-                                    self._get_app_service_unit().reload_metas(
-                                        self._flow_reload_manager)
+                                    if not self._is_remote_component:
+                                        self._get_app_service_unit().reload_metas(
+                                            self._flow_reload_manager)
                             else:
                                 assert isinstance(
                                     layout, mui.FlexBox), f"{type(layout)}"
@@ -1431,10 +1527,11 @@ class EditableApp(App):
                                     bind_and_reset_object_methods(
                                         changed_user_obj, changed_metas)
                                 if layout is self:
-                                    self._get_app_dynamic_cls(
-                                    ).module_dict = reload_res.module_entry.module_dict
-                                    self._get_app_service_unit().reload_metas(
-                                        self._flow_reload_manager)
+                                    if not self._is_remote_component:
+                                        self._get_app_dynamic_cls(
+                                        ).module_dict = reload_res.module_entry.module_dict
+                                        self._get_app_service_unit().reload_metas(
+                                            self._flow_reload_manager)
                             # use updated metas to run special methods such as create_layout and auto_run
                             if changed_metas:
                                 flow_special = FlowSpecialMethods(
@@ -1567,7 +1664,6 @@ class EditableApp(App):
         # 5. if autorun changed, run them
 
         if isinstance(ev, watchdog.events.FileModifiedEvent):
-            dcls = self._get_app_dynamic_cls()
             rprint("<watchdog>", ev)
             with self._watch_lock:
                 if self._flowapp_code_mgr is None or self._loop is None:
@@ -1575,32 +1671,10 @@ class EditableApp(App):
                 asyncio.run_coroutine_threadsafe(
                     self._reload_object_with_new_code(ev.src_path), self._loop)
 
-    def _reload_app_file(self):
-        # comps = self._uid_to_comp
-        # callback_dict = {}
-        # for k, v in comps.items():
-        #     cb = v.get_callback()
-        #     if cb is not None:
-        #         callback_dict[k] = cb
-        if self._is_external_root:
-            obj = self.root
-            if self.root._wrapped_obj is not None:
-                obj = self.root._wrapped_obj
-            new_cb, code_changed = self._get_app_dynamic_cls(
-            ).reload_obj_methods(obj, {}, self._flow_reload_manager)
-        else:
-            new_cb, code_changed = self._get_app_dynamic_cls(
-            ).reload_obj_methods(self, {}, self._flow_reload_manager)
-        self._get_app_service_unit().reload_metas(self._flow_reload_manager)
-        # for k, v in comps.items():
-        #     if k in new_cb:
-        #         v.set_callback(new_cb[k])
-        return code_changed
-
     async def handle_code_editor_event(self, event: AppEditorFrontendEvent):
         """override this method to support vscode editor.
         """
-        if self._use_app_editor:
+        if self._use_app_editor and not self._is_remote_component:
             app_path = self._get_app_dynamic_cls().file_path
             if event.type == AppEditorFrontendEventType.Save:
                 with self._watch_lock:

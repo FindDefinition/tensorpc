@@ -38,6 +38,10 @@ class UniqueTreeId:
     def empty(self):
         return len(self.uid_encoded) == 0
 
+    def set_parts_inplace(self, parts: List[str], splitter: str = "."):
+        self.parts = parts
+        self.uid_encoded = ",".join([str(len(p)) for p in parts]) + "|" + splitter.join(parts)
+
     @classmethod
     def from_parts(cls,
                    parts: List[str],
@@ -57,6 +61,9 @@ class UniqueTreeId:
 
     def append_part(self, part: str, splitter: str = ".") -> "UniqueTreeId":
         return UniqueTreeId.from_parts(self.parts + [part], splitter)
+
+    def extend_parts(self, parts: List[str], splitter: str = ".") -> "UniqueTreeId":
+        return UniqueTreeId.from_parts(self.parts + parts, splitter)
 
     def pop(self):
         return UniqueTreeId.from_parts(self.parts[:-1])
@@ -112,6 +119,8 @@ class UniqueTreeId:
             i += 1
         return i
 
+    def copy(self) -> "UniqueTreeId":
+        return UniqueTreeId(self.uid_encoded, self.splitter_length)
 
 class UniqueTreeIdForTree(UniqueTreeId):
 
@@ -131,6 +140,9 @@ class UniqueTreeIdForTree(UniqueTreeId):
                     splitter: str = ":") -> "UniqueTreeIdForTree":
         return UniqueTreeIdForTree.from_parts(self.parts + [part], splitter)
 
+    def extend_parts(self, parts: List[str], splitter: str = ".") -> "UniqueTreeIdForTree":
+        return UniqueTreeIdForTree.from_parts(self.parts + parts, splitter)
+
     def pop(self):
         return UniqueTreeIdForTree.from_parts(self.parts[:-1])
 
@@ -140,3 +152,6 @@ class UniqueTreeIdForTree(UniqueTreeId):
         if isinstance(other, str):
             return UniqueTreeIdForTree.from_parts(self.parts + [other], ":")
         return UniqueTreeIdForTree.from_parts(self.parts + other.parts, ":")
+
+    def copy(self) -> "UniqueTreeIdForTree":
+        return UniqueTreeIdForTree(self.uid_encoded, self.splitter_length)

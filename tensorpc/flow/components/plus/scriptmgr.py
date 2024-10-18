@@ -30,6 +30,7 @@ from tensorpc.flow import appctx
 from tensorpc.flow import marker
 from tensorpc.flow.components import three
 from tensorpc.flow.components.plus.tutorials import AppInMemory
+from tensorpc.flow.core.appcore import app_is_remote_comp
 from tensorpc.flow.core.component import FrontendEventType
 from .options import CommonOptions
 
@@ -110,13 +111,11 @@ class ScriptManager(mui.FlexBox):
         """when storage_node_rid is None, use app node storage, else use the specified node storage
         """
         super().__init__()
-        if storage_node_rid is None:
-            storage_node_rid = MasterMeta().node_id
-        if graph_id is None:
-            graph_id = MasterMeta().graph_id
+        self._init_storage_node_rid = storage_node_rid
+        self._init_graph_id = graph_id
         self._storage_node_rid = storage_node_rid
-
         self._graph_id = graph_id
+
         self.code_editor = mui.MonacoEditor("", "python",
                                             "default").prop(flex=1,
                                                             minHeight=0,
@@ -187,6 +186,19 @@ class ScriptManager(mui.FlexBox):
             self._on_editor_ready)
         self.scripts.event_select_new_item.on(
             self._on_new_script)
+
+    @marker.mark_did_mount
+    async def _on_mount(self):
+        if app_is_remote_comp():
+            assert self._init_storage_node_rid is None, "remote comp can't specify storage node"
+            assert self._init_graph_id is None, "remote comp can't specify graph id"
+            self._storage_node_rid = None 
+            self._graph_id = None
+        else:
+            if self._init_storage_node_rid is None:
+                self._storage_node_rid = MasterMeta().node_id
+            if self._init_graph_id is None:
+                self._graph_id = MasterMeta().graph_id
 
     async def _on_editor_ready(self):
         items = await appctx.list_data_storage(self._storage_node_rid,
@@ -259,7 +271,7 @@ class ScriptManager(mui.FlexBox):
                     exec_path = Path(tempd) / "executable"
                     with open(path, "w") as f:
                         f.write(code)
-                    sources = [
+                    sources: List[Union[str, Path]] = [
                         path,
                     ]
                     build_meta = ccimport.BuildMeta()

@@ -35,7 +35,7 @@ ValueType: TypeAlias = Union[int, float, str]
 EventDataType: TypeAlias = Union[int, str]
 NumberType: TypeAlias = Union[int, float]
 
-SimpleEventType: TypeAlias = Tuple[EventDataType, Any]
+SimpleEventType: TypeAlias = Union[Tuple[EventDataType, Any], Tuple[EventDataType, Any, Optional[str]]]
 T = TypeVar("T")
 
 T_comp = TypeVar("T_comp")
@@ -137,8 +137,9 @@ class EventHandlers:
 
 class AppContext:
 
-    def __init__(self, app: "App") -> None:
+    def __init__(self, app: "App", is_remote: bool = False) -> None:
         self.app = app
+        self.is_remote = is_remote
 
     def is_editable_app(self):
         return self.app._is_editable_app()
@@ -180,6 +181,10 @@ def get_app() -> "App":
     assert ctx is not None
     return ctx.app
 
+def app_is_remote_comp() -> bool:
+    ctx = get_app_context()
+    assert ctx is not None
+    return ctx.app._is_remote_component
 
 @contextlib.contextmanager
 def enter_app_conetxt(app: "App"):

@@ -15,7 +15,7 @@
 from typing import Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Literal
 from ..mui import FlexBox, Component, NumberType, AppEvent
-from .. import plotly
+from .. import chart
 from ...core.component import DataClassWithUndefined, NumberType, Undefined, ValueType, undefined, as_dict_no_undefined
 import dataclasses
 
@@ -38,9 +38,9 @@ class HomogeneousMetricFigure(FlexBox):
     def __init__(self, width: int, height: int):
         super().__init__()
         self.props.flexFlow = "row wrap"
-        self.base_layout = plotly.Layout(width=width, height=height)
-        self.traces: List[plotly.Trace] = []
-        self._trace_dict: Dict[str, Dict[str, plotly.Trace]] = {}
+        self.base_layout = chart.Layout(width=width, height=height)
+        self.traces: List[chart.Trace] = []
+        self._trace_dict: Dict[str, Dict[str, chart.Trace]] = {}
 
     async def update_figures(self, keys_to_title: Dict[str, str]):
         if not keys_to_title:
@@ -48,7 +48,7 @@ class HomogeneousMetricFigure(FlexBox):
         plots: Dict[str, Component] = {}
         for k, v in keys_to_title.items():
             new_layout = dataclasses.replace(self.base_layout, title=v)
-            plots[k] = plotly.Plotly().prop(data=[], layout=new_layout)
+            plots[k] = chart.Plotly().prop(data=[], layout=new_layout)
         await self.update_childs(plots)
 
     async def clear_figures(self):
@@ -62,7 +62,7 @@ class HomogeneousMetricFigure(FlexBox):
                 trace = self._trace_dict[trace_id][k]
                 trace.visible = visible
                 plot = self[k]
-                assert isinstance(plot, plotly.Plotly)
+                assert isinstance(plot, chart.Plotly)
                 ev += plot.update_event(data=plot.props.data)
         return await self.send_and_wait(ev)
 
@@ -85,14 +85,14 @@ class HomogeneousMetricFigure(FlexBox):
         ev = AppEvent("", {})
         for k, v in metric_dict.items():
             plot = self[k]
-            assert isinstance(plot, plotly.Plotly)
+            assert isinstance(plot, chart.Plotly)
             if trace_id not in self._trace_dict:
                 self._trace_dict[trace_id] = {}
             if k not in self._trace_dict[trace_id]:
-                new_trace = plotly.Trace([], [], [],
+                new_trace = chart.Trace([], [], [],
                                          "scatter",
                                          "lines",
-                                         line=plotly.Line(color=color),
+                                         line=chart.Line(color=color),
                                          name=trace_id)
                 plot.props.data.append(new_trace)
                 self._trace_dict[trace_id][k] = new_trace
@@ -102,14 +102,14 @@ class HomogeneousMetricFigure(FlexBox):
             ev += plot.update_event(data=plot.props.data)
         return await self.send_and_wait(ev)
 
-    async def update_plotly_layout(self, layout: plotly.Layout):
+    async def update_plotly_layout(self, layout: chart.Layout):
         """merge new key to existed base_layout, only support depth-1 merge"""
         layout_dict = as_dict_no_undefined_first_level(layout)
         self.base_layout = dataclasses.replace(self.base_layout, **layout_dict)
         ev = AppEvent("", {})
         for k in self.props.childs:
             plot = self[k]
-            assert isinstance(plot, plotly.Plotly)
+            assert isinstance(plot, chart.Plotly)
             new_layout = dataclasses.replace(plot.props.layout, **layout_dict)
             plot.props.layout = new_layout
             ev += plot.update_event(layout=new_layout)

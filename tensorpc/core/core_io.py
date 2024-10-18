@@ -8,6 +8,7 @@ from typing_extensions import Literal
 
 import msgpack
 import numpy as np
+from tensorpc.core.tree_id import UniqueTreeId
 from tensorpc.protos_export import arraybuf_pb2, rpc_message_pb2, wsdef_pb2
 import traceback
 import numpy.typing as npt
@@ -54,6 +55,8 @@ def byte_size(obj: Union[bytes, np.ndarray]) -> int:
         return obj.nbytes
     elif isinstance(obj, bytes):
         return len(obj)
+    elif isinstance(obj, JSArrayBuffer):
+        return len(obj.data)
     else:
         raise NotImplementedError
 
@@ -89,6 +92,7 @@ NPDTYPE_TO_JSONARRAY_MAP: Dict[np.dtype, int] = {
 
 BYTES_JSONARRAY_CODE = 100
 BYTES_SKELETON_CODE = 101
+BYTES_JSONARRAY_ARRAYBUFFER_CODE = 102
 
 INV_NPDTYPE_TO_PB_MAP = _inv_map(NPDTYPE_TO_PB_MAP)
 INV_NPDTYPE_TO_JSONARRAY_MAP = _inv_map(NPDTYPE_TO_JSONARRAY_MAP)
@@ -104,6 +108,11 @@ INV_NPBYTEORDER_TO_PB_MAP: Dict["arraybuf_pb2.dtype.ByteOrder",
                                 Literal["=", "<", ">",
                                         "|"]] = _inv_map(NPBYTEORDER_TO_PB_MAP)
 
+class JSArrayBuffer:
+    def __init__(self, data: bytes, to_uint8array: bool = False) -> None:
+        assert isinstance(data, bytes)
+        self.data = data
+        self.dtype_code = BYTES_JSONARRAY_CODE if to_uint8array else BYTES_JSONARRAY_ARRAYBUFFER_CODE
 
 def bytes2pb(data: bytes, send_data=True) -> arraybuf_pb2.ndarray:
     dtype = arraybuf_pb2.dtype.CustomBytes
@@ -137,9 +146,11 @@ def array2pb(array: npt.NDArray, send_data=True) -> arraybuf_pb2.ndarray:
     return pb
 
 
-def pb2data(buf: arraybuf_pb2.ndarray) -> Union[np.ndarray, bytes]:
+def pb2data(buf: arraybuf_pb2.ndarray) -> Union[np.ndarray, bytes, JSArrayBuffer]:
     if buf.dtype.type == arraybuf_pb2.dtype.CustomBytes:
         return buf.data
+    elif buf.dtype.type == arraybuf_pb2.dtype.Base64: # TODO change name
+        return JSArrayBuffer(buf.data)
     byte_order = INV_NPBYTEORDER_TO_PB_MAP[buf.dtype.byte_order]
     dtype = INV_NPDTYPE_TO_PB_MAP[buf.dtype.type].newbyteorder(byte_order)
     res = np.frombuffer(buf.data, dtype).reshape(list(buf.shape))
@@ -155,12 +166,14 @@ def pb2meta(buf: arraybuf_pb2.ndarray) -> Tuple[List[int], np.dtype]:
     return (shape, dtype)
 
 
-def data2pb(array_or_bytes: Union[bytes, np.ndarray],
+def data2pb(array_or_bytes: Union[bytes, np.ndarray, JSArrayBuffer],
             send_data=True) -> arraybuf_pb2.ndarray:
     if isinstance(array_or_bytes, np.ndarray):
         return array2pb(array_or_bytes, send_data)
     elif isinstance(array_or_bytes, bytes):
         return bytes2pb(array_or_bytes, send_data)
+    elif isinstance(array_or_bytes, JSArrayBuffer):
+        return bytes2pb(array_or_bytes.data, send_data)
     else:
         raise NotImplementedError("only support ndarray/bytes.")
 
@@ -258,7 +271,12 @@ def to_protobuf_stream(data_list: List[Any],
             data_bytes = arg
             shape = ()
             length = len(data_bytes)
-
+        elif isinstance(arg, JSArrayBuffer):
+            data_dtype = arraybuf_pb2.dtype(
+                type=arraybuf_pb2.dtype.Base64)
+            data_bytes = arg.data
+            shape = ()
+            length = len(data_bytes)
         else:
             raise NotImplementedError
         # data = ref_buf.data
@@ -309,7 +327,7 @@ def is_json_index(data):
 
 def _extract_arrays_from_data(arrays,
                               data,
-                              object_classes=(np.ndarray, bytes),
+                              object_classes=(np.ndarray, bytes, JSArrayBuffer),
                               json_index=False):
     # can't use abc.Sequence because string is sequence too.
     data_skeleton: Optional[Union[List[Any], Dict[str, Any], Placeholder]]
@@ -345,6 +363,9 @@ def _extract_arrays_from_data(arrays,
         return data_skeleton
     elif isinstance(data, JsonOnlyData):
         return data.data
+    elif isinstance(data, UniqueTreeId):
+        # we delay UniqueTreeId conversion here to allow modify uid
+        return data.uid_encoded
     else:
         data_skeleton = None
         if isinstance(data, object_classes):
@@ -359,9 +380,9 @@ def _extract_arrays_from_data(arrays,
 
 
 def extract_arrays_from_data(data,
-                             object_classes=(np.ndarray, bytes),
+                             object_classes=(np.ndarray, bytes, JSArrayBuffer),
                              json_index=False):
-    arrays: List[Union[np.ndarray, bytes]] = []
+    arrays: List[Union[np.ndarray, bytes, JSArrayBuffer]] = []
     data_skeleton = _extract_arrays_from_data(arrays,
                                               data,
                                               object_classes=object_classes,
@@ -519,9 +540,12 @@ def data_to_pb_shmem(data, shared_mem, multi_thread=False, align_nbit=0):
     array_buffers = []
     for i in range(len(arrays)):
         arr = arrays[i]
-        if isinstance(arr, bytes):
-            sum_array_nbytes += len(arrays[i])
-            array_buffers.append((arrays[i], len(arrays[i])))
+        if isinstance(arr, (bytes, memoryview, bytearray)):
+            sum_array_nbytes += len(arr)
+            array_buffers.append((arr, len(arr)))
+        elif isinstance(arr, JSArrayBuffer):
+            sum_array_nbytes += len(arr.data)
+            array_buffers.append((arr.data, len(arr.data)))
         else:
             if not arr.flags['C_CONTIGUOUS']:
                 arrays[i] = np.ascontiguousarray(arr)
@@ -595,13 +619,17 @@ def dumps(obj, multi_thread=False, buffer=None, use_bytearray=False):
     sum_array_nbytes = 0
     array_buffers = []
     for i in range(len(arrays)):
-        if isinstance(arrays[i], bytes):
-            sum_array_nbytes += len(arrays[i])
-            array_buffers.append((arrays[i], len(arrays[i])))
+        arr = arrays[i]
+        if isinstance(arr, (bytes, memoryview, bytearray)):
+            sum_array_nbytes += len(arr)
+            array_buffers.append((arr, len(arr)))
+        elif isinstance(arr, JSArrayBuffer):
+            sum_array_nbytes += len(arr.data)
+            array_buffers.append((arr.data, len(arr.data)))
         else:
             # ascontiguous will convert scalar to 1-D array. be careful.
-            if not arrays[i].flags['C_CONTIGUOUS']:
-                arrays[i] = np.ascontiguousarray(arrays[i])
+            if not arr.flags['C_CONTIGUOUS']:
+                arrays[i] = np.ascontiguousarray(arr)
 
             sum_array_nbytes += arrays[i].nbytes
             array_buffers.append((arrays[i].view(np.uint8), arrays[i].nbytes))
@@ -761,7 +789,7 @@ class SocketMessageEncoder:
     def __init__(
         self, data, skeleton_size_limit: int = int(1024 * 1024 * 3.6)) -> None:
         arrays, data_skeleton = extract_arrays_from_data(data, json_index=True)
-        self.arrays: List[Union[np.ndarray, bytes]] = arrays
+        self.arrays: List[Union[np.ndarray, bytes, JSArrayBuffer]] = arrays
         self.data_skeleton = data_skeleton
         self._total_size = 0
         self._arr_metadata: List[Tuple[int, List[int]]] = []
@@ -770,6 +798,9 @@ class SocketMessageEncoder:
                 self._total_size += arr.nbytes
                 self._arr_metadata.append(
                     (NPDTYPE_TO_JSONARRAY_MAP[arr.dtype], list(arr.shape)))
+            elif isinstance(arr, JSArrayBuffer):
+                self._total_size += len(arr.data)
+                self._arr_metadata.append((arr.dtype_code, [len(arr.data)]))
             else:
                 self._total_size += len(arr)
                 self._arr_metadata.append((BYTES_JSONARRAY_CODE, [len(arr)]))
@@ -808,12 +839,15 @@ class SocketMessageEncoder:
             binary_view[1:5] = cnt_arr.tobytes()
             binary_view[5:req_msg_size + 5] = req.SerializeToString()
             start = req_msg_size + 5
-
+    
             for arr in self.arrays:
                 if isinstance(arr, np.ndarray):
                     buff2 = arr.reshape(-1).view(np.uint8).data
                     binary_view[start:start + arr.nbytes] = buff2
                     start += arr.nbytes
+                elif isinstance(arr, JSArrayBuffer):
+                    binary_view[start:start + len(arr.data)] = arr.data
+                    start += len(arr.data)
                 else:
                     # bytes
                     binary_view[start:start + len(arr)] = arr
@@ -865,6 +899,9 @@ class SocketMessageEncoder:
             if isinstance(arr, np.ndarray):
                 size = arr.nbytes
                 memview = arr.reshape(-1).view(np.uint8).data
+            elif isinstance(arr, JSArrayBuffer):
+                size = len(arr.data)
+                memview = arr.data
             else:
                 size = len(arr)
                 memview = memoryview(arr)
@@ -926,7 +963,7 @@ def parse_array_of_chunked_message(req: wsdef_pb2.Header, chunks: List[bytes]):
     # print("START", chunk_header_length)
     arrs: List[Union[bytes, np.ndarray]] = []
     for dtype_jarr, shape in meta:
-        if dtype_jarr == BYTES_JSONARRAY_CODE:
+        if dtype_jarr == BYTES_JSONARRAY_CODE or dtype_jarr == BYTES_JSONARRAY_ARRAYBUFFER_CODE:
             data = np.empty(shape, np.uint8)
             data_buffer = data.reshape(-1).view(np.uint8).data
             size = shape[0]
@@ -955,7 +992,7 @@ def parse_array_of_chunked_message(req: wsdef_pb2.Header, chunks: List[bytes]):
                                                     dtype=np.int32)[0]
                 chunk_size = len(cur_chunk) - 5 - chunk_header_length
                 cur_chunk_start = 5 + chunk_header_length
-        if dtype_jarr == BYTES_JSONARRAY_CODE:
+        if dtype_jarr == BYTES_JSONARRAY_CODE or dtype_jarr == BYTES_JSONARRAY_ARRAYBUFFER_CODE:
             arrs.append(data.tobytes())
         else:
             arrs.append(data)
@@ -972,7 +1009,7 @@ def parse_message_chunks(header: TensoRPCHeader, chunks: List[bytes]):
         start = 0
         arrs: List[Union[npt.NDArray, bytes]] = []
         for dtype_jarr, shape in meta:
-            if dtype_jarr == BYTES_JSONARRAY_CODE:
+            if dtype_jarr == BYTES_JSONARRAY_CODE or dtype_jarr == BYTES_JSONARRAY_ARRAYBUFFER_CODE:
                 arrs.append(data_arr[start:start + shape[0]])
                 start += shape[0]
             else:
