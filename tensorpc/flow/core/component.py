@@ -2807,7 +2807,6 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                 app_url = get_primary_ip()
             await self.remote_call(serv_names.REMOTE_COMP_MOUNT_APP, 10, node_uid, self._key,
                                    app_url, app_serv_meta.grpc_port, prefixes)
-
             layout, root_comp_uid = await self.get_layout_dict()
             # first event: update layout from remote
             update_comp_ev = self.create_update_comp_event(layout, [])

@@ -33,7 +33,7 @@ class BreakpointDebugPanel(mui.FlexBox):
             self.header,
             self.header_actions,
         ]).prop(paddingLeft="4px", alignItems="center", )
-        self.tree_viewer = ObjectInspector(show_terminal=False, default_sizes=[100, 100])
+        self.tree_viewer = ObjectInspector(show_terminal=False, default_sizes=[100, 100], with_builtins=False)
         self.content_container = mui.VBox([
             self.tree_viewer.prop(flex=1),
         ]).prop(flex=1)

@@ -34,11 +34,20 @@ class DebugServerProcessMeta:
 
 def list_all_dbg_server_in_machine():
     res: List[DebugServerProcessMeta] = []
-    for proc in psutil.process_iter(['pid', 'name']):
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
         proc_name = proc.info["name"]
+        proc_cmdline = proc.info["cmdline"]
         if proc_name.startswith(TENSORPC_BG_PROCESS_NAME_PREFIX):
             parts = proc_name.split("-")[1:]
             meta = DebugServerProcessMeta(str(proc.info["pid"]), proc_name,
+                                          proc.info["pid"], parts[-1],
+                                          parts[0], int(parts[1]))
+            res.append(meta)
+            continue 
+        if proc_cmdline and proc_cmdline[0].startswith(TENSORPC_BG_PROCESS_NAME_PREFIX):
+            # some platform need cmdline
+            parts = proc_cmdline[0].split("-")[1:]
+            meta = DebugServerProcessMeta(str(proc.info["pid"]), proc_cmdline[0],
                                           proc.info["pid"], parts[-1],
                                           parts[0], int(parts[1]))
             res.append(meta)
@@ -58,7 +67,13 @@ class MasterDebugPanel(mui.FlexBox):
         assert not InWindows, "MasterDebugPanel is not supported in Windows due to setproctitle."
         name = mui.ListItemText("").prop(
             primaryTypographyProps=mui.TypographyProps(
-                variant="body1", fontFamily=CodeStyles.fontFamily))
+                variant="body1", fontFamily=CodeStyles.fontFamily,
+                overflow="hidden",
+                whiteSpace="nowrap", textOverflow="ellipsis"),
+            secondaryTypographyProps=mui.TypographyProps(
+                variant="caption", fontFamily=CodeStyles.fontFamily,
+                overflow="hidden",
+                whiteSpace="nowrap", textOverflow="ellipsis"))
         name.set_override_props(value="server_id", secondary="secondary_name")
         remote_server_item = mui.ListItemButton([
             name,
@@ -73,10 +88,10 @@ class MasterDebugPanel(mui.FlexBox):
             dense=False,
             disablePadding=True,
             secondaryIconButtonProps=[
-                mui.IconButtonBaseProps(
-                    name=ServerItemActions.RELEASE_BREAKPOINT.value,
-                    icon=mui.IconType.PlayArrow,
-                    size="small"),
+                # mui.IconButtonBaseProps(
+                #     name=ServerItemActions.RELEASE_BREAKPOINT.value,
+                #     icon=mui.IconType.PlayArrow,
+                #     size="small"),
                 mui.IconButtonBaseProps(
                     name=ServerItemActions.UNMOUNT_REMOTE_SERVER.value,
                     icon=mui.IconType.Close,
@@ -167,10 +182,11 @@ class MasterDebugPanel(mui.FlexBox):
         meta = self._current_metas[indexes[0]]
         if self._current_mount_uid == meta.uid:
             return
-        await self._remote_comp_container.set_new_layout([
-            mui.RemoteBoxGrpc("localhost", meta.port,
-                              TENSORPC_DBG_FRAME_INSPECTOR_KEY).prop(flex=1)
-        ])
+        async with self._serv_list_lock:
+            await self._remote_comp_container.set_new_layout([
+                mui.RemoteBoxGrpc("localhost", meta.port,
+                                TENSORPC_DBG_FRAME_INSPECTOR_KEY).prop(flex=1)
+            ])
         self._current_mount_uid = meta.uid
 
     async def _scan_loop(self, shutdown_ev: asyncio.Event):
@@ -199,7 +215,9 @@ class MasterDebugPanel(mui.FlexBox):
                     frame_meta: Optional[DebugFrameMeta] = await simple_remote_call_async(
                         meta.url_with_port, dbg_serv_names.DBG_CURRENT_FRAME_META, rpc_timeout=1)
                     if frame_meta is not None:
-                        meta.secondary_name = f"{frame_meta.name}:{frame_meta.lineno}"
+                        meta.secondary_name = f"{meta.pid}|{frame_meta.name}:{frame_meta.lineno}"
+                    else:
+                        meta.secondary_name = f"{meta.pid}|running"
                 except:
                     traceback.print_exc()
                     continue
@@ -225,11 +243,12 @@ class MasterDebugPanel(mui.FlexBox):
         indexes = ev.indexes
         assert not isinstance(indexes, mui.Undefined)
         action = ev.data
-        if action == ServerItemActions.RELEASE_BREAKPOINT.value:
-            await self.release_server_breakpoint(ev)
-        elif action == ServerItemActions.UNMOUNT_REMOTE_SERVER.value:
-            await self._remote_comp_container.set_new_layout({}) 
-            self._current_mount_uid = ""
+        async with self._serv_list_lock:
+            if action == ServerItemActions.RELEASE_BREAKPOINT.value:
+                await self.release_server_breakpoint(ev)
+            elif action == ServerItemActions.UNMOUNT_REMOTE_SERVER.value:
+                await self._remote_comp_container.set_new_layout({}) 
+                self._current_mount_uid = ""
 
     async def release_all_breakpoints(self):
         for meta in self._current_metas:
@@ -263,11 +282,9 @@ class MasterDebugPanel(mui.FlexBox):
         assert not isinstance(indexes, mui.Undefined)
         meta = self._current_metas[indexes[0]]
         url = meta.url_with_port
-        print(1)
         await simple_remote_call_async(url,
                                        dbg_serv_names.DBG_LEAVE_BREAKPOINT,
                                        rpc_timeout=1)
-        print(2)
         await self._update_remote_server_discover_lst()
 
     def _register_vscode_handler(self):

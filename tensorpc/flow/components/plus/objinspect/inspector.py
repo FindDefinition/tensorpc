@@ -80,7 +80,8 @@ class ObjectInspector(mui.FlexBox):
                  use_fast_tree: bool = False,
                  fixed_size: bool = False,
                  show_terminal: bool = True,
-                 default_sizes: Optional[List[mui.NumberType]] = None) -> None:
+                 default_sizes: Optional[List[mui.NumberType]] = None,
+                 with_builtins: bool = True) -> None:
 
         self.preview_container = mui.HBox([]).prop(overflow="auto",
                                                    flex=1,
@@ -164,7 +165,8 @@ class ObjectInspector(mui.FlexBox):
                                cared_types,
                                ignored_types,
                                use_fast_tree=use_fast_tree,
-                               fixed_size=fixed_size)
+                               fixed_size=fixed_size,
+                               with_builtins=with_builtins)
         layout: List[mui.MUIComponentType] = []
         if use_allotment:
             layout.append(

@@ -159,6 +159,7 @@ class FlexComponentBaseProps(BasicProps):
                       Undefined] = undefined
     wordBreak: Union[Literal["normal", "break-all", "keep-all", "break-word"],
                      Undefined] = undefined
+    textOverflow: Union[Literal["clip", "ellipsis"], Undefined] = undefined
     pointerEvents: Union[PointerEventsProperties, Undefined] = undefined
     transform: Union[str, Undefined] = undefined
 
@@ -4032,7 +4033,7 @@ class TanstackJsonLikeTreeProps(JsonLikeTreePropsBase):
     rowSelection: Dict[str, bool] = dataclasses.field(default_factory=dict)
     expanded: Union[bool, Dict[str,
                                bool]] = dataclasses.field(default_factory=dict)
-
+    globalFilter: Union[Undefined, str] = undefined
 
 T_tview_base_props = TypeVar("T_tview_base_props", bound=JsonLikeTreePropsBase)
 
@@ -4696,7 +4697,8 @@ class DataGridPropsBase:
     size: Union[Undefined, Literal["small", "medium"]] = undefined
     cellEdit: Union[Undefined, bool] = undefined
     rowSelection: Union[Undefined, bool] = undefined
-    enableFilter: Union[Undefined, bool] = undefined
+    enableColumnFilter: Union[Undefined, bool] = undefined
+    globalFilter: Union[Undefined, str] = undefined
     fullWidth: Union[Undefined, bool] = undefined
     tableLayout: Union[Undefined, Literal["auto", "fixed"]] = undefined
     tableSxProps: Union[Undefined, Dict[str, Any]] = undefined

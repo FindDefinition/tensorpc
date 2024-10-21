@@ -848,7 +848,8 @@ class ObjectTree(BasicObjectTree):
             use_fast_tree: bool = True,
             limit: int = 50,
             fixed_size: bool = False,
-            custom_tree_handler: Optional[CustomTreeItemHandler] = None
+            custom_tree_handler: Optional[CustomTreeItemHandler] = None,
+            with_builtins: bool = True,
     ) -> None:
         master_meta = MasterMeta()
         self._default_data_storage_nodes: Dict[str, DataStorageTreeItem] = {}
@@ -885,7 +886,8 @@ class ObjectTree(BasicObjectTree):
                          use_fast_tree,
                          fixed_size=fixed_size,
                          custom_tree_handler=custom_tree_handler)
-        self.root.update(default_builtins)
+        if with_builtins:
+            self.root.update(default_builtins)
 
     @mark_did_mount
     async def _on_mount(self):

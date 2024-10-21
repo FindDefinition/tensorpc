@@ -937,7 +937,7 @@ class ComplexCanvas(mui.FlexBox):
         dgrid = mui.DataGrid(column_defs, data_items).prop(idKey="id",
                                                            rowHover=True,
                                                            virtualized=True,
-                                                           enableFilter=True,
+                                                           enableColumnFilter=True,
                                                            size="small",
                                                            fullWidth=True)
 

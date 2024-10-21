@@ -99,7 +99,7 @@ class MatrixDataGridAppV1:
         )
         dgrid.prop(rowHover=True,
                    virtualized=True,
-                   enableFilter=True,
+                   enableColumnFilter=True,
                    tableLayout="fixed")
         dgrid.prop(tableSxProps={
             '& .MuiTableCell-sizeSmall': {

@@ -203,7 +203,7 @@ class NumpyArrayGrid(mui.FlexBox):
                    stickyHeader=False,
                    virtualized=True,
                    size="small",
-                   enableFilter=True,
+                   enableColumnFilter=True,
                    tableLayout="fixed",
                    headerMenuItems=[
                        mui.MenuItem("Scroll To Nan")
@@ -468,7 +468,7 @@ class NumpyArrayGridTable(mui.FlexBox):
                                  idKey="id",
                                  rowHover=True,
                                  virtualized=True,
-                                 enableFilter=True,
+                                 enableColumnFilter=True,
                                  size="small",
                                  fullWidth=True)
         dgrid.bind_prop(cbox, "contiguous")

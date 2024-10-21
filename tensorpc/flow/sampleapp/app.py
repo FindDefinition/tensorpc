@@ -1299,7 +1299,7 @@ class DataGridApp:
                     stickyHeader=False,
                     virtualized=False,
                     size="small",
-                    enableFilter=False).set_override_props(dataList="nested")
+                    enableColumnFilter=False).set_override_props(dataList="nested")
         ]).prop(width="100%", alignItems="center")
         # master_detail = mui.DataFlexBox(mui.HBox([
         #     mui.Typography().set_override_props(value="id"),
@@ -1330,7 +1330,7 @@ class DataGridApp:
             ]).prop(idKey="id",
                     rowHover=True,
                     virtualized=True,
-                    enableFilter=True)
+                    enableColumnFilter=True)
         # dgrid.event_fetch_detail.on(self._fetch_detail)
         dgrid.bind_prop(cbox, "protein")
         dgrid.bind_prop(input_cell, "name")
@@ -1398,7 +1398,7 @@ class DataGridProxyApp:
                              NumpyDataGridProxy(arr)).prop(idKey="id",
                                                            rowHover=True,
                                                            virtualized=True,
-                                                           enableFilter=True)
+                                                           enableColumnFilter=True)
         return mui.VBox([
             dgrid.prop(stickyHeader=False, virtualized=True, size="small"),
         ]).prop(width="100%", height="100%", overflow="hidden")
@@ -1444,7 +1444,7 @@ class MatrixDataGridApp:
         )
         dgrid.prop(rowHover=True,
                    virtualized=True,
-                   enableFilter=True,
+                   enableColumnFilter=True,
                    tableLayout="fixed")
         dgrid.prop(tableSxProps={
             '& .MuiTableCell-sizeSmall': {
