@@ -247,6 +247,7 @@ class FlowApp:
             currentUri=data["currentUri"],
             workspaceUri=data["workspaceUri"],
             selections=data["selections"] if "selections" in data else None,
+            selectedCode=data["selectedCode"] if "selectedCode" in data else None,
         )
         await self.app.handle_vscode_event(ev)
 

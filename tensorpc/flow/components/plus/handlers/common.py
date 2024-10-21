@@ -1,7 +1,7 @@
 import inspect
 from pathlib import PosixPath, WindowsPath
 import traceback
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import numpy as np
 import io
@@ -106,7 +106,7 @@ class TensorHandler(ObjectPreviewHandler):
         assert canvas is not None
         await canvas._unknown_visualization(self.obj_uid, res)
 
-    async def bind(self, obj, uid: str):
+    async def bind(self, obj, uid: Optional[str] = None):
         # bind np object, update all metadata
         qualname = "np.ndarray"
         device = None
@@ -147,14 +147,16 @@ class TensorHandler(ObjectPreviewHandler):
         else:
             raise NotImplementedError
         self.obj = obj
-        self.obj_uid = uid
+        if uid is not None:
+            self.obj_uid = uid
         ev = self.data_print.update_event(value="")
         ev += self.title.update_event(
             value=f"{qualname} shape = {list(self.obj.shape)}")
-        if uid in self._tensor_slices:
-            ev += self.slice_val.update_event(value=self._tensor_slices[uid])
-        else:
-            ev += self.slice_val.update_event(value="")
+        if uid is not None:
+            if uid in self._tensor_slices:
+                ev += self.slice_val.update_event(value=self._tensor_slices[uid])
+            else:
+                ev += self.slice_val.update_event(value="")
         await self.send_and_wait(ev)
         tags = [
             mui.Chip(str(dtype)).prop(size="small", clickable=False),
@@ -198,7 +200,7 @@ class StringHandler(ObjectPreviewHandler):
                                             whiteSpace="pre-wrap")
         super().__init__([self.text])
 
-    async def bind(self, obj: str, uid: str):
+    async def bind(self, obj: str, uid: Optional[str] = None):
         if not isinstance(obj, str):
             str_obj = str(obj)
         else:
@@ -221,7 +223,7 @@ class ObservedFunctionHandler(ObjectPreviewHandler):
              mui.Divider().prop(padding="3px"), self.path])
         self.prop(flexDirection="column")
 
-    async def bind(self, obj: ObservedFunction, uid: str):
+    async def bind(self, obj: ObservedFunction, uid: Optional[str] = None):
         await self.qualname.write(obj.qualname)
         await self.path.write(obj.path)
 
@@ -234,7 +236,7 @@ class DataclassesHandler(ObjectPreviewHandler):
         super().__init__([self.cfg_ctrl_container])
         self.prop(flexDirection="column", flex=1)
 
-    async def bind(self, obj: Any, uid: str):
+    async def bind(self, obj: Any, uid: Optional[str] = None):
         # for uncontrolled component, use react_key to force remount.
         # TODO currently no way to update if obj dataclass def is changed with same uid.
         panel = ConfigPanelV2(obj).prop(reactKey=uid)
@@ -275,7 +277,7 @@ class DefaultHandler(ObjectPreviewHandler):
             string = string[:_MAX_STRING_IN_DETAIL] + "..."
         await self.data_print.write(string)
 
-    async def bind(self, obj: Any, uid: str):
+    async def bind(self, obj: Any, uid: Optional[str] = None):
         # bind np object, update all metadata
         self.obj = obj
         ev = self.data_print.update_event(value="")

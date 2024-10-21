@@ -21,6 +21,7 @@ from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.core.tracers.tracer import FrameResult, TraceEventType, Tracer
 from tensorpc.core.tree_id import UniqueTreeIdForTree
+from tensorpc.flow.components.plus.styles import CodeStyles
 from tensorpc.flow.core.appcore import Event, get_app, get_editable_app
 from tensorpc.flow.components import mui
 from tensorpc.flow.components import three
@@ -80,11 +81,24 @@ class ObjectInspector(mui.FlexBox):
                  fixed_size: bool = False,
                  show_terminal: bool = True,
                  default_sizes: Optional[List[mui.NumberType]] = None) -> None:
+
         self.preview_container = mui.HBox([]).prop(overflow="auto",
-                                                   padding="3px",
                                                    flex=1,
                                                    width="100%",
-                                                   height="100%")
+                                                   height="100%",
+                                                   alignItems="stretch")
+        self._preview_header = mui.Typography("").prop(variant="caption",
+                                                       fontFamily=CodeStyles.fontFamily)
+        self.preview_container_parent = mui.VBox([
+            self._preview_header,
+            mui.Divider(),
+            self.preview_container,
+        ]).prop(overflow="hidden",
+                padding="3px",
+                flex=1,
+                width="100%",
+                height="100%")
+
         self.fast_layout_container = mui.HBox([]).prop(overflow="auto",
                                                        padding="3px",
                                                        flex=1,
@@ -107,7 +121,7 @@ class ObjectInspector(mui.FlexBox):
         tabdefs = [
             mui.TabDef("",
                         "1",
-                        self.preview_container,
+                        self.preview_container_parent,
                         icon=mui.IconType.Preview,
                         tooltip="preview layout of item"),
             mui.TabDef(
@@ -119,7 +133,7 @@ class ObjectInspector(mui.FlexBox):
                 "custom layout (appctx.inspector.set_custom_layout_sync)"
             ),
         ]
-        default_tab = "2"
+        default_tab = "1"
         if show_terminal:
             tabdefs.append(mui.TabDef("",
                         "3",
@@ -194,46 +208,9 @@ class ObjectInspector(mui.FlexBox):
     async def get_object_by_uid(self, uid: str):
         return await self.tree.get_object_by_uid(uid)
 
-    async def _on_select(self, uid_list: Union[List[str], str, Dict[str,
-                                                                    bool]]):
-        if isinstance(uid_list, list):
-            # node id list may empty
-            if not uid_list:
-                return
-            uid = uid_list[0]
-        elif isinstance(uid_list, dict):
-            if not uid_list:
-                return
-            uid = list(uid_list.keys())[0]
-        else:
-            uid = uid_list
-        uid_obj = UniqueTreeIdForTree(uid)
-        nodes = self.tree._objinspect_root._get_node_by_uid_trace(
-            uid_obj.parts)
-        node = nodes[-1]
-        if node.type in FOLDER_TYPES:
-            await self.preview_container.set_new_layout([])
-            return
-        obj, found = await self.tree._get_obj_by_uid_with_folder(uid, nodes)
-        if not found:
-            raise ValueError(
-                f"your object {uid} is invalid, may need to reflesh")
-        obj_type: Type = type(obj)
-        is_dcls = dataclasses.is_dataclass(obj)
-
+    async def set_external_preview_layout(self, obj: Any, uid: Optional[str] = None, root: Optional[UserObjTreeProtocol] = None, header: Optional[str] = None):
         preview_layout: Optional[mui.FlexBox] = None
-
-        objs, found = await self.tree._get_obj_by_uid_trace(uid_obj, nodes)
-        # determine objtree root
-        # we don't require your tree is strictly nested,
-        # you can have a tree with non-tree-item container,
-        # e.g. treeitem-anyobject-treeitem
-        assert found, f"shouldn't happen, {uid}"
-        root: Optional[UserObjTreeProtocol] = None
-        for obj_iter_val in objs:
-            if isinstance(obj_iter_val, tuple(USER_OBJ_TREE_TYPES)):
-                root = obj_iter_val
-                break
+        obj_type: Type = type(obj)
 
         # preview layout is checked firstly, then preview handler.
         if self._cached_preview_handler.is_in_cache(obj):
@@ -244,7 +221,7 @@ class ObjectInspector(mui.FlexBox):
                 obj_type, True, include_base=True)
             special_methods = FlowSpecialMethods(metas)
             if special_methods.create_preview_layout is not None:
-                if uid in self._cached_preview_layouts:
+                if uid is not None and uid in self._cached_preview_layouts:
                     preview_layout, obj_id = self._cached_preview_layouts[uid]
                     if obj_id != id(obj):
                         preview_layout = None
@@ -269,29 +246,71 @@ class ObjectInspector(mui.FlexBox):
                 preview_layout.set_flow_event_context_creator(
                     lambda: root.enter_context(root))
             # preview_layout.event_emitter.remove_listener()
-            if self._current_preview_layout is None:
-                get_editable_app().observe_layout(
-                    preview_layout,
-                    partial(self._on_preview_layout_reload,
-                            uid=uid,
-                            obj_id=id(obj)))
-            else:
-                # get_app()._get_self_as_editable_app()._flowapp_remove_observer(
-                #     self._current_preview_layout)
-                get_editable_app().observe_layout(
-                    preview_layout,
-                    partial(self._on_preview_layout_reload,
-                            uid=uid,
-                            obj_id=id(obj)))
+            if uid is not None:
+                if self._current_preview_layout is None:
+                    get_editable_app().observe_layout(
+                        preview_layout,
+                        partial(self._on_preview_layout_reload,
+                                uid=uid,
+                                obj_id=id(obj)))
+                else:
+                    get_editable_app().observe_layout(
+                        preview_layout,
+                        partial(self._on_preview_layout_reload,
+                                uid=uid,
+                                obj_id=id(obj)))
             self._current_preview_layout = preview_layout
-            self._cached_preview_layouts[uid] = (preview_layout, id(obj))
+            if uid is not None:
+                self._cached_preview_layouts[uid] = (preview_layout, id(obj))
             # self.__install_preview_event_listeners(preview_layout)
             await self.preview_container.set_new_layout([preview_layout])
         else:
             childs = list(self.preview_container._child_comps.values())
             if not childs or childs[0] is not handler:
                 await self.preview_container.set_new_layout([handler])
-            await handler.bind(obj, uid)
+            await handler.bind(obj, None)
+        if header is not None:
+            await self._preview_header.write(header)
+
+    async def _on_select(self, uid_list: Union[List[str], str, Dict[str,
+                                                                    bool]]):
+        if isinstance(uid_list, list):
+            # node id list may empty
+            if not uid_list:
+                return
+            uid = uid_list[0]
+        elif isinstance(uid_list, dict):
+            if not uid_list:
+                return
+            uid = list(uid_list.keys())[0]
+        else:
+            uid = uid_list
+        uid_obj = UniqueTreeIdForTree(uid)
+        nodes = self.tree._objinspect_root._get_node_by_uid_trace(
+            uid_obj.parts)
+        node = nodes[-1]
+        if node.type in FOLDER_TYPES:
+            await self.preview_container.set_new_layout([])
+            return
+        obj, found = await self.tree._get_obj_by_uid_with_folder(uid, nodes)
+        if not found:
+            raise ValueError(
+                f"your object {uid} is invalid, may need to reflesh")
+
+        objs, found = await self.tree._get_obj_by_uid_trace(uid_obj, nodes)
+        # determine objtree root
+        # we don't require your tree is strictly nested,
+        # you can have a tree with non-tree-item container,
+        # e.g. treeitem-anyobject-treeitem
+        assert found, f"shouldn't happen, {uid}"
+        root: Optional[UserObjTreeProtocol] = None
+        for obj_iter_val in objs:
+            if isinstance(obj_iter_val, tuple(USER_OBJ_TREE_TYPES)):
+                root = obj_iter_val
+                break
+        # ignore root part of uid
+        header = ".".join(uid_obj.parts[1:])
+        await self.set_external_preview_layout(obj, uid, root, header=header)
 
     async def _on_preview_layout_reload(self, layout: mui.FlexBox,
                                         create_layout: ServFunctionMeta,

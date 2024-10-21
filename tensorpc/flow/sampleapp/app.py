@@ -1785,6 +1785,13 @@ class RemoteDebugDevApp:
             mui.RemoteBoxGrpc("localhost", 54321, TENSORPC_DBG_FRAME_INSPECTOR_KEY).prop(flex=1),
         ]).prop(width="100%")
 
+class RemoteDebugPanelDevApp:
+    @mark_create_layout
+    def my_layout(self):
+        return mui.VBox([
+            plus.MasterDebugPanel().prop(flex=1),
+        ]).prop(width="100%")
+
 if __name__ == "__main__":
     from pydantic import (
         BaseModel,

@@ -4,7 +4,7 @@ from typing import Tuple, List
 import random
 def process_func(q, ev):
     from tensorpc.core.bgserver import BACKGROUND_SERVER
-    port = BACKGROUND_SERVER.start_async()
+    port = BACKGROUND_SERVER.start_async(id="wtf-1")
     q.put(port)
     for i in range(10):
         if ev.is_set():
@@ -26,7 +26,7 @@ def process_func(q, ev):
     print("EXIT")
 def process_func2(q, ev):
     from tensorpc.core.bgserver import BACKGROUND_SERVER
-    port = BACKGROUND_SERVER.start_async()
+    port = BACKGROUND_SERVER.start_async(id="wtf-2")
     q.put(port)
     for i in range(10):
         if ev.is_set():
@@ -48,7 +48,7 @@ def process_func2(q, ev):
     print("EXIT")
 
 def multiprocess_main():
-    ctx = multiprocessing.get_context("spawn")
+    ctx = multiprocessing.get_context("fork")
     procs: List[Tuple[multiprocessing.Process, multiprocessing.Event]] = []
     robjs: List["RemoteManager"] = []
     for i in range(2):
@@ -94,4 +94,4 @@ def main():
     # BACKGROUND_SERVER.stop()
 
 if __name__ == "__main__":
-    main()
+    multiprocess_main()

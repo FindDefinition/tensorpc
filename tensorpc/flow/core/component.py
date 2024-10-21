@@ -403,6 +403,7 @@ class FrontendEventType(enum.IntEnum):
     DataGridRowRangeChanged = 73
     DataGridProxyLazyLoadRange = 74
 
+    # flow events
     FlowSelectionChange = 80
     FlowNodesInitialized = 81
     FlowEdgeConnection = 82
@@ -412,6 +413,9 @@ class FrontendEventType(enum.IntEnum):
     FlowPaneContextMenu = 86
     FlowNodeLogicChange = 87
     FlowEdgeLogicChange = 88
+
+    # data box events
+    DataBoxSecondaryActionClick = 90
 
     PlotlyClickData = 100
     PlotlyClickAnnotation = 101
@@ -2750,6 +2754,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
 
         self._is_remote_mounted: bool = False
 
+        self._mount_lock = asyncio.Lock()
+
     @property
     def is_remote_mounted(self):
         return self._is_remote_mounted
@@ -2779,7 +2785,9 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
 
     @marker.mark_did_mount
     async def mount_handler(self):
-        await self._reconnect_to_remote_comp()
+        async with self._mount_lock:
+            # avoid unmount during mount.
+            await self._reconnect_to_remote_comp()
 
     async def _reconnect_to_remote_comp(self):
         try:
@@ -2799,6 +2807,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                 app_url = get_primary_ip()
             await self.remote_call(serv_names.REMOTE_COMP_MOUNT_APP, 10, node_uid, self._key,
                                    app_url, app_serv_meta.grpc_port, prefixes)
+
             layout, root_comp_uid = await self.get_layout_dict()
             # first event: update layout from remote
             update_comp_ev = self.create_update_comp_event(layout, [])
@@ -2817,11 +2826,12 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
 
     @marker.mark_will_unmount
     async def unmount_handler(self):
-        if self._is_remote_mounted:
-            self._is_remote_mounted = False
-            await self.remote_call(serv_names.REMOTE_COMP_UNMOUNT_APP,
-                                   2, self._key)
-            await self.shutdown_remote_object()
+        async with self._mount_lock:
+            if self._is_remote_mounted:
+                self._is_remote_mounted = False
+                await self.remote_call(serv_names.REMOTE_COMP_UNMOUNT_APP,
+                                    2, self._key)
+                await self.shutdown_remote_object()
 
     async def disconnect(self):
         await self.shutdown_remote_object()

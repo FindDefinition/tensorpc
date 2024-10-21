@@ -116,7 +116,7 @@ class AsyncRemoteObject(object):
     async def remote_call(self,
                           key: str,
                           *args,
-                          timeout: Optional[int] = None,
+                          rpc_timeout: Optional[int] = None,
                           rpc_callback="",
                           rpc_flags: int = rpc_message_pb2.PickleArray,
                           **kwargs) -> Any:
@@ -125,12 +125,12 @@ class AsyncRemoteObject(object):
                                                     arrays=data_to_be_send,
                                                     callback=rpc_callback,
                                                     flags=rpc_flags)
-        return self.parse_remote_response(await self.stub.RemoteCall(request))
+        return self.parse_remote_response(await self.stub.RemoteCall(request, timeout=rpc_timeout))
 
     async def remote_json_call(self,
                                key: str,
                                *args,
-                               timeout: Optional[int] = None,
+                               rpc_timeout: Optional[int] = None,
                                rpc_callback="",
                                rpc_flags: int = rpc_message_pb2.JsonArray,
                                **kwargs) -> Any:
@@ -142,7 +142,7 @@ class AsyncRemoteObject(object):
                                                         flags=rpc_flags)
 
         return self.parse_remote_json_response(
-            await self.stub.RemoteJsonCall(request))
+            await self.stub.RemoteJsonCall(request, timeout=rpc_timeout))
 
     def parse_remote_json_response(self, response):
         self._check_remote_exception(response.exception)
@@ -438,15 +438,15 @@ class AsyncRemoteManager(AsyncRemoteObject):
         return await self.close()
 
 
-async def simple_remote_call_async(addr, key, *args, timeout=None, **kwargs):
+async def simple_remote_call_async(addr, key, *args, rpc_timeout=None, **kwargs):
     async with AsyncRemoteManager(addr) as robj:
-        return await robj.remote_call(key, *args, timeout=timeout, **kwargs)
+        return await robj.remote_call(key, *args, rpc_timeout=rpc_timeout, **kwargs)
 
 
-async def simple_chunk_call_async(addr, key, *args, **kwargs):
+async def simple_chunk_call_async(addr, key, *args, rpc_timeout=None, **kwargs):
     async with AsyncRemoteManager(addr) as robj:
         # await robj.wait_for_channel_ready()
-        return await robj.chunked_remote_call(key, *args, **kwargs)
+        return await robj.chunked_remote_call(key, *args, rpc_timeout=rpc_timeout, **kwargs)
 
 
 async def shutdown_server_async(addr):

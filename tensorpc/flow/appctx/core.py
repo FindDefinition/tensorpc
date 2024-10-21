@@ -108,6 +108,10 @@ async def data_storage_has_item(key: str,
     app = get_app()
     return await app.app_storage.data_storage_has_item(key, node_id, graph_id)
 
+async def copy_text_to_clipboard(data: str):
+    app = get_app()
+    return await app.copy_text_to_clipboard(data)
+
 async def get_vscode_storage():
     app = get_app()
     return await app.get_vscode_storage_lazy()

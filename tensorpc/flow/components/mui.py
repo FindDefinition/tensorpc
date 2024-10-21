@@ -353,39 +353,6 @@ class Image(MUIComponentBase[ImageProps]):
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
 
-@dataclasses.dataclass
-class ListItemTextProps(MUIComponentBaseProps):
-    value: str = ""
-    disableTypography: Union[bool, Undefined] = undefined
-    inset: Union[bool, Undefined] = undefined
-
-
-class ListItemText(MUIComponentBase[ListItemTextProps]):
-
-    def __init__(self, init: str = "") -> None:
-        super().__init__(UIType.ListItemText, ListItemTextProps)
-        self.props.value = init
-
-    def get_sync_props(self) -> Dict[str, Any]:
-        res = super().get_sync_props()
-        res["value"] = self.props.value
-        return res
-
-    @property
-    def prop(self):
-        propcls = self.propcls
-        return self._prop_base(propcls, self)
-
-    @property
-    def update_event(self):
-        propcls = self.propcls
-        return self._update_props_base(propcls)
-
-    @property
-    def value(self):
-        return self.props.value
-
-
 _SEVERITY_TYPES: TypeAlias = Literal["error", "warning", "success", "info"]
 
 
@@ -585,6 +552,7 @@ class IconType(enum.IntEnum):
     TableView = 50
     Image = 51
     Merge = 52
+    DoubleArrow = 53
 
 
 @dataclasses.dataclass
@@ -609,6 +577,7 @@ class MenuItem:
 
 @dataclasses.dataclass
 class TooltipBaseProps:
+    tooltipMultiline: Union[Undefined, bool] = undefined
     tooltipPlacement: Union[_TooltipPlacement, Undefined] = undefined
     tooltipEnterDelay: Union[Undefined, NumberType] = undefined
     tooltipEnterNextDelay: Union[Undefined, NumberType] = undefined
@@ -670,6 +639,20 @@ class Icon(MUIComponentBase[IconProps]):
 
 
 @dataclasses.dataclass
+class IconButtonBaseProps(IconBaseProps, TooltipBaseProps):
+    """For internal use only, e.g. iconbutton in other components"""
+    muiColor: Union[_BtnGroupColor, Undefined] = undefined
+    disabled: Union[bool, Undefined] = undefined
+    size: Union[Literal["small", "medium", "large"], Undefined] = undefined
+    edge: Union[Literal["start", "end"], Undefined] = undefined
+    tooltip: Union[str, Undefined] = undefined
+    # if defined, will show a confirm dialog before executing the callback
+    confirmMessage: Union[str, Undefined] = undefined
+    confirmTitle: Union[str, Undefined] = undefined
+    # unique key in button list.
+    name: Union[str, Undefined] = undefined
+
+@dataclasses.dataclass
 class IconButtonProps(MUIComponentBaseProps, IconBaseProps, TooltipBaseProps):
 
     muiColor: Union[_BtnGroupColor, Undefined] = undefined
@@ -683,7 +666,6 @@ class IconButtonProps(MUIComponentBaseProps, IconBaseProps, TooltipBaseProps):
     # if defined, will show a confirm dialog before executing the callback
     confirmMessage: Union[str, Undefined] = undefined
     confirmTitle: Union[str, Undefined] = undefined
-    tooltipMultiline: Union[bool, Undefined] = undefined
 
 
 class IconButton(MUIComponentBase[IconButtonProps]):
@@ -1551,6 +1533,10 @@ class InputBaseProps(MUIComponentBaseProps):
     type: Union[Undefined, _HTMLInputType] = undefined
     debounce: Union[Undefined, NumberType] = undefined
     required: Union[Undefined, bool] = undefined
+    # change a prop in another component according to the value change of this component
+    # without send event to backend. e.g. filter a list or data grid
+    # format: (component, prop_name)
+    valueChangeTarget: Union[Undefined, Tuple[Component, str]] = undefined
 
 
 T_input_base_props = TypeVar("T_input_base_props", bound=InputBaseProps)
@@ -2993,6 +2979,40 @@ class TypographyProps(MUIComponentBaseProps):
     tooltipLeaveDelay: Union[Undefined, NumberType] = undefined
     className: Union[Undefined, str] = undefined
 
+@dataclasses.dataclass
+class ListItemTextProps(MUIComponentBaseProps):
+    value: str = ""
+    disableTypography: Union[bool, Undefined] = undefined
+    inset: Union[bool, Undefined] = undefined
+    secondary: Union[Undefined, str] = undefined
+    primaryTypographyProps: Union[TypographyProps, Undefined] = undefined
+    secondaryTypographyProps: Union[TypographyProps, Undefined] = undefined
+
+class ListItemText(MUIComponentBase[ListItemTextProps]):
+
+    def __init__(self, init: str = "") -> None:
+        super().__init__(UIType.ListItemText, ListItemTextProps)
+        self.props.value = init
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
+        return res
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    @property
+    def value(self):
+        return self.props.value
+
 
 @dataclasses.dataclass
 class LinkProps(MUIComponentBaseProps):
@@ -4428,6 +4448,25 @@ class MUIDataFlexBoxWithDndProps(MUIFlexBoxWithDndProps):
     idKey: str = "id"
     virtualized: Union[Undefined, bool] = undefined
 
+    # variant?: "default" | "list"
+    # filter?: string 
+    # filterKey?: string
+
+    # // for list only
+    # disablePadding?: boolean
+    # dense?: boolean
+    # divider?: boolean
+    # disableGutters?: boolean
+    variant: Union[Undefined, Literal["default", "list"]] = undefined
+    filter: Union[Undefined, str] = undefined
+    filterKey: Union[Undefined, str] = undefined
+
+    # for list only
+    disablePadding: Union[Undefined, bool] = undefined
+    dense: Union[Undefined, bool] = undefined
+    divider: Union[Undefined, bool] = undefined
+    disableGutters: Union[Undefined, bool] = undefined
+    secondaryIconButtonProps: Union[Undefined, List[IconButtonBaseProps]] = undefined
 
 @dataclasses.dataclass
 class DataUpdate:
@@ -4445,17 +4484,23 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps,
     class ChildDef:
         component: Component
 
-    def __init__(self, children: Component) -> None:
+    def __init__(self, children: Component, init_data_list: Optional[List[Dict[str, Any]]] = None) -> None:
         super().__init__(UIType.DataFlexBox,
                          MUIDataFlexBoxWithDndProps,
                          DataFlexBox.ChildDef(children),
                          allowed_events=[
+                             FrontendEventType.DataBoxSecondaryActionClick.value,
                              FrontendEventType.Drop.value,
                              FrontendEventType.DragCollect.value
                          ] + list(ALL_POINTER_EVENTS))
         # backend events
+        if init_data_list is not None:
+            self.props.dataList = init_data_list
         self.event_item_changed = self._create_emitter_event_slot(
             FrontendEventType.DataItemChange)
+        self.event_secondary_action_click = self._create_event_slot_noarg(
+            FrontendEventType.DataBoxSecondaryActionClick)
+
         self.event_click = self._create_event_slot_noarg(
             FrontendEventType.Click)
         self.event_double_click = self._create_event_slot(

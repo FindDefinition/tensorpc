@@ -1,6 +1,7 @@
 import asyncio
 import queue
-from typing import Optional
+from typing import Optional, Union
+import uuid
 from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
 from tensorpc.core.asyncserver import serve_service_core as serve_service_core_async
 
@@ -24,6 +25,9 @@ class BackgroundServer:
 
         self._service_core: Optional[ServiceCore] = None
 
+        self.server_id: Optional[str] = None
+        self.server_uuid: Optional[str] = None
+
     @property
     def service_core(self):
         assert self._service_core is not None, "you must start the server first"
@@ -33,9 +37,9 @@ class BackgroundServer:
     def is_started(self):
         return self._thread is not None and self._thread.is_alive()
 
-    def _try_set_proc_title(self, id: str):
+    def _try_set_proc_title(self, uid: str, id: str, status: int = 0):
         assert self.port > 0
-        title = f"{TENSORPC_BG_PROCESS_NAME_PREFIX}-{id}-{self.port}"
+        title = f"{TENSORPC_BG_PROCESS_NAME_PREFIX}-{id}-{self.port}-{status}-{uid}"
         try:
             import setproctitle  # type: ignore
             setproctitle.setproctitle(title)
@@ -69,14 +73,27 @@ class BackgroundServer:
                                         })
         self._thread.daemon = True
         self._thread.start()
+        uid = uuid.uuid4().hex # [:8]
+        self.server_uuid = uid
         if port < 0:
             port = port_res_queue.get(timeout=20)
         self.port = port
         if id is not None:
-            self._try_set_proc_title(id)
+            self.server_id = id
+            self._try_set_proc_title(uid, id)
         if wait_for_start:
             ev.wait()
         return port
+
+    def set_running_proc_status(self, status: Union[int, str]):
+        assert self.port > 0 and self.server_id is not None and self.server_uuid is not None
+        uid = self.server_uuid
+        title = f"{TENSORPC_BG_PROCESS_NAME_PREFIX}-{self.server_id}-{self.port}-{status}-{uid}"
+        try:
+            import setproctitle  # type: ignore
+            setproctitle.setproctitle(title)
+        except ImportError:
+            pass
 
     def stop(self):
         if self.is_started:
@@ -90,6 +107,9 @@ class BackgroundServer:
             self._thread.join()
             self._thread = None
             self._service_core = None
+            self.server_id = None
+            self.port = -1
+            self.server_uuid = None
 
     def execute_service(
         self,

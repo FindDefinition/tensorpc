@@ -845,7 +845,7 @@ class ObjectTree(BasicObjectTree):
             init: Optional[Any] = None,
             cared_types: Optional[Set[Type]] = None,
             ignored_types: Optional[Set[Type]] = None,
-            use_fast_tree: bool = False,
+            use_fast_tree: bool = True,
             limit: int = 50,
             fixed_size: bool = False,
             custom_tree_handler: Optional[CustomTreeItemHandler] = None

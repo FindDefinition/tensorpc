@@ -89,6 +89,35 @@ def find_toplevel_func_node_by_lineno(tree: ast.Module, lineno: int):
 
     return None
 
+def find_toplevel_func_node_container_by_lineno(tree: ast.Module, lineno: int):
+    # TODO should we check try block?
+    from collections import deque
+    todo: Deque[Tuple[List[ast.AST],
+                      List[ast.ClassDef]]] = deque([([*tree.body], [])])
+    while todo:
+        body, cur_parent_ns = todo.popleft()
+        for node in body:
+            if isinstance(node, (ast.ClassDef)):
+                todo.append(([*node.body], [*cur_parent_ns, node]))
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                func_lineno = node.lineno
+                deco_list = node.decorator_list
+                # fix lineno to match inspect
+                if len(deco_list) > 0:
+                    func_lineno = min([d.lineno for d in deco_list])
+                func_end_lineno = node.end_lineno
+                if func_end_lineno is None:
+                    in_range = (func_lineno <= lineno)
+                else:
+                    in_range = (func_lineno <= lineno) and (lineno <= func_end_lineno) 
+                if in_range:
+                    return [*cur_parent_ns, node]
+                else:
+                    break
+            elif isinstance(node, (ast.If, )):
+                todo.append(([*node.body], cur_parent_ns))
+                todo.append(([*node.orelse], cur_parent_ns))
+    return None
 
 def split_func_id(
         fid: str,

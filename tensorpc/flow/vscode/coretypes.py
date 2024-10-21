@@ -38,6 +38,7 @@ class VscodeTensorpcMessage:
     currentUri: str
     workspaceUri: str
     selections: Optional[List[Selection]] = None
+    selectedCode: Optional[str] = None
 
     def get_workspace_path(self):
         if self.workspaceUri == "":

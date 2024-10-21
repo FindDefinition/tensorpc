@@ -70,6 +70,8 @@ _ONEARG_DATAGRID_EVENTS = set([
     FrontendEventType.DataGridFetchDetail.value,
     FrontendEventType.DataGridRowRangeChanged.value,
     FrontendEventType.DataGridProxyLazyLoadRange.value,
+
+    FrontendEventType.DataBoxSecondaryActionClick.value,
 ])
 
 _ONEARG_EVENTS = set(
