@@ -19,6 +19,7 @@ from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator,
                     get_origin)
 
 from typing_extensions import get_type_hints, is_typeddict, Annotated, TypeAlias
+from tensorpc.flow.components.plus.styles import CodeStyles
 from tensorpc.flow.core.appcore import run_coro_sync
 
 from tensorpc import compat
@@ -98,7 +99,7 @@ def _default_compute_flow_css():
         },
         f".{ComputeFlowClasses.HeaderIcons}": {
             "flex": 1,
-            "justifyContent": "end",
+            "justifyContent": "flex-end",
             "paddingRight": "4px",
             "alignItems": "center",
         },
@@ -120,8 +121,7 @@ def _default_compute_flow_css():
             "minHeight": "24px",
         },
         f".{ComputeFlowClasses.CodeTypography}": {
-            "fontFamily":
-            "IBMPlexMono,SFMono-Regular,Consolas,Liberation Mono,Menlo,Courier,monospace",
+            "fontFamily": CodeStyles.fontFamily,
         },
         f".{ComputeFlowClasses.OutputHandle}": {
             "position": "absolute",

@@ -5,6 +5,7 @@ from tensorpc.core import inspecttools
 from tensorpc import prim 
 from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY
 from tensorpc.dbg.serv_names import serv_names
+from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
 from tensorpc.flow.serv_names import serv_names as app_serv_names
 
@@ -19,10 +20,9 @@ class BackgroundDebugTools:
         assert prim.is_loopback_call(), "this function should only be called in main thread"
         self._frame = frame
         self._event = event
-        local_vars_for_inspect = self._get_filtered_local_vars(frame)
         obj = prim.get_service(app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(TENSORPC_DBG_FRAME_INSPECTOR_KEY)
-        assert isinstance(obj, BasicObjectTree)
-        await obj.set_object_dict(local_vars_for_inspect)
+        assert isinstance(obj, BreakpointDebugPanel)
+        await obj.set_breakpoint_frame_meta(frame, self.leave_breakpoint)
 
     async def leave_breakpoint(self):
         """should only be called from remote"""
@@ -32,8 +32,8 @@ class BackgroundDebugTools:
             self._event = None
         self._frame = None 
         obj = prim.get_service(app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(TENSORPC_DBG_FRAME_INSPECTOR_KEY)
-        assert isinstance(obj, BasicObjectTree)
-        await obj.set_object_dict({})
+        assert isinstance(obj, BreakpointDebugPanel)
+        await obj.leave_breakpoint()
 
     def _get_filtered_local_vars(self, frame: FrameType):
         local_vars = frame.f_locals.copy()

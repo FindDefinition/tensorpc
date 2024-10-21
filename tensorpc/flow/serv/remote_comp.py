@@ -5,6 +5,7 @@ import time
 import traceback
 from typing import Any, Dict, List, Optional
 import tensorpc
+from tensorpc.core.asyncclient import simple_chunk_call_async
 from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.core.tree_id import UniqueTreeId
 from tensorpc.core import marker
@@ -301,6 +302,12 @@ class RemoteComponentService:
     @marker.mark_server_event(event_type=ServiceEventType.Exit)
     async def on_exit(self):
         for app_obj in self._app_objs.values():
+            try:
+                if app_obj.mounted_app_meta is not None:
+                    prefixes = app_obj.mounted_app_meta.prefixes
+                    await simple_chunk_call_async(app_obj.mounted_app_meta.url_with_port, serv_names.APP_REMOTE_COMP_SHUTDOWN, prefixes)
+            except:
+                traceback.print_exc()
             app_obj.shutdown_ev.set()
             if app_obj.send_loop_task is not None:
                 await app_obj.send_loop_task
@@ -309,4 +316,3 @@ class RemoteComponentService:
                 await app_obj.app.app_terminate_async()
             except:
                 traceback.print_exc()
-

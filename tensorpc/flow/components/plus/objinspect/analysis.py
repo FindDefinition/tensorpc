@@ -24,7 +24,7 @@ from tensorpc.flow.jsonlike import (IconButtonData, TreeItem,
 STRING_LENGTH_LIMIT = 500
 _IGNORE_ATTR_NAMES = set(["_abc_impl", "__abstractmethods__"])
 
-SET_CONTAINER_LIMIT_SIZE = 50
+SET_CONTAINER_LIMIT_SIZE = 100
 
 
 class ButtonType(enum.Enum):
@@ -122,7 +122,8 @@ class ObjectTreeParser:
                 obj_list = list(obj)[:SET_CONTAINER_LIMIT_SIZE]
             else:
                 obj_list = obj
-            return {str(i + start_for_list): obj_list[i] for i in range(len(obj))}
+            len_obj = len(obj_list)
+            return {str(i + start_for_list): obj_list[i] for i in range(len_obj)}
         elif isinstance(obj, dict):
             # return {k: v for k, v in obj.items() if not _is_obj_builtin_or_module(v)}
             return obj

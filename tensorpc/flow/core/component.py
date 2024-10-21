@@ -1483,9 +1483,9 @@ class Component(Generic[T_base_props, T_child]):
         pass
 
     def __repr__(self):
+        if self._flow_uid is None:
+            return f"{self.__class__.__name__}()"
         res = f"{self.__class__.__name__}({self._flow_uid_encoded})"
-        # if self._flow_user_data is not None:
-        #     res += f"({self._flow_user_data})"
         return res
 
     def find_user_meta_by_type(self, type: Type[T]) -> Optional[T]:
@@ -2813,9 +2813,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             self._is_remote_mounted = True
         except Exception as e:
             await self.send_exception(e)
-            await self.shutdown_remote_object()
-            await self.set_fallback_layout()
-            self._is_remote_mounted = False
+            await self.disconnect()
 
     @marker.mark_will_unmount
     async def unmount_handler(self):
@@ -2824,6 +2822,11 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             await self.remote_call(serv_names.REMOTE_COMP_UNMOUNT_APP,
                                    2, self._key)
             await self.shutdown_remote_object()
+
+    async def disconnect(self):
+        await self.shutdown_remote_object()
+        self._is_remote_mounted = False 
+        await self.set_fallback_layout()
 
     def get_layout_dict_sync(self) -> Tuple[Dict[str, Any], str]:
         assert self._flow_uid is not None, "shouldn't happen"
@@ -2859,9 +2862,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                 }, is_sync)
         except Exception as e:
             await self.send_exception(e)
-            await self.shutdown_remote_object()
-            await self.set_fallback_layout()
-            self._is_remote_mounted = False
+            await self.disconnect()
 
     async def collect_drag_source_data(self,
                                   ev: UIEvent):
@@ -2874,9 +2875,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             return list(res.values())[0]
         except Exception as e:
             await self.send_exception(e)
-            await self.shutdown_remote_object()
-            await self.set_fallback_layout()
-            self._is_remote_mounted = False
+            await self.disconnect()
         return None
 
 @dataclasses_strict.dataclass

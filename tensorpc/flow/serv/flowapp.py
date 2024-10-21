@@ -287,6 +287,12 @@ class FlowApp:
         return await simple_chunk_call_async(self.master_meta.grpc_url,
                                              serv_name, *args, **kwargs)
 
+    async def remote_comp_shutdown(self, prefixes: List[str]):
+        uid = UniqueTreeId.from_parts(prefixes)
+        remote_comp = self.app.root._get_comp_by_uid(uid.uid_encoded)
+        assert isinstance(remote_comp, RemoteComponentBase)
+        await remote_comp.disconnect()
+
     def get_layout(self, editor_only: bool = False):
         if editor_only:
             res = self.app._get_app_editor_state()
