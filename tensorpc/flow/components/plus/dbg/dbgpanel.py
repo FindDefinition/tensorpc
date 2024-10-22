@@ -4,6 +4,8 @@ import enum
 import time
 import traceback
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
+
+import grpc
 from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
 from tensorpc.core.asyncclient import simple_remote_call_async
 from tensorpc.core.client import simple_remote_call
@@ -85,7 +87,7 @@ class MasterDebugPanel(mui.FlexBox):
             valueChangeTarget=(self._remote_server_discover_lst, "filter"))
         self._remote_server_discover_lst.prop(
             filterKey="server_id",
-            # variant="list",
+            variant="list",
             dense=False,
             disablePadding=True,
             overflow="auto",
@@ -112,7 +114,7 @@ class MasterDebugPanel(mui.FlexBox):
         ], mui.IconButton(mui.IconType.MoreVert))
         self._menu.prop(anchorOrigin=mui.Anchor("top", "right"))
         self._menu.event_contextmenu_select.on(self._handle_secondary_actions)
-        self._drawer = mui.VBox([
+        self._drawer = mui.Collapse([
             mui.VBox([
                 mui.HBox([
                     mui.HBox([
@@ -129,9 +131,9 @@ class MasterDebugPanel(mui.FlexBox):
                     self._menu,
                 ]).prop(alignItems="center"),
                 mui.Divider(),
-                self._remote_server_discover_lst.prop(flex="1 0 auto", minHeight=0),
+                self._remote_server_discover_lst.prop(flex="1 1 1", minHeight=0),
             ]).prop(width="240px", alignItems="stretch", overflow="hidden", height="100%")
-        ]).prop(overflow="hidden")
+        ]).prop(triggered=True, orientation="horizontal", overflow="hidden")
         self._remote_comp_container = mui.VBox([]).prop(flex=1)
         super().__init__([
             self._drawer,
@@ -218,9 +220,18 @@ class MasterDebugPanel(mui.FlexBox):
                         meta.secondary_name = f"{meta.pid}|{frame_meta.name}:{frame_meta.lineno}"
                     else:
                         meta.secondary_name = f"{meta.pid}|running"
+                except grpc.aio.AioRpcError as e:
+                    if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+                        meta.secondary_name = f"{meta.pid}|disconnected"
+                    elif e.code() == grpc.StatusCode.UNAVAILABLE:
+                        meta.secondary_name = f"{meta.pid}|unavailable"
+                    else:
+                        traceback.print_exc()
+                        meta.secondary_name = f"{meta.pid}|error"
                 except:
                     print("Failed to connect to", meta.url_with_port)
-                    # traceback.print_exc()
+                    traceback.print_exc()
+                    meta.secondary_name = f"{meta.pid}|error"
                     continue
             metas_dict = [dataclasses.asdict(meta) for meta in metas]
             await self.send_and_wait(
@@ -260,6 +271,11 @@ class MasterDebugPanel(mui.FlexBox):
                                         rpc_timeout=1)
             except TimeoutError:
                 traceback.print_exc()
+            except grpc.aio.AioRpcError as e:
+                if e.code() == grpc.StatusCode.UNAVAILABLE:
+                    continue
+                else:
+                    traceback.print_exc()
         # await self._update_remote_server_discover_lst()
 
     async def skip_all_breakpoints(self):

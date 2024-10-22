@@ -1790,7 +1790,7 @@ class RemoteDebugPanelDevApp:
     def my_layout(self):
         return mui.VBox([
             plus.MasterDebugPanel().prop(flex=1),
-        ]).prop(width="100%")
+        ]).prop(width="100%", overflow="hidden")
 
 if __name__ == "__main__":
     from pydantic import (
