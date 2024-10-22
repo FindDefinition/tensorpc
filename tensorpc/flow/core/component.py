@@ -170,6 +170,7 @@ class UIType(enum.IntEnum):
     MatrixDataGrid = 0x3b
     SimpleEditor = 0x3c
     IFrame = 0x3d
+    Pagination = 0x3e
     GridLayout = 0x40
 
     # special
@@ -1004,7 +1005,7 @@ class _DataclassHelper:
 
 @dataclasses_strict.dataclass
 class BasicProps(DataClassWithUndefined):
-    status: int = UIRunStatus.Stop.value
+    # status: int = UIRunStatus.Stop.value
     tensorpc_dynamic_eval: Union[Undefined, Dict[str, Any]] = undefined
     # used for template component
     override_props: Union[Dict[str, str], Undefined] = undefined
@@ -1292,7 +1293,7 @@ class Component(Generic[T_base_props, T_child]):
         # json_only, this scan will be skipped.
         # WARNING: you shouldn't use json_only when prop contains another component.
         self._flow_json_only = json_only
-
+        self._flow_comp_status = UIRunStatus.Stop.value
         self.effects = _ComponentEffects()
         self._flow_unmount_effect_objects: List[Callable[[], _CORO_NONE]] = []
 
@@ -1588,7 +1589,7 @@ class Component(Generic[T_base_props, T_child]):
         2. update layout: all component will override props
         by previous sync props
         """
-        return {"status": self.props.status}
+        return {"status": self._flow_comp_status}
 
     def get_persist_props(self) -> Optional[Dict[str, Any]]:
         return None
@@ -1597,9 +1598,11 @@ class Component(Generic[T_base_props, T_child]):
         return
 
     def get_props(self) -> Dict[str, Any]:
-        return self.__props.get_dict(
+        res = self.__props.get_dict(
             dict_factory=_undefined_comp_dict_factory,
             obj_factory=_undefined_comp_obj_factory)  # type: ignore
+        res["status"] = self._flow_comp_status
+        return res
 
     def validate_props(self, props: Dict[str, Any]):
         """use this function to validate props before call
@@ -1903,7 +1906,7 @@ class Component(Generic[T_base_props, T_child]):
         """
 
         if change_status:
-            self.props.status = UIRunStatus.Running.value
+            self._flow_comp_status = UIRunStatus.Running.value
         # only ui with loading support need sync first.
         # otherwise don't use this because slow
         if sync_status_first:
@@ -1938,7 +1941,7 @@ class Component(Generic[T_base_props, T_child]):
                     await app._inspect_exception()
             finally:
                 if change_status:
-                    self.props.status = UIRunStatus.Stop.value
+                    self._flow_comp_status = UIRunStatus.Stop.value
                     await self.sync_status(sync_state)
                 if evctx.delayed_callbacks:
                     for cb in evctx.delayed_callbacks:
@@ -1976,7 +1979,7 @@ class Component(Generic[T_base_props, T_child]):
         """
 
         if change_status:
-            self.props.status = UIRunStatus.Running.value
+            self._flow_comp_status = UIRunStatus.Running.value
         # only ui with loading support need sync first.
         # otherwise don't use this because slow
         if sync_status_first:
@@ -2011,7 +2014,7 @@ class Component(Generic[T_base_props, T_child]):
                     #     await app._inspect_exception()
             # finally:
             if change_status:
-                self.props.status = UIRunStatus.Stop.value
+                self._flow_comp_status = UIRunStatus.Stop.value
                 await self.sync_status(sync_state)
             else:
                 if sync_state:
@@ -2033,7 +2036,7 @@ class Component(Generic[T_base_props, T_child]):
                 ev.sent_event = sent_event
                 await self.put_app_event(ev)
         else:
-            ev = self.create_update_event({"status": self.props.status})
+            ev = self.create_update_event({"status": self._flow_comp_status})
             ev.sent_event = sent_event
             await self.put_app_event(ev)
 
@@ -2044,7 +2047,7 @@ class Component(Generic[T_base_props, T_child]):
         if sync_state:
             return self.create_update_event(self.get_sync_props())
         else:
-            return self.create_update_event({"status": self.props.status})
+            return self.create_update_event({"status": self._flow_comp_status})
 
 
 class ForEachResult(enum.Enum):

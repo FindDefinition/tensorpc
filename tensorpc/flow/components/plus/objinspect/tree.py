@@ -617,13 +617,17 @@ class BasicObjectTree(mui.FlexBox):
                          key: str = _DEFAULT_OBJ_NAME,
                          expand_level: int = 1,
                          validator: Optional[Callable[[Any], bool]] = None):
-        return await self.set_object_dict({key: obj}, expand_level, validator)
+        return await self.update_root_object_dict({key: obj}, expand_level, validator)
 
-    async def set_object_dict(self,
+    async def update_root_object_dict(self,
                          obj_dict: Mapping[str, Any],
                          expand_level: int = 1,
-                         validator: Optional[Callable[[Any], bool]] = None):
+                         validator: Optional[Callable[[Any], bool]] = None,
+                         keep_old: bool = True):
         obj_key_to_tree: Dict[str, mui.JsonLikeNode] = {}
+        if not keep_old:
+            self.root.clear()
+            self.tree.props.tree.children.clear()
         for key, obj in obj_dict.items():
 
             key_in_root = key in self.root

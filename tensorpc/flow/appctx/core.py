@@ -22,7 +22,7 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, ContextManager, Co
 from typing_extensions import ParamSpec
 
 from tensorpc.core.serviceunit import ObservedFunctionRegistryProtocol
-from tensorpc.flow.core.appcore import (AppSpecialEventType, enter_app_conetxt, find_component,
+from tensorpc.flow.core.appcore import (AppSpecialEventType, enter_app_context, find_component,
                                         find_component_by_uid, get_app,
                                         find_all_components, get_app_context,
                                         get_editable_app, get_reload_manager,
@@ -67,11 +67,11 @@ async def read_data_storage(key: str,
                                        raise_if_not_found)
 
 
-async def read_data_storage_by_glob_prefix(glob_prefix: str,
+async def glob_read_data_storage(glob_prefix: str,
                                            node_id: Optional[str] = None,
                                            graph_id: Optional[str] = None):
     app = get_app()
-    return await app.app_storage.read_data_storage_by_glob_prefix(glob_prefix, node_id,
+    return await app.app_storage.glob_read_data_storage(glob_prefix, node_id,
                                                       graph_id)
 
 
@@ -91,9 +91,10 @@ async def rename_data_storage_item(key: str,
 
 
 async def list_data_storage(node_id: Optional[str] = None,
-                            graph_id: Optional[str] = None):
+                            graph_id: Optional[str] = None,
+                            glob_prefix: Optional[str] = None):
     app = get_app()
-    return await app.app_storage.list_data_storage(node_id, graph_id)
+    return await app.app_storage.list_data_storage(node_id, graph_id, glob_prefix)
 
 
 async def list_all_data_storage_nodes(
@@ -144,7 +145,7 @@ async def run_with_exception_inspect_async(func: Callable[P, T], *args: P.args,
 
 def _run_func_with_app(app, func: Callable[P, T], *args: P.args,
                        **kwargs: P.kwargs) -> T:
-    with enter_app_conetxt(app):
+    with enter_app_context(app):
         return func(*args, **kwargs)
 
 
@@ -203,7 +204,7 @@ async def run_in_executor_with_contexts(func: Callable[P, T],
     """
     app = get_app()
     return await asyncio.get_running_loop().run_in_executor(
-        None, _run_func_with_context_creators, [lambda: enter_app_conetxt(app)] + ctx_creators, partial(func, **kwargs), *args) # type: ignore
+        None, _run_func_with_context_creators, [lambda: enter_app_context(app)] + ctx_creators, partial(func, **kwargs), *args) # type: ignore
 
 def register_app_special_event_handler(event: AppSpecialEventType,
                                              handler: Callable):

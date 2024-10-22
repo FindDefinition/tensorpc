@@ -21,6 +21,7 @@ from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.core.tracers.tracer import FrameResult, TraceEventType, Tracer
 from tensorpc.core.tree_id import UniqueTreeIdForTree
+from tensorpc.flow.components.plus.scriptmgr import ScriptManager
 from tensorpc.flow.components.plus.styles import CodeStyles
 from tensorpc.flow.core.appcore import Event, get_app, get_editable_app
 from tensorpc.flow.components import mui
@@ -77,11 +78,12 @@ class ObjectInspector(mui.FlexBox):
                  with_detail: bool = True,
                  use_allotment: bool = True,
                  enable_exception_inspect: bool = True,
-                 use_fast_tree: bool = False,
+                 use_fast_tree: bool = True,
                  fixed_size: bool = False,
                  show_terminal: bool = True,
                  default_sizes: Optional[List[mui.NumberType]] = None,
-                 with_builtins: bool = True) -> None:
+                 with_builtins: bool = True,
+                 custom_tabs: Optional[List[mui.TabDef]] = None) -> None:
 
         self.preview_container = mui.HBox([]).prop(overflow="auto",
                                                    flex=1,
@@ -118,31 +120,35 @@ class ObjectInspector(mui.FlexBox):
                     }
                 }
             })
+        tab_prefix = "__tensorpc_flow_obj_inspector"
 
         tabdefs = [
             mui.TabDef("",
-                        "1",
+                        tab_prefix + "1",
                         self.preview_container_parent,
                         icon=mui.IconType.Preview,
                         tooltip="preview layout of item"),
             mui.TabDef(
                 "",
-                "2",
+                tab_prefix + "2",
                 self.fast_layout_container,
                 icon=mui.IconType.ManageAccounts,
                 tooltip=
                 "custom layout (appctx.inspector.set_custom_layout_sync)"
             ),
         ]
-        default_tab = "1"
+        default_tab = tab_prefix + "1"
         if show_terminal:
             tabdefs.append(mui.TabDef("",
-                        "3",
+                        tab_prefix + "3",
                         mui.AppTerminal(),
                         icon=mui.IconType.Terminal,
                         tooltip="app terminal (read only)"),
             )
-            default_tab = "3"
+            default_tab = tab_prefix + "3"
+        if custom_tabs is not None:
+            tabdefs.extend(custom_tabs)
+
         self.detail_container = mui.HBox([
             mui.ThemeProvider([
                 mui.Tabs(tabdefs,

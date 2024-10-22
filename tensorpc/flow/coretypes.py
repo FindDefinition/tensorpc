@@ -41,6 +41,23 @@ class StorageDataItem:
     def shallow_copy(self):
         return StorageDataItem(self.data, self.meta)
 
+class StorageDataLoadedItem:
+
+    def __init__(self, data: Any, meta: JsonLikeNode) -> None:
+        self.data = data
+        self.meta = meta
+        assert not isinstance(self.meta.userdata, Undefined)
+
+    @property
+    def timestamp(self):
+        assert not isinstance(self.meta.userdata, Undefined)
+        return self.meta.userdata["timestamp"]
+
+    def get_meta_dict(self):
+        return as_dict_no_undefined(self.meta)
+
+    def shallow_copy(self):
+        return StorageDataLoadedItem(self.data, self.meta)
 
 class MessageItemType(enum.Enum):
     Text = 0

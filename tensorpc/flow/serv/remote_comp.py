@@ -1,22 +1,28 @@
+import asyncio
 import collections
 import collections.abc
 import dataclasses
 import time
 import traceback
 from typing import Any, Dict, List, Optional
+
 import tensorpc
-from tensorpc.core.asyncclient import AsyncRemoteManager, simple_chunk_call_async
+from tensorpc.core import marker
+from tensorpc.core.asyncclient import (AsyncRemoteManager,
+                                       simple_chunk_call_async)
 from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.core.tree_id import UniqueTreeId
-from tensorpc.core import marker
+from tensorpc.flow.components.mui import FlexBox
 from tensorpc.flow.constants import TENSORPC_APP_ROOT_COMP
-from tensorpc.flow.core.component import AppEvent, AppEventType, FrontendEventType, LayoutEvent, UIEvent, UpdateComponentsEvent, patch_uid_keys_with_prefix, patch_uid_list_with_prefix
+from tensorpc.flow.core.appcore import ALL_OBSERVED_FUNCTIONS, AppSpecialEventType, enter_app_context
+from tensorpc.flow.core.component import (AppEvent, AppEventType,
+                                          FrontendEventType, LayoutEvent,
+                                          UIEvent, UpdateComponentsEvent,
+                                          patch_uid_keys_with_prefix,
+                                          patch_uid_list_with_prefix)
 from tensorpc.flow.core.reload import AppReloadManager, FlowSpecialMethods
 from tensorpc.flow.coretypes import split_unique_node_id
 from tensorpc.flow.flowapp.app import App, EditableApp
-from tensorpc.flow.core.appcore import ALL_OBSERVED_FUNCTIONS
-from tensorpc.flow.components.mui import FlexBox
-import asyncio
 from tensorpc.flow.serv_names import serv_names
 
 
@@ -151,8 +157,8 @@ class RemoteComponentService:
         app_obj.send_loop_task = send_loop_task
         self._app_objs[key] = app_obj
 
-    def get_layout_root_by_key(self, key: str):
-        return self._app_objs[key].app.root
+    def get_layout_root_and_app_by_key(self, key: str):
+        return self._app_objs[key].app.root, self._app_objs[key].app
 
     async def mount_app(self, node_uid: str, key: str, url: str, port: int,
                         prefixes: List[str]):
@@ -173,7 +179,8 @@ class RemoteComponentService:
             except:
                 # mounted app dead. use new one
                 traceback.print_exc()
-                self.unmount_app(app_obj.mounted_app_meta.key)
+                # with app_obj.app._enter
+                await self.unmount_app(app_obj.mounted_app_meta.key)
 
         assert app_obj.mounted_app_meta is None, "already mounted"
         app_obj.mounted_app_meta = MountedAppMeta(node_uid, url, port, key,
@@ -183,12 +190,18 @@ class RemoteComponentService:
             app_obj.mounted_app_meta.url_with_port)
         gid, nid = split_unique_node_id(node_uid)
         app_obj.app.app_storage.set_graph_node_id(gid, nid)
+        with enter_app_context(app_obj.app):
+            await app_obj.app._flowapp_special_eemitter.emit_async(AppSpecialEventType.RemoteCompMount, app_obj.mounted_app_meta)
+
         # app_obj.send_loop_task = send_loop_task
 
-    def unmount_app(self, key: str):
+    async def unmount_app(self, key: str):
         print("UNMOUNT", key)
         assert key in self._app_objs
         app_obj = self._app_objs[key]
+        with enter_app_context(app_obj.app):
+            await app_obj.app._flowapp_special_eemitter.emit_async(AppSpecialEventType.RemoteCompUnmount, None)
+
         if app_obj.mounted_app_meta is not None:
             app_obj.mounted_app_meta = None
         app_obj.mount_ev.clear()
@@ -298,7 +311,7 @@ class RemoteComponentService:
                 if robj is not None:
                     await robj.close()
                     robj = None
-                self.unmount_app(app_obj.mounted_app_meta.key)
+                await self.unmount_app(app_obj.mounted_app_meta.key)
                 wait_for_mount_task = asyncio.create_task(
                     app_obj.mount_ev.wait())
                 wait_tasks: List[asyncio.Task] = [

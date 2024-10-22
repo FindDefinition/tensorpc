@@ -8,7 +8,7 @@ from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable,
 
 from typing_extensions import ParamSpec
 
-from tensorpc.flow.core.appcore import (enter_app_conetxt, find_component,
+from tensorpc.flow.core.appcore import (enter_app_context, find_component,
                                            get_app)
 from tensorpc.utils.uniquename import UniqueNamePool
 if TYPE_CHECKING:

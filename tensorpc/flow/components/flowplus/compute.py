@@ -37,7 +37,7 @@ from tensorpc.core.moduleid import (get_module_id_of_type,
 from tensorpc.flow import marker
 from tensorpc.flow.appctx.core import (data_storage_has_item,
                                        read_data_storage,
-                                       read_data_storage_by_glob_prefix,
+                                       glob_read_data_storage,
                                        remove_data_storage, save_data_storage)
 from tensorpc.flow.components import flowui, mui
 from tensorpc.flow.core.appcore import CORO_ANY, find_all_components
@@ -957,8 +957,9 @@ class ComputeFlowManager(mui.FlexBox):
 
     @staticmethod
     async def _get_template_items_and_code():
-        all_templates = await read_data_storage_by_glob_prefix(
+        all_templates_item = await glob_read_data_storage(
             "__cflow_templates/*")
+        all_templates = {k: v.data for k, v in all_templates_item.items()}
         items: List[Tuple[str, mui.ValueType]] = []
         for template_key_path in all_templates:
             template_key = template_key_path.split("/")[-1]
@@ -1209,7 +1210,8 @@ class ComputeFlow(mui.FlexBox):
 
     async def update_templates(self):
         glob_prefix = get_cflow_shared_node_key("*")
-        res = await read_data_storage_by_glob_prefix(glob_prefix)
+        res_items = await glob_read_data_storage(glob_prefix)
+        res = {k: v.data for k, v in res_items.items()}
         menu_items: List[mui.MenuItem] = []
         for k in res.keys():
             k_path = Path(k)

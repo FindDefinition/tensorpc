@@ -92,8 +92,8 @@ from tensorpc.utils.uniquename import UniqueNamePool
 from tensorpc.flow.vscode.storage import AppDataStorageForVscode
 from ..core.appcore import (ALL_OBSERVED_FUNCTIONS, AppContext, AppSpecialEventType,
                       _CompReloadMeta, Event, EventHandlingContext, create_reload_metas, enter_event_handling_conetxt)
-from ..core.appcore import enter_app_conetxt
-from ..core.appcore import enter_app_conetxt as _enter_app_conetxt
+from ..core.appcore import enter_app_context
+from ..core.appcore import enter_app_context as _enter_app_conetxt
 from ..core.appcore import get_app, get_app_context
 from ..components import plus
 from tensorpc.core.tracers.tracer import FrameResult, Tracer, TraceEventType
@@ -643,7 +643,7 @@ class App:
         # make sure did_mount is called from leaf to root (reversed breadth first order)
         uid_to_comp_items = list(uid_to_comp.items())
         uid_to_comp_items.sort(key=lambda x: len(x[0].parts), reverse=True)
-        with enter_app_conetxt(self):
+        with enter_app_context(self):
             for _, v in uid_to_comp_items:
                 special_methods = v.get_special_methods(
                     self._flow_reload_manager)
@@ -670,7 +670,7 @@ class App:
         """override this to init app after server stop
         """
         uid_to_comp = self.root._get_uid_encoded_to_comp_dict()
-        with enter_app_conetxt(self):
+        with enter_app_context(self):
             for v in uid_to_comp.values():
                 special_methods = v.get_special_methods(
                     self._flow_reload_manager)
@@ -855,7 +855,8 @@ class App:
             indexes_raw = None
             if len(data) == 3 and data[2] is not None:
                 indexes_raw = data[2]
-                indexes = list(map(int, data[2].split(".")))
+                assert indexes_raw is not None 
+                indexes = list(map(int, indexes_raw.split(".")))
             event = Event(data[0], data[1], keys, indexes)
             comps = self.root._get_comps_by_uid(uid)
             last_comp = comps[-1]

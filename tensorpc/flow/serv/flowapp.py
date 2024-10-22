@@ -30,7 +30,7 @@ from tensorpc.flow.coretypes import ScheduleEvent, get_unique_node_id
 from tensorpc.core.tree_id import UniqueTreeId
 from tensorpc.flow.vscode.coretypes import VscodeTensorpcMessage, VscodeTensorpcQuery
 from tensorpc.flow import appctx
-from tensorpc.flow.core.appcore import ALL_OBSERVED_FUNCTIONS, enter_app_conetxt
+from tensorpc.flow.core.appcore import ALL_OBSERVED_FUNCTIONS, enter_app_context
 from tensorpc.flow.components.mui import FlexBox, flex_wrapper
 from tensorpc.flow.core.component import AppEditorEvent, AppEditorFrontendEvent, AppEvent, AppEventType, InitLSPClientEvent, LayoutEvent, NotifyEvent, NotifyType, RemoteComponentBase, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
 from tensorpc.flow.flowapp.app import App, EditableApp
@@ -179,7 +179,7 @@ class FlowApp:
                 cfg.get_dict())
         await self._send_loop_queue.put(AppEvent("", init_event))
         if self.external_argv is not None:
-            with enter_app_conetxt(self.app):
+            with enter_app_context(self.app):
                 self._external_argv_task = asyncio.create_task(
                     appctx.run_in_executor_with_exception_inspect(
                         partial(self._run_app_script,

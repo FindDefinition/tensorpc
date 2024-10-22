@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from pathlib import Path
 import tempfile
 import asyncio
 import dataclasses
@@ -19,6 +20,7 @@ import inspect
 import os
 import time
 from typing import Any, Callable, Coroutine, Dict, Iterable, List, Optional, Set, Tuple, Union
+from regex import F
 from typing_extensions import Literal
 
 import numpy as np
@@ -30,7 +32,7 @@ from tensorpc.flow import appctx
 from tensorpc.flow import marker
 from tensorpc.flow.components import three
 from tensorpc.flow.components.plus.tutorials import AppInMemory
-from tensorpc.flow.core.appcore import app_is_remote_comp
+from tensorpc.flow.core.appcore import AppSpecialEventType, app_is_remote_comp
 from tensorpc.flow.core.component import FrontendEventType
 from .options import CommonOptions
 
@@ -70,6 +72,8 @@ async def _read_stream(stream, cb):
         else:
             break
 
+
+SCRIPT_STORAGE_KEY_PREFIX = "__tensorpc_flow_plus_script_manager"
 
 _INITIAL_SCRIPT_PER_LANG = {
     "python": """
@@ -138,7 +142,7 @@ class ScriptManager(mui.FlexBox):
             [],
             self._on_script_select,
         ).prop(size="small",
-               muiMargin="dense",
+               textFieldProps=mui.TextFieldProps(muiMargin="dense"),
                padding="0 3px 0 3px",
                **CommonOptions.AddableAutocomplete)
         self.langs = mui.ToggleButtonGroup([
@@ -151,9 +155,9 @@ class ScriptManager(mui.FlexBox):
         # self._enable_save_watch = mui.ToggleButton(
         #             "value",
         #             mui.IconType.Visibility).prop(muiColor="secondary", size="small")
-        self._run_button = mui.IconButton(
+        self._save_and_run_btn = mui.IconButton(
             mui.IconType.PlayArrow,
-            self._on_run_script).prop(progressColor="primary")
+            self._on_save_and_run).prop(progressColor="primary")
         self._delete_button = mui.IconButton(
             mui.IconType.Delete, self._on_script_delete).prop(
                 progressColor="primary",
@@ -164,7 +168,7 @@ class ScriptManager(mui.FlexBox):
             "header":
             mui.HBox([
                 self.scripts.prop(flex=1),
-                self._run_button,
+                self._save_and_run_btn,
                 # self._enable_save_watch,
                 self.langs,
                 self._delete_button,
@@ -180,52 +184,68 @@ class ScriptManager(mui.FlexBox):
                   width="100%",
                   height="100%",
                   overflow="hidden")
-        self.code_editor.event_editor_save.on(
-            self._on_editor_save)
-        self.code_editor.event_editor_ready.on(
-            self._on_editor_ready)
-        self.scripts.event_select_new_item.on(
-            self._on_new_script)
+        self.code_editor.event_editor_save.on(self._on_editor_save)
+        self.code_editor.event_editor_ready.on(self._on_editor_ready)
+        self.scripts.event_select_new_item.on(self._on_new_script)
 
     @marker.mark_did_mount
     async def _on_mount(self):
         if app_is_remote_comp():
             assert self._init_storage_node_rid is None, "remote comp can't specify storage node"
             assert self._init_graph_id is None, "remote comp can't specify graph id"
-            self._storage_node_rid = None 
+            self._storage_node_rid = None
             self._graph_id = None
         else:
             if self._init_storage_node_rid is None:
                 self._storage_node_rid = MasterMeta().node_id
             if self._init_graph_id is None:
                 self._graph_id = MasterMeta().graph_id
+        appctx.register_app_special_event_handler(AppSpecialEventType.RemoteCompMount, self._on_remote_comp_mount)
+    
+    @marker.mark_will_unmount
+    async def _on_unmount(self):
+        appctx.unregister_app_special_event_handler(AppSpecialEventType.RemoteCompMount, self._on_remote_comp_mount)
+
+    async def _on_remote_comp_mount(self, data: Any):
+        await self._on_editor_ready()
 
     async def _on_editor_ready(self):
-        items = await appctx.list_data_storage(self._storage_node_rid,
-                                               self._graph_id)
+        items = await appctx.list_data_storage(
+            self._storage_node_rid, self._graph_id,
+            f"{SCRIPT_STORAGE_KEY_PREFIX}/*")
         items.sort(key=lambda x: x.userdata["timestamp"]
                    if not isinstance(x.userdata, mui.Undefined) else 0,
                    reverse=True)
         options: List[Dict[str, Any]] = []
         for item in items:
             if item.typeStr == Script.__name__:
-                options.append({"label": item.name})
+                options.append({
+                    "label": Path(item.name).stem,
+                    "storage_key": item.name
+                })
         if options:
             await self.scripts.update_options(options, 0)
             await self._on_script_select(options[0])
         else:
-            await self._on_new_script({
+            default_opt = {
                 "label": "example",
-            },
+                "storage_key": f"{SCRIPT_STORAGE_KEY_PREFIX}/example"
+            }
+            await self._on_new_script(default_opt,
                                       init_str=self._init_scripts["python"])
 
-    async def _on_run_script(self, do_save: bool = True):
-        if do_save:
-            print("EDITOR SAVE")
-            await self.code_editor.save()
+    async def _on_save_and_run(self):
+        # we attach userdata to tell save handler run script after save
+        # actual run script will be handled in save handler
+        await self.code_editor.save({"SaveAndRun": True})
+        return
+
+    async def _on_run_script(self):
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
-            item = await appctx.read_data_storage(label,
+            storage_key = self.scripts.value["storage_key"]
+
+            item = await appctx.read_data_storage(storage_key,
                                                   self._storage_node_rid,
                                                   self._graph_id)
             assert isinstance(item, Script)
@@ -254,10 +274,8 @@ class ScriptManager(mui.FlexBox):
                     code,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE)
-                await asyncio.gather(
-                    _read_stream(proc.stdout, print),
-                    _read_stream(proc.stderr, print)
-                )
+                await asyncio.gather(_read_stream(proc.stdout, print),
+                                     _read_stream(proc.stderr, print))
                 await proc.wait()
                 print(f'[cmd exited with {proc.returncode}]')
             elif item.lang == "cpp":
@@ -298,9 +316,9 @@ class ScriptManager(mui.FlexBox):
                 flex=1 if value == "app" else mui.undefined))
 
         if self.scripts.value is not None:
-            label = self.scripts.value["label"]
+            storage_key = self.scripts.value["storage_key"]
 
-            item = await appctx.read_data_storage(label,
+            item = await appctx.read_data_storage(storage_key,
                                                   self._storage_node_rid,
                                                   self._graph_id)
             assert isinstance(item, Script)
@@ -309,7 +327,8 @@ class ScriptManager(mui.FlexBox):
                 self.code_editor.update_event(
                     language=_LANG_TO_VSCODE_MAPPING[value],
                     value=item.get_code()))
-            await appctx.save_data_storage(label, item, self._storage_node_rid,
+            await appctx.save_data_storage(storage_key, item,
+                                           self._storage_node_rid,
                                            self._graph_id)
             if value == "app":
                 # TODO add better option
@@ -324,7 +343,8 @@ class ScriptManager(mui.FlexBox):
         value = ev.value
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
-            item = await appctx.read_data_storage(label,
+            storage_key = f"{SCRIPT_STORAGE_KEY_PREFIX}/{label}"
+            item = await appctx.read_data_storage(storage_key,
                                                   self._storage_node_rid,
                                                   self._graph_id)
             assert isinstance(item, Script)
@@ -332,13 +352,13 @@ class ScriptManager(mui.FlexBox):
             if not isinstance(item.code, dict):
                 item.code = self._init_scripts.copy()
             item.code[item.lang] = value
-            
-            await appctx.save_data_storage(label, item, self._storage_node_rid,
+
+            await appctx.save_data_storage(storage_key, item,
+                                           self._storage_node_rid,
                                            self._graph_id)
-            if item.lang == "app":
-                await self._on_run_script(do_save=False)
-            # if self._enable_save_watch.checked:
-            #     await self._run_button.headless_click()
+            is_save_and_run = ev.userdata is not None and "SaveAndRun" in ev.userdata
+            if item.lang == "app" or is_save_and_run:
+                await self._on_run_script()
 
     async def _on_new_script(self, value, init_str: Optional[str] = None):
 
@@ -348,7 +368,8 @@ class ScriptManager(mui.FlexBox):
         lang = self.langs.props.value
         assert isinstance(lang, str)
         script = Script(new_item_name, self._init_scripts, lang)
-        await appctx.save_data_storage(new_item_name, script,
+        storage_key = f"{SCRIPT_STORAGE_KEY_PREFIX}/{new_item_name}"
+        await appctx.save_data_storage(storage_key, script,
                                        self._storage_node_rid, self._graph_id)
         if lang != "app":
             await self.app_show_box.set_new_layout({})
@@ -367,7 +388,10 @@ class ScriptManager(mui.FlexBox):
     async def _on_script_delete(self):
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
-            await appctx.remove_data_storage(label, self._storage_node_rid,
+            storage_key = self.scripts.value["storage_key"]
+
+            await appctx.remove_data_storage(storage_key,
+                                             self._storage_node_rid,
                                              self._graph_id)
             new_options = [
                 x for x in self.scripts.props.options if x["label"] != label
@@ -378,7 +402,10 @@ class ScriptManager(mui.FlexBox):
 
     async def _on_script_select(self, value):
         label = value["label"]
-        item = await appctx.read_data_storage(label, self._storage_node_rid,
+        storage_key = value["storage_key"]
+
+        item = await appctx.read_data_storage(storage_key,
+                                              self._storage_node_rid,
                                               self._graph_id)
         assert isinstance(item, Script)
         await self.send_and_wait(

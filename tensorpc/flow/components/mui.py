@@ -1621,7 +1621,7 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
 
 @dataclasses.dataclass
 class TextFieldProps(InputBaseProps):
-    label: str = ""
+    label: Union[str, Undefined] = undefined
     muiColor: Union[_StdColorNoDefault, Undefined] = undefined
     size: Union[Undefined, Literal["small", "medium"]] = undefined
     muiMargin: Union[Undefined, Literal["dense", "none", "normal"]] = "dense"
@@ -1720,6 +1720,7 @@ class MonacoEditorSaveEvent:
     value: str
     saveVersionId: int
     viewState: Any
+    userdata: Optional[Any] = None
 
 
 class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
@@ -1799,10 +1800,18 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         })
         await self.send_and_wait(ev)
 
-    async def save(self):
-        ev = self.create_comp_event({
+    async def save(self, userdata: Optional[Any] = None):
+        """Tell Editor in frontend to save.
+        userdata will be passed back in the save event.
+        You can use userdata to implement logic such as 
+        save and run.
+        """
+        data = {
             "type": int(_MonacoEditorControlType.Save),
-        })
+        }
+        if userdata is not None:
+            data["userdata"] = userdata
+        ev = self.create_comp_event(data)
         await self.send_and_wait(ev)
 
 
@@ -2190,6 +2199,7 @@ class AutocompletePropsBase(MUIComponentBaseProps, SelectBaseProps):
     groupByKey: Union[Undefined, str] = undefined
     limitTags: Union[Undefined, int] = undefined
     addOption: Union[Undefined, bool] = undefined
+    textFieldProps: Union[Undefined, TextFieldProps] = undefined
 
 
 @dataclasses.dataclass
@@ -5259,3 +5269,57 @@ class IFrame(MUIComponentBase[IFrameProps]):
             "targetOrigin": target_origin,
         })
         await self.send_and_wait(ev)
+
+@dataclasses.dataclass
+class PaginationProps(MUIComponentBaseProps):
+    value: int = 0
+    boundaryCount: Union[Undefined, int] = undefined
+    muiColor: Union[Undefined, Literal["primary", "secondary",
+                                       "standard"]] = undefined
+    count: Union[Undefined, int] = undefined
+    disabled: Union[Undefined, bool] = undefined
+    hideNextButton: Union[Undefined, bool] = undefined
+    hidePrevButton: Union[Undefined, bool] = undefined
+    shape: Union[Undefined, Literal["circular", "rounded"]] = undefined
+    showFirstButton: Union[Undefined, bool] = undefined
+    showLastButton: Union[Undefined, bool] = undefined
+    siblingCount: Union[Undefined, int] = undefined
+    size: Union[Undefined, Literal["small", "medium", "large"]] = undefined
+    variant: Union[Undefined, Literal["text", "outlined"]] = undefined
+    
+class Pagination(MUIComponentBase[PaginationProps]):
+
+    def __init__(self,
+                 count: int, init_value: int = 0,
+                 callback: Optional[Callable[[int], _CORO_NONE]] = None,) -> None:
+        super().__init__(UIType.Pagination, PaginationProps, [FrontendEventType.Change.value])
+        assert count > 0, "count must be positive"
+        self.prop(count=count, value=init_value)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
+        if callback is not None:
+            self.event_change.on(callback)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync=is_sync)
+    
+    def state_change_callback(
+            self,
+            value: int,
+            type: ValueType = FrontendEventType.Change.value):
+        self.props.value = value
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
+        return res
+

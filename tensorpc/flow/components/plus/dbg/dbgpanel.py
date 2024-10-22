@@ -1,12 +1,13 @@
 import asyncio
 import dataclasses
 import enum
+import time
 import traceback
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
 from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
 from tensorpc.core.asyncclient import simple_remote_call_async
 from tensorpc.core.client import simple_remote_call
-from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, DebugFrameMeta
+from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_SPLIT, DebugFrameMeta
 from tensorpc.flow import marker, appctx
 from tensorpc.flow.components import mui
 from tensorpc.flow.components.plus.styles import CodeStyles
@@ -38,7 +39,7 @@ def list_all_dbg_server_in_machine():
         proc_name = proc.info["name"]
         proc_cmdline = proc.info["cmdline"]
         if proc_name.startswith(TENSORPC_BG_PROCESS_NAME_PREFIX):
-            parts = proc_name.split("-")[1:]
+            parts = proc_name.split(TENSORPC_DBG_SPLIT)[1:]
             meta = DebugServerProcessMeta(str(proc.info["pid"]), proc_name,
                                           proc.info["pid"], parts[-1],
                                           parts[0], int(parts[1]))
@@ -46,7 +47,7 @@ def list_all_dbg_server_in_machine():
             continue 
         if proc_cmdline and proc_cmdline[0].startswith(TENSORPC_BG_PROCESS_NAME_PREFIX):
             # some platform need cmdline
-            parts = proc_cmdline[0].split("-")[1:]
+            parts = proc_cmdline[0].split(TENSORPC_DBG_SPLIT)[1:]
             meta = DebugServerProcessMeta(str(proc.info["pid"]), proc_cmdline[0],
                                           proc.info["pid"], parts[-1],
                                           parts[0], int(parts[1]))
@@ -84,24 +85,34 @@ class MasterDebugPanel(mui.FlexBox):
             valueChangeTarget=(self._remote_server_discover_lst, "filter"))
         self._remote_server_discover_lst.prop(
             filterKey="server_id",
-            variant="list",
+            # variant="list",
             dense=False,
             disablePadding=True,
+            overflow="auto",
+            virtualized=False,
             secondaryIconButtonProps=[
                 # mui.IconButtonBaseProps(
                 #     name=ServerItemActions.RELEASE_BREAKPOINT.value,
                 #     icon=mui.IconType.PlayArrow,
                 #     size="small"),
-                mui.IconButtonBaseProps(
-                    name=ServerItemActions.UNMOUNT_REMOTE_SERVER.value,
-                    icon=mui.IconType.Close,
-                    size="small"),
+                # mui.IconButtonBaseProps(
+                #     name=ServerItemActions.UNMOUNT_REMOTE_SERVER.value,
+                #     icon=mui.IconType.Close,
+                #     size="small"),
             ])
-        self._remote_server_discover_lst.event_secondary_action_click.on_standard(
-            self._handle_secondary_actions)
+        # self._remote_server_discover_lst.event_secondary_action_click.on_standard(
+        #     self._handle_secondary_actions)
         remote_server_item.event_click.on_standard(
             self._on_server_item_click).configure(True)
-        self._drawer = mui.Collapse([
+        self._menu = mui.MenuList([
+            mui.MenuItem(id=ServerItemActions.RELEASE_BREAKPOINT.value, label="Release Breakpoint"),
+            mui.MenuItem(id=ServerItemActions.SKIP_BREAKPOINT.value, label="Disable All Breakpoints"),
+            mui.MenuItem(id=ServerItemActions.ENABLE_BREAKPOINT.value, label="Enable All Breakpoints"),
+            mui.MenuItem(id=ServerItemActions.UNMOUNT_REMOTE_SERVER.value, label="Unmount Remote Panel"),
+        ], mui.IconButton(mui.IconType.MoreVert))
+        self._menu.prop(anchorOrigin=mui.Anchor("top", "right"))
+        self._menu.event_contextmenu_select.on(self._handle_secondary_actions)
+        self._drawer = mui.VBox([
             mui.VBox([
                 mui.HBox([
                     mui.HBox([
@@ -115,23 +126,12 @@ class MasterDebugPanel(mui.FlexBox):
                 ]).prop(alignItems="center"),
                 mui.HBox([
                     filter_input.prop(flex=1),
-                    mui.IconButton(mui.IconType.PlayArrow,
-                                   self.release_all_breakpoints).prop(
-                                       size="small",
-                                       iconFontSize="18px"),
-                    mui.IconButton(mui.IconType.DoubleArrow,
-                                   self.skip_all_breakpoints).prop(
-                                       size="small",
-                                       iconFontSize="18px"),
-                    mui.IconButton(mui.IconType.Pause,
-                                   self.enable_all_breakpoints).prop(
-                                       size="small",
-                                       iconFontSize="18px"),
+                    self._menu,
                 ]).prop(alignItems="center"),
                 mui.Divider(),
-                self._remote_server_discover_lst,
-            ]).prop(width="240px", flexShrink=0, alignItems="stretch")
-        ]).prop(triggered=True, orientation="horizontal")
+                self._remote_server_discover_lst.prop(flex="1 0 auto", minHeight=0),
+            ]).prop(width="240px", alignItems="stretch", overflow="hidden", height="100%")
+        ]).prop(overflow="hidden")
         self._remote_comp_container = mui.VBox([]).prop(flex=1)
         super().__init__([
             self._drawer,
@@ -147,7 +147,7 @@ class MasterDebugPanel(mui.FlexBox):
             mui.Divider(orientation="vertical"),
             self._remote_comp_container,
         ])
-        self.prop(flexDirection="row")
+        self.prop(flexDirection="row", overflow="hidden", alignItems="stretch")
         self._cur_leave_bkpt_cb: Optional[Callable[[], Coroutine[None, None,
                                                                  Any]]] = None
 
@@ -219,7 +219,8 @@ class MasterDebugPanel(mui.FlexBox):
                     else:
                         meta.secondary_name = f"{meta.pid}|running"
                 except:
-                    traceback.print_exc()
+                    print("Failed to connect to", meta.url_with_port)
+                    # traceback.print_exc()
                     continue
             metas_dict = [dataclasses.asdict(meta) for meta in metas]
             await self.send_and_wait(
@@ -239,16 +240,18 @@ class MasterDebugPanel(mui.FlexBox):
     async def _close_drawer(self):
         await self.send_and_wait(self._drawer.update_event(triggered=False))
 
-    async def _handle_secondary_actions(self, ev: mui.Event):
-        indexes = ev.indexes
-        assert not isinstance(indexes, mui.Undefined)
-        action = ev.data
+    async def _handle_secondary_actions(self, item_id: str):
         async with self._serv_list_lock:
-            if action == ServerItemActions.RELEASE_BREAKPOINT.value:
-                await self.release_server_breakpoint(ev)
-            elif action == ServerItemActions.UNMOUNT_REMOTE_SERVER.value:
+            if item_id == ServerItemActions.UNMOUNT_REMOTE_SERVER.value:
                 await self._remote_comp_container.set_new_layout({}) 
                 self._current_mount_uid = ""
+            elif item_id == ServerItemActions.RELEASE_BREAKPOINT.value:
+                await self.release_all_breakpoints()
+            elif item_id == ServerItemActions.SKIP_BREAKPOINT.value:
+                await self.skip_all_breakpoints()
+            elif item_id == ServerItemActions.ENABLE_BREAKPOINT.value:
+                await self.enable_all_breakpoints()
+        await self._update_remote_server_discover_lst()
 
     async def release_all_breakpoints(self):
         for meta in self._current_metas:
@@ -257,7 +260,7 @@ class MasterDebugPanel(mui.FlexBox):
                                         rpc_timeout=1)
             except TimeoutError:
                 traceback.print_exc()
-        await self._update_remote_server_discover_lst()
+        # await self._update_remote_server_discover_lst()
 
     async def skip_all_breakpoints(self):
         for meta in self._current_metas:
@@ -266,7 +269,7 @@ class MasterDebugPanel(mui.FlexBox):
                                         rpc_timeout=1)
             except TimeoutError:
                 traceback.print_exc()
-        await self._update_remote_server_discover_lst()
+        # await self._update_remote_server_discover_lst()
 
     async def enable_all_breakpoints(self):
         for meta in self._current_metas:
@@ -275,7 +278,7 @@ class MasterDebugPanel(mui.FlexBox):
                                         rpc_timeout=1)
             except TimeoutError:
                 traceback.print_exc()
-        await self._update_remote_server_discover_lst()
+        # await self._update_remote_server_discover_lst()
 
     async def release_server_breakpoint(self, event: mui.Event):
         indexes = event.indexes
@@ -285,7 +288,7 @@ class MasterDebugPanel(mui.FlexBox):
         await simple_remote_call_async(url,
                                        dbg_serv_names.DBG_LEAVE_BREAKPOINT,
                                        rpc_timeout=1)
-        await self._update_remote_server_discover_lst()
+        # await self._update_remote_server_discover_lst()
 
     def _register_vscode_handler(self):
         if self._vscode_handler_registered:

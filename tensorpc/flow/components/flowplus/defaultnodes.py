@@ -115,7 +115,7 @@ class ObjectTreeViewerNode(ResizeableNodeBase):
         return False
 
     async def compute(self, obj: SpecialHandleDict[Any]) -> None:
-        await self.item_tree.set_object_dict(obj,
+        await self.item_tree.update_root_object_dict(obj,
                                         expand_level=1000,
                                         validator=self._expand_validator)
         await self.item_tree.expand_all()

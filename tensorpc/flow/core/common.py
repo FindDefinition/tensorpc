@@ -97,11 +97,11 @@ async def handle_raw_event(event: Event,
     handlers = comp.get_event_handlers(event.type)
     if handlers is None:
         return
-    if comp.props.status == UIRunStatus.Running.value:
+    if comp._flow_comp_status == UIRunStatus.Running.value:
         msg = create_ignore_usr_msg(comp)
         await comp.send_and_wait(msg)
         return
-    elif comp.props.status == UIRunStatus.Stop.value:
+    elif comp._flow_comp_status == UIRunStatus.Stop.value:
         comp.state_change_callback(data, type)
         run_funcs = handlers.get_bind_event_handlers(event)
         if not just_run:
@@ -119,12 +119,12 @@ async def handle_standard_event(comp: Component,
                                 change_status: bool = True):
     """ common event handler
     """
-    # print("WTF", event.type, event.data, comp.props.status)
-    if comp.props.status == UIRunStatus.Running.value:
+    # print("WTF", event.type, event.data, comp._flow_comp_status)
+    if comp._flow_comp_status == UIRunStatus.Running.value:
         # msg = create_ignore_usr_msg(comp)
         # await comp.send_and_wait(msg)
         return
-    elif comp.props.status == UIRunStatus.Stop.value:
+    elif comp._flow_comp_status == UIRunStatus.Stop.value:
         if not isinstance(event.keys, Undefined):
             # for all template components, we must disable
             # status change and sync. status indicator
@@ -195,11 +195,11 @@ async def handle_standard_event(comp: Component,
 
 
 # async def handle_change_event_no_arg(comp: Component, sync_status_first: bool = False):
-#     if comp.props.status == UIRunStatus.Running.value:
+#     if comp._flow_comp_status == UIRunStatus.Running.value:
 #         msg = create_ignore_usr_msg(comp)
 #         await comp.send_and_wait(msg)
 #         return
-#     elif comp.props.status == UIRunStatus.Stop.value:
+#     elif comp._flow_comp_status == UIRunStatus.Stop.value:
 #         cb2 = comp.get_callback()
 #         if cb2 is not None:
 #             comp._task = asyncio.create_task(comp.run_callback(cb2, sync_status_first=sync_status_first))

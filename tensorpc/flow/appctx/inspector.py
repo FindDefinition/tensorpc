@@ -9,7 +9,7 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
 
 from typing_extensions import ParamSpec
 
-from tensorpc.flow.core.appcore import (enter_app_conetxt, find_component,
+from tensorpc.flow.core.appcore import (enter_app_context, find_component,
                                            get_app)
 from tensorpc.flow.components import mui
 from tensorpc.flow.components import plus

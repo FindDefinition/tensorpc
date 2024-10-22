@@ -13,6 +13,7 @@ from tensorpc.dbg.core.sourcecache import PythonSourceASTCache
 from tensorpc.dbg.serv_names import serv_names
 from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
+from tensorpc.flow.core.appcore import enter_app_context
 from tensorpc.flow.serv_names import serv_names as app_serv_names
 
 
@@ -29,11 +30,12 @@ class BackgroundDebugTools:
         self._ast_cache = PythonSourceASTCache()
 
     async def set_skip_breakpoint(self, skip: bool):
-        obj = prim.get_service(
+        obj, app = prim.get_service(
             app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
                 TENSORPC_DBG_FRAME_INSPECTOR_KEY)
         assert isinstance(obj, BreakpointDebugPanel)
-        await obj._skip_further_bkpt(skip)
+        with enter_app_context(app):
+            await obj._skip_further_bkpt(skip)
 
     def init_bkpt_debug_panel(self, panel: BreakpointDebugPanel):
         # panel may change the cfg
@@ -49,11 +51,12 @@ class BackgroundDebugTools:
         ), "this function should only be called in main thread"
         self._frame = frame
         self._event = event
-        obj = prim.get_service(
+        obj, app = prim.get_service(
             app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
                 TENSORPC_DBG_FRAME_INSPECTOR_KEY)
         assert isinstance(obj, BreakpointDebugPanel)
-        await obj.set_breakpoint_frame_meta(frame, self.leave_breakpoint)
+        with enter_app_context(app):
+            await obj.set_breakpoint_frame_meta(frame, self.leave_breakpoint)
         self._cur_status = DebugServerStatus.InsideBreakpoint
 
     async def leave_breakpoint(self):
@@ -64,12 +67,16 @@ class BackgroundDebugTools:
             self._event.set()
             self._event = None
         self._frame = None
-        obj = prim.get_service(
+        obj, app = prim.get_service(
             app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
                 TENSORPC_DBG_FRAME_INSPECTOR_KEY)
         assert isinstance(obj, BreakpointDebugPanel)
-        await obj.leave_breakpoint()
+        with enter_app_context(app):
+            await obj.leave_breakpoint()
         self._cur_status = DebugServerStatus.Idle
+
+    def bkgd_get_cur_frame(self):
+        return self._frame
 
     def get_cur_frame_meta(self):
         if self._frame is not None:
@@ -98,7 +105,7 @@ class BackgroundDebugTools:
         # print("WTF", code_segment, path, code_range)
         if self._frame is None:
             return 
-        obj = prim.get_service(
+        obj, app = prim.get_service(
             app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
                 TENSORPC_DBG_FRAME_INSPECTOR_KEY)
         assert isinstance(obj, BreakpointDebugPanel)
@@ -112,19 +119,20 @@ class BackgroundDebugTools:
         if res is not None:
             node_qname = ".".join([n.name for n in res])
             cur_frame: Optional[FrameType] = self._frame
-            while cur_frame is not None:
-                if Path(cur_frame.f_code.co_filename).resolve() == Path(path).resolve():
-                    qname = inspecttools.get_co_qualname_from_frame(cur_frame)
-                    # print(qname, node_qname)
-                    if node_qname == qname:
-                        # found. eval expr in this frame
-                        try:
-                            local_vars = cur_frame.f_locals
-                            global_vars = cur_frame.f_globals
-                            res = eval(code_segment, global_vars, local_vars)
-                            await obj.tree_viewer.set_external_preview_layout(res, header=code_segment)
-                        except Exception as e:
-                            traceback.print_exc()
-                            await obj.send_exception(e)
-                            return 
-                cur_frame = cur_frame.f_back
+            with enter_app_context(app):
+                while cur_frame is not None:
+                    if Path(cur_frame.f_code.co_filename).resolve() == Path(path).resolve():
+                        qname = inspecttools.get_co_qualname_from_frame(cur_frame)
+                        # print(qname, node_qname)
+                        if node_qname == qname:
+                            # found. eval expr in this frame
+                            try:
+                                local_vars = cur_frame.f_locals
+                                global_vars = cur_frame.f_globals
+                                res = eval(code_segment, global_vars, local_vars)
+                                await obj.tree_viewer.set_external_preview_layout(res, header=code_segment)
+                            except Exception as e:
+                                traceback.print_exc()
+                                await obj.send_exception(e)
+                                return 
+                    cur_frame = cur_frame.f_back

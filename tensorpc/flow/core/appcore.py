@@ -187,7 +187,7 @@ def app_is_remote_comp() -> bool:
     return ctx.app._is_remote_component
 
 @contextlib.contextmanager
-def enter_app_conetxt(app: "App"):
+def enter_app_context(app: "App"):
     ctx = AppContext(app)
     token = APP_CONTEXT_VAR.set(ctx)
     try:
@@ -286,6 +286,10 @@ class AppSpecialEventType(enum.Enum):
     # emitted when layout update is sent to frontend.
     LayoutChange = "LayoutChange"
     VscodeTensorpcMessage = "VscodeTensorpcMessage"
+
+    # emitted in remote comp server only
+    RemoteCompMount = "RemoteCompMount"
+    RemoteCompUnmount = "RemoteCompUnmount"
 
 
 @dataclasses.dataclass

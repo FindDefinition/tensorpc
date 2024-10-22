@@ -291,6 +291,6 @@ class _ServiceNames:
     @property
     def REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY(self):
         from tensorpc.flow.serv.remote_comp import RemoteComponentService
-        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.get_layout_root_by_key.__name__)
+        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.get_layout_root_and_app_by_key.__name__)
 
 serv_names = _ServiceNames()

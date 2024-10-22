@@ -797,8 +797,8 @@ class DataStorageNodeBase(abc.ABC):
     def get_in_memory_limit(self) -> int:
         raise NotImplementedError
 
-    def get_data_attrs(self):
-        items = self.get_items()
+    def get_data_attrs(self, glob_prefix: Optional[str] = None):
+        items = self.get_items(glob_prefix)
         res = []
         for item in items:
             data = self.read_meta_dict(item)
@@ -880,11 +880,6 @@ class DataStorageNodeBase(abc.ABC):
         if meta_path.exists():
             with meta_path.open("r") as f:
                 meta_dict = json.load(f)
-            if "|" not in meta_dict["id"]:
-                meta_dict["id"] = UniqueTreeId.from_parts([meta_dict["id"]
-                                                           ]).uid_encoded
-                with meta_path.open("w") as f:
-                    json.dump(meta_dict, f)
             return meta_dict
         raise DataStorageKeyError(f"{key}({meta_path}) not exists")
 
@@ -2754,11 +2749,11 @@ class Flow:
         assert isinstance(node, DataStorageNodeBase)
         return node.read_data_by_glob_prefix(glob_prefix)
 
-    async def query_data_attrs(self, graph_id: str, node_id: str):
+    async def query_data_attrs(self, graph_id: str, node_id: str, glob_prefix: Optional[str] = None):
         node_desp = self._get_node_desp(graph_id, node_id)
         node = node_desp.node
         assert isinstance(node, DataStorageNodeBase), f"{type(node)}"
-        return node.get_data_attrs()
+        return node.get_data_attrs(glob_prefix)
 
     async def delete_datastorage_data(self, graph_id: str, node_id: str,
                                       key: Optional[str]):

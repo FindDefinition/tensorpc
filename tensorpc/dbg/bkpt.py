@@ -56,7 +56,7 @@ def breakpoint(name: Optional[str] = None,
     if frame is None:
         return
     rich.print(
-        f"[bold red]Entering breakpoint... port={BACKGROUND_SERVER.port}[/bold red]"
+        f"[bold red]Entering breakpoint... port={BACKGROUND_SERVER.port}, pid={os.getpid()}[/bold red]"
     )
     BACKGROUND_SERVER.execute_service(serv_names.DBG_ENTER_BREAKPOINT, frame,
                                       ev)

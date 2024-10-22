@@ -12,7 +12,9 @@ import threading
 import atexit
 from tensorpc.core import BUILTIN_SERVICES
 from tensorpc.core.server_core import ProtobufServiceCore, ServerMeta, ServiceCore
-import sys 
+import sys
+
+from tensorpc.dbg.constants import TENSORPC_DBG_SPLIT 
 
 class BackgroundServer:
     """A background server that runs in a separate thread.
@@ -39,7 +41,10 @@ class BackgroundServer:
 
     def _try_set_proc_title(self, uid: str, id: str, status: int = 0):
         assert self.port > 0
-        title = f"{TENSORPC_BG_PROCESS_NAME_PREFIX}-{id}-{self.port}-{status}-{uid}"
+        parts = [
+            TENSORPC_BG_PROCESS_NAME_PREFIX, id, str(self.port), str(status),
+        ]
+        title = TENSORPC_DBG_SPLIT.join(parts)
         try:
             import setproctitle  # type: ignore
             setproctitle.setproctitle(title)

@@ -2,7 +2,7 @@ from typing import Dict
 from tensorpc.core.tree_id import UniqueTreeIdForTree, UniqueTreeId
 from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.core.appcore import get_app, get_app_context
-from tensorpc.flow.coretypes import StorageDataItem
+from tensorpc.flow.coretypes import StorageDataItem, StorageDataLoadedItem
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable,
                     Coroutine, Dict, Generic, Iterable, List, Optional, Set,
                     Tuple, Type, TypeVar, Union)
@@ -37,6 +37,12 @@ class AppStorage:
     def set_graph_node_id(self, graph_id: str, node_id: str):
         self.__flowapp_graph_id = graph_id
         self.__flowapp_node_id = node_id
+
+    def is_available(self):
+        if not self._is_remote_comp:
+            return True 
+        else:
+            return self._remote_grpc_url is not None
 
     async def _remote_call(self, serv_name: str, *args, **kwargs):
         if self._is_remote_comp:
@@ -152,7 +158,7 @@ class AppStorage:
                 self.__flowapp_storage_cache[key] = res
             return data
 
-    async def read_data_storage_by_glob_prefix(self,
+    async def glob_read_data_storage(self,
                                                key: str,
                                                node_id: Optional[str] = None,
                                                graph_id: Optional[str] = None):
@@ -165,7 +171,7 @@ class AppStorage:
             node_id = self.__flowapp_node_id
         res: Dict[str, StorageDataItem] = await self._remote_call(
             serv_names.FLOW_DATA_READ_GLOB_PREFIX, graph_id, node_id, key)
-        return {k: pickle.loads(d.data) for k, d in res.items()}
+        return {k: StorageDataLoadedItem(pickle.loads(d.data), d.meta) for k, d in res.items()}
 
     async def remove_data_storage_item(self,
                                        key: Optional[str],
@@ -208,7 +214,8 @@ class AppStorage:
 
     async def list_data_storage(self,
                                 node_id: Optional[str] = None,
-                                graph_id: Optional[str] = None):
+                                graph_id: Optional[str] = None,
+                                glob_prefix: Optional[str] = None):
         if not self._is_remote_comp:
             assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
@@ -216,11 +223,7 @@ class AppStorage:
         if node_id is None:
             node_id = self.__flowapp_node_id
         res: List[dict] = await self._remote_call(
-            serv_names.FLOW_DATA_LIST_ITEM_METAS, graph_id, node_id)
-        for x in res:
-            # TODO remove this (old style uid compat)
-            if "|" not in x["id"]:
-                x["id"] = UniqueTreeId.from_parts([x["id"]]).uid_encoded
+            serv_names.FLOW_DATA_LIST_ITEM_METAS, graph_id, node_id, glob_prefix)
         return [JsonLikeNode(**x) for x in res]
 
     async def list_all_data_storage_nodes(self,
