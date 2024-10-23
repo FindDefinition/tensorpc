@@ -325,6 +325,9 @@ def serve_service_core(service_core: ProtobufServiceCore,
         loop = asyncio.get_event_loop()
     try:
         service_core._loop = loop
+        
+        # os.register_at_fork(before=partial(_on_fork, service_core, loop))
+
         loop.run_until_complete(
             serve_async(service_core,
                         port=service_core.server_meta.port,
@@ -341,6 +344,7 @@ def serve_service_core(service_core: ProtobufServiceCore,
     finally:
         if _cleanup_coroutines:
             loop.run_until_complete(*_cleanup_coroutines)
+            _cleanup_coroutines.pop()
         service_core._loop = None
 
 

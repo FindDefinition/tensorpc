@@ -26,6 +26,7 @@ def init(proc_name: Optional[str] = None, port: int = -1):
     """
     if not should_enable_debug():
         return False
+    print("BACKGROUND_SERVER.is_started", os.getpid(), BACKGROUND_SERVER.is_started)
     if not BACKGROUND_SERVER.is_started:
         assert not InWindows, "init is not supported in Windows due to setproctitle."
         if proc_name is None:
@@ -43,12 +44,17 @@ def init(proc_name: Optional[str] = None, port: int = -1):
         elif mpi_world_size is not None and mpi_rank is not None:
             # assume mpi
             proc_name += f"_mpi_rank{mpi_rank}"
+        print(os.getpid(), 1)
+
         BACKGROUND_SERVER.start_async(id=proc_name, port=port)
+        print(os.getpid(), 2)
+
         panel = BreakpointDebugPanel().prop(flex=1)
         set_background_layout(TENSORPC_DBG_FRAME_INSPECTOR_KEY, panel)
         BACKGROUND_SERVER.execute_service(serv_names.DBG_INIT_BKPT_DEBUG_PANEL,
                                           panel)
         BACKGROUND_SERVER.execute_service(serv_names.DBG_TRY_FETCH_VSCODE_BREAKPOINTS)
+        print(os.getpid(), 3)
 
     return True
 
@@ -63,9 +69,14 @@ def breakpoint(name: Optional[str] = None,
     you must use specific UI or command tool to exit breakpoint.
     WARNING: currently don't support multi-thread
     """
+    print("ENTER BKPT")
     if not should_enable_debug():
         return
+    print("ENTER BKPT", 2)
+
     init(init_proc_name, init_port)
+    print("ENTER BKPT", 3)
+
     ev = threading.Event()
     frame = inspect.currentframe()
     if frame is None:

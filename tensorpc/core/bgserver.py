@@ -1,5 +1,8 @@
 import asyncio
+from functools import partial
+import os
 import queue
+import traceback
 from typing import Optional, Union
 import uuid
 from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
@@ -13,9 +16,10 @@ import atexit
 from tensorpc.core import BUILTIN_SERVICES
 from tensorpc.core.server_core import ProtobufServiceCore, ServerMeta, ServiceCore
 import sys
-
+from tensorpc.compat import InMacOS
 from tensorpc.dbg.constants import TENSORPC_DBG_SPLIT 
 
+_MAIN_PID = os.getpid()
 class BackgroundServer:
     """A background server that runs in a separate thread.
     use single-thread async server."""
@@ -56,38 +60,58 @@ class BackgroundServer:
                     port: int = -1,
                     id: Optional[str] = None,
                     wait_for_start: bool = True):
-        assert not self.is_started
-        if service_def is None:
-            service_def = ServiceDef([])
-            service_def.services.extend(BUILTIN_SERVICES)
-        port_res_queue = queue.Queue()
-        if port < 0:
-            service_def.services.append(
-                Service("tensorpc.services.collection::ProcessObserver",
-                        {"q": port_res_queue}))
-        url = '[::]:{}'.format(port)
-        smeta = ServerMeta(port=port, http_port=-1)
-        service_core = ProtobufServiceCore(url, service_def, False, smeta)
-        self._service_core = service_core
-        ev = threading.Event()
-        self._thread = threading.Thread(target=serve_service_core_async,
-                                        kwargs={
-                                            "service_core": service_core,
-                                            "create_loop": True,
-                                            "start_thread_ev": ev
-                                        })
-        self._thread.daemon = True
-        self._thread.start()
-        uid = uuid.uuid4().hex # [:8]
-        self.server_uuid = uid
-        if port < 0:
-            port = port_res_queue.get(timeout=20)
-        self.port = port
-        if id is not None:
-            self.server_id = id
-            self._try_set_proc_title(uid, id)
-        if wait_for_start:
-            ev.wait()
+        try:
+            print(os.getpid(), "1.0")
+
+            assert not self.is_started
+            print(os.getpid(), "1.1")
+
+            if service_def is None:
+                service_def = ServiceDef([])
+                service_def.services.extend(BUILTIN_SERVICES)
+            port_res_queue = queue.Queue()
+            if port < 0:
+                service_def.services.append(
+                    Service("tensorpc.services.collection::ProcessObserver",
+                            {"q": port_res_queue}))
+            url = '[::]:{}'.format(port)
+            smeta = ServerMeta(port=port, http_port=-1)
+            service_core = ProtobufServiceCore(url, service_def, False, smeta)
+            self._service_core = service_core
+            ev = threading.Event()
+            thread = threading.Thread(target=serve_service_core_async,
+                                            kwargs={
+                                                "service_core": service_core,
+                                                "create_loop": True,
+                                                "start_thread_ev": ev
+                                            })
+            self._thread = thread
+            self._thread.daemon = True
+            self._thread.start()
+            print(os.getpid(), "1.2")
+            os.register_at_fork(before=lambda: self.stop(), )
+
+            uid = uuid.uuid4().hex # [:8]
+            self.server_uuid = uid
+            if port < 0:
+                port = port_res_queue.get(timeout=20)
+            self.port = port
+            print(os.getpid(), "1.3")
+
+            if id is not None:
+                if _MAIN_PID != os.getpid():
+                    # forked process
+                    if InMacOS:
+                        raise NotImplementedError("forked process with setproctitle is not supported in MacOS")
+                self.server_id = id
+                self._try_set_proc_title(uid, id)
+            print(os.getpid(), "1.4")
+
+            if wait_for_start:
+                ev.wait()
+        except:
+            traceback.print_exc()
+            raise
         return port
 
     def set_running_proc_status(self, status: Union[int, str]):
@@ -109,12 +133,13 @@ class BackgroundServer:
                 loop.call_soon_threadsafe(self._service_core.async_shutdown_event.set)
             # robj = RemoteManager(f"localhost:{self.port}")
             # robj.shutdown()
-            self._thread.join()
+            _thread = self._thread
             self._thread = None
             self._service_core = None
             self.server_id = None
             self.port = -1
             self.server_uuid = None
+            _thread.join()
 
     def execute_service(
         self,

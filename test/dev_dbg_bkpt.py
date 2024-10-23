@@ -1,11 +1,15 @@
 import concurrent
+import setproctitle
+setproctitle.getproctitle()
 import multiprocessing
+import os
 import tensorpc 
 from tensorpc.flow import mui
 import time 
 import numpy as np
 import concurrent.futures
 def mp_func(rank):
+    print("FORK START", os.getpid())
     a = 5
     b = 3
     complex_obj = mui.Button("Hello")
@@ -39,5 +43,22 @@ def main_mp():
     for p in procs:
         p.join()
 
+def main_mp_fork_debug():
+    ctx = multiprocessing.get_context("fork")
+    num_proc = 2
+    procs = []
+    tensorpc.dbg.breakpoint(name="WTF", init_port=54322)
+    for j in range(num_proc):
+        p = ctx.Process(target=mp_func, args=(j,))
+        p.daemon = True
+        p.start()
+        procs.append(p)
+    # time.sleep(1)
+    # tensorpc.dbg.breakpoint(name="WTF2", init_port=54322)
+
+    for p in procs:
+        p.join()
+
+
 if __name__ == "__main__":
-    main()
+    main_mp_fork_debug()
