@@ -185,7 +185,7 @@ class TensorHandler(ObjectPreviewHandler):
                                      clickable=False))
         await self.tags.set_new_layout([*tags])
 
-
+@ALL_OBJECT_PREVIEW_HANDLERS.register(bool)
 @ALL_OBJECT_PREVIEW_HANDLERS.register(str)
 @ALL_OBJECT_PREVIEW_HANDLERS.register(int)
 @ALL_OBJECT_PREVIEW_HANDLERS.register(float)

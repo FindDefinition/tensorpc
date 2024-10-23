@@ -22,7 +22,7 @@ def main(c = 5):
     arr = np.random.uniform(-1, 1, size=[1000, 3])
     tensorpc.dbg.breakpoint(name="WTF", init_port=54321)
     time.sleep(2)
-    tensorpc.dbg.breakpoint(name="WTF", init_port=54321)
+    tensorpc.dbg.vscode_breakpoint(name="WTF", init_port=54321)
 
     print("Finish!")
 
@@ -40,4 +40,4 @@ def main_mp():
         p.join()
 
 if __name__ == "__main__":
-    main_mp()
+    main()

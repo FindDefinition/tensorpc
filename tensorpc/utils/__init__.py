@@ -13,14 +13,7 @@
 # limitations under the License.
 from typing import Type, TypeVar
 from tensorpc.constants import TENSORPC_SPLIT
-
-
-def get_qualname_of_type(klass: Type) -> str:
-    module = klass.__module__
-    if module == 'builtins':
-        return klass.__qualname__  # avoid outputs like 'builtins.str'
-    return module + '.' + klass.__qualname__
-
+from tensorpc.core.moduleid import get_qualname_of_type
 
 def get_service_key_by_type(klass: Type, method_name: str):
     qname = get_qualname_of_type(klass)

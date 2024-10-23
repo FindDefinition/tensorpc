@@ -207,6 +207,12 @@ class _ServiceNames:
         return get_service_key_by_type(FlowApp, FlowApp.get_file.__name__)
 
     @property
+    def APP_GET_VSCODE_BREAKPOINTS(self):
+        from tensorpc.flow.serv.flowapp import FlowApp
+        return get_service_key_by_type(FlowApp,
+                                       FlowApp.get_vscode_breakpoints.__name__)
+
+    @property
     def FLOW_DATA_SAVE(self):
         from tensorpc.flow.serv.core import Flow
         return get_service_key_by_type(Flow,

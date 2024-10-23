@@ -48,6 +48,8 @@ class FrameScriptItem:
     label: str
     code: str
 
+class EditorActions(enum.Enum):
+    SaveAndRun = "SaveAndRun"
 
 class FrameScript(mui.FlexBox):
 
@@ -57,11 +59,17 @@ class FrameScript(mui.FlexBox):
                                             "default").prop(flex=1,
                                                             minHeight=0,
                                                             minWidth=0)
-
+        # monaco key code 3: enter
+        self.code_editor.prop(actions=[
+            mui.MonacoEditorAction(id=EditorActions.SaveAndRun.value, 
+                label="Save And Run", contextMenuOrder=1.5,
+                keybindings=[([mui.MonacoKeyMod.Shift], 3)]),
+        ])
         self.code_editor_container = mui.HBox({
             "editor":
             self.code_editor,
         }).prop(flex=1)
+        self.code_editor.event_editor_action.on(self._handle_editor_action)
         self.scripts = mui.Autocomplete(
             "Scripts",
             [],
@@ -127,7 +135,6 @@ class FrameScript(mui.FlexBox):
     async def mount_frame(self, frame_state: DebugFrameState):
         assert frame_state.frame is not None 
         frame_id, title = self._get_frame_id_and_title_from_frame(frame_state.frame)
-        print("WTF", frame_id, title)
         self._current_frame_id = frame_id
         self._current_frame_state = frame_state
         ev = self.code_editor.update_event(readOnly=False)
@@ -169,6 +176,10 @@ class FrameScript(mui.FlexBox):
         # actual run script will be handled in save handler
         await self.code_editor.save({"SaveAndRun": True})
         return
+        
+    async def _handle_editor_action(self, action: str):
+        if action == EditorActions.SaveAndRun.value:
+            await self._on_save_and_run()
 
     async def _on_run_script(self):
         if self.scripts.value is not None:

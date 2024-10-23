@@ -449,7 +449,7 @@ class ProtobufServiceCore(ServiceCore):
         res, is_exc = await self.execute_async_service(request.service_key,
                                                        args,
                                                        kwargs,
-                                                       json_call=True)
+                                                       json_call=True)        
         if is_exc:
             return rpc_msg_pb2.RemoteJsonCallReply(exception=res)
         if json_only:

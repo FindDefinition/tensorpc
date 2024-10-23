@@ -76,7 +76,7 @@ from tensorpc.flow.flowapp.appstorage import AppStorage
 from tensorpc.utils.wait_tools import debounce
 from ..components import mui, three
 from tensorpc.flow.coretypes import ScheduleEvent, StorageDataItem
-from tensorpc.flow.vscode.coretypes import VscodeTensorpcMessage, VscodeTensorpcQuery, VscodeTensorpcQueryType, VscodeTraceItem, VscodeTraceQueries, VscodeTraceQuery, VscodeTraceQueryResult
+from tensorpc.flow.vscode.coretypes import VscodeBreakpoint, VscodeTensorpcMessage, VscodeTensorpcQuery, VscodeTensorpcQueryType, VscodeTraceItem, VscodeTraceQueries, VscodeTraceQuery, VscodeTraceQueryResult
 from tensorpc.flow.components.plus.objinspect.inspector import get_exception_frame_stack
 from tensorpc.flow.components.plus.objinspect.treeitems import TraceTreeItem
 from tensorpc.flow.core.reload import (AppReloadManager,
@@ -89,7 +89,7 @@ from tensorpc.flow.serv_names import serv_names
 from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.reload import reload_method
 from tensorpc.utils.uniquename import UniqueNamePool
-from tensorpc.flow.vscode.storage import AppDataStorageForVscode
+from tensorpc.flow.vscode.storage import AppDataStorageForVscode, AppVscodeState
 from ..core.appcore import (ALL_OBSERVED_FUNCTIONS, AppContext, AppSpecialEventType,
                       _CompReloadMeta, Event, EventHandlingContext, create_reload_metas, enter_event_handling_conetxt)
 from ..core.appcore import enter_app_context
@@ -317,6 +317,7 @@ class App:
         # for app and dynamic layout in AnyFlexLayout
         self._flowapp_change_observers: Dict[str, _WatchDogWatchEntry] = {}
         self._flowapp_vscode_storage: Optional[AppDataStorageForVscode] = None
+        self._flowapp_vscode_state = AppVscodeState()
         self._flowapp_is_inited: bool = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._flowapp_enable_lsp: bool = False
@@ -367,6 +368,9 @@ class App:
             else:
                 self._flowapp_vscode_storage = AppDataStorageForVscode(trace_trees={})
         return self._flowapp_vscode_storage
+
+    def get_vscode_state(self):
+        return self._flowapp_vscode_state
 
     def set_observed_func_registry(self,
                                    registry: ObservedFunctionRegistryProtocol):
@@ -1007,6 +1011,13 @@ class App:
         # print("VSCODE QUERY", event)
         with _enter_app_conetxt(self):
             try:
+                if event.type == VscodeTensorpcQueryType.SyncBreakpoints:
+                    self._flowapp_vscode_state.breakpoints = [VscodeBreakpoint(**d) for d in event.data]
+                elif event.type == VscodeTensorpcQueryType.BreakpointUpdate:
+                    bkpts = [VscodeBreakpoint(**d) for d in event.data]
+                    self._flowapp_vscode_state.breakpoints = bkpts
+                    await self._flowapp_special_eemitter.emit_async(
+                        AppSpecialEventType.VscodeBreakpointChange, bkpts)
                 workspace = event.get_workspace_path()
                 if workspace is None:
                     return None 

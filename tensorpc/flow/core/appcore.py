@@ -286,6 +286,7 @@ class AppSpecialEventType(enum.Enum):
     # emitted when layout update is sent to frontend.
     LayoutChange = "LayoutChange"
     VscodeTensorpcMessage = "VscodeTensorpcMessage"
+    VscodeBreakpointChange = "VscodeBreakpointChange"
 
     # emitted in remote comp server only
     RemoteCompMount = "RemoteCompMount"

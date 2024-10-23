@@ -18,7 +18,7 @@ from tensorpc.compat import InWindows
 import psutil
 
 from tensorpc.flow.core.appcore import AppSpecialEventType
-from tensorpc.flow.vscode.coretypes import VscodeTensorpcMessage, VscodeTensorpcMessageType
+from tensorpc.flow.vscode.coretypes import VscodeBreakpoint, VscodeTensorpcMessage, VscodeTensorpcMessageType
 
 
 @dataclasses.dataclass
@@ -156,7 +156,7 @@ class MasterDebugPanel(mui.FlexBox):
         self._current_mount_uid = ""
         self._current_metas: List[DebugServerProcessMeta] = []
 
-        self._scan_duration = 1  # 1s
+        self._scan_duration = 2  # seconds
 
         self._scan_shutdown_ev = asyncio.Event()
         self._scan_loop_task: Optional[asyncio.Task] = None
@@ -212,10 +212,11 @@ class MasterDebugPanel(mui.FlexBox):
             metas = list_all_dbg_server_in_machine()
             metas.sort(key=lambda x: x.server_id)
             self._current_metas = metas
+            bkpts = appctx.get_vscode_state().breakpoints
             for i, meta in enumerate(metas):
                 try:
                     frame_meta: Optional[DebugFrameMeta] = await simple_remote_call_async(
-                        meta.url_with_port, dbg_serv_names.DBG_CURRENT_FRAME_META, rpc_timeout=1)
+                        meta.url_with_port, dbg_serv_names.DBG_SET_BKPTS_AND_CURRENT_FRAME_META, bkpts, rpc_timeout=1)
                     if frame_meta is not None:
                         meta.secondary_name = f"{meta.pid}|{frame_meta.name}:{frame_meta.lineno}"
                     else:
@@ -227,7 +228,7 @@ class MasterDebugPanel(mui.FlexBox):
                         meta.secondary_name = f"{meta.pid}|unavailable"
                     else:
                         traceback.print_exc()
-                        meta.secondary_name = f"{meta.pid}|error"
+                        meta.secondary_name = f"{meta.pid}|{e.code().name}"
                 except:
                     print("Failed to connect to", meta.url_with_port)
                     traceback.print_exc()
@@ -312,15 +313,32 @@ class MasterDebugPanel(mui.FlexBox):
         appctx.register_app_special_event_handler(
             AppSpecialEventType.VscodeTensorpcMessage,
             self._handle_vscode_message)
+        appctx.register_app_special_event_handler(
+            AppSpecialEventType.VscodeBreakpointChange,
+            self._handle_vscode_bkpt_change)
+
         self._vscode_handler_registered = True
 
     def _unregister_vscode_handler(self):
         if not self._vscode_handler_registered:
             return
+        self._vscode_handler_registered = False
         appctx.unregister_app_special_event_handler(
             AppSpecialEventType.VscodeTensorpcMessage,
             self._handle_vscode_message)
-        self._vscode_handler_registered = False
+        appctx.unregister_app_special_event_handler(
+            AppSpecialEventType.VscodeBreakpointChange,
+            self._handle_vscode_bkpt_change)
+
+    async def _handle_vscode_bkpt_change(self, bkpts: List[VscodeBreakpoint]):
+        async with self._serv_list_lock:
+            for meta in self._current_metas:
+                try:
+                    await simple_remote_call_async(meta.url_with_port, dbg_serv_names.DBG_SET_VSCODE_BKPTS, bkpts,
+                                            rpc_timeout=1)
+                except TimeoutError:
+                    traceback.print_exc()
+
 
     async def _handle_vscode_message(self, data: VscodeTensorpcMessage):
         if data.type == VscodeTensorpcMessageType.UpdateCursorPosition:

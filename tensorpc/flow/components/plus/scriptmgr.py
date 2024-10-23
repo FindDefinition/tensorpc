@@ -38,6 +38,8 @@ from .options import CommonOptions
 
 from tensorpc.flow.client import MasterMeta
 
+class EditorActions(enum.Enum):
+    SaveAndRun = "SaveAndRun"
 
 @dataclasses.dataclass
 class Script:
@@ -124,6 +126,14 @@ class ScriptManager(mui.FlexBox):
                                             "default").prop(flex=1,
                                                             minHeight=0,
                                                             minWidth=0)
+        self.code_editor.prop(actions=[
+            mui.MonacoEditorAction(id=EditorActions.SaveAndRun.value, 
+                label="Save And Run", contextMenuOrder=1.5,
+                contextMenuGroupId="tensorpc-flow-editor-action", 
+                keybindings=[([mui.MonacoKeyMod.Shift], 3)]),
+        ])
+        self.code_editor.event_editor_action.on(self._handle_editor_action)
+
         self.app_editor = AppInMemory("scriptmgr", "").prop(flex=1,
                                                             minHeight=0,
                                                             minWidth=0)
@@ -239,6 +249,10 @@ class ScriptManager(mui.FlexBox):
         # actual run script will be handled in save handler
         await self.code_editor.save({"SaveAndRun": True})
         return
+
+    async def _handle_editor_action(self, action: str):
+        if action == EditorActions.SaveAndRun.value:
+            await self._on_save_and_run()
 
     async def _on_run_script(self):
         if self.scripts.value is not None:

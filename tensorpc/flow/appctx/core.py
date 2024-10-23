@@ -117,6 +117,10 @@ async def get_vscode_storage():
     app = get_app()
     return await app.get_vscode_storage_lazy()
 
+def get_vscode_state():
+    app = get_app()
+    return app.get_vscode_state()
+
 def set_app_z_index(z_index: int):
     app = get_app()
     app._dialog_z_index = z_index

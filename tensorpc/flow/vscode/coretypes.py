@@ -17,6 +17,10 @@ class VscodeTensorpcMessageType(enum.IntEnum):
 class VscodeTensorpcQueryType(enum.IntEnum):
     TraceTrees = 0
     DeleteTraceTree = 1
+    # period sync event
+    SyncBreakpoints = 2
+    # fired when you set or remove a breakpoint
+    BreakpointUpdate = 3
 
 @dataclass_dispatch.dataclass
 class Position:
@@ -89,4 +93,12 @@ class VscodeTraceQueryResult:
     updates: List[VscodeTraceItem]
     deleted: List[str]
 
+@dataclass_dispatch.dataclass
+class VscodeBreakpoint:
+    uri: str 
+    path: str
+    line: int 
+    character: int 
+    enabled: bool 
+    lineText: Optional[str]
 

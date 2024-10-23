@@ -1,12 +1,18 @@
 from tensorpc.core import dataclass_dispatch
 from tensorpc.flow.constants import TENSORPC_APP_STORAGE_VSCODE_TRACE_PATH
-from tensorpc.flow.vscode.coretypes import VscodeTraceItem, VscodeTraceQueries, VscodeTraceQueryResult
+from tensorpc.flow.vscode.coretypes import VscodeTraceItem, VscodeTraceQueries, VscodeTraceQueryResult, VscodeBreakpoint
 import time 
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable,
                     Coroutine, Dict, Generic, Iterable, List, Optional, Set,
                     Tuple, Type, TypeVar, Union)
 from tensorpc.flow.jsonlike import JsonLikeNode, as_dict_no_undefined, Undefined, undefined
 from tensorpc.flow.core.appcore import get_app, get_app_context
+
+@dataclass_dispatch.dataclass
+class AppVscodeState:
+    """Sync vscode storage, no touch on app storage.
+    """
+    breakpoints: List[VscodeBreakpoint] = dataclass_dispatch.field(default_factory=list)
 
 @dataclass_dispatch.dataclass
 class AppDataStorageForVscodeBase:
@@ -41,7 +47,10 @@ class AppDataStorageForVscodeBase:
         return VscodeTraceQueryResult(updates, deleted)   
 
     def to_dict(self):
-        return as_dict_no_undefined(self)     
+        res = as_dict_no_undefined(self)
+        # don't save breakpoints
+        res.pop("breakpoints")
+        return res
         
 @dataclass_dispatch.dataclass
 class AppDataStorageForVscode(AppDataStorageForVscodeBase):

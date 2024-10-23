@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import threading
+import traceback
 from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import aiohttp
@@ -171,9 +172,14 @@ class HttpService:
             pb_data.service_key = data["service_key"]
             pb_data.flags = rpc_message_pb2.JsonArray
             res = await self.service_core.remote_json_call_async(pb_data, json_only=True)
-            res_json_str = res.data
-
+            is_exc = res.exception != ""
+            if is_exc:
+                print(res.exception)
+                res_json_str = res.exception
+            else:
+                res_json_str = res.data
         except Exception as e:
+            traceback.print_exc()
             data = self.service_core._remote_exception_json(e)
             res = rpc_message_pb2.RemoteCallReply(exception=data)
             res_json_str = data

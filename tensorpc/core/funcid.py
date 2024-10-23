@@ -113,7 +113,7 @@ def find_toplevel_func_node_container_by_lineno(tree: ast.Module, lineno: int):
                 if in_range:
                     return [*cur_parent_ns, node]
                 else:
-                    break
+                    continue
             elif isinstance(node, (ast.If, )):
                 todo.append(([*node.body], cur_parent_ns))
                 todo.append(([*node.orelse], cur_parent_ns))

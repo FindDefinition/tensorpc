@@ -268,6 +268,19 @@ class FlowApp:
             }
         return None
 
+    async def handle_vscode_queries(self, datas: List[dict]):
+        """run event come from vscode, you need to install vscode-tensorpc-bridge extension first,
+        then enable it in machine which run this app.
+        """
+        res_list = []
+        for data in datas:
+            qres = await self.handle_vscode_query(data)
+            res_list.append(qres)
+        return res_list
+
+    def get_vscode_breakpoints(self):
+        return self.app.get_vscode_state().breakpoints
+
     async def relay_app_event_from_remote_component(self, app_event_dict: Dict[str, Any]):
         assert "remotePrefixes" in app_event_dict
         prefixes = app_event_dict["remotePrefixes"]
