@@ -207,6 +207,11 @@ class _ServiceNames:
         return get_service_key_by_type(FlowApp, FlowApp.get_file.__name__)
 
     @property
+    def APP_GET_FILE_METADATA(self):
+        from tensorpc.flow.serv.flowapp import FlowApp
+        return get_service_key_by_type(FlowApp, FlowApp.get_file_metadata.__name__)
+
+    @property
     def APP_GET_VSCODE_BREAKPOINTS(self):
         from tensorpc.flow.serv.flowapp import FlowApp
         return get_service_key_by_type(FlowApp,
@@ -303,5 +308,10 @@ class _ServiceNames:
     def REMOTE_COMP_GET_FILE(self):
         from tensorpc.flow.serv.remote_comp import RemoteComponentService
         return get_service_key_by_type(RemoteComponentService, RemoteComponentService.get_file.__name__)
+
+    @property
+    def REMOTE_COMP_GET_FILE_METADATA(self):
+        from tensorpc.flow.serv.remote_comp import RemoteComponentService
+        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.get_file_metadata.__name__)
 
 serv_names = _ServiceNames()

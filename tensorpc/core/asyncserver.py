@@ -343,6 +343,8 @@ def serve_service_core(service_core: ProtobufServiceCore,
             loop.run_until_complete(*_cleanup_coroutines)
             _cleanup_coroutines.pop()
         service_core._loop = None
+        if create_loop:
+            loop.close()
 
 
 # import uvloop

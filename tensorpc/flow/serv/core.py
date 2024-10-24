@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import (Any, Awaitable, Callable, Coroutine, Dict, Iterable, List,
                     Optional, Set, Tuple, Type, Union)
 from tensorpc.autossh.coretypes import SSHTarget
-from tensorpc.core.asyncclient import AsyncRemoteManager
+from tensorpc.core.asyncclient import AsyncRemoteManager, simple_remote_call_async
 from tensorpc.core.defs import File
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import ServiceEventType
@@ -1974,7 +1974,7 @@ class Flow:
                                                AppEventType.UIEvent.value,
                                                ev.to_dict(), True)
 
-    async def app_get_file(self, node_uid: str, file_key: str, comp_uid: Optional[str] = None):
+    async def app_get_file(self, node_uid: str, file_key: str, offset: int, count: Optional[int], comp_uid: Optional[str] = None):
         graph_id = node_uid.split("@")[0]
         node_id = node_uid.split("@")[1]
 
@@ -1992,8 +1992,26 @@ class Flow:
                 app_url = get_grpc_url(durl, grpc_port)
             async with AsyncRemoteManager(app_url) as robj:
                 async for x in robj.remote_generator(serv_names.APP_GET_FILE,
-                                                     file_key, comp_uid=comp_uid):
+                                                     file_key, offset, count, comp_uid=comp_uid):
                     yield x
+
+    async def app_get_file_metadata(self, node_uid: str, file_key: str, comp_uid: Optional[str] = None):
+        graph_id = node_uid.split("@")[0]
+        node_id = node_uid.split("@")[1]
+
+        node, driver = self._get_app_node_and_driver(graph_id, node_id)
+        if not node.is_session_started():
+            raise NotImplementedError
+        if isinstance(driver, RemoteSSHNode):
+            raise NotImplementedError
+        else:
+            grpc_port = node.grpc_port
+            durl, _ = get_url_port(driver.url)
+            if driver.enable_port_forward:
+                app_url = get_grpc_url("localhost", node.fwd_grpc_port)
+            else:
+                app_url = get_grpc_url(durl, grpc_port)
+            return await simple_remote_call_async(app_url, serv_names.APP_GET_FILE_METADATA, file_key, comp_uid=comp_uid)
 
     async def query_app_state(self,
                               graph_id: str,

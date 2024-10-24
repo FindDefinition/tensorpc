@@ -28,6 +28,7 @@ from tensorpc.core.defs import FileDesp, FileResource, FileResourceRequest
 from tensorpc.flow.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_LSP_EXTRA_PATH
 from tensorpc.flow.coretypes import ScheduleEvent, get_unique_node_id
 from tensorpc.core.tree_id import UniqueTreeId
+from tensorpc.flow.serv.common import handle_file_resource
 from tensorpc.flow.vscode.coretypes import VscodeTensorpcMessage, VscodeTensorpcQuery
 from tensorpc.flow import appctx
 from tensorpc.flow.core.appcore import ALL_OBSERVED_FUNCTIONS, enter_app_context
@@ -356,6 +357,9 @@ class FlowApp:
                     )
                     res.stat = st
                 else:
+                    if res.content is not None:
+                        assert res.content is not None and isinstance(res.content, bytes)
+                        res.length = len(res.content)
                     msg = "file metadata must return stat or length if not path"
                     assert res.stat is not None or res.length is not None, msg
                 return res  
@@ -365,7 +369,7 @@ class FlowApp:
         else:
             raise KeyError(f"File key {file_key} not found.")
 
-    async def get_file(self, file_key: str, offset: Optional[int] = None, chunk_size=2**16, comp_uid: Optional[str] = None):
+    async def get_file(self, file_key: str, offset: int, count: Optional[int] = None, chunk_size=2**16, comp_uid: Optional[str] = None):
         url = parse.urlparse(file_key)
         base = url.path
         file_key_qparams = parse.parse_qs(url.query)
@@ -386,48 +390,10 @@ class FlowApp:
             else:
                 file_key_qparams = {}
             try:
+                req = FileResourceRequest(base, False, offset, file_key_qparams)
                 handler = self.app._flowapp_file_resource_handlers[base]
-                res = handler(FileResourceRequest(base, False, offset, file_key_qparams))
-                if inspect.iscoroutine(res):
-                    res = await res
-                assert isinstance(res, (str, bytes, FileResource))
-                if isinstance(res, (str, bytes)):
-                    if isinstance(res, str):
-                        res = res.encode()
-                    bio = io.BytesIO(res)
-                    chunk = bio.read(chunk_size)
-                    yield FileDesp(base)
-                    while chunk:
-                        yield chunk
-                        chunk = bio.read(chunk_size)
-                else:
-                    fname = res.name
-                    if res.chunk_size is not None:
-                        assert res.chunk_size > 1024
-                        chunk_size = res.chunk_size
-                    if res.path is not None:
-                        yield FileDesp(Path(res.path).name, res.content_type)
-                        with open(res.path, "rb") as f:
-                            if offset is not None:
-                                f.seek(offset)
-                            chunk = f.read(chunk_size)
-                            while chunk:
-                                yield chunk
-                                chunk = f.read(chunk_size)
-                    elif res.content is not None:
-                        content = res.content
-                        if isinstance(content, str):
-                            content = content.encode()
-                        bio = io.BytesIO(content)
-                        if offset is not None:
-                            bio.seek(offset)
-                        chunk = bio.read(chunk_size)
-                        yield FileDesp(fname, res.content_type)
-                        while chunk:
-                            yield chunk
-                            chunk = bio.read(chunk_size)
-                    else:
-                        raise NotImplementedError
+                async for chunk in handle_file_resource(req, handler, chunk_size, count):
+                    yield chunk
             except:
                 traceback.print_exc()
                 raise

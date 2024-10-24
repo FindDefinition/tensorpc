@@ -42,7 +42,7 @@ from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from tensorpc.flow import marker
 from .typemetas import Vector3Type
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.core.defs import FileResource
+from tensorpc.core.defs import FileResource, FileResourceRequest
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 from tensorpc.core.serviceunit import AppFuncType, ObjectReloadManager, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.flow.client import MasterMeta

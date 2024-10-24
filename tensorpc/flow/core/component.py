@@ -2774,7 +2774,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         ...
 
     @abc.abstractmethod
-    async def remote_call(self, service_key: str, timeout: Optional[int], /, *args, **kwargs):
+    async def remote_call(self, service_key: str, timeout: Optional[int], /, *args, **kwargs) -> Any:
         ...
 
     @abc.abstractmethod
@@ -2782,7 +2782,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         ...
 
     @abc.abstractmethod
-    def remote_call_sync(self, service_key: str, timeout: Optional[int], /, *args, **kwargs):
+    def remote_call_sync(self, service_key: str, timeout: Optional[int], /, *args, **kwargs) -> Any:
         ...
 
     @abc.abstractmethod
@@ -2900,6 +2900,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         async for x in self.remote_generator(serv_names.REMOTE_COMP_GET_FILE, 10, self._key, file_key, chunk_size):
             yield x
  
+    async def get_file_metadata(self, file_key: str):
+        return await self.remote_call(serv_names.REMOTE_COMP_GET_FILE_METADATA, 1, self._key, file_key)
 
 @dataclasses_strict.dataclass
 class FragmentProps(ContainerBaseProps):

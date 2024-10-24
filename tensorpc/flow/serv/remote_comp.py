@@ -15,7 +15,7 @@ from tensorpc.core import marker
 from tensorpc.core.asyncclient import (AsyncRemoteManager,
                                        simple_chunk_call_async)
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.core.defs import FileDesp, FileResource
+from tensorpc.core.defs import FileDesp, FileResource, FileResourceRequest
 from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.core.tree_id import UniqueTreeId
 from tensorpc.flow.components.mui import FlexBox
@@ -29,6 +29,7 @@ from tensorpc.flow.core.component import (AppEvent, AppEventType,
 from tensorpc.flow.core.reload import AppReloadManager, FlowSpecialMethods
 from tensorpc.flow.coretypes import split_unique_node_id
 from tensorpc.flow.flowapp.app import App, EditableApp
+from tensorpc.flow.serv.common import handle_file_resource
 from tensorpc.flow.serv_names import serv_names
 from urllib import parse
 
@@ -391,7 +392,56 @@ class RemoteComponentService:
             except:
                 traceback.print_exc()
 
-    async def get_file(self, key: str, file_key: str, chunk_size=2**16):
+    def _get_file_path_stat(
+        self, path: str
+    ) -> os.stat_result:
+        """Return the file path, stat result, and gzip status.
+
+        This method should be called from a thread executor
+        since it calls os.stat which may block.
+        """
+        return Path(path).stat()
+
+    async def get_file_metadata(self, key: str, file_key: str):
+        app_obj = self._app_objs[key]
+        assert app_obj.mounted_app_meta is not None
+
+
+        url = parse.urlparse(file_key)
+        base = url.path
+        file_key_qparams = parse.parse_qs(url.query)
+        if base in app_obj.app._flowapp_file_resource_handlers:
+            # we only use first value
+            if len(file_key_qparams) > 0:
+                file_key_qparams = {
+                    k: v[0]
+                    for k, v in file_key_qparams.items()
+                }
+            else:
+                file_key_qparams = {}
+            try:
+                handler = app_obj.app._flowapp_file_resource_handlers[base]
+                res = handler(FileResourceRequest(base, True, None, file_key_qparams))
+                if inspect.iscoroutine(res):
+                    res = await res
+                assert isinstance(res, FileResource)
+                if res.path is not None and res.stat is None:
+                    loop = asyncio.get_event_loop()
+                    st = await loop.run_in_executor(
+                        None, self._get_file_path_stat, res.path
+                    )
+                    res.stat = st
+                else:
+                    msg = "file metadata must return stat or length if not path"
+                    assert res.stat is not None or res.length is not None, msg
+                return res  
+            except:
+                traceback.print_exc()
+                raise
+        else:
+            raise KeyError(f"File key {file_key} not found.")
+
+    async def get_file(self, key: str, file_key: str, offset: int, count: Optional[int] = None, chunk_size=2**16):
         app_obj = self._app_objs[key]
         assert app_obj.mounted_app_meta is not None
 
@@ -409,44 +459,10 @@ class RemoteComponentService:
             else:
                 file_key_qparams = {}
             try:
+                req = FileResourceRequest(base, False, offset, file_key_qparams)
                 handler = app_obj.app._flowapp_file_resource_handlers[base]
-                res = handler(**file_key_qparams)
-                if inspect.iscoroutine(res):
-                    res = await res
-                assert isinstance(res, (str, bytes, FileResource))
-                if isinstance(res, (str, bytes)):
-                    if isinstance(res, str):
-                        res = res.encode()
-                    bio = io.BytesIO(res)
-                    chunk = bio.read(chunk_size)
-                    yield FileDesp(base)
-                    while chunk:
-                        yield chunk
-                        chunk = bio.read(chunk_size)
-                else:
-                    fname = res.name
-                    if res.chunk_size is not None:
-                        assert res.chunk_size > 1024
-                        chunk_size = res.chunk_size
-                    if res.path is not None:
-                        yield FileDesp(Path(res.path).name, res.content_type)
-                        with open(res.path, "rb") as f:
-                            chunk = f.read(chunk_size)
-                            while chunk:
-                                yield chunk
-                                chunk = f.read(chunk_size)
-                    elif res.content is not None:
-                        content = res.content
-                        if isinstance(content, str):
-                            content = content.encode()
-                        bio = io.BytesIO(content)
-                        chunk = bio.read(chunk_size)
-                        yield FileDesp(fname, res.content_type)
-                        while chunk:
-                            yield chunk
-                            chunk = bio.read(chunk_size)
-                    else:
-                        raise NotImplementedError
+                async for chunk in handle_file_resource(req, handler, chunk_size, count):
+                    yield chunk
             except:
                 traceback.print_exc()
                 raise

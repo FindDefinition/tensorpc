@@ -499,21 +499,30 @@ class EnvmapGroupdProjectionApp:
                 overflow="hidden")
         return res
 
-    async def old_depot_2k(self, req):
+    async def old_depot_2k(self, req: mui.FileResourceRequest):
         url = "https://uploads.codesandbox.io/uploads/user/b3e56831-8b98-4fee-b941-0e27f39883ab/KNRT-old_depot_2k.hdr"
         if self.hdr_content is None:
             self.hdr_content = await download_file(url)
         print("self.hdr_content", len(self.hdr_content))
+        if req.is_metadata_req:
+            return mui.FileResource(
+                name="old_depot_2k.hdr",
+                length=len(self.hdr_content),
+            )
         return mui.FileResource(name="old_depot_2k.hdr",
                                 content=self.hdr_content)
 
-    async def porsche(self, req):
+    async def porsche(self, req: mui.FileResourceRequest):
         url = "https://uploads.codesandbox.io/uploads/user/b3e56831-8b98-4fee-b941-0e27f39883ab/or72-porsche-transformed.glb"
         url2 = "https://uploads.codesandbox.io/uploads/user/b3e56831-8b98-4fee-b941-0e27f39883ab/cExH-911-transformed.glb"
         if self.glb_content is None:
             self.glb_content = await download_file(url)
         print("self.glb_content", len(self.glb_content))
-
+        if req.is_metadata_req:
+            return mui.FileResource(
+                name="porsche-transformed.glb",
+                length=len(self.glb_content),
+            )
         return mui.FileResource(name="porsche-transformed.glb",
                                 content=self.glb_content)
 
