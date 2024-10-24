@@ -49,6 +49,7 @@ REQUIRED = [
     "pyright",
     "pydantic>=2.7,<3.0",
     "setproctitle",
+    "rich",
 ]
 
 # What packages are optional?

@@ -2,6 +2,10 @@ import asyncio
 import collections
 import collections.abc
 import dataclasses
+import inspect
+import io
+import os
+from pathlib import Path
 import time
 import traceback
 from typing import Any, Dict, List, Optional
@@ -10,6 +14,8 @@ import tensorpc
 from tensorpc.core import marker
 from tensorpc.core.asyncclient import (AsyncRemoteManager,
                                        simple_chunk_call_async)
+from tensorpc.core.asynctools import cancel_task
+from tensorpc.core.defs import FileDesp, FileResource
 from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.core.tree_id import UniqueTreeId
 from tensorpc.flow.components.mui import FlexBox
@@ -24,6 +30,7 @@ from tensorpc.flow.core.reload import AppReloadManager, FlowSpecialMethods
 from tensorpc.flow.coretypes import split_unique_node_id
 from tensorpc.flow.flowapp.app import App, EditableApp
 from tensorpc.flow.serv_names import serv_names
+from urllib import parse
 
 
 @dataclasses.dataclass
@@ -235,7 +242,7 @@ class RemoteComponentService:
         # grpc_url = mount_meta.url_with_port
         # async with tensorpc.AsyncRemoteManager(grpc_url) as robj:
         send_task = asyncio.create_task(app_obj.send_loop_queue.get(), name="wait for queue")
-        wait_for_mount_task = asyncio.create_task(app_obj.mount_ev.wait(), name="wait for mount")
+        wait_for_mount_task = asyncio.create_task(app_obj.mount_ev.wait(), name=f"wait for mount-{os.getpid()}")
         robj: Optional[tensorpc.AsyncRemoteManager] = None
         wait_tasks: List[asyncio.Task] = [
             shut_task, send_task, wait_for_mount_task
@@ -245,6 +252,8 @@ class RemoteComponentService:
              pending) = await asyncio.wait(wait_tasks,
                                            return_when=asyncio.FIRST_COMPLETED)
             if shut_task in done:
+                for task in pending:
+                    await cancel_task(task)
                 break
             if wait_for_mount_task in done:
                 assert app_obj.mounted_app_meta is not None, "shouldn't happen"
@@ -276,9 +285,9 @@ class RemoteComponentService:
             if app_obj.mounted_app_meta is None or robj is None:
                 # we got app event, but
                 # remote component isn't mounted, ignore app event
-                send_task = asyncio.create_task(app_obj.send_loop_queue.get())
+                send_task = asyncio.create_task(app_obj.send_loop_queue.get(), name="wait for queue")
                 wait_for_mount_task = asyncio.create_task(
-                    app_obj.mount_ev.wait())
+                    app_obj.mount_ev.wait(), name=f"wait for mount-{os.getpid()}")
                 wait_tasks: List[asyncio.Task] = [
                     shut_task, wait_for_mount_task, send_task
                 ]
@@ -290,7 +299,7 @@ class RemoteComponentService:
             # assign uid here.
             # print("WTF", ev.to_dict(), app_obj.mounted_app_meta.node_uid)
             ev.uid = app_obj.mounted_app_meta.node_uid
-            send_task = asyncio.create_task(app_obj.send_loop_queue.get())
+            send_task = asyncio.create_task(app_obj.send_loop_queue.get(), name="wait for queue")
             wait_tasks: List[asyncio.Task] = [shut_task, send_task]
             succeed = False
             # retry
@@ -313,7 +322,7 @@ class RemoteComponentService:
                     robj = None
                 await self.unmount_app(app_obj.mounted_app_meta.key)
                 wait_for_mount_task = asyncio.create_task(
-                    app_obj.mount_ev.wait())
+                    app_obj.mount_ev.wait(), name=f"wait for mount-{os.getpid()}")
                 wait_tasks: List[asyncio.Task] = [
                     shut_task, wait_for_mount_task, send_task
                 ]
@@ -381,3 +390,65 @@ class RemoteComponentService:
                 await app_obj.app.app_terminate_async()
             except:
                 traceback.print_exc()
+
+    async def get_file(self, key: str, file_key: str, chunk_size=2**16):
+        app_obj = self._app_objs[key]
+        assert app_obj.mounted_app_meta is not None
+
+        url = parse.urlparse(file_key)
+        base = url.path
+        file_key_qparams = parse.parse_qs(url.query)
+
+        if base in app_obj.app._flowapp_file_resource_handlers:
+            # we only use first value
+            if len(file_key_qparams) > 0:
+                file_key_qparams = {
+                    k: v[0]
+                    for k, v in file_key_qparams.items()
+                }
+            else:
+                file_key_qparams = {}
+            try:
+                handler = app_obj.app._flowapp_file_resource_handlers[base]
+                res = handler(**file_key_qparams)
+                if inspect.iscoroutine(res):
+                    res = await res
+                assert isinstance(res, (str, bytes, FileResource))
+                if isinstance(res, (str, bytes)):
+                    if isinstance(res, str):
+                        res = res.encode()
+                    bio = io.BytesIO(res)
+                    chunk = bio.read(chunk_size)
+                    yield FileDesp(base)
+                    while chunk:
+                        yield chunk
+                        chunk = bio.read(chunk_size)
+                else:
+                    fname = res.name
+                    if res.chunk_size is not None:
+                        assert res.chunk_size > 1024
+                        chunk_size = res.chunk_size
+                    if res.path is not None:
+                        yield FileDesp(Path(res.path).name, res.content_type)
+                        with open(res.path, "rb") as f:
+                            chunk = f.read(chunk_size)
+                            while chunk:
+                                yield chunk
+                                chunk = f.read(chunk_size)
+                    elif res.content is not None:
+                        content = res.content
+                        if isinstance(content, str):
+                            content = content.encode()
+                        bio = io.BytesIO(content)
+                        chunk = bio.read(chunk_size)
+                        yield FileDesp(fname, res.content_type)
+                        while chunk:
+                            yield chunk
+                            chunk = bio.read(chunk_size)
+                    else:
+                        raise NotImplementedError
+            except:
+                traceback.print_exc()
+                raise
+        else:
+            raise KeyError(f"File key {file_key} not found.")

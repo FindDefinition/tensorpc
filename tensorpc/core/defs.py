@@ -1,8 +1,8 @@
-import mashumaro
+import dataclasses
+from os import stat_result
 
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 from dataclasses import dataclass
-
 from typing import Dict, List, Optional, Tuple, Union, Any
 from pathlib import Path
 import base64
@@ -34,7 +34,6 @@ class DynamicEvents:
     def __init__(self, name_and_datas: List[Tuple[str, Any]]) -> None:
         self.name_and_datas = name_and_datas
 
-
 @dataclass
 class File:
     name: str
@@ -49,12 +48,24 @@ class FileResource:
     content: Optional[Union[str, bytes]] = None
     chunk_size: Optional[int] = None
     content_type: Optional[str] = None
+    length: Optional[int] = None
+    stat: Optional[stat_result] = None
 
 
 @dataclass
 class FileDesp:
     name: str
     content_type: Optional[str] = None
+    length: Optional[int] = None
+    stat: Optional[stat_result] = None
+
+
+@dataclass
+class FileResourceRequest:
+    key: str
+    is_metadata_req: bool
+    offset: Optional[int] = None
+    params: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 def from_yaml_path(path: Union[Path, str]) -> ServiceDef:

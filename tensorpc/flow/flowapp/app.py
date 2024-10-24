@@ -56,7 +56,7 @@ from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.constants import PACKAGE_ROOT, TENSORPC_FILE_NAME_PREFIX, TENSORPC_FLOW_FUNC_META_KEY, TENSORPC_OBSERVED_FUNCTION_ATTR
 from tensorpc.core.astex.astcache import AstCache
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.core.defs import FileResource
+from tensorpc.core.defs import FileDesp, FileResource, FileResourceRequest
 from tensorpc.core.funcid import remove_common_indent_from_code
 from tensorpc.core.inspecttools import get_all_members_by_type
 from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
@@ -326,9 +326,7 @@ class App:
         self._flowapp_internal_lsp_config.python.analysis.pythonPath = sys.executable
         self._flowapp_observed_func_registry: Optional[
             ObservedFunctionRegistryProtocol] = None
-        self._flowapp_file_resource_handlers: Dict[str, Callable[[], Union[
-            bytes, FileResource, Coroutine[None, None,
-                                           Union[bytes, FileResource]]]]] = {}
+        self._flowapp_file_resource_handlers: Dict[str, Callable[[FileResourceRequest], Union[FileResource, Coroutine[None, None, FileResource]]]] = {}
 
     @property
     def _flow_reload_manager(self):
@@ -336,9 +334,7 @@ class App:
 
     def add_file_resource(
         self, key: str,
-        handler: Callable[..., Union[bytes, FileResource,
-                                     Coroutine[None, None,
-                                               Union[bytes, FileResource]]]]):
+        handler: Callable[[FileResourceRequest], Union[FileResource, Coroutine[None, None, FileResource]]]):
         self._flowapp_file_resource_handlers[key] = handler
 
     def remove_file_resource(
@@ -1011,16 +1007,21 @@ class App:
         # print("VSCODE QUERY", event)
         with _enter_app_conetxt(self):
             try:
-                if event.type == VscodeTensorpcQueryType.SyncBreakpoints:
-                    self._flowapp_vscode_state.breakpoints = [VscodeBreakpoint(**d) for d in event.data]
-                elif event.type == VscodeTensorpcQueryType.BreakpointUpdate:
-                    bkpts = [VscodeBreakpoint(**d) for d in event.data]
-                    self._flowapp_vscode_state.breakpoints = bkpts
-                    await self._flowapp_special_eemitter.emit_async(
-                        AppSpecialEventType.VscodeBreakpointChange, bkpts)
                 workspace = event.get_workspace_path()
                 if workspace is None:
                     return None 
+
+                if event.type == VscodeTensorpcQueryType.SyncBreakpoints:
+                    if event.workspaceUri not in self._flowapp_vscode_state.breakpoint_dict:
+                        self._flowapp_vscode_state.breakpoint_dict[event.workspaceUri] = []
+                    self._flowapp_vscode_state.breakpoint_dict[event.workspaceUri] = [VscodeBreakpoint(**d) for d in event.data]
+                elif event.type == VscodeTensorpcQueryType.BreakpointUpdate:
+                    bkpts = [VscodeBreakpoint(**d) for d in event.data]
+                    if event.workspaceUri not in self._flowapp_vscode_state.breakpoint_dict:
+                        self._flowapp_vscode_state.breakpoint_dict[event.workspaceUri] = []
+                    self._flowapp_vscode_state.breakpoint_dict[event.workspaceUri] = [VscodeBreakpoint(**d) for d in event.data]
+                    await self._flowapp_special_eemitter.emit_async(
+                        AppSpecialEventType.VscodeBreakpointChange, self._flowapp_vscode_state.get_all_breakpoints())
                 if not self._is_app_workspace_child_of_vscode_workspace_root(str(workspace)):
                     return None
                 storage = await self.get_vscode_storage_lazy()

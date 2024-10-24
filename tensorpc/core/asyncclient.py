@@ -167,7 +167,7 @@ class AsyncRemoteObject(object):
     async def remote_generator(self,
                                key: str,
                                *args,
-                               timeout: Optional[int] = None,
+                               rpc_timeout: Optional[int] = None,
                                rpc_callback="",
                                rpc_flags: int = rpc_message_pb2.PickleArray,
                                **kwargs) -> AsyncGenerator[Any, None]:
@@ -176,7 +176,7 @@ class AsyncRemoteObject(object):
                                                     arrays=data_to_be_send,
                                                     callback=rpc_callback,
                                                     flags=rpc_flags)
-        async for response in self.stub.RemoteGenerator(request):
+        async for response in self.stub.RemoteGenerator(request, timeout=rpc_timeout):
             yield self.parse_remote_response(response)
 
     async def client_stream(self,

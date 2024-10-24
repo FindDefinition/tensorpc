@@ -93,17 +93,7 @@ class MasterDebugPanel(mui.FlexBox):
             overflow="auto",
             virtualized=False,
             secondaryIconButtonProps=[
-                # mui.IconButtonBaseProps(
-                #     name=ServerItemActions.RELEASE_BREAKPOINT.value,
-                #     icon=mui.IconType.PlayArrow,
-                #     size="small"),
-                # mui.IconButtonBaseProps(
-                #     name=ServerItemActions.UNMOUNT_REMOTE_SERVER.value,
-                #     icon=mui.IconType.Close,
-                #     size="small"),
             ])
-        # self._remote_server_discover_lst.event_secondary_action_click.on_standard(
-        #     self._handle_secondary_actions)
         remote_server_item.event_click.on_standard(
             self._on_server_item_click).configure(True)
         self._menu = mui.MenuList([
@@ -212,7 +202,7 @@ class MasterDebugPanel(mui.FlexBox):
             metas = list_all_dbg_server_in_machine()
             metas.sort(key=lambda x: x.server_id)
             self._current_metas = metas
-            bkpts = appctx.get_vscode_state().breakpoints
+            bkpts = appctx.get_vscode_state().get_all_breakpoints()
             for i, meta in enumerate(metas):
                 try:
                     frame_meta: Optional[DebugFrameMeta] = await simple_remote_call_async(
@@ -336,8 +326,11 @@ class MasterDebugPanel(mui.FlexBox):
                 try:
                     await simple_remote_call_async(meta.url_with_port, dbg_serv_names.DBG_SET_VSCODE_BKPTS, bkpts,
                                             rpc_timeout=1)
-                except TimeoutError:
-                    traceback.print_exc()
+                except grpc.aio.AioRpcError as e:
+                    if e.code() == grpc.StatusCode.UNAVAILABLE:
+                        continue
+                    else:
+                        traceback.print_exc()
 
 
     async def _handle_vscode_message(self, data: VscodeTensorpcMessage):

@@ -1361,6 +1361,11 @@ class RemoteBoxGrpc(RemoteComponentBase[MUIFlexBoxProps, MUIComponentType]):
     def remote_call_sync(self, service_key: str, timeout: Optional[int], *args, **kwargs):
         return simple_chunk_call(self._get_addr(), service_key, *args, rpc_timeout=timeout, **kwargs)
 
+    async def remote_generator(self, service_key: str, timeout: Optional[int], /, *args, **kwargs) -> AsyncGenerator[Any, None]:
+        assert self._robj is not None 
+        async for x in self._robj.remote_generator(service_key, *args, rpc_timeout=timeout, **kwargs):
+            yield x
+
     async def set_fallback_layout(self):
         await self.set_new_layout([
             VBox([
@@ -2833,7 +2838,7 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
         self.props.label = label
 
     async def set_raw_update(self, enable: bool):
-        if self.props.status != UIRunStatus.Stop.value:
+        if self._flow_comp_status != UIRunStatus.Stop.value:
             raise ValueError("you must set raw_update in stop status")
         if enable != self._raw_update:
             await self.clear()
@@ -2866,7 +2871,7 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
             return await handle_standard_event(self, ev, is_sync=is_sync)
         data = ev.data
         if data == TaskLoopEvent.Start.value:
-            if self.props.status == UIRunStatus.Stop.value:
+            if self._flow_comp_status == UIRunStatus.Stop.value:
                 handlers = self.get_event_handlers(self.__callback_key)
                 if handlers is not None:
                     self._task = asyncio.create_task(
@@ -2875,29 +2880,29 @@ class TaskLoop(MUIComponentBase[TaskLoopProps]):
                             True,
                             sync_status_first=True,
                             change_status=True))
-                    self.props.status = UIRunStatus.Running.value
+                    self._flow_comp_status = UIRunStatus.Running.value
             else:
-                print("IGNORE TaskLoop EVENT", self.props.status)
+                print("IGNORE TaskLoop EVENT", self._flow_comp_status)
         elif data == TaskLoopEvent.Pause.value:
-            if self.props.status == UIRunStatus.Running.value:
+            if self._flow_comp_status == UIRunStatus.Running.value:
                 # pause
                 self.pause_event.clear()
-                self.props.status = UIRunStatus.Pause.value
-            elif self.props.status == UIRunStatus.Pause.value:
+                self._flow_comp_status = UIRunStatus.Pause.value
+            elif self._flow_comp_status == UIRunStatus.Pause.value:
                 self.pause_event.set()
-                self.props.status = UIRunStatus.Running.value
+                self._flow_comp_status = UIRunStatus.Running.value
             else:
-                print("IGNORE TaskLoop EVENT", self.props.status)
+                print("IGNORE TaskLoop EVENT", self._flow_comp_status)
         elif data == TaskLoopEvent.Stop.value:
-            if self.props.status == UIRunStatus.Running.value:
+            if self._flow_comp_status == UIRunStatus.Running.value:
                 await cancel_task(self._task)
-                self.props.status = UIRunStatus.Stop.value
-            elif self.props.status == UIRunStatus.Pause.value:
+                self._flow_comp_status = UIRunStatus.Stop.value
+            elif self._flow_comp_status == UIRunStatus.Pause.value:
                 self.pause_event.set()
                 await cancel_task(self._task)
-                self.props.status = UIRunStatus.Stop.value
+                self._flow_comp_status = UIRunStatus.Stop.value
             else:
-                print("IGNORE TaskLoop EVENT", self.props.status)
+                print("IGNORE TaskLoop EVENT", self._flow_comp_status)
         else:
             raise NotImplementedError
         await self.sync_status(True)
@@ -5322,4 +5327,33 @@ class Pagination(MUIComponentBase[PaginationProps]):
         res = super().get_sync_props()
         res["value"] = self.props.value
         return res
+
+@dataclasses.dataclass
+class VideoPlayerProps(MUIComponentBaseProps):
+    src: Union[str, Undefined] = undefined
+    title: Union[Undefined, str] = undefined
+    thumbnails: Union[Undefined, str] = undefined
+
+
+class VideoPlayer(MUIComponentBase[VideoPlayerProps]):
+
+    def __init__(self,
+                 src: Optional[str] = None,
+                 ) -> None:
+        super().__init__(UIType.VideoPlayer, VideoPlayerProps)
+        if src is not None:
+            self.prop(src=src)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync=is_sync)
 

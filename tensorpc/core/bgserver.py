@@ -5,7 +5,7 @@ import queue
 import traceback
 from typing import Optional, Union
 import uuid
-from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
+from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX, TENSORPC_MAIN_PID
 from tensorpc.core.asyncserver import serve_service_core as serve_service_core_async
 
 from tensorpc.core.client import RemoteManager
@@ -15,14 +15,20 @@ import threading
 import atexit
 from tensorpc.core import BUILTIN_SERVICES
 from tensorpc.core.server_core import ProtobufServiceCore, ServerMeta, ServiceCore
-import sys
-from tensorpc.compat import InMacOS
-from tensorpc.dbg.constants import TENSORPC_DBG_SPLIT 
+from tensorpc.compat import InMacOS, InLinux
+from tensorpc.dbg.constants import TENSORPC_DBG_SPLIT
+from tensorpc.utils.rich_logging import get_logger 
 
-_MAIN_PID = os.getpid()
+LOGGER = get_logger("tensorpc.core")
+
 class BackgroundServer:
     """A background server that runs in a separate thread.
-    use single-thread async server."""
+    use single-thread async server.
+
+    ### Fork Behavior
+    When you fork a process after background server started, the background server will be stopped before fork.
+
+    """
     def __init__(self):
         self._thread: Optional[threading.Thread] = None
         self.port = -1
@@ -33,6 +39,10 @@ class BackgroundServer:
 
         self.server_id: Optional[str] = None
         self.server_uuid: Optional[str] = None
+
+        self._is_fork_handler_registered = False
+
+        self._prev_proc_title: Optional[str] = None
 
     @property
     def service_core(self):
@@ -46,11 +56,13 @@ class BackgroundServer:
     def _try_set_proc_title(self, uid: str, id: str, status: int = 0):
         assert self.port > 0
         parts = [
-            TENSORPC_BG_PROCESS_NAME_PREFIX, id, str(self.port), str(status),
+            TENSORPC_BG_PROCESS_NAME_PREFIX, id, str(self.port), str(status), uid,
         ]
         title = TENSORPC_DBG_SPLIT.join(parts)
         try:
             import setproctitle  # type: ignore
+            if self._prev_proc_title is None:
+                self._prev_proc_title = setproctitle.getproctitle()
             setproctitle.setproctitle(title)
         except ImportError:
             pass
@@ -60,12 +72,13 @@ class BackgroundServer:
                     port: int = -1,
                     id: Optional[str] = None,
                     wait_for_start: bool = True):
+        if id is not None:
+            if TENSORPC_MAIN_PID != os.getpid():
+                # forked process
+                if InMacOS:
+                    raise NotImplementedError("forked process with setproctitle is not supported in MacOS")
         try:
-            print(os.getpid(), "1.0")
-
             assert not self.is_started
-            print(os.getpid(), "1.1")
-
             if service_def is None:
                 service_def = ServiceDef([])
                 service_def.services.extend(BUILTIN_SERVICES)
@@ -88,25 +101,19 @@ class BackgroundServer:
             self._thread = thread
             self._thread.daemon = True
             self._thread.start()
-            print(os.getpid(), "1.2")
-            os.register_at_fork(before=lambda: self.stop(), )
-
+            if InMacOS or InLinux:
+                if not self._is_fork_handler_registered:
+                    os.register_at_fork(before=partial(self.stop, is_fork=True))
+                    self._is_fork_handler_registered = True
             uid = uuid.uuid4().hex # [:8]
             self.server_uuid = uid
             if port < 0:
                 port = port_res_queue.get(timeout=20)
             self.port = port
-            print(os.getpid(), "1.3")
 
             if id is not None:
-                if _MAIN_PID != os.getpid():
-                    # forked process
-                    if InMacOS:
-                        raise NotImplementedError("forked process with setproctitle is not supported in MacOS")
                 self.server_id = id
                 self._try_set_proc_title(uid, id)
-            print(os.getpid(), "1.4")
-
             if wait_for_start:
                 ev.wait()
         except:
@@ -120,15 +127,24 @@ class BackgroundServer:
         title = f"{TENSORPC_BG_PROCESS_NAME_PREFIX}-{self.server_id}-{self.port}-{status}-{uid}"
         try:
             import setproctitle  # type: ignore
+            if self._prev_proc_title is None:
+                self._prev_proc_title = setproctitle.getproctitle()
             setproctitle.setproctitle(title)
         except ImportError:
             pass
 
-    def stop(self):
+    def stop(self, is_fork: bool = False):
         if self.is_started:
             assert self._thread is not None
             assert self._service_core is not None 
             loop = self._service_core._loop
+            if InLinux:
+                if self._prev_proc_title is not None:
+                    try:
+                        import setproctitle  # type: ignore
+                        setproctitle.setproctitle(self._prev_proc_title)
+                    except ImportError:
+                        pass
             if loop is not None:
                 loop.call_soon_threadsafe(self._service_core.async_shutdown_event.set)
             # robj = RemoteManager(f"localhost:{self.port}")
@@ -140,6 +156,10 @@ class BackgroundServer:
             self.port = -1
             self.server_uuid = None
             _thread.join()
+            if is_fork:
+                LOGGER.warning("shutdown background server because of fork")
+            else:
+                LOGGER.warning("shutdown background server")
 
     def execute_service(
         self,

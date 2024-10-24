@@ -63,9 +63,21 @@ class TensorHandler(ObjectPreviewHandler):
         self.obj_uid: str = ""
         self._tensor_slices: Dict[str, str] = {}
 
+    def _to_numpy(self, obj):
+        if get_qualname_of_type(type(obj)) == CommonQualNames.TorchTensor:
+            if obj.is_cpu:
+                return obj.detach().numpy()
+            return obj.detach().cpu().numpy()
+        elif get_qualname_of_type(type(obj)) == CommonQualNames.TorchParameter:
+            return obj.data.cpu().numpy()
+        elif get_qualname_of_type(type(obj)) == CommonQualNames.TVTensor:
+            return obj.cpu().numpy()
+        else:
+            return obj
+
     async def _on_show_viewer_dialog(self):
         await self.grid_container.set_new_layout([
-            NumpyArrayGrid(self.obj).prop(width="100%",
+            NumpyArrayGrid(self._to_numpy(self.obj)).prop(width="100%",
                                           height="100%",
                                           overflow="hidden")
         ])

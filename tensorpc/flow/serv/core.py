@@ -1974,7 +1974,7 @@ class Flow:
                                                AppEventType.UIEvent.value,
                                                ev.to_dict(), True)
 
-    async def app_get_file(self, node_uid: str, file_key: str):
+    async def app_get_file(self, node_uid: str, file_key: str, comp_uid: Optional[str] = None):
         graph_id = node_uid.split("@")[0]
         node_id = node_uid.split("@")[1]
 
@@ -1992,7 +1992,7 @@ class Flow:
                 app_url = get_grpc_url(durl, grpc_port)
             async with AsyncRemoteManager(app_url) as robj:
                 async for x in robj.remote_generator(serv_names.APP_GET_FILE,
-                                                     file_key):
+                                                     file_key, comp_uid=comp_uid):
                     yield x
 
     async def query_app_state(self,

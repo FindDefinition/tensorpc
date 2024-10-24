@@ -271,18 +271,18 @@ class BufferMeshDevApp:
                 overflow="hidden")
         return res
 
-    def std_png(self):
+    def std_png(self, req):
         return mui.FileResource(
             name="std.png",
             path=str(Path.home() /
                      "Pictures/Screenshot from 2023-03-10 15-40-39.png"),
             content_type="image/png")
 
-    def old_depot_2k(self):
+    def old_depot_2k(self, req):
         return mui.FileResource(name="old_depot_2k.hdr",
                                 path=str(Path.home() / "old_depot_2k.hdr"))
 
-    def porsche(self):
+    def porsche(self, req):
         return mui.FileResource(name="porsche-transformed.glb",
                                 path=str(Path.home() /
                                          "porsche-transformed.glb"))
@@ -499,7 +499,7 @@ class EnvmapGroupdProjectionApp:
                 overflow="hidden")
         return res
 
-    async def old_depot_2k(self):
+    async def old_depot_2k(self, req):
         url = "https://uploads.codesandbox.io/uploads/user/b3e56831-8b98-4fee-b941-0e27f39883ab/KNRT-old_depot_2k.hdr"
         if self.hdr_content is None:
             self.hdr_content = await download_file(url)
@@ -507,7 +507,7 @@ class EnvmapGroupdProjectionApp:
         return mui.FileResource(name="old_depot_2k.hdr",
                                 content=self.hdr_content)
 
-    async def porsche(self):
+    async def porsche(self, req):
         url = "https://uploads.codesandbox.io/uploads/user/b3e56831-8b98-4fee-b941-0e27f39883ab/or72-porsche-transformed.glb"
         url2 = "https://uploads.codesandbox.io/uploads/user/b3e56831-8b98-4fee-b941-0e27f39883ab/cExH-911-transformed.glb"
         if self.glb_content is None:

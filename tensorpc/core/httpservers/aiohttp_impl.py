@@ -21,7 +21,18 @@ from tensorpc.protos_export import rpc_message_pb2
 from contextlib import suppress
 from aiohttp import streamer
 from tensorpc.core.serviceunit import ServiceEventType
+from .aiohttp_file import FileProxy, FileProxyResponse
 
+class GrpcFileProxy(FileProxy):
+    def __init__(self, sc: ServiceCore) -> None:
+        self._sc = sc
+
+    async def get_file(self, offset: int, count: int) -> AsyncGenerator[Tuple[bytes, bool], None]:
+        async for chunk, is_exc in self._reader:
+            yield chunk, is_exc
+
+    def get_file_metadata(self) -> defs.FileResource:
+        return defs.FileResource()
 
 @streamer
 async def file_sender(writer, file_bytes: bytes, chunk_size=2**16):
@@ -209,6 +220,8 @@ class HttpService:
         params = request.rel_url.query
         node_uid = params.get('nodeUid')
         resource_key = params.get('key')
+        comp_id = params.get('compUid')
+        web.FileResponse
         headers = {
             'Access-Control-Allow-Origin': '*',
             "Content-Disposition": f"Attachment;filename={resource_key}",
@@ -218,7 +231,7 @@ class HttpService:
         if node_uid is not None and resource_key is not None:
             ait = self.service_core.execute_async_generator_service(
                 "tensorpc.flow.serv.core::Flow.app_get_file",
-                [node_uid, resource_key], {},
+                [node_uid, resource_key, comp_id], {},
                 json_call=False)
             desp, is_exc = await ait.__anext__()
             if is_exc:
@@ -227,6 +240,10 @@ class HttpService:
             headers["Content-Disposition"] = f"Attachment;filename={desp.name}"
             if desp.content_type is not None:
                 headers["Content-Type"] = desp.content_type
+            if desp.length is not None:
+                headers["Content-Length"] = str(desp.length)
+                ifrange = request.if_range
+
             return web.Response(body=grpc_iter_file_sender(reader=ait),
                                 headers=headers)
         else:

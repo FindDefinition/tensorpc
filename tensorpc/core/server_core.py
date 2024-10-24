@@ -288,18 +288,19 @@ class ServiceCore(object):
             json_call=False):
         # no lock here, user must use 'get_exec_lock' to get global lock
         # or create lock by themselves.
-        with self.enter_exec_context(service_key, json_call, is_loopback_call=True) as ctx:
-            # all services are lazy-loaded,
-            # so we need to put get_service in try block
-            func, meta = self.service_units.get_service_and_meta(
-                service_key)
-            assert service_type == meta.type
-            # client code can call primitives to get server contents.
-            assert not meta.is_gen
-            if meta.is_async:
-                res = await func(*args, **kwargs)
-            else:
-                res = func(*args, **kwargs)
+        with self.enter_global_context():
+            with self.enter_exec_context(service_key, json_call, is_loopback_call=True) as ctx:
+                # all services are lazy-loaded,
+                # so we need to put get_service in try block
+                func, meta = self.service_units.get_service_and_meta(
+                    service_key)
+                assert service_type == meta.type
+                # client code can call primitives to get server contents.
+                assert not meta.is_gen
+                if meta.is_async:
+                    res = await func(*args, **kwargs)
+                else:
+                    res = func(*args, **kwargs)
         return res
 
 

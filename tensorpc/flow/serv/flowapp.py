@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 import async_timeout
 from tensorpc.core.asyncclient import simple_chunk_call_async
-from tensorpc.core.defs import FileDesp, FileResource
+from tensorpc.core.defs import FileDesp, FileResource, FileResourceRequest
 from tensorpc.flow.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_LSP_EXTRA_PATH
 from tensorpc.flow.coretypes import ScheduleEvent, get_unique_node_id
 from tensorpc.core.tree_id import UniqueTreeId
@@ -279,7 +279,7 @@ class FlowApp:
         return res_list
 
     def get_vscode_breakpoints(self):
-        return self.app.get_vscode_state().breakpoints
+        return self.app.get_vscode_state().get_all_breakpoints()
 
     async def relay_app_event_from_remote_component(self, app_event_dict: Dict[str, Any]):
         assert "remotePrefixes" in app_event_dict
@@ -316,11 +316,25 @@ class FlowApp:
             res["lspPort"] = self.lsp_port
         return res
 
-    async def get_file(self, file_key: str, chunk_size=2**16):
-        if file_key in self.app._flowapp_file_resource_handlers:
-            url = parse.urlparse(file_key)
-            base = url.path
-            file_key_qparams = parse.parse_qs(url.query)
+    def _get_file_path_stat(
+        self, path: str
+    ) -> os.stat_result:
+        """Return the file path, stat result, and gzip status.
+
+        This method should be called from a thread executor
+        since it calls os.stat which may block.
+        """
+        return Path(path).stat()
+
+    async def get_file_metadata(self, file_key: str, comp_uid: Optional[str] = None):
+        url = parse.urlparse(file_key)
+        base = url.path
+        file_key_qparams = parse.parse_qs(url.query)
+        if comp_uid is not None:
+            comp = self.app.root._get_comp_by_uid(comp_uid)
+            if isinstance(comp, RemoteComponentBase):
+                return await comp.get_file_metadata(file_key)
+        if base in self.app._flowapp_file_resource_handlers:
             # we only use first value
             if len(file_key_qparams) > 0:
                 file_key_qparams = {
@@ -331,7 +345,49 @@ class FlowApp:
                 file_key_qparams = {}
             try:
                 handler = self.app._flowapp_file_resource_handlers[base]
-                res = handler(**file_key_qparams)
+                res = handler(FileResourceRequest(base, True, None, file_key_qparams))
+                if inspect.iscoroutine(res):
+                    res = await res
+                assert isinstance(res, FileResource)
+                if res.path is not None and res.stat is None:
+                    loop = asyncio.get_event_loop()
+                    st = await loop.run_in_executor(
+                        None, self._get_file_path_stat, res.path
+                    )
+                    res.stat = st
+                else:
+                    msg = "file metadata must return stat or length if not path"
+                    assert res.stat is not None or res.length is not None, msg
+                return res  
+            except:
+                traceback.print_exc()
+                raise
+        else:
+            raise KeyError(f"File key {file_key} not found.")
+
+    async def get_file(self, file_key: str, offset: Optional[int] = None, chunk_size=2**16, comp_uid: Optional[str] = None):
+        url = parse.urlparse(file_key)
+        base = url.path
+        file_key_qparams = parse.parse_qs(url.query)
+        if comp_uid is not None:
+            comp = self.app.root._get_comp_by_uid(comp_uid)
+            if isinstance(comp, RemoteComponentBase):
+                async for x in comp.get_file(file_key, chunk_size):
+                    yield x
+                return 
+
+        if base in self.app._flowapp_file_resource_handlers:
+            # we only use first value
+            if len(file_key_qparams) > 0:
+                file_key_qparams = {
+                    k: v[0]
+                    for k, v in file_key_qparams.items()
+                }
+            else:
+                file_key_qparams = {}
+            try:
+                handler = self.app._flowapp_file_resource_handlers[base]
+                res = handler(FileResourceRequest(base, False, offset, file_key_qparams))
                 if inspect.iscoroutine(res):
                     res = await res
                 assert isinstance(res, (str, bytes, FileResource))
@@ -352,6 +408,8 @@ class FlowApp:
                     if res.path is not None:
                         yield FileDesp(Path(res.path).name, res.content_type)
                         with open(res.path, "rb") as f:
+                            if offset is not None:
+                                f.seek(offset)
                             chunk = f.read(chunk_size)
                             while chunk:
                                 yield chunk
@@ -361,6 +419,8 @@ class FlowApp:
                         if isinstance(content, str):
                             content = content.encode()
                         bio = io.BytesIO(content)
+                        if offset is not None:
+                            bio.seek(offset)
                         chunk = bio.read(chunk_size)
                         yield FileDesp(fname, res.content_type)
                         while chunk:
@@ -372,7 +432,7 @@ class FlowApp:
                 traceback.print_exc()
                 raise
         else:
-            raise NotImplementedError
+            raise KeyError(f"File key {file_key} not found.")
 
     async def _http_remote_call(self, key: str, *args, **kwargs):
         return await http_remote_call(prim.get_http_client_session(),

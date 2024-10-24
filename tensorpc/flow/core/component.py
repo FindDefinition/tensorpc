@@ -27,7 +27,7 @@ import sys
 import threading
 import traceback
 from pathlib import Path
-from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
+from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine, Dict, Generator,
                     Generic, Iterable, List, Optional, Set, Tuple, Type, Union,
                     ClassVar, Dict, Protocol)
 
@@ -171,6 +171,8 @@ class UIType(enum.IntEnum):
     SimpleEditor = 0x3c
     IFrame = 0x3d
     Pagination = 0x3e
+    VideoPlayer = 0x3f
+
     GridLayout = 0x40
 
     # special
@@ -2765,23 +2767,27 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
 
     @abc.abstractmethod
     async def setup_remote_object(self):
-        raise NotImplementedError
+        ...
 
     @abc.abstractmethod
     async def shutdown_remote_object(self):
-        raise NotImplementedError
+        ...
 
     @abc.abstractmethod
     async def remote_call(self, service_key: str, timeout: Optional[int], /, *args, **kwargs):
-        raise NotImplementedError
+        ...
+
+    @abc.abstractmethod
+    async def remote_generator(self, service_key: str, timeout: Optional[int], /, *args, **kwargs) -> AsyncGenerator[Any, None]:
+        ...
 
     @abc.abstractmethod
     def remote_call_sync(self, service_key: str, timeout: Optional[int], /, *args, **kwargs):
-        raise NotImplementedError
+        ...
 
     @abc.abstractmethod
     async def set_fallback_layout(self):
-        raise NotImplementedError
+        ...
 
     def set_cur_child_uids(self, cur_child_uids: List[str]):
         self._cur_child_uids = cur_child_uids
@@ -2889,6 +2895,11 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             await self.send_exception(e)
             await self.disconnect()
         return None
+
+    async def get_file(self, file_key: str, chunk_size=2**16):
+        async for x in self.remote_generator(serv_names.REMOTE_COMP_GET_FILE, 10, self._key, file_key, chunk_size):
+            yield x
+ 
 
 @dataclasses_strict.dataclass
 class FragmentProps(ContainerBaseProps):

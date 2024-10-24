@@ -109,7 +109,7 @@ class BreakpointDebugPanel(mui.FlexBox):
         frame_func_name = inspecttools.get_co_qualname_from_frame(frame)
         local_vars_for_inspect = self._get_filtered_local_vars(frame)
         await self.tree_viewer.tree.update_root_object_dict(local_vars_for_inspect, keep_old=False)
-        await self.header.write(frame_func_name)
+        await self.header.write(f"{frame_func_name}({frame.f_lineno})")
         await self.frame_script.mount_frame(dataclasses.replace(self._cur_frame_state, frame=frame))
 
     async def set_breakpoint_frame_meta(self, frame: FrameType, leave_bkpt_cb: Callable[[], Coroutine[None, None, Any]]):

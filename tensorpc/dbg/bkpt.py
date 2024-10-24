@@ -3,14 +3,13 @@ import os
 from pathlib import Path
 import threading
 from typing import Any, Optional
+from tensorpc.constants import TENSORPC_MAIN_PID
 from tensorpc.core.bgserver import BACKGROUND_SERVER
 from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_ENV_DBG_ENABLE, BreakpointType
 from tensorpc.flow.client import is_inside_app_session
 from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
 from .serv_names import serv_names
 from tensorpc.flow.serv_names import serv_names as app_serv_names
-import rich
-from tensorpc.flow import mui, plus
 from tensorpc.compat import InWindows
 
 
@@ -26,9 +25,9 @@ def init(proc_name: Optional[str] = None, port: int = -1):
     """
     if not should_enable_debug():
         return False
-    print("BACKGROUND_SERVER.is_started", os.getpid(), BACKGROUND_SERVER.is_started)
     if not BACKGROUND_SERVER.is_started:
         assert not InWindows, "init is not supported in Windows due to setproctitle."
+        cur_pid = os.getpid()
         if proc_name is None:
             proc_name = Path(__file__).stem
         # pytorch distributed environment variables
@@ -44,17 +43,14 @@ def init(proc_name: Optional[str] = None, port: int = -1):
         elif mpi_world_size is not None and mpi_rank is not None:
             # assume mpi
             proc_name += f"_mpi_rank{mpi_rank}"
-        print(os.getpid(), 1)
-
+        if cur_pid != TENSORPC_MAIN_PID:
+            proc_name += f"_fork"
         BACKGROUND_SERVER.start_async(id=proc_name, port=port)
-        print(os.getpid(), 2)
-
         panel = BreakpointDebugPanel().prop(flex=1)
         set_background_layout(TENSORPC_DBG_FRAME_INSPECTOR_KEY, panel)
         BACKGROUND_SERVER.execute_service(serv_names.DBG_INIT_BKPT_DEBUG_PANEL,
                                           panel)
         BACKGROUND_SERVER.execute_service(serv_names.DBG_TRY_FETCH_VSCODE_BREAKPOINTS)
-        print(os.getpid(), 3)
 
     return True
 
@@ -69,14 +65,9 @@ def breakpoint(name: Optional[str] = None,
     you must use specific UI or command tool to exit breakpoint.
     WARNING: currently don't support multi-thread
     """
-    print("ENTER BKPT")
     if not should_enable_debug():
         return
-    print("ENTER BKPT", 2)
-
     init(init_proc_name, init_port)
-    print("ENTER BKPT", 3)
-
     ev = threading.Event()
     frame = inspect.currentframe()
     if frame is None:
@@ -87,9 +78,6 @@ def breakpoint(name: Optional[str] = None,
         _frame_cnt -= 1
     if frame is None:
         return
-    rich.print(
-        f"[bold red]Entering breakpoint... port = {BACKGROUND_SERVER.port}, pid = {os.getpid()}[/bold red]"
-    )
     BACKGROUND_SERVER.execute_service(serv_names.DBG_ENTER_BREAKPOINT, frame,
                                       ev, type, name)
     ev.wait(timeout)

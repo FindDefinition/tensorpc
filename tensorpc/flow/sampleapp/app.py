@@ -1493,8 +1493,8 @@ class LinkDownloadApp:
             mui.Link.app_download_link("click to download", "sample.py"),
         ])
 
-    def sample_file(self):
-        return Path(__file__).read_bytes()
+    def sample_file(self, req):
+        return mui.FileResource(name="sample.py", content=Path(__file__).read_bytes())
 
 
 class VirtualizedBoxApp:
