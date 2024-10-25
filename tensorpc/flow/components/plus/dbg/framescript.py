@@ -28,6 +28,7 @@ import numpy as np
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 from tensorpc.core.inspecttools import get_co_qualname_from_frame
 from tensorpc.dbg.constants import TENSORPC_DBG_FRAMESCRIPT_STORAGE_PREFIX, DebugFrameState
+from tensorpc.dbg.core.frame_id import get_frame_uid
 from tensorpc.flow.components.plus.styles import CodeStyles
 from tensorpc.flow.constants import TENSORPC_FLOW_APP_LANG_SERVER_PORT
 from tensorpc.flow.components import mui
@@ -38,7 +39,6 @@ from tensorpc.flow.components import three
 from tensorpc.flow.components.plus.tutorials import AppInMemory
 from tensorpc.flow.core.appcore import AppSpecialEventType, app_is_remote_comp
 from tensorpc.flow.core.component import FrontendEventType
-from tensorpc.utils.loader import get_frame_module_meta, locate_top_package
 from ..options import CommonOptions
 from tensorpc.flow.client import MasterMeta
 from urllib.request import pathname2url
@@ -195,16 +195,8 @@ class FrameScript(mui.FlexBox):
             exec(code_comp, frame.f_globals, frame.f_locals)
 
     def _get_frame_id_and_title_from_frame(self, frame: FrameType):
-        frame_mod_meta = get_frame_module_meta(frame)
-        qname = frame_mod_meta.qualname
-        if frame_mod_meta.is_path:
-            path_no_suffix = Path(frame_mod_meta.module).with_suffix("")
-            path_enc = b64encode(path_no_suffix.as_posix().encode()).decode()
-            path_enc = path_enc.replace("=", "a")
-            uid = f"{frame_mod_meta.qualname}-{path_enc}"
-        else:
-            uid = f"{frame_mod_meta.qualname}-{frame_mod_meta.module}"
-        title = f"{frame_mod_meta.module}::{qname}"
+        uid, meta = get_frame_uid(frame)
+        title = f"{meta.module}::{meta.qualname}"
         return uid, title
 
     def _get_current_frame_id(self):

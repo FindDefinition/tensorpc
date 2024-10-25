@@ -5,13 +5,16 @@ from types import FrameType
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
 from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
 from tensorpc.core import inspecttools
+from tensorpc.dbg.core.frame_id import get_frame_uid
 from tensorpc.flow import appctx
 from tensorpc.flow.components import mui
+from tensorpc.flow.components.plus.dbg.frameobj import FrameObjectPreview
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
 from tensorpc.flow.components.plus.scriptmgr import ScriptManager
 from tensorpc.flow.components.plus.styles import CodeStyles
 from tensorpc.flow.components.plus.objinspect.inspector import ObjectInspector
 from tensorpc.dbg.constants import BackgroundDebugToolsConfig, DebugFrameMeta, DebugFrameState
+from tensorpc.utils.loader import FrameModuleMeta
 from .framescript import FrameScript
 
 class BreakpointDebugPanel(mui.FlexBox):
@@ -51,7 +54,10 @@ class BreakpointDebugPanel(mui.FlexBox):
                 icon=mui.IconType.DataArray,
                 tooltip="frame script manager"),
         ]
-        self.tree_viewer = ObjectInspector(show_terminal=False, default_sizes=[100, 100], with_builtins=False, custom_tabs=custom_tabs)
+        self._frame_obj_preview = FrameObjectPreview()
+        self._frame_obj_preview.prop(width="100%", height="100%", overflow="hidden")
+        self.tree_viewer = ObjectInspector(show_terminal=False, default_sizes=[100, 100], with_builtins=False, custom_tabs=custom_tabs,
+            custom_preview=self._frame_obj_preview)
         self.content_container = mui.VBox([
             self.tree_viewer.prop(flex=1),
         ]).prop(flex=1)
@@ -132,9 +138,10 @@ class BreakpointDebugPanel(mui.FlexBox):
             cur_frame = cur_frame.f_back
         await self._all_frame_select.update_options(frame_select_opts, 0)
         await self._set_frame_meta(frame)
+        frame_uid, frame_meta = get_frame_uid(frame)
+        await self._frame_obj_preview.set_frame_meta(frame_uid, frame_meta.qualname)
 
     async def leave_breakpoint(self):
-        # await self.continue_btn.send_and_wait(self.continue_btn.update_event(icon=mui.IconType.PlayArrow))
         await self.header.write("")
         await self.tree_viewer.tree.update_root_object_dict({}, keep_old=False)
         await self.copy_path_btn.send_and_wait(self.copy_path_btn.update_event(disabled=True))
@@ -142,8 +149,16 @@ class BreakpointDebugPanel(mui.FlexBox):
         self._cur_frame_meta = None
         self._cur_frame_state.frame = None
         await self.frame_script.unmount_frame()
+        await self._frame_obj_preview.clear_frame_variable()
 
     def _get_filtered_local_vars(self, frame: FrameType):
         local_vars = frame.f_locals.copy()
         local_vars = inspecttools.filter_local_vars(local_vars)
         return local_vars
+
+    async def set_frame_object(self, obj: Any, expr: str):
+        if expr.isidentifier():
+            await self._frame_obj_preview.set_frame_variable(expr, obj)
+        await self.tree_viewer.set_obj_preview_layout(
+            obj, header=expr)
+

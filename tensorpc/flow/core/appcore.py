@@ -181,6 +181,11 @@ def get_app() -> "App":
     assert ctx is not None
     return ctx.app
 
+def get_app_storage():
+    ctx = get_app_context()
+    assert ctx is not None
+    return ctx.app.app_storage
+
 def app_is_remote_comp() -> bool:
     ctx = get_app_context()
     assert ctx is not None
@@ -214,7 +219,7 @@ def enter_event_handling_conetxt(uid: UniqueTreeId):
     finally:
         EVENT_HANDLING_CONTEXT_VAR.reset(token)
 
-def get_app_storage():
+def get_app_persist_storage():
     ctx = get_app_context()
     assert ctx is not None
     return ctx.app.get_persist_storage()

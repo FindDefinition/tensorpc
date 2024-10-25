@@ -50,6 +50,7 @@ class FileResource:
     content_type: Optional[str] = None
     length: Optional[int] = None
     stat: Optional[stat_result] = None
+    modify_timestamp_ns: Optional[int] = None
 
 
 @dataclass

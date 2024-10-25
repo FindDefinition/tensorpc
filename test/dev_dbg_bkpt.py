@@ -57,6 +57,9 @@ def main_mp_fork_debug():
     ctx = multiprocessing.get_context("fork")
     num_proc = 2
     procs = []
+    img = np.random.randint(0, 255, size=[1080, 1920, 3], dtype=np.uint8)
+    imgs = np.random.randint(0, 255, size=[10, 480, 640, 3], dtype=np.uint8)
+
     tensorpc.dbg.breakpoint(name="WTF", init_port=54322)
     for j in range(num_proc):
         p = ctx.Process(target=mp_func_for_fork_debug, args=(j,))

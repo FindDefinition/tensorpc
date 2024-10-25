@@ -257,8 +257,8 @@ class BackgroundDebugTools:
                                 global_vars = cur_frame.f_globals
                                 res = eval(code_segment, global_vars,
                                            local_vars)
-                                await obj.tree_viewer.set_external_preview_layout(
-                                    res, header=code_segment)
+                                await obj.set_frame_object(
+                                    res, code_segment)
                             except grpc.aio.AioRpcError as e:
                                 return
                             except Exception as e:

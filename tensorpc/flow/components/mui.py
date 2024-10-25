@@ -554,6 +554,7 @@ class IconType(enum.IntEnum):
     Image = 51
     Merge = 52
     DoubleArrow = 53
+    AccountTree = 54
 
 
 @dataclasses.dataclass

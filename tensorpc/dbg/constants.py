@@ -37,3 +37,5 @@ TENSORPC_DBG_FRAME_INSPECTOR_KEY = "__tensorpc_debug_frame_inspector"
 TENSORPC_DBG_FRAMESCRIPT_STORAGE_PREFIX = "__tensorpc_dbg_frame_scripts"
 
 TENSORPC_DBG_SPLIT = "::"
+
+TENSORPC_DBG_FRAME_STORAGE_PREFIX = "__tensorpc_dbg_frame"

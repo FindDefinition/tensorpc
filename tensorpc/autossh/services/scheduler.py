@@ -11,6 +11,7 @@ import subprocess
 import dataclasses
 import io
 import csv
+from tensorpc.core.asynctools import cancel_task
 from tensorpc.utils.gpuusage import get_nvidia_gpu_measures
 
 _SUPPORTED_SET_STATUS = set([TaskStatus.NeedToCancel])
@@ -82,6 +83,10 @@ class Scheduler:
         self.grpc_port = prim.get_server_grpc_port()
         self._period_task = asyncio.create_task(
             self._period_check_task_status())
+
+    @marker.mark_server_event(event_type=marker.ServiceEventType.Exit)
+    async def _on_exit(self):
+        await cancel_task(self._period_task)
 
     def init_task(self, task_id: str, pid: int):
         if task_id in self.tasks:

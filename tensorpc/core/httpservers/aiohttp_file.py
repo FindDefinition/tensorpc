@@ -1,29 +1,40 @@
 import asyncio
 from os import stat_result
 import os
-from typing import cast, IO, TYPE_CHECKING, Any, AsyncGenerator, Optional, Tuple, Union
+from typing import cast, IO, TYPE_CHECKING, Any, AsyncGenerator, Optional, Tuple, Union, Final
 from aiohttp import web
 from pathlib import Path
 from aiohttp.abc import AbstractStreamWriter
 import abc
 import stat
 from contextlib import suppress
+from types import MappingProxyType
 
 from tensorpc.core.defs import FileDesp, FileResource
 from aiohttp.helpers import ETAG_ANY, ETag, must_be_empty_body
 from aiohttp.typedefs import LooseHeaders, PathLike
 from aiohttp import hdrs
 from aiohttp.web_response import StreamResponse
-from aiohttp.web_fileresponse import ENCODING_EXTENSIONS, CONTENT_TYPES, FALLBACK_CONTENT_TYPE
 from aiohttp.web_exceptions import (
     HTTPForbidden,
     HTTPNotFound,
-    HTTPNotModified,
     HTTPPartialContent,
-    HTTPPreconditionFailed,
     HTTPRequestRangeNotSatisfiable,
 )
 from stat import S_ISREG
+from mimetypes import MimeTypes
+import sys
+CONTENT_TYPES: Final[MimeTypes] = MimeTypes()
+
+if sys.version_info < (3, 9):
+    CONTENT_TYPES.encodings_map[".br"] = "br"
+
+# File extension to IANA encodings map that will be checked in the order defined.
+ENCODING_EXTENSIONS = MappingProxyType(
+    {ext: CONTENT_TYPES.encodings_map[ext] for ext in (".br", ".gz")}
+)
+
+FALLBACK_CONTENT_TYPE = "application/octet-stream"
 
 if TYPE_CHECKING:
     from aiohttp.web_request import BaseRequest
@@ -96,9 +107,9 @@ class FileProxyResponse(web.FileResponse):
             stat = os.stat_result(init_tuple + additional_tuple)
         return Path(path), stat, False
 
-    def _get_file_path_stat_encoding(
+    def _get_file_path_stat_encoding_proxy(
             self, accept_encoding: str
-    ) -> Tuple[Path, os.stat_result, Optional[str]]:
+    ) -> Tuple[Path, os.stat_result, Optional[str], bool]:
         """Return the file path, stat result, and encoding.
 
         If an uncompressed file is returned, the encoding is set to
@@ -110,6 +121,7 @@ class FileProxyResponse(web.FileResponse):
         meta = self._file_proxy.get_file_metadata()
         path = meta.name
         stat = meta.stat
+        is_fake_stat = False
         if stat is None:
             assert meta.length is not None
             # create a fake stat result
@@ -117,7 +129,8 @@ class FileProxyResponse(web.FileResponse):
             stat = os.stat_result(init_tuple)
             additional_tuple = tuple([0] * (stat.n_fields - len(init_tuple)))
             stat = os.stat_result(init_tuple + additional_tuple)
-        return Path(path), stat, None
+            is_fake_stat = True
+        return Path(path), stat, None, is_fake_stat
 
     async def prepare(
             self, request: "BaseRequest") -> Optional[AbstractStreamWriter]:
@@ -126,18 +139,23 @@ class FileProxyResponse(web.FileResponse):
         # https://www.rfc-editor.org/rfc/rfc9110#section-8.4.1
         accept_encoding = request.headers.get(hdrs.ACCEPT_ENCODING, "").lower()
         try:
-            file_path, st, file_encoding = await loop.run_in_executor(
-                None, self._get_file_path_stat_encoding, accept_encoding)
+            file_path, st, file_encoding, is_fake_stat = await loop.run_in_executor(
+                None, self._get_file_path_stat_encoding_proxy, accept_encoding)
         except OSError:
             # Most likely to be FileNotFoundError or OSError for circular
             # symlinks in python >= 3.13, so respond with 404.
             self.set_status(HTTPNotFound.status_code)
             return await super().prepare(request)
+        meta = self._file_proxy.get_file_metadata()
         st_mtime_ns = st.st_mtime_ns
+        st_mtime = st.st_mtime
         if st_mtime_ns is None:
             st_mtime_ns = 0
+        if is_fake_stat and meta.modify_timestamp_ns is not None:
+            st_mtime_ns = meta.modify_timestamp_ns
+            st_mtime = st_mtime_ns / 1e9
         etag_value = f"{st_mtime_ns:x}-{st.st_size:x}"
-        last_modified = st.st_mtime
+        last_modified = st_mtime
 
         # https://www.rfc-editor.org/rfc/rfc9110#section-13.1.1-2
         ifmatch = request.if_match
@@ -147,7 +165,7 @@ class FileProxyResponse(web.FileResponse):
 
         unmodsince = request.if_unmodified_since
         if (unmodsince is not None and ifmatch is None
-                and st.st_mtime > unmodsince.timestamp()):
+                and st_mtime > unmodsince.timestamp()):
             return await self._precondition_failed(request)
 
         # https://www.rfc-editor.org/rfc/rfc9110#section-13.1.2-2
@@ -158,7 +176,7 @@ class FileProxyResponse(web.FileResponse):
 
         modsince = request.if_modified_since
         if (modsince is not None and ifnonematch is None
-                and st.st_mtime <= modsince.timestamp()):
+                and st_mtime <= modsince.timestamp()):
             return await self._not_modified(request, etag_value, last_modified)
 
         status = self._status
@@ -168,7 +186,7 @@ class FileProxyResponse(web.FileResponse):
         start = None
 
         ifrange = request.if_range
-        if ifrange is None or st.st_mtime <= ifrange.timestamp():
+        if ifrange is None or st_mtime <= ifrange.timestamp():
             # If-Range header check:
             # condition = cached date >= last modification date
             # return 206 if True else 200.
@@ -251,7 +269,7 @@ class FileProxyResponse(web.FileResponse):
             self._compression = False
 
         self.etag = etag_value  # type: ignore[assignment]
-        self.last_modified = st.st_mtime  # type: ignore[assignment]
+        self.last_modified = st_mtime  # type: ignore[assignment]
         self.content_length = count
 
         self.headers[hdrs.ACCEPT_RANGES] = "bytes"

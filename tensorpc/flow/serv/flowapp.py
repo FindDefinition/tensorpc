@@ -360,6 +360,7 @@ class FlowApp:
                     if res.content is not None:
                         assert res.content is not None and isinstance(res.content, bytes)
                         res.length = len(res.content)
+                        res.content = None
                     msg = "file metadata must return stat or length if not path"
                     assert res.stat is not None or res.length is not None, msg
                 return res  
@@ -376,10 +377,9 @@ class FlowApp:
         if comp_uid is not None:
             comp = self.app.root._get_comp_by_uid(comp_uid)
             if isinstance(comp, RemoteComponentBase):
-                async for x in comp.get_file(file_key, chunk_size):
+                async for x in comp.get_file(file_key, offset, count, chunk_size):
                     yield x
                 return 
-
         if base in self.app._flowapp_file_resource_handlers:
             # we only use first value
             if len(file_key_qparams) > 0:

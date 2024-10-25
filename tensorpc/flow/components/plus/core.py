@@ -76,8 +76,7 @@ def register_user_obj_tree_type(type):
 class ObjectPreviewHandler(mui.FlexBox):
 
     @abc.abstractmethod
-    async def bind(self, obj: Any, uid: Optional[str] = None):
-        pass
+    async def bind(self, obj: Any, uid: Optional[str] = None) -> None: ...
 
 
 class ObjectLayoutHandler(abc.ABC):
@@ -147,6 +146,7 @@ class ObjectLayoutHandleManager:
                 handler = handler_type()
                 self._type_to_handler_object[modified_obj_type] = handler
         return handler
+        
 class ObjectPreviewLayoutHandleManager:
     def __init__(self):
         self._type_to_handler_object: Dict[Type[Any], ObjectPreviewHandler] = {}

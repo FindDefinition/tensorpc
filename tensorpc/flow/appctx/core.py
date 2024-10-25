@@ -23,7 +23,7 @@ from typing_extensions import ParamSpec
 
 from tensorpc.core.serviceunit import ObservedFunctionRegistryProtocol
 from tensorpc.flow.core.appcore import (AppSpecialEventType, enter_app_context, find_component,
-                                        find_component_by_uid, get_app,
+                                        find_component_by_uid, get_app, get_app_storage,
                                         find_all_components, get_app_context,
                                         get_editable_app, get_reload_manager,
                                         is_inside_app, observe_function,

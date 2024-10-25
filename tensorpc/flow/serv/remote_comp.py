@@ -255,6 +255,7 @@ class RemoteComponentService:
             if shut_task in done:
                 for task in pending:
                     await cancel_task(task)
+                # print("!!!", "send loop closed by event", last_key, os.getpid())
                 break
             if wait_for_mount_task in done:
                 assert app_obj.mounted_app_meta is not None, "shouldn't happen"
@@ -287,8 +288,10 @@ class RemoteComponentService:
                 # we got app event, but
                 # remote component isn't mounted, ignore app event
                 send_task = asyncio.create_task(app_obj.send_loop_queue.get(), name="wait for queue")
+                if not wait_for_mount_task.done():
+                    await cancel_task(wait_for_mount_task)
                 wait_for_mount_task = asyncio.create_task(
-                    app_obj.mount_ev.wait(), name=f"wait for mount-{os.getpid()}")
+                    app_obj.mount_ev.wait(), name=f"wait for mount-{os.getpid()}-{time.time_ns()}-1")
                 wait_tasks: List[asyncio.Task] = [
                     shut_task, wait_for_mount_task, send_task
                 ]
@@ -335,6 +338,7 @@ class RemoteComponentService:
         app_obj.mounted_app_meta = None
         if robj is not None:
             await robj.close()
+        # print("!!!", "send loop closed", last_key, os.getpid())
 
     async def _send_grpc_event_large(self,
                                      ev: AppEvent,
@@ -432,6 +436,10 @@ class RemoteComponentService:
                     )
                     res.stat = st
                 else:
+                    if res.content is not None:
+                        assert res.content is not None and isinstance(res.content, bytes)
+                        res.length = len(res.content)
+                        res.content = None
                     msg = "file metadata must return stat or length if not path"
                     assert res.stat is not None or res.length is not None, msg
                 return res  
@@ -444,7 +452,6 @@ class RemoteComponentService:
     async def get_file(self, key: str, file_key: str, offset: int, count: Optional[int] = None, chunk_size=2**16):
         app_obj = self._app_objs[key]
         assert app_obj.mounted_app_meta is not None
-
         url = parse.urlparse(file_key)
         base = url.path
         file_key_qparams = parse.parse_qs(url.query)

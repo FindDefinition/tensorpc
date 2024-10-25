@@ -2896,8 +2896,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             await self.disconnect()
         return None
 
-    async def get_file(self, file_key: str, chunk_size=2**16):
-        async for x in self.remote_generator(serv_names.REMOTE_COMP_GET_FILE, 10, self._key, file_key, chunk_size):
+    async def get_file(self, file_key: str, offset: int, count: Optional[int] = None, chunk_size=2**16):
+        async for x in self.remote_generator(serv_names.REMOTE_COMP_GET_FILE, 10, self._key, file_key, offset, count, chunk_size):
             yield x
  
     async def get_file_metadata(self, file_key: str):

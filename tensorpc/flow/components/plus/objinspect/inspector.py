@@ -10,8 +10,8 @@ import threading
 import traceback
 import types
 from functools import partial
-from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional, Sequence,
-                    Set, Tuple, Type, TypeVar, Union)
+from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
+                    Sequence, Set, Tuple, Type, TypeVar, Union)
 
 import numpy as np
 from typing_extensions import ParamSpec
@@ -21,6 +21,8 @@ from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import AppFuncType, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.core.tracers.tracer import FrameResult, TraceEventType, Tracer
 from tensorpc.core.tree_id import UniqueTreeIdForTree
+from tensorpc.flow.components.plus.objview.preview import ObjectPreview, ObjectPreviewBase
+
 from tensorpc.flow.components.plus.scriptmgr import ScriptManager
 from tensorpc.flow.components.plus.styles import CodeStyles
 from tensorpc.flow.core.appcore import Event, get_app, get_editable_app
@@ -32,7 +34,8 @@ from tensorpc.flow.core.component import FlowSpecialMethods, FrontendEventType, 
 from tensorpc.flow.core.objtree import UserObjTreeProtocol
 from ..handlers.common import DefaultHandler
 from ..core import (ALL_OBJECT_PREVIEW_HANDLERS, USER_OBJ_TREE_TYPES,
-                    ObjectPreviewHandler, DataClassesType, ObjectPreviewLayoutHandleManager)
+                    ObjectPreviewHandler, DataClassesType,
+                    ObjectPreviewLayoutHandleManager)
 from .tree import _DEFAULT_OBJ_NAME, FOLDER_TYPES, ObjectTree
 from tensorpc.core import inspecttools
 
@@ -83,24 +86,29 @@ class ObjectInspector(mui.FlexBox):
                  show_terminal: bool = True,
                  default_sizes: Optional[List[mui.NumberType]] = None,
                  with_builtins: bool = True,
-                 custom_tabs: Optional[List[mui.TabDef]] = None) -> None:
+                 custom_tabs: Optional[List[mui.TabDef]] = None,
+                 custom_preview: Optional[ObjectPreviewBase] = None) -> None:
 
-        self.preview_container = mui.HBox([]).prop(overflow="auto",
-                                                   flex=1,
-                                                   width="100%",
-                                                   height="100%",
-                                                   alignItems="stretch")
-        self._preview_header = mui.Typography("").prop(variant="caption",
-                                                       fontFamily=CodeStyles.fontFamily)
-        self.preview_container_parent = mui.VBox([
-            self._preview_header,
-            mui.Divider(),
-            self.preview_container,
-        ]).prop(overflow="hidden",
-                padding="3px",
-                flex=1,
-                width="100%",
-                height="100%")
+        # self.preview_container = mui.HBox([]).prop(overflow="auto",
+        #                                            flex=1,
+        #                                            width="100%",
+        #                                            height="100%",
+        #                                            alignItems="stretch")
+        # self._preview_header = mui.Typography("").prop(
+        #     variant="caption", fontFamily=CodeStyles.fontFamily)
+        # self.preview_container_parent = mui.VBox([
+        #     self._preview_header,
+        #     mui.Divider(),
+        #     self.preview_container,
+        # ]).prop(overflow="hidden",
+        #         padding="3px",
+        #         flex=1,
+        #         width="100%",
+        #         height="100%")
+        if custom_preview is not None:
+            self._obj_preview = custom_preview
+        else:
+            self._obj_preview = ObjectPreview()
 
         self.fast_layout_container = mui.HBox([]).prop(overflow="auto",
                                                        padding="3px",
@@ -124,40 +132,37 @@ class ObjectInspector(mui.FlexBox):
 
         tabdefs = [
             mui.TabDef("",
-                        tab_prefix + "1",
-                        self.preview_container_parent,
-                        icon=mui.IconType.Preview,
-                        tooltip="preview layout of item"),
+                       tab_prefix + "1",
+                       self._obj_preview,
+                       icon=mui.IconType.Preview,
+                       tooltip="preview layout of item"),
             mui.TabDef(
                 "",
                 tab_prefix + "2",
                 self.fast_layout_container,
                 icon=mui.IconType.ManageAccounts,
                 tooltip=
-                "custom layout (appctx.inspector.set_custom_layout_sync)"
-            ),
+                "custom layout (appctx.inspector.set_custom_layout_sync)"),
         ]
         default_tab = tab_prefix + "1"
         if show_terminal:
-            tabdefs.append(mui.TabDef("",
-                        tab_prefix + "3",
-                        mui.AppTerminal(),
-                        icon=mui.IconType.Terminal,
-                        tooltip="app terminal (read only)"),
-            )
+            tabdefs.append(
+                mui.TabDef("",
+                           tab_prefix + "3",
+                           mui.AppTerminal(),
+                           icon=mui.IconType.Terminal,
+                           tooltip="app terminal (read only)"), )
             default_tab = tab_prefix + "3"
         if custom_tabs is not None:
             tabdefs.extend(custom_tabs)
-
         self.detail_container = mui.HBox([
             mui.ThemeProvider([
-                mui.Tabs(tabdefs,
-                         init_value=default_tab).prop(panelProps=mui.FlexBoxProps(
-                             width="100%", padding=0),
-                                              orientation="vertical",
-                                              borderRight=1,
-                                              borderColor='divider',
-                                              tooltipPlacement="right")
+                mui.Tabs(tabdefs, init_value=default_tab).prop(
+                    panelProps=mui.FlexBoxProps(width="100%", padding=0),
+                    orientation="vertical",
+                    borderRight=1,
+                    borderColor='divider',
+                    tooltipPlacement="right")
             ], tab_theme)
         ])
         if use_allotment:
@@ -175,12 +180,10 @@ class ObjectInspector(mui.FlexBox):
                                with_builtins=with_builtins)
         layout: List[mui.MUIComponentType] = []
         if use_allotment:
-            layout.append(
-                self.tree.prop(
-                    overflow="auto",
-                    height="100%",
-                )
-            )
+            layout.append(self.tree.prop(
+                overflow="auto",
+                height="100%",
+            ))
         else:
             layout.append(self.tree.prop(flex=1))
         if with_detail:
@@ -216,69 +219,6 @@ class ObjectInspector(mui.FlexBox):
     async def get_object_by_uid(self, uid: str):
         return await self.tree.get_object_by_uid(uid)
 
-    async def set_external_preview_layout(self, obj: Any, uid: Optional[str] = None, root: Optional[UserObjTreeProtocol] = None, header: Optional[str] = None):
-        preview_layout: Optional[mui.FlexBox] = None
-        obj_type: Type = type(obj)
-
-        # preview layout is checked firstly, then preview handler.
-        if self._cached_preview_handler.is_in_cache(obj):
-            handler = self._cached_preview_handler.query_handler(obj)
-            assert handler is not None
-        else:
-            metas = self.flow_app_comp_core.reload_mgr.query_type_method_meta(
-                obj_type, True, include_base=True)
-            special_methods = FlowSpecialMethods(metas)
-            if special_methods.create_preview_layout is not None:
-                if uid is not None and uid in self._cached_preview_layouts:
-                    preview_layout, obj_id = self._cached_preview_layouts[uid]
-                    if obj_id != id(obj):
-                        preview_layout = None
-                        self._cached_preview_layouts.pop(uid)
-                if preview_layout is None:
-                    if root is None:
-                        preview_layout = mui.flex_preview_wrapper(
-                            obj, metas, self.flow_app_comp_core.reload_mgr)
-                    else:
-                        with root.enter_context(root):
-                            preview_layout = mui.flex_preview_wrapper(
-                                obj, metas, self.flow_app_comp_core.reload_mgr)
-                handler = self.default_handler
-            else:
-                handler = self._cached_preview_handler.query_handler(obj)
-                if handler is None:
-                    handler = self.default_handler
-            # if preview_layout is None:
-            #     self._type_to_handler_object[modified_obj_type] = handler
-        if preview_layout is not None:
-            if root is not None:
-                preview_layout.set_flow_event_context_creator(
-                    lambda: root.enter_context(root))
-            # preview_layout.event_emitter.remove_listener()
-            if uid is not None:
-                if self._current_preview_layout is None:
-                    get_editable_app().observe_layout(
-                        preview_layout,
-                        partial(self._on_preview_layout_reload,
-                                uid=uid,
-                                obj_id=id(obj)))
-                else:
-                    get_editable_app().observe_layout(
-                        preview_layout,
-                        partial(self._on_preview_layout_reload,
-                                uid=uid,
-                                obj_id=id(obj)))
-            self._current_preview_layout = preview_layout
-            if uid is not None:
-                self._cached_preview_layouts[uid] = (preview_layout, id(obj))
-            # self.__install_preview_event_listeners(preview_layout)
-            await self.preview_container.set_new_layout([preview_layout])
-        else:
-            childs = list(self.preview_container._child_comps.values())
-            if not childs or childs[0] is not handler:
-                await self.preview_container.set_new_layout([handler])
-            await handler.bind(obj, None)
-        if header is not None:
-            await self._preview_header.write(header)
 
     async def _on_select(self, uid_list: Union[List[str], str, Dict[str,
                                                                     bool]]):
@@ -298,7 +238,7 @@ class ObjectInspector(mui.FlexBox):
             uid_obj.parts)
         node = nodes[-1]
         if node.type in FOLDER_TYPES:
-            await self.preview_container.set_new_layout([])
+            await self._obj_preview.clear_preview_layout()
             return
         obj, found = await self.tree._get_obj_by_uid_with_folder(uid, nodes)
         if not found:
@@ -318,21 +258,15 @@ class ObjectInspector(mui.FlexBox):
                 break
         # ignore root part of uid
         header = ".".join(uid_obj.parts[1:])
-        await self.set_external_preview_layout(obj, uid, root, header=header)
+        await self._obj_preview.set_obj_preview_layout(obj, uid, root, header=header)
 
-    async def _on_preview_layout_reload(self, layout: mui.FlexBox,
-                                        create_layout: ServFunctionMeta,
-                                        uid: str, obj_id: int):
-        layout_flex = await preview_layout_reload(
-            lambda x: self.preview_container.set_new_layout([x]), layout,
-            create_layout)
-        if layout_flex is not None:
-            get_editable_app().observe_layout(
-                layout_flex,
-                partial(self._on_preview_layout_reload, uid=uid,
-                        obj_id=obj_id))
-            self._cached_preview_layouts[uid] = (layout_flex, obj_id)
-            return layout_flex
+    async def set_obj_preview_layout(
+            self,
+            obj: Any,
+            uid: Optional[str] = None,
+            root: Optional[UserObjTreeProtocol] = None,
+            header: Optional[str] = None):
+        return await self._obj_preview.set_obj_preview_layout(obj, uid, root, header)
 
     async def set_object(self,
                          obj,
