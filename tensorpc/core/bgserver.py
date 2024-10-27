@@ -83,10 +83,10 @@ class BackgroundServer:
                 service_def = ServiceDef([])
                 service_def.services.extend(BUILTIN_SERVICES)
             port_res_queue = queue.Queue()
-            if port < 0:
-                service_def.services.append(
-                    Service("tensorpc.services.collection::ProcessObserver",
-                            {"q": port_res_queue}))
+            # if port < 0:
+            service_def.services.append(
+                Service("tensorpc.services.collection::ProcessObserver",
+                        {"q": port_res_queue}))
             url = '[::]:{}'.format(port)
             smeta = ServerMeta(port=port, http_port=-1)
             service_core = ProtobufServiceCore(url, service_def, False, smeta)
@@ -107,10 +107,9 @@ class BackgroundServer:
                     self._is_fork_handler_registered = True
             uid = uuid.uuid4().hex # [:8]
             self.server_uuid = uid
-            if port < 0:
-                port = port_res_queue.get(timeout=20)
+            # if port < 0:
+            port = port_res_queue.get(timeout=20)
             self.port = port
-
             if id is not None:
                 self.server_id = id
                 self._try_set_proc_title(uid, id)

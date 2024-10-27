@@ -14,6 +14,9 @@ class AppVscodeState:
     """
     breakpoint_dict: Dict[str, List[VscodeBreakpoint]] = dataclass_dispatch.field(default_factory=dict)
 
+    def set_workspace_breakpoints(self, workspace_uri: str, breakpoints: List[VscodeBreakpoint]):
+        self.breakpoint_dict[workspace_uri] = breakpoints
+
     def get_all_breakpoints(self):
         res: List[VscodeBreakpoint] = []
         for k, v in self.breakpoint_dict.items():

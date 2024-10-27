@@ -38,7 +38,7 @@ class TensorHandler(ObjectPreviewHandler):
         self.grid_container = mui.HBox([])
         dialog = mui.Dialog([
             self.grid_container.prop(flex=1, height="70vh", width="100%")
-        ]).prop(title="Array Viewer", maxWidth="xl", fullWidth=True)
+        ]).prop(title="Array Viewer", dialogMaxWidth="xl", fullWidth=True)
         self.dialog = dialog
 
         layout = [

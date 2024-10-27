@@ -369,30 +369,31 @@ class Plotly(MUIComponentBase[PlotlyProps]):
 
 
 class Perfetto(IFrame):
-    def __init__(self, data: bytes, title: str):
-        assert isinstance(data, bytes)
-        # debug = {
-        #     "perfetto": {
-        #         "buffer": core_io.JSArrayBuffer(data),
-        #         "title": title,
-        #     }
-        # }
-        # enc = core_io.SocketMessageEncoder(debug)
-        # for c in enc.get_message_chunks(core_io.SocketMsgType.Chunk, core_io.wsdef_pb2.Header(), 65536):
-        #     pass 
-        # print("DATA LENGTH", len(data))
-        super().__init__("https://ui.perfetto.dev", {
-            "perfetto": {
-                "buffer": core_io.JSArrayBuffer(data),
-                "title": title,
+    def __init__(self, data: Optional[bytes] = None, title: Optional[str] = None):
+        init_data = None 
+        if data is not None and title is not None:
+            init_data = {
+                "perfetto": {
+                    "buffer": core_io.JSArrayBuffer(data),
+                    "title": title,
+                }
             }
-        })
+        super().__init__("https://ui.perfetto.dev", init_data)
+
+    # async def set_trace_data(self, data: bytes, title: str):
+    #     assert isinstance(data, bytes)
+    #     await self.post_message({
+    #         "perfetto": {
+    #             "buffer": core_io.JSArrayBuffer(data),
+    #             "title": title,
+    #         }
+    #     })
 
     async def set_trace_data(self, data: bytes, title: str):
         assert isinstance(data, bytes)
-        await self.post_message({
+        await self.send_and_wait(self.update_event(data=({
             "perfetto": {
                 "buffer": core_io.JSArrayBuffer(data),
                 "title": title,
             }
-        })
+        })))

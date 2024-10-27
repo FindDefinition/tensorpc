@@ -17,7 +17,7 @@ from typing_extensions import (Concatenate, Literal, ParamSpec, Protocol, Self,
 
 from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
                                     is_valid_function)
-from tensorpc.core.tree_id import UniqueTreeId
+from tensorpc.core.tree_id import UniqueTreeIdForComp
 
 from tensorpc.flow.core.context import ALL_APP_CONTEXT_GETTERS
 from tensorpc.flow.jsonlike import Undefined, BackendOnlyProp, undefined
@@ -146,7 +146,7 @@ class AppContext:
 
 class EventHandlingContext:
 
-    def __init__(self, uid: UniqueTreeId) -> None:
+    def __init__(self, uid: UniqueTreeIdForComp) -> None:
         self.comp_uid = uid
         self.delayed_callbacks: List[Callable[[], CORO_ANY]] = []
 
@@ -211,7 +211,7 @@ def enter_app_conetxt_obj(ctx: AppContext):
 ALL_APP_CONTEXT_GETTERS.add((get_app_context, enter_app_conetxt_obj))
 
 @contextlib.contextmanager
-def enter_event_handling_conetxt(uid: UniqueTreeId):
+def enter_event_handling_conetxt(uid: UniqueTreeIdForComp):
     ctx = EventHandlingContext(uid)
     token = EVENT_HANDLING_CONTEXT_VAR.set(ctx)
     try:

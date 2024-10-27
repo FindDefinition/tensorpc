@@ -11,6 +11,7 @@ from tensorpc.dbg.core.frame_id import VariableMetaType, get_storage_frame_path
 from tensorpc.flow import appctx
 from tensorpc.flow.components import mui, three
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
+from tensorpc.flow.components.plus.styles import get_tight_icon_tab_theme
 from tensorpc.flow.core.objtree import UserObjTreeProtocol
 
 from ..objview.preview import ObjectPreview, ObjectPreviewBase
@@ -75,18 +76,7 @@ class FrameObjectPreview(ObjectPreviewBase):
                         width="100%",
                         height="100%",
                         overflow="hidden")
-        tab_theme = mui.Theme(
-            components={
-                "MuiTab": {
-                    "styleOverrides": {
-                        "root": {
-                            "padding": "0",
-                            "minWidth": "28px",
-                            "minHeight": "28px",
-                        }
-                    }
-                }
-            })
+        tab_theme = get_tight_icon_tab_theme()
         self._editor = mui.MonacoEditor("", "python", "")
         self._editor.prop(minHeight=0,
                         minWidth=0,
@@ -130,7 +120,7 @@ class FrameObjectPreview(ObjectPreviewBase):
                     tooltipPlacement="right")
             ], tab_theme)
         ])
-        self.prop(flex=1, flexFlow="row nowrap", alignItems="stretch", border="1px solid #e0e0e0")
+        self.prop(flex=1, flexFlow="row nowrap", alignItems="stretch", border="1px solid #e0e0e0", overflow="hidden")
         self._cur_state: Optional[FrameObjectPreviewState] = None
 
     async def clear_preview_layout(self):
@@ -160,7 +150,6 @@ class FrameObjectPreview(ObjectPreviewBase):
         await self._obj_original_preview.set_obj_preview_layout(obj, uid, root, header)
 
     async def set_frame_meta(self, frame_id: str, frame_qualname: str):
-        print("???", frame_id)
         self._cur_state = FrameObjectPreviewState(frame_id, frame_qualname)
 
     async def set_frame_variable(self, var_name: str, value: Any):

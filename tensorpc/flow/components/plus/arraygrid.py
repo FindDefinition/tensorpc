@@ -431,7 +431,7 @@ class NumpyArrayGridTable(mui.FlexBox):
         dialog = mui.Dialog([
             self.grid_container.prop(flex=1, height="70vh", width="100%")
         ]).prop(title="Array Viewer",
-                maxWidth="xl",
+                dialogMaxWidth="xl",
                 fullWidth=True,
                 includeFormControl=False)
 

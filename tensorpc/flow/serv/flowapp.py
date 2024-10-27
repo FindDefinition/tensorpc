@@ -27,7 +27,7 @@ from tensorpc.core.asyncclient import simple_chunk_call_async
 from tensorpc.core.defs import FileDesp, FileResource, FileResourceRequest
 from tensorpc.flow.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_LSP_EXTRA_PATH
 from tensorpc.flow.coretypes import ScheduleEvent, get_unique_node_id
-from tensorpc.core.tree_id import UniqueTreeId
+from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp
 from tensorpc.flow.serv.common import handle_file_resource
 from tensorpc.flow.vscode.coretypes import VscodeTensorpcMessage, VscodeTensorpcQuery
 from tensorpc.flow import appctx
@@ -143,7 +143,7 @@ class FlowApp:
             if not layout_created:
                 await self.app._app_run_layout_function()
         else:
-            self.app.root._attach(UniqueTreeId.from_parts([TENSORPC_APP_ROOT_COMP]),
+            self.app.root._attach(UniqueTreeIdForComp.from_parts([TENSORPC_APP_ROOT_COMP]),
                                   self.app._flow_app_comp_core)
         # print(lay["layout"])
         self.app.app_initialize()
@@ -285,7 +285,7 @@ class FlowApp:
     async def relay_app_event_from_remote_component(self, app_event_dict: Dict[str, Any]):
         assert "remotePrefixes" in app_event_dict
         prefixes = app_event_dict["remotePrefixes"]
-        uid = UniqueTreeId.from_parts(prefixes)
+        uid = UniqueTreeIdForComp.from_parts(prefixes)
         # sync some state from remote component
         for ev_type, ev_dict in app_event_dict["typeToEvents"]:
             if ev_type == AppEventType.UpdateComponents:
@@ -303,9 +303,10 @@ class FlowApp:
                                              serv_name, *args, **kwargs)
 
     async def remote_comp_shutdown(self, prefixes: List[str]):
-        uid = UniqueTreeId.from_parts(prefixes)
+        uid = UniqueTreeIdForComp.from_parts(prefixes)
         remote_comp = self.app.root._get_comp_by_uid(uid.uid_encoded)
         assert isinstance(remote_comp, RemoteComponentBase)
+        print("DISCONNECT")
         await remote_comp.disconnect()
 
     def get_layout(self, editor_only: bool = False):

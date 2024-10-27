@@ -491,7 +491,7 @@ class JsonLikeNode:
         """TODO if dict key contains split word, this function will
         produce wrong result.
         """
-        uid_object = UniqueTreeId(uid, 1)
+        uid_object = UniqueTreeIdForTree(uid, 1)
         parts = uid_object.parts
         if len(parts) == 1:
             return self

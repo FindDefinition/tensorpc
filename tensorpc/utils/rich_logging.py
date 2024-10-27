@@ -12,6 +12,9 @@ TENSORPC_LOGGING_OVERRIDED_PATH_LINENO_KEY = "__tensorpc_overrided_path_lineno_k
 # )
 
 class ModifiedRichHandler(RichHandler):
+    """A custom rich handler that add ability to override the path and 
+    lineno of the log record.
+    """
     def emit(self, record):
         if hasattr(record, TENSORPC_LOGGING_OVERRIDED_PATH_LINENO_KEY):
             path_lineno = getattr(record, TENSORPC_LOGGING_OVERRIDED_PATH_LINENO_KEY)
@@ -23,10 +26,13 @@ class ModifiedRichHandler(RichHandler):
 
 def get_logger(name: str, level: str = "WARNING") -> logging.Logger:
     logger = logging.getLogger(name)
+    if logger.handlers:
+        for handler in logger.handlers:
+            if isinstance(handler, ModifiedRichHandler):
+                # already initialized
+                return logger
     logger.setLevel(level)
     formatter = logging.Formatter("%(name)s|%(message)s")
-    # if logger.handlers:
-    #     logger.handlers.clear()
     if TENSORPC_ENABLE_RICH_LOG:
         rh = ModifiedRichHandler(rich_tracebacks=True)
         rh.setFormatter(formatter)

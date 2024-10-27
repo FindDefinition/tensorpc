@@ -1,18 +1,23 @@
 import asyncio
 import dataclasses
 import enum
+import gzip
+import json
 import time
 import traceback
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
+import uuid
 
 import grpc
+from regex import P
+import rich
 from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
-from tensorpc.core.asyncclient import simple_remote_call_async
+from tensorpc.core.asyncclient import simple_chunk_call_async, simple_remote_call_async
 from tensorpc.core.client import simple_remote_call
-from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_SPLIT, DebugFrameMeta
+from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_SPLIT, DebugFrameMeta, TracerConfig
 from tensorpc.flow import marker, appctx
-from tensorpc.flow.components import mui
-from tensorpc.flow.components.plus.styles import CodeStyles
+from tensorpc.flow.components import chart, mui
+from tensorpc.flow.components.plus.styles import CodeStyles, get_tight_icon_tab_theme
 from tensorpc.dbg.serv_names import serv_names as dbg_serv_names
 from tensorpc.compat import InWindows
 import psutil
@@ -62,6 +67,7 @@ class ServerItemActions(enum.Enum):
     SKIP_BREAKPOINT = "skip_breakpoint"
     ENABLE_BREAKPOINT = "enable_breakpoint"
     UNMOUNT_REMOTE_SERVER = "unmount_remote_server"
+    RECORD = "record"
 
 
 class MasterDebugPanel(mui.FlexBox):
@@ -101,6 +107,7 @@ class MasterDebugPanel(mui.FlexBox):
             mui.MenuItem(id=ServerItemActions.SKIP_BREAKPOINT.value, label="Disable All Breakpoints"),
             mui.MenuItem(id=ServerItemActions.ENABLE_BREAKPOINT.value, label="Enable All Breakpoints"),
             mui.MenuItem(id=ServerItemActions.UNMOUNT_REMOTE_SERVER.value, label="Unmount Remote Panel"),
+            mui.MenuItem(id=ServerItemActions.RECORD.value, label="Release And Start Record"),
         ], mui.IconButton(mui.IconType.MoreVert))
         self._menu.prop(anchorOrigin=mui.Anchor("top", "right"))
         self._menu.event_contextmenu_select.on(self._handle_secondary_actions)
@@ -124,20 +131,60 @@ class MasterDebugPanel(mui.FlexBox):
                 self._remote_server_discover_lst.prop(flex="1 1 1", minHeight=0),
             ]).prop(width="240px", alignItems="stretch", overflow="hidden", height="100%")
         ]).prop(triggered=True, orientation="horizontal", overflow="hidden")
-        self._remote_comp_container = mui.VBox([]).prop(flex=1)
+        self._remote_comp_container = mui.VBox([]).prop(width="100%", height="100%", overflow="hidden")
+        
+        self._perfetto_select = mui.Select("trace", []).prop(size="small", muiMargin="dense")
+        self._dist_perfetto = chart.Perfetto().prop(width="100%", height="100%")
+        
+        self._dist_perfetto_container = mui.VBox([
+            mui.HBox([
+                self._perfetto_select.prop(flex=1),
+                mui.IconButton(mui.IconType.Refresh, self._on_dist_perfetto_reflesh).prop(size="small")
+            ]).prop(alignItems="center"),
+            mui.Divider(),
+            self._dist_perfetto,
+        ]).prop(width="100%", height="100%", overflow="hidden")
+        tab_defs = [
+            mui.TabDef("",
+                       "remote",
+                       self._remote_comp_container,
+                       icon=mui.IconType.Terminal,
+                       tooltip="Remote Viewer"),
+            mui.TabDef("",
+                       "perfetto",
+                       self._dist_perfetto_container,
+                       icon=mui.IconType.Timeline,
+                       tooltip="Distributed Perfetto Viewer"),
+        ]
+        before = [
+            mui.IconButton(mui.IconType.Menu,
+                            self._open_drawer).prop(size="small",
+                                                    iconFontSize="18px"),
+            mui.Divider(),
+
+        ]
+        self._tabs = mui.Tabs(tab_defs, init_value="remote", before=before).prop(
+                    panelProps=mui.FlexBoxProps(width="100%", padding=0),
+                    orientation="vertical",
+                    borderRight=1,
+                    flex=1,
+                    borderColor='divider',
+                    tooltipPlacement="right")
+        self._tabs.event_change.on(self._on_tab_change)
         super().__init__([
             self._drawer,
             mui.Divider(orientation="vertical"),
-            mui.VBox([
-                mui.IconButton(mui.IconType.Menu,
-                               self._open_drawer).prop(size="small",
-                                                       iconFontSize="18px"),
-                mui.Divider(),
-                mui.IconButton(mui.IconType.Menu).prop(size="small",
-                                                       iconFontSize="18px"),
-            ]),
+            # mui.VBox([
+            #     mui.IconButton(mui.IconType.Menu).prop(size="small",
+            #                                            iconFontSize="18px"),
+            # ]),
             mui.Divider(orientation="vertical"),
-            self._remote_comp_container,
+            # self._remote_comp_container,
+            mui.ThemeProvider([
+                mui.HBox([
+                    self._tabs
+                ]).prop(flex=1)
+            ], get_tight_icon_tab_theme())
         ])
         self.prop(flexDirection="row", overflow="hidden", alignItems="stretch")
         self._cur_leave_bkpt_cb: Optional[Callable[[], Coroutine[None, None,
@@ -253,7 +300,80 @@ class MasterDebugPanel(mui.FlexBox):
                 await self.skip_all_breakpoints()
             elif item_id == ServerItemActions.ENABLE_BREAKPOINT.value:
                 await self.enable_all_breakpoints()
+            elif item_id == ServerItemActions.RECORD.value:
+                await self.start_record()
         await self._update_remote_server_discover_lst()
+
+    async def start_record(self):
+        ts = time.time_ns()
+        for meta in self._current_metas:
+            trace_cfg = TracerConfig(True, breakpoint_count=1, trace_timestamp=ts)
+            try:
+                await simple_remote_call_async(meta.url_with_port, dbg_serv_names.DBG_LEAVE_BREAKPOINT,
+                                        trace_cfg, rpc_timeout=1)
+            except TimeoutError:
+                traceback.print_exc()
+            except grpc.aio.AioRpcError as e:
+                if e.code() == grpc.StatusCode.UNAVAILABLE:
+                    continue
+                else:
+                    traceback.print_exc()
+
+    async def query_record_data_keys(self):
+        all_keys = []
+        for meta in self._current_metas:
+            try:
+                keys = await simple_remote_call_async(meta.url_with_port, dbg_serv_names.DBG_GET_TRACE_DATA_KEYS,
+                                        rpc_timeout=1)
+                all_keys.extend(keys)
+            except TimeoutError:
+                traceback.print_exc()
+            except grpc.aio.AioRpcError as e:
+                if e.code() == grpc.StatusCode.UNAVAILABLE:
+                    continue
+                else:
+                    traceback.print_exc()
+        return list(set(all_keys))
+
+    async def query_record_data_by_key(self, key: str):
+        all_data = []
+        for meta in self._current_metas:
+            try:
+                data_gzipped = await simple_chunk_call_async(meta.url_with_port, dbg_serv_names.DBG_GET_TRACE_DATA,
+                                        key, rpc_timeout=10)
+                if data_gzipped is not None:
+                    data = gzip.decompress(data_gzipped[1])
+                    all_data.append(data)
+            except TimeoutError:
+                traceback.print_exc()
+            except grpc.aio.AioRpcError as e:
+                if e.code() == grpc.StatusCode.UNAVAILABLE:
+                    continue
+                else:
+                    traceback.print_exc()
+        # merge trace events
+        all_trace_events = []
+        for data in all_data:
+            data_json = json.loads(data)
+            all_trace_events.extend(data_json["traceEvents"])
+        return json.dumps({
+            "traceEvents": all_trace_events
+        }).encode()
+
+    async def _on_dist_perfetto_select(self, value: Any):
+        data = await self.query_record_data_by_key(value)
+        await self._dist_perfetto.set_trace_data(data, value)
+
+    async def _on_dist_perfetto_reflesh(self):
+        await self._on_tab_change("perfetto")
+
+    async def _on_tab_change(self, value: str):
+        if value == "perfetto":
+            keys = await self.query_record_data_keys() 
+            if keys:
+                options = [(key, key) for key in keys]
+                await self._perfetto_select.update_items(options, 0)
+                await self._on_dist_perfetto_select(options[0][1])
 
     async def release_all_breakpoints(self):
         for meta in self._current_metas:
@@ -267,7 +387,6 @@ class MasterDebugPanel(mui.FlexBox):
                     continue
                 else:
                     traceback.print_exc()
-        # await self._update_remote_server_discover_lst()
 
     async def skip_all_breakpoints(self):
         for meta in self._current_metas:
@@ -276,7 +395,6 @@ class MasterDebugPanel(mui.FlexBox):
                                         rpc_timeout=1)
             except TimeoutError:
                 traceback.print_exc()
-        # await self._update_remote_server_discover_lst()
 
     async def enable_all_breakpoints(self):
         for meta in self._current_metas:

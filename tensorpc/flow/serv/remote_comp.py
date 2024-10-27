@@ -17,7 +17,7 @@ from tensorpc.core.asyncclient import (AsyncRemoteManager,
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.defs import FileDesp, FileResource, FileResourceRequest
 from tensorpc.core.serviceunit import ServiceEventType
-from tensorpc.core.tree_id import UniqueTreeId
+from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp
 from tensorpc.flow.components.mui import FlexBox
 from tensorpc.flow.constants import TENSORPC_APP_ROOT_COMP
 from tensorpc.flow.core.appcore import ALL_OBSERVED_FUNCTIONS, AppSpecialEventType, enter_app_context
@@ -64,7 +64,7 @@ def patch_unique_id(data: Any, prefixes: List[str]):
         new_data = []
         for i in range(len(data)):
             d = data[i]
-            if isinstance(d, UniqueTreeId):
+            if isinstance(d, UniqueTreeIdForComp):
                 d = d.copy()
                 d.set_parts_inplace(prefixes + d.parts)
             else:
@@ -75,7 +75,7 @@ def patch_unique_id(data: Any, prefixes: List[str]):
         new_data = []
         for i in range(len(data)):
             d = data[i]
-            if isinstance(d, UniqueTreeId):
+            if isinstance(d, UniqueTreeIdForComp):
                 d = d.copy()
                 d.set_parts_inplace(prefixes + d.parts)
             else:
@@ -85,14 +85,14 @@ def patch_unique_id(data: Any, prefixes: List[str]):
     elif isinstance(data, collections.abc.Mapping):
         new_data = {}
         for k, d in data.items():
-            if isinstance(d, UniqueTreeId):
+            if isinstance(d, UniqueTreeIdForComp):
                 d = d.copy()
                 d.set_parts_inplace(prefixes + d.parts)
             else:
                 d = patch_unique_id(d, prefixes)
             new_data[k] = d
         return new_data
-    elif isinstance(data, UniqueTreeId):
+    elif isinstance(data, UniqueTreeIdForComp):
         # data.parts[1:]: remote the ROOT part
         data = data.copy()
         data.set_parts_inplace(prefixes + data.parts)
@@ -157,7 +157,7 @@ class RemoteComponentService:
             if not layout_created:
                 await app._app_run_layout_function()
         else:
-            app.root._attach(UniqueTreeId.from_parts([TENSORPC_APP_ROOT_COMP]),
+            app.root._attach(UniqueTreeIdForComp.from_parts([TENSORPC_APP_ROOT_COMP]),
                              app._flow_app_comp_core)
         send_loop_task = asyncio.create_task(self._send_loop(app_obj))
         app.app_initialize()
@@ -230,7 +230,7 @@ class RemoteComponentService:
             layout_dict[k] = patch_unique_id(v, prefixes)
         lay["layout"] = layout_dict
         # print("APP layout_dict", layout_dict)
-        lay["remoteRootUid"] = UniqueTreeId.from_parts(
+        lay["remoteRootUid"] = UniqueTreeIdForComp.from_parts(
             prefixes + root_uid.parts).uid_encoded
         return lay
 
@@ -470,6 +470,8 @@ class RemoteComponentService:
                 handler = app_obj.app._flowapp_file_resource_handlers[base]
                 async for chunk in handle_file_resource(req, handler, chunk_size, count):
                     yield chunk
+            except GeneratorExit:
+                return 
             except:
                 traceback.print_exc()
                 raise

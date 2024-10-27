@@ -2,29 +2,35 @@ import ast
 import asyncio
 import dataclasses
 import os
-from pathlib import Path
 import threading
 import traceback
+from pathlib import Path
 from types import FrameType
 from typing import Any, Dict, List, Optional, Tuple
 
 import grpc
-import rich
-from tensorpc.core import inspecttools, marker
+import gzip 
 from tensorpc import prim
+from tensorpc.core import inspecttools, marker
 from tensorpc.core.asyncclient import simple_remote_call_async
-from tensorpc.core.funcid import find_toplevel_func_node_by_lineno, find_toplevel_func_node_container_by_lineno
+from tensorpc.core.funcid import (find_toplevel_func_node_by_lineno,
+                                  find_toplevel_func_node_container_by_lineno)
 from tensorpc.core.serviceunit import ServiceEventType
-from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_ENV_DBG_DEFAULT_BREAKPOINT_ENABLE, BreakpointType, DebugFrameMeta, DebugServerStatus, BackgroundDebugToolsConfig
+from tensorpc.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
+                                    TENSORPC_ENV_DBG_DEFAULT_BREAKPOINT_ENABLE,
+                                    BackgroundDebugToolsConfig, BreakpointEvent, BreakpointType,
+                                    DebugFrameMeta, DebugServerStatus, RecordMode,
+                                    TracerConfig)
 from tensorpc.dbg.core.sourcecache import LineCache, PythonSourceASTCache
 from tensorpc.dbg.serv_names import serv_names
 from tensorpc.flow.client import list_all_app_in_machine
 from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
-from tensorpc.flow.core.appcore import enter_app_context
+from tensorpc.flow.core.appcore import enter_app_context, get_app_context
 from tensorpc.flow.serv_names import serv_names as app_serv_names
 from tensorpc.flow.vscode.coretypes import VscodeBreakpoint
-from tensorpc.utils.rich_logging import TENSORPC_LOGGING_OVERRIDED_PATH_LINENO_KEY, get_logger
+from tensorpc.utils.rich_logging import (
+    TENSORPC_LOGGING_OVERRIDED_PATH_LINENO_KEY, get_logger)
 
 LOGGER = get_logger("tensorpc.dbg")
 
@@ -36,8 +42,14 @@ class BreakpointMeta:
     path: str
     lineno: int
     line_text: str
-    event: threading.Event
+    event: BreakpointEvent
+    user_dict: Optional[Dict[str, Any]] = None
 
+@dataclasses.dataclass
+class TracerState:
+    tracer: Any
+    cfg: TracerConfig
+    frame_identifier: Tuple[str, int] # path, lineno
 
 class BackgroundDebugTools:
 
@@ -60,6 +72,16 @@ class BackgroundDebugTools:
                                             VscodeBreakpoint] = {}
 
         self._bkpt_lock = asyncio.Lock()
+
+        self._cur_tracer_state: Optional[TracerState] = None
+
+        self._trace_gzip_data_dict: Dict[str, Tuple[int, bytes]] = {}
+
+    @marker.mark_server_event(event_type=ServiceEventType.Exit)
+    def _on_exit(self):
+        pass 
+        # if self._cur_tracer_state is not None:
+        #     self._cur_tracer_state.tracer.stop()
 
     # @marker.mark_server_event(event_type=ServiceEventType.BeforeServerStart)
     async def try_fetch_vscode_breakpoints(self):
@@ -90,10 +112,11 @@ class BackgroundDebugTools:
 
     async def enter_breakpoint(self,
                                frame: FrameType,
-                               event: threading.Event,
+                               event: BreakpointEvent,
                                type: BreakpointType,
                                name: Optional[str] = None):
         """should only be called in main thread (server runs in background thread)"""
+        # FIXME better vscode breakpoint handling
         if self._cfg.skip_breakpoint:
             event.set()
             return
@@ -124,6 +147,18 @@ class BackgroundDebugTools:
                         })
                     self._cur_breakpoint = None
                     return
+            res_tracer = None
+            is_record_stop = False
+            if self._cur_tracer_state is not None and self._cur_tracer_state.tracer is not None:
+                cfg = self._cur_tracer_state.cfg
+                is_same_bkpt = False
+                if cfg.mode == RecordMode.SAME_BREAKPOINT:
+                    is_same_bkpt = self._cur_tracer_state.frame_identifier == (frame.f_code.co_filename, frame.f_lineno)
+                self._cur_tracer_state.cfg.breakpoint_count -= 1
+                if self._cur_tracer_state.cfg.breakpoint_count == 0 or is_same_bkpt:
+                    res_tracer = (self._cur_tracer_state.tracer, self._cur_tracer_state.cfg)
+                    self._cur_tracer_state = None
+                    is_record_stop = True
             self._frame = frame
             LOGGER.warning(
                 f"Breakpoint({type.name}), "
@@ -140,25 +175,69 @@ class BackgroundDebugTools:
             assert isinstance(obj, BreakpointDebugPanel)
             with enter_app_context(app):
                 await obj.set_breakpoint_frame_meta(frame,
-                                                    self.leave_breakpoint)
+                                                    self.leave_breakpoint,
+                                                    is_record_stop)
             self._cur_status = DebugServerStatus.InsideBreakpoint
+            return res_tracer
 
-    async def leave_breakpoint(self):
+    async def leave_breakpoint(self, trace_cfg: Optional[TracerConfig] = None):
         """should only be called from remote"""
         assert not prim.is_loopback_call(
         ), "this function should only be called from remote"
         async with self._bkpt_lock:
-            if self._cur_breakpoint is not None:
-                self._cur_breakpoint.event.set()
-                self._cur_breakpoint = None
-            self._frame = None
             obj, app = prim.get_service(
                 app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
                     TENSORPC_DBG_FRAME_INSPECTOR_KEY)
             assert isinstance(obj, BreakpointDebugPanel)
-            with enter_app_context(app):
-                await obj.leave_breakpoint()
+            is_record_start = False
+
+            if self._cur_breakpoint is not None:
+                if trace_cfg is not None and trace_cfg.enable and self._frame is not None:
+                    if self._cur_tracer_state is None:
+                        is_record_start = True
+            if get_app_context() is None:
+                with enter_app_context(app):
+                    await obj.leave_breakpoint(is_record_start)
+            else:
+                await obj.leave_breakpoint(is_record_start)
             self._cur_status = DebugServerStatus.Idle
+            if self._cur_breakpoint is not None:
+                if trace_cfg is not None and trace_cfg.enable and self._frame is not None:
+                    if self._cur_tracer_state is None:
+                        self._cur_tracer_state = TracerState(None, trace_cfg, (self._frame.f_code.co_filename, self._frame.f_lineno))
+                        self._cur_breakpoint.event.enable_trace_in_main_thread = True
+                self._cur_breakpoint.event.set()
+                self._cur_breakpoint = None
+            self._frame = None
+
+    def set_tracer(self, tracer: Any):
+        assert self._cur_tracer_state is not None
+        self._cur_tracer_state.tracer = tracer
+
+    async def set_trace_data(self, data: str, cfg: TracerConfig):
+        obj, app = prim.get_service(
+            app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
+                TENSORPC_DBG_FRAME_INSPECTOR_KEY)
+        assert isinstance(obj, BreakpointDebugPanel)
+        data_bytes = data.encode()
+        with enter_app_context(app):
+            await obj.set_perfetto_data(data_bytes)
+        if cfg.trace_timestamp is not None:
+            name = "default"
+            if cfg.trace_name is not None:
+                name = cfg.trace_name
+            data_compressed = gzip.compress(data_bytes)
+            LOGGER.warning(f"Compress trace data: {len(data_bytes)} -> {len(data_compressed)}") 
+            self._trace_gzip_data_dict[name] = (cfg.trace_timestamp, data_compressed)
+
+    def get_trace_data(self, name: str):
+        if name in self._trace_gzip_data_dict:
+            res = self._trace_gzip_data_dict[name]
+            return res 
+        return None
+
+    def get_trace_data_keys(self):
+        return list(self._trace_gzip_data_dict.keys())
 
     def bkgd_get_cur_frame(self):
         return self._frame

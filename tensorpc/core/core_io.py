@@ -8,7 +8,7 @@ from typing_extensions import Literal
 
 import msgpack
 import numpy as np
-from tensorpc.core.tree_id import UniqueTreeId
+from tensorpc.core.tree_id import UniqueTreeIdForComp
 from tensorpc.protos_export import arraybuf_pb2, rpc_message_pb2, wsdef_pb2
 import traceback
 import numpy.typing as npt
@@ -363,8 +363,8 @@ def _extract_arrays_from_data(arrays,
         return data_skeleton
     elif isinstance(data, JsonOnlyData):
         return data.data
-    elif isinstance(data, UniqueTreeId):
-        # we delay UniqueTreeId conversion here to allow modify uid
+    elif isinstance(data, UniqueTreeIdForComp):
+        # we delay UniqueTreeIdForComp conversion here to allow modify uid
         return data.uid_encoded
     else:
         data_skeleton = None

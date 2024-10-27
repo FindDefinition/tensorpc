@@ -36,7 +36,7 @@ import numpy as np
 from typing_extensions import ParamSpec, TypeAlias, Annotated
 
 from tensorpc.utils.uniquename import UniqueNamePool
-from .typemetas import RangedFloat, RangedInt, Vector3Type
+from ...core.typemetas import RangedFloat, RangedInt, Vector3Type
 from ..core.component import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, ContainerBaseProps, EventHandler,
                     SimpleEventType, Fragment, FrontendEventType, NumberType,
@@ -47,7 +47,7 @@ from .mui import (FlexBoxProps, MUIFlexBoxProps, MUIComponentType,
                   MUIContainerBase, MenuItem, PointerEventsProperties, Image as
                   MUIImage)
 from ..core.common import handle_standard_event
-from tensorpc.flow.components import typemetas
+from tensorpc.core import typemetas
 
 _CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
 _CORO_ANY: TypeAlias = Union[Coroutine[Any, None, None], Any]

@@ -14,6 +14,7 @@ from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.flow import marker
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from tensorpc.flow.components import mui
+from tensorpc.flow.components.plus.styles import get_tight_icon_tab_theme
 from tensorpc.flow.core import colors
 from tensorpc.flow.core.appcore import find_component_by_uid
 from tensorpc.flow.components import three
@@ -24,7 +25,7 @@ from tensorpc.flow.components.plus.core import ALL_OBJECT_LAYOUT_HANDLERS, Objec
 from tensorpc.flow.components.plus.grid_preview_layout import GridPreviewLayout
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree, SelectSingleEvent
 from .core import UNKNOWN_KEY_SPLIT, UNKNOWN_VIS_KEY, UserTreeItemCard, VContext, get_canvas_item_cfg, get_or_create_canvas_item_cfg, _VapiObjects, is_reserved_uid
-from tensorpc.flow.components.typemetas import RangedFloat
+from tensorpc.core.typemetas import RangedFloat
 from tensorpc.flow.core.component import Component, ContainerBase, FrontendEventType, RemoteComponentBase
 from tensorpc.flow.core.coretypes import TreeDragTarget
 from tensorpc.flow import appctx
@@ -557,18 +558,7 @@ class ComplexCanvas(mui.FlexBox):
             border="2px solid transparent",
             sxOverDrop={"border": "2px solid green"},
         )
-        tab_theme = mui.Theme(
-            components={
-                "MuiTab": {
-                    "styleOverrides": {
-                        "root": {
-                            "padding": "0",
-                            "minWidth": "28px",
-                            "minHeight": "28px",
-                        }
-                    }
-                }
-            })
+        tab_theme = get_tight_icon_tab_theme()
 
         detail_container = mui.HBox([
             mui.ThemeProvider([

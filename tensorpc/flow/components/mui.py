@@ -38,9 +38,9 @@ from PIL import Image as PILImage
 from typing_extensions import Literal, TypeAlias, TypedDict, Self
 from pydantic import field_validator, model_validator
 
-from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
+from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp, UniqueTreeIdForTree
 from tensorpc.flow import marker
-from .typemetas import Vector3Type
+from ...core.typemetas import Vector3Type
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.defs import FileResource, FileResourceRequest
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
@@ -260,6 +260,7 @@ def layout_unify(layout: LayoutType):
 class ImageProps(MUIComponentBaseProps):
     image: Union[Undefined, str, bytes] = undefined
     alt: str = ""
+    enableZoom: Union[bool, Undefined] = undefined
 
 
 class Image(MUIComponentBase[ImageProps]):
@@ -555,6 +556,8 @@ class IconType(enum.IntEnum):
     Merge = 52
     DoubleArrow = 53
     AccountTree = 54
+    Timeline = 55
+    FiberManualRecord = 56
 
 
 @dataclasses.dataclass
@@ -747,7 +750,7 @@ class DialogProps(MUIFlexBoxProps):
     title: Union[str, Undefined] = undefined
     fullScreen: Union[bool, Undefined] = undefined
     fullWidth: Union[bool, Undefined] = undefined
-    maxWidth: Union[Literal['xs', 'sm', "md", "lg", "xl"],
+    dialogMaxWidth: Union[Literal['xs', 'sm', "md", "lg", "xl"],
                     Undefined] = undefined
     scroll: Union[Literal["body", "paper"], Undefined] = undefined
     includeFormControl: Union[bool, Undefined] = undefined
@@ -1248,7 +1251,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
     def __init__(self,
                  children: Optional[LayoutType] = None,
                  base_type: UIType = UIType.FlexBox,
-                 uid: Optional[UniqueTreeId] = None,
+                 uid: Optional[UniqueTreeIdForComp] = None,
                  app_comp_core: Optional[AppComponentCore] = None,
                  wrapped_obj: Optional[Any] = None) -> None:
         if children is not None and isinstance(children, Sequence):
@@ -3461,15 +3464,27 @@ class Tabs(MUIContainerBase[TabsProps, MUIComponentType]):
     @dataclasses.dataclass
     class ChildDef:
         tabDefs: List["TabDef"]
+        # components before tab list
+        before: Union[Undefined, List[Component]] = undefined
+        # components after tab list
+        after: Union[Undefined, List[Component]] = undefined
 
     def __init__(self,
                  tab_defs: List["TabDef"],
-                 init_value: Optional[str] = None) -> None:
+                 init_value: Optional[str] = None,
+                 before: Optional[List[Component]] = None,
+                 after: Optional[List[Component]] = None
+                 ) -> None:
         all_values = [x.value for x in tab_defs]
+        cdef = Tabs.ChildDef(tab_defs)
+        if before is not None:
+            cdef.before = before
+        if after is not None:
+            cdef.after = after
         assert len(all_values) == len(set(all_values)), "values must be unique"
         super().__init__(UIType.Tabs,
                          TabsProps,
-                         Tabs.ChildDef(tab_defs),
+                         cdef,
                          allowed_events=[
                              FrontendEventType.Change,
                          ])
@@ -3478,6 +3493,8 @@ class Tabs(MUIContainerBase[TabsProps, MUIComponentType]):
             self.props.value = init_value
         else:
             self.props.value = all_values[0]
+
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -5234,8 +5251,9 @@ class MenuList(MUIContainerBase[MenuListProps, MUIComponentType]):
 class IFrameProps(MUIComponentBaseProps):
     url: Union[str, Undefined] = undefined
     title: Union[Undefined, str] = undefined
-    initData: Union[Undefined, Any] = undefined
-    initTargetOrigin: Union[Undefined, str] = undefined
+    # controlled post message.
+    data: Union[Undefined, Any] = undefined
+    targetOrigin: Union[Undefined, str] = undefined
 
 
 class IFrame(MUIComponentBase[IFrameProps]):
@@ -5251,9 +5269,9 @@ class IFrame(MUIComponentBase[IFrameProps]):
         super().__init__(UIType.IFrame, IFrameProps)
         self.prop(url=url)
         if init_data is not None:
-            self.prop(initData=init_data)
+            self.prop(data=init_data)
         if init_target_origin is not None:
-            self.prop(initTargetOrigin=init_target_origin)
+            self.prop(targetOrigin=init_target_origin)
 
     @property
     def prop(self):
@@ -5269,11 +5287,16 @@ class IFrame(MUIComponentBase[IFrameProps]):
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
     async def post_message(self, data: Any, target_origin: str = "*"):
+        # TODO should we use controlled manner instead of post message?
+        # the problem is some component (tabs) won't mount iframe
+        # until it's selected, so the component msg handler won't be
+        # registered.
         ev = self.create_comp_event({
             "type": 0,
             "data": data,
             "targetOrigin": target_origin,
         })
+        self.prop(data=data, targetOrigin=target_origin)
         await self.send_and_wait(ev)
 
 @dataclasses.dataclass

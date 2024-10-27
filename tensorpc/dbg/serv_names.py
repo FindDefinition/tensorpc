@@ -53,4 +53,25 @@ class _ServiceNames:
         from tensorpc.services.dbg.tools import BackgroundDebugTools
         return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.try_fetch_vscode_breakpoints.__name__)
 
+    @property
+    def DBG_SET_TRACE_DATA(self):
+        from tensorpc.services.dbg.tools import BackgroundDebugTools
+        return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.set_trace_data.__name__)
+
+    @property
+    def DBG_SET_TRACER(self):
+        from tensorpc.services.dbg.tools import BackgroundDebugTools
+        return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.set_tracer.__name__)
+
+    @property
+    def DBG_GET_TRACE_DATA(self):
+        from tensorpc.services.dbg.tools import BackgroundDebugTools
+        return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.get_trace_data.__name__)
+
+    @property
+    def DBG_GET_TRACE_DATA_KEYS(self):
+        from tensorpc.services.dbg.tools import BackgroundDebugTools
+        return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.get_trace_data_keys.__name__)
+
+
 serv_names = _ServiceNames()

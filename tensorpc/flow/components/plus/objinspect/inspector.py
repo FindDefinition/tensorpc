@@ -24,7 +24,7 @@ from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.flow.components.plus.objview.preview import ObjectPreview, ObjectPreviewBase
 
 from tensorpc.flow.components.plus.scriptmgr import ScriptManager
-from tensorpc.flow.components.plus.styles import CodeStyles
+from tensorpc.flow.components.plus.styles import CodeStyles, get_tight_icon_tab_theme
 from tensorpc.flow.core.appcore import Event, get_app, get_editable_app
 from tensorpc.flow.components import mui
 from tensorpc.flow.components import three
@@ -116,18 +116,7 @@ class ObjectInspector(mui.FlexBox):
                                                        width="100%",
                                                        height="100%")
 
-        tab_theme = mui.Theme(
-            components={
-                "MuiTab": {
-                    "styleOverrides": {
-                        "root": {
-                            "padding": "0",
-                            "minWidth": "28px",
-                            "minHeight": "28px",
-                        }
-                    }
-                }
-            })
+        tab_theme = get_tight_icon_tab_theme()
         tab_prefix = "__tensorpc_flow_obj_inspector"
 
         tabdefs = [

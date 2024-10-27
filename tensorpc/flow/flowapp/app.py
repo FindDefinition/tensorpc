@@ -71,7 +71,7 @@ from tensorpc.core.serviceunit import (ObjectReloadManager,
 from tensorpc.core.tracers.codefragtracer import get_trace_infos_from_coderange_item
 from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.constants import TENSORPC_APP_DND_SRC_KEY, TENSORPC_APP_ROOT_COMP, TENSORPC_APP_STORAGE_VSCODE_TRACE_PATH, TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT, TENSORPC_FLOW_EFFECTS_OBSERVE
-from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
+from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp, UniqueTreeIdForTree
 from tensorpc.flow.flowapp.appstorage import AppStorage
 from tensorpc.utils.wait_tools import debounce
 from ..components import mui, three
@@ -262,7 +262,7 @@ class App:
         self._is_external_root = False
         self._use_app_editor = False
         # self.__flowapp_external_wrapped_obj = external_wrapped_obj
-        root_uid = UniqueTreeId.from_parts([_ROOT])
+        root_uid = UniqueTreeIdForComp.from_parts([_ROOT])
 
         if external_root is not None:
             # TODO better mount
@@ -534,7 +534,7 @@ class App:
             await self.root._run_special_methods(
                 [], {x[0] : x[1] for x in detached_items}, self._flow_reload_manager)
             del detached
-        root_uid = UniqueTreeId.from_parts([_ROOT])
+        root_uid = UniqueTreeIdForComp.from_parts([_ROOT])
 
         await self.root._clear()
         # self._uid_to_comp.clear()
@@ -542,7 +542,7 @@ class App:
         new_is_flex = False
         res: mui.LayoutType = {}
         wrapped_obj = self.root._wrapped_obj
-        attached: Dict[UniqueTreeId, Component] = {}
+        attached: Dict[UniqueTreeIdForComp, Component] = {}
         try:
             with _enter_app_conetxt(self):
                 if decorator_fn is not None:
@@ -1012,14 +1012,10 @@ class App:
                     return None 
 
                 if event.type == VscodeTensorpcQueryType.SyncBreakpoints:
-                    if event.workspaceUri not in self._flowapp_vscode_state.breakpoint_dict:
-                        self._flowapp_vscode_state.breakpoint_dict[event.workspaceUri] = []
-                    self._flowapp_vscode_state.breakpoint_dict[event.workspaceUri] = [VscodeBreakpoint(**d) for d in event.data]
+                    self._flowapp_vscode_state.set_workspace_breakpoints(event.workspaceUri, [VscodeBreakpoint(**d) for d in event.data])
                 elif event.type == VscodeTensorpcQueryType.BreakpointUpdate:
-                    bkpts = [VscodeBreakpoint(**d) for d in event.data]
-                    if event.workspaceUri not in self._flowapp_vscode_state.breakpoint_dict:
-                        self._flowapp_vscode_state.breakpoint_dict[event.workspaceUri] = []
-                    self._flowapp_vscode_state.breakpoint_dict[event.workspaceUri] = [VscodeBreakpoint(**d) for d in event.data]
+                    # bkpts = [VscodeBreakpoint(**d) for d in event.data]
+                    self._flowapp_vscode_state.set_workspace_breakpoints(event.workspaceUri, [VscodeBreakpoint(**d) for d in event.data])
                     await self._flowapp_special_eemitter.emit_async(
                         AppSpecialEventType.VscodeBreakpointChange, self._flowapp_vscode_state.get_all_breakpoints())
                 if not self._is_app_workspace_child_of_vscode_workspace_root(str(workspace)):

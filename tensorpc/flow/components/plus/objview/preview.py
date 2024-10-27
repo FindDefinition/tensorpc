@@ -35,9 +35,7 @@ class ObjectPreview(ObjectPreviewBase):
     def __init__(self, enable_reload: bool = True):
         self.preview_container = mui.VBox([]).prop(overflow="auto",
                                                    flex=1,
-                                                   width="100%",
-                                                   height="100%",
-                                                   alignItems="stretch")
+                                                   alignItems="center")
         self.preview_header = mui.Typography("").prop(
             variant="caption", fontFamily=CodeStyles.fontFamily)
         super().__init__([

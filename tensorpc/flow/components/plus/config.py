@@ -23,7 +23,7 @@ from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.core.annocore import is_annotated
 
 from .. import mui
-from tensorpc.flow.components import typemetas
+from tensorpc.core import typemetas
 from tensorpc.flow.core.component import AppEvent
 from .. import three
 import inspect
@@ -587,8 +587,9 @@ class ConfigPanelV2(mui.SimpleControls):
                                       "",
                                       self._obj_to_ctrl_meta,
                                       ignored_field_names=ignored_field_names)
-        super().__init__(init=control_nodes_v1_to_v2(
-            node, self.uid_to_json_like_node).children,
+        node_v2 = control_nodes_v1_to_v2(
+            node, self.uid_to_json_like_node)
+        super().__init__(init=node_v2.children,
                          callback=self.callback)
         self.__config_obj = config_obj
         self.__callback_key = "config_panel_v3_handler"
@@ -657,3 +658,37 @@ class ConfigPanelV2(mui.SimpleControls):
             _CONFIG_META_KEY:
             SliderMeta(begin=begin, end=end, step=step, alias=alias)
         }
+
+
+class ConfigPanelDialog(mui.Dialog):
+    def __init__(self, callback: Callable[[Any], mui._CORO_NONE]):
+        super().__init__([], self._on_dialog_close)
+        # save callback to standard flow event handlers to enable reload for user callback
+        self.__callback_key = "_config_panel_dialog_ev_handler"
+        self.register_event_handler(self.__callback_key,
+                                    callback,
+                                    backend_only=True)
+
+        self._cur_cfg: Any = None
+
+    async def open_config_dialog(self, config_obj: Any, inplace: bool = False):
+        assert dataclasses.is_dataclass(config_obj) and not isinstance(config_obj, type), "config_obj should be a dataclass"
+        config_obj = dataclasses.replace(config_obj)
+        self._cur_cfg = config_obj
+        panel = ConfigPanelV2(config_obj)
+        await self.set_new_layout([
+            panel
+        ], post_ev_creator=lambda: self.update_event(open=True)) 
+
+    async def _on_dialog_close(self, ev: mui.DialogCloseEvent):
+        assert self._cur_cfg is not None, "shouldn't happen"
+        handlers = self.get_event_handlers(self.__callback_key)
+        try:
+            if handlers is not None and ev.ok:
+                for handler in handlers.handlers:
+                    coro = handler.cb(self._cur_cfg)
+                    if inspect.iscoroutine(coro):
+                        await coro
+        finally:
+            self._cur_cfg = None
+            await self.set_new_layout({}) 

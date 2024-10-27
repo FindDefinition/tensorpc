@@ -1,17 +1,32 @@
 import inspect
+import io
+import json
 import os
 from pathlib import Path
 import threading
 from typing import Any, Optional
+
+import rich
 from tensorpc.constants import TENSORPC_MAIN_PID
 from tensorpc.core.bgserver import BACKGROUND_SERVER
-from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_ENV_DBG_ENABLE, BreakpointType
+from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_TRACER_KEY, TENSORPC_ENV_DBG_ENABLE, BreakpointEvent, BreakpointType
 from tensorpc.flow.client import is_inside_app_session
 from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
+from tensorpc.utils.rich_logging import get_logger
 from .serv_names import serv_names
 from tensorpc.flow.serv_names import serv_names as app_serv_names
 from tensorpc.compat import InWindows
 
+LOGGER = get_logger("tensorpc.dbg")
+
+def _get_viztracer():
+    try:
+        from viztracer import VizTracer
+        # file_info=False to reduce the size of trace data
+        # TODO let user customize this
+        return VizTracer(file_info=False, max_stack_depth=12)
+    except ImportError:
+        return None
 
 def should_enable_debug() -> bool:
     """Check if the debug environment is enabled"""
@@ -67,8 +82,7 @@ def breakpoint(name: Optional[str] = None,
     """
     if not should_enable_debug():
         return
-    init(init_proc_name, init_port)
-    ev = threading.Event()
+    bev = BreakpointEvent(threading.Event())
     frame = inspect.currentframe()
     if frame is None:
         return
@@ -78,9 +92,30 @@ def breakpoint(name: Optional[str] = None,
         _frame_cnt -= 1
     if frame is None:
         return
-    BACKGROUND_SERVER.execute_service(serv_names.DBG_ENTER_BREAKPOINT, frame,
-                                      ev, type, name)
-    ev.wait(timeout)
+    if init_proc_name is None:
+        init_proc_name = frame.f_code.co_name
+
+    init(init_proc_name, init_port)
+    trace_res = BACKGROUND_SERVER.execute_service(serv_names.DBG_ENTER_BREAKPOINT, frame,
+                                      bev, type, name)
+    if trace_res is not None:
+        tracer_to_stop, tracer_cfg = trace_res
+        tracer_to_stop.stop()
+        LOGGER.warning(f"Record Stop.")
+        ss = io.StringIO()
+        tracer_to_stop.save(ss)
+        BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACE_DATA, ss.getvalue(), tracer_cfg)
+
+    bev.event.wait(timeout)
+    if bev.enable_trace_in_main_thread:
+        # tracer must be create/start/stop in main thread (or same thread)
+        tracer = _get_viztracer()
+        if tracer is not None:
+            LOGGER.warning(f"Record Start.")
+            tracer.start()
+            BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACER, tracer)
+        else:
+            LOGGER.error("viztracer is not installed, can't record trace data. use `pip install viztracer` to install.")
 
 def vscode_breakpoint(name: Optional[str] = None,
                timeout: Optional[float] = None,

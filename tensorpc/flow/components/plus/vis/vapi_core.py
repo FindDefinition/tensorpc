@@ -46,7 +46,7 @@ from tensorpc.flow.components.plus.config import ConfigPanelV2
 from tensorpc.flow.core.component import AppEvent
 from tensorpc.utils.typeutils import take_annotation_from
 from ... import three
-from ...typemetas import (ColorRGB, ColorRGBA, RangedFloat, RangedInt,
+from .....core.typemetas import (ColorRGB, ColorRGBA, RangedFloat, RangedInt,
                           RangedVector3, Vector3,
                           annotated_function_to_dataclass)
 from .canvas import ComplexCanvas, find_component_trace_by_uid_with_not_exist_parts

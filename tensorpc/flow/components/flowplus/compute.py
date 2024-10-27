@@ -1067,7 +1067,7 @@ class ComputeFlow(mui.FlexBox):
                                                self._handle_dialog_close)
         self._node_setting_dialog.prop(title="Node Setting")
         self._shared_manage_dialog = mui.Dialog([]).prop(
-            maxWidth="xl", fullWidth=True, title="Manage Shared Nodes")
+            dialogMaxWidth="xl", fullWidth=True, title="Manage Shared Nodes")
         self._shared_manage_dialog.event_modal_close.on(
             lambda x: self._shared_manage_dialog.set_new_layout([]))
         self.graph_container = mui.HBox([

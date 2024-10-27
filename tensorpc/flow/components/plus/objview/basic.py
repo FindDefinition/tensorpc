@@ -42,10 +42,11 @@ class Image(mui.Image):
                     img = _smoothstep(img, lower, upper)
                 img = (img * 255).astype(np.uint8)
             self.prop(image=self.encode_image_bytes(img))
-        self.prop(height="100%", width="100%", overflow="hidden")
-        self.update_sx_props({
-            "object-fit": "contain",
-        })
+        # self.prop(height="100%", width="100%", overflow="hidden")
+        self.prop(maxWidth="400px", enableZoom=True)
+        # self.update_sx_props({
+        #     "object-fit": "contain",
+        # })
 
 class ImageBatch(mui.FlexBox):
     def __init__(self, arr, *, lower: float = 0.0, upper: float = 1.0):
@@ -61,17 +62,19 @@ class ImageBatch(mui.FlexBox):
         self._imgs = imgs
         self._slider = mui.Slider(0, imgs.shape[0] - 1, 1, callback=self._on_slider)
         self._img = mui.Image()
-        self._img.prop(overflow="hidden", flex=1)
-        self._img.update_sx_props({
-            "object-fit": "contain",
-        })
+        # self._img.prop(overflow="hidden", flex=1)
+        self._img.prop(maxWidth="400px", enableZoom=True)
+
+        # self._img.update_sx_props({
+        #     "object-fit": "contain",
+        # })
         self._img.prop(image=self._img.encode_image_bytes(imgs[0]))
 
         super().__init__([
             self._img,
             self._slider,
         ])
-        self.prop(flexFlow="column nowrap", flex=1, overflow="hidden", alignItems="stretch")
+        self.prop(maxWidth="400px", flexFlow="column nowrap", alignItems="stretch")
 
     async def _on_slider(self, val):
         await self._img.show(self._imgs[val])
@@ -87,7 +90,7 @@ class Video(mui.VideoPlayer):
         if suffix is not None:
             self._key = f"__tensorpc_objview_video{suffix}"
         super().__init__(f"tensorpc://{self._key}")
-        self.prop(overflow="auto")
+        self.prop(maxWidth="400px")
 
     @marker.mark_did_mount
     async def _on_mount(self):
