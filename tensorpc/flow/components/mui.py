@@ -918,8 +918,6 @@ class ButtonGroup(MUIContainerBase[ButtonGroupProps, Button]):
 
 @dataclasses.dataclass
 class ToggleButtonProps(MUIComponentBaseProps, IconBaseProps):
-    icon: Union[IconType, str, Undefined] = undefined
-
     value: ValueType = ""
     name: str = ""
     selected: Union[Undefined, bool] = undefined
@@ -2307,8 +2305,8 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    async def handle_event(self, data: Event, is_sync: bool = False):
-        return await handle_standard_event(self, data, is_sync=is_sync)
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync=is_sync)
 
     @property
     def prop(self):
@@ -2959,8 +2957,8 @@ class RawTaskLoop(MUIComponentBase[TaskLoopProps]):
         return await self.put_app_event(
             AppEvent("", {AppEventType.UIEvent: uiev}))
 
-    async def handle_event(self, data: Event, is_sync: bool = False):
-        return await handle_standard_event(self, data, is_sync=is_sync)
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync=is_sync)
 
     @property
     def prop(self):
@@ -3279,7 +3277,6 @@ class ChipProps(MUIComponentBaseProps, IconBaseProps):
     size: Union[Literal["small", "medium"], Undefined] = undefined
     variant: Union[Literal["filled", "outlined"], Undefined] = undefined
     label: str = ""
-    icon: Union[IconType, Undefined] = undefined
     deleteIcon: Union[IconType, Undefined] = undefined
 
 

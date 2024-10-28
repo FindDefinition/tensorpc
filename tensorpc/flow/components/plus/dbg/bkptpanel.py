@@ -15,7 +15,7 @@ from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
 from tensorpc.flow.components.plus.scriptmgr import ScriptManager
 from tensorpc.flow.components.plus.styles import CodeStyles
 from tensorpc.flow.components.plus.objinspect.inspector import ObjectInspector
-from tensorpc.dbg.constants import BackgroundDebugToolsConfig, DebugFrameMeta, DebugFrameState, RecordMode, TracerConfig, TracerUIConfig
+from tensorpc.dbg.constants import BackgroundDebugToolsConfig, DebugFrameInfo, DebugFrameState, RecordMode, TracerConfig, TracerUIConfig
 from tensorpc.utils.loader import FrameModuleMeta
 from .framescript import FrameScript
 
@@ -73,7 +73,7 @@ class BreakpointDebugPanel(mui.FlexBox):
                                         muiMargin="dense",
                                         fontFamily=CodeStyles.fontFamily),
                                     padding="0 3px 0 3px")
-        self._trace_launch_dialog = ConfigPanelDialog(self._on_trace_launch)
+        self._trace_launch_dialog = ConfigPanelDialog(self._on_trace_launch).prop(okLabel="Launch Record")
         
         self.header_actions.prop(flex=1,
                                  justifyContent="flex-end",
@@ -130,7 +130,7 @@ class BreakpointDebugPanel(mui.FlexBox):
                                                    Coroutine[None, None,
                                                              Any]]] = None
 
-        self._cur_frame_meta: Optional[DebugFrameMeta] = None
+        self._cur_frame_meta: Optional[DebugFrameInfo] = None
         self._cur_frame_state: DebugFrameState = DebugFrameState(None)
 
         self._bkgd_debug_tool_cfg: Optional[BackgroundDebugToolsConfig] = None
@@ -185,7 +185,8 @@ class BreakpointDebugPanel(mui.FlexBox):
                     enable=True,
                     mode=config.mode,
                     breakpoint_count=config.breakpoint_count,
-                    trace_name=config.trace_name))
+                    trace_name=config.trace_name,
+                    max_stack_depth=config.max_stack_depth))
             self._cur_leave_bkpt_cb = None
 
     async def _select_frame(self, option: Dict[str, Any]):
@@ -216,7 +217,7 @@ class BreakpointDebugPanel(mui.FlexBox):
                                     Coroutine[None, None, Any]],
             is_record_stop: bool = False):
         qname = inspecttools.get_co_qualname_from_frame(frame)
-        self._cur_frame_meta = DebugFrameMeta(frame.f_code.co_name, qname,
+        self._cur_frame_meta = DebugFrameInfo(frame.f_code.co_name, qname,
                                               frame.f_code.co_filename,
                                               frame.f_lineno)
         self._cur_frame_state.frame = frame

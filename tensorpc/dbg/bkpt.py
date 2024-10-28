@@ -9,7 +9,7 @@ from typing import Any, Optional
 import rich
 from tensorpc.constants import TENSORPC_MAIN_PID
 from tensorpc.core.bgserver import BACKGROUND_SERVER
-from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_TRACER_KEY, TENSORPC_ENV_DBG_ENABLE, BreakpointEvent, BreakpointType
+from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_TRACER_KEY, TENSORPC_ENV_DBG_ENABLE, BreakpointEvent, BreakpointType, TracerConfig
 from tensorpc.flow.client import is_inside_app_session
 from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
 from tensorpc.utils.rich_logging import get_logger
@@ -19,12 +19,15 @@ from tensorpc.compat import InWindows
 
 LOGGER = get_logger("tensorpc.dbg")
 
-def _get_viztracer():
+def _get_viztracer(cfg: Optional[TracerConfig]):
     try:
         from viztracer import VizTracer
         # file_info=False to reduce the size of trace data
         # TODO let user customize this
-        return VizTracer(file_info=False, max_stack_depth=12)
+        if cfg is not None:
+            return VizTracer(file_info=False, max_stack_depth=cfg.max_stack_depth)
+        else:
+            return VizTracer(file_info=False, max_stack_depth=4)
     except ImportError:
         return None
 
@@ -109,9 +112,10 @@ def breakpoint(name: Optional[str] = None,
     bev.event.wait(timeout)
     if bev.enable_trace_in_main_thread:
         # tracer must be create/start/stop in main thread (or same thread)
-        tracer = _get_viztracer()
+        tracer = _get_viztracer(bev.trace_cfg)
         if tracer is not None:
-            LOGGER.warning(f"Record Start.")
+            LOGGER.warning(f"Record Start. Config:")
+            LOGGER.warning(bev.trace_cfg)
             tracer.start()
             BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACER, tracer)
         else:

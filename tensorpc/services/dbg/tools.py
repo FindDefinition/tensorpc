@@ -19,7 +19,7 @@ from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
                                     TENSORPC_ENV_DBG_DEFAULT_BREAKPOINT_ENABLE,
                                     BackgroundDebugToolsConfig, BreakpointEvent, BreakpointType,
-                                    DebugFrameMeta, DebugServerStatus, RecordMode,
+                                    DebugFrameInfo, DebugInfo, DebugServerStatus, RecordMode,
                                     TracerConfig)
 from tensorpc.dbg.core.sourcecache import LineCache, PythonSourceASTCache
 from tensorpc.dbg.serv_names import serv_names
@@ -50,6 +50,7 @@ class TracerState:
     tracer: Any
     cfg: TracerConfig
     frame_identifier: Tuple[str, int] # path, lineno
+    force_stop: bool = False
 
 class BackgroundDebugTools:
 
@@ -121,7 +122,6 @@ class BackgroundDebugTools:
             event.set()
             return
         async with self._bkpt_lock:
-            assert self._frame is None, "already in breakpoint, shouldn't happen"
             assert prim.is_loopback_call(
             ), "this function should only be called in main thread"
             try:
@@ -150,15 +150,31 @@ class BackgroundDebugTools:
             res_tracer = None
             is_record_stop = False
             if self._cur_tracer_state is not None and self._cur_tracer_state.tracer is not None:
+                # is tracing
                 cfg = self._cur_tracer_state.cfg
                 is_same_bkpt = False
+                is_inf_record = cfg.mode == RecordMode.INFINITE
                 if cfg.mode == RecordMode.SAME_BREAKPOINT:
                     is_same_bkpt = self._cur_tracer_state.frame_identifier == (frame.f_code.co_filename, frame.f_lineno)
-                self._cur_tracer_state.cfg.breakpoint_count -= 1
-                if self._cur_tracer_state.cfg.breakpoint_count == 0 or is_same_bkpt:
+                if not is_inf_record:
+                    self._cur_tracer_state.cfg.breakpoint_count -= 1
+                if (self._cur_tracer_state.cfg.breakpoint_count == 0 and not is_inf_record) or is_same_bkpt or self._cur_tracer_state.force_stop:
                     res_tracer = (self._cur_tracer_state.tracer, self._cur_tracer_state.cfg)
                     self._cur_tracer_state = None
                     is_record_stop = True
+                if not is_record_stop:
+                    event.set()
+                    if cfg.mode != RecordMode.INFINITE:
+                        msg_str = f"Skip Vscode breakpoint (Remaining trace count: {cfg.breakpoint_count})"
+                        LOGGER.warning(
+                            msg_str,
+                            extra={
+                                TENSORPC_LOGGING_OVERRIDED_PATH_LINENO_KEY:
+                                (frame.f_code.co_filename, frame.f_lineno)
+                            })
+                    self._cur_breakpoint = None
+                    return 
+            assert self._frame is None, "already in breakpoint, shouldn't happen"
             self._frame = frame
             LOGGER.warning(
                 f"Breakpoint({type.name}), "
@@ -168,7 +184,6 @@ class BackgroundDebugTools:
                     TENSORPC_LOGGING_OVERRIDED_PATH_LINENO_KEY:
                     (frame.f_code.co_filename, frame.f_lineno)
                 })
-
             obj, app = prim.get_service(
                 app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
                     TENSORPC_DBG_FRAME_INSPECTOR_KEY)
@@ -190,7 +205,6 @@ class BackgroundDebugTools:
                     TENSORPC_DBG_FRAME_INSPECTOR_KEY)
             assert isinstance(obj, BreakpointDebugPanel)
             is_record_start = False
-
             if self._cur_breakpoint is not None:
                 if trace_cfg is not None and trace_cfg.enable and self._frame is not None:
                     if self._cur_tracer_state is None:
@@ -206,6 +220,7 @@ class BackgroundDebugTools:
                     if self._cur_tracer_state is None:
                         self._cur_tracer_state = TracerState(None, trace_cfg, (self._frame.f_code.co_filename, self._frame.f_lineno))
                         self._cur_breakpoint.event.enable_trace_in_main_thread = True
+                        self._cur_breakpoint.event.trace_cfg = trace_cfg
                 self._cur_breakpoint.event.set()
                 self._cur_breakpoint = None
             self._frame = None
@@ -242,13 +257,18 @@ class BackgroundDebugTools:
     def bkgd_get_cur_frame(self):
         return self._frame
 
-    def get_cur_frame_meta(self):
+    def get_cur_debug_info(self):
+        frame_info: Optional[DebugFrameInfo] = None
+
         if self._frame is not None:
             qname = inspecttools.get_co_qualname_from_frame(self._frame)
-            return DebugFrameMeta(self._frame.f_code.co_name, qname,
+            frame_info = DebugFrameInfo(self._frame.f_code.co_name, qname,
                                   self._frame.f_code.co_filename,
                                   self._frame.f_lineno)
-        return None
+        trace_cfg: Optional[TracerConfig] = None
+        if self._cur_tracer_state is not None:
+            trace_cfg = self._cur_tracer_state.cfg
+        return DebugInfo(frame_info, trace_cfg)
 
     def _get_filtered_local_vars(self, frame: FrameType):
         local_vars = frame.f_locals.copy()
@@ -297,11 +317,16 @@ class BackgroundDebugTools:
             if not is_cur_bkpt_is_vscode:
                 await self.leave_breakpoint()
 
-    async def set_vscode_breakpoints_and_get_cur_meta(
+    async def set_vscode_breakpoints_and_get_cur_info(
             self, bkpts: List[VscodeBreakpoint]):
-        meta = self.get_cur_frame_meta()
+        info = self.get_cur_debug_info()
         await self.set_vscode_breakpoints(bkpts)
-        return meta
+        return info
+
+    async def force_trace_stop(self):
+        if self._cur_tracer_state is not None:
+            self._cur_tracer_state.force_stop = True
+            # actual stop will be done in next enter breakpoint.
 
     async def handle_code_selection_msg(self, code_segment: str, path: str,
                                         code_range: Tuple[int, int, int, int]):

@@ -1606,7 +1606,7 @@ class Component(Generic[T_base_props, T_child]):
         res["status"] = self._flow_comp_status
         return res
 
-    def validate_props(self, props: Dict[str, Any]):
+    def validate_props(self, props: Dict[str, Any]) -> bool:
         """use this function to validate props before call
         set props.
         """

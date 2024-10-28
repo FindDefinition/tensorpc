@@ -13,7 +13,7 @@ class DebugServerStatus(enum.IntEnum):
     InsideBreakpoint = 1
 
 @dataclasses.dataclass
-class DebugFrameMeta:
+class DebugFrameInfo:
     name: str
     qualname: str
     
@@ -25,7 +25,7 @@ class BreakpointEvent:
     event: threading.Event
     # props below are set in background server
     enable_trace_in_main_thread: bool = False
-
+    trace_cfg: Optional["TracerConfig"] = None
     def set(self):
         self.event.set()
 
@@ -33,6 +33,7 @@ class BreakpointEvent:
 class RecordMode(enum.IntEnum):
     NEXT_BREAKPOINT = 0
     SAME_BREAKPOINT = 1
+    INFINITE = 2
 
 
 @dataclasses.dataclass
@@ -51,12 +52,19 @@ class TracerConfig:
     trace_name: Optional[str] = None
     trace_timestamp: Optional[int] = None
     mode: RecordMode = RecordMode.NEXT_BREAKPOINT
+    max_stack_depth: int = 4
 
 @dataclasses.dataclass
 class TracerUIConfig:
     breakpoint_count: Annotated[int, typemetas.CommonObject(alias="Breakpoint Count")] = 1
     trace_name: Annotated[str, typemetas.CommonObject(alias="Trace Name")] = "trace"
     mode: RecordMode = RecordMode.NEXT_BREAKPOINT
+    max_stack_depth: Annotated[int, typemetas.CommonObject(alias="Max Stack Depth")] = 4
+
+@dataclasses.dataclass
+class DebugInfo:
+    frame_meta: Optional[DebugFrameInfo]
+    trace_cfg: Optional[TracerConfig]
 
 
 class BreakpointType(enum.IntEnum):

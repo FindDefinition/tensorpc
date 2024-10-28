@@ -1010,14 +1010,15 @@ class App:
                 workspace = event.get_workspace_path()
                 if workspace is None:
                     return None 
-
                 if event.type == VscodeTensorpcQueryType.SyncBreakpoints:
                     self._flowapp_vscode_state.set_workspace_breakpoints(event.workspaceUri, [VscodeBreakpoint(**d) for d in event.data])
+                    return None
                 elif event.type == VscodeTensorpcQueryType.BreakpointUpdate:
                     # bkpts = [VscodeBreakpoint(**d) for d in event.data]
                     self._flowapp_vscode_state.set_workspace_breakpoints(event.workspaceUri, [VscodeBreakpoint(**d) for d in event.data])
                     await self._flowapp_special_eemitter.emit_async(
                         AppSpecialEventType.VscodeBreakpointChange, self._flowapp_vscode_state.get_all_breakpoints())
+                    return None
                 if not self._is_app_workspace_child_of_vscode_workspace_root(str(workspace)):
                     return None
                 storage = await self.get_vscode_storage_lazy()
