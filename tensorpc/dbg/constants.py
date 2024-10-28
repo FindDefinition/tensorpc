@@ -55,6 +55,10 @@ class TracerConfig:
     max_stack_depth: int = 4
 
 @dataclasses.dataclass
+class TraceMetrics:
+    breakpoint_count: int
+
+@dataclasses.dataclass
 class TracerUIConfig:
     breakpoint_count: Annotated[int, typemetas.CommonObject(alias="Breakpoint Count")] = 1
     trace_name: Annotated[str, typemetas.CommonObject(alias="Trace Name")] = "trace"
@@ -62,7 +66,13 @@ class TracerUIConfig:
     max_stack_depth: Annotated[int, typemetas.CommonObject(alias="Max Stack Depth")] = 4
 
 @dataclasses.dataclass
+class DebugMetric:
+    total_skipped_bkpt: int
+
+
+@dataclasses.dataclass
 class DebugInfo:
+    metric: DebugMetric
     frame_meta: Optional[DebugFrameInfo]
     trace_cfg: Optional[TracerConfig]
 

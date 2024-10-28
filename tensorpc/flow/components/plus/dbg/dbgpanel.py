@@ -122,13 +122,13 @@ class MasterDebugPanel(mui.FlexBox):
             remote_server_item, [])
         filter_input = mui.TextField("filter").prop(
             valueChangeTarget=(self._remote_server_discover_lst, "filter"))
+        filter_input.prop(size="small", muiMargin="dense")
         self._remote_server_discover_lst.prop(filterKey="server_id",
                                               variant="list",
-                                              dense=False,
+                                              dense=True,
                                               disablePadding=True,
                                               overflow="auto",
-                                              virtualized=False,
-                                              secondaryIconButtonProps=[])
+                                              virtualized=False)
         remote_server_item.event_click.on_standard(
             self._on_server_item_click).configure(True)
         self._menu = mui.MenuList([
@@ -149,7 +149,7 @@ class MasterDebugPanel(mui.FlexBox):
             mui.MenuItem(id=ServerItemActions.FORCE_STOP_RECORD.value,
                             label="Force Stop Record"),
 
-        ], mui.IconButton(mui.IconType.MoreVert))
+        ], mui.IconButton(mui.IconType.MoreVert).prop(size="small"))
         self._menu.prop(anchorOrigin=mui.Anchor("top", "right"))
         self._menu.event_contextmenu_select.on(self._handle_secondary_actions)
 
@@ -170,6 +170,8 @@ class MasterDebugPanel(mui.FlexBox):
                 ]).prop(alignItems="center"),
                 mui.HBox([
                     filter_input.prop(flex=1),
+                    mui.IconButton(mui.IconType.FiberManualRecord, self.start_inf_record).prop(size="small", muiColor="success"),
+                    mui.IconButton(mui.IconType.Stop, self.force_trace_stop).prop(size="small"),
                     self._menu,
                 ]).prop(alignItems="center"),
                 mui.Divider(),
@@ -308,12 +310,15 @@ class MasterDebugPanel(mui.FlexBox):
                             rpc_timeout=1)
                     frame_meta = debug_info.frame_meta
                     trace_cfg = debug_info.trace_cfg
-                    status_str = "running"
+                    skipped_count = str(debug_info.metric.total_skipped_bkpt)
+                    if debug_info.metric.total_skipped_bkpt > 100:
+                        skipped_count = "100+"
+                    status_str = f"running ({skipped_count})"
                     if trace_cfg is not None:
                         if trace_cfg.mode == RecordMode.INFINITE:
-                            status_str = "recording (inf)"
+                            status_str = f"recording ({skipped_count}-inf)"
                         else:
-                            status_str = "recording"
+                            status_str = f"recording ({skipped_count})"
                         meta.is_tracing = True
                     if frame_meta is not None:
                         meta.secondary_name = f"{meta.pid}|{frame_meta.name}:{frame_meta.lineno}"

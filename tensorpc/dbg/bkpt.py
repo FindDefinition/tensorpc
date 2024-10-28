@@ -1,3 +1,4 @@
+import dataclasses
 import inspect
 import io
 import json
@@ -6,7 +7,6 @@ from pathlib import Path
 import threading
 from typing import Any, Optional
 
-import rich
 from tensorpc.constants import TENSORPC_MAIN_PID
 from tensorpc.core.bgserver import BACKGROUND_SERVER
 from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_TRACER_KEY, TENSORPC_ENV_DBG_ENABLE, BreakpointEvent, BreakpointType, TracerConfig
@@ -19,15 +19,21 @@ from tensorpc.compat import InWindows
 
 LOGGER = get_logger("tensorpc.dbg")
 
-def _get_viztracer(cfg: Optional[TracerConfig]):
+@dataclasses.dataclass
+class _DebugBkptMeta:
+    rank: int = 0
+    world_size: int = 1 
+    backend: Optional[str] = None
+
+def _get_viztracer(cfg: Optional[TracerConfig], name: Optional[str] = None):
     try:
         from viztracer import VizTracer
         # file_info=False to reduce the size of trace data
         # TODO let user customize this
         if cfg is not None:
-            return VizTracer(file_info=False, max_stack_depth=cfg.max_stack_depth)
+            return VizTracer(process_name=name, file_info=False, max_stack_depth=cfg.max_stack_depth)
         else:
-            return VizTracer(file_info=False, max_stack_depth=4)
+            return VizTracer(process_name=name, file_info=False, max_stack_depth=4)
     except ImportError:
         return None
 
@@ -55,15 +61,25 @@ def init(proc_name: Optional[str] = None, port: int = -1):
         mpi_rank = os.getenv("OMPI_COMM_WORLD_RANK", None)
         # TODO we can only detect distributed workers inside same machine.
         # so we only support single-machine distributed debugging.
+        rank_int = 0
+        world_size_int = 1
+        backend: Optional[str] = None
+        if rank is not None:
+            rank_int = int(rank)
+        if world_size is not None:
+            world_size_int = int(world_size)
         if world_size is not None and rank is not None:
             # assume pytorch distributed
             proc_name += f"_pth_rank{rank}"
+            backend = "Pytorch"
         elif mpi_world_size is not None and mpi_rank is not None:
             # assume mpi
             proc_name += f"_mpi_rank{mpi_rank}"
+            backend = "Mpi"
         if cur_pid != TENSORPC_MAIN_PID:
             proc_name += f"_fork"
-        BACKGROUND_SERVER.start_async(id=proc_name, port=port)
+        userdata = _DebugBkptMeta(rank=rank_int, world_size=world_size_int, backend=backend)
+        BACKGROUND_SERVER.start_async(id=proc_name, port=port, userdata=userdata)
         panel = BreakpointDebugPanel().prop(flex=1)
         set_background_layout(TENSORPC_DBG_FRAME_INSPECTOR_KEY, panel)
         BACKGROUND_SERVER.execute_service(serv_names.DBG_INIT_BKPT_DEBUG_PANEL,
@@ -106,13 +122,17 @@ def breakpoint(name: Optional[str] = None,
         tracer_to_stop.stop()
         LOGGER.warning(f"Record Stop.")
         ss = io.StringIO()
-        tracer_to_stop.save(ss)
+        tracer_to_stop.save(ss, verbose=0)
         BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACE_DATA, ss.getvalue(), tracer_cfg)
 
     bev.event.wait(timeout)
     if bev.enable_trace_in_main_thread:
         # tracer must be create/start/stop in main thread (or same thread)
-        tracer = _get_viztracer(bev.trace_cfg)
+        meta = BACKGROUND_SERVER.get_userdata_typed(_DebugBkptMeta)
+        tracer_name: Optional[str] = None
+        if meta.backend is not None:
+            tracer_name = f"{meta.backend}|{meta.rank}/{meta.world_size}"
+        tracer = _get_viztracer(bev.trace_cfg, name=tracer_name)
         if tracer is not None:
             LOGGER.warning(f"Record Start. Config:")
             LOGGER.warning(bev.trace_cfg)

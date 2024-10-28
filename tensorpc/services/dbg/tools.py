@@ -19,7 +19,7 @@ from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
                                     TENSORPC_ENV_DBG_DEFAULT_BREAKPOINT_ENABLE,
                                     BackgroundDebugToolsConfig, BreakpointEvent, BreakpointType,
-                                    DebugFrameInfo, DebugInfo, DebugServerStatus, RecordMode,
+                                    DebugFrameInfo, DebugInfo, DebugMetric, DebugServerStatus, RecordMode, TraceMetrics,
                                     TracerConfig)
 from tensorpc.dbg.core.sourcecache import LineCache, PythonSourceASTCache
 from tensorpc.dbg.serv_names import serv_names
@@ -49,6 +49,7 @@ class BreakpointMeta:
 class TracerState:
     tracer: Any
     cfg: TracerConfig
+    metric: TraceMetrics
     frame_identifier: Tuple[str, int] # path, lineno
     force_stop: bool = False
 
@@ -77,6 +78,8 @@ class BackgroundDebugTools:
         self._cur_tracer_state: Optional[TracerState] = None
 
         self._trace_gzip_data_dict: Dict[str, Tuple[int, bytes]] = {}
+
+        self._debug_metric = DebugMetric(0)
 
     @marker.mark_server_event(event_type=ServiceEventType.Exit)
     def _on_exit(self):
@@ -146,26 +149,28 @@ class BackgroundDebugTools:
                             (frame.f_code.co_filename, frame.f_lineno)
                         })
                     self._cur_breakpoint = None
+                    self._debug_metric.total_skipped_bkpt += 1
                     return
             res_tracer = None
             is_record_stop = False
             if self._cur_tracer_state is not None and self._cur_tracer_state.tracer is not None:
                 # is tracing
                 cfg = self._cur_tracer_state.cfg
+                metric = self._cur_tracer_state.metric
                 is_same_bkpt = False
                 is_inf_record = cfg.mode == RecordMode.INFINITE
                 if cfg.mode == RecordMode.SAME_BREAKPOINT:
                     is_same_bkpt = self._cur_tracer_state.frame_identifier == (frame.f_code.co_filename, frame.f_lineno)
                 if not is_inf_record:
-                    self._cur_tracer_state.cfg.breakpoint_count -= 1
-                if (self._cur_tracer_state.cfg.breakpoint_count == 0 and not is_inf_record) or is_same_bkpt or self._cur_tracer_state.force_stop:
+                    metric.breakpoint_count -= 1
+                if (metric.breakpoint_count == 0 and not is_inf_record) or is_same_bkpt or self._cur_tracer_state.force_stop:
                     res_tracer = (self._cur_tracer_state.tracer, self._cur_tracer_state.cfg)
                     self._cur_tracer_state = None
                     is_record_stop = True
                 if not is_record_stop:
                     event.set()
                     if cfg.mode != RecordMode.INFINITE:
-                        msg_str = f"Skip Vscode breakpoint (Remaining trace count: {cfg.breakpoint_count})"
+                        msg_str = f"Skip Vscode breakpoint (Remaining trace count: {metric.breakpoint_count})"
                         LOGGER.warning(
                             msg_str,
                             extra={
@@ -173,9 +178,11 @@ class BackgroundDebugTools:
                                 (frame.f_code.co_filename, frame.f_lineno)
                             })
                     self._cur_breakpoint = None
+                    self._debug_metric.total_skipped_bkpt += 1
                     return 
             assert self._frame is None, "already in breakpoint, shouldn't happen"
             self._frame = frame
+            self._debug_metric.total_skipped_bkpt = 0
             LOGGER.warning(
                 f"Breakpoint({type.name}), "
                 f"port = {prim.get_server_meta().port}, "
@@ -218,7 +225,8 @@ class BackgroundDebugTools:
             if self._cur_breakpoint is not None:
                 if trace_cfg is not None and trace_cfg.enable and self._frame is not None:
                     if self._cur_tracer_state is None:
-                        self._cur_tracer_state = TracerState(None, trace_cfg, (self._frame.f_code.co_filename, self._frame.f_lineno))
+                        metric = TraceMetrics(trace_cfg.breakpoint_count)
+                        self._cur_tracer_state = TracerState(None, trace_cfg, metric, (self._frame.f_code.co_filename, self._frame.f_lineno))
                         self._cur_breakpoint.event.enable_trace_in_main_thread = True
                         self._cur_breakpoint.event.trace_cfg = trace_cfg
                 self._cur_breakpoint.event.set()
@@ -268,7 +276,7 @@ class BackgroundDebugTools:
         trace_cfg: Optional[TracerConfig] = None
         if self._cur_tracer_state is not None:
             trace_cfg = self._cur_tracer_state.cfg
-        return DebugInfo(frame_info, trace_cfg)
+        return DebugInfo(self._debug_metric, frame_info, trace_cfg)
 
     def _get_filtered_local_vars(self, frame: FrameType):
         local_vars = frame.f_locals.copy()
