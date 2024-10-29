@@ -13,7 +13,7 @@ import rich
 from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
 from tensorpc.core.asyncclient import simple_chunk_call_async, simple_remote_call_async
 from tensorpc.core.client import simple_remote_call
-from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_SPLIT, DebugFrameInfo, DebugInfo, RecordMode, TraceResult, TracerConfig, TracerUIConfig
+from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_SPLIT, DebugFrameInfo, DebugInfo, RecordMode, TraceResult, TracerConfig, TracerType, TracerUIConfig
 from tensorpc.flow import marker, appctx
 from tensorpc.flow.components import chart, mui
 from tensorpc.flow.components.plus.config import ConfigPanelDialog
@@ -346,10 +346,15 @@ class MasterDebugPanel(mui.FlexBox):
                         skipped_count = "100+"
                     status_str = f"running ({skipped_count})"
                     if trace_cfg is not None:
-                        if trace_cfg.mode == RecordMode.INFINITE:
-                            status_str = f"recording ({skipped_count}-inf)"
+                        tracer = trace_cfg.tracer
+                        if tracer == TracerType.VIZTRACER:
+                            tracer_str = "viz"
                         else:
-                            status_str = f"recording ({skipped_count})"
+                            tracer_str = "pth"
+                        if trace_cfg.mode == RecordMode.INFINITE:
+                            status_str = f"recording-{tracer_str} ({skipped_count}-inf)"
+                        else:
+                            status_str = f"recording-{tracer_str} ({skipped_count})"
                         meta.is_tracing = True
                     if frame_meta is not None:
                         meta.secondary_name = f"{meta.pid}|{frame_meta.name}:{frame_meta.lineno}"

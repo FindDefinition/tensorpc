@@ -19,7 +19,7 @@ Layout Instance: App itself and layout objects created on AnyFlexLayout.
 import ast
 import asyncio
 import base64
-from collections.abc import Mapping, Sequence
+from typing import Mapping, Sequence
 import contextlib
 import contextvars
 import dataclasses

@@ -15,7 +15,7 @@
 import abc
 import asyncio
 import builtins
-from collections.abc import Mapping, Sequence
+from typing import Mapping, Sequence
 import copy
 import dataclasses
 import enum

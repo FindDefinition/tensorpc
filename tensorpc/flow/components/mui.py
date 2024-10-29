@@ -15,7 +15,7 @@
 import abc
 import asyncio
 import base64
-from collections.abc import Mapping, Sequence
+from typing import Mapping, Sequence
 import copy
 from functools import partial
 
