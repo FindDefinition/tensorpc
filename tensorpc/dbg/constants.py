@@ -38,7 +38,7 @@ class RecordMode(enum.IntEnum):
 class TracerType(enum.IntEnum):
     VIZTRACER = 0
     PYTORCH = 1
-
+    VIZTRACER_PYTORCH = 2
 
 @dataclasses.dataclass
 class BackgroundDebugToolsConfig:
@@ -65,7 +65,7 @@ class TraceMetrics:
 
 @dataclasses.dataclass
 class TraceResult:
-    data: bytes 
+    data: List[bytes] 
     external_events: List[Any] = dataclasses.field(default_factory=list)
 
 @dataclasses.dataclass

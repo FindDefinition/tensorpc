@@ -253,14 +253,14 @@ class BackgroundDebugTools:
                 TENSORPC_DBG_FRAME_INSPECTOR_KEY)
         assert isinstance(obj, BreakpointDebugPanel)
         with enter_app_context(app):
-            await obj.set_perfetto_data(trace_res.data)
+            await obj.set_perfetto_data(trace_res.data[0])
         if cfg.trace_timestamp is not None:
             name = "default"
             if cfg.trace_name is not None:
                 name = cfg.trace_name
-            data_compressed = gzip.compress(trace_res.data)
-            LOGGER.warning(f"Compress trace data: {len(trace_res.data)} -> {len(data_compressed)}") 
-            self._trace_gzip_data_dict[name] = (cfg.trace_timestamp, dataclasses.replace(trace_res, data=data_compressed))
+            datas_compressed = [gzip.compress(x) for x in trace_res.data]
+            LOGGER.warning(f"Compress trace data: {len(trace_res.data[0])} -> {len(datas_compressed[0])}") 
+            self._trace_gzip_data_dict[name] = (cfg.trace_timestamp, dataclasses.replace(trace_res, data=datas_compressed))
 
     def get_trace_data(self, name: str):
         if name in self._trace_gzip_data_dict:

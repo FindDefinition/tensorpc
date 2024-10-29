@@ -10,7 +10,7 @@ from typing import Any, Optional
 from tensorpc.constants import TENSORPC_MAIN_PID
 from tensorpc.core.bgserver import BACKGROUND_SERVER
 from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_TRACER_KEY, TENSORPC_ENV_DBG_ENABLE, BreakpointEvent, BreakpointType, TraceResult, TracerConfig, TracerType
-from tensorpc.dbg.tracer import DebugTracerWrapper
+from tensorpc.dbg.tracer import DebugTracerWrapper, VizTracerAndPytorchTracer
 from tensorpc.flow.client import is_inside_app_session
 from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
 from tensorpc.utils.rich_logging import get_logger
@@ -40,13 +40,22 @@ def _get_viztracer(cfg: Optional[TracerConfig], name: Optional[str] = None):
             if tracer_type == TracerType.VIZTRACER:
                 tracer = VizTracer(process_name=name, file_info=False, max_stack_depth=cfg.max_stack_depth)
                 return tracer, TracerType.VIZTRACER
-            else:
+            elif tracer_type == TracerType.PYTORCH:
                 import torch.profiler as profiler
                 # pytorch tracer can't control ignored files and max_stack_depth, so
                 # never use with_stack.
                 tracer = profiler.profile(activities=[profiler.ProfilerActivity.CPU, profiler.ProfilerActivity.CUDA], 
                     with_stack=False, profile_memory=False)
                 return tracer, TracerType.PYTORCH
+            elif tracer_type == TracerType.VIZTRACER_PYTORCH:
+                import torch.profiler as profiler
+                viz_tracer = VizTracer(process_name=name, file_info=False, max_stack_depth=cfg.max_stack_depth)
+                pytorch_tracer = profiler.profile(activities=[profiler.ProfilerActivity.CPU, profiler.ProfilerActivity.CUDA], 
+                    with_stack=False, profile_memory=False)
+                return VizTracerAndPytorchTracer(viz_tracer, pytorch_tracer), TracerType.VIZTRACER_PYTORCH
+            else:
+                # TODO raise here? may break user code
+                return None, TracerType.VIZTRACER
         else:
             return VizTracer(process_name=name, file_info=False, max_stack_depth=8), TracerType.VIZTRACER
     except ImportError:
@@ -150,13 +159,14 @@ def breakpoint(name: Optional[str] = None,
         tracer_to_stop, tracer_cfg = trace_res
         RECORDING = False
         _TRACER_WRAPPER.stop()
-        ss = io.BytesIO()
-        _TRACER_WRAPPER.save(ss, BACKGROUND_SERVER.cur_proc_title)
-        trace_res = TraceResult(ss.getvalue(), _TRACER_WRAPPER._trace_instant_events_for_pth)
+        res = _TRACER_WRAPPER.save(BACKGROUND_SERVER.cur_proc_title)
+        trace_res_obj = None
+        if res is not None:
+            trace_res_obj = TraceResult(res, _TRACER_WRAPPER._trace_instant_events_for_pth)
         _TRACER_WRAPPER.reset_tracer()
         # tracer_to_stop.stop()
         LOGGER.warning(f"Record Stop.")
-        BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACE_DATA, trace_res, tracer_cfg)
+        BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACE_DATA, trace_res_obj, tracer_cfg)
 
     bev.event.wait(timeout)
     if bev.enable_trace_in_main_thread:

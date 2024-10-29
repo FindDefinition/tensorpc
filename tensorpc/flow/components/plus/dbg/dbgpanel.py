@@ -2,10 +2,12 @@ import asyncio
 import dataclasses
 import enum
 import gzip
+import io
 import time
 import traceback
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Union, Tuple
 import uuid
+import zipfile
 
 import grpc
 from regex import F, P
@@ -290,8 +292,6 @@ class MasterDebugPanel(mui.FlexBox):
             await self._scan_loop_task
 
     def _trace_download(self, req: mui.FileResourceRequest):
-        print("???WTF", type(self._dist_trace_data_for_download))
-
         if self._dist_trace_data_for_download is not None:
             return mui.FileResource(name=f"{self._perfetto_select.value}.tar.gz", content=self._dist_trace_data_for_download)
         return mui.FileResource(name=f"{self._perfetto_select.value}.json", content="{}".encode()) 
@@ -468,40 +468,54 @@ class MasterDebugPanel(mui.FlexBox):
         return list(set(all_keys))
 
     async def query_record_data_by_key(self, key: str):
+        debug_use_zip_instead_of_merge = True
         all_data_gzipped: List[Optional[Tuple[int, TraceResult]]] = await self._run_rpc_on_metas_chunk_call(
             self._current_metas,
             dbg_serv_names.DBG_GET_TRACE_DATA,
             key,
-            rpc_timeout=10)
+            rpc_timeout=30)
         # print("RPC TIME", time.time() - t)
         all_data = []
         all_data_external_evs = []
         for data_gzipped in all_data_gzipped:
             if data_gzipped is None:
                 continue
-            data = gzip.decompress(data_gzipped[1].data)
+            datas = [gzip.decompress(d) for d in data_gzipped[1].data]
             all_data_external_evs.append(data_gzipped[1].external_events)
-            all_data.append(data)
-        # print("DECOMPRESS TIME", time.time() - t)
-        # merge trace events
-        all_trace_events = []
-        data_json_meta = {}
-        for i, data in enumerate(all_data):
-            data_json = json.loads(data)
-            trace_ev = data_json.pop("traceEvents")
-            external_evs = all_data_external_evs[i]
-            trace_ev.extend(external_evs)
-            all_trace_events.extend(trace_ev)
-            if i == 0:
-                data_json_meta = data_json
-        # print("JSON LOAD TIME", time.time() - t)
-        res_trace = {"traceEvents": all_trace_events}
-        res_trace.update(data_json_meta)
-        res_data = json_dump_to_bytes(res_trace)
-        # print("JSON DUMP TIME", time.time() - t)
-        res = gzip.compress(res_data)
-        # print("ALL GZIP TIME", time.time() - t)
-        return res
+            all_data.extend(datas)
+        if debug_use_zip_instead_of_merge:
+            zip_ss = io.BytesIO()
+            with zipfile.ZipFile(zip_ss, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+                for i, data in enumerate(all_data):
+                    zf.writestr(f"{i}.json", data)
+                for i, data in enumerate(all_data_external_evs):
+                    if data:
+                        zf.writestr(f"{i}_extra.json", json.dumps({
+                            "traceEvents": data
+                        }))
+            res = zip_ss.getvalue()
+            return res 
+        else:
+            # print("DECOMPRESS TIME", time.time() - t)
+            # merge trace events
+            all_trace_events = []
+            data_json_meta = {}
+            for i, data in enumerate(all_data):
+                data_json = json.loads(data)
+                trace_ev = data_json.pop("traceEvents")
+                external_evs = all_data_external_evs[i]
+                trace_ev.extend(external_evs)
+                all_trace_events.extend(trace_ev)
+                if i == 0:
+                    data_json_meta = data_json
+            # print("JSON LOAD TIME", time.time() - t)
+            res_trace = {"traceEvents": all_trace_events}
+            res_trace.update(data_json_meta)
+            res_data = json_dump_to_bytes(res_trace)
+            # print("JSON DUMP TIME", time.time() - t)
+            res = gzip.compress(res_data)
+            # print("ALL GZIP TIME", time.time() - t)
+            return res
 
     async def _on_dist_perfetto_select(self, value: Any):
         data = await self.query_record_data_by_key(value)
