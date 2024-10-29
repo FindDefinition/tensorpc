@@ -462,6 +462,8 @@ class ButtonProps(MUIComponentBaseProps):
                    Undefined] = undefined
     loading: Union[Undefined, bool] = undefined
     loadingIndicator: Union[Undefined, str] = undefined
+    href: Union[str, Undefined] = undefined
+    target: Union[str, Undefined] = undefined
 
 
 class Button(MUIComponentBase[ButtonProps]):
@@ -558,6 +560,15 @@ class IconType(enum.IntEnum):
     AccountTree = 54
     Timeline = 55
     FiberManualRecord = 56
+    NavigateNext = 57
+    NavigateBefore = 58
+    SkipNext = 59
+    SkipPrevious = 60
+    RadioButtonChecked = 61
+    StopCircleOutlined = 62
+    Block = 63
+    Download = 64
+    Upload = 65
 
 
 @dataclasses.dataclass
@@ -671,6 +682,8 @@ class IconButtonProps(MUIComponentBaseProps, IconBaseProps, TooltipBaseProps):
     # if defined, will show a confirm dialog before executing the callback
     confirmMessage: Union[str, Undefined] = undefined
     confirmTitle: Union[str, Undefined] = undefined
+    href: Union[str, Undefined] = undefined
+    target: Union[str, Undefined] = undefined
 
 
 class IconButton(MUIComponentBase[IconButtonProps]):
@@ -2985,11 +2998,6 @@ class TypographyProps(MUIComponentBaseProps):
     # we check fixed first, then precision
     fixedDigits: Union[Undefined, int] = undefined
     precisionDigits: Union[Undefined, int] = undefined
-    # enableTooltipWhenOverflow?: boolean
-    # tooltipPlacement?: TooltipProps['placement']
-    # tooltipEnterDelay?: TooltipProps['enterDelay']
-    # tooltipEnterNextDelay?: TooltipProps['enterNextDelay']
-    # tooltipLeaveDelay?: TooltipProps['leaveDelay']
     enableTooltipWhenOverflow: Union[Undefined, bool] = undefined
     tooltipPlacement: Union[_TooltipPlacement, Undefined] = undefined
     tooltipEnterDelay: Union[Undefined, NumberType] = undefined

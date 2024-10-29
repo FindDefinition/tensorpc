@@ -58,6 +58,7 @@ class BackgroundServer:
         self._is_fork_handler_registered = False
 
         self._prev_proc_title: Optional[str] = None
+        self._cur_proc_title: Optional[str] = None
 
     @property 
     def port(self):
@@ -73,6 +74,10 @@ class BackgroundServer:
     def is_started(self):
         return self._state is not None and self._state.thread.is_alive()
 
+    @property
+    def cur_proc_title(self):
+        return self._cur_proc_title
+
     def _try_set_proc_title(self, uid: str, id: str, status: int = 0):
         assert self._state is not None 
         parts = [
@@ -83,6 +88,7 @@ class BackgroundServer:
             import setproctitle  # type: ignore
             if self._prev_proc_title is None:
                 self._prev_proc_title = setproctitle.getproctitle()
+            self._cur_proc_title = title
             setproctitle.setproctitle(title)
         except ImportError:
             pass
@@ -164,6 +170,7 @@ class BackgroundServer:
             import setproctitle  # type: ignore
             if self._prev_proc_title is None:
                 self._prev_proc_title = setproctitle.getproctitle()
+            self._cur_proc_title = title
             setproctitle.setproctitle(title)
         except ImportError:
             pass
@@ -185,6 +192,7 @@ class BackgroundServer:
             # robj.shutdown()
             _thread = self._state.thread
             self._state = None
+            self._cur_proc_title = None 
             _thread.join()
             if is_fork:
                 LOGGER.warning("shutdown background server because of fork")

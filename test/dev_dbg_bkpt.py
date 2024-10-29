@@ -9,6 +9,31 @@ import time
 import numpy as np
 import concurrent.futures
 import torch 
+
+import torch
+
+import torch
+import numpy as np
+from torch import nn
+import torch.profiler as profiler
+
+
+class MyModule(nn.Module):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True):
+        super(MyModule, self).__init__()
+        self.linear = nn.Linear(in_features, out_features, bias)
+
+    def forward(self, input, mask):
+        with profiler.record_function("LINEAR PASS"):
+            out = self.linear(input)
+
+        with profiler.record_function("MASK INDICES"):
+            threshold = out.sum(axis=1).mean().item()
+            hi_idx = np.argwhere(mask.cpu().numpy() > threshold)
+            hi_idx = torch.from_numpy(hi_idx).cuda()
+
+        return out, hi_idx
+
 def mp_func(rank):
     a = 5
     b = 3
@@ -42,11 +67,19 @@ def mp_func_inf_record(rank):
     for j in range(1000):
         a = 5
         b = 3
+        # tensorpc.dbg.record_instant_event(f"WTf-{j}")
         c = torch.rand(100, 3)
         complex_obj = mui.Button("Hello")
         arr = np.random.uniform(-1, 1, size=[1000, 3])
         # tensorpc.dbg.vscode_breakpoint(name=f"WTF-{rank}")
         tensorpc.dbg.breakpoint(name="WTF")
+        model = MyModule(500, 10).cuda()
+        input = torch.rand(128, 500).cuda()
+        mask = torch.rand((500, 500, 500), dtype=torch.double).cuda()
+        model(input, mask)
+        with profiler.profile(with_stack=False, profile_memory=True) as prof:
+            out, idx = model(input, mask)
+
         complex_obj = mui.Button("Hello")
         arr = np.random.uniform(-1, 1, size=[1000, 3])
         _trace_func()

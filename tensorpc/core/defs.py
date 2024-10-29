@@ -52,6 +52,12 @@ class FileResource:
     stat: Optional[stat_result] = None
     modify_timestamp_ns: Optional[int] = None
 
+    _empty: bool = False 
+
+    @classmethod
+    def empty(cls):
+        return cls("", _empty=True)
+
 
 @dataclass
 class FileDesp:

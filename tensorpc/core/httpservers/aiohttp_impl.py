@@ -224,38 +224,6 @@ class HttpService:
         res = web.json_response(status, headers=headers)
         return res
 
-    # async def resource_download_call(self, request: web.Request):
-    #     params = request.rel_url.query
-    #     node_uid = params.get('nodeUid')
-    #     resource_key = params.get('key')
-    #     comp_id = params.get('compUid')
-    #     web.FileResponse
-    #     headers = {
-    #         'Access-Control-Allow-Origin': '*',
-    #         "Content-Disposition": f"Attachment;filename={resource_key}",
-    #         # 'Access-Control-Allow-Headers': '*',
-    #         # 'Access-Control-Allow-Method': 'POST',
-    #     }
-    #     if node_uid is not None and resource_key is not None:
-    #         ait = self.service_core.execute_async_generator_service(
-    #             "tensorpc.flow.serv.core::Flow.app_get_file",
-    #             [node_uid, resource_key, comp_id], {},
-    #             json_call=False)
-    #         desp, is_exc = await ait.__anext__()
-    #         if is_exc:
-    #             return web.Response(status=500, text=desp, headers=headers)
-    #         assert isinstance(desp, defs.FileDesp)
-    #         headers["Content-Disposition"] = f"Attachment;filename={desp.name}"
-    #         if desp.content_type is not None:
-    #             headers["Content-Type"] = desp.content_type
-    #         if desp.length is not None:
-    #             headers["Content-Length"] = str(desp.length)
-    #             ifrange = request.if_range
-
-    #         return web.Response(body=grpc_iter_file_sender(reader=ait),
-    #                             headers=headers)
-    #     else:
-    #         raise web.HTTPBadRequest(text="nodeUid or key is None")
     async def resource_download_call(self, request: web.Request):
         params = request.rel_url.query
         node_uid = params.get('nodeUid')
@@ -275,6 +243,8 @@ class HttpService:
             if is_exc:
                 return web.Response(status=500, text=metadata)
             assert isinstance(metadata, defs.FileResource), f"metadata is not FileResource: {type(metadata)}"
+            if metadata._empty:
+                return web.Response(status=404, text="File not found")
             headers["Content-Disposition"] = f"Attachment;filename={metadata.name}"
             return FileProxyResponse(GrpcFileProxy(self.service_core, node_uid, resource_key, comp_id, metadata), headers=headers)
         else:

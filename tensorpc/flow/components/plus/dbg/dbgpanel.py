@@ -4,16 +4,16 @@ import enum
 import gzip
 import time
 import traceback
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Union, Tuple
 import uuid
 
 import grpc
-from regex import P
+from regex import F, P
 import rich
 from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
 from tensorpc.core.asyncclient import simple_chunk_call_async, simple_remote_call_async
 from tensorpc.core.client import simple_remote_call
-from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_SPLIT, DebugFrameInfo, DebugInfo, RecordMode, TracerConfig, TracerUIConfig
+from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_SPLIT, DebugFrameInfo, DebugInfo, RecordMode, TraceResult, TracerConfig, TracerUIConfig
 from tensorpc.flow import marker, appctx
 from tensorpc.flow.components import chart, mui
 from tensorpc.flow.components.plus.config import ConfigPanelDialog
@@ -26,15 +26,19 @@ from tensorpc.flow.core.appcore import AppSpecialEventType
 from tensorpc.flow.vscode.coretypes import VscodeBreakpoint, VscodeTensorpcMessage, VscodeTensorpcMessageType
 
 try:
-    import orjson as json # type: ignore
+    import orjson as json  # type: ignore
+
     def json_dump_to_bytes(obj: Any) -> bytes:
         # json dump/load is very slow when trace data is large
         # so we use orjson if available
         return json.dumps(obj)
 except ImportError:
-    import json # type: ignore
+    import json  # type: ignore
+
     def json_dump_to_bytes(obj: Any) -> bytes:
         return json.dumps(obj).encode()
+
+FILE_RESOURCE_KEY = "tensorpc_dbg_trace.json"
 
 @dataclasses.dataclass
 class DebugServerProcessMeta:
@@ -91,26 +95,28 @@ class MasterDebugPanel(mui.FlexBox):
     def __init__(self):
         assert not InWindows, "MasterDebugPanel is not supported in Windows due to setproctitle."
         lst_name_primary_prop = mui.TypographyProps(
-                variant="body1",
-                fontFamily=CodeStyles.fontFamily,
-                overflow="hidden",
-                whiteSpace="nowrap",
-                textOverflow="ellipsis")
+            variant="body1",
+            fontFamily=CodeStyles.fontFamily,
+            overflow="hidden",
+            whiteSpace="nowrap",
+            textOverflow="ellipsis")
         lst_name_secondary_prop = mui.TypographyProps(
-                variant="caption",
-                fontFamily=CodeStyles.fontFamily,
-                overflow="hidden",
-                whiteSpace="nowrap",
-                textOverflow="ellipsis")
+            variant="caption",
+            fontFamily=CodeStyles.fontFamily,
+            overflow="hidden",
+            whiteSpace="nowrap",
+            textOverflow="ellipsis")
         name = mui.ListItemText("").prop(
             primaryTypographyProps=lst_name_primary_prop,
             secondaryTypographyProps=lst_name_secondary_prop)
         name_is_tracing = mui.ListItemText("").prop(
-            primaryTypographyProps=dataclasses.replace(lst_name_primary_prop, muiColor="primary"),
+            primaryTypographyProps=dataclasses.replace(lst_name_primary_prop,
+                                                       muiColor="primary"),
             secondaryTypographyProps=lst_name_secondary_prop)
 
         name.set_override_props(value="server_id", secondary="secondary_name")
-        name_is_tracing.set_override_props(value="server_id", secondary="secondary_name")
+        name_is_tracing.set_override_props(value="server_id",
+                                           secondary="secondary_name")
 
         remote_server_item = mui.ListItemButton([
             mui.MatchCase([
@@ -131,25 +137,26 @@ class MasterDebugPanel(mui.FlexBox):
                                               virtualized=False)
         remote_server_item.event_click.on_standard(
             self._on_server_item_click).configure(True)
-        self._menu = mui.MenuList([
-            mui.MenuItem(id=ServerItemActions.RELEASE_BREAKPOINT.value,
-                         label="Release Breakpoint"),
-            mui.MenuItem(id=ServerItemActions.SKIP_BREAKPOINT.value,
-                         label="Disable All Breakpoints"),
-            mui.MenuItem(id=ServerItemActions.ENABLE_BREAKPOINT.value,
-                         label="Enable All Breakpoints"),
-            mui.MenuItem(id=ServerItemActions.UNMOUNT_REMOTE_SERVER.value,
-                         label="Unmount Remote Panel"),
-            mui.MenuItem(id=ServerItemActions.RECORD.value,
-                         label="Release And Start Record"),
-            mui.MenuItem(id=ServerItemActions.RECORD_CUSTOM.value,
-                         label="Launch Custom Record"),
-            mui.MenuItem(id=ServerItemActions.RECORD_INFINITE.value,
-                            label="Start Infinite Record"),
-            mui.MenuItem(id=ServerItemActions.FORCE_STOP_RECORD.value,
-                            label="Force Stop Record"),
-
-        ], mui.IconButton(mui.IconType.MoreVert).prop(size="small"))
+        self._menu = mui.MenuList(
+            [
+                # mui.MenuItem(id=ServerItemActions.RELEASE_BREAKPOINT.value,
+                #              label="Release Breakpoint"),
+                mui.MenuItem(id=ServerItemActions.SKIP_BREAKPOINT.value,
+                             label="Disable All Breakpoints"),
+                mui.MenuItem(id=ServerItemActions.ENABLE_BREAKPOINT.value,
+                             label="Enable All Breakpoints"),
+                mui.MenuItem(id=ServerItemActions.UNMOUNT_REMOTE_SERVER.value,
+                             label="Unmount Remote Panel"),
+                mui.MenuItem(id=ServerItemActions.RECORD.value,
+                             label="Release And Start Record"),
+                mui.MenuItem(id=ServerItemActions.RECORD_CUSTOM.value,
+                             label="Launch Custom Record"),
+                # mui.MenuItem(id=ServerItemActions.RECORD_INFINITE.value,
+                #              label="Start Infinite Record"),
+                # mui.MenuItem(id=ServerItemActions.FORCE_STOP_RECORD.value,
+                #              label="Force Stop Record"),
+            ],
+            mui.IconButton(mui.IconType.MoreVert).prop(size="small"))
         self._menu.prop(anchorOrigin=mui.Anchor("top", "right"))
         self._menu.event_contextmenu_select.on(self._handle_secondary_actions)
 
@@ -170,9 +177,23 @@ class MasterDebugPanel(mui.FlexBox):
                 ]).prop(alignItems="center"),
                 mui.HBox([
                     filter_input.prop(flex=1),
-                    mui.IconButton(mui.IconType.FiberManualRecord, self.start_inf_record).prop(size="small", muiColor="success"),
-                    mui.IconButton(mui.IconType.Stop, self.force_trace_stop).prop(size="small"),
+                    # mui.IconButton(mui.IconType.FiberManualRecord, self.start_inf_record).prop(size="small", muiColor="success"),
+                    # mui.IconButton(mui.IconType.Stop, self.force_trace_stop).prop(size="small"),
                     self._menu,
+                ]).prop(alignItems="center"),
+                mui.HBox([
+                    mui.IconButton(mui.IconType.NavigateNext,
+                                   self.release_all_breakpoints).prop(
+                                       size="small",
+                                       tooltip="Release All Breakpoints"),
+                    mui.IconButton(mui.IconType.RadioButtonChecked,
+                                   self.start_inf_record).prop(
+                                       size="small",
+                                       tooltip="Start Infinite Record",
+                                       muiColor="success"),
+                    mui.IconButton(mui.IconType.StopCircleOutlined,
+                                   self.force_trace_stop).prop(
+                                       size="small", tooltip="Stop Record"),
                 ]).prop(alignItems="center"),
                 mui.Divider(),
                 self._remote_server_discover_lst.prop(flex="1 1 1",
@@ -190,13 +211,15 @@ class MasterDebugPanel(mui.FlexBox):
                                                              muiMargin="dense")
         self._dist_perfetto = chart.Perfetto().prop(width="100%",
                                                     height="100%")
-
+        self._dist_trace_data_for_download: Optional[bytes] = None
         self._dist_perfetto_container = mui.VBox([
             mui.HBox([
                 self._perfetto_select.prop(flex=1),
                 mui.IconButton(
                     mui.IconType.Refresh,
-                    self._on_dist_perfetto_reflesh).prop(size="small")
+                    self._on_dist_perfetto_reflesh).prop(size="small"),
+                mui.IconButton(
+                    mui.IconType.Download).prop(size="small", href=f"tensorpc://{FILE_RESOURCE_KEY}", target="_blank"),
             ]).prop(alignItems="center"),
             mui.Divider(),
             self._dist_perfetto,
@@ -253,6 +276,7 @@ class MasterDebugPanel(mui.FlexBox):
     @marker.mark_did_mount
     async def _on_init(self):
         self._register_vscode_handler()
+        appctx.get_app().add_file_resource(FILE_RESOURCE_KEY, self._trace_download)
         self._scan_shutdown_ev.clear()
         self._scan_loop_task = asyncio.create_task(
             self._scan_loop(self._scan_shutdown_ev))
@@ -260,9 +284,17 @@ class MasterDebugPanel(mui.FlexBox):
     @marker.mark_will_unmount
     async def _on_unmount(self):
         self._unregister_vscode_handler()
+        appctx.get_app().remove_file_resource(FILE_RESOURCE_KEY)
         self._scan_shutdown_ev.set()
         if self._scan_loop_task is not None:
             await self._scan_loop_task
+
+    def _trace_download(self, req: mui.FileResourceRequest):
+        print("???WTF", type(self._dist_trace_data_for_download))
+
+        if self._dist_trace_data_for_download is not None:
+            return mui.FileResource(name=f"{self._perfetto_select.value}.tar.gz", content=self._dist_trace_data_for_download)
+        return mui.FileResource(name=f"{self._perfetto_select.value}.json", content="{}".encode()) 
 
     async def _on_server_item_click(self, ev: mui.Event):
         indexes = ev.indexes
@@ -303,11 +335,10 @@ class MasterDebugPanel(mui.FlexBox):
             for i, meta in enumerate(metas):
                 try:
                     debug_info: DebugInfo = await simple_remote_call_async(
-                            meta.url_with_port,
-                            dbg_serv_names.
-                            DBG_SET_BKPTS_AND_GET_CURRENT_INFO,
-                            bkpts,
-                            rpc_timeout=1)
+                        meta.url_with_port,
+                        dbg_serv_names.DBG_SET_BKPTS_AND_GET_CURRENT_INFO,
+                        bkpts,
+                        rpc_timeout=1)
                     frame_meta = debug_info.frame_meta
                     trace_cfg = debug_info.trace_cfg
                     skipped_count = str(debug_info.metric.total_skipped_bkpt)
@@ -402,17 +433,17 @@ class MasterDebugPanel(mui.FlexBox):
                     traceback.print_exc()
 
     async def force_trace_stop(self):
-        await self._run_rpc_on_metas(
-            self._current_metas,
-            dbg_serv_names.DBG_FORCE_TRACE_STOP,
-            rpc_timeout=3)
+        await self._run_rpc_on_metas(self._current_metas,
+                                     dbg_serv_names.DBG_FORCE_TRACE_STOP,
+                                     rpc_timeout=3)
 
     async def _on_trace_launch(self, config: TracerUIConfig):
         cfg = TracerConfig(enable=True,
                            mode=config.mode,
                            breakpoint_count=config.breakpoint_count,
                            trace_name=config.trace_name,
-                           max_stack_depth=config.max_stack_depth)
+                           max_stack_depth=config.max_stack_depth,
+                           tracer=config.tracer)
         await self.start_record(cfg)
 
     async def start_inf_record(self):
@@ -432,28 +463,44 @@ class MasterDebugPanel(mui.FlexBox):
         return list(set(all_keys))
 
     async def query_record_data_by_key(self, key: str):
-        all_data_gzipped = await self._run_rpc_on_metas_chunk_call(
+        all_data_gzipped: List[Optional[Tuple[int, TraceResult]]] = await self._run_rpc_on_metas_chunk_call(
             self._current_metas,
             dbg_serv_names.DBG_GET_TRACE_DATA,
             key,
             rpc_timeout=10)
+        # print("RPC TIME", time.time() - t)
         all_data = []
+        all_data_external_evs = []
         for data_gzipped in all_data_gzipped:
             if data_gzipped is None:
                 continue
-            data = gzip.decompress(data_gzipped[1])
+            data = gzip.decompress(data_gzipped[1].data)
+            all_data_external_evs.append(data_gzipped[1].external_events)
             all_data.append(data)
+        # print("DECOMPRESS TIME", time.time() - t)
         # merge trace events
         all_trace_events = []
-        for data in all_data:
+        data_json_meta = {}
+        for i, data in enumerate(all_data):
             data_json = json.loads(data)
-            all_trace_events.extend(data_json["traceEvents"])
-        res_data = json_dump_to_bytes({"traceEvents": all_trace_events})
-        return gzip.compress(res_data)
+            trace_ev = data_json.pop("traceEvents")
+            external_evs = all_data_external_evs[i]
+            trace_ev.extend(external_evs)
+            all_trace_events.extend(trace_ev)
+            if i == 0:
+                data_json_meta = data_json
+        # print("JSON LOAD TIME", time.time() - t)
+        res_trace = {"traceEvents": all_trace_events}
+        res_trace.update(data_json_meta)
+        res_data = json_dump_to_bytes(res_trace)
+        # print("JSON DUMP TIME", time.time() - t)
+        res = gzip.compress(res_data)
+        # print("ALL GZIP TIME", time.time() - t)
+        return res
 
     async def _on_dist_perfetto_select(self, value: Any):
         data = await self.query_record_data_by_key(value)
-        print("SET DATA")
+        self._dist_trace_data_for_download = data
         await self._dist_perfetto.set_trace_data(data, value)
 
     async def _on_dist_perfetto_reflesh(self):

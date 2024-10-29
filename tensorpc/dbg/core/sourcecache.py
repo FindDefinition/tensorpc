@@ -1,9 +1,12 @@
+import bisect
+import dataclasses
+from difflib import SequenceMatcher
 import functools
 import sys
 import os
 import tokenize
 import ast
-from typing import Dict, Tuple
+from typing import Dict, List, Optional, Tuple
 import linecache 
 
 
@@ -263,3 +266,148 @@ class LineCache:
                 self.cache[filename] = (get_lines,)
                 return True
         return False
+
+
+@dataclasses.dataclass
+class SCDItem:
+    size: int
+    mtime: Optional[float]
+    lines: List[str]
+    diff_opcodes_equal: Optional[List[Tuple[int, int, int, int]]]
+    fullname: str
+
+class SourceChangeDiffCache:
+
+    def __init__(self):
+        self.cache: Dict[str, SCDItem] = {}
+        self.original_lines: Dict[str, List[str]] = {}
+
+    def clearcache(self):
+        """Clear the cache entirely."""
+        self.cache.clear()
+        self.original_lines.clear()
+
+    def _bisect_mapped_lineno(self, opcodes: List[Tuple[int, int, int, int]], lineno: int):
+        if not opcodes:
+            return -1
+        line_idx = lineno - 1
+        lo = bisect.bisect_left(opcodes, line_idx, key=lambda x: x[0])
+        if lo >= len(opcodes):
+            last_opcode = opcodes[-1]
+            if line_idx >= last_opcode[0] and line_idx < last_opcode[1]:
+                return last_opcode[2] + line_idx - last_opcode[0] + 1
+            return -1 
+        opcode = opcodes[lo]
+        if opcode[0] != lineno and lo > 0:
+            # x[lo - 1] < x[lo] <= x[lo + 1]
+            opcode = opcodes[lo - 1]
+        if line_idx < opcode[0] or line_idx > opcode[1]:
+            return -1 
+        # plus 1 because lineno is 1-based
+        return opcode[2] + line_idx - opcode[0] + 1
+
+    def query_mapped_linenos(self, filename, lineno: int, module_globals=None):
+        """Get the lines for a Python source file from the cache.
+        Update the cache if it doesn't contain an entry for this file already."""
+        self.checkcache(filename)
+        if filename in self.cache:
+            entry = self.cache[filename]
+            if entry.diff_opcodes_equal is None:
+                # no diff info, return original lineno
+                return lineno
+            return self._bisect_mapped_lineno(entry.diff_opcodes_equal, lineno)
+        try:
+            success = self.updatecache(filename, module_globals)
+            if not success:
+                return -1
+            entry = self.cache[filename]
+            if entry.diff_opcodes_equal is None:
+                # no diff info, return original lineno
+                return lineno
+            return self._bisect_mapped_lineno(entry.diff_opcodes_equal, lineno)
+        except MemoryError:
+            self.clearcache()
+            return -1
+
+    def checkcache(self, filename=None):
+        """Discard cache entries that are out of date.
+        (This is not checked upon each call!)"""
+
+        if filename is None:
+            filenames = list(self.cache.keys())
+        elif filename in self.cache:
+            filenames = [filename]
+        else:
+            return
+
+        for filename in filenames:
+            entry = self.cache[filename]
+            if entry.mtime is None:
+                continue   # no-op for files loaded via a __loader__
+            try:
+                stat = os.stat(entry.fullname)
+            except OSError:
+                self.cache.pop(filename, None)
+                continue
+            if entry.size != stat.st_size or entry.mtime != stat.st_mtime:
+                self.cache.pop(filename, None)
+
+
+    def updatecache(self, filename, module_globals=None):
+        """Update a cache entry and return its list of lines.
+        If something's wrong, print a message, discard the cache entry,
+        and return an empty list."""
+
+        if filename in self.cache:
+            self.cache.pop(filename, None)
+        if not filename or (filename.startswith('<') and filename.endswith('>')):
+            return False
+
+        fullname = filename
+        try:
+            stat = os.stat(fullname)
+        except OSError:
+            basename = filename
+            # Try looking through the module search path, which is only useful
+            # when handling a relative filename.
+            if os.path.isabs(filename):
+                return False
+
+            for dirname in sys.path:
+                try:
+                    fullname = os.path.join(dirname, basename)
+                except (TypeError, AttributeError):
+                    # Not sufficiently string-like to do anything useful with.
+                    continue
+                try:
+                    stat = os.stat(fullname)
+                    break
+                except OSError:
+                    pass
+            else:
+                return False
+        try:
+            with tokenize.open(fullname) as fp:
+                lines = fp.readlines()
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            return False
+        if lines and not lines[-1].endswith('\n'):
+            lines[-1] += '\n'
+        eq_opcodes: Optional[List[Tuple[int, int, int, int]]] = None
+        if filename not in self.original_lines:
+            self.original_lines[filename] = lines
+        else:
+            eq_opcodes = []
+            s = SequenceMatcher(self._is_junk, self.original_lines[filename], lines)
+            for tag, i1, i2, j1, j2 in s.get_opcodes():
+                if tag == 'equal':
+                    eq_opcodes.append((i1, i2, j1, j2))
+
+        size, mtime = stat.st_size, stat.st_mtime
+        self.cache[filename] = SCDItem(size, mtime, lines, eq_opcodes, fullname)
+        return True
+
+    def _is_junk(self, x: str):
+        # ignore empty lines and python comment lines
+        x_strip = x.strip()
+        return len(x_strip) == 0 or x_strip.startswith("#")

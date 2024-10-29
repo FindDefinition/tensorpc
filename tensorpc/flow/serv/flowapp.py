@@ -351,6 +351,8 @@ class FlowApp:
                 if inspect.iscoroutine(res):
                     res = await res
                 assert isinstance(res, FileResource)
+                if res._empty:
+                    return res
                 if res.path is not None and res.stat is None:
                     loop = asyncio.get_event_loop()
                     st = await loop.run_in_executor(
@@ -362,6 +364,9 @@ class FlowApp:
                         assert res.content is not None and isinstance(res.content, bytes)
                         res.length = len(res.content)
                         res.content = None
+                        if res.stat is None:
+                            # mtime must exist to resolve cache problem
+                            res.modify_timestamp_ns = time.time_ns()
                     msg = "file metadata must return stat or length if not path"
                     assert res.stat is not None or res.length is not None, msg
                 return res  

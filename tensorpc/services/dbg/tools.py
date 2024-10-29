@@ -19,9 +19,9 @@ from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
                                     TENSORPC_ENV_DBG_DEFAULT_BREAKPOINT_ENABLE,
                                     BackgroundDebugToolsConfig, BreakpointEvent, BreakpointType,
-                                    DebugFrameInfo, DebugInfo, DebugMetric, DebugServerStatus, RecordMode, TraceMetrics,
+                                    DebugFrameInfo, DebugInfo, DebugMetric, DebugServerStatus, ExternalTrace, RecordMode, TraceMetrics, TraceResult,
                                     TracerConfig)
-from tensorpc.dbg.core.sourcecache import LineCache, PythonSourceASTCache
+from tensorpc.dbg.core.sourcecache import LineCache, PythonSourceASTCache, SourceChangeDiffCache
 from tensorpc.dbg.serv_names import serv_names
 from tensorpc.flow.client import list_all_app_in_machine
 from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
@@ -44,6 +44,7 @@ class BreakpointMeta:
     line_text: str
     event: BreakpointEvent
     user_dict: Optional[Dict[str, Any]] = None
+    mapped_lineno: Optional[int] = None
 
 @dataclasses.dataclass
 class TracerState:
@@ -67,6 +68,7 @@ class BackgroundDebugTools:
 
         self._ast_cache = PythonSourceASTCache()
         self._line_cache = LineCache()
+        self._scd_cache = SourceChangeDiffCache()
 
         self._vscode_breakpoints: List[VscodeBreakpoint] = []
         # (path, lineno) -> VscodeBreakpoint
@@ -77,7 +79,7 @@ class BackgroundDebugTools:
 
         self._cur_tracer_state: Optional[TracerState] = None
 
-        self._trace_gzip_data_dict: Dict[str, Tuple[int, bytes]] = {}
+        self._trace_gzip_data_dict: Dict[str, Tuple[int, TraceResult]] = {}
 
         self._debug_metric = DebugMetric(0)
 
@@ -127,16 +129,24 @@ class BackgroundDebugTools:
         async with self._bkpt_lock:
             assert prim.is_loopback_call(
             ), "this function should only be called in main thread"
-            try:
-                lines = self._line_cache.getlines(frame.f_code.co_filename)
-                linetext = lines[frame.f_lineno - 1]
-            except:
-                linetext = ""
+            # may_changed_frame_lineno is used in breakpoint change detection.
+            # user may change source code in vscode after program launch, so we
+            # store code of frame when first see it, and compare it with current code
+            # by difflib. if the frame lineno is inside a `equal` block, we map
+            # frame lineno to the lineno in the new code.
+            may_changed_frame_lineno = self._scd_cache.query_mapped_linenos(frame.f_code.co_filename, frame.f_lineno)
+            if may_changed_frame_lineno < 1:
+                may_changed_frame_lineno = frame.f_lineno
+            # try:
+            #     lines = self._line_cache.getlines(frame.f_code.co_filename)
+            #     linetext = lines[frame.f_lineno - 1]
+            # except:
+            linetext = ""
             pid = os.getpid()
             self._cur_breakpoint = BreakpointMeta(name, type,
                                                   frame.f_code.co_filename,
                                                   frame.f_lineno, linetext,
-                                                  event)
+                                                  event, mapped_lineno=may_changed_frame_lineno)
             if self._cur_breakpoint is not None and self._cur_breakpoint.type == BreakpointType.Vscode:
                 is_cur_bkpt_is_vscode = self._determine_vscode_bkpt_status(
                     self._cur_breakpoint, self._vscode_breakpoints_dict)
@@ -237,21 +247,20 @@ class BackgroundDebugTools:
         assert self._cur_tracer_state is not None
         self._cur_tracer_state.tracer = tracer
 
-    async def set_trace_data(self, data: str, cfg: TracerConfig):
+    async def set_trace_data(self, trace_res: TraceResult, cfg: TracerConfig):
         obj, app = prim.get_service(
             app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
                 TENSORPC_DBG_FRAME_INSPECTOR_KEY)
         assert isinstance(obj, BreakpointDebugPanel)
-        data_bytes = data.encode()
         with enter_app_context(app):
-            await obj.set_perfetto_data(data_bytes)
+            await obj.set_perfetto_data(trace_res.data)
         if cfg.trace_timestamp is not None:
             name = "default"
             if cfg.trace_name is not None:
                 name = cfg.trace_name
-            data_compressed = gzip.compress(data_bytes)
-            LOGGER.warning(f"Compress trace data: {len(data_bytes)} -> {len(data_compressed)}") 
-            self._trace_gzip_data_dict[name] = (cfg.trace_timestamp, data_compressed)
+            data_compressed = gzip.compress(trace_res.data)
+            LOGGER.warning(f"Compress trace data: {len(trace_res.data)} -> {len(data_compressed)}") 
+            self._trace_gzip_data_dict[name] = (cfg.trace_timestamp, dataclasses.replace(trace_res, data=data_compressed))
 
     def get_trace_data(self, name: str):
         if name in self._trace_gzip_data_dict:
@@ -297,7 +306,7 @@ class BackgroundDebugTools:
             self, bkpt_meta: BreakpointMeta,
             vscode_bkpt_dict: Dict[Tuple[Path, int], VscodeBreakpoint]):
         if bkpt_meta.type == BreakpointType.Vscode:
-            key = (Path(bkpt_meta.path).resolve(), bkpt_meta.lineno)
+            key = (Path(bkpt_meta.path).resolve(), bkpt_meta.mapped_lineno)
             # rich.print("BKPT", key, vscode_bkpt_dict)
             if key in vscode_bkpt_dict:
                 return vscode_bkpt_dict[key].enabled
@@ -374,7 +383,8 @@ class BackgroundDebugTools:
                             except grpc.aio.AioRpcError as e:
                                 return
                             except Exception as e:
-                                print(e)
+                                LOGGER.info(f"Eval code segment failed. exception: {e}")
+                                # print(e)
                                 # traceback.print_exc()
                                 # await obj.send_exception(e)
                                 return

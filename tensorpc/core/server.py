@@ -35,10 +35,10 @@ from tensorpc.protos_export import rpc_message_pb2
 
 from tensorpc.protos_export import \
     remote_object_pb2_grpc as remote_object_pb2_grpc
-from tensorpc.utils.df_logging import get_logger
+from tensorpc.utils.rich_logging import get_logger
 from tensorpc.utils.wait_tools import get_free_ports
 
-LOGGER = get_logger()
+LOGGER = get_logger("tensorpc.server")
 
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 

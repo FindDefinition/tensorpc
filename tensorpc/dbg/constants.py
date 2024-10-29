@@ -3,9 +3,9 @@ import dataclasses
 import os
 import threading
 from types import FrameType
-from typing import Any, Optional
+from typing import Any, List, Optional
 from tensorpc.core import typemetas
-from typing_extensions import Annotated
+from typing_extensions import Annotated, Literal
 
 
 class DebugServerStatus(enum.IntEnum):
@@ -35,6 +35,10 @@ class RecordMode(enum.IntEnum):
     SAME_BREAKPOINT = 1
     INFINITE = 2
 
+class TracerType(enum.IntEnum):
+    VIZTRACER = 0
+    PYTORCH = 1
+
 
 @dataclasses.dataclass
 class BackgroundDebugToolsConfig:
@@ -52,23 +56,34 @@ class TracerConfig:
     trace_name: Optional[str] = None
     trace_timestamp: Optional[int] = None
     mode: RecordMode = RecordMode.NEXT_BREAKPOINT
-    max_stack_depth: int = 4
+    tracer: TracerType = TracerType.VIZTRACER
+    max_stack_depth: int = 10
 
 @dataclasses.dataclass
 class TraceMetrics:
     breakpoint_count: int
 
 @dataclasses.dataclass
+class TraceResult:
+    data: bytes 
+    external_events: List[Any] = dataclasses.field(default_factory=list)
+
+@dataclasses.dataclass
 class TracerUIConfig:
     breakpoint_count: Annotated[int, typemetas.CommonObject(alias="Breakpoint Count")] = 1
     trace_name: Annotated[str, typemetas.CommonObject(alias="Trace Name")] = "trace"
     mode: RecordMode = RecordMode.NEXT_BREAKPOINT
-    max_stack_depth: Annotated[int, typemetas.CommonObject(alias="Max Stack Depth")] = 4
+    max_stack_depth: Annotated[int, typemetas.CommonObject(alias="Max Stack Depth")] = 10
+    tracer: TracerType = TracerType.VIZTRACER
 
 @dataclasses.dataclass
 class DebugMetric:
     total_skipped_bkpt: int
 
+@dataclasses.dataclass
+class ExternalTrace:
+    backend: Literal["pytorch"]
+    data: Any
 
 @dataclasses.dataclass
 class DebugInfo:

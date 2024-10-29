@@ -9,7 +9,8 @@ from typing import Any, Optional
 
 from tensorpc.constants import TENSORPC_MAIN_PID
 from tensorpc.core.bgserver import BACKGROUND_SERVER
-from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_TRACER_KEY, TENSORPC_ENV_DBG_ENABLE, BreakpointEvent, BreakpointType, TracerConfig
+from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_TRACER_KEY, TENSORPC_ENV_DBG_ENABLE, BreakpointEvent, BreakpointType, TraceResult, TracerConfig, TracerType
+from tensorpc.dbg.tracer import DebugTracerWrapper
 from tensorpc.flow.client import is_inside_app_session
 from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
 from tensorpc.utils.rich_logging import get_logger
@@ -18,6 +19,10 @@ from tensorpc.flow.serv_names import serv_names as app_serv_names
 from tensorpc.compat import InWindows
 
 LOGGER = get_logger("tensorpc.dbg")
+
+RECORDING = False
+
+_TRACER_WRAPPER = DebugTracerWrapper()
 
 @dataclasses.dataclass
 class _DebugBkptMeta:
@@ -31,11 +36,21 @@ def _get_viztracer(cfg: Optional[TracerConfig], name: Optional[str] = None):
         # file_info=False to reduce the size of trace data
         # TODO let user customize this
         if cfg is not None:
-            return VizTracer(process_name=name, file_info=False, max_stack_depth=cfg.max_stack_depth)
+            tracer_type = cfg.tracer 
+            if tracer_type == TracerType.VIZTRACER:
+                tracer = VizTracer(process_name=name, file_info=False, max_stack_depth=cfg.max_stack_depth)
+                return tracer, TracerType.VIZTRACER
+            else:
+                import torch.profiler as profiler
+                # pytorch tracer can't control ignored files and max_stack_depth, so
+                # never use with_stack.
+                tracer = profiler.profile(activities=[profiler.ProfilerActivity.CPU, profiler.ProfilerActivity.CUDA], 
+                    with_stack=False, profile_memory=False)
+                return tracer, TracerType.PYTORCH
         else:
-            return VizTracer(process_name=name, file_info=False, max_stack_depth=4)
+            return VizTracer(process_name=name, file_info=False, max_stack_depth=8), TracerType.VIZTRACER
     except ImportError:
-        return None
+        return None, TracerType.VIZTRACER
 
 def should_enable_debug() -> bool:
     """Check if the debug environment is enabled"""
@@ -98,7 +113,16 @@ def breakpoint(name: Optional[str] = None,
     """Enter a breakpoint in the background server.
     you must use specific UI or command tool to exit breakpoint.
     WARNING: currently don't support multi-thread
+
+    Args:
+        name: the name of the breakpoint, currently only used during record (instant event).
+        timeout: the timeout of the breakpoint
+        init_port: the port of the background server
+        init_proc_name: the process name of the background server
+        type: the type of the breakpoint
+        _frame_cnt: the frame count to skip
     """
+    global RECORDING
     if not should_enable_debug():
         return
     bev = BreakpointEvent(threading.Event())
@@ -115,15 +139,24 @@ def breakpoint(name: Optional[str] = None,
         init_proc_name = frame.f_code.co_name
 
     init(init_proc_name, init_port)
+    if name is not None:
+        record_instant_event(name, args={
+            "path": frame.f_code.co_filename,
+            "lineno": frame.f_lineno
+        })
     trace_res = BACKGROUND_SERVER.execute_service(serv_names.DBG_ENTER_BREAKPOINT, frame,
                                       bev, type, name)
     if trace_res is not None:
         tracer_to_stop, tracer_cfg = trace_res
-        tracer_to_stop.stop()
+        RECORDING = False
+        _TRACER_WRAPPER.stop()
+        ss = io.BytesIO()
+        _TRACER_WRAPPER.save(ss, BACKGROUND_SERVER.cur_proc_title)
+        trace_res = TraceResult(ss.getvalue(), _TRACER_WRAPPER._trace_instant_events_for_pth)
+        _TRACER_WRAPPER.reset_tracer()
+        # tracer_to_stop.stop()
         LOGGER.warning(f"Record Stop.")
-        ss = io.StringIO()
-        tracer_to_stop.save(ss, verbose=0)
-        BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACE_DATA, ss.getvalue(), tracer_cfg)
+        BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACE_DATA, trace_res, tracer_cfg)
 
     bev.event.wait(timeout)
     if bev.enable_trace_in_main_thread:
@@ -132,11 +165,15 @@ def breakpoint(name: Optional[str] = None,
         tracer_name: Optional[str] = None
         if meta.backend is not None:
             tracer_name = f"{meta.backend}|{meta.rank}/{meta.world_size}"
-        tracer = _get_viztracer(bev.trace_cfg, name=tracer_name)
+        else:
+            tracer_name = f"Process"
+        tracer, tracer_type = _get_viztracer(bev.trace_cfg, name=tracer_name)
         if tracer is not None:
             LOGGER.warning(f"Record Start. Config:")
             LOGGER.warning(bev.trace_cfg)
-            tracer.start()
+            RECORDING = True
+            _TRACER_WRAPPER.set_tracer(tracer, tracer_type, tracer_name)
+            _TRACER_WRAPPER.start()
             BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACER, tracer)
         else:
             LOGGER.error("viztracer is not installed, can't record trace data. use `pip install viztracer` to install.")
@@ -171,3 +208,22 @@ class Debugger:
 
     def breakpoint(self, name: Optional[str] = None, timeout: Optional[float] = None):
         breakpoint(name, timeout, self._port, self._proc_name)
+
+def record_instant_event(name: str, args: Any = None, *, _frame_cnt: int = 1):
+    if RECORDING:
+        if args is None:
+            frame = inspect.currentframe()
+            if frame is None:
+                return
+            while _frame_cnt > 0:
+                if frame is not None:
+                    frame = frame.f_back
+                _frame_cnt -= 1
+            if frame is None:
+                return
+            args={
+                "path": frame.f_code.co_filename,
+                "lineno": frame.f_lineno
+            }
+        _TRACER_WRAPPER.log_instant(name, args)
+
