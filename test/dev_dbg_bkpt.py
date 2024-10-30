@@ -71,15 +71,15 @@ def mp_func_inf_record(rank):
         c = torch.rand(100, 3)
         complex_obj = mui.Button("Hello")
         arr = np.random.uniform(-1, 1, size=[1000, 3])
+        ten = torch.rand(1).to(torch.bfloat16)
+        ten2 = torch.rand(1).to(torch.float16)
+
         # tensorpc.dbg.vscode_breakpoint(name=f"WTF-{rank}")
         tensorpc.dbg.breakpoint(name="WTF")
         model = MyModule(500, 10).cuda()
         input = torch.rand(128, 500).cuda()
         mask = torch.rand((500, 500, 500), dtype=torch.double).cuda()
         model(input, mask)
-        with profiler.profile(with_stack=False, profile_memory=True) as prof:
-            out, idx = model(input, mask)
-
         complex_obj = mui.Button("Hello")
         arr = np.random.uniform(-1, 1, size=[1000, 3])
         _trace_func()

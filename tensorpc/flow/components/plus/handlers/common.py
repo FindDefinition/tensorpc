@@ -65,14 +65,21 @@ class TensorHandler(ObjectPreviewHandler):
 
     def _to_numpy(self, obj):
         if get_qualname_of_type(type(obj)) == CommonQualNames.TorchTensor:
+            import torch 
             if obj.is_cpu:
+                if obj.dtype == torch.bfloat16 or obj.dtype == torch.float16:
+                    return obj.to(torch.float32).detach().numpy()
                 return obj.detach().numpy()
+            if obj.dtype == torch.bfloat16 or obj.dtype == torch.float16:
+                return obj.to(torch.float32).detach().cpu().numpy()
             return obj.detach().cpu().numpy()
         elif get_qualname_of_type(type(obj)) == CommonQualNames.TorchParameter:
             return obj.data.cpu().numpy()
         elif get_qualname_of_type(type(obj)) == CommonQualNames.TVTensor:
             return obj.cpu().numpy()
         else:
+            if obj.dtype == np.float16:
+                return obj.astype(np.float32)
             return obj
 
     async def _on_show_viewer_dialog(self):

@@ -369,13 +369,15 @@ class Plotly(MUIComponentBase[PlotlyProps]):
 
 
 class Perfetto(IFrame):
-    def __init__(self, data: Optional[bytes] = None, title: Optional[str] = None):
+    def __init__(self, data: Optional[bytes] = None, title: Optional[str] = None, keep_api_open: bool = True):
         init_data = None 
+        self._keep_api_open = keep_api_open
         if data is not None and title is not None:
             init_data = {
                 "perfetto": {
                     "buffer": core_io.JSArrayBuffer(data),
                     "title": title,
+                    "keepApiOpen": self._keep_api_open,
                 }
             }
         super().__init__("https://ui.perfetto.dev", init_data)
@@ -395,5 +397,6 @@ class Perfetto(IFrame):
             "perfetto": {
                 "buffer": core_io.JSArrayBuffer(data),
                 "title": title,
+                "keepApiOpen": self._keep_api_open,
             }
         })))

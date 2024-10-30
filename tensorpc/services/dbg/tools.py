@@ -152,12 +152,12 @@ class BackgroundDebugTools:
                     self._cur_breakpoint, self._vscode_breakpoints_dict)
                 if not is_cur_bkpt_is_vscode:
                     event.set()
-                    LOGGER.warning(
-                        f"Skip Vscode breakpoint",
-                        extra={
-                            TENSORPC_LOGGING_OVERRIDED_PATH_LINENO_KEY:
-                            (frame.f_code.co_filename, frame.f_lineno)
-                        })
+                    # LOGGER.warning(
+                    #     f"Skip Vscode breakpoint",
+                    #     extra={
+                    #         TENSORPC_LOGGING_OVERRIDED_PATH_LINENO_KEY:
+                    #         (frame.f_code.co_filename, frame.f_lineno)
+                    #     })
                     self._cur_breakpoint = None
                     self._debug_metric.total_skipped_bkpt += 1
                     return
@@ -179,14 +179,14 @@ class BackgroundDebugTools:
                     is_record_stop = True
                 if not is_record_stop:
                     event.set()
-                    if cfg.mode != RecordMode.INFINITE:
-                        msg_str = f"Skip Vscode breakpoint (Remaining trace count: {metric.breakpoint_count})"
-                        LOGGER.warning(
-                            msg_str,
-                            extra={
-                                TENSORPC_LOGGING_OVERRIDED_PATH_LINENO_KEY:
-                                (frame.f_code.co_filename, frame.f_lineno)
-                            })
+                    # if cfg.mode != RecordMode.INFINITE:
+                    #     msg_str = f"Skip Vscode breakpoint (Remaining trace count: {metric.breakpoint_count})"
+                    #     LOGGER.warning(
+                    #         msg_str,
+                    #         extra={
+                    #             TENSORPC_LOGGING_OVERRIDED_PATH_LINENO_KEY:
+                    #             (frame.f_code.co_filename, frame.f_lineno)
+                    #         })
                     self._cur_breakpoint = None
                     self._debug_metric.total_skipped_bkpt += 1
                     return 
@@ -266,6 +266,12 @@ class BackgroundDebugTools:
         if name in self._trace_gzip_data_dict:
             res = self._trace_gzip_data_dict[name]
             return res 
+        return None
+
+    def get_trace_data_timestamp(self, name: str):
+        if name in self._trace_gzip_data_dict:
+            res = self._trace_gzip_data_dict[name]
+            return res[0] 
         return None
 
     def get_trace_data_keys(self):

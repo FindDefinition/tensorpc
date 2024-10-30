@@ -569,6 +569,8 @@ class IconType(enum.IntEnum):
     Block = 63
     Download = 64
     Upload = 65
+    Link = 66
+    LinkOff = 67
 
 
 @dataclasses.dataclass
@@ -770,6 +772,7 @@ class DialogProps(MUIFlexBoxProps):
     cancelLabel: Union[str, Undefined] = undefined
     okLabel: Union[str, Undefined] = undefined
     userData: Union[Any, Undefined] = undefined
+    dividers: Union[bool, Undefined] = undefined
 
 
 @dataclasses.dataclass
@@ -1838,7 +1841,7 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
 @dataclasses.dataclass
 class SimpleCodeEditorProps(MUIComponentBaseProps):
     value: str = ""
-    language: Union[Literal["cpp", "python", "json"], Undefined] = undefined
+    language: Union[Literal["cpp", "python", "json", "yaml"], Undefined] = undefined
     debounce: Union[NumberType, Undefined] = undefined
     tabSize: Union[NumberType, Undefined] = undefined
     insertSpaces: Union[bool, Undefined] = undefined
@@ -1847,12 +1850,14 @@ class SimpleCodeEditorProps(MUIComponentBaseProps):
     textareaId: Union[str, Undefined] = undefined
     textareaClassName: Union[str, Undefined] = undefined
     preClassName: Union[str, Undefined] = undefined
+    editorFontSize: Union[ValueType, Undefined] = undefined
+    editorFontFamily: Union[str, Undefined] = undefined
 
 
 class SimpleCodeEditor(MUIComponentBase[SimpleCodeEditorProps]):
 
     def __init__(self, value: str, language: Literal["cpp", "python",
-                                                     "json"]) -> None:
+                                                     "json", "yaml"]) -> None:
         all_evs = [
             FrontendEventType.Change.value,
         ]
@@ -3013,6 +3018,8 @@ class ListItemTextProps(MUIComponentBaseProps):
     secondary: Union[Undefined, str] = undefined
     primaryTypographyProps: Union[TypographyProps, Undefined] = undefined
     secondaryTypographyProps: Union[TypographyProps, Undefined] = undefined
+    primaryColor: Union[_StdColorNoDefault, Undefined] = undefined
+    secondaryColor: Union[_StdColorNoDefault, Undefined] = undefined
 
 class ListItemText(MUIComponentBase[ListItemTextProps]):
 
@@ -4072,6 +4079,8 @@ class TanstackJsonLikeTreeProps(JsonLikeTreePropsBase):
     expanded: Union[bool, Dict[str,
                                bool]] = dataclasses.field(default_factory=dict)
     globalFilter: Union[Undefined, str] = undefined
+    maxLeafRowFilterDepth: Union[Undefined, int] = undefined
+    filterFromLeafRows: Union[Undefined, bool] = undefined
 
 T_tview_base_props = TypeVar("T_tview_base_props", bound=JsonLikeTreePropsBase)
 
@@ -4393,6 +4402,7 @@ class SimpleControlsProps(MUIFlexBoxProps):
     tree: List[JsonLikeNode] = dataclasses.field(default_factory=list)
     contextMenus: Union[Undefined, List[ContextMenuData]] = undefined
     reactKey: Union[Undefined, str] = undefined
+    variant: Union[Undefined, Literal["mui", "native"]] = undefined # mui by default
 
 
 class SimpleControls(MUIComponentBase[SimpleControlsProps]):

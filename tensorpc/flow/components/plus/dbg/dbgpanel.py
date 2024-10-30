@@ -1,31 +1,43 @@
 import asyncio
+from calendar import c
 import dataclasses
+import datetime
 import enum
 import gzip
 import io
 import time
 import traceback
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Union, Tuple
 import uuid
 import zipfile
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple, Union
 
 import grpc
-from regex import F, P
-import rich
-from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
-from tensorpc.core.asyncclient import simple_chunk_call_async, simple_remote_call_async
-from tensorpc.core.client import simple_remote_call
-from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_SPLIT, DebugFrameInfo, DebugInfo, RecordMode, TraceResult, TracerConfig, TracerType, TracerUIConfig
-from tensorpc.flow import marker, appctx
-from tensorpc.flow.components import chart, mui
-from tensorpc.flow.components.plus.config import ConfigPanelDialog
-from tensorpc.flow.components.plus.styles import CodeStyles, get_tight_icon_tab_theme
-from tensorpc.dbg.serv_names import serv_names as dbg_serv_names
-from tensorpc.compat import InWindows
 import psutil
+import rich
+import yaml
+from regex import F, P
 
+from tensorpc.compat import InWindows
+from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
+from tensorpc.core.asyncclient import (simple_chunk_call_async,
+                                       simple_remote_call_async)
+from tensorpc.core.client import simple_remote_call
+from tensorpc.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
+                                    TENSORPC_DBG_SPLIT, DebugFrameInfo,
+                                    DebugInfo, RecordFilterConfig, RecordMode,
+                                    TracerConfig, TraceResult, TracerType,
+                                    TracerUIConfig)
+from tensorpc.dbg.serv_names import serv_names as dbg_serv_names
+from tensorpc.flow import appctx, marker
+from tensorpc.flow.components import chart, mui
+from tensorpc.flow.components.plus.config import ConfigPanelDialogPersist
+from tensorpc.flow.components.plus.styles import (CodeStyles,
+                                                  get_tight_icon_tab_theme)
 from tensorpc.flow.core.appcore import AppSpecialEventType
-from tensorpc.flow.vscode.coretypes import VscodeBreakpoint, VscodeTensorpcMessage, VscodeTensorpcMessageType
+from tensorpc.flow.jsonlike import as_dict_no_undefined
+from tensorpc.flow.vscode.coretypes import (VscodeBreakpoint,
+                                            VscodeTensorpcMessage,
+                                            VscodeTensorpcMessageType)
 
 try:
     import orjson as json  # type: ignore
@@ -52,11 +64,22 @@ class DebugServerProcessMeta:
     port: int
     secondary_name: str = "running"
     is_tracing: bool = False
+    primaryColor: Union[mui.Undefined, mui._StdColorNoDefault] = mui.undefined
+    secondaryColor: Union[mui.Undefined, mui._StdColorNoDefault] = mui.undefined
 
     @property
     def url_with_port(self):
         return f"localhost:{self.port}"
 
+
+_INIT_YAML_CONFIG = """include_modules:
+
+exclude_modules:
+
+include_files:
+
+exclude_files:
+"""
 
 def list_all_dbg_server_in_machine():
     res: List[DebugServerProcessMeta] = []
@@ -94,7 +117,8 @@ class ServerItemActions(enum.Enum):
 
 class MasterDebugPanel(mui.FlexBox):
 
-    def __init__(self):
+    def __init__(self, app_storage_key: str = "MasterDebugPanel"):
+        self._app_storage_key = app_storage_key
         assert not InWindows, "MasterDebugPanel is not supported in Windows due to setproctitle."
         lst_name_primary_prop = mui.TypographyProps(
             variant="body1",
@@ -111,20 +135,9 @@ class MasterDebugPanel(mui.FlexBox):
         name = mui.ListItemText("").prop(
             primaryTypographyProps=lst_name_primary_prop,
             secondaryTypographyProps=lst_name_secondary_prop)
-        name_is_tracing = mui.ListItemText("").prop(
-            primaryTypographyProps=dataclasses.replace(lst_name_primary_prop,
-                                                       muiColor="primary"),
-            secondaryTypographyProps=lst_name_secondary_prop)
-
-        name.set_override_props(value="server_id", secondary="secondary_name")
-        name_is_tracing.set_override_props(value="server_id",
-                                           secondary="secondary_name")
-
+        name.set_override_props(value="server_id", secondary="secondary_name", primaryColor="primaryColor", secondaryColor="secondaryColor")
         remote_server_item = mui.ListItemButton([
-            mui.MatchCase([
-                mui.MatchCase.Case(True, name_is_tracing),
-                mui.MatchCase.Case(False, name),
-            ]).set_override_props(condition="is_tracing"),
+            name,
         ])
         self._remote_server_discover_lst = mui.DataFlexBox(
             remote_server_item, [])
@@ -147,8 +160,8 @@ class MasterDebugPanel(mui.FlexBox):
                              label="Disable All Breakpoints"),
                 mui.MenuItem(id=ServerItemActions.ENABLE_BREAKPOINT.value,
                              label="Enable All Breakpoints"),
-                mui.MenuItem(id=ServerItemActions.UNMOUNT_REMOTE_SERVER.value,
-                             label="Unmount Remote Panel"),
+                # mui.MenuItem(id=ServerItemActions.UNMOUNT_REMOTE_SERVER.value,
+                #              label="Unmount Remote Panel"),
                 mui.MenuItem(id=ServerItemActions.RECORD.value,
                              label="Release And Start Record"),
                 mui.MenuItem(id=ServerItemActions.RECORD_CUSTOM.value,
@@ -161,10 +174,17 @@ class MasterDebugPanel(mui.FlexBox):
             mui.IconButton(mui.IconType.MoreVert).prop(size="small"))
         self._menu.prop(anchorOrigin=mui.Anchor("top", "right"))
         self._menu.event_contextmenu_select.on(self._handle_secondary_actions)
-
-        self._trace_launch_dialog = ConfigPanelDialog(
-            self._on_trace_launch).prop(okLabel="Launch Record")
-
+        self._trace_yaml_cfg_editor = mui.SimpleCodeEditor(_INIT_YAML_CONFIG, "yaml")
+        self._trace_yaml_cfg_editor.prop(backgroundColor="#fafafa", flex=1, overflow="auto", editorFontSize="12px", debounce=100)
+        self._trace_launch_dialog = ConfigPanelDialogPersist(
+            TracerUIConfig(), self._on_trace_launch, children=[
+                mui.Divider(),
+                mui.Typography("Record Filter (Valid For Viztracer)").prop(variant="body1"),
+                mui.Divider(),
+                self._trace_yaml_cfg_editor
+            ]).prop(okLabel="Launch Record", title="Record Launch Config", dividers=True)
+        
+        self._record_data_cache: Dict[str, Tuple[List[int], bytes]] = {}
         self._drawer = mui.Collapse([
             mui.VBox([
                 mui.HBox([
@@ -196,6 +216,9 @@ class MasterDebugPanel(mui.FlexBox):
                     mui.IconButton(mui.IconType.StopCircleOutlined,
                                    self.force_trace_stop).prop(
                                        size="small", tooltip="Stop Record"),
+                    mui.IconButton(mui.IconType.LinkOff,
+                                   self._unmount_remote_comp).prop(
+                                       size="small", tooltip="Unmount Remote Panel"),
                 ]).prop(alignItems="center"),
                 mui.Divider(),
                 self._remote_server_discover_lst.prop(flex="1 1 1",
@@ -214,6 +237,7 @@ class MasterDebugPanel(mui.FlexBox):
         self._dist_perfetto = chart.Perfetto().prop(width="100%",
                                                     height="100%")
         self._dist_trace_data_for_download: Optional[bytes] = None
+        self._debug_use_zip_instead_of_merge = True
         self._dist_perfetto_container = mui.VBox([
             mui.HBox([
                 self._perfetto_select.prop(flex=1),
@@ -282,6 +306,9 @@ class MasterDebugPanel(mui.FlexBox):
         self._scan_shutdown_ev.clear()
         self._scan_loop_task = asyncio.create_task(
             self._scan_loop(self._scan_shutdown_ev))
+        filter_cfg_str = await appctx.read_data_storage(f"{self._app_storage_key}/record_filter", raise_if_not_found=False)
+        if filter_cfg_str is not None:
+            await self.send_and_wait(self._trace_yaml_cfg_editor.update_event(value=filter_cfg_str))
 
     @marker.mark_will_unmount
     async def _on_unmount(self):
@@ -293,7 +320,8 @@ class MasterDebugPanel(mui.FlexBox):
 
     def _trace_download(self, req: mui.FileResourceRequest):
         if self._dist_trace_data_for_download is not None:
-            return mui.FileResource(name=f"{self._perfetto_select.value}.tar.gz", content=self._dist_trace_data_for_download)
+            suffix = ".zip" if self._debug_use_zip_instead_of_merge else ".tar.gz"
+            return mui.FileResource(name=f"{self._perfetto_select.value}{suffix}", content=self._dist_trace_data_for_download)
         return mui.FileResource(name=f"{self._perfetto_select.value}.json", content="{}".encode()) 
 
     async def _on_server_item_click(self, ev: mui.Event):
@@ -345,19 +373,26 @@ class MasterDebugPanel(mui.FlexBox):
                     if debug_info.metric.total_skipped_bkpt > 100:
                         skipped_count = "100+"
                     status_str = f"running ({skipped_count})"
+                    meta.primaryColor = mui.undefined
                     if trace_cfg is not None:
                         tracer = trace_cfg.tracer
                         if tracer == TracerType.VIZTRACER:
                             tracer_str = "viz"
-                        else:
+                        elif tracer == TracerType.PYTORCH:
                             tracer_str = "pth"
-                        if trace_cfg.mode == RecordMode.INFINITE:
-                            status_str = f"recording-{tracer_str} ({skipped_count}-inf)"
+                        elif tracer == TracerType.VIZTRACER_PYTORCH:
+                            tracer_str = "v+p"
                         else:
-                            status_str = f"recording-{tracer_str} ({skipped_count})"
+                            tracer_str = "unknown"
+                        if trace_cfg.mode == RecordMode.INFINITE:
+                            status_str = f"rec-{tracer_str} ({skipped_count}-inf)"
+                        else:
+                            status_str = f"rec-{tracer_str} ({skipped_count})"
                         meta.is_tracing = True
+                        meta.primaryColor = "success"
                     if frame_meta is not None:
                         meta.secondary_name = f"{meta.pid}|{frame_meta.name}:{frame_meta.lineno}"
+                        meta.primaryColor = "primary"
                     else:
                         meta.secondary_name = f"{meta.pid}|{status_str}"
                 except grpc.aio.AioRpcError as e:
@@ -368,12 +403,14 @@ class MasterDebugPanel(mui.FlexBox):
                     else:
                         traceback.print_exc()
                         meta.secondary_name = f"{meta.pid}|{e.code().name}"
+                    meta.primaryColor = "error"
                 except:
                     print("Failed to connect to", meta.url_with_port)
                     traceback.print_exc()
                     meta.secondary_name = f"{meta.pid}|error"
+                    meta.primaryColor = "error"
                     continue
-            metas_dict = [dataclasses.asdict(meta) for meta in metas]
+            metas_dict = [as_dict_no_undefined(meta) for meta in metas]
             await self.send_and_wait(
                 self._remote_server_discover_lst.update_event(
                     dataList=metas_dict))
@@ -392,6 +429,12 @@ class MasterDebugPanel(mui.FlexBox):
     async def _close_drawer(self):
         await self.send_and_wait(self._drawer.update_event(triggered=False))
 
+    async def _unmount_remote_comp(self):
+        async with self._serv_list_lock:
+            if self._current_mount_uid != "":
+                await self._remote_comp_container.set_new_layout({})
+                self._current_mount_uid = ""
+
     async def _handle_secondary_actions(self, item_id: str):
         async with self._serv_list_lock:
             if item_id == ServerItemActions.UNMOUNT_REMOTE_SERVER.value:
@@ -406,8 +449,7 @@ class MasterDebugPanel(mui.FlexBox):
             elif item_id == ServerItemActions.RECORD.value:
                 await self.start_record()
             elif item_id == ServerItemActions.RECORD_CUSTOM.value:
-                await self._trace_launch_dialog.open_config_dialog(
-                    TracerUIConfig())
+                await self._trace_launch_dialog.open_config_dialog()
             elif item_id == ServerItemActions.RECORD_INFINITE.value:
                 await self.start_inf_record()
             elif item_id == ServerItemActions.FORCE_STOP_RECORD.value:
@@ -418,7 +460,7 @@ class MasterDebugPanel(mui.FlexBox):
         ts = time.time_ns()
         for meta in self._current_metas:
             if trace_cfg is None:
-                trace_cfg = TracerConfig(True,
+                trace_cfg = TracerConfig(enable=True,
                                          breakpoint_count=1,
                                          trace_timestamp=ts)
             else:
@@ -443,12 +485,20 @@ class MasterDebugPanel(mui.FlexBox):
                                      rpc_timeout=3)
 
     async def _on_trace_launch(self, config: TracerUIConfig):
+        filter_cfg_value = self._trace_yaml_cfg_editor.props.value
+        filter_cfg = yaml.safe_load(filter_cfg_value)
+        filter_obj = RecordFilterConfig(**filter_cfg)
+        await appctx.save_data_storage(f"{self._app_storage_key}/record_filter", filter_cfg_value)
         cfg = TracerConfig(enable=True,
-                           mode=config.mode,
-                           breakpoint_count=config.breakpoint_count,
-                           trace_name=config.trace_name,
-                           max_stack_depth=config.max_stack_depth,
-                           tracer=config.tracer)
+                            record_filter=filter_obj,
+                           **dataclasses.asdict(config))
+        if cfg.tracer == TracerType.VIZTRACER:
+            cfg.trace_name = f"{cfg.trace_name}|viz"
+        elif cfg.tracer == TracerType.PYTORCH:
+            cfg.trace_name = f"{cfg.trace_name}|pth"
+        elif cfg.tracer == TracerType.VIZTRACER_PYTORCH:
+            cfg.trace_name = f"{cfg.trace_name}|v+p"
+
         await self.start_record(cfg)
 
     async def start_inf_record(self):
@@ -468,7 +518,18 @@ class MasterDebugPanel(mui.FlexBox):
         return list(set(all_keys))
 
     async def query_record_data_by_key(self, key: str):
-        debug_use_zip_instead_of_merge = True
+        if key in self._record_data_cache:
+            all_timestamps_with_none: List[Optional[int]] = await self._run_rpc_on_metas_chunk_call(
+                self._current_metas,
+                dbg_serv_names.DBG_GET_TRACE_DATA_TIMESTAMP,
+                key,
+                rpc_timeout=1)
+            all_timestamps = [ts for ts in all_timestamps_with_none if ts is not None]
+            cached_timestamps, cached_data = self._record_data_cache[key]
+            # if cached_timestamps contains all timestamps in all_timestamps, we can use cache
+            if all(ts in cached_timestamps for ts in all_timestamps):
+                return cached_data, cached_timestamps
+        
         all_data_gzipped: List[Optional[Tuple[int, TraceResult]]] = await self._run_rpc_on_metas_chunk_call(
             self._current_metas,
             dbg_serv_names.DBG_GET_TRACE_DATA,
@@ -477,13 +538,17 @@ class MasterDebugPanel(mui.FlexBox):
         # print("RPC TIME", time.time() - t)
         all_data = []
         all_data_external_evs = []
+        all_timestamps = []
         for data_gzipped in all_data_gzipped:
             if data_gzipped is None:
                 continue
             datas = [gzip.decompress(d) for d in data_gzipped[1].data]
             all_data_external_evs.append(data_gzipped[1].external_events)
             all_data.extend(datas)
-        if debug_use_zip_instead_of_merge:
+            all_timestamps.append(data_gzipped[0])
+        if not all_data:
+            raise ValueError("No trace data found for key", key)
+        if self._debug_use_zip_instead_of_merge:
             zip_ss = io.BytesIO()
             with zipfile.ZipFile(zip_ss, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
                 for i, data in enumerate(all_data):
@@ -494,7 +559,8 @@ class MasterDebugPanel(mui.FlexBox):
                             "traceEvents": data
                         }))
             res = zip_ss.getvalue()
-            return res 
+            self._record_data_cache[key] = (all_timestamps, res)
+            return res, all_timestamps
         else:
             # print("DECOMPRESS TIME", time.time() - t)
             # merge trace events
@@ -515,12 +581,17 @@ class MasterDebugPanel(mui.FlexBox):
             # print("JSON DUMP TIME", time.time() - t)
             res = gzip.compress(res_data)
             # print("ALL GZIP TIME", time.time() - t)
-            return res
+            self._record_data_cache[key] = (all_timestamps, res)
+            return res, all_timestamps
 
     async def _on_dist_perfetto_select(self, value: Any):
-        data = await self.query_record_data_by_key(value)
+        data, timestamps = await self.query_record_data_by_key(value)
         self._dist_trace_data_for_download = data
-        await self._dist_perfetto.set_trace_data(data, value)
+        title = value
+        if timestamps:
+            time_str = datetime.datetime.fromtimestamp(timestamps[0] / 1e9).strftime('%m-%d %H:%M:%S')
+            title = f"{value} ({time_str})"
+        await self._dist_perfetto.set_trace_data(data, title)
 
     async def _on_dist_perfetto_reflesh(self):
         await self._on_tab_change("perfetto")

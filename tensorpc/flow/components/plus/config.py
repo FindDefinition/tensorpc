@@ -661,10 +661,15 @@ class ConfigPanelV2(mui.SimpleControls):
 
 
 class ConfigPanelDialog(mui.Dialog):
-    def __init__(self, callback: Callable[[Any], mui._CORO_NONE]):
-        super().__init__([], self._on_dialog_close)
+    def __init__(self, callback: Callable[[Any], mui._CORO_NONE], children: Optional[mui.LayoutType] = None):
+        self._content = mui.VBox([
+
+        ]).prop(flex=1)
+        
+        super().__init__([] if children is None else children, self._on_dialog_close)
         # save callback to standard flow event handlers to enable reload for user callback
         self.__callback_key = "_config_panel_dialog_ev_handler"
+        self.__layout_key = "__tensorpc_config_dialog_panel"
         self.register_event_handler(self.__callback_key,
                                     callback,
                                     backend_only=True)
@@ -676,9 +681,9 @@ class ConfigPanelDialog(mui.Dialog):
         config_obj = dataclasses.replace(config_obj)
         self._cur_cfg = config_obj
         panel = ConfigPanelV2(config_obj)
-        await self.set_new_layout([
-            panel
-        ], post_ev_creator=lambda: self.update_event(open=True)) 
+        await self.update_childs({
+            self.__layout_key: panel,
+        }, post_ev_creator=lambda: self.update_event(open=True)) 
 
     async def _on_dialog_close(self, ev: mui.DialogCloseEvent):
         assert self._cur_cfg is not None, "shouldn't happen"
@@ -691,4 +696,43 @@ class ConfigPanelDialog(mui.Dialog):
                         await coro
         finally:
             self._cur_cfg = None
-            await self.set_new_layout({}) 
+            await self.remove_childs_by_keys([self.__layout_key])
+
+class ConfigPanelDialogPersist(mui.Dialog):
+    def __init__(self, cfg: Any, callback: Callable[[Any], mui._CORO_NONE], children: Optional[mui.LayoutType] = None):
+        self._config_container = mui.HBox([]).prop(flex=1)
+        super().__init__([], self._on_dialog_close)
+        self.init_add_layout([self._config_container])
+        if children is not None:
+            self.init_add_layout(children)
+        # save callback to standard flow event handlers to enable reload for user callback
+        self.__callback_key = "_config_panel_dialog_ev_handler"
+        self.register_event_handler(self.__callback_key,
+                                    callback,
+                                    backend_only=True)
+        assert dataclasses.is_dataclass(cfg) and not isinstance(cfg, type), "config_obj should be a dataclass"
+
+        self._cur_cfg = cfg
+
+    @property
+    def config(self):
+        return self._cur_cfg
+
+    async def open_config_dialog(self, inplace: bool = True):
+        config_obj = self._cur_cfg
+        if not inplace:
+            config_obj = dataclasses.replace(config_obj)
+            self._cur_cfg = config_obj
+        panel = ConfigPanelV2(config_obj)
+        await self._config_container.set_new_layout([panel], post_ev_creator=lambda: self.update_event(open=True)) 
+
+    async def _on_dialog_close(self, ev: mui.DialogCloseEvent):
+        handlers = self.get_event_handlers(self.__callback_key)
+        try:
+            if handlers is not None and ev.ok:
+                for handler in handlers.handlers:
+                    coro = handler.cb(self._cur_cfg)
+                    if inspect.iscoroutine(coro):
+                        await coro
+        finally:
+            await self._config_container.set_new_layout([])

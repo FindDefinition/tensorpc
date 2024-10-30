@@ -2409,8 +2409,9 @@ class ContainerBase(Component[T_container_props, T_child]):
         }
         """
         self.__check_child_structure_is_none()
+        num_exists = len(self._child_comps)
         if isinstance(layout, Sequence):
-            layout = {str(i): v for i, v in enumerate(layout)}
+            layout = {str(i + num_exists): v for i, v in enumerate(layout)}
         # for k, v in layout.items():
         #     v._flow_name = k
         if self._prevent_add_layout:

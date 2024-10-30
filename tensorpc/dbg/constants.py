@@ -6,7 +6,7 @@ from types import FrameType
 from typing import Any, List, Optional
 from tensorpc.core import typemetas
 from typing_extensions import Annotated, Literal
-
+from tensorpc.core import dataclass_dispatch as pydantic_dataclasses
 
 class DebugServerStatus(enum.IntEnum):
     Idle = 0
@@ -38,7 +38,18 @@ class RecordMode(enum.IntEnum):
 class TracerType(enum.IntEnum):
     VIZTRACER = 0
     PYTORCH = 1
+    # use viztracer for python code and pytorch profiler for pytorch+cuda code
+    # `with_stack` in pytorch profiler must be disabled.
     VIZTRACER_PYTORCH = 2
+
+
+@pydantic_dataclasses.dataclass
+class RecordFilterConfig:
+    include_modules: Optional[List[str]] = None
+    exclude_modules: Optional[List[str]] = None
+    include_files: Optional[List[str]] = None
+    exclude_files: Optional[List[str]] = None
+
 
 @dataclasses.dataclass
 class BackgroundDebugToolsConfig:
@@ -49,15 +60,19 @@ class DebugFrameState:
     frame: Optional[FrameType]
 
 @dataclasses.dataclass
-class TracerConfig:
-    enable: bool
-    # trace until this number of breakpoints is reached
-    breakpoint_count: int = 1 
-    trace_name: Optional[str] = None
-    trace_timestamp: Optional[int] = None
+class TracerUIConfig:
+    breakpoint_count: Annotated[int, typemetas.CommonObject(alias="Breakpoint Count")] = 1
+    trace_name: Annotated[str, typemetas.CommonObject(alias="Trace Name")] = "trace"
     mode: RecordMode = RecordMode.NEXT_BREAKPOINT
+    max_stack_depth: Annotated[int, typemetas.CommonObject(alias="Max Stack Depth")] = 10
     tracer: TracerType = TracerType.VIZTRACER
-    max_stack_depth: int = 10
+
+@dataclasses.dataclass
+class TracerConfig(TracerUIConfig):
+    enable: bool = True
+    # trace until this number of breakpoints is reached
+    trace_timestamp: Optional[int] = None
+    record_filter: RecordFilterConfig = dataclasses.field(default_factory=RecordFilterConfig)
 
 @dataclasses.dataclass
 class TraceMetrics:
@@ -67,14 +82,6 @@ class TraceMetrics:
 class TraceResult:
     data: List[bytes] 
     external_events: List[Any] = dataclasses.field(default_factory=list)
-
-@dataclasses.dataclass
-class TracerUIConfig:
-    breakpoint_count: Annotated[int, typemetas.CommonObject(alias="Breakpoint Count")] = 1
-    trace_name: Annotated[str, typemetas.CommonObject(alias="Trace Name")] = "trace"
-    mode: RecordMode = RecordMode.NEXT_BREAKPOINT
-    max_stack_depth: Annotated[int, typemetas.CommonObject(alias="Max Stack Depth")] = 10
-    tracer: TracerType = TracerType.VIZTRACER
 
 @dataclasses.dataclass
 class DebugMetric:

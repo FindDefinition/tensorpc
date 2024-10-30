@@ -79,14 +79,6 @@ class BreakpointDebugPanel(mui.FlexBox):
                                  justifyContent="flex-end",
                                  paddingRight="4px",
                                  alignItems="center")
-        self.header_container = mui.HBox([
-            self._all_frame_select.prop(flex=1),
-            self.header.prop(flex=2),
-            self.header_actions,
-        ]).prop(
-            paddingLeft="4px",
-            alignItems="center",
-        )
         self.frame_script = FrameScript()
         self._perfetto = chart.Perfetto().prop(width="100%", height="100%")
         custom_tabs = [
@@ -107,6 +99,7 @@ class BreakpointDebugPanel(mui.FlexBox):
                        tooltip="perfetto"),
         ]
         self._frame_obj_preview = FrameObjectPreview()
+
         self._frame_obj_preview.prop(width="100%",
                                      height="100%",
                                      overflow="hidden")
@@ -116,6 +109,18 @@ class BreakpointDebugPanel(mui.FlexBox):
             with_builtins=False,
             custom_tabs=custom_tabs,
             custom_preview=self._frame_obj_preview)
+        filter_input = mui.TextField("filter").prop(
+            valueChangeTarget=(self.tree_viewer.tree.tree, "globalFilter"))
+        self.header_container = mui.HBox([
+            filter_input.prop(flex=1),
+            self._all_frame_select.prop(flex=2),
+            self.header.prop(flex=4),
+            self.header_actions,
+        ]).prop(
+            paddingLeft="4px",
+            alignItems="center",
+        )
+
         self.content_container = mui.VBox([
             self.tree_viewer.prop(flex=1),
         ]).prop(flex=1)
@@ -254,6 +259,7 @@ class BreakpointDebugPanel(mui.FlexBox):
         self._cur_frame_state.frame = None
         await self.frame_script.unmount_frame()
         await self._frame_obj_preview.clear_frame_variable()
+        await self._frame_obj_preview.clear_preview_layouts()
 
     def _get_filtered_local_vars(self, frame: FrameType):
         local_vars = frame.f_locals.copy()
@@ -261,9 +267,10 @@ class BreakpointDebugPanel(mui.FlexBox):
         return local_vars
 
     async def set_frame_object(self, obj: Any, expr: str):
-        if expr.isidentifier():
-            await self._frame_obj_preview.set_frame_variable(expr, obj)
-        await self.tree_viewer.set_obj_preview_layout(obj, header=expr)
+        # if expr.isidentifier():
+        #     await self._frame_obj_preview.set_frame_variable(expr, obj)
+        await self._frame_obj_preview.set_user_selection_frame_variable(expr, obj)
+        # await self.tree_viewer.set_obj_preview_layout(obj, header=expr)
 
     async def set_perfetto_data(self, data: bytes):
         await self._perfetto.set_trace_data(data, title="trace")

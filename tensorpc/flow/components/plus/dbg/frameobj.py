@@ -68,6 +68,8 @@ class FrameObjectPreview(ObjectPreviewBase):
 
     def __init__(self):
         self._obj_preview = ObjectPreview(enable_reload=False)
+        self._obj_user_sel_preview = ObjectPreview(enable_reload=False)
+
         self._obj_original_preview = ObjectPreview(enable_reload=False)
 
         self._obj_simple_tree = BasicObjectTree(use_fast_tree=True)
@@ -90,7 +92,11 @@ class FrameObjectPreview(ObjectPreviewBase):
         tabdefs = [
             mui.TabDef("",
                        FrameObjTabType.Preview.value,
-                       self._obj_preview,
+                       mui.HBox([
+                            self._obj_preview.prop(flex=1),
+                            mui.Divider("vertical"),
+                            self._obj_user_sel_preview.prop(flex=1),
+                       ]).prop(width="100%", height="100%", overflow="hidden"),
                        icon=mui.IconType.Preview,
                        tooltip="preview"),
             mui.TabDef("",
@@ -162,12 +168,21 @@ class FrameObjectPreview(ObjectPreviewBase):
         if appctx.get_app_storage().is_available():
             await self._on_editor_ready() 
 
+    async def set_user_selection_frame_variable(self, var_name: str, value: Any):
+        await self._obj_user_sel_preview.set_obj_preview_layout(value, None, header=f"Vscode: {var_name}")
+
     async def clear_frame_variable(self):
         self._cur_state = None
         await self.send_and_wait(
             self._editor.update_event(
                 value="",
                 path=""))
+
+    async def clear_preview_layouts(self):
+        await self._obj_preview.clear_preview_layout()
+        await self._obj_original_preview.clear_preview_layout()
+        await self._obj_user_sel_preview.clear_preview_layout()
+        await self._obj_simple_tree.update_root_object_dict({}, keep_old=False)
 
     def _determine_convert_code_is_trivial(self, tree: ast.Module):
         for node in tree.body:
