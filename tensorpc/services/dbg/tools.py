@@ -385,13 +385,16 @@ class BackgroundDebugTools:
                                 res = eval(code_segment, global_vars,
                                            local_vars)
                                 await obj.set_frame_object(
-                                    res, code_segment, nodes[-1])
+                                    res, code_segment, nodes[-1], cur_frame)
                             except grpc.aio.AioRpcError as e:
+                                del cur_frame
                                 return
                             except Exception as e:
                                 LOGGER.info(f"Eval code segment failed. exception: {e}")
                                 # print(e)
                                 # traceback.print_exc()
                                 # await obj.send_exception(e)
+                                del cur_frame
                                 return
                     cur_frame = cur_frame.f_back
+            del cur_frame

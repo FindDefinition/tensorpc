@@ -242,10 +242,13 @@ def fold_func_node_with_target_identifier(tree: Union[ast.FunctionDef,
 
 def fold_func_node_with_target_identifier_to_code(
         tree: Union[ast.FunctionDef,
-                    ast.AsyncFunctionDef], target_identifier: str):
-
-    return ast.unparse(
-        fold_func_node_with_target_identifier(tree, target_identifier))
+                    ast.AsyncFunctionDef], target_identifier: str, with_func: bool = True):
+    node = fold_func_node_with_target_identifier(tree, target_identifier)
+    assert isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    if not with_func:
+        return ast.unparse(ast.Module(node.body, []))
+    else:
+        return ast.unparse(node)
 
 
 def split_func_id(

@@ -1772,6 +1772,7 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
             FrontendEventType.EditorSaveState.value,
             FrontendEventType.EditorReady.value,
             FrontendEventType.EditorAction.value,
+            FrontendEventType.EditorCursorSelection.value,
         ]
         super().__init__(UIType.MonacoEditor, MonacoEditorProps, all_evs)
         self.props.language = language

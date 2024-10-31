@@ -269,9 +269,10 @@ class BreakpointDebugPanel(mui.FlexBox):
         local_vars = inspecttools.filter_local_vars(local_vars)
         return local_vars
 
-    async def set_frame_object(self, obj: Any, expr: str, func_node: Optional[Union[ast.FunctionDef, ast.AsyncFunctionDef]] = None):
+    async def set_frame_object(self, obj: Any, expr: str, func_node: Optional[Union[ast.FunctionDef, ast.AsyncFunctionDef]] = None, cur_frame: Optional[FrameType] = None):
         if expr.isidentifier() and func_node is not None:
-            await self._frame_obj_preview.set_folding_code(expr, func_node)
+            await self._frame_obj_preview.set_folding_code(expr, func_node, cur_frame)
+        del cur_frame
         #     await self._frame_obj_preview.set_frame_variable(expr, obj)
         await self._frame_obj_preview.set_user_selection_frame_variable(expr, obj)
         # await self.tree_viewer.set_obj_preview_layout(obj, header=expr)

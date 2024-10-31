@@ -1,7 +1,9 @@
 import ast
 import dataclasses
 import enum
+from functools import partial
 import sys
+from types import FrameType
 from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
                     Sequence, Set, Tuple, Type, TypeVar, Union)
 
@@ -14,9 +16,10 @@ from tensorpc.flow.components import mui, three
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
 from tensorpc.flow.components.plus.styles import get_tight_icon_tab_theme
 from tensorpc.flow.core.objtree import UserObjTreeProtocol
-
+from tensorpc.utils.rich_logging import get_logger
 from ..objview.preview import ObjectPreview, ObjectPreviewBase
 
+LOGGER = get_logger("tensorpc.dbg")
 
 class FrameObjTabType(enum.Enum):
     Preview = "preview"
@@ -63,7 +66,9 @@ def convert(x):
     """
     return code
 
-
+@dataclasses.dataclass
+class _FrameHolder:
+    frame: Optional[FrameType]
 
 class FrameObjectPreview(ObjectPreviewBase):
 
@@ -135,6 +140,8 @@ class FrameObjectPreview(ObjectPreviewBase):
         self.prop(flex=1, flexFlow="row nowrap", alignItems="stretch", border="1px solid #e0e0e0", overflow="hidden")
         self._cur_state: Optional[FrameObjectPreviewState] = None
 
+        self._cur_fold_frame_holder: Optional[_FrameHolder] = None
+
     async def clear_preview_layout(self):
         await self._obj_preview.clear_preview_layout()
 
@@ -177,10 +184,30 @@ class FrameObjectPreview(ObjectPreviewBase):
     async def set_user_selection_frame_variable(self, var_name: str, value: Any):
         await self._obj_user_sel_preview.set_obj_preview_layout(value, None, header=f"Vscode: {var_name}")
 
-    async def set_folding_code(self, var_name: str, node: Union[ast.FunctionDef, ast.AsyncFunctionDef]):
-        fold_code = funcid.fold_func_node_with_target_identifier_to_code(node, var_name)
+    async def _fold_editor_sel(self, ev: mui.MonacoEditorSelectionEvent, frame_holder: _FrameHolder):
+        cur_frame = frame_holder.frame
+        if cur_frame is None:
+            return 
+        try:
+            local_vars = cur_frame.f_locals
+            global_vars = cur_frame.f_globals
+            res = eval(ev.selectedCode, global_vars,
+                        local_vars)
+            await self.set_user_selection_frame_variable(
+                ev.selectedCode, res)
+        except Exception as e:
+            LOGGER.info(f"Eval code segment failed. exception: {e}")
+            return
+
+    async def set_folding_code(self, var_name: str, node: Union[ast.FunctionDef, ast.AsyncFunctionDef], var_frame: Optional[FrameType]):
+        fold_code = funcid.fold_func_node_with_target_identifier_to_code(node, var_name, with_func=False)
+        editor = mui.MonacoEditor(fold_code, "python", "").prop(readOnly=True, width="100%", height="100%")
+        if var_frame is not None:
+            self._cur_fold_frame_holder = _FrameHolder(var_frame)
+            editor.event_editor_cursor_selection.on(partial(self._fold_editor_sel, frame_holder=self._cur_fold_frame_holder))
+            del var_frame
         await self._fold_editor_container.set_new_layout([
-            mui.MonacoEditor(fold_code, "python", "").prop(readOnly=True, width="100%", height="100%")
+            editor
         ])
 
     async def clear_frame_variable(self):
@@ -191,6 +218,11 @@ class FrameObjectPreview(ObjectPreviewBase):
                 path=""))
 
     async def clear_preview_layouts(self):
+        if self._cur_fold_frame_holder is not None:
+            frame = self._cur_fold_frame_holder.frame
+            self._cur_fold_frame_holder.frame = None
+            del frame
+            self._cur_fold_frame_holder = None
         await self._obj_preview.clear_preview_layout()
         await self._obj_original_preview.clear_preview_layout()
         await self._obj_user_sel_preview.clear_preview_layout()
