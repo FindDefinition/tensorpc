@@ -249,7 +249,8 @@ class BasicObjectTree(mui.FlexBox):
                  fixed_size: bool = False,
                  custom_tree_handler: Optional[CustomTreeItemHandler] = None,
                  use_init_as_root: bool = False,
-                 drag_userdata: Any = None) -> None:
+                 drag_userdata: Any = None,
+                 clear_data_when_unmount: bool = False) -> None:
         if use_fast_tree:
             self.tree = mui.TanstackJsonLikeTree()
         else:
@@ -279,17 +280,12 @@ class BasicObjectTree(mui.FlexBox):
         self.limit = limit
         if init is None:
             self.root = {}
-            # self.tree.props.tree = mui.JsonLikeNode(
-            #     _ROOT, _ROOT, mui.JsonLikeType.Dict.value)
         else:
             if use_init_as_root:
                 self.root = init
             else:
                 self.root = {_DEFAULT_OBJ_NAME: init}
-        # self.tree.props.tree = _get_root_tree(self.root, self._valid_checker,
-        #                                       _ROOT, self._obj_meta_cache)
-        # print(self.tree.props.tree)
-        # inspect.isbuiltin()
+        self._clear_data_when_unmount = clear_data_when_unmount
         self.tree.register_event_handler(
             FrontendEventType.TreeLazyExpand.value, self._on_expand)
         self.tree.register_event_handler(
@@ -323,6 +319,13 @@ class BasicObjectTree(mui.FlexBox):
         self.tree.props.tree = root_node
         await self.tree.send_and_wait(
             self.tree.update_event(tree=self.tree.props.tree))
+
+    @mark_will_unmount
+    async def _on_unmount(self):
+        # remove all data reference to avoid memory problem
+        if self._clear_data_when_unmount:
+            self.root.clear()
+            self.tree.props.tree = mui.JsonLikeNode.create_dummy()
 
     @property
     def _objinspect_root(self):
@@ -936,7 +939,7 @@ class ObjectTree(BasicObjectTree):
             self._on_obs_func_change)
 
     @mark_will_unmount
-    def _on_unmount(self):
+    async def _on_unmount(self):
         appctx.get_app().unregister_app_special_event_handler(
             AppSpecialEventType.ObservedFunctionChange,
             self._on_obs_func_change)

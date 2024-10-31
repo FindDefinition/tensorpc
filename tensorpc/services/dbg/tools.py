@@ -365,10 +365,10 @@ class BackgroundDebugTools:
         tree = self._ast_cache.getast(path)
         assert isinstance(tree, ast.Module)
         # print(tree)
-        res = find_toplevel_func_node_container_by_lineno(tree, code_range[0])
+        nodes = find_toplevel_func_node_container_by_lineno(tree, code_range[0])
         # print(res)
-        if res is not None:
-            node_qname = ".".join([n.name for n in res])
+        if nodes is not None:
+            node_qname = ".".join([n.name for n in nodes])
             cur_frame: Optional[FrameType] = self._frame
             with enter_app_context(app):
                 while cur_frame is not None:
@@ -385,7 +385,7 @@ class BackgroundDebugTools:
                                 res = eval(code_segment, global_vars,
                                            local_vars)
                                 await obj.set_frame_object(
-                                    res, code_segment)
+                                    res, code_segment, nodes[-1])
                             except grpc.aio.AioRpcError as e:
                                 return
                             except Exception as e:

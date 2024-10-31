@@ -24,6 +24,10 @@ from aiohttp import streamer
 from tensorpc.core.serviceunit import ServiceEventType
 from .aiohttp_file import FileProxy, FileProxyResponse
 
+from tensorpc.utils.rich_logging import get_logger
+
+LOGGER = get_logger("tensorpc.http")
+
 class GrpcFileProxy(FileProxy):
     def __init__(self, sc: ServiceCore,node_uid: str, resource_key: str, comp_id: Optional[str],  metadata: defs.FileResource) -> None:
         self._sc = sc
@@ -135,7 +139,7 @@ class AiohttpWebsocketHandler(WebsocketHandler):
 
     async def handle_new_connection_aiohttp(self, request):
         client_id = request.match_info.get('client_id')
-        print("NEW CONN", client_id, request)
+        LOGGER.warning("New Websocket %s", client_id)
         service_core = self.service_core
         ws = web.WebSocketResponse()
         await ws.prepare(request)
@@ -146,7 +150,7 @@ class AiohttpWebsocketHandler(WebsocketHandler):
 
     async def handle_new_backup_connection_aiohttp(self, request):
         client_id = request.match_info.get('client_id')
-        print("NEW BACKUP CONN", client_id, request)
+        LOGGER.warning("New Backup Websocket %s", client_id)
         service_core = self.service_core
         ws = web.WebSocketResponse()
         await ws.prepare(request)
@@ -381,6 +385,7 @@ async def serve_service_core_task(server_core: ProtobufServiceCore,
         app.router.add_get(ws_name, ws_service.handle_new_connection_aiohttp)
         app.router.add_get(ws_backup_name,
                            ws_service.handle_new_backup_connection_aiohttp)
+        LOGGER.warning("server started at {}".format(port))
 
         ssl_context = None
         if ssl_key_path != "" and ssl_key_path != "":

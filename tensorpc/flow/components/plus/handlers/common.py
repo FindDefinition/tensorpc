@@ -11,6 +11,7 @@ from tensorpc.flow import appctx
 from tensorpc.flow.components import mui
 from tensorpc.flow.components.plus.canvas import SimpleCanvas
 from tensorpc.flow.components.plus.config import ConfigPanelV2
+from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
 
 from ..common import CommonQualNames
 from ..core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler, DataClassesType
@@ -257,7 +258,7 @@ class DataclassesHandler(ObjectPreviewHandler):
 
     async def bind(self, obj: Any, uid: Optional[str] = None):
         # for uncontrolled component, use react_key to force remount.
-        # TODO currently no way to update if obj dataclass def is changed with same uid.
+        # FIXME currently no way to update if obj dataclass def is changed with same uid.
         panel = ConfigPanelV2(obj).prop(reactKey=uid)
         await self.cfg_ctrl_container.set_new_layout([panel])
 
@@ -275,17 +276,19 @@ class DefaultHandler(ObjectPreviewHandler):
         self.data_print = mui.Typography("").prop(fontFamily="monospace",
                                                   fontSize="12px",
                                                   wordBreak="break-word")
-        layout = [
-            self.title.prop(fontSize="14px", fontFamily="monospace"),
-            self.path.prop(fontSize="14px", fontFamily="monospace"),
-            self.tags,
-            mui.Divider().prop(padding="3px"),
-            mui.HBox([
-                mui.Button("print", self._on_print),
-            ]),
-            self.data_print,
-        ]
+        self._simple_tree = BasicObjectTree(use_fast_tree=False, clear_data_when_unmount=True)
+        layout = {
+            "title": self.title.prop(fontSize="14px", fontFamily="monospace"),
+            "path": self.path.prop(fontSize="14px", fontFamily="monospace"),
+            "tags": self.tags,
+            "divider": mui.Divider().prop(padding="3px"),
+            "buttons": mui.HBox([
+                mui.Button("print", self._on_print).prop(size="small"),
+                mui.Button("tree", self._on_tree_print).prop(size="small"),
 
+            ]),
+            "data": self.data_print,
+        }
         super().__init__(layout)
         self.prop(flexDirection="column")
         self.obj: Any = np.zeros([1])
@@ -294,11 +297,24 @@ class DefaultHandler(ObjectPreviewHandler):
         string = str(self.obj)
         if len(string) > _MAX_STRING_IN_DETAIL:
             string = string[:_MAX_STRING_IN_DETAIL] + "..."
-        await self.data_print.write(string)
+        self.data_print.props.value = string
+        await self.update_childs({
+            "data": self.data_print
+        })
+        # await self.data_print.write(string)
+
+    async def _on_tree_print(self):
+        await self.update_childs({
+            "data": self._simple_tree
+        })
+        await self._simple_tree.set_object(self.obj)
 
     async def bind(self, obj: Any, uid: Optional[str] = None):
         # bind np object, update all metadata
         self.obj = obj
+        await self.update_childs({
+            "data": self.data_print
+        })
         ev = self.data_print.update_event(value="")
         ev += self.title.update_event(value=get_qualname_of_type(type(obj)))
         try:

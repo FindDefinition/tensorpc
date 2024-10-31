@@ -30,7 +30,7 @@ from tensorpc.core.serviceunit import ServiceEventType
 class Simple:
 
     def __init__(self) -> None:
-        print("???????????")
+        pass
 
     def echo(self, x):
         return x

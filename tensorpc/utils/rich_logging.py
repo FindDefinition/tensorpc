@@ -24,7 +24,7 @@ class ModifiedRichHandler(RichHandler):
                     record.lineno = path_lineno[1]
         super().emit(record)
 
-def get_logger(name: str, level: str = "WARNING") -> logging.Logger:
+def get_logger(name: str, level: str = "WARNING", show_path: bool = True) -> logging.Logger:
     logger = logging.getLogger(name)
     if logger.handlers:
         for handler in logger.handlers:
@@ -34,7 +34,7 @@ def get_logger(name: str, level: str = "WARNING") -> logging.Logger:
     logger.setLevel(level)
     formatter = logging.Formatter("%(name)s|%(message)s")
     if TENSORPC_ENABLE_RICH_LOG:
-        rh = ModifiedRichHandler(rich_tracebacks=True)
+        rh = ModifiedRichHandler(rich_tracebacks=True, show_path=show_path)
         rh.setFormatter(formatter)
         logger.addHandler(rh)
     else:

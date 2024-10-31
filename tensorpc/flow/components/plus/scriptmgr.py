@@ -156,10 +156,10 @@ class ScriptManager(mui.FlexBox):
                padding="0 3px 0 3px",
                **CommonOptions.AddableAutocomplete)
         self.langs = mui.ToggleButtonGroup([
-            mui.ToggleButton("cpp", name="CPP"),
-            mui.ToggleButton("python", name="PY"),
-            mui.ToggleButton("bash", name="BASH"),
-            mui.ToggleButton("app", name="APP"),
+            mui.GroupToggleButtonDef("cpp", name="CPP"),
+            mui.GroupToggleButtonDef("python", name="PY"),
+            mui.GroupToggleButtonDef("bash", name="BASH"),
+            mui.GroupToggleButtonDef("app", name="APP"),
         ], True, self._on_lang_select).prop(value="python",
                                             enforceValueSet=True)
         # self._enable_save_watch = mui.ToggleButton(

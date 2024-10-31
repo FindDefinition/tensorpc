@@ -61,11 +61,13 @@ class DebugFrameState:
 
 @dataclasses.dataclass
 class TracerUIConfig:
-    breakpoint_count: Annotated[int, typemetas.CommonObject(alias="Breakpoint Count")] = 1
+    tracer: TracerType = TracerType.VIZTRACER
     trace_name: Annotated[str, typemetas.CommonObject(alias="Trace Name")] = "trace"
     mode: RecordMode = RecordMode.NEXT_BREAKPOINT
-    max_stack_depth: Annotated[int, typemetas.CommonObject(alias="Max Stack Depth")] = 10
-    tracer: TracerType = TracerType.VIZTRACER
+    breakpoint_count: Annotated[int, typemetas.RangedInt(1, 100, alias="Breakpoint Count")] = 1
+    max_stack_depth: Annotated[int, typemetas.RangedInt(1, 50, alias="Max Stack Depth")] = 10
+    min_duration: Annotated[float, typemetas.RangedInt(0, 5000, alias="Min Duration (us, VizTracer)")] = 0
+    profile_memory: Annotated[bool, typemetas.CommonObject(alias="Profile Memory (PyTorch)")] = False
 
 @dataclasses.dataclass
 class TracerConfig(TracerUIConfig):

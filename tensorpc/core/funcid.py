@@ -1,4 +1,5 @@
 import ast
+import copy
 from typing import Any, Callable, Deque, Dict, List, Optional, Tuple, Union
 import tokenize
 import io
@@ -89,6 +90,7 @@ def find_toplevel_func_node_by_lineno(tree: ast.Module, lineno: int):
 
     return None
 
+
 def find_toplevel_func_node_container_by_lineno(tree: ast.Module, lineno: int):
     # TODO should we check try block?
     from collections import deque
@@ -109,7 +111,8 @@ def find_toplevel_func_node_container_by_lineno(tree: ast.Module, lineno: int):
                 if func_end_lineno is None:
                     in_range = (func_lineno <= lineno)
                 else:
-                    in_range = (func_lineno <= lineno) and (lineno <= func_end_lineno) 
+                    in_range = (func_lineno <= lineno) and (lineno
+                                                            <= func_end_lineno)
                 if in_range:
                     return [*cur_parent_ns, node]
                 else:
@@ -118,6 +121,132 @@ def find_toplevel_func_node_container_by_lineno(tree: ast.Module, lineno: int):
                 todo.append(([*node.body], cur_parent_ns))
                 todo.append(([*node.orelse], cur_parent_ns))
     return None
+
+
+class _NodeNameAccessor(ast.NodeVisitor):
+    """remove all nodes except node contains target identifier.
+    """
+
+    def __init__(self, target_identifier: str):
+        self._target_identifier = target_identifier
+        self._name_node = None
+
+    def visit_Name(self, node):
+        if node.id == self._target_identifier:
+            self._name_node = node
+
+
+class NodeFoldingTransformer(ast.NodeTransformer):
+    """remove all nodes except node contains target identifier.
+    remove all nested func/class/async func def
+    """
+
+    def __init__(self, root_func_node: Union[ast.FunctionDef,
+                                             ast.AsyncFunctionDef],
+                 target_identifier: str):
+        self._target_identifier = target_identifier
+        self._root_func_node = root_func_node
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> Any:
+        self.generic_visit(node)
+        if node is self._root_func_node:
+            return node
+        return None
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Any:
+        self.generic_visit(node)
+        if node is self._root_func_node:
+            return node
+        return None
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> Any:
+        self.generic_visit(node)
+        return None
+
+    def _only_keep_node_contains_target_identifier(self, node: ast.AST):
+        self.generic_visit(node)
+        accessor = _NodeNameAccessor(self._target_identifier)
+        accessor.visit(node)
+        if accessor._name_node is not None:
+            return node
+        return None
+
+    def visit_Return(self, node: ast.Return) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_Assign(self, node: ast.Assign) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_Expr(self, node: ast.Expr) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_If(self, node: ast.If) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_For(self, node: ast.For) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_While(self, node: ast.While) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_With(self, node: ast.With) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_Try(self, node: ast.Try) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_AugAssign(self, node: ast.AST) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_TypeAlias(self, node: ast.AST) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_TryStar(self, node: ast.AST) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_Match(self, node: ast.AST) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_Raise(self, node: ast.Raise) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_Import(self, node: ast.Import) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> Any:
+        return self._only_keep_node_contains_target_identifier(node)
+
+    def visit_Continue(self, node: ast.Continue) -> Any:
+        return None
+
+
+def fold_func_node_with_target_identifier(tree: Union[ast.FunctionDef,
+                                                      ast.AsyncFunctionDef],
+                                          target_identifier: str):
+    tree = copy.deepcopy(tree)
+    transformer = NodeFoldingTransformer(tree, target_identifier)
+    return ast.fix_missing_locations(transformer.visit(tree))
+
+
+def fold_func_node_with_target_identifier_to_code(
+        tree: Union[ast.FunctionDef,
+                    ast.AsyncFunctionDef], target_identifier: str):
+
+    return ast.unparse(
+        fold_func_node_with_target_identifier(tree, target_identifier))
+
 
 def split_func_id(
         fid: str,
@@ -235,3 +364,52 @@ def get_body_blocks_from_code(code: str, autorun_block_symbol: str = ""):
         body_code_blocks = [body_code]
 
     return body_code_blocks
+
+
+def _main():
+
+    code = """
+def find_toplevel_func_node_container_by_lineno(tree: ast.Module, lineno: int):
+    # TODO should we check try block?
+    from collections import deque
+    todo: Deque[Tuple[List[ast.AST],
+                      List[ast.ClassDef]]] = deque([([*tree.body], [])])
+    while todo:
+        body, cur_parent_ns = todo.popleft()
+        for node in body:
+            if isinstance(node, (ast.ClassDef)):
+                todo.append(([*node.body], [*cur_parent_ns, node]))
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                func_lineno = node.lineno
+                deco_list = node.decorator_list
+                # fix lineno to match inspect
+                if len(deco_list) > 0:
+                    func_lineno = min([d.lineno for d in deco_list])
+                func_end_lineno = node.end_lineno
+                if func_end_lineno is None:
+                    in_range = (func_lineno <= lineno)
+                else:
+                    in_range = (func_lineno <= lineno) and (lineno <= func_end_lineno) 
+                if in_range:
+                    return [*cur_parent_ns, node]
+                else:
+                    print("WTFWTF")
+                    continue
+            elif isinstance(node, (ast.If, )):
+                todo.append(([*node.body], cur_parent_ns))
+                todo.append(([*node.orelse], cur_parent_ns))
+    return None
+
+"""
+
+    code2 = code
+    tree = ast.parse(code2)
+    node = tree.body[0]
+    assert isinstance(node, ast.FunctionDef)
+    print(
+        fold_func_node_with_target_identifier_to_code(node,
+                                                      "node"))
+
+
+if __name__ == "__main__":
+    _main()

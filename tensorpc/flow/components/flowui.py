@@ -16,7 +16,7 @@ import contextlib
 import contextvars
 import enum
 from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Dict, Generic, Iterable,
-                    List, Optional, Set, Tuple, Type, TypeVar, Union)
+                    List, Optional, Sequence, Set, Tuple, Type, TypeVar, Union)
 
 from typing_extensions import Literal, TypeAlias
 
@@ -224,6 +224,7 @@ class FlowControlType(enum.IntEnum):
     UpdateNodeStyle = 7
     DeleteEdgeByIds = 8
     UpdatePaneContextMenuItem = 9
+    SetFlowAndDagreLayout = 10
 
 @dataclasses.dataclass
 class DagreLayoutOptions:
@@ -571,6 +572,40 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         }
         return await self.send_and_wait(self.create_comp_event(res))
 
+    async def set_flow_and_do_dagre_layout(self,
+                              nodes: List[Node],
+                              edges: List[Edge],
+                              options: Optional[DagreLayoutOptions] = None,
+                              fit_view: bool = False):
+        """Inorder to handle init static flow layout, you should use this function to set flow and do dagre layout.
+        """
+        new_layout: Dict[str, Component] = {}
+        for node in nodes:
+            assert node.id not in self._id_to_node, f"node id {node.id} already exists"
+            comp = node.get_component()
+            if comp is not None:
+                new_layout[node.id] = comp
+        self.childs_complex.nodes = nodes
+        self.childs_complex.edges = edges
+        self._update_graph_data()
+        if options is None:
+            options = DagreLayoutOptions()
+
+        ev_new_node = {
+            "type": FlowControlType.SetFlowAndDagreLayout,
+            "nodes": nodes,
+            "edges": edges,
+            "graphOptions": options,
+            "fitView": fit_view,
+        }
+        if new_layout:
+            return await self.update_childs(new_layout,
+                                            update_child_complex=False,
+                                            post_ev_creator=lambda: self.
+                                            create_comp_event(ev_new_node))
+        else:
+            return await self.send_and_wait(self.create_comp_event(ev_new_node))
+
     async def fit_view(self):
         res = {
             "type": FlowControlType.FitView,
@@ -905,7 +940,7 @@ class NodeToolbarProps(ContainerBaseProps):
 class NodeToolbar(MUIContainerBase[NodeToolbarProps, MUIComponentType]):
 
     def __init__(self, children: LayoutType) -> None:
-        if isinstance(children, list):
+        if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.FlowNodeToolBar,
                          NodeToolbarProps,

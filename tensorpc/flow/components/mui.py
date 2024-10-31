@@ -571,6 +571,7 @@ class IconType(enum.IntEnum):
     Upload = 65
     Link = 66
     LinkOff = 67
+    Search = 68
 
 
 @dataclasses.dataclass
@@ -1002,9 +1003,16 @@ class ToggleButton(MUIComponentBase[ToggleButtonProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+@dataclasses.dataclass
+class GroupToggleButtonDef:
+    value: ValueType
+    name: str = ""
+    icon: Union[IconType, str, Undefined] = undefined
+    disabled: Union[bool, Undefined] = undefined
 
 @dataclasses.dataclass
 class ToggleButtonGroupProps(MUIFlexBoxProps):
+    buttons: List["GroupToggleButtonDef"] = dataclasses.field(default_factory=list)
     value: Optional[Union[ValueType, List[ValueType]]] = None
     orientation: Union[Literal["horizontal", "vertical"],
                        Undefined] = undefined
@@ -1015,44 +1023,35 @@ class ToggleButtonGroupProps(MUIFlexBoxProps):
     size: Union[Literal["small", "medium", "large"], Undefined] = undefined
     nameOrIcons: List[Tuple[bool, ValueType]] = dataclasses.field(
         default_factory=list)
-    values: List[ValueType] = dataclasses.field(default_factory=list)
     iconSize: Union[Literal["small", "medium", "large"], Undefined] = undefined
     iconFontSize: Union[ValueType, Undefined] = undefined
     enforceValueSet: Union[bool, Undefined] = undefined
 
-
-class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
-                                         ToggleButton]):
+class ToggleButtonGroup(MUIComponentBase[ToggleButtonGroupProps]):
 
     def __init__(
             self,
-            children: Union[List[ToggleButton], Dict[str, ToggleButton]],
+            button_defs: List[GroupToggleButtonDef],
             exclusive: bool = True,
             callback: Optional[
                 Callable[[Optional[Union[ValueType, List[ValueType]]]],
                          _CORO_NONE]] = None,
             value: Optional[Union[ValueType, List[ValueType]]] = None) -> None:
-        if isinstance(children, Sequence):
-            children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.ToggleButtonGroup,
                          ToggleButtonGroupProps,
-                         children,
                          allowed_events=[FrontendEventType.Change.value])
+        values: List[ValueType] = []
         values_set: Set[ValueType] = set()
-        for v in children.values():
-            assert isinstance(v,
-                              ToggleButton), "all childs must be toggle button"
-            if not isinstance(v.props.icon, Undefined):
-
-                self.props.nameOrIcons.append((True, v.props.icon))
-            else:
-                self.props.nameOrIcons.append((False, v.props.name))
-            values_set.add(v.props.value)
-            self.props.values.append(v.props.value)
+        for v in button_defs:
+            assert isinstance(v, GroupToggleButtonDef), "all childs must be GroupToggleButtonDef"
+            values_set.add(v.value)
+            values.append(v.value)
         assert len(values_set) == len(
-            self.props.values), "values must be unique"
+            values), "values must be unique"
         self.props.value = value
         self.props.exclusive = exclusive
+        self.props.buttons = button_defs
+
         self.callback = callback
         if not exclusive:
             if value is not None:
@@ -1069,18 +1068,17 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
         self.event_change = self._create_event_slot(FrontendEventType.Change)
 
     async def update_items(self,
-                           btns: List[ToggleButton],
+                           btns: List[GroupToggleButtonDef],
                            value: Optional[Union[ValueType,
                                                  List[ValueType]]] = None):
-        name_or_icons = []
         values = []
+        values_set: Set[ValueType] = set()
         for v in btns:
-            assert isinstance(v, ToggleButton), "all childs must be button"
-            if not isinstance(v.props.icon, Undefined):
-                self.props.nameOrIcons.append((True, v.props.icon))
-            else:
-                self.props.nameOrIcons.append((False, v.props.name))
-            values.append(v.props.value)
+            assert isinstance(v, GroupToggleButtonDef), "all childs must be GroupToggleButtonDef"
+            values_set.add(v.value)
+            values.append(v.value)
+        assert len(values_set) == len(
+            values), "values must be unique"
         if value is None:
             assert self.props.value in values
             value = self.props.value
@@ -1088,8 +1086,7 @@ class ToggleButtonGroup(MUIContainerBase[ToggleButtonGroupProps,
             assert value in values
         await self.send_and_wait(
             self.update_event(value=value,
-                              nameOrIcons=name_or_icons,
-                              values=values))
+                              buttons=btns))
 
     @property
     def prop(self):
@@ -1745,6 +1742,25 @@ class MonacoEditorSaveEvent:
     viewState: Any
     userdata: Optional[Any] = None
 
+@dataclasses.dataclass
+class MonacoEditorSelection:
+    startLineNumber: int
+    startColumn: int
+    endLineNumber: int
+    endColumn: int
+    selectionStartLineNumber: int 
+    selectionStartColumn: int 
+    positionLineNumber: int 
+    positionColumn: int 
+
+
+
+@dataclasses.dataclass
+class MonacoEditorSelectionEvent:
+    selections: List[MonacoEditorSelection]
+    selectedCode: str
+    source: str
+
 
 class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
 
@@ -1777,6 +1793,9 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         self.event_editor_action = self._create_event_slot(
             FrontendEventType.EditorAction)
         self.event_editor_save.on(self._default_on_editor_save)
+        self.event_editor_cursor_selection = self._create_event_slot(
+            FrontendEventType.EditorCursorSelection,
+            converter=lambda x: MonacoEditorSelectionEvent(**x))
 
     def state_change_callback(
             self,
@@ -2662,7 +2681,7 @@ class BlenderSliderProps(MUIComponentBaseProps):
     debounce: Union[Undefined, NumberType] = undefined
     infSlider: Union[Undefined, bool] = undefined
     showControlButton: Union[Undefined, bool] = undefined
-    color: Union[Undefined, str] = undefined
+    idleColor: Union[Undefined, str] = undefined
     hoverColor: Union[Undefined, str] = undefined
     clickColor: Union[Undefined, str] = undefined
     indicatorColor: Union[Undefined, str] = undefined
@@ -2674,23 +2693,34 @@ class BlenderSliderProps(MUIComponentBaseProps):
 class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
 
     def __init__(self,
-                 begin: NumberType,
-                 end: NumberType,
+                 begin: Optional[NumberType] = None,
+                 end: Optional[NumberType] = None,
                  step: Optional[NumberType] = None,
                  callback: Optional[Callable[[NumberType], _CORO_NONE]] = None,
                  init_value: Optional[NumberType] = None) -> None:
         super().__init__(UIType.BlenderSlider, BlenderSliderProps,
                          [FrontendEventType.Change.value])
-        if isinstance(begin, int) and isinstance(end, int):
-            if step is None:
-                step = 1
-        assert step is not None, "step must be specified for float type"
+        is_inf_slider = begin is None or end is None
+        if not is_inf_slider:
+            assert end is not None and begin is not None
+            if isinstance(begin, int) and isinstance(end, int):
+                if step is None:
+                    step = 1
+            assert step is not None, "step must be specified for float type"
+            assert end >= begin  #  and step <= end - begin
+            self.props.ranges = (begin, end, step)
+            if init_value is None:
+                init_value = begin
+            self.props.value = init_value
+        else:
+            begin = 0
+            end = 10
+            # inf slider 
+            assert init_value is not None and step is not None, "you must specify `init_value` and `step` if you use infinite."
+            self.props.value = init_value
+            self.props.infSlider = True
+
         self.callback = callback
-        assert end >= begin  #  and step <= end - begin
-        self.props.ranges = (begin, end, step)
-        if init_value is None:
-            init_value = begin
-        self.props.value = init_value
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
@@ -2996,7 +3026,6 @@ class TypographyProps(MUIComponentBaseProps):
     gutterBottom: Union[bool, Undefined] = undefined
     noWrap: Union[bool, Undefined] = undefined
     variant: Union[_TypographyVarient, Undefined] = undefined
-    paragraph: Union[bool, Undefined] = undefined
     muiColor: Union[_StdColorNoDefault, Undefined] = undefined
     value: Union[str, NumberType] = ""
     # if value is number, will apply this to number
@@ -4045,10 +4074,6 @@ class JsonViewer(MUIComponentBase[JsonViewerProps]):
         return self._update_props_base(propcls)
 
 
-def _default_json_node():
-    return JsonLikeNode(UniqueTreeIdForTree.from_parts(["root"]), "root",
-                        JsonLikeType.Object.value, "Object", undefined, 0, [])
-
 
 class _TreeControlType(enum.IntEnum):
     UpdateSubTree = 0
@@ -4057,7 +4082,7 @@ class _TreeControlType(enum.IntEnum):
 
 @dataclasses.dataclass
 class JsonLikeTreePropsBase(MUIFlexBoxProps):
-    tree: JsonLikeNode = dataclasses.field(default_factory=_default_json_node)
+    tree: JsonLikeNode = dataclasses.field(default_factory=JsonLikeNode.create_dummy)
     multiSelect: Union[Undefined, bool] = undefined
     disableSelection: Union[Undefined, bool] = undefined
     ignoreRoot: Union[Undefined, bool] = undefined
@@ -4092,7 +4117,7 @@ class JsonLikeTreeBase(MUIComponentBase[T_tview_base_props]):
                  prop_cls: Type[T_tview_base_props],
                  tree: Optional[JsonLikeNode] = None) -> None:
         if tree is None:
-            tree = _default_json_node()
+            tree = JsonLikeNode.create_dummy()
         tview_events = [
             FrontendEventType.Change.value,
             FrontendEventType.TreeItemSelectChange.value,

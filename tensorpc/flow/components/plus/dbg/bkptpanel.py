@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import dataclasses
 import enum
@@ -109,6 +110,8 @@ class BreakpointDebugPanel(mui.FlexBox):
             with_builtins=False,
             custom_tabs=custom_tabs,
             custom_preview=self._frame_obj_preview)
+        if isinstance(self.tree_viewer.tree.tree, mui.TanstackJsonLikeTree):
+            self.tree_viewer.tree.tree.prop(maxLeafRowFilterDepth=0)
         filter_input = mui.TextField("filter").prop(
             valueChangeTarget=(self.tree_viewer.tree.tree, "globalFilter"))
         self.header_container = mui.HBox([
@@ -266,8 +269,9 @@ class BreakpointDebugPanel(mui.FlexBox):
         local_vars = inspecttools.filter_local_vars(local_vars)
         return local_vars
 
-    async def set_frame_object(self, obj: Any, expr: str):
-        # if expr.isidentifier():
+    async def set_frame_object(self, obj: Any, expr: str, func_node: Optional[Union[ast.FunctionDef, ast.AsyncFunctionDef]] = None):
+        if expr.isidentifier() and func_node is not None:
+            await self._frame_obj_preview.set_folding_code(expr, func_node)
         #     await self._frame_obj_preview.set_frame_variable(expr, obj)
         await self._frame_obj_preview.set_user_selection_frame_variable(expr, obj)
         # await self.tree_viewer.set_obj_preview_layout(obj, header=expr)

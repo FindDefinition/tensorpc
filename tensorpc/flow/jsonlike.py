@@ -595,7 +595,11 @@ class JsonLikeNode:
                 res.append(node)
                 count += this_cnt
         return res
-
+    
+    @classmethod 
+    def create_dummy(cls):
+        return cls(UniqueTreeIdForTree.from_parts(["root"]), "root",
+                    JsonLikeType.Object.value, "Object", undefined, 0, [])
 
 def parse_obj_to_jsonlike(obj, name: str, id: UniqueTreeIdForTree):
     obj_type = type(obj)

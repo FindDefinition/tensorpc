@@ -5,7 +5,6 @@ from tensorpc.flow.components import mui, three
 from tensorpc.flow.components.plus.arraycommon import can_cast_to_np_array, try_cast_to_np_array
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
 import numpy as np 
-import cv2 
 from tensorpc.flow import appctx, marker
 
 def _smoothstep(x, x_min: float=0, x_max: float=1):
@@ -30,6 +29,7 @@ class Image(mui.Image):
                 with open(arr_or_path, "rb") as f:
                     self.prop(image=f.read())
             else:
+                import cv2 
                 img = cv2.imread(arr_or_path)
                 self.prop(image=self.encode_image_bytes(img))
         else:

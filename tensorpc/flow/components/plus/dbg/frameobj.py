@@ -6,6 +6,7 @@ from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
                     Sequence, Set, Tuple, Type, TypeVar, Union)
 
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
+from tensorpc.core import funcid
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.dbg.core.frame_id import VariableMetaType, get_storage_frame_path
 from tensorpc.flow import appctx
@@ -72,6 +73,8 @@ class FrameObjectPreview(ObjectPreviewBase):
 
         self._obj_original_preview = ObjectPreview(enable_reload=False)
 
+        self._fold_editor_container = mui.HBox([]).prop(flex=1)
+
         self._obj_simple_tree = BasicObjectTree(use_fast_tree=True)
         self._obj_simple_tree.prop(minHeight=0,
                         minWidth=0,
@@ -96,6 +99,9 @@ class FrameObjectPreview(ObjectPreviewBase):
                             self._obj_preview.prop(flex=1),
                             mui.Divider("vertical"),
                             self._obj_user_sel_preview.prop(flex=1),
+                            mui.Divider("vertical"),
+                            self._fold_editor_container.prop(flex=1),
+
                        ]).prop(width="100%", height="100%", overflow="hidden"),
                        icon=mui.IconType.Preview,
                        tooltip="preview"),
@@ -171,6 +177,12 @@ class FrameObjectPreview(ObjectPreviewBase):
     async def set_user_selection_frame_variable(self, var_name: str, value: Any):
         await self._obj_user_sel_preview.set_obj_preview_layout(value, None, header=f"Vscode: {var_name}")
 
+    async def set_folding_code(self, var_name: str, node: Union[ast.FunctionDef, ast.AsyncFunctionDef]):
+        fold_code = funcid.fold_func_node_with_target_identifier_to_code(node, var_name)
+        await self._fold_editor_container.set_new_layout([
+            mui.MonacoEditor(fold_code, "python", "").prop(readOnly=True, width="100%", height="100%")
+        ])
+
     async def clear_frame_variable(self):
         self._cur_state = None
         await self.send_and_wait(
@@ -183,6 +195,7 @@ class FrameObjectPreview(ObjectPreviewBase):
         await self._obj_original_preview.clear_preview_layout()
         await self._obj_user_sel_preview.clear_preview_layout()
         await self._obj_simple_tree.update_root_object_dict({}, keep_old=False)
+        await self._fold_editor_container.set_new_layout([])
 
     def _determine_convert_code_is_trivial(self, tree: ast.Module):
         for node in tree.body:

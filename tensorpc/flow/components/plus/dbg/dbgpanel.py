@@ -72,7 +72,8 @@ class DebugServerProcessMeta:
         return f"localhost:{self.port}"
 
 
-_INIT_YAML_CONFIG = """include_modules:
+_INIT_YAML_CONFIG = """# e.g. add "torch.nn" to trace all submodules of torch.nn only
+include_modules:
 
 exclude_modules:
 
@@ -141,9 +142,9 @@ class MasterDebugPanel(mui.FlexBox):
         ])
         self._remote_server_discover_lst = mui.DataFlexBox(
             remote_server_item, [])
-        filter_input = mui.TextField("filter").prop(
+        filter_input = mui.Input("filter").prop(
             valueChangeTarget=(self._remote_server_discover_lst, "filter"))
-        filter_input.prop(size="small", muiMargin="dense")
+        filter_input.prop(muiMargin="dense", paddingLeft="5px")
         self._remote_server_discover_lst.prop(filterKey="server_id",
                                               variant="list",
                                               dense=True,
@@ -179,7 +180,7 @@ class MasterDebugPanel(mui.FlexBox):
         self._trace_launch_dialog = ConfigPanelDialogPersist(
             TracerUIConfig(), self._on_trace_launch, children=[
                 mui.Divider(),
-                mui.Typography("Record Filter (Valid For Viztracer)").prop(variant="body1"),
+                mui.Typography("Record Filter (YAML, For Viztracer)").prop(variant="body1"),
                 mui.Divider(),
                 self._trace_yaml_cfg_editor
             ]).prop(okLabel="Launch Record", title="Record Launch Config", dividers=True)

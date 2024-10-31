@@ -26,14 +26,15 @@ from tensorpc.protos_export import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos_export import rpc_message_pb2
 
 from tensorpc.protos_export import wsdef_pb2
-from tensorpc.utils import df_logging
+from tensorpc.utils import rich_logging
 from tensorpc.constants import TENSORPC_WEBSOCKET_MSG_SIZE
 from contextlib import suppress
 import numpy as np
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-LOGGER = df_logging.get_logger()
+LOGGER = rich_logging.get_logger("tensorpc.http")
+
 JS_MAX_SAFE_INT = 2**53 - 1
 
 
@@ -81,7 +82,7 @@ class WebsocketClientBase(abc.ABC):
         self.hang_shutdown_event = asyncio.Event()
 
     @abc.abstractmethod
-    async def close(self):
+    async def close(self) -> Any:
         ...
 
     @abc.abstractmethod
@@ -407,7 +408,6 @@ class WebsocketHandler:
                                     client: WebsocketClientBase,
                                     client_id: str,
                                     is_backup: bool = False):
-        print(f"NEW CONN {client.id}, is backup: ", is_backup)
         service_core = self.service_core
         conn_st_ev = asyncio.Event()
         # wait at most 100 rpcs

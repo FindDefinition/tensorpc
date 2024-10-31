@@ -84,7 +84,8 @@ def _get_viztracer(cfg: Optional[TracerConfig], name: Optional[str] = None):
                                    file_info=False,
                                    max_stack_depth=cfg.max_stack_depth,
                                    include_files=inc_files,
-                                   exclude_files=exc_files)
+                                   exclude_files=exc_files,
+                                   min_duration=cfg.min_duration)
                 return tracer, TracerType.VIZTRACER
             elif tracer_type == TracerType.PYTORCH:
                 import torch.profiler as profiler
@@ -95,7 +96,7 @@ def _get_viztracer(cfg: Optional[TracerConfig], name: Optional[str] = None):
                     profiler.ProfilerActivity.CUDA
                 ],
                                           with_stack=False,
-                                          profile_memory=False)
+                                          profile_memory=cfg.profile_memory)
                 return tracer, TracerType.PYTORCH
             elif tracer_type == TracerType.VIZTRACER_PYTORCH:
                 import torch.profiler as profiler
@@ -103,13 +104,14 @@ def _get_viztracer(cfg: Optional[TracerConfig], name: Optional[str] = None):
                                        file_info=False,
                                        max_stack_depth=cfg.max_stack_depth,
                                        include_files=inc_files,
-                                       exclude_files=exc_files)
+                                       exclude_files=exc_files,
+                                        min_duration=cfg.min_duration)
                 pytorch_tracer = profiler.profile(activities=[
                     profiler.ProfilerActivity.CPU,
                     profiler.ProfilerActivity.CUDA
                 ],
                                                   with_stack=False,
-                                                  profile_memory=False)
+                                                  profile_memory=cfg.profile_memory)
                 return VizTracerAndPytorchTracer(
                     viz_tracer, pytorch_tracer), TracerType.VIZTRACER_PYTORCH
             else:

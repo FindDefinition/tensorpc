@@ -394,6 +394,7 @@ class FrontendEventType(enum.IntEnum):
     EditorSaveState = 53
     EditorReady = 54
     EditorAction = 55
+    EditorCursorSelection = 56
 
     # leaflet events
     MapZoom = 60
