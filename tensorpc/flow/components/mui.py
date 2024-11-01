@@ -2081,7 +2081,13 @@ class Select(MUIComponentBase[SelectProps]):
         return res
 
     async def update_items(self, items: List[Tuple[str, ValueType]],
-                           selected: int):
+                           selected: Optional[int] = None):
+        if selected is None:
+            # check if the selected value is still in the new items
+            if self.props.value not in [x[1] for x in items]:
+                selected = 0
+            else:
+                selected = [x[1] for x in items].index(self.props.value)
         await self.put_app_event(
             self.create_update_event({
                 "items":

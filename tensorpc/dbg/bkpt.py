@@ -15,7 +15,8 @@ from tensorpc.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
                                     TENSORPC_DBG_TRACER_KEY,
                                     TENSORPC_ENV_DBG_ENABLE, BreakpointEvent,
                                     BreakpointType, TracerConfig, TraceResult,
-                                    TracerType, RecordFilterConfig)
+                                    TracerType, RecordFilterConfig, 
+                                    DebugDistributedMeta)
 from tensorpc.dbg.tracer import DebugTracerWrapper, VizTracerAndPytorchTracer
 from tensorpc.flow.client import is_inside_app_session
 from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
@@ -29,13 +30,6 @@ LOGGER = get_logger("tensorpc.dbg")
 RECORDING = False
 
 _TRACER_WRAPPER = DebugTracerWrapper()
-
-
-@dataclasses.dataclass
-class _DebugBkptMeta:
-    rank: int = 0
-    world_size: int = 1
-    backend: Optional[str] = None
 
 
 def _extrace_module_path(module: str):
@@ -85,7 +79,8 @@ def _get_viztracer(cfg: Optional[TracerConfig], name: Optional[str] = None):
                                    max_stack_depth=cfg.max_stack_depth,
                                    include_files=inc_files,
                                    exclude_files=exc_files,
-                                   min_duration=cfg.min_duration)
+                                   min_duration=cfg.min_duration,
+                                   ignore_c_function=cfg.ignore_c_function)
                 return tracer, TracerType.VIZTRACER
             elif tracer_type == TracerType.PYTORCH:
                 import torch.profiler as profiler
@@ -95,7 +90,7 @@ def _get_viztracer(cfg: Optional[TracerConfig], name: Optional[str] = None):
                     profiler.ProfilerActivity.CPU,
                     profiler.ProfilerActivity.CUDA
                 ],
-                                          with_stack=False,
+                                          with_stack=cfg.pytorch_with_stask,
                                           profile_memory=cfg.profile_memory)
                 return tracer, TracerType.PYTORCH
             elif tracer_type == TracerType.VIZTRACER_PYTORCH:
@@ -105,7 +100,8 @@ def _get_viztracer(cfg: Optional[TracerConfig], name: Optional[str] = None):
                                        max_stack_depth=cfg.max_stack_depth,
                                        include_files=inc_files,
                                        exclude_files=exc_files,
-                                        min_duration=cfg.min_duration)
+                                        min_duration=cfg.min_duration,
+                                        ignore_c_function=cfg.ignore_c_function)
                 pytorch_tracer = profiler.profile(activities=[
                     profiler.ProfilerActivity.CPU,
                     profiler.ProfilerActivity.CUDA
@@ -167,7 +163,7 @@ def init(proc_name: Optional[str] = None, port: int = -1):
             backend = "Mpi"
         if cur_pid != TENSORPC_MAIN_PID:
             proc_name += f"_fork"
-        userdata = _DebugBkptMeta(rank=rank_int,
+        userdata = DebugDistributedMeta(rank=rank_int,
                                   world_size=world_size_int,
                                   backend=backend)
         BACKGROUND_SERVER.start_async(id=proc_name,
@@ -245,7 +241,7 @@ def breakpoint(name: Optional[str] = None,
     bev.event.wait(timeout)
     if bev.enable_trace_in_main_thread:
         # tracer must be create/start/stop in main thread (or same thread)
-        meta = BACKGROUND_SERVER.get_userdata_typed(_DebugBkptMeta)
+        meta = BACKGROUND_SERVER.get_userdata_typed(DebugDistributedMeta)
         tracer_name: Optional[str] = None
         if meta.backend is not None:
             tracer_name = f"{meta.backend}|{meta.rank}/{meta.world_size}"
@@ -256,7 +252,7 @@ def breakpoint(name: Optional[str] = None,
             LOGGER.warning(f"Record Start. Config:")
             LOGGER.warning(bev.trace_cfg)
             RECORDING = True
-            _TRACER_WRAPPER.set_tracer(tracer, tracer_type, tracer_name)
+            _TRACER_WRAPPER.set_tracer(bev.trace_cfg, tracer, tracer_type, tracer_name, meta)
             _TRACER_WRAPPER.start()
             BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACER,
                                               tracer)

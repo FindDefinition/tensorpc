@@ -45,6 +45,8 @@ class TracerType(enum.IntEnum):
 
 @pydantic_dataclasses.dataclass
 class RecordFilterConfig:
+    exclude_name_prefixes: Optional[List[str]] = None
+
     include_modules: Optional[List[str]] = None
     exclude_modules: Optional[List[str]] = None
     include_files: Optional[List[str]] = None
@@ -66,8 +68,11 @@ class TracerUIConfig:
     mode: RecordMode = RecordMode.NEXT_BREAKPOINT
     breakpoint_count: Annotated[int, typemetas.RangedInt(1, 100, alias="Breakpoint Count")] = 1
     max_stack_depth: Annotated[int, typemetas.RangedInt(1, 50, alias="Max Stack Depth")] = 10
+    ignore_c_function: Annotated[bool, typemetas.CommonObject(alias="Ignore C Function")] = True
     min_duration: Annotated[float, typemetas.RangedInt(0, 5000, alias="Min Duration (us, VizTracer)")] = 0
     profile_memory: Annotated[bool, typemetas.CommonObject(alias="Profile Memory (PyTorch)")] = False
+    pytorch_with_stask: Annotated[bool, typemetas.CommonObject(alias="PyTorch Record Python")] = False
+    replace_sitepkg_prefix: Annotated[bool, typemetas.CommonObject(alias="Remove site-packages Prefix")] = True
 
 @dataclasses.dataclass
 class TracerConfig(TracerUIConfig):
@@ -107,6 +112,11 @@ class BreakpointType(enum.IntEnum):
     # is set on the same line
     Vscode = 1
 
+@dataclasses.dataclass
+class DebugDistributedMeta:
+    rank: int = 0
+    world_size: int = 1
+    backend: Optional[str] = None
 
 TENSORPC_ENV_DBG_ENABLE = os.getenv("TENSORPC_DBG_ENABLE", "1") != "0"
 TENSORPC_ENV_DBG_DEFAULT_BREAKPOINT_ENABLE = os.getenv("TENSORPC_DBG_DEFAULT_BREAKPOINT_ENABLE", "1") != "0"

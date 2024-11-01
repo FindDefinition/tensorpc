@@ -31,7 +31,6 @@ def demo_basic():
     dist.init_process_group("nccl")
     rank = dist.get_rank()
     print(f"Start running basic DDP example on rank {rank}.")
-    tensorpc.dbg.breakpoint("entering basic DDP example")
 
     # create model and move it to GPU with id rank
     device_id = rank % torch.cuda.device_count()
@@ -40,13 +39,14 @@ def demo_basic():
 
     loss_fn = nn.MSELoss()
     optimizer = optim.SGD(ddp_model.parameters(), lr=0.001)
-
-    optimizer.zero_grad()
-    outputs = ddp_model(torch.randn(20, 10))
-    labels = torch.randn(20, 5).to(device_id)
-    loss_fn(outputs, labels).backward()
-    optimizer.step()
-    tensorpc.dbg.breakpoint("finish basic DDP example")
+    for j in range(5):
+        tensorpc.dbg.breakpoint("entering basic DDP example")
+        optimizer.zero_grad()
+        outputs = ddp_model(torch.randn(20, 10))
+        labels = torch.randn(20, 5).to(device_id)
+        loss_fn(outputs, labels).backward()
+        optimizer.step()
+        tensorpc.dbg.breakpoint("finish basic DDP example")
 
     dist.destroy_process_group()
 

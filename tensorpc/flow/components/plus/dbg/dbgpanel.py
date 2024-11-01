@@ -72,7 +72,13 @@ class DebugServerProcessMeta:
         return f"localhost:{self.port}"
 
 
-_INIT_YAML_CONFIG = """# e.g. add "torch.nn" to trace all submodules of torch.nn only
+_INIT_YAML_CONFIG = """
+# e.g. use Module._call_impl to remove all events starting with it
+exclude_name_prefixes:
+- Module._
+- DisableContext
+- _disable_dynamo
+# e.g. add "torch.nn" to trace all submodules of torch.nn only
 include_modules:
 
 exclude_modules:
@@ -233,8 +239,8 @@ class MasterDebugPanel(mui.FlexBox):
                                                         height="100%",
                                                         overflow="hidden")
 
-        self._perfetto_select = mui.Select("trace", []).prop(size="small",
-                                                             muiMargin="dense")
+        self._perfetto_select = mui.Select("trace", [], self._on_dist_perfetto_select)
+        self._perfetto_select.prop(size="small", muiMargin="dense")
         self._dist_perfetto = chart.Perfetto().prop(width="100%",
                                                     height="100%")
         self._dist_trace_data_for_download: Optional[bytes] = None
@@ -602,8 +608,8 @@ class MasterDebugPanel(mui.FlexBox):
             keys = await self.query_record_data_keys()
             if keys:
                 options = [(key, key) for key in keys]
-                await self._perfetto_select.update_items(options, 0)
-                await self._on_dist_perfetto_select(options[0][1])
+                await self._perfetto_select.update_items(options)
+                await self._on_dist_perfetto_select(self._perfetto_select.value)
 
     async def release_all_breakpoints(self):
         await self._run_rpc_on_metas(self._current_metas,
