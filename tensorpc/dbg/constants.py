@@ -46,6 +46,7 @@ class TracerType(enum.IntEnum):
 @pydantic_dataclasses.dataclass
 class RecordFilterConfig:
     exclude_name_prefixes: Optional[List[str]] = None
+    exclude_file_names: Optional[List[str]] = None
 
     include_modules: Optional[List[str]] = None
     exclude_modules: Optional[List[str]] = None
@@ -86,9 +87,16 @@ class TraceMetrics:
     breakpoint_count: int
 
 @dataclasses.dataclass
+class TracerSingleResult:
+    data: bytes 
+    tracer_type: TracerType
+    trace_events: Optional[List[Any]] = None
+    site_packages_prefix: Optional[str] = None
+    external_events: Optional[List[Any]] = None
+
+@dataclasses.dataclass
 class TraceResult:
-    data: List[bytes] 
-    external_events: List[Any] = dataclasses.field(default_factory=list)
+    single_results: List[TracerSingleResult] 
 
 @dataclasses.dataclass
 class DebugMetric:
@@ -122,6 +130,8 @@ TENSORPC_ENV_DBG_ENABLE = os.getenv("TENSORPC_DBG_ENABLE", "1") != "0"
 TENSORPC_ENV_DBG_DEFAULT_BREAKPOINT_ENABLE = os.getenv("TENSORPC_DBG_DEFAULT_BREAKPOINT_ENABLE", "1") != "0"
 
 TENSORPC_DBG_FRAME_INSPECTOR_KEY = "__tensorpc_debug_frame_inspector"
+TENSORPC_DBG_TRACE_VIEW_KEY = "__tensorpc_debug_trace_view"
+
 TENSORPC_DBG_FRAMESCRIPT_STORAGE_PREFIX = "__tensorpc_dbg_frame_scripts"
 
 TENSORPC_DBG_SPLIT = "::"
@@ -129,3 +139,5 @@ TENSORPC_DBG_SPLIT = "::"
 TENSORPC_DBG_FRAME_STORAGE_PREFIX = "__tensorpc_dbg_frame"
 
 TENSORPC_DBG_TRACER_KEY = "__tensorpc_dbg_tracer"
+
+TENSORPC_DBG_USER_DURATION_EVENT_KEY = "__tensorpc_dbg_E_dur"

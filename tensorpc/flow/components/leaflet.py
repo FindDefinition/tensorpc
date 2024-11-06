@@ -23,11 +23,7 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, Coroutine, Dict,
 from tensorpc import compat
 from tensorpc.flow.core.appcore import Event
 
-if compat.Python3_8AndLater:
-    from typing import Literal
-else:
-    from typing_extensions import Literal
-
+from typing_extensions import Literal
 import tensorpc.core.dataclass_dispatch as dataclasses
 
 import numpy as np

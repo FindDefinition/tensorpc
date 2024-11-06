@@ -1,14 +1,17 @@
+import contextlib
+import copy
 import dataclasses
 import io
 import math
 import os
+import random
 import tempfile
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from typing_extensions import Literal
 
-from .constants import DebugDistributedMeta, TracerType, TracerConfig
+from .constants import TENSORPC_DBG_USER_DURATION_EVENT_KEY, DebugDistributedMeta, TracerSingleResult, TracerType, TracerConfig
 
 try:
     import orjson as json  # type: ignore
@@ -50,7 +53,7 @@ class DebugTracerWrapper:
         self._trace_cfg: Optional[TracerConfig] = None
         self._trace_dist_meta: Optional[DebugDistributedMeta] = None
 
-        self._trace_instant_events_for_pth: List[Any] = []
+        self._trace_events_external: List[Any] = []
         self._trace_tid = None
         self._trace_lock = None
 
@@ -66,10 +69,11 @@ class DebugTracerWrapper:
         self._trace_tid = threading.get_ident()
 
     def reset_tracer(self) -> None:
+        # TODO if fork during tracing...
         self._tracer = None
         self._tracer_type = TracerType.VIZTRACER
         self._tracer_proc_name = None
-        self._trace_instant_events_for_pth = []
+        self._trace_events_external = []
         self._trace_cfg = None
         self._trace_dist_meta = None
         self._trace_lock = None
@@ -108,7 +112,7 @@ class DebugTracerWrapper:
                 else:
                     ts = time.time_ns() // 1000  # us
                 with self._trace_lock:
-                    self._trace_instant_events_for_pth.append({
+                    self._trace_events_external.append({
                         "name": name,
                         "args": args,
                         "s": scope,
@@ -117,6 +121,40 @@ class DebugTracerWrapper:
                         "ph": "i",
                         "ts": ts,
                     })
+    
+    @contextlib.contextmanager
+    def log_duration(self,
+                    name: str,
+                    args: Any = None,
+                    thread_id: int = 0):
+        """only log to thread 0.
+        """
+        if self._tracer is not None and self._trace_lock is not None:
+            pid = os.getpid()
+            # pid == tid in pytorch profiler
+            if self._tracer_type == TracerType.VIZTRACER:
+                ts = time.monotonic_ns() / 1000  # us
+            else:
+                ts = time.time_ns() / 1000  # us
+            yield 
+            if self._tracer_type == TracerType.VIZTRACER:
+                ts_end = time.monotonic_ns() / 1000  # us
+            else:
+                ts_end = time.time_ns() / 1000  # us
+            with self._trace_lock:
+                res = {
+                    "name": name,
+                    "pid": pid,
+                    # "tid": pid,
+                    "tid": thread_id, # TODO pid or 0?
+                    "ph": "X",
+                    "ts": ts,
+                    "dur": ts_end - ts,
+                    "cat": TENSORPC_DBG_USER_DURATION_EVENT_KEY,
+                }
+                if args is not None:
+                    res["args"] = args
+                self._trace_events_external.append(res)
 
     def start(self):
         if self._tracer is not None:
@@ -139,15 +177,22 @@ class DebugTracerWrapper:
     def _save_pth(
             self,
             tracer_pth: Any,
+            external_events: List[Any],
             proc_name_for_pth: Optional[str] = None,
             extract_base_ts: bool = True,
             suppress_user_anno: bool = False) -> Tuple[bytes, Optional[int]]:
+        assert self._trace_lock is not None
+        MAX_FLOW_ID_NUM_PAD = 6
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=False)
         fp.close()
         tracer_pth.export_chrome_trace(fp.name)
         with open(fp.name, "rb") as f:
             data = f.read()
         os.remove(fp.name)
+        # for large json file (> 50MB), load and dump is very slow even with orjson
+        # so we use a ugly but fast way to modify events and extract baseTimeNanoseconds
+        # pytorch may modify json format so we currently need to check for each pytorch version.
+        # checked: pytorch 2.1 and 2.5
         if proc_name_for_pth is not None and self._tracer_proc_name is not None:
             data = data.replace(proc_name_for_pth.encode(),
                                 f"{self._tracer_proc_name}".encode())
@@ -161,10 +206,11 @@ class DebugTracerWrapper:
                 else:
                     digits = 1
                 # pad zeros to meta.rank
-                rank_padded_str = str(meta.rank).zfill(digits)
+                rank_padded_str = str(
+                    meta.rank).zfill(digits) + "0" * MAX_FLOW_ID_NUM_PAD
                 if meta.world_size > 1:
                     # fix duplicated flow event across ranks
-                    # TODO do we really need this?
+                    # TODO pytorch may remove beautiful json dump (remove whitespace) in future
                     data = data.replace(
                         b'"ph": "f", "id": ',
                         f'"ph": "f", "id": {rank_padded_str}'.encode())
@@ -172,8 +218,9 @@ class DebugTracerWrapper:
                         b'"ph": "s", "id": ',
                         f'"ph": "s", "id": {rank_padded_str}'.encode())
                     # suppress all pytorch process_name meta events
-                    data = data.replace(b'"process_name"',
-                                        b'"process_name_tensorpc_invalid"')
+                    data = data.replace(
+                        b'"process_name"',
+                        b'"process_name_change_name_to_be_invalid"')
                     # supress all user annotation events when use v+p tracer
                     if suppress_user_anno:
                         data = data.replace(
@@ -182,7 +229,7 @@ class DebugTracerWrapper:
 
                     # append our process name meta event
                     pid = os.getpid()
-                    self._trace_instant_events_for_pth.append({
+                    external_events.append({
                         "name": "process_name",
                         "ph": "M",
                         "pid": pid,
@@ -191,7 +238,7 @@ class DebugTracerWrapper:
                             "name": self._tracer_proc_name,
                         },
                     })
-                    self._trace_instant_events_for_pth.append({
+                    external_events.append({
                         "name": "process_name",
                         "ph": "M",
                         "pid": meta.rank,
@@ -242,10 +289,22 @@ class DebugTracerWrapper:
                         ev["name"].startswith(prefix)
                         for prefix in exclude_name_prefixes)
                 ]
+            if self._trace_cfg.record_filter.exclude_file_names:
+                exclude_file_names = self._trace_cfg.record_filter.exclude_file_names
+                data["traceEvents"] = [
+                    ev for ev in data["traceEvents"]
+                    if "name" not in ev or not any(
+                        prefix in ev["name"]
+                        for prefix in exclude_file_names)
+                ]
 
-    def save(self,
-             proc_name_for_pth: Optional[str] = None) -> Optional[List[bytes]]:
-        if self._tracer is not None:
+    def save(
+        self,
+        proc_name_for_pth: Optional[str] = None
+    ) -> Optional[List[TracerSingleResult]]:
+        if self._tracer is not None and self._trace_lock is not None:
+            with self._trace_lock:
+                ext_events = copy.deepcopy(self._trace_events_external)
             if self._tracer_type == TracerType.VIZTRACER:
                 ss = io.BytesIO()
                 sss = io.StringIO()
@@ -253,27 +312,41 @@ class DebugTracerWrapper:
                 self._filter_viztracer_data_inplace(self._tracer.data)
                 self._tracer.save(sss)
                 data = sss.getvalue().encode()
+                site_pkg = None
                 if self._trace_cfg is not None and self._trace_cfg.replace_sitepkg_prefix:
                     site_pkg = self._get_site_packages_by_profiler_location()
                     data = data.replace(site_pkg.encode(), b"")
                 ss.write(data)
-                return [ss.getvalue()]
+                tr_res = TracerSingleResult(
+                    data=ss.getvalue(),
+                    tracer_type=self._tracer_type,
+                    trace_events=self._tracer.data["traceEvents"],
+                    site_packages_prefix=site_pkg,
+                    external_events=ext_events)
+                return [tr_res]
             elif self._tracer_type == TracerType.PYTORCH:
-                extract_bts = bool(self._trace_instant_events_for_pth)
-                data, base_ts = self._save_pth(self._tracer, proc_name_for_pth,
+                extract_bts = bool(ext_events)
+                data, base_ts = self._save_pth(self._tracer, ext_events, proc_name_for_pth,
                                                extract_bts)
-                if self._trace_instant_events_for_pth and base_ts is not None:
-                    for ev in self._trace_instant_events_for_pth:
+                if ext_events and base_ts is not None:
+                    for ev in ext_events:
                         if "ts" in ev:
                             ev["ts"] -= base_ts / 1000.0
-                return [data]
+                tr_res = TracerSingleResult(data=data,
+                                            tracer_type=self._tracer_type,
+                                            external_events=ext_events)
+                return [tr_res]
 
             elif self._tracer_type == TracerType.VIZTRACER_PYTORCH:
                 # handle pytorch
                 data, base_ts = self._save_pth(self._tracer._tracer_pth,
+                                               ext_events,
                                                proc_name_for_pth,
                                                True,
                                                suppress_user_anno=True)
+                pth_tr_res = TracerSingleResult(data=data,
+                                                tracer_type=TracerType.PYTORCH)
+
                 ss = io.BytesIO()
                 sss = io.StringIO()
                 # align viztracer timestamp from monotonic time to epoch time (or pytorch base time if exists)
@@ -283,8 +356,9 @@ class DebugTracerWrapper:
                     ) - base_ts
                 else:
                     mono_pth_diff = time.time_ns() - time.monotonic_ns()
-                if self._trace_instant_events_for_pth and base_ts is not None:
-                    for ev in self._trace_instant_events_for_pth:
+                if ext_events and base_ts is not None:
+                    # if use PYTORCH or VIZTRACER_PYTORCH, we need to align viztracer timestamp
+                    for ev in ext_events:
                         if "ts" in ev:
                             ev["ts"] -= base_ts / 1000.0
                 self._tracer._tracer_viz.parse()
@@ -296,11 +370,19 @@ class DebugTracerWrapper:
                                     mono_pth_diff) / 1000.0
                 self._tracer._tracer_viz.save(sss)
                 vizdata = sss.getvalue().encode()
+                site_pkg = None
+
                 if self._trace_cfg is not None and self._trace_cfg.replace_sitepkg_prefix:
                     site_pkg = self._get_site_packages_by_profiler_location()
                     vizdata = vizdata.replace(site_pkg.encode(), b"")
                 ss.write(vizdata)
                 viz_res = ss.getvalue()
-                return [viz_res, data]
+                viz_tr_res = TracerSingleResult(
+                    data=viz_res,
+                    tracer_type=TracerType.VIZTRACER,
+                    site_packages_prefix=site_pkg,
+                    trace_events=self._tracer._tracer_viz.data["traceEvents"],
+                    external_events=ext_events)
+                return [viz_tr_res, pth_tr_res]
             else:
                 raise ValueError(f"Invalid tracer type: {self._tracer_type}")

@@ -947,7 +947,7 @@ class ComputeFlowManager(mui.FlexBox):
             self._code_editor,
         ])
         self.prop(height="70vh", flexDirection="column")
-        self.event_before_mount.on(self._handle_mount)
+        self.event_after_mount.on(self._handle_mount)
 
     @staticmethod
     async def create_from_app_storage():
@@ -1073,7 +1073,7 @@ class ComputeFlow(mui.FlexBox):
         self.graph_container = mui.HBox([
             self.graph, self._node_setting_dialog, self._shared_manage_dialog
         ]).prop(width="100%", height="100%", overflow="hidden")
-        self.graph_container.update_sx_props(_default_compute_flow_css())
+        self.graph_container.update_raw_props(_default_compute_flow_css())
         self._graph_with_bottom_container = mui.Allotment(
             mui.Allotment.ChildDef([
                 mui.Allotment.Pane(self.graph_container),

@@ -46,6 +46,7 @@ from tensorpc.flow import (App, EditableApp, EditableLayoutApp, leaflet,
                            mark_autorun, mark_create_layout, marker, mui,
                            chart, plus, three, UserObjTree, appctx, V)
 from tensorpc.flow.client import AppClient, AsyncAppClient, add_message
+from tensorpc.flow.components.plus.dbg.traceview import TraceView
 from tensorpc.flow.coretypes import MessageLevel, ScheduleEvent
 from tensorpc.flow.core.appcore import observe_autorun_function, observe_function, observe_autorun_script
 from tensorpc.flow.components.mui import (Button, HBox, ListItemButton,
@@ -1768,29 +1769,13 @@ class GridPreviewLayoutApp:
             })
         ]).prop(width="100%")
 
-class RemoteComponentDevApp:
-    @mark_create_layout
-    def my_layout(self):
-        from tensorpc.examples.tutorials import MarkdownTutorialsTree
 
-        return mui.HBox([
-            mui.RemoteBoxGrpc("localhost", 52051, "complex_dev").prop(flex=1),
-            mui.flex_wrapper(MarkdownTutorialsTree()).prop(flex=1),
-        ]).prop(width="100%")
-
-class RemoteDebugDevApp:
-    @mark_create_layout
-    def my_layout(self):
-        return mui.HBox([
-            mui.RemoteBoxGrpc("localhost", 54321, TENSORPC_DBG_FRAME_INSPECTOR_KEY).prop(flex=1),
-        ]).prop(width="100%")
-
-class RemoteDebugPanelDevApp:
+class TraceViewDevApp:
     @mark_create_layout
     def my_layout(self):
         return mui.VBox([
-            plus.MasterDebugPanel().prop(flex=1),
-        ]).prop(width="100%", overflow="hidden")
+            TraceView(),
+        ]).prop(width="100%", height="100%", overflow="hidden")
 
 if __name__ == "__main__":
     from pydantic import (

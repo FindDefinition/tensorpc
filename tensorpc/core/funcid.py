@@ -15,23 +15,9 @@ def from_constant(node):
             return -res
         else:
             raise ValueError("node not a constant")
-    if compat.Python3_8AndLater:
-        if not isinstance(node, ast.Constant):
-            raise ValueError("node not a constant")
-        return node.value
-    else:
-        if isinstance(node, ast.Num):
-            return node.n
-        elif isinstance(node, ast.Str):
-            return node.s
-        elif isinstance(node, ast.Bytes):
-            return node.s
-        elif isinstance(node, ast.Ellipsis):
-            return Ellipsis
-        elif isinstance(node, ast.NameConstant):
-            return node.value
-        else:
-            raise ValueError("node not a constant")
+    if not isinstance(node, ast.Constant):
+        raise ValueError("node not a constant")
+    return node.value
 
 
 def get_toplevel_func_node(tree: ast.Module):

@@ -44,7 +44,7 @@ class Image(mui.Image):
             self.prop(image=self.encode_image_bytes(img))
         # self.prop(height="100%", width="100%", overflow="hidden")
         self.prop(maxWidth="400px", enableZoom=True)
-        # self.update_sx_props({
+        # self.update_raw_props({
         #     "object-fit": "contain",
         # })
 
@@ -65,7 +65,7 @@ class ImageBatch(mui.FlexBox):
         # self._img.prop(overflow="hidden", flex=1)
         self._img.prop(maxWidth="400px", enableZoom=True)
 
-        # self._img.update_sx_props({
+        # self._img.update_raw_props({
         #     "object-fit": "contain",
         # })
         self._img.prop(image=self._img.encode_image_bytes(imgs[0]))

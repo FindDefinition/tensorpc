@@ -446,13 +446,15 @@ class JsonLikeNode:
     start: Union[Undefined, int] = undefined
     # name color
     color: Union[Undefined, str] = undefined
-    dictKey: Union[Undefined, BackendOnlyProp[Hashable]] = undefined
-    keys: Union[Undefined, BackendOnlyProp[List[str]]] = undefined
     menus: Union[Undefined, List[ContextMenuData]] = undefined
     edit: Union[Undefined, bool] = undefined
     userdata: Union[Undefined, Any] = undefined
     alias: Union[Undefined, str] = undefined
     fixedIconBtns: Union[Undefined, List[IconButtonData]] = undefined
+
+    # backend only props, not used in frontend
+    dictKey: Union[Undefined, BackendOnlyProp[Hashable]] = undefined
+    keys: Union[Undefined, BackendOnlyProp[List[str]]] = undefined
 
     # @staticmethod
     # def decode_uid(uid: str, split_length: int = 2):
@@ -601,6 +603,15 @@ class JsonLikeNode:
         return cls(UniqueTreeIdForTree.from_parts(["root"]), "root",
                     JsonLikeType.Object.value, "Object", undefined, 0, [])
 
+    @staticmethod 
+    def create_dummy_dict():
+        return {
+            "id": UniqueTreeIdForTree.from_parts(["root"]).uid_encoded,
+            "name": "root",
+            "type": JsonLikeType.Object.value,
+            "children": [],
+        }
+
 def parse_obj_to_jsonlike(obj, name: str, id: UniqueTreeIdForTree):
     obj_type = type(obj)
     if obj is None or obj is Ellipsis:
@@ -662,41 +673,62 @@ def parse_obj_to_jsonlike(obj, name: str, id: UniqueTreeIdForTree):
                             typeStr="np.ndarray",
                             value=f"[{shape_short}]{obj.dtype}",
                             drag=True)
-    elif get_qualname_of_type(obj_type) == CommonQualNames.TorchTensor:
-        t = JsonLikeType.Tensor
-        shape_short = ",".join(map(str, obj.shape))
-        return JsonLikeNode(id,
-                            name,
-                            t.value,
-                            typeStr="torch.Tensor",
-                            value=f"[{shape_short}]{obj.dtype}",
-                            drag=True)
-    elif get_qualname_of_type(obj_type) == CommonQualNames.TorchParameter:
-        t = JsonLikeType.Tensor
-        shape_short = ",".join(map(str, obj.data.shape))
-        return JsonLikeNode(id,
-                            name,
-                            t.value,
-                            typeStr="torch.Parameter",
-                            value=f"[{shape_short}]{obj.data.dtype}",
-                            drag=True)
-    elif get_qualname_of_type(obj_type) == CommonQualNames.TVTensor:
-        t = JsonLikeType.Tensor
-        shape_short = ",".join(map(str, obj.shape))
-        return JsonLikeNode(id,
-                            name,
-                            t.value,
-                            typeStr="tv.Tensor",
-                            value=f"[{shape_short}]{obj.dtype}",
-                            drag=True)
     else:
-        t = JsonLikeType.Object
-        value = undefined
-        return JsonLikeNode(id,
-                            name,
-                            t.value,
-                            value=value,
-                            typeStr=obj_type.__qualname__)
+        qname = get_qualname_of_type(obj_type)
+        if qname == CommonQualNames.TorchTensor:
+            t = JsonLikeType.Tensor
+            shape_short = ",".join(map(str, obj.shape))
+            return JsonLikeNode(id,
+                                name,
+                                t.value,
+                                typeStr="torch.Tensor",
+                                value=f"[{shape_short}]{obj.dtype}",
+                                drag=True)
+        elif qname == CommonQualNames.TorchParameter:
+            t = JsonLikeType.Tensor
+            shape_short = ",".join(map(str, obj.data.shape))
+            return JsonLikeNode(id,
+                                name,
+                                t.value,
+                                typeStr="torch.Parameter",
+                                value=f"[{shape_short}]{obj.data.dtype}",
+                                drag=True)
+        elif qname == CommonQualNames.TVTensor:
+            t = JsonLikeType.Tensor
+            shape_short = ",".join(map(str, obj.shape))
+            return JsonLikeNode(id,
+                                name,
+                                t.value,
+                                typeStr="tv.Tensor",
+                                value=f"[{shape_short}]{obj.dtype}",
+                                drag=True)
+        elif qname.startswith("torch"):
+            import torch 
+            if isinstance(obj, torch.Tensor):
+                t = JsonLikeType.Tensor
+                shape_short = ",".join(map(str, obj.shape))
+                return JsonLikeNode(id,
+                                    name,
+                                    t.value,
+                                    typeStr="torch.Tensor",
+                                    value=f"{obj_type.__name__}[{shape_short}]{obj.dtype}",
+                                    drag=True)
+            else:
+                t = JsonLikeType.Object
+                value = undefined
+                return JsonLikeNode(id,
+                                    name,
+                                    t.value,
+                                    value=value,
+                                    typeStr=obj_type.__qualname__)
+        else:
+            t = JsonLikeType.Object
+            value = undefined
+            return JsonLikeNode(id,
+                                name,
+                                t.value,
+                                value=value,
+                                typeStr=obj_type.__qualname__)
 
 
 class TreeItem(abc.ABC):

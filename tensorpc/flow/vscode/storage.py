@@ -12,16 +12,15 @@ from tensorpc.flow.core.appcore import get_app, get_app_context
 class AppVscodeState:
     """Sync vscode storage, no touch on app storage.
     """
+    is_init: bool = False
     breakpoint_dict: Dict[str, List[VscodeBreakpoint]] = dataclass_dispatch.field(default_factory=dict)
 
     def set_workspace_breakpoints(self, workspace_uri: str, breakpoints: List[VscodeBreakpoint]):
+        self.is_init = True
         self.breakpoint_dict[workspace_uri] = breakpoints
 
     def get_all_breakpoints(self):
-        res: List[VscodeBreakpoint] = []
-        for k, v in self.breakpoint_dict.items():
-            res.extend(v)
-        return res
+        return self.breakpoint_dict
 
 @dataclass_dispatch.dataclass
 class AppDataStorageForVscodeBase:

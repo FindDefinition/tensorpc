@@ -222,8 +222,6 @@ async def serve_with_http_async(server_core: ProtobufServiceCore,
                                 process_id=-1,
                                 ssl_key_path: str = "",
                                 ssl_crt_path: str = ""):
-    if not compat.Python3_7AndLater:
-        raise NotImplementedError
     smeta = ServerMeta(port=port, http_port=http_port)
 
     # server_core = ProtobufServiceCore(url, service_def, False, smeta)
@@ -270,9 +268,6 @@ async def serve_async(sc: ProtobufServiceCore,
                       ssl_key_path: str = "",
                       ssl_crt_path: str = "",
                       start_thread_ev: Optional[threading.Event] = None):
-    if not compat.Python3_7AndLater:
-        raise NotImplementedError
-
     server_core = sc
     with server_core.enter_global_context():
         with server_core.enter_exec_context():
@@ -296,8 +291,6 @@ def serve(service_def: ServiceDef,
           ssl_key_path: str = "",
           ssl_crt_path: str = "",
           create_loop: bool = False):
-    if not compat.Python3_7AndLater:
-        raise NotImplementedError
     url = '[::]:{}'.format(port)
     smeta = ServerMeta(port=port, http_port=-1)
     server_core = ProtobufServiceCore(url, service_def, False, smeta)
@@ -314,8 +307,6 @@ def serve_service_core(service_core: ProtobufServiceCore,
           ssl_crt_path: str = "",
           create_loop: bool = False,
           start_thread_ev: Optional[threading.Event] = None):
-    if not compat.Python3_7AndLater:
-        raise NotImplementedError
     # url = '[::]:{}'.format(port)
     # smeta = ServerMeta(port=port, http_port=-1)
     # server_core = ProtobufServiceCore(url, service_def, False, smeta)
@@ -358,8 +349,6 @@ def serve_with_http(service_def: ServiceDef,
                     process_id=-1,
                     ssl_key_path: str = "",
                     ssl_crt_path: str = ""):
-    if not compat.Python3_7AndLater:
-        raise NotImplementedError
     url = '[::]:{}'.format(port)
     smeta = ServerMeta(port=port, http_port=http_port)
     server_core = ProtobufServiceCore(url, service_def, False, smeta)

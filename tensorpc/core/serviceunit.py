@@ -683,7 +683,7 @@ class ObjectReloadManager:
         size, mtime = stat.st_size, stat.st_mtime
         entry = FileCacheEntry(size, mtime, fullname, lines)
         self.file_cache[path] = entry
-        if lines and compat.Python3_8AndLater:
+        if lines:
             try:
                 qualname_to_code = get_qualname_to_code(lines)
                 entry.qualname_to_code = qualname_to_code

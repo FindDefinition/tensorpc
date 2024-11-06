@@ -352,6 +352,10 @@ class FrontendEventType(enum.IntEnum):
     DataItemChange = -5
     # emitted when a drop comes from remote component.
     DropFromRemoteComp = -6
+    # emitted by event_emitter
+    AfterMount = -7
+    # emitted by event_emitter
+    AfterUnmount = -8
 
     Click = 0
     DoubleClick = 1
@@ -1016,7 +1020,8 @@ class BasicProps(DataClassWithUndefined):
 
 @dataclasses_strict.dataclass
 class ContainerBaseProps(BasicProps):
-    childs: List[str] = dataclasses_strict.field(default_factory=list)
+    pass 
+    # childs: List[str] = dataclasses_strict.field(default_factory=list)
 
 
 T_base_props = TypeVar("T_base_props", bound=BasicProps)
@@ -1280,7 +1285,7 @@ class Component(Generic[T_base_props, T_child]):
         self._prop_field_names: Set[str] = set(
             [x.name for x in dataclasses.fields(prop_cls)])
         self._mounted_override = False
-        self.__sx_props: Dict[str, Any] = {}
+        self.__raw_props: Dict[str, Any] = {}
         self._flow_allowed_events: Set[EventDataType] = set([
             FrontendEventType.BeforeMount.value,
             FrontendEventType.BeforeUnmount.value
@@ -1313,6 +1318,10 @@ class Component(Generic[T_base_props, T_child]):
             FrontendEventType.BeforeMount)
         self.event_before_unmount = self._create_emitter_event_slot_noarg(
             FrontendEventType.BeforeUnmount)
+        self.event_after_mount = self._create_emitter_event_slot_noarg(
+            FrontendEventType.AfterMount)
+        self.event_after_unmount = self._create_emitter_event_slot_noarg(
+            FrontendEventType.AfterUnmount)
 
     def use_effect(self,
                    effect: Callable[[],
@@ -1470,7 +1479,8 @@ class Component(Generic[T_base_props, T_child]):
 
     def _update_props_base(self,
                            prop: Callable[P, Any],
-                           json_only: bool = False):
+                           json_only: bool = False,
+                           ensure_json_keys: Optional[List[str]] = None):
         """create prop update event by keyword arguments
         this function is used to provide intellisense result for all props.
         """
@@ -1483,7 +1493,7 @@ class Component(Generic[T_base_props, T_child]):
                 setattr(self.__props, k, v)
             # do validation for all props (call model validator)
             self._prop_validator.validate_python(self.__props)
-            return self.create_update_event(kwargs, json_only)
+            return self.create_update_event(kwargs, json_only, ensure_json_keys=ensure_json_keys)
 
         return wrapper
 
@@ -1536,12 +1546,12 @@ class Component(Generic[T_base_props, T_child]):
                 traceback.print_exc()
             self._task = None
 
-    def update_sx_props(self, sx_props: Dict[str, Any]):
-        self.__sx_props.update(sx_props)
+    def update_raw_props(self, sx_props: Dict[str, Any]):
+        self.__raw_props.update(sx_props)
         return self
 
-    def get_sx_props(self):
-        return self.__sx_props
+    def get_raw_props(self):
+        return self.__raw_props
 
     def to_dict(self):
         """undefined will be removed here.
@@ -1550,7 +1560,7 @@ class Component(Generic[T_base_props, T_child]):
         """
         props = self.get_props()
         props, und = split_props_to_undefined(props)
-        props.update(as_dict_no_undefined(self.__sx_props))
+        props.update(as_dict_no_undefined(self.__raw_props))
         res = {
             "uid": self._flow_uid,
             "type": self._flow_comp_type.value,
@@ -1770,17 +1780,22 @@ class Component(Generic[T_base_props, T_child]):
     def create_update_event(self,
                             data: Dict[str, Union[Any, Undefined]],
                             json_only: bool = False,
-                            validate: bool = False):
+                            validate: bool = False,
+                            ensure_json_keys: Optional[List[str]] = None):
         if validate:
             self.__prop_cls(**data)  # type: ignore
         data_no_und = {}
         data_unds = []
+        ensure_json_keys_set = set(ensure_json_keys) if ensure_json_keys else set()
         for k, v in data.items():
             # k = snake_to_camel(k)
             if isinstance(v, Undefined):
                 data_unds.append(k)
             else:
-                data_no_und[k] = as_dict_no_undefined(v)
+                if k in ensure_json_keys_set:
+                    data_no_und[k] = v
+                else:
+                    data_no_und[k] = as_dict_no_undefined(v)
         assert self._flow_uid is not None
         ev = UIUpdateEvent(
             {self._flow_uid.uid_encoded: (data_no_und, data_unds)}, json_only)
@@ -2052,6 +2067,50 @@ class Component(Generic[T_base_props, T_child]):
         else:
             return self.create_update_event({"status": self._flow_comp_status})
 
+    async def _run_mount_special_methods(self, container_comp: "Component", reload_mgr: Optional[AppReloadManager] = None):
+        if reload_mgr is None:
+            reload_mgr = container_comp.flow_app_comp_core.reload_mgr
+
+        special_methods = self.get_special_methods(reload_mgr)
+        if special_methods.did_mount is not None:
+            # run callback in container comp.
+            await container_comp.run_callback(
+                special_methods.did_mount.get_binded_fn(),
+                sync_status_first=False,
+                change_status=False)
+        await self._flow_event_emitter.emit_async(FrontendEventType.AfterMount.value,
+                                                  Event(FrontendEventType.AfterMount.value, None)) 
+        # run effects
+        for k, effects in self.effects._flow_effects.items():
+            for effect in effects:
+                res = await container_comp.run_callback(effect,
+                                                sync_status_first=False,
+                                                change_status=False)
+                if res is not None:
+                    # res is effect
+                    self.effects._flow_unmounted_effects[k].append(
+                        res)
+
+    async def _run_unmount_special_methods(self, container_comp: "Component", reload_mgr: Optional[AppReloadManager] = None):
+        if reload_mgr is None:
+            reload_mgr = container_comp.flow_app_comp_core.reload_mgr
+        special_methods = self.get_special_methods(reload_mgr)
+        if special_methods.will_unmount is not None:
+            # run callback in container comp because self component is unmounted,
+            # so app queue are already removed.
+            await container_comp.run_callback(
+                special_methods.will_unmount.get_binded_fn(),
+                sync_status_first=False,
+                change_status=False)
+        await self._flow_event_emitter.emit_async(FrontendEventType.AfterUnmount.value,
+                                                  Event(FrontendEventType.AfterUnmount.value, None)) 
+        for k, unmount_effects in self.effects._flow_unmounted_effects.items(
+        ):
+            for unmount_effect in unmount_effects:
+                await container_comp.run_callback(unmount_effect,
+                                        sync_status_first=False,
+                                        change_status=False)
+            unmount_effects.clear()
 
 class ForEachResult(enum.Enum):
     Continue = 0
@@ -2460,37 +2519,10 @@ class ContainerBase(Component[T_container_props, T_child]):
         for _, is_detach, comp in sort_items:
             if is_detach:
                 deleted = comp
-                special_methods = deleted.get_special_methods(reload_mgr)
-                if special_methods.will_unmount is not None:
-                    await self.run_callback(
-                        special_methods.will_unmount.get_binded_fn(),
-                        sync_status_first=False,
-                        change_status=False)
-                for k, unmount_effects in deleted.effects._flow_unmounted_effects.items(
-                ):
-                    for unmount_effect in unmount_effects:
-                        await self.run_callback(unmount_effect,
-                                                sync_status_first=False,
-                                                change_status=False)
-                    unmount_effects.clear()
+                await deleted._run_unmount_special_methods(self, reload_mgr)
             else:
                 attach = comp
-                special_methods = attach.get_special_methods(reload_mgr)
-                if special_methods.did_mount is not None:
-                    await self.run_callback(
-                        special_methods.did_mount.get_binded_fn(),
-                        sync_status_first=False,
-                        change_status=False)
-                # run effects
-                for k, effects in attach.effects._flow_effects.items():
-                    for effect in effects:
-                        res = await self.run_callback(effect,
-                                                      sync_status_first=False,
-                                                      change_status=False)
-                        if res is not None:
-                            # res is effect
-                            attach.effects._flow_unmounted_effects[k].append(
-                                res)
+                await attach._run_mount_special_methods(self, reload_mgr)
 
     async def set_new_layout_locally(self, layout: Union[Dict[str, Component],
                                                          T_child_structure]):

@@ -1,5 +1,4 @@
 import asyncio
-from calendar import c
 import dataclasses
 import datetime
 import enum
@@ -15,7 +14,6 @@ import grpc
 import psutil
 import rich
 import yaml
-from regex import F, P
 
 from tensorpc.compat import InWindows
 from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
@@ -23,14 +21,14 @@ from tensorpc.core.asyncclient import (simple_chunk_call_async,
                                        simple_remote_call_async)
 from tensorpc.core.client import simple_remote_call
 from tensorpc.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
-                                    TENSORPC_DBG_SPLIT, DebugFrameInfo,
+                                    TENSORPC_DBG_SPLIT, TENSORPC_DBG_TRACE_VIEW_KEY, DebugFrameInfo,
                                     DebugInfo, RecordFilterConfig, RecordMode,
                                     TracerConfig, TraceResult, TracerType,
                                     TracerUIConfig)
 from tensorpc.dbg.serv_names import serv_names as dbg_serv_names
 from tensorpc.flow import appctx, marker
 from tensorpc.flow.components import chart, mui
-from tensorpc.flow.components.plus.config import ConfigPanelDialogPersist
+from tensorpc.flow.components.plus.config import ConfigPanelDialog, ConfigPanelDialogPersist
 from tensorpc.flow.components.plus.styles import (CodeStyles,
                                                   get_tight_icon_tab_theme)
 from tensorpc.flow.core.appcore import AppSpecialEventType
@@ -76,13 +74,35 @@ _INIT_YAML_CONFIG = """
 # e.g. use Module._call_impl to remove all events starting with it
 exclude_name_prefixes:
 - Module._
+- Module.named_
 - DisableContext
 - _disable_dynamo
+- _CachingTorchDispatchMode
+- OpOverload
+- find_torch_dispatch_rule
+- _is_compiling
+- SimpleLibraryRegistry
+- no_grad.__
+- SelectiveCheckpointContext
+- set_grad_enabled
+- _NoParamDecoratorContextManager
+- Tensor.__hash__
+- DTensorSpec
+- DTensor.__torch_dispatch__
+- OpDispatcher
+- Logger
+- OpSchema
+
+exclude_file_names:
+- pytree.py
+- simple_registry.py
+- _jit_internal.py
+
 # e.g. add "torch.nn" to trace all submodules of torch.nn only
 include_modules:
 
 exclude_modules:
-
+- torch.distributed.tensor._dispatch # comment this to debug pytorch distributed
 include_files:
 
 exclude_files:
@@ -120,6 +140,11 @@ class ServerItemActions(enum.Enum):
     RECORD_INFINITE = "record_infinite"
     RECORD_CUSTOM = "record_custom"
     FORCE_STOP_RECORD = "force_stop_record"
+
+@dataclasses.dataclass
+class _DebugPerfettoScrollToRange:
+    start_us: mui.NumberType
+    end_us: mui.NumberType
 
 
 class MasterDebugPanel(mui.FlexBox):
@@ -181,8 +206,12 @@ class MasterDebugPanel(mui.FlexBox):
             mui.IconButton(mui.IconType.MoreVert).prop(size="small"))
         self._menu.prop(anchorOrigin=mui.Anchor("top", "right"))
         self._menu.event_contextmenu_select.on(self._handle_secondary_actions)
-        self._trace_yaml_cfg_editor = mui.SimpleCodeEditor(_INIT_YAML_CONFIG, "yaml")
-        self._trace_yaml_cfg_editor.prop(backgroundColor="#fafafa", flex=1, overflow="auto", editorFontSize="12px", debounce=100)
+        # self._trace_yaml_cfg_editor = mui.SimpleCodeEditor(_INIT_YAML_CONFIG, "yaml")
+        # self._trace_yaml_cfg_editor.prop(backgroundColor="#fafafa", flex=1, overflow="auto", editorFontSize="12px", debounce=100)
+        self._trace_yaml_cfg_editor = mui.MonacoEditor(_INIT_YAML_CONFIG, "yaml", "")
+        self._trace_yaml_cfg_editor.prop(width="100%", height="40vh")
+        # self._trace_yaml_cfg_editor.prop(backgroundColor="#fafafa", flex=1, overflow="auto", editorFontSize="12px", debounce=100)
+
         self._trace_launch_dialog = ConfigPanelDialogPersist(
             TracerUIConfig(), self._on_trace_launch, children=[
                 mui.Divider(),
@@ -190,7 +219,7 @@ class MasterDebugPanel(mui.FlexBox):
                 mui.Divider(),
                 self._trace_yaml_cfg_editor
             ]).prop(okLabel="Launch Record", title="Record Launch Config", dividers=True)
-        
+
         self._record_data_cache: Dict[str, Tuple[List[int], bytes]] = {}
         self._drawer = mui.Collapse([
             mui.VBox([
@@ -238,6 +267,9 @@ class MasterDebugPanel(mui.FlexBox):
         self._remote_comp_container = mui.VBox([]).prop(width="100%",
                                                         height="100%",
                                                         overflow="hidden")
+        self._remote_comp_tv_container = mui.VBox([]).prop(width="100%",
+                                                        height="100%",
+                                                        overflow="hidden")
 
         self._perfetto_select = mui.Select("trace", [], self._on_dist_perfetto_select)
         self._perfetto_select.prop(size="small", muiMargin="dense")
@@ -259,10 +291,15 @@ class MasterDebugPanel(mui.FlexBox):
         ]).prop(width="100%", height="100%", overflow="hidden")
         tab_defs = [
             mui.TabDef("",
-                       "remote",
+                       "remote_breakpoint_view",
                        self._remote_comp_container,
                        icon=mui.IconType.Terminal,
-                       tooltip="Remote Viewer"),
+                       tooltip="Remote Debug Viewer"),
+            mui.TabDef("",
+                       "remote_trace_view",
+                       self._remote_comp_tv_container,
+                       icon=mui.IconType.TableView,
+                       tooltip="Remote Trace Viewer"),
             mui.TabDef("",
                        "perfetto",
                        self._dist_perfetto_container,
@@ -275,7 +312,7 @@ class MasterDebugPanel(mui.FlexBox):
                                                    iconFontSize="18px"),
             mui.Divider(),
         ]
-        self._tabs = mui.Tabs(tab_defs, init_value="remote",
+        self._tabs = mui.Tabs(tab_defs, init_value="remote_breakpoint_view",
                               before=before).prop(panelProps=mui.FlexBoxProps(
                                   width="100%", padding=0),
                                                   orientation="vertical",
@@ -331,18 +368,30 @@ class MasterDebugPanel(mui.FlexBox):
             return mui.FileResource(name=f"{self._perfetto_select.value}{suffix}", content=self._dist_trace_data_for_download)
         return mui.FileResource(name=f"{self._perfetto_select.value}.json", content="{}".encode()) 
 
-    async def _on_server_item_click(self, ev: mui.Event):
-        indexes = ev.indexes
-        assert not isinstance(indexes, mui.Undefined)
-        meta = self._current_metas[indexes[0]]
-        if self._current_mount_uid == meta.uid:
-            return
+    async def _mount_remote_server_apps(self, meta: DebugServerProcessMeta):
         async with self._serv_list_lock:
             await self._remote_comp_container.set_new_layout([
                 mui.RemoteBoxGrpc(
                     "localhost", meta.port,
                     TENSORPC_DBG_FRAME_INSPECTOR_KEY).prop(flex=1)
             ])
+            await self._remote_comp_tv_container.set_new_layout([
+                mui.RemoteBoxGrpc(
+                    "localhost", meta.port,
+                    TENSORPC_DBG_TRACE_VIEW_KEY).prop(flex=1)
+            ])
+
+    async def _unmount_remote_server_apps(self):
+        await self._remote_comp_container.set_new_layout([])
+        await self._remote_comp_tv_container.set_new_layout([])
+
+    async def _on_server_item_click(self, ev: mui.Event):
+        indexes = ev.indexes
+        assert not isinstance(indexes, mui.Undefined)
+        meta = self._current_metas[indexes[0]]
+        if self._current_mount_uid == meta.uid:
+            return
+        await self._mount_remote_server_apps(meta)
         self._current_mount_uid = meta.uid
 
     async def _scan_loop(self, shutdown_ev: asyncio.Event):
@@ -427,7 +476,7 @@ class MasterDebugPanel(mui.FlexBox):
                     found = True
                     break
             if not found:
-                await self._remote_comp_container.set_new_layout({})
+                await self._unmount_remote_server_apps()
                 self._current_mount_uid = ""
 
     async def _open_drawer(self):
@@ -439,13 +488,13 @@ class MasterDebugPanel(mui.FlexBox):
     async def _unmount_remote_comp(self):
         async with self._serv_list_lock:
             if self._current_mount_uid != "":
-                await self._remote_comp_container.set_new_layout({})
+                await self._unmount_remote_server_apps()
                 self._current_mount_uid = ""
 
     async def _handle_secondary_actions(self, item_id: str):
         async with self._serv_list_lock:
             if item_id == ServerItemActions.UNMOUNT_REMOTE_SERVER.value:
-                await self._remote_comp_container.set_new_layout({})
+                await self._unmount_remote_server_apps()
                 self._current_mount_uid = ""
             elif item_id == ServerItemActions.RELEASE_BREAKPOINT.value:
                 await self.release_all_breakpoints()
@@ -462,6 +511,9 @@ class MasterDebugPanel(mui.FlexBox):
             elif item_id == ServerItemActions.FORCE_STOP_RECORD.value:
                 await self.force_trace_stop()
         await self._update_remote_server_discover_lst()
+
+    async def _on_debug_perfetto_select(self, cfg: _DebugPerfettoScrollToRange):
+        await self._dist_perfetto.scroll_to_range(cfg.start_us / 1e9, cfg.end_us / 1e9, 0.5)
 
     async def start_record(self, trace_cfg: Optional[TracerConfig] = None):
         ts = time.time_ns()
@@ -549,8 +601,10 @@ class MasterDebugPanel(mui.FlexBox):
         for data_gzipped in all_data_gzipped:
             if data_gzipped is None:
                 continue
-            datas = [gzip.decompress(d) for d in data_gzipped[1].data]
-            all_data_external_evs.append(data_gzipped[1].external_events)
+            datas = [gzip.decompress(d.data) for d in data_gzipped[1].single_results]
+            for single_res in data_gzipped[1].single_results:
+                if single_res.external_events is not None:
+                    all_data_external_evs.append(single_res.external_events)
             all_data.extend(datas)
             all_timestamps.append(data_gzipped[0])
         if not all_data:
@@ -715,7 +769,7 @@ class MasterDebugPanel(mui.FlexBox):
             AppSpecialEventType.VscodeBreakpointChange,
             self._handle_vscode_bkpt_change)
 
-    async def _handle_vscode_bkpt_change(self, bkpts: List[VscodeBreakpoint]):
+    async def _handle_vscode_bkpt_change(self, bkpts: Dict[str, List[VscodeBreakpoint]]):
         async with self._serv_list_lock:
             await self._run_rpc_on_metas(self._current_metas,
                                          dbg_serv_names.DBG_SET_VSCODE_BKPTS,

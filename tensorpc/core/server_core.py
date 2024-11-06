@@ -91,36 +91,16 @@ SERVER_GLOBAL_CONTEXT_VAR: contextvars.ContextVar[Optional[ServerGlobalContext]]
 
 
 def is_in_server_context() -> bool:
-    if compat.Python3_7AndLater:
-        assert SERVER_RPC_CONTEXT_VAR is not None
-        return SERVER_RPC_CONTEXT_VAR.get() is not None
-    tid = threading.get_ident()
-    exist = True
-    with CONTEXT_LOCK:
-        if tid not in SERVER_RPC_CONTEXT:
-            exist = False
-    return exist
+    assert SERVER_RPC_CONTEXT_VAR is not None
+    return SERVER_RPC_CONTEXT_VAR.get() is not None
 
 
 def get_server_context() -> ServerContext:
-    ctx = None
-    if compat.Python3_7AndLater:
-        assert SERVER_RPC_CONTEXT_VAR is not None
-        ctx = SERVER_RPC_CONTEXT_VAR.get()
-        if ctx is None:
-            raise ValueError(
-                "you can't call primitives outside server context.")
-        return ctx
-    tid = threading.get_ident()
-    notexist = False
-    with CONTEXT_LOCK:
-        if tid not in SERVER_RPC_CONTEXT:
-            notexist = True
-        else:
-            ctx = SERVER_RPC_CONTEXT[tid]
-    if notexist:
-        raise ValueError("you can't call primitives outside server context.")
-    assert ctx is not None
+    assert SERVER_RPC_CONTEXT_VAR is not None
+    ctx = SERVER_RPC_CONTEXT_VAR.get()
+    if ctx is None:
+        raise ValueError(
+            "you can't call primitives outside server context.")
     return ctx
 
 

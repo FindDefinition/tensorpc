@@ -62,7 +62,7 @@ class VscodeTracerBox(mui.FlexBox):
         self._tracer = CursorFuncTracer()
         self._trace_data: Optional[VscodeTracerData] = None
         self._is_tracing = False
-        self.event_before_unmount.on(self.unset_trace_data)
+        self.event_after_unmount.on(self.unset_trace_data)
         self._traced_folders = traced_folders
         self._max_depth = max_depth
 

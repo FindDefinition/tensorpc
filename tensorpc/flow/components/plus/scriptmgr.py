@@ -377,12 +377,14 @@ class ScriptManager(mui.FlexBox):
     async def _on_new_script(self, value, init_str: Optional[str] = None):
 
         new_item_name = value["label"]
+        storage_key = f"{SCRIPT_STORAGE_KEY_PREFIX}/{new_item_name}"
+
+        value["storage_key"] = storage_key
         await self.scripts.update_options([*self.scripts.props.options, value],
                                           -1)
         lang = self.langs.props.value
         assert isinstance(lang, str)
         script = Script(new_item_name, self._init_scripts, lang)
-        storage_key = f"{SCRIPT_STORAGE_KEY_PREFIX}/{new_item_name}"
         await appctx.save_data_storage(storage_key, script,
                                        self._storage_node_rid, self._graph_id)
         if lang != "app":

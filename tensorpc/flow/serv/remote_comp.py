@@ -171,7 +171,7 @@ class RemoteComponentService:
     async def mount_app(self, node_uid: str, key: str, url: str, port: int,
                         prefixes: List[str]):
         print("MOUNT", key)
-        assert key in self._app_objs
+        assert key in self._app_objs, key
         app_obj = self._app_objs[key]
         #
         if app_obj.mounted_app_meta is not None:

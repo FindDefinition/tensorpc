@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import importlib.util
 import inspect
@@ -12,14 +13,15 @@ from tensorpc.compat import InWindows
 from tensorpc.constants import TENSORPC_MAIN_PID
 from tensorpc.core.bgserver import BACKGROUND_SERVER
 from tensorpc.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
-                                    TENSORPC_DBG_TRACER_KEY,
+                                    TENSORPC_DBG_TRACE_VIEW_KEY,
                                     TENSORPC_ENV_DBG_ENABLE, BreakpointEvent,
                                     BreakpointType, TracerConfig, TraceResult,
-                                    TracerType, RecordFilterConfig, 
+                                    TracerType, RecordFilterConfig,
                                     DebugDistributedMeta)
 from tensorpc.dbg.tracer import DebugTracerWrapper, VizTracerAndPytorchTracer
 from tensorpc.flow.client import is_inside_app_session
 from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
+from tensorpc.flow.components.plus.dbg.traceview import TraceView
 from tensorpc.flow.serv_names import serv_names as app_serv_names
 from tensorpc.utils.rich_logging import get_logger
 
@@ -100,14 +102,15 @@ def _get_viztracer(cfg: Optional[TracerConfig], name: Optional[str] = None):
                                        max_stack_depth=cfg.max_stack_depth,
                                        include_files=inc_files,
                                        exclude_files=exc_files,
-                                        min_duration=cfg.min_duration,
-                                        ignore_c_function=cfg.ignore_c_function)
-                pytorch_tracer = profiler.profile(activities=[
-                    profiler.ProfilerActivity.CPU,
-                    profiler.ProfilerActivity.CUDA
-                ],
-                                                  with_stack=False,
-                                                  profile_memory=cfg.profile_memory)
+                                       min_duration=cfg.min_duration,
+                                       ignore_c_function=cfg.ignore_c_function)
+                pytorch_tracer = profiler.profile(
+                    activities=[
+                        profiler.ProfilerActivity.CPU,
+                        profiler.ProfilerActivity.CUDA
+                    ],
+                    with_stack=False,
+                    profile_memory=cfg.profile_memory)
                 return VizTracerAndPytorchTracer(
                     viz_tracer, pytorch_tracer), TracerType.VIZTRACER_PYTORCH
             else:
@@ -128,9 +131,13 @@ def should_enable_debug() -> bool:
     return enable
 
 
-def init(proc_name: Optional[str] = None, port: int = -1):
+def init(proc_name: Optional[str] = None,
+         port: int = -1,
+         *,
+         pytorch_dist_extra: bool = False):
     """Initialize the background server with the given process name
     if already started, this function does nothing.
+    TODO setup pytorch extra
     """
     if not should_enable_debug():
         return False
@@ -155,22 +162,25 @@ def init(proc_name: Optional[str] = None, port: int = -1):
             world_size_int = int(world_size)
         if world_size is not None and rank is not None:
             # assume pytorch distributed
-            proc_name += f"_pth_rank{rank}"
+            proc_name += f"_pth_{rank}"
             backend = "Pytorch"
         elif mpi_world_size is not None and mpi_rank is not None:
             # assume mpi
-            proc_name += f"_mpi_rank{mpi_rank}"
+            proc_name += f"_mpi_{mpi_rank}"
             backend = "Mpi"
         if cur_pid != TENSORPC_MAIN_PID:
             proc_name += f"_fork"
         userdata = DebugDistributedMeta(rank=rank_int,
-                                  world_size=world_size_int,
-                                  backend=backend)
+                                        world_size=world_size_int,
+                                        backend=backend)
         BACKGROUND_SERVER.start_async(id=proc_name,
                                       port=port,
                                       userdata=userdata)
         panel = BreakpointDebugPanel().prop(flex=1)
+        trace_view = TraceView().prop(flex=1)
         set_background_layout(TENSORPC_DBG_FRAME_INSPECTOR_KEY, panel)
+        set_background_layout(TENSORPC_DBG_TRACE_VIEW_KEY, trace_view)
+
         BACKGROUND_SERVER.execute_service(serv_names.DBG_INIT_BKPT_DEBUG_PANEL,
                                           panel)
         BACKGROUND_SERVER.execute_service(
@@ -178,6 +188,23 @@ def init(proc_name: Optional[str] = None, port: int = -1):
 
     return True
 
+def _patch_events_for_pytorch_dist(events: List[Any]):
+    import torch.distributed as dist 
+    rank = dist.get_rank()
+
+    for ev in events:
+        if ev["ph"] == "X":
+            # set thread id to rank
+            ev["tid"] = rank
+
+def _patch_events_pid_for_pytorch_dist(events: List[Any]):
+    import torch.distributed as dist 
+    rank = dist.get_rank()
+    pid = os.getpid()
+    for ev in events:
+        if ev["ph"] == "X":
+            # set thread id to rank
+            ev["pid"] = pid
 
 def breakpoint(name: Optional[str] = None,
                timeout: Optional[float] = None,
@@ -185,7 +212,8 @@ def breakpoint(name: Optional[str] = None,
                init_proc_name: Optional[str] = None,
                type: BreakpointType = BreakpointType.Normal,
                *,
-               _frame_cnt: int = 1):
+               _frame_cnt: int = 1,
+               pytorch_dist_extra: bool = False):
     """Enter a breakpoint in the background server.
     you must use specific UI or command tool to exit breakpoint.
     WARNING: currently don't support multi-thread
@@ -197,6 +225,9 @@ def breakpoint(name: Optional[str] = None,
         init_proc_name: the process name of the background server
         type: the type of the breakpoint
         _frame_cnt: the frame count to skip
+        pytorch_dist_extra: whether to enable pytorch distributed extra.
+            if user enable this, user must ensure all breakpoint call is synchronized,
+            hang may happen if some rank is diverged.
     """
     global RECORDING
     if not should_enable_debug():
@@ -214,7 +245,7 @@ def breakpoint(name: Optional[str] = None,
     if init_proc_name is None:
         init_proc_name = frame.f_code.co_name
 
-    init(init_proc_name, init_port)
+    init(init_proc_name, init_port, pytorch_dist_extra=pytorch_dist_extra)
     if name is not None:
         record_instant_event(name,
                              args={
@@ -230,8 +261,25 @@ def breakpoint(name: Optional[str] = None,
         res = _TRACER_WRAPPER.save(BACKGROUND_SERVER.cur_proc_title)
         trace_res_obj = None
         if res is not None:
-            trace_res_obj = TraceResult(
-                res, _TRACER_WRAPPER._trace_instant_events_for_pth)
+            if pytorch_dist_extra:
+                # broadcast external events to all rank.
+                # usually used for perfetto distributed visualization in single rank.
+                # you can insert custom duration event to show distributed events
+                # such as pipeline parallel.
+                for single_res in res:
+                    if single_res.external_events:
+                        import torch.distributed as dist
+                        ws = dist.get_world_size()
+                        output = [None for _ in range(ws)]
+                        _patch_events_for_pytorch_dist(single_res.external_events)
+                        dist.all_gather_object(output, single_res.external_events)
+                        events_all_rank = []
+                        for events in output:
+                            assert events is not None
+                            events_all_rank.extend(events)
+                        _patch_events_pid_for_pytorch_dist(events_all_rank)
+                        single_res.external_events = events_all_rank
+            trace_res_obj = TraceResult(res)
         _TRACER_WRAPPER.reset_tracer()
         # tracer_to_stop.stop()
         LOGGER.warning(f"Record Stop.")
@@ -252,7 +300,8 @@ def breakpoint(name: Optional[str] = None,
             LOGGER.warning(f"Record Start. Config:")
             LOGGER.warning(bev.trace_cfg)
             RECORDING = True
-            _TRACER_WRAPPER.set_tracer(bev.trace_cfg, tracer, tracer_type, tracer_name, meta)
+            _TRACER_WRAPPER.set_tracer(bev.trace_cfg, tracer, tracer_type,
+                                       tracer_name, meta)
             _TRACER_WRAPPER.start()
             BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACER,
                                               tracer)
@@ -260,6 +309,23 @@ def breakpoint(name: Optional[str] = None,
             LOGGER.error(
                 "viztracer is not installed, can't record trace data. use `pip install viztracer` to install."
             )
+
+
+def breakpoint_dist_pth(name: Optional[str] = None,
+                        timeout: Optional[float] = None,
+                        init_port: int = -1,
+                        init_proc_name: Optional[str] = None):
+    """Enter a breakpoint in the background server.
+    pytorch distributed sync may called in breakpoint (init and record),
+    so user must ensure all breakpoint call is synchronized,
+    """
+    return breakpoint(name,
+                      timeout,
+                      init_port,
+                      init_proc_name,
+                      BreakpointType.Normal,
+                      _frame_cnt=2,
+                      pytorch_dist_extra=True)
 
 
 def vscode_breakpoint(name: Optional[str] = None,
@@ -278,6 +344,23 @@ def vscode_breakpoint(name: Optional[str] = None,
                       init_proc_name,
                       BreakpointType.Vscode,
                       _frame_cnt=2)
+
+
+def vscode_breakpoint_dist_pth(name: Optional[str] = None,
+                               timeout: Optional[float] = None,
+                               init_port: int = -1,
+                               init_proc_name: Optional[str] = None):
+    """Enter a vscode breakpoint in the background server.
+    pytorch distributed sync may called in breakpoint (init and record),
+    so user must ensure all breakpoint call is synchronized,
+    """
+    return breakpoint(name,
+                      timeout,
+                      init_port,
+                      init_proc_name,
+                      BreakpointType.Vscode,
+                      _frame_cnt=2,
+                      pytorch_dist_extra=True)
 
 
 def set_background_layout(key: str, layout: Any):
@@ -310,11 +393,70 @@ def record_instant_event(name: str, args: Any = None, *, _frame_cnt: int = 1):
             frame = inspect.currentframe()
             if frame is None:
                 return
-            while _frame_cnt > 0:
-                if frame is not None:
-                    frame = frame.f_back
-                _frame_cnt -= 1
+            if _frame_cnt == 1:
+                # fast path
+                frame = frame.f_back
+            else:
+                while _frame_cnt > 0:
+                    if frame is not None:
+                        frame = frame.f_back
+                    _frame_cnt -= 1
             if frame is None:
                 return
             args = {"path": frame.f_code.co_filename, "lineno": frame.f_lineno}
         _TRACER_WRAPPER.log_instant(name, args)
+
+
+def record_print(*args, _frame_cnt: int = 1, name: str = "print"):
+    if RECORDING:
+        ss = io.StringIO()
+        print(*args, file=ss)
+        frame = inspect.currentframe()
+        if frame is None:
+            return
+        if _frame_cnt == 1:
+            # fast path
+            frame = frame.f_back
+        else:
+            while _frame_cnt > 0:
+                if frame is not None:
+                    frame = frame.f_back
+                _frame_cnt -= 1
+        if frame is None:
+            return
+        ev_args = {
+            "path": frame.f_code.co_filename,
+            "lineno": frame.f_lineno,
+            "msg": ss.getvalue()
+        }
+        _TRACER_WRAPPER.log_instant(name, ev_args)
+
+
+@contextlib.contextmanager
+def record_duration(name: str,
+                    args: Any = None,
+                    *,
+                    _frame_cnt: int = 1,
+                    thread_id: int = 0):
+    if RECORDING:
+        frame = inspect.currentframe()
+        if frame is None:
+            yield
+            return
+        if _frame_cnt == 1:
+            # fast path
+            frame = frame.f_back
+        else:
+            while _frame_cnt > 0:
+                if frame is not None:
+                    frame = frame.f_back
+                _frame_cnt -= 1
+        if frame is None:
+            yield
+            return
+        if args is None:
+            args = {"path": frame.f_code.co_filename, "lineno": frame.f_lineno}
+        with _TRACER_WRAPPER.log_duration(name, args, thread_id):
+            yield
+    else:
+        yield

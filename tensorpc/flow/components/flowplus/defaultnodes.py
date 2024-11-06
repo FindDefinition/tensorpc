@@ -207,7 +207,7 @@ class ImageViewerNode(ResizeableNodeBase):
         self.img = mui.Image()
         self.img.event_pointer_context_menu.disable_and_stop_propagation()
         self.img.prop(height="100%", width="100%", overflow="hidden")
-        self.img.update_sx_props({
+        self.img.update_raw_props({
             "object-fit": "contain",
         })
     @property

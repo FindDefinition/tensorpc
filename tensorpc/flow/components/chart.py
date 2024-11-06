@@ -29,7 +29,7 @@ from ..core.component import (AppEvent, AppEventType, BasicProps, Component,
                     ContainerBase, FrontendEventType, NumberType, T_child,
                     TaskLoopEvent, UIEvent, UIRunStatus, UIType, Undefined,
                     undefined, as_dict_no_undefined)
-from .mui import IFrame, MUIComponentBase
+from .mui import IFrame, MUIComponentBase, ValueType
 
 
 @dataclasses.dataclass
@@ -400,3 +400,19 @@ class Perfetto(IFrame):
                 "keepApiOpen": self._keep_api_open,
             }
         })))
+
+    async def scroll_to_range(self, start: ValueType, end: ValueType, view_percentage: Optional[float] = None):
+        """start and end are seconds, not micro seconds or nano seconds.
+        """
+        msg = {
+            "timeStart": start,
+            "timeEnd": end,
+            "keepApiOpen": self._keep_api_open,
+        }
+        if view_percentage is not None:
+            assert view_percentage >= 0 and view_percentage <= 1
+            msg["viewPercentage"] = view_percentage
+        await self.post_message(data=({
+            "perfetto": msg
+        }))
+

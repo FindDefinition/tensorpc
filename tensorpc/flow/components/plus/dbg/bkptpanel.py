@@ -20,13 +20,17 @@ from tensorpc.dbg.constants import BackgroundDebugToolsConfig, DebugFrameInfo, D
 from tensorpc.utils.loader import FrameModuleMeta
 from .framescript import FrameScript
 
+
 class DebugActions(enum.Enum):
     RECORD_TO_NEXT_SAME_BKPT = "Record To Same Breakpoint"
     RECORD_CUSTOM = "Launch Custom Record"
 
 
 _DEFAULT_BKPT_CNT_FOR_SAME_BKPT = 10
+
+
 class BreakpointDebugPanel(mui.FlexBox):
+
     def __init__(self):
         self.header = mui.Typography("").prop(variant="caption",
                                               fontFamily=CodeStyles.fontFamily)
@@ -53,12 +57,18 @@ class BreakpointDebugPanel(mui.FlexBox):
                                                        iconFontSize="18px",
                                                        muiColor="primary")
         self._header_more_menu = mui.MenuList([
-            mui.MenuItem(id=DebugActions.RECORD_TO_NEXT_SAME_BKPT.value, label=DebugActions.RECORD_TO_NEXT_SAME_BKPT.value),
-            mui.MenuItem(id=DebugActions.RECORD_CUSTOM.value, label=DebugActions.RECORD_CUSTOM.value),
-        ], mui.IconButton(mui.IconType.MoreVert).prop(size="small",
-                                                iconFontSize="18px"))
+            mui.MenuItem(id=DebugActions.RECORD_TO_NEXT_SAME_BKPT.value,
+                         label=DebugActions.RECORD_TO_NEXT_SAME_BKPT.value),
+            mui.MenuItem(id=DebugActions.RECORD_CUSTOM.value,
+                         label=DebugActions.RECORD_CUSTOM.value),
+        ],
+                                              mui.IconButton(
+                                                  mui.IconType.MoreVert).prop(
+                                                      size="small",
+                                                      iconFontSize="18px"))
         self._header_more_menu.prop(anchorOrigin=mui.Anchor("top", "right"))
-        self._header_more_menu.event_contextmenu_select.on(self._handle_debug_more_actions)
+        self._header_more_menu.event_contextmenu_select.on(
+            self._handle_debug_more_actions)
 
         self.header_actions = mui.HBox([
             self.continue_btn,
@@ -74,8 +84,9 @@ class BreakpointDebugPanel(mui.FlexBox):
                                         muiMargin="dense",
                                         fontFamily=CodeStyles.fontFamily),
                                     padding="0 3px 0 3px")
-        self._trace_launch_dialog = ConfigPanelDialog(self._on_trace_launch).prop(okLabel="Launch Record")
-        
+        self._trace_launch_dialog = ConfigPanelDialog(
+            self._on_trace_launch).prop(okLabel="Launch Record")
+
         self.header_actions.prop(flex=1,
                                  justifyContent="flex-end",
                                  paddingRight="4px",
@@ -111,7 +122,9 @@ class BreakpointDebugPanel(mui.FlexBox):
             custom_tabs=custom_tabs,
             custom_preview=self._frame_obj_preview)
         if isinstance(self.tree_viewer.tree.tree, mui.TanstackJsonLikeTree):
-            self.tree_viewer.tree.tree.prop(maxLeafRowFilterDepth=0)
+            self.tree_viewer.tree.tree.prop(maxLeafRowFilterDepth=0,
+                                            filterNodeValue=True)
+
         filter_input = mui.TextField("filter").prop(
             valueChangeTarget=(self.tree_viewer.tree.tree, "globalFilter"))
         self.header_container = mui.HBox([
@@ -181,20 +194,24 @@ class BreakpointDebugPanel(mui.FlexBox):
     async def _handle_debug_more_actions(self, value: str):
         if self._cur_leave_bkpt_cb is not None:
             if value == DebugActions.RECORD_TO_NEXT_SAME_BKPT.value:
-                await self._cur_leave_bkpt_cb(TracerConfig(enable=True, mode=RecordMode.SAME_BREAKPOINT, breakpoint_count=_DEFAULT_BKPT_CNT_FOR_SAME_BKPT))
+                await self._cur_leave_bkpt_cb(
+                    TracerConfig(
+                        enable=True,
+                        mode=RecordMode.SAME_BREAKPOINT,
+                        breakpoint_count=_DEFAULT_BKPT_CNT_FOR_SAME_BKPT))
                 self._cur_leave_bkpt_cb = None
             elif value == DebugActions.RECORD_CUSTOM.value:
-                await self._trace_launch_dialog.open_config_dialog(TracerUIConfig())
+                await self._trace_launch_dialog.open_config_dialog(
+                    TracerUIConfig())
 
     async def _on_trace_launch(self, config: TracerUIConfig):
         if self._cur_leave_bkpt_cb is not None:
             await self._cur_leave_bkpt_cb(
-                TracerConfig(
-                    enable=True,
-                    mode=config.mode,
-                    breakpoint_count=config.breakpoint_count,
-                    trace_name=config.trace_name,
-                    max_stack_depth=config.max_stack_depth))
+                TracerConfig(enable=True,
+                             mode=config.mode,
+                             breakpoint_count=config.breakpoint_count,
+                             trace_name=config.trace_name,
+                             max_stack_depth=config.max_stack_depth))
             self._cur_leave_bkpt_cb = None
 
     async def _select_frame(self, option: Dict[str, Any]):
@@ -269,12 +286,20 @@ class BreakpointDebugPanel(mui.FlexBox):
         local_vars = inspecttools.filter_local_vars(local_vars)
         return local_vars
 
-    async def set_frame_object(self, obj: Any, expr: str, func_node: Optional[Union[ast.FunctionDef, ast.AsyncFunctionDef]] = None, cur_frame: Optional[FrameType] = None):
+    async def set_frame_object(
+            self,
+            obj: Any,
+            expr: str,
+            func_node: Optional[Union[ast.FunctionDef,
+                                      ast.AsyncFunctionDef]] = None,
+            cur_frame: Optional[FrameType] = None):
         if expr.isidentifier() and func_node is not None:
-            await self._frame_obj_preview.set_folding_code(expr, func_node, cur_frame)
+            await self._frame_obj_preview.set_folding_code(
+                expr, func_node, cur_frame)
         del cur_frame
         #     await self._frame_obj_preview.set_frame_variable(expr, obj)
-        await self._frame_obj_preview.set_user_selection_frame_variable(expr, obj)
+        await self._frame_obj_preview.set_user_selection_frame_variable(
+            expr, obj)
         # await self.tree_viewer.set_obj_preview_layout(obj, header=expr)
 
     async def set_perfetto_data(self, data: bytes):

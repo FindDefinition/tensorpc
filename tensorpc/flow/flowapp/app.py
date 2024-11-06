@@ -645,21 +645,7 @@ class App:
         uid_to_comp_items.sort(key=lambda x: len(x[0].parts), reverse=True)
         with enter_app_context(self):
             for _, v in uid_to_comp_items:
-                special_methods = v.get_special_methods(
-                    self._flow_reload_manager)
-                if special_methods.did_mount is not None:
-                    await v.run_callback(
-                        special_methods.did_mount.get_binded_fn(),
-                        sync_status_first=False,
-                        change_status=False)
-                for k, effects in v.effects._flow_effects.items():
-                    for effect in effects:
-                        res = await v.run_callback(effect,
-                                                   sync_status_first=False,
-                                                   change_status=False)
-                        if res is not None:
-                            # res is effect
-                            v.effects._flow_unmounted_effects[k].append(res)
+                await v._run_mount_special_methods(v, self._flow_reload_manager)
 
     def app_terminate(self):
         """override this to init app after server stop
@@ -672,19 +658,7 @@ class App:
         uid_to_comp = self.root._get_uid_encoded_to_comp_dict()
         with enter_app_context(self):
             for v in uid_to_comp.values():
-                special_methods = v.get_special_methods(
-                    self._flow_reload_manager)
-                if special_methods.will_unmount is not None:
-                    await v.run_callback(
-                        special_methods.will_unmount.get_binded_fn(),
-                        sync_status_first=False,
-                        change_status=False)
-                for k, unmount_effects in v.effects._flow_unmounted_effects.items():
-                    for unmount_effect in unmount_effects:
-                        await v.run_callback(unmount_effect,
-                                            sync_status_first=False,
-                                            change_status=False)
-                    unmount_effects.clear()
+                await v._run_unmount_special_methods(v, self._flow_reload_manager)
 
     def app_create_layout(self) -> mui.LayoutType:
         """override this in EditableApp to support reloadable layout

@@ -18,6 +18,7 @@ import base64
 from typing import Mapping, Sequence
 import copy
 from functools import partial
+from typing_extensions import override
 
 from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.client import simple_chunk_call
@@ -4086,6 +4087,11 @@ class _TreeControlType(enum.IntEnum):
     UpdateSubTree = 0
     ExpandAll = 1
 
+@dataclasses.dataclass
+class JsonLikeTreeFieldMap:
+    name: Union[Undefined, Dict[str, str]] = undefined
+    typeStr: Union[Undefined, Dict[str, str]] = undefined
+    value: Union[Undefined, Dict[str, ValueType]] = undefined
 
 @dataclasses.dataclass
 class JsonLikeTreePropsBase(MUIFlexBoxProps):
@@ -4096,6 +4102,9 @@ class JsonLikeTreePropsBase(MUIFlexBoxProps):
     # useFastTree: Union[Undefined, bool] = undefined
     contextMenus: Union[Undefined, List[ContextMenuData]] = undefined
     fixedSize: Union[Undefined, bool] = undefined
+    expansionIconTrigger: Union[Undefined, bool] = undefined
+    showLazyExpandButton: Union[Undefined, bool] = undefined
+    fieldMap: Union[Undefined, JsonLikeTreeFieldMap] = undefined
 
 
 @dataclasses.dataclass
@@ -4113,8 +4122,42 @@ class TanstackJsonLikeTreeProps(JsonLikeTreePropsBase):
     globalFilter: Union[Undefined, str] = undefined
     maxLeafRowFilterDepth: Union[Undefined, int] = undefined
     filterFromLeafRows: Union[Undefined, bool] = undefined
+    # global filter only filter node.name by default
+    # if filterNodeValue set to true, filter node.value as well
+    filterNodeValue: Union[Undefined, bool] = undefined
+    rowFilterMatchProps: Union[Undefined, FlexBoxProps] = undefined
+    globalFilterContiguousOnly: Union[Undefined, bool] = undefined
 
 T_tview_base_props = TypeVar("T_tview_base_props", bound=JsonLikeTreePropsBase)
+
+@dataclasses.dataclass
+class RawJsonLikeTreePropsBase(MUIFlexBoxProps):
+    tree: Dict[str, Any] = dataclasses.field(default_factory=dict)
+    multiSelect: Union[Undefined, bool] = undefined
+    disableSelection: Union[Undefined, bool] = undefined
+    ignoreRoot: Union[Undefined, bool] = undefined
+    # useFastTree: Union[Undefined, bool] = undefined
+    contextMenus: Union[Undefined, List[ContextMenuData]] = undefined
+    fixedSize: Union[Undefined, bool] = undefined
+    expansionIconTrigger: Union[Undefined, bool] = undefined
+    showLazyExpandButton: Union[Undefined, bool] = undefined
+    fieldMap: Union[Undefined, JsonLikeTreeFieldMap] = undefined
+
+@dataclasses.dataclass
+class RawTanstackJsonLikeTreeProps(RawJsonLikeTreePropsBase):
+    rowSelection: Dict[str, bool] = dataclasses.field(default_factory=dict)
+    expanded: Union[bool, Dict[str,
+                               bool]] = dataclasses.field(default_factory=dict)
+    globalFilter: Union[Undefined, str] = undefined
+    maxLeafRowFilterDepth: Union[Undefined, int] = undefined
+    filterFromLeafRows: Union[Undefined, bool] = undefined
+    # global filter only filter node.name by default
+    # if filterNodeValue set to true, filter node.value as well
+    filterNodeValue: Union[Undefined, bool] = undefined
+    rowFilterMatchProps: Union[Undefined, FlexBoxProps] = undefined
+    globalFilterContiguousOnly: Union[Undefined, bool] = undefined
+
+T_raw_tview_base_props = TypeVar("T_raw_tview_base_props", bound=RawJsonLikeTreePropsBase)
 
 
 class JsonLikeTreeBase(MUIComponentBase[T_tview_base_props]):
@@ -4207,6 +4250,7 @@ class JsonLikeTreeBase(MUIComponentBase[T_tview_base_props]):
                 res.append(node.id.uid_encoded)
                 stack.extend(node.children)
         return res
+
 
 
 class JsonLikeTree(JsonLikeTreeBase[JsonLikeTreeProps]):
@@ -4331,6 +4375,150 @@ class TanstackJsonLikeTree(JsonLikeTreeBase[TanstackJsonLikeTreeProps]):
                 "type": _TreeControlType.ExpandAll,
             }))
 
+
+class RawJsonLikeTreeBase(MUIComponentBase[T_raw_tview_base_props]):
+
+    def __init__(self,
+                 base_type: UIType,
+                 prop_cls: Type[T_raw_tview_base_props],
+                 tree: Optional[dict] = None) -> None:
+        if tree is None:
+            tree = JsonLikeNode.create_dummy_dict()
+        tview_events = [
+            FrontendEventType.Change.value,
+            FrontendEventType.TreeItemSelectChange.value,
+            FrontendEventType.TreeItemToggle.value,
+            FrontendEventType.TreeLazyExpand.value,
+            FrontendEventType.TreeItemFocus.value,
+            FrontendEventType.TreeItemButton.value,
+            FrontendEventType.ContextMenuSelect.value,
+            FrontendEventType.TreeItemRename.value,
+        ]
+        super().__init__(base_type,
+                         prop_cls,
+                         allowed_events=tview_events,
+                         json_only=True)
+        self.props.tree = tree
+
+        self.event_select = self._create_event_slot(
+            FrontendEventType.TreeItemSelectChange)
+        # selection/expand change
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
+
+        self.event_toggle = self._create_event_slot(
+            FrontendEventType.TreeItemToggle)
+        self.event_lazy_expand = self._create_event_slot(
+            FrontendEventType.TreeLazyExpand)
+        self.event_focus = self._create_event_slot(
+            FrontendEventType.TreeItemFocus)
+        self.event_icon_button = self._create_event_slot(
+            FrontendEventType.TreeItemButton)
+        self.event_context_menu = self._create_event_slot(
+            FrontendEventType.ContextMenuSelect)
+        self.event_rename = self._create_event_slot(
+            FrontendEventType.TreeItemRename)
+
+    @override
+    def get_props(self) -> Dict[str, Any]:
+        # we assume the dict is valid and json serializable
+        # so we override standard as_dict to avoid expensive nested asdict
+        tree_data = self.props.tree
+        self.props.tree = {}
+        res = super().get_props()
+        self.props.tree = tree_data
+        res["tree"] = tree_data
+        return res
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    def get_all_expandable_node_ids(self, nodes: List[dict]):
+        res: List[str] = []
+        stack: List[dict] = nodes.copy()
+        while stack:
+            node = stack.pop()
+            if node.get("children"):
+                res.append(node["id"])
+                stack.extend(node["children"])
+        return res
+
+class RawTanstackJsonLikeTree(RawJsonLikeTreeBase[RawTanstackJsonLikeTreeProps]):
+    """Same as json like tree but use raw dict instead of JsonLikeNode.
+    faster, but no validation and no unique-tree-id support, you must
+    deal with tree id by yourself.
+
+    check fields of JsonLikeNode for supported fields of raw tree dict.
+    e.g. 
+    tree = {
+        "id": "root", # must be str
+        "name": "root", # must be str
+        "type": mui.JsonLikeType.Object.value, # must be value of enum `JsonLikeType`
+        "value": "root", # any type or undefined
+    }
+
+    **WARNING**: you must ensure tree is json serializable, dataclass fields in JsonLikeNode
+    must be converted to dict by user for performance reason, we don't provide any check
+    and auto conversion in this component.
+    """
+    def __init__(self, tree: Optional[dict] = None) -> None:
+        super().__init__(UIType.TanstackJsonLikeTreeView,
+                         RawTanstackJsonLikeTreeProps, tree)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls, json_only=True, ensure_json_keys=["tree"])
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        # select and expand event may received at the same time,
+        # so we can't change status here.
+        return await handle_standard_event(self,
+                                           ev,
+                                           sync_status_first=False,
+                                           change_status=False,
+                                           is_sync=is_sync)
+
+    def state_change_callback(
+            self,
+            value,
+            type: ValueType = FrontendEventType.TreeItemSelectChange.value):
+        # this only triggered when dialog closed, so we always set
+        # open to false.
+        if type == FrontendEventType.TreeItemSelectChange:
+            self.prop(rowSelection=value)
+        elif type == FrontendEventType.TreeItemExpandChange:
+            self.prop(expanded=value)
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["rowSelection"] = self.props.rowSelection
+        res["expanded"] = self.props.expanded
+        return res
+
+    async def select(self, ids: List[str]):
+        await self.send_and_wait(
+            self.update_event(rowSelection={k: True
+                                            for k in ids}))
+
+    async def expand_all(self):
+        if self.props.ignoreRoot == True:
+            all_expandable = self.get_all_expandable_node_ids(
+                self.props.tree["children"])
+        else:
+            all_expandable = self.get_all_expandable_node_ids(
+                [self.props.tree])
+        self.props.expanded = {k: True for k in all_expandable}
+        return await self.send_and_wait(
+            self.create_comp_event({
+                "type": _TreeControlType.ExpandAll,
+            }))
 
 class ControlNodeType(enum.IntEnum):
     Number = 0

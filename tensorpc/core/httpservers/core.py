@@ -325,10 +325,7 @@ class WebsocketClientBase(abc.ABC):
 
 
 def create_task(coro):
-    if compat.Python3_7AndLater:
-        return asyncio.create_task(coro)
-    else:
-        return asyncio.ensure_future(coro)
+    return asyncio.create_task(coro)
 
 
 async def _cancel(task):

@@ -280,7 +280,10 @@ class FlowApp:
         return res_list
 
     def get_vscode_breakpoints(self):
-        return self.app.get_vscode_state().get_all_breakpoints()
+        state = self.app.get_vscode_state()
+        if not state.is_init:
+            return None 
+        return state.get_all_breakpoints()
 
     async def relay_app_event_from_remote_component(self, app_event_dict: Dict[str, Any]):
         assert "remotePrefixes" in app_event_dict

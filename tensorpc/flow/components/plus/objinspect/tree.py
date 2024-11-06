@@ -256,7 +256,7 @@ class BasicObjectTree(mui.FlexBox):
         else:
             self.tree = mui.JsonLikeTree()
         super().__init__([
-            self.tree.prop(ignoreRoot=True, fixedSize=fixed_size),
+            self.tree.prop(ignoreRoot=True, fixedSize=fixed_size, showLazyExpandButton=True),
         ])
         self._drag_userdata = drag_userdata
         self.prop(overflow="auto", flexDirection="column")
