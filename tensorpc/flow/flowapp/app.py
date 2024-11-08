@@ -91,7 +91,7 @@ from tensorpc.utils.reload import reload_method
 from tensorpc.utils.uniquename import UniqueNamePool
 from tensorpc.flow.vscode.storage import AppDataStorageForVscode, AppVscodeState
 from ..core.appcore import (ALL_OBSERVED_FUNCTIONS, AppContext, AppSpecialEventType,
-                      _CompReloadMeta, Event, EventHandlingContext, create_reload_metas, enter_event_handling_conetxt)
+                      _CompReloadMeta, RemoteCompEvent, Event, EventHandlingContext, create_reload_metas, enter_event_handling_conetxt)
 from ..core.appcore import enter_app_context
 from ..core.appcore import enter_app_context as _enter_app_conetxt
 from ..core.appcore import get_app, get_app_context
@@ -231,6 +231,8 @@ def _enter_flowapp_observe_context(ctx: _FlowAppObserveContext):
     finally:
         _FLOWAPP_OBSERVE_CONTEXT.reset(token)
 
+def _component_rpc_runner(args_kwargs: Tuple[tuple, Dict[str, Any]], fn: Callable):
+    return fn(*args_kwargs[0], **args_kwargs[1])
 
 class App:
     """
@@ -291,6 +293,8 @@ class App:
         self._dialog_z_index: Optional[int] = None
         self._flowapp_special_eemitter: AsyncIOEventEmitter[
             AppSpecialEventType, Any] = AsyncIOEventEmitter()
+        self._flowapp_component_rpc_eemitter: AsyncIOEventEmitter[
+            str, RemoteCompEvent] = AsyncIOEventEmitter()
         self._flowapp_thread_id = threading.get_ident()
         self._flowapp_enable_exception_inspect: bool = False
 
@@ -971,6 +975,20 @@ class App:
         with _enter_app_conetxt(self):
             res = await self.handle_event(ev, is_sync)
         return res 
+
+    def register_remote_comp_event_handler(self, key: str,
+                                       handler: Callable[[RemoteCompEvent], Any]):
+        self._flowapp_component_rpc_eemitter.on(key, handler)
+
+    def unregister_remote_comp_event_handler(self, key: str,
+                                            handler: Callable[[RemoteCompEvent],
+                                                            Any]):
+        self._flowapp_component_rpc_eemitter.remove_listener(key, handler)
+
+    async def handle_msg_from_remote_comp(self, key: str, msg: RemoteCompEvent):
+        with _enter_app_conetxt(self):
+            return await self._flowapp_component_rpc_eemitter.emit_async(
+                key, msg)
 
     async def handle_vscode_event(self, data: VscodeTensorpcMessage):
         with _enter_app_conetxt(self):

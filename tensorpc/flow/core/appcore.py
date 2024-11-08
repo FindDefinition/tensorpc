@@ -134,6 +134,10 @@ class EventHandlers:
         self.handlers = [h for h in self.handlers if h.cb != handler]
         return
 
+@dataclasses.dataclass
+class RemoteCompEvent:
+    key: str
+    data: Any
 
 class AppContext:
 

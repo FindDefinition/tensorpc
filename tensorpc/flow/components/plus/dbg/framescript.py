@@ -134,6 +134,10 @@ class FrameScript(mui.FlexBox):
 
     async def mount_frame(self, frame_state: DebugFrameState):
         assert frame_state.frame is not None 
+        if frame_state.frame.f_code.co_filename.startswith("<"):
+            return
+        if frame_state.frame.f_code.co_name.startswith("<"):
+            return
         frame_id, title = self._get_frame_id_and_title_from_frame(frame_state.frame)
         self._current_frame_id = frame_id
         self._current_frame_state = frame_state
@@ -177,7 +181,9 @@ class FrameScript(mui.FlexBox):
         await self.code_editor.save({"SaveAndRun": True})
         return
         
-    async def _handle_editor_action(self, action: str):
+    async def _handle_editor_action(self, act_ev: mui.MonacoEditorActionEvent):
+        action = act_ev.action
+
         if action == EditorActions.SaveAndRun.value:
             await self._on_save_and_run()
 

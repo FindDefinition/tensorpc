@@ -5,13 +5,17 @@ from tensorpc import compat
 from tensorpc.core.dataclass_dispatch import dataclass
 from typing_extensions import TypeAlias, get_type_hints
 from dataclasses import Field, make_dataclass, field
-
+import enum 
 
 @dataclass
 class CommonObject:
     alias: Optional[str] = None
     default: Optional[Any] = None
 
+@dataclass
+class Enum:
+    alias: Optional[str] = None
+    excludes: Optional[List[Any]] = None
 
 @dataclass
 class RangedInt:

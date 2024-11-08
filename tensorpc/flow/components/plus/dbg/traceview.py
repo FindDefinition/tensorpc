@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import dataclasses
 import datetime
@@ -21,16 +22,18 @@ from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
 from tensorpc.core.asyncclient import (simple_chunk_call_async,
                                        simple_remote_call_async)
 from tensorpc.core.client import simple_remote_call
+from tensorpc.core.funcid import find_toplevel_func_node_container_by_lineno
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
-                                    TENSORPC_DBG_SPLIT, DebugFrameInfo,
-                                    DebugInfo, RecordFilterConfig, RecordMode,
+                                    TENSORPC_DBG_SPLIT, DebugDistributedMeta, DebugFrameInfo,
+                                    DebugInfo, RecordFilterConfig, RecordMode, RemoteDebugEventType, RemoteDebugTargetTrace,
                                     TracerConfig, TraceResult, TracerSingleResult, TracerType,
                                     TracerUIConfig)
 from tensorpc.dbg.serv_names import serv_names as dbg_serv_names
 from tensorpc.flow import appctx, marker
 from tensorpc.flow.components import chart, mui
 from tensorpc.flow.components.plus.config import ConfigPanelDialog, ConfigPanelDialogPersist
+from tensorpc.flow.components.plus.objview.preview import ObjectPreview
 from tensorpc.flow.components.plus.styles import (CodeStyles,
                                                   get_tight_icon_tab_theme)
 from tensorpc.flow.core.appcore import AppSpecialEventType
@@ -160,25 +163,55 @@ class TraceState:
     max_ts: float 
     has_trace_data: bool = False
 
-class TraceView(mui.FlexBox):
-    def __init__(self):
+class EditorActionType(enum.Enum):
+    LaunchVariableTracing = "LaunchVariableTracing"
 
+class TraceView(mui.FlexBox):
+    def __init__(self, dist_meta: DebugDistributedMeta):
+        self._dist_meta = dist_meta
+        self._obj_preview = ObjectPreview(enable_reload=False)
         self.tree = mui.RawTanstackJsonLikeTree()
+        # use globalFilterContiguousOnly to match whole word only.
+        # we usually don't need too much fuzzy search, usually copy-paste class name or file name
+        # from other places.
         self.tree.prop(ignoreRoot=True, expansionIconTrigger=True, 
                 fixedSize=True, filterFromLeafRows=True, filterNodeValue=True,
                 rowFilterMatchProps=mui.FlexBoxProps(backgroundColor="beige"),
                 globalFilterContiguousOnly=True)
-        self.tree.props.tree = mui.JsonLikeNode.create_dummy_dict()
+        self.tree.props.tree = mui.JsonLikeNode.create_dummy_dict_binary()
         filter_inp = mui.Input("filter").prop(valueChangeTarget=(self.tree, "globalFilter"), debounce=500, value=mui.undefined)
+        # update filter prop in backend only because we use `valueChangeTarget` to change
+        # globalFilter directly. we modify backend value to keep state when remount.
+        filter_inp.event_change.on(lambda val: self.tree.prop(globalFilter=val))
         self._editor = mui.MonacoEditor("", "python", "")
         self._editor.prop(readOnly=True)
+        self._editor.prop(actions=[
+            mui.MonacoEditorAction(id=EditorActionType.LaunchVariableTracing.value, 
+                label="Launch Variable Trace", contextMenuOrder=1.5,
+                contextMenuGroupId="tensorpc-traceview-action", 
+            ),
+        ])
+        self._editor.event_editor_action.on(self._handle_editor_action)
+
         self._code_header = mui.Typography().prop(variant="caption", paddingLeft="10px")
         self._perfetto = chart.Perfetto()
         child = mui.Allotment([
-            mui.VBox([
-                filter_inp,
-                self.tree,
-            ]).prop(width="100%", height="100%", overflow="hidden"),
+            mui.Allotment([
+                mui.VBox([
+                    filter_inp,
+                    self.tree,
+                ]).prop(width="100%", height="100%", overflow="hidden"),
+                self._obj_preview,
+
+            ]).prop(
+                    overflow="hidden",
+                    defaultSizes=[2, 1],
+                    vertical=True),
+            # mui.VBox([
+            #     filter_inp,
+            #     self.tree,
+            # ]).prop(width="100%", height="100%", overflow="hidden"),
+
             mui.VBox([
                 self._perfetto.prop(flex=1),
                 self._code_header,
@@ -205,7 +238,7 @@ class TraceView(mui.FlexBox):
             with open(path, "r") as f:
                 code = f.read()
             write_ev = self._code_header.update_event(value=f"{path}:{lineno}")
-            await self.send_and_wait(self._editor.update_event(value=code) + write_ev)
+            await self.send_and_wait(self._editor.update_event(value=code, path=path) + write_ev)
             await self._editor.set_line_number(lineno)
             if self._state.has_trace_data:
                 duration = self._state.max_ts - self._state.min_ts
@@ -241,7 +274,7 @@ class TraceView(mui.FlexBox):
             self._state = TraceState(id_to_ev, min_ts, max_ts, has_trace_data=True)
             editor_ev = self._editor.update_event(value="")
             selected_state = {k: True for k in self.tree.get_all_expandable_node_ids(root["children"])}
-            editor_ev += self.tree.update_event(tree=root, expanded=selected_state, fieldMap=fieldmap)
+            editor_ev += self.tree.update_event(tree=json.dumps(root).encode(), expanded=selected_state, fieldMap=fieldmap)
             await self.send_and_wait(editor_ev)
             zip_ss = io.BytesIO()
             with zipfile.ZipFile(zip_ss, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
@@ -253,3 +286,21 @@ class TraceView(mui.FlexBox):
             res = zip_ss.getvalue()
             await self._perfetto.set_trace_data(res, "trace")
 
+    async def _handle_editor_action(self, act_ev: mui.MonacoEditorActionEvent):
+        action = act_ev.action
+        if action == EditorActionType.LaunchVariableTracing.value:
+            sel = act_ev.selection
+            if sel is not None and not isinstance(self._editor.props.value, mui.Undefined) and not isinstance(self._editor.props.path, mui.Undefined):
+                code = sel.selectedCode
+                if code.strip() != "":
+                    # parse code via ast to avoid early error
+                    ast.parse(code)
+                    tree = ast.parse(self._editor.props.value)
+                    lineno = sel.selections[0].startLineNumber
+                    nodes = find_toplevel_func_node_container_by_lineno(
+                        tree, lineno)
+                    if nodes is not None:
+                        node_qname = ".".join([n.name for n in nodes])
+                        trace_ev = RemoteDebugTargetTrace(RemoteDebugEventType.DIST_TARGET_VARIABLE_TRACE, self._dist_meta, 
+                            self._editor.props.path, node_qname, code)
+                        await self.put_app_event(self.create_remote_comp_event(RemoteDebugEventType.DIST_TARGET_VARIABLE_TRACE.value, trace_ev))

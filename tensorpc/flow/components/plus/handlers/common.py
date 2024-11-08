@@ -253,14 +253,18 @@ class DataclassesHandler(ObjectPreviewHandler):
 
     def __init__(self) -> None:
         self.cfg_ctrl_container = mui.Fragment([])
-        super().__init__([self.cfg_ctrl_container])
+        self._simple_tree = BasicObjectTree(use_fast_tree=False, clear_data_when_unmount=True)
+
+        super().__init__([self._simple_tree])
         self.prop(flexDirection="column", flex=1)
 
     async def bind(self, obj: Any, uid: Optional[str] = None):
         # for uncontrolled component, use react_key to force remount.
         # FIXME currently no way to update if obj dataclass def is changed with same uid.
-        panel = ConfigPanelV2(obj).prop(reactKey=uid)
-        await self.cfg_ctrl_container.set_new_layout([panel])
+        # panel = ConfigPanelV2(obj).prop(reactKey=uid)
+        # await self.cfg_ctrl_container.set_new_layout([panel])
+        await self._simple_tree.set_object(obj, expand_level=2)
+
 
 
 class DefaultHandler(ObjectPreviewHandler):

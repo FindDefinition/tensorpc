@@ -22,7 +22,7 @@ from typing import (Any, AsyncGenerator, Awaitable, Callable, ContextManager, Co
 from typing_extensions import ParamSpec
 
 from tensorpc.core.serviceunit import ObservedFunctionRegistryProtocol
-from tensorpc.flow.core.appcore import (AppSpecialEventType, enter_app_context, find_component,
+from tensorpc.flow.core.appcore import (AppSpecialEventType, RemoteCompEvent, enter_app_context, find_component,
                                         find_component_by_uid, get_app, get_app_storage,
                                         find_all_components, get_app_context,
                                         get_editable_app, get_reload_manager,
@@ -219,3 +219,13 @@ def unregister_app_special_event_handler(event: AppSpecialEventType,
                                            handler: Callable):
     app = get_app()
     return app.unregister_app_special_event_handler(event, handler)
+
+def register_remote_comp_event_handler(key: str,
+                                        handler: Callable[[RemoteCompEvent], Any]):
+    app = get_app()
+    return app.register_remote_comp_event_handler(key, handler)
+
+def unregister_remote_comp_event_handler(key: str,
+                                        handler: Callable[[RemoteCompEvent], Any]):
+    app = get_app()
+    return app.unregister_remote_comp_event_handler(key, handler)

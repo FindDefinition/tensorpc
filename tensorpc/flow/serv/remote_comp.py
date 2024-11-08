@@ -20,7 +20,7 @@ from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp
 from tensorpc.flow.components.mui import FlexBox
 from tensorpc.flow.constants import TENSORPC_APP_ROOT_COMP
-from tensorpc.flow.core.appcore import ALL_OBSERVED_FUNCTIONS, AppSpecialEventType, enter_app_context
+from tensorpc.flow.core.appcore import ALL_OBSERVED_FUNCTIONS, AppSpecialEventType, RemoteCompEvent, enter_app_context
 from tensorpc.flow.core.component import (AppEvent, AppEventType,
                                           FrontendEventType, LayoutEvent,
                                           UIEvent, UpdateComponentsEvent,
@@ -306,39 +306,53 @@ class RemoteComponentService:
             send_task = asyncio.create_task(app_obj.send_loop_queue.get(), name="wait for queue")
             wait_tasks: List[asyncio.Task] = [shut_task, send_task]
             succeed = False
-            # retry
-            for _ in range(retry_cnt):
-                try:
-                    await self._send_grpc_event_large(
-                        ev,
-                        robj,
-                        app_obj.mounted_app_meta.prefixes,
-                        app,
-                        timeout=10)
-                    succeed = True
-                    break
-                except Exception as e:
-                    traceback.print_exc()
-            if not succeed:
-                print("Master disconnect for too long, unmount")
-                if robj is not None:
-                    await robj.close()
-                    robj = None
-                await self.unmount_app(app_obj.mounted_app_meta.key)
-                wait_for_mount_task = asyncio.create_task(
-                    app_obj.mount_ev.wait(), name=f"wait for mount-{os.getpid()}")
-                wait_tasks: List[asyncio.Task] = [
-                    shut_task, wait_for_mount_task, send_task
-                ]
-                continue
+            # when user use additional event such as RemoteCompEvent, regular app event may be empty.
+            if ev.type_to_event:
+                # retry
+                for _ in range(retry_cnt):
+                    try:
+                        await self._send_grpc_event_large(
+                            ev,
+                            robj,
+                            app_obj.mounted_app_meta.prefixes,
+                            app,
+                            timeout=10)
+                        succeed = True
+                        break
+                    except Exception as e:
+                        traceback.print_exc()
+                if not succeed:
+                    print("Master disconnect for too long, unmount")
+                    if robj is not None:
+                        await robj.close()
+                        robj = None
+                    await self.unmount_app(app_obj.mounted_app_meta.key)
+                    wait_for_mount_task = asyncio.create_task(
+                        app_obj.mount_ev.wait(), name=f"wait for mount-{os.getpid()}")
+                    wait_tasks: List[asyncio.Task] = [
+                        shut_task, wait_for_mount_task, send_task
+                    ]
+                    continue
             # trigger sent event here.
             if ev.sent_event is not None:
                 ev.sent_event.set()
+            # handle additional events
+            for addi_ev in ev._additional_events:
+                if isinstance(addi_ev, RemoteCompEvent):
+                    try:
+                        await robj.remote_call(serv_names.APP_RUN_REMOTE_COMP_EVENT, addi_ev.key, addi_ev, rpc_timeout=1)
+                    except Exception as e:
+                        traceback.print_exc()
+
         app_obj.send_loop_task = None
         app_obj.mounted_app_meta = None
         if robj is not None:
             await robj.close()
         # print("!!!", "send loop closed", last_key, os.getpid())
+
+    async def handle_msg_from_remote_comp(self, key: str, rpc_key: str, event: RemoteCompEvent):
+        app_obj = self._app_objs[key]
+        return await app_obj.app.handle_msg_from_remote_comp(rpc_key, event)
 
     async def _send_grpc_event_large(self,
                                      ev: AppEvent,

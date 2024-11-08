@@ -94,6 +94,9 @@ class DebugTracerWrapper:
                     name: str,
                     args: Any = None,
                     scope: str = "p") -> None:
+        if self._tracer_type == TracerType.TARGET_TRACER:
+            return 
+
         is_diff_thread = threading.get_ident() != self._trace_tid
         if self._tracer is not None and self._trace_lock is not None:
             if self._tracer_type == TracerType.VIZTRACER and not is_diff_thread:
@@ -129,6 +132,10 @@ class DebugTracerWrapper:
                     thread_id: int = 0):
         """only log to thread 0.
         """
+        if self._tracer_type == TracerType.TARGET_TRACER:
+            yield 
+            return 
+
         if self._tracer is not None and self._trace_lock is not None:
             pid = os.getpid()
             # pid == tid in pytorch profiler
@@ -162,6 +169,8 @@ class DebugTracerWrapper:
                 self._tracer.start()
             elif self._tracer_type == TracerType.PYTORCH:
                 self._tracer.__enter__()
+            elif self._tracer_type == TracerType.TARGET_TRACER:
+                self._tracer.start()
             else:
                 raise ValueError(f"Invalid tracer type: {self._tracer_type}")
 
@@ -171,6 +180,8 @@ class DebugTracerWrapper:
                 self._tracer.stop()
             elif self._tracer_type == TracerType.PYTORCH:
                 self._tracer.__exit__(None, None, None)
+            elif self._tracer_type == TracerType.TARGET_TRACER:
+                self._tracer.start()
             else:
                 raise ValueError(f"Invalid tracer type: {self._tracer_type}")
 
@@ -302,6 +313,8 @@ class DebugTracerWrapper:
         self,
         proc_name_for_pth: Optional[str] = None
     ) -> Optional[List[TracerSingleResult]]:
+        if self._tracer_type == TracerType.TARGET_TRACER:
+            return None 
         if self._tracer is not None and self._trace_lock is not None:
             with self._trace_lock:
                 ext_events = copy.deepcopy(self._trace_events_external)

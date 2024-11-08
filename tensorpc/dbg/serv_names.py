@@ -14,6 +14,11 @@ class _ServiceNames:
         return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.leave_breakpoint.__name__)
 
     @property
+    def DBG_SET_DISTRIBUTED_META(self):
+        from tensorpc.services.dbg.tools import BackgroundDebugTools
+        return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.set_distributed_meta.__name__)
+
+    @property
     def DBG_CURRENT_FRAME_META(self):
         from tensorpc.services.dbg.tools import BackgroundDebugTools
         return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.get_cur_debug_info.__name__)
@@ -82,5 +87,10 @@ class _ServiceNames:
     def DBG_FORCE_TRACE_STOP(self):
         from tensorpc.services.dbg.tools import BackgroundDebugTools
         return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.force_trace_stop.__name__)
+
+    @property
+    def DBG_TRACEVIEW_SET_VARIABLE_INSPECT(self):
+        from tensorpc.services.dbg.tools import BackgroundDebugTools
+        return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.set_traceview_variable_inspect.__name__)
 
 serv_names = _ServiceNames()

@@ -47,7 +47,7 @@ from tensorpc.core.defs import FileResource, FileResourceRequest
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 from tensorpc.core.serviceunit import AppFuncType, ObjectReloadManager, ReloadableDynamicClass, ServFunctionMeta
 from tensorpc.flow.client import MasterMeta
-from tensorpc.flow.core.appcore import Event, EventDataType
+from tensorpc.flow.core.appcore import Event, EventDataType, RemoteCompEvent
 from tensorpc.flow.core.common import (handle_standard_event)
 from tensorpc.flow.core.reload import AppReloadManager
 from ..jsonlike import JsonLikeType, BackendOnlyProp, ContextMenuData, JsonLikeNode, as_dict_no_undefined
@@ -1593,7 +1593,13 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
             self,
             value: str,
             type: ValueType = FrontendEventType.Change.value):
-        self.props.value = value
+        if isinstance(self.props.value, Undefined):
+            # if value is undefined, this component behaves as an uncontrolled component
+            # we still need to update defaultValue here to make sure
+            # init value is recover when unmount and remount.
+            self.props.defaultValue = value
+        else: 
+            self.props.value = value
 
     async def headless_write(self, content: str):
         uiev = UIEvent({
@@ -1762,6 +1768,10 @@ class MonacoEditorSelectionEvent:
     selectedCode: str
     source: str
 
+@dataclasses.dataclass
+class MonacoEditorActionEvent:
+    action: str 
+    selection: Optional[MonacoEditorSelectionEvent]
 
 class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
 
@@ -1793,7 +1803,7 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         self.event_editor_ready = self._create_event_slot_noarg(
             FrontendEventType.EditorReady)
         self.event_editor_action = self._create_event_slot(
-            FrontendEventType.EditorAction)
+            FrontendEventType.EditorAction, converter=lambda x: MonacoEditorActionEvent(**x))
         self.event_editor_save.on(self._default_on_editor_save)
         self.event_editor_cursor_selection = self._create_event_slot(
             FrontendEventType.EditorCursorSelection,
@@ -4132,7 +4142,7 @@ T_tview_base_props = TypeVar("T_tview_base_props", bound=JsonLikeTreePropsBase)
 
 @dataclasses.dataclass
 class RawJsonLikeTreePropsBase(MUIFlexBoxProps):
-    tree: Dict[str, Any] = dataclasses.field(default_factory=dict)
+    tree: Union[Dict[str, Any], bytes] = dataclasses.field(default_factory=dict)
     multiSelect: Union[Undefined, bool] = undefined
     disableSelection: Union[Undefined, bool] = undefined
     ignoreRoot: Union[Undefined, bool] = undefined
@@ -4508,12 +4518,16 @@ class RawTanstackJsonLikeTree(RawJsonLikeTreeBase[RawTanstackJsonLikeTreeProps])
                                             for k in ids}))
 
     async def expand_all(self):
+        tree_root = self.props.tree
+        if isinstance(tree_root, bytes):
+            raise ValueError("expand all not supported for binary data")
+        assert isinstance(tree_root, dict)
         if self.props.ignoreRoot == True:
             all_expandable = self.get_all_expandable_node_ids(
-                self.props.tree["children"])
+                tree_root["children"])
         else:
             all_expandable = self.get_all_expandable_node_ids(
-                [self.props.tree])
+                [tree_root])
         self.props.expanded = {k: True for k in all_expandable}
         return await self.send_and_wait(
             self.create_comp_event({

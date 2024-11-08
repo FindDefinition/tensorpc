@@ -20,7 +20,8 @@ from tensorpc.dbg.constants import (
     TENSORPC_DBG_FRAME_INSPECTOR_KEY,
     TENSORPC_DBG_TRACE_VIEW_KEY,
     TENSORPC_ENV_DBG_DEFAULT_BREAKPOINT_ENABLE, BackgroundDebugToolsConfig,
-    BreakpointEvent, BreakpointType, DebugFrameInfo, DebugInfo, DebugMetric,
+    BreakpointEvent, BreakpointType,
+    DebugDistributedMeta, DebugFrameInfo, DebugInfo, DebugMetric,
     DebugServerStatus, ExternalTrace, RecordMode, TraceMetrics, TraceResult,
     TracerConfig,
     TracerType)
@@ -88,6 +89,12 @@ class BackgroundDebugTools:
         self._trace_gzip_data_dict: Dict[str, Tuple[int, TraceResult]] = {}
 
         self._debug_metric = DebugMetric(0)
+
+        self._distributed_meta: Optional[DebugDistributedMeta] = None
+
+
+    def set_distributed_meta(self, meta: DebugDistributedMeta):
+        self._distributed_meta = meta
 
     @marker.mark_server_event(event_type=ServiceEventType.Exit)
     def _on_exit(self):
@@ -261,6 +268,14 @@ class BackgroundDebugTools:
                 self._cur_breakpoint = None
             self._frame = None
 
+    async def set_traceview_variable_inspect(self, var_name: str, var_obj: Any):
+        tv_obj, tv_app = prim.get_service(
+            app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
+                TENSORPC_DBG_TRACE_VIEW_KEY)
+        assert isinstance(tv_obj, TraceView)
+        with enter_app_context(tv_app):
+            await tv_obj._obj_preview.set_obj_preview_layout(var_obj, header=var_name)
+
     def set_tracer(self, tracer: Any):
         assert self._cur_tracer_state is not None
         self._cur_tracer_state.tracer = tracer
@@ -330,7 +345,7 @@ class BackgroundDebugTools:
         trace_cfg: Optional[TracerConfig] = None
         if self._cur_tracer_state is not None:
             trace_cfg = self._cur_tracer_state.cfg
-        return DebugInfo(self._debug_metric, frame_info, trace_cfg)
+        return DebugInfo(self._debug_metric, frame_info, trace_cfg, self._distributed_meta)
 
     def _get_filtered_local_vars(self, frame: FrameType):
         local_vars = frame.f_locals.copy()

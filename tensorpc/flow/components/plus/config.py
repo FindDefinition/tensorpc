@@ -305,6 +305,8 @@ def parse_to_control_nodes(origin_obj,
         # if _CONFIG_META_KEY in f.metadata:
         #     meta = f.metadata[_CONFIG_META_KEY]
         ty = f.type
+        if isinstance(ty, str):
+            continue # ignore str type
         is_anno = is_annotated(ty)
         # ty_origin = get_origin(ty)
         annotated_metas = None
@@ -390,7 +392,7 @@ def parse_to_control_nodes(origin_obj,
                     child_node.initValue = val
                 else:
                     if first_anno_meta.default is not None:
-                        child_node.initValue = first_anno_meta.default
+                        child_node.initValue = list(first_anno_meta.default)
                 if isinstance(first_anno_meta, (typemetas.RangedVector3, typemetas.RangedVector2)):
                     child_node.min = first_anno_meta.lo
                     child_node.max = first_anno_meta.hi
@@ -430,6 +432,17 @@ def parse_to_control_nodes(origin_obj,
                     res_node.children.append(child_node)
                     obj_uid_to_meta[child_node.id] = res
                     continue
+            elif isinstance(first_anno_meta, (typemetas.Enum)):
+                res = _parse_base_type(ty, current_obj, f.name, child_node)
+                if res is not None and issubclass(ty, (enum.Enum, enum.IntEnum)):
+                    if first_anno_meta.alias is not None:
+                        child_node.alias = first_anno_meta.alias
+                    if first_anno_meta.excludes is not None:
+                        child_node.selects = list((x.name, x.value) for x in ty if x not in first_anno_meta.excludes)
+                    res_node.children.append(child_node)
+                    obj_uid_to_meta[child_node.id] = res
+                    continue
+
             elif isinstance(first_anno_meta, (typemetas.CommonObject)):
                 res = _parse_base_type(ty, current_obj, f.name, child_node)
                 if res is not None:

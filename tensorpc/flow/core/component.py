@@ -70,7 +70,7 @@ from ..jsonlike import (BackendOnlyProp, DataClassWithUndefined, Undefined,
                         camel_to_snake, snake_to_camel,
                         split_props_to_undefined, undefined,
                         undefined_dict_factory)
-from .appcore import SimpleEventType, NumberType, ValueType, enter_event_handling_conetxt, get_app, Event, EventDataType, get_event_handling_context
+from .appcore import RemoteCompEvent, SimpleEventType, NumberType, ValueType, enter_event_handling_conetxt, get_app, Event, EventDataType, get_event_handling_context
 from tensorpc.flow.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_FLOW_COMP_UID_STRUCTURE_SPLIT
 
 
@@ -954,6 +954,9 @@ class AppEvent:
         self.event_id = event_id
         self.is_loopback = is_loopback
         self._remote_prefixes = remote_prefixes
+        # for additional events, such as remote component events.
+        # RemoteCompEvent: only available in remote component.
+        self._additional_events: List[RemoteCompEvent] = []
 
     def to_dict(self):
         # here we don't use dict for typeToEvents because key in js must be string.
@@ -982,7 +985,9 @@ class AppEvent:
                 new_type_to_event[k] = v.merge_new(new.type_to_event[k])
             else:
                 new_type_to_event[k] = v
-        return AppEvent(self.uid, new_type_to_event, sent_event)
+        res = AppEvent(self.uid, new_type_to_event, sent_event)
+        res._additional_events = self._additional_events + new._additional_events
+        return res 
 
     def get_event_uid(self):
         if self.event_id:
@@ -1852,6 +1857,13 @@ class Component(Generic[T_base_props, T_child]):
         ev = UpdateComponentsEvent({}, deletes)
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.UpdateComponents: ev})
+
+    def create_remote_comp_event(self, key: str, data: Any):
+        """create event for remote comp to send to mounted master app.
+        """
+        res = AppEvent("", {})
+        res._additional_events = [RemoteCompEvent(key, data)]
+        return res
 
     def create_user_msg_event(self, exc: UserMessage):
         ev = UIExceptionEvent([exc])
@@ -2938,6 +2950,9 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
  
     async def get_file_metadata(self, file_key: str):
         return await self.remote_call(serv_names.REMOTE_COMP_GET_FILE_METADATA, 1, self._key, file_key)
+
+    async def send_remote_comp_event(self, key: str, event: RemoteCompEvent):
+        return await self.remote_call(serv_names.REMOTE_COMP_RUN_REMOTE_COMP_EVENT, 1, self._key, key, event)
 
 @dataclasses_strict.dataclass
 class FragmentProps(ContainerBaseProps):

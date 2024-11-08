@@ -197,6 +197,11 @@ class _ServiceNames:
                                        FlowApp.remote_comp_shutdown.__name__)
 
     @property
+    def APP_RUN_REMOTE_COMP_EVENT(self):
+        from tensorpc.flow.serv.flowapp import FlowApp
+        return get_service_key_by_type(FlowApp, FlowApp.handle_msg_from_remote_comp.__name__)
+
+    @property
     def APP_GET_LAYOUT(self):
         from tensorpc.flow.serv.flowapp import FlowApp
         return get_service_key_by_type(FlowApp, FlowApp.get_layout.__name__)
@@ -313,5 +318,10 @@ class _ServiceNames:
     def REMOTE_COMP_GET_FILE_METADATA(self):
         from tensorpc.flow.serv.remote_comp import RemoteComponentService
         return get_service_key_by_type(RemoteComponentService, RemoteComponentService.get_file_metadata.__name__)
+
+    @property
+    def REMOTE_COMP_RUN_REMOTE_COMP_EVENT(self):
+        from tensorpc.flow.serv.remote_comp import RemoteComponentService
+        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.handle_msg_from_remote_comp.__name__)
 
 serv_names = _ServiceNames()

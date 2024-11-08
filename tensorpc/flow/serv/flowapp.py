@@ -31,7 +31,7 @@ from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp
 from tensorpc.flow.serv.common import handle_file_resource
 from tensorpc.flow.vscode.coretypes import VscodeTensorpcMessage, VscodeTensorpcQuery
 from tensorpc.flow import appctx
-from tensorpc.flow.core.appcore import ALL_OBSERVED_FUNCTIONS, enter_app_context
+from tensorpc.flow.core.appcore import ALL_OBSERVED_FUNCTIONS, RemoteCompEvent, enter_app_context
 from tensorpc.flow.components.mui import FlexBox, flex_wrapper
 from tensorpc.flow.core.component import AppEditorEvent, AppEditorFrontendEvent, AppEvent, AppEventType, InitLSPClientEvent, LayoutEvent, NotifyEvent, NotifyType, RemoteComponentBase, ScheduleNextForApp, UIEvent, UIExceptionEvent, UISaveStateEvent, UserMessage
 from tensorpc.flow.flowapp.app import App, EditableApp
@@ -251,6 +251,9 @@ class FlowApp:
             selectedCode=data["selectedCode"] if "selectedCode" in data else None,
         )
         await self.app.handle_vscode_event(ev)
+
+    async def handle_msg_from_remote_comp(self, key: str, event: RemoteCompEvent):
+        return await self.app.handle_msg_from_remote_comp(key, event)
 
     async def handle_vscode_query(self, data: dict):
         """run event come from vscode, you need to install vscode-tensorpc-bridge extension first,

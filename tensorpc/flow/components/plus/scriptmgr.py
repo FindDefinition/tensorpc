@@ -250,7 +250,8 @@ class ScriptManager(mui.FlexBox):
         await self.code_editor.save({"SaveAndRun": True})
         return
 
-    async def _handle_editor_action(self, action: str):
+    async def _handle_editor_action(self, act_ev: mui.MonacoEditorActionEvent):
+        action = act_ev.action
         if action == EditorActions.SaveAndRun.value:
             await self._on_save_and_run()
 
@@ -293,8 +294,8 @@ class ScriptManager(mui.FlexBox):
                 await proc.wait()
                 print(f'[cmd exited with {proc.returncode}]')
             elif item.lang == "cpp":
-                import ccimport
-                from ccimport.utils import tempdir
+                import ccimport # type: ignore
+                from ccimport.utils import tempdir # type: ignore
                 from pathlib import Path
                 import subprocess
 

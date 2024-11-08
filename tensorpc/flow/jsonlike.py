@@ -1,6 +1,7 @@
 from dataclasses import is_dataclass
 import enum
 
+import json
 from typing import Any, Callable, Dict, Generic, Hashable, List, Optional, TypeVar, Union, Tuple
 import tensorpc.core.dataclass_dispatch as dataclasses
 import re
@@ -611,6 +612,10 @@ class JsonLikeNode:
             "type": JsonLikeType.Object.value,
             "children": [],
         }
+
+    @staticmethod 
+    def create_dummy_dict_binary():
+        return json.dumps(JsonLikeNode.create_dummy_dict()).encode()
 
 def parse_obj_to_jsonlike(obj, name: str, id: UniqueTreeIdForTree):
     obj_type = type(obj)

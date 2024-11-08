@@ -1,16 +1,9 @@
 """tracer that used for cursor selection
 """
 
-import ast
-from dataclasses import dataclass
-import enum
-import inspect
-import os
 from pathlib import Path
 import sys
 import threading
-import time
-import traceback
 from types import FrameType
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple, Type, Union
 
@@ -44,15 +37,17 @@ class TargetTracer(object):
 
     def _trace_func(self, frame: FrameType, event, arg):
         if event == "call":
-            THREAD_GLOBALS.depth += 1
-            if THREAD_GLOBALS.depth > self._max_depth:
-                return None
+            # THREAD_GLOBALS.depth += 1
+            # if THREAD_GLOBALS.depth > self._max_depth:
+            #     THREAD_GLOBALS.depth -= 1
+            #     return None
+            if frame.f_code.co_filename != self._target_fname or get_co_qualname_from_frame(frame) != self._target_co_qualname:
+                return None 
+        elif event == "return":
+            # THREAD_GLOBALS.depth -= 1
             if frame.f_code.co_filename == self._target_fname and get_co_qualname_from_frame(frame) == self._target_co_qualname:
                 self._callback(frame)
-                sys.settrace(None)
+                sys.settrace(self._original_trace_func)
             else:
                 return None
-        elif event == "return":
-            THREAD_GLOBALS.depth -= 1
-        
         return self._trace_func

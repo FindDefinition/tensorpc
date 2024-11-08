@@ -21,8 +21,8 @@ from tensorpc.core.asyncclient import (simple_chunk_call_async,
                                        simple_remote_call_async)
 from tensorpc.core.client import simple_remote_call
 from tensorpc.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
-                                    TENSORPC_DBG_SPLIT, TENSORPC_DBG_TRACE_VIEW_KEY, DebugFrameInfo,
-                                    DebugInfo, RecordFilterConfig, RecordMode,
+                                    TENSORPC_DBG_SPLIT, TENSORPC_DBG_TRACE_VIEW_KEY, DebugDistributedMeta, DebugFrameInfo,
+                                    DebugInfo, RecordFilterConfig, RecordMode, RemoteDebugEventType, RemoteDebugTargetTrace, TraceLaunchType,
                                     TracerConfig, TraceResult, TracerType,
                                     TracerUIConfig)
 from tensorpc.dbg.serv_names import serv_names as dbg_serv_names
@@ -64,7 +64,8 @@ class DebugServerProcessMeta:
     is_tracing: bool = False
     primaryColor: Union[mui.Undefined, mui._StdColorNoDefault] = mui.undefined
     secondaryColor: Union[mui.Undefined, mui._StdColorNoDefault] = mui.undefined
-
+    dist_meta: Optional[DebugDistributedMeta] = None
+    is_mounted: bool = False
     @property
     def url_with_port(self):
         return f"localhost:{self.port}"
@@ -171,6 +172,7 @@ class MasterDebugPanel(mui.FlexBox):
         remote_server_item = mui.ListItemButton([
             name,
         ])
+        remote_server_item.set_override_props(selected="is_mounted")
         self._remote_server_discover_lst = mui.DataFlexBox(
             remote_server_item, [])
         filter_input = mui.Input("filter").prop(
@@ -345,7 +347,7 @@ class MasterDebugPanel(mui.FlexBox):
 
     @marker.mark_did_mount
     async def _on_init(self):
-        self._register_vscode_handler()
+        self._register_handlers()
         appctx.get_app().add_file_resource(FILE_RESOURCE_KEY, self._trace_download)
         self._scan_shutdown_ev.clear()
         self._scan_loop_task = asyncio.create_task(
@@ -356,7 +358,7 @@ class MasterDebugPanel(mui.FlexBox):
 
     @marker.mark_will_unmount
     async def _on_unmount(self):
-        self._unregister_vscode_handler()
+        self._unregister_handlers()
         appctx.get_app().remove_file_resource(FILE_RESOURCE_KEY)
         self._scan_shutdown_ev.set()
         if self._scan_loop_task is not None:
@@ -384,6 +386,24 @@ class MasterDebugPanel(mui.FlexBox):
     async def _unmount_remote_server_apps(self):
         await self._remote_comp_container.set_new_layout([])
         await self._remote_comp_tv_container.set_new_layout([])
+        await self._set_selected_remote_list(None)
+
+    async def _set_selected_remote_list(self, selected_meta: Optional[DebugServerProcessMeta] = None):
+        metas = self._current_metas
+        metas_with_selected = []
+        for m in metas:
+            if selected_meta is not None:
+                print(m.uid, selected_meta.uid)
+            if selected_meta is not None and m.uid == selected_meta.uid:
+                m = dataclasses.replace(m, is_mounted=True)
+            else:
+                m = dataclasses.replace(m, is_mounted=False)
+            metas_with_selected.append(m)
+        metas_dict = [as_dict_no_undefined(meta) for meta in metas_with_selected]
+        print(metas_with_selected)
+        await self.send_and_wait(
+            self._remote_server_discover_lst.update_event(
+                dataList=metas_dict))
 
     async def _on_server_item_click(self, ev: mui.Event):
         indexes = ev.indexes
@@ -393,6 +413,8 @@ class MasterDebugPanel(mui.FlexBox):
             return
         await self._mount_remote_server_apps(meta)
         self._current_mount_uid = meta.uid
+        # update list selected status
+        await self._set_selected_remote_list(meta)
 
     async def _scan_loop(self, shutdown_ev: asyncio.Event):
         shutdown_task = asyncio.create_task(shutdown_ev.wait())
@@ -424,12 +446,17 @@ class MasterDebugPanel(mui.FlexBox):
                         bkpts,
                         rpc_timeout=1)
                     frame_meta = debug_info.frame_meta
+                    dist_meta = debug_info.dist_meta
                     trace_cfg = debug_info.trace_cfg
+                    meta.dist_meta = dist_meta
                     skipped_count = str(debug_info.metric.total_skipped_bkpt)
                     if debug_info.metric.total_skipped_bkpt > 100:
                         skipped_count = "100+"
                     status_str = f"running ({skipped_count})"
                     meta.primaryColor = mui.undefined
+                    prefix = str(meta.pid)
+                    if dist_meta is not None and dist_meta.run_id is not None:
+                        prefix = f"{dist_meta.run_id[:6]}"
                     if trace_cfg is not None:
                         tracer = trace_cfg.tracer
                         if tracer == TracerType.VIZTRACER:
@@ -447,10 +474,12 @@ class MasterDebugPanel(mui.FlexBox):
                         meta.is_tracing = True
                         meta.primaryColor = "success"
                     if frame_meta is not None:
-                        meta.secondary_name = f"{meta.pid}|{frame_meta.name}:{frame_meta.lineno}"
+                        meta.secondary_name = f"{prefix}|{frame_meta.name}:{frame_meta.lineno}"
                         meta.primaryColor = "primary"
                     else:
-                        meta.secondary_name = f"{meta.pid}|{status_str}"
+                        meta.secondary_name = f"{prefix}|{status_str}"
+                    if self._current_mount_uid == meta.uid:
+                        meta.is_mounted = True
                 except grpc.aio.AioRpcError as e:
                     if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
                         meta.secondary_name = f"{meta.pid}|disconnected"
@@ -489,6 +518,7 @@ class MasterDebugPanel(mui.FlexBox):
         async with self._serv_list_lock:
             if self._current_mount_uid != "":
                 await self._unmount_remote_server_apps()
+
                 self._current_mount_uid = ""
 
     async def _handle_secondary_actions(self, item_id: str):
@@ -515,9 +545,12 @@ class MasterDebugPanel(mui.FlexBox):
     async def _on_debug_perfetto_select(self, cfg: _DebugPerfettoScrollToRange):
         await self._dist_perfetto.scroll_to_range(cfg.start_us / 1e9, cfg.end_us / 1e9, 0.5)
 
-    async def start_record(self, trace_cfg: Optional[TracerConfig] = None):
+    async def start_record(self, trace_cfg: Optional[TracerConfig] = None, dist_id: Optional[str] = None):
         ts = time.time_ns()
         for meta in self._current_metas:
+            if dist_id is not None and meta.dist_meta is not None:
+                if meta.dist_meta.run_id != dist_id:
+                    continue
             if trace_cfg is None:
                 trace_cfg = TracerConfig(enable=True,
                                          breakpoint_count=1,
@@ -545,20 +578,21 @@ class MasterDebugPanel(mui.FlexBox):
 
     async def _on_trace_launch(self, config: TracerUIConfig):
         filter_cfg_value = self._trace_yaml_cfg_editor.props.value
-        filter_cfg = yaml.safe_load(filter_cfg_value)
-        filter_obj = RecordFilterConfig(**filter_cfg)
-        await appctx.save_data_storage(f"{self._app_storage_key}/record_filter", filter_cfg_value)
-        cfg = TracerConfig(enable=True,
-                            record_filter=filter_obj,
-                           **dataclasses.asdict(config))
-        if cfg.tracer == TracerType.VIZTRACER:
-            cfg.trace_name = f"{cfg.trace_name}|viz"
-        elif cfg.tracer == TracerType.PYTORCH:
-            cfg.trace_name = f"{cfg.trace_name}|pth"
-        elif cfg.tracer == TracerType.VIZTRACER_PYTORCH:
-            cfg.trace_name = f"{cfg.trace_name}|v+p"
+        if not isinstance(filter_cfg_value, mui.Undefined):
+            filter_cfg = yaml.safe_load(filter_cfg_value)
+            filter_obj = RecordFilterConfig(**filter_cfg)
+            await appctx.save_data_storage(f"{self._app_storage_key}/record_filter", filter_cfg_value)
+            cfg = TracerConfig(enable=True,
+                                record_filter=filter_obj,
+                            **dataclasses.asdict(config))
+            if cfg.tracer == TracerType.VIZTRACER:
+                cfg.trace_name = f"{cfg.trace_name}|viz"
+            elif cfg.tracer == TracerType.PYTORCH:
+                cfg.trace_name = f"{cfg.trace_name}|pth"
+            elif cfg.tracer == TracerType.VIZTRACER_PYTORCH:
+                cfg.trace_name = f"{cfg.trace_name}|v+p"
 
-        await self.start_record(cfg)
+            await self.start_record(cfg)
 
     async def start_inf_record(self):
         cfg = TracerConfig(enable=True, mode=RecordMode.INFINITE)
@@ -746,7 +780,21 @@ class MasterDebugPanel(mui.FlexBox):
                                        rpc_timeout=1)
         # await self._update_remote_server_discover_lst()
 
-    def _register_vscode_handler(self):
+    async def _handle_target_trace_from_distributed_group_worker(self, ev: mui.RemoteCompEvent):
+        trace_ev = ev.data
+        assert isinstance(trace_ev, RemoteDebugTargetTrace), f"WTF, {ev}"
+        cfg = TracerConfig(enable=True,
+                        **dataclasses.asdict(self._trace_launch_dialog.config))
+        cfg.breakpoint_count = 1
+        cfg.mode = RecordMode.NEXT_BREAKPOINT
+        cfg.tracer = TracerType.TARGET_TRACER
+        cfg.launch_type = TraceLaunchType.TARGET_VARIABLE
+        cfg.target_expr = trace_ev.target_expr
+        cfg.target_filename = trace_ev.target_filename
+        cfg.target_func_qname = trace_ev.target_func_qname
+        await self.start_record(cfg, trace_ev.meta.run_id)
+
+    def _register_handlers(self):
         if self._vscode_handler_registered:
             return
         appctx.register_app_special_event_handler(
@@ -755,10 +803,11 @@ class MasterDebugPanel(mui.FlexBox):
         appctx.register_app_special_event_handler(
             AppSpecialEventType.VscodeBreakpointChange,
             self._handle_vscode_bkpt_change)
-
+        appctx.register_remote_comp_event_handler(RemoteDebugEventType.DIST_TARGET_VARIABLE_TRACE.value, 
+            self._handle_target_trace_from_distributed_group_worker)
         self._vscode_handler_registered = True
 
-    def _unregister_vscode_handler(self):
+    def _unregister_handlers(self):
         if not self._vscode_handler_registered:
             return
         self._vscode_handler_registered = False
@@ -768,6 +817,8 @@ class MasterDebugPanel(mui.FlexBox):
         appctx.unregister_app_special_event_handler(
             AppSpecialEventType.VscodeBreakpointChange,
             self._handle_vscode_bkpt_change)
+        appctx.unregister_remote_comp_event_handler(RemoteDebugEventType.DIST_TARGET_VARIABLE_TRACE.value, 
+            self._handle_target_trace_from_distributed_group_worker)
 
     async def _handle_vscode_bkpt_change(self, bkpts: Dict[str, List[VscodeBreakpoint]]):
         async with self._serv_list_lock:

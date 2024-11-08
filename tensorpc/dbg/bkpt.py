@@ -1,5 +1,6 @@
 import contextlib
 import dataclasses
+from functools import partial
 import importlib.util
 import inspect
 import io
@@ -7,15 +8,17 @@ import json
 import os
 import threading
 from pathlib import Path
+from types import FrameType
 from typing import Any, List, Optional
 
 from tensorpc.compat import InWindows
 from tensorpc.constants import TENSORPC_MAIN_PID
 from tensorpc.core.bgserver import BACKGROUND_SERVER
+from tensorpc.core.tracers.targettracer import TargetTracer
 from tensorpc.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
                                     TENSORPC_DBG_TRACE_VIEW_KEY,
                                     TENSORPC_ENV_DBG_ENABLE, BreakpointEvent,
-                                    BreakpointType, TracerConfig, TraceResult,
+                                    BreakpointType, TraceLaunchType, TracerConfig, TraceResult,
                                     TracerType, RecordFilterConfig,
                                     DebugDistributedMeta)
 from tensorpc.dbg.tracer import DebugTracerWrapper, VizTracerAndPytorchTracer
@@ -24,7 +27,7 @@ from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
 from tensorpc.flow.components.plus.dbg.traceview import TraceView
 from tensorpc.flow.serv_names import serv_names as app_serv_names
 from tensorpc.utils.rich_logging import get_logger
-
+import sys
 from .serv_names import serv_names
 
 LOGGER = get_logger("tensorpc.dbg")
@@ -33,8 +36,35 @@ RECORDING = False
 
 _TRACER_WRAPPER = DebugTracerWrapper()
 
+def _try_get_distributed_meta():
+    # try find torch dist (only support torchrun since it set enought env)
+    if "torch" in sys.modules:
+        import torch.distributed as dist
+        if dist.is_initialized():
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+            res = DebugDistributedMeta(rank=rank, world_size=world_size, backend="pytorch")
+            if os.getenv("TORCHELASTIC_RUN_ID", None) is not None:
+                run_id = os.getenv("TORCHELASTIC_RUN_ID", None)
+                local_world_size = os.getenv("LOCAL_WORLD_SIZE", None)
+                res.run_id = run_id
+                if local_world_size is not None:
+                    res.local_world_size = int(local_world_size)
+            return res
+    elif "OMPI_COMM_WORLD_SIZE" in os.environ:
+        mpi_world_size = os.getenv("OMPI_COMM_WORLD_SIZE", None)
+        mpi_rank = os.getenv("OMPI_COMM_WORLD_RANK", None)
+        mpi_local_world_size = os.getenv("OMPI_COMM_WORLD_LOCAL_SIZE", None)
+        if mpi_world_size is not None and mpi_rank is not None:
+            res = DebugDistributedMeta(rank=int(mpi_rank),
+                                         world_size=int(mpi_world_size),
+                                         backend="openmpi")
+            if mpi_local_world_size is not None:
+                res.local_world_size = int(mpi_local_world_size)
+            return res
+    return DebugDistributedMeta() 
 
-def _extrace_module_path(module: str):
+def _extract_module_path(module: str):
     spec = importlib.util.find_spec(module)
     if spec is None or spec.origin is None:
         return []
@@ -55,14 +85,29 @@ def _parse_record_filter(cfg: RecordFilterConfig):
             exclude_files.append(f)
     if cfg.include_modules is not None:
         for mod in cfg.include_modules:
-            include_files.extend(_extrace_module_path(mod))
+            include_files.extend(_extract_module_path(mod))
     if cfg.exclude_modules is not None:
         for mod in cfg.exclude_modules:
-            exclude_files.extend(_extrace_module_path(mod))
+            exclude_files.extend(_extract_module_path(mod))
     return include_files, exclude_files
 
+def _special_trace_target_variable(frame: FrameType, target_expr: str):
+    # eval expr in frame 
+    try:
+        res = eval(target_expr, frame.f_globals, frame.f_locals)
+        BACKGROUND_SERVER.execute_service(serv_names.DBG_TRACEVIEW_SET_VARIABLE_INSPECT, target_expr, res)
+    except Exception as e:
+        LOGGER.error(f"Eval target variable error: {e}")
 
 def _get_viztracer(cfg: Optional[TracerConfig], name: Optional[str] = None):
+    if cfg is not None and cfg.launch_type != TraceLaunchType.DEFAULT:
+        # handle special trace.
+        if (cfg.launch_type == TraceLaunchType.TARGET_VARIABLE and cfg.target_filename is not None and cfg.target_func_qname is not None):
+            if cfg.target_expr is not None:
+                handler = partial(_special_trace_target_variable, target_expr=cfg.target_expr)
+                tracer = TargetTracer(cfg.target_filename, cfg.target_func_qname, handler, max_depth=cfg.max_stack_depth)
+                return tracer, TracerType.TARGET_TRACER
+        return None, TracerType.VIZTRACER
     try:
         from viztracer import VizTracer
 
@@ -132,9 +177,7 @@ def should_enable_debug() -> bool:
 
 
 def init(proc_name: Optional[str] = None,
-         port: int = -1,
-         *,
-         pytorch_dist_extra: bool = False):
+         port: int = -1):
     """Initialize the background server with the given process name
     if already started, this function does nothing.
     TODO setup pytorch extra
@@ -146,38 +189,17 @@ def init(proc_name: Optional[str] = None,
         cur_pid = os.getpid()
         if proc_name is None:
             proc_name = Path(__file__).stem
-        # pytorch distributed environment variables
-        world_size = os.getenv("WORLD_SIZE", None)
-        rank = os.getenv("RANK", None)
-        mpi_world_size = os.getenv("OMPI_COMM_WORLD_SIZE", None)
-        mpi_rank = os.getenv("OMPI_COMM_WORLD_RANK", None)
-        # TODO we can only detect distributed workers inside same machine.
-        # so we only support single-machine distributed debugging.
-        rank_int = 0
-        world_size_int = 1
-        backend: Optional[str] = None
-        if rank is not None:
-            rank_int = int(rank)
-        if world_size is not None:
-            world_size_int = int(world_size)
-        if world_size is not None and rank is not None:
-            # assume pytorch distributed
-            proc_name += f"_pth_{rank}"
-            backend = "Pytorch"
-        elif mpi_world_size is not None and mpi_rank is not None:
-            # assume mpi
-            proc_name += f"_mpi_{mpi_rank}"
-            backend = "Mpi"
         if cur_pid != TENSORPC_MAIN_PID:
             proc_name += f"_fork"
-        userdata = DebugDistributedMeta(rank=rank_int,
-                                        world_size=world_size_int,
-                                        backend=backend)
+        userdata = _try_get_distributed_meta()
+        if userdata.backend is not None:
+            proc_name += f"_{userdata.get_backend_short()}_{userdata.rank}"
+
         BACKGROUND_SERVER.start_async(id=proc_name,
                                       port=port,
                                       userdata=userdata)
         panel = BreakpointDebugPanel().prop(flex=1)
-        trace_view = TraceView().prop(flex=1)
+        trace_view = TraceView(userdata).prop(flex=1)
         set_background_layout(TENSORPC_DBG_FRAME_INSPECTOR_KEY, panel)
         set_background_layout(TENSORPC_DBG_TRACE_VIEW_KEY, trace_view)
 
@@ -185,6 +207,9 @@ def init(proc_name: Optional[str] = None,
                                           panel)
         BACKGROUND_SERVER.execute_service(
             serv_names.DBG_TRY_FETCH_VSCODE_BREAKPOINTS)
+        if userdata.backend is not None:
+            BACKGROUND_SERVER.execute_service(
+                serv_names.DBG_SET_DISTRIBUTED_META, userdata)
 
     return True
 
@@ -245,7 +270,7 @@ def breakpoint(name: Optional[str] = None,
     if init_proc_name is None:
         init_proc_name = frame.f_code.co_name
 
-    init(init_proc_name, init_port, pytorch_dist_extra=pytorch_dist_extra)
+    init(init_proc_name, init_port)
     if name is not None:
         record_instant_event(name,
                              args={
@@ -283,8 +308,9 @@ def breakpoint(name: Optional[str] = None,
         _TRACER_WRAPPER.reset_tracer()
         # tracer_to_stop.stop()
         LOGGER.warning(f"Record Stop.")
-        BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACE_DATA,
-                                          trace_res_obj, tracer_cfg)
+        if trace_res_obj is not None:
+            BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACE_DATA,
+                                            trace_res_obj, tracer_cfg)
 
     bev.event.wait(timeout)
     if bev.enable_trace_in_main_thread:

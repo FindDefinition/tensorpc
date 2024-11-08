@@ -41,7 +41,16 @@ class TracerType(enum.IntEnum):
     # use viztracer for python code and pytorch profiler for pytorch+cuda code
     # `with_stack` in pytorch profiler must be disabled.
     VIZTRACER_PYTORCH = 2
+    # special tracer types
+    TARGET_TRACER = 3
 
+class TraceLaunchType(enum.IntEnum):
+    DEFAULT = 0
+    # launch simple tracer, when encounter target file and function, run callback in return
+    # and disable trace.
+    # won't save trace data to perfetto and other trace-based tool.
+    # used to inspect a variable in a loop with `tensorpc.dbg.breakpoint``.
+    TARGET_VARIABLE = 1
 
 @pydantic_dataclasses.dataclass
 class RecordFilterConfig:
@@ -64,7 +73,7 @@ class DebugFrameState:
 
 @dataclasses.dataclass
 class TracerUIConfig:
-    tracer: TracerType = TracerType.VIZTRACER
+    tracer: Annotated[TracerType, typemetas.Enum(excludes=[TracerType.TARGET_TRACER])] = TracerType.VIZTRACER
     trace_name: Annotated[str, typemetas.CommonObject(alias="Trace Name")] = "trace"
     mode: RecordMode = RecordMode.NEXT_BREAKPOINT
     breakpoint_count: Annotated[int, typemetas.RangedInt(1, 100, alias="Breakpoint Count")] = 1
@@ -81,6 +90,11 @@ class TracerConfig(TracerUIConfig):
     # trace until this number of breakpoints is reached
     trace_timestamp: Optional[int] = None
     record_filter: RecordFilterConfig = dataclasses.field(default_factory=RecordFilterConfig)
+    launch_type: TraceLaunchType = TraceLaunchType.DEFAULT
+
+    target_filename: Optional[str] = None
+    target_func_qname: Optional[str] = None
+    target_expr: Optional[str] = None
 
 @dataclasses.dataclass
 class TraceMetrics:
@@ -108,11 +122,27 @@ class ExternalTrace:
     data: Any
 
 @dataclasses.dataclass
+class DebugDistributedMeta:
+    rank: int = 0
+    world_size: int = 1
+    backend: Optional[Literal["pytorch", "openmpi"]] = None
+    run_id: Optional[str] = None
+    local_world_size: Optional[int] = None
+
+    def get_backend_short(self):
+        if self.backend == "pytorch":
+            return "pth"
+        elif self.backend == "openmpi":
+            return "mpi"
+        else:
+            return self.backend
+
+@dataclasses.dataclass
 class DebugInfo:
     metric: DebugMetric
     frame_meta: Optional[DebugFrameInfo]
     trace_cfg: Optional[TracerConfig]
-
+    dist_meta: Optional[DebugDistributedMeta] = None
 
 class BreakpointType(enum.IntEnum):
     Normal = 0
@@ -120,11 +150,20 @@ class BreakpointType(enum.IntEnum):
     # is set on the same line
     Vscode = 1
 
+class RemoteDebugEventType(enum.Enum):
+    DIST_TARGET_VARIABLE_TRACE = "dist_target_variable_trace"
+
 @dataclasses.dataclass
-class DebugDistributedMeta:
-    rank: int = 0
-    world_size: int = 1
-    backend: Optional[str] = None
+class RemoteDebugEvent:
+    type: RemoteDebugEventType
+
+
+@dataclasses.dataclass
+class RemoteDebugTargetTrace(RemoteDebugEvent):
+    meta: DebugDistributedMeta
+    target_filename: str 
+    target_func_qname: str
+    target_expr: str
 
 TENSORPC_ENV_DBG_ENABLE = os.getenv("TENSORPC_DBG_ENABLE", "1") != "0"
 TENSORPC_ENV_DBG_DEFAULT_BREAKPOINT_ENABLE = os.getenv("TENSORPC_DBG_DEFAULT_BREAKPOINT_ENABLE", "1") != "0"
@@ -141,3 +180,6 @@ TENSORPC_DBG_FRAME_STORAGE_PREFIX = "__tensorpc_dbg_frame"
 TENSORPC_DBG_TRACER_KEY = "__tensorpc_dbg_tracer"
 
 TENSORPC_DBG_USER_DURATION_EVENT_KEY = "__tensorpc_dbg_E_dur"
+
+
+TENSORPC_DBG_REMOTE_EVENT_TARGET_TRACE = "__tensorpc_remote_ev_target_trace"
