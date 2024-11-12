@@ -6,7 +6,7 @@ from tensorpc.flow.coretypes import StorageDataItem, StorageDataLoadedItem
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable,
                     Coroutine, Dict, Generic, Iterable, List, Optional, Set,
                     Tuple, Type, TypeVar, Union)
-from tensorpc.flow.jsonlike import JsonLikeNode, parse_obj_to_jsonlike
+from tensorpc.flow.jsonlike import JsonLikeNode, Undefined, parse_obj_to_jsonlike
 from pathlib import Path
 import pickle
 import time
@@ -59,7 +59,7 @@ class AppStorage:
     async def save_data_storage(self,
                                 key: str,
                                 data: Any,
-                                node_id: Optional[str] = None,
+                                node_id: Optional[Union[str, Undefined]] = None,
                                 graph_id: Optional[str] = None,
                                 in_memory_limit: int = 1000,
                                 raise_if_exist: bool = False):
@@ -71,6 +71,9 @@ class AppStorage:
             graph_id = self.__flowapp_graph_id
         if node_id is None:
             node_id = self.__flowapp_node_id
+        elif isinstance(node_id, Undefined):
+            # graph storage
+            node_id = None
         meta = parse_obj_to_jsonlike(data, key,
                                      UniqueTreeIdForTree.from_parts([key]))
         in_memory_limit_bytes = in_memory_limit * 1024 * 1024
@@ -94,7 +97,7 @@ class AppStorage:
 
     async def data_storage_has_item(self,
                                     key: str,
-                                    node_id: Optional[str] = None,
+                                    node_id: Optional[Union[str, Undefined]] = None,
                                     graph_id: Optional[str] = None):
         Path(key)  # check key is valid path
         meta = self.__flowapp_master_meta
@@ -104,6 +107,9 @@ class AppStorage:
             graph_id = self.__flowapp_graph_id
         if node_id is None:
             node_id = self.__flowapp_node_id
+        elif isinstance(node_id, Undefined):
+            # graph storage
+            node_id = None
         if key in self.__flowapp_storage_cache:
             return True
         else:
@@ -112,18 +118,20 @@ class AppStorage:
 
     async def read_data_storage(self,
                                 key: str,
-                                node_id: Optional[str] = None,
+                                node_id: Optional[Union[str, Undefined]] = None,
                                 graph_id: Optional[str] = None,
                                 in_memory_limit: int = 100,
                                 raise_if_not_found: bool = True):
         Path(key)  # check key is valid path
-        meta = self.__flowapp_master_meta
         if not self._is_remote_comp:
             assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
             graph_id = self.__flowapp_graph_id
         if node_id is None:
             node_id = self.__flowapp_node_id
+        elif isinstance(node_id, Undefined):
+            # graph storage
+            node_id = None
         if key in self.__flowapp_storage_cache:
             item_may_invalid = self.__flowapp_storage_cache[key]
             res: Optional[StorageDataItem] = await self._remote_call(
@@ -160,7 +168,7 @@ class AppStorage:
 
     async def glob_read_data_storage(self,
                                                key: str,
-                                               node_id: Optional[str] = None,
+                                               node_id: Optional[Union[str, Undefined]] = None,
                                                graph_id: Optional[str] = None):
         Path(key)  # check key is valid path
         if not self._is_remote_comp:
@@ -169,13 +177,16 @@ class AppStorage:
             graph_id = self.__flowapp_graph_id
         if node_id is None:
             node_id = self.__flowapp_node_id
+        elif isinstance(node_id, Undefined):
+            # graph storage
+            node_id = None
         res: Dict[str, StorageDataItem] = await self._remote_call(
             serv_names.FLOW_DATA_READ_GLOB_PREFIX, graph_id, node_id, key)
         return {k: StorageDataLoadedItem(pickle.loads(d.data), d.meta) for k, d in res.items()}
 
     async def remove_data_storage_item(self,
                                        key: Optional[str],
-                                       node_id: Optional[str] = None,
+                                       node_id: Optional[Union[str, Undefined]] = None,
                                        graph_id: Optional[str] = None):
         if key is not None:
             Path(key)
@@ -185,6 +196,9 @@ class AppStorage:
             graph_id = self.__flowapp_graph_id
         if node_id is None:
             node_id = self.__flowapp_node_id
+        elif isinstance(node_id, Undefined):
+            # graph storage
+            node_id = None
         await self._remote_call(serv_names.FLOW_DATA_DELETE_ITEM, graph_id,
                                 node_id, key)
         if key is None:
@@ -196,7 +210,7 @@ class AppStorage:
     async def rename_data_storage_item(self,
                                        key: str,
                                        newname: str,
-                                       node_id: Optional[str] = None,
+                                       node_id: Optional[Union[str, Undefined]] = None,
                                        graph_id: Optional[str] = None):
         Path(key)
         if not self._is_remote_comp:
@@ -205,6 +219,9 @@ class AppStorage:
             graph_id = self.__flowapp_graph_id
         if node_id is None:
             node_id = self.__flowapp_node_id
+        elif isinstance(node_id, Undefined):
+            # graph storage
+            node_id = None
         await self._remote_call(serv_names.FLOW_DATA_RENAME_ITEM, graph_id,
                                 node_id, key, newname)
         if key in self.__flowapp_storage_cache:
@@ -213,7 +230,7 @@ class AppStorage:
                 self.__flowapp_storage_cache[newname] = item
 
     async def list_data_storage(self,
-                                node_id: Optional[str] = None,
+                                node_id: Optional[Union[str, Undefined]] = None,
                                 graph_id: Optional[str] = None,
                                 glob_prefix: Optional[str] = None):
         if not self._is_remote_comp:
@@ -222,6 +239,9 @@ class AppStorage:
             graph_id = self.__flowapp_graph_id
         if node_id is None:
             node_id = self.__flowapp_node_id
+        elif isinstance(node_id, Undefined):
+            # graph storage
+            node_id = None
         res: List[dict] = await self._remote_call(
             serv_names.FLOW_DATA_LIST_ITEM_METAS, graph_id, node_id, glob_prefix)
         return [JsonLikeNode(**x) for x in res]

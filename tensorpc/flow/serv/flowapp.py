@@ -23,6 +23,7 @@ from runpy import run_path
 from typing import Any, Dict, List, Optional
 
 import async_timeout
+import grpc
 from tensorpc.core.asyncclient import simple_chunk_call_async
 from tensorpc.core.defs import FileDesp, FileResource, FileResourceRequest
 from tensorpc.flow.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_LSP_EXTRA_PATH
@@ -53,6 +54,10 @@ import time
 import sys
 from urllib import parse
 
+_grpc_status_master_disconnect = set([
+     grpc.StatusCode.UNAVAILABLE,
+    grpc.StatusCode.DEADLINE_EXCEEDED,
+])
 
 class FlowApp:
     """this service must run inside devflow.
@@ -459,6 +464,12 @@ class FlowApp:
             return robj.chunked_remote_call(serv_names.FLOW_PUT_APP_EVENT,
                                             ev.to_dict())
 
+    def _create_exception_event(self, e: Exception):
+        ss = io.StringIO()
+        traceback.print_exc(file=ss)
+        user_exc = UserMessage.create_error("UNKNOWN", f"AppServiceError: {repr(e)}", ss.getvalue())
+        return AppEvent("", {AppEventType.UIException: UIExceptionEvent([user_exc])})
+
     async def _send_loop(self):
         # TODO unlike flowworker, the app shouldn't disconnect to master/flowworker.
         # so we should just use retry here.
@@ -512,17 +523,31 @@ class FlowApp:
                         # await self._send_http_event(ev)
                         await self._send_grpc_event_large(ev, robj)
                         # print("SEND", ev.type, "FINISH")
+                    except grpc.aio.AioRpcError as e:
+                        traceback.print_exc()
+                        if e.code() in _grpc_status_master_disconnect:
+                            # print("Connection Fail.")
+                            # remote call may fail by connection broken
+                            # when disconnect to master/remote worker, enter slient mode
+                            previous_event = previous_event.merge_new(ev)
+                            master_disconnect = ts
+                        else:
+                            # other error. send exception
+                            exc_ev = self._create_exception_event(e)
+                            exc_ev.uid = self._uid
+                            try:
+                                await self._send_grpc_event_large(exc_ev, robj)
+                            except Exception as e:
+                                traceback.print_exc()
                     except Exception as e:
                         traceback.print_exc()
-                        # ss = io.StringIO()
-                        # traceback.print_exc(file=ss)
-                        # user_exc = UserMessage.create_error(ev.uid, repr(e), ss.getvalue())
-                        # exc_ev = AppEvent("", {AppEventType.UIException: UIExceptionEvent([user_exc])})
-                        # await self._send_grpc_event_large(exc_ev, robj)
-                        # remote call may fail by connection broken
-                        # when disconnect to master/remote worker, enter slient mode
-                        previous_event = previous_event.merge_new(ev)
-                        master_disconnect = ts
+                        exc_ev = self._create_exception_event(e)
+                        exc_ev.uid = self._uid
+                        try:
+                            await self._send_grpc_event_large(exc_ev, robj)
+                        except Exception as e:
+                            traceback.print_exc()
+
                 # trigger sent event here.
                 if ev.sent_event is not None:
                     ev.sent_event.set()

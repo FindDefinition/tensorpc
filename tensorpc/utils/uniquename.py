@@ -56,3 +56,6 @@ class UniqueNamePool:
 
     def clear(self):
         self.unique_set.clear()
+
+    def copy(self):
+        return UniqueNamePool(self.max_count, self.unique_set.copy())

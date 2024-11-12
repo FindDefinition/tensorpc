@@ -76,6 +76,7 @@ from tensorpc.flow.langserv import close_tmux_lang_server, get_tmux_lang_server_
 FLOW_FOLDER_DATA_PATH = FLOW_FOLDER_PATH / "data_nodes"
 FLOW_MARKDOWN_DATA_PATH = FLOW_FOLDER_PATH / "markdown_nodes"
 FLOW_APP_DATA_PATH = FLOW_FOLDER_PATH / "app_nodes"
+FLOW_GRAPH_FOLDER_DATA_PATH = FLOW_FOLDER_PATH / "graph_data_nodes"
 
 JINJA2_VARIABLE_ENV = Environment(loader=BaseLoader(),
                                   variable_start_string="{{",
@@ -776,6 +777,7 @@ class EnvNode(Node):
 
 class DataStorageKeyError(KeyError):
     pass 
+
 class DataStorageNodeBase(abc.ABC):
     """storage: 
     """
@@ -788,7 +790,11 @@ class DataStorageNodeBase(abc.ABC):
         for p in key_to_path.parts:
             assert len(p) > 0, f"{key} contains empty part."
         return key_to_path.parts 
-        
+    
+    @abc.abstractmethod
+    def get_store_root(self) -> Path:
+        ...
+
     @abc.abstractmethod
     def get_node_id(self) -> str:
         raise NotImplementedError
@@ -811,7 +817,7 @@ class DataStorageNodeBase(abc.ABC):
 
     def get_items(self, glob_prefix: Optional[str] = None):
         res: List[str] = []
-        root = FLOW_FOLDER_DATA_PATH / self.get_node_id()
+        root = self.get_store_root() / self.get_node_id()
         if not root.exists():
             return res
         if glob_prefix is not None:
@@ -838,7 +844,7 @@ class DataStorageNodeBase(abc.ABC):
     #     return res
 
     def _get_and_create_storage_root_path(self, key: str):
-        root = FLOW_FOLDER_DATA_PATH / self.get_node_id()
+        root = self.get_store_root() / self.get_node_id()
         parts = self._check_and_split_key(key)
         for part in parts[:-1]:
             root = root / part
@@ -979,6 +985,30 @@ class DataStorageNodeBase(abc.ABC):
                 res.data = bytes()
                 return res 
 
+class GraphDataStorage(DataStorageNodeBase):
+    """storage: 
+    """
+
+    def __init__(self,
+                 graph_id: str) -> None:
+        super().__init__()
+        self._graph_id = graph_id
+
+    def get_node_id(self) -> str:
+        return self._graph_id
+
+    def get_in_memory_limit(self) -> int:
+        return 10 * 1024 * 1024
+
+    def get_store_root(self) -> Path:
+        return FLOW_GRAPH_FOLDER_DATA_PATH
+
+    def on_delete(self):
+        if (self.get_store_root() / self.get_node_id()).exists():
+            try:
+                shutil.rmtree(self.get_store_root() / self.get_node_id())
+            except:
+                traceback.print_exc()
 
 @ALL_NODES.register
 class DataStorageNode(Node, DataStorageNodeBase):
@@ -1001,10 +1031,13 @@ class DataStorageNode(Node, DataStorageNodeBase):
     def in_memory_limit_bytes(self):
         return self.get_in_memory_limit()
 
+    def get_store_root(self) -> Path:
+        return FLOW_FOLDER_DATA_PATH
+
     def on_delete(self):
-        if (FLOW_FOLDER_DATA_PATH / self.id).exists():
+        if (self.get_store_root() / self.id).exists():
             try:
-                shutil.rmtree(FLOW_FOLDER_DATA_PATH / self.id)
+                shutil.rmtree(self.get_store_root() / self.id)
             except:
                 traceback.print_exc()
 
@@ -1416,6 +1449,8 @@ class FlowGraph:
         self.salt = ""
 
         self.variable_dict = self._get_jinja_variable_dict(nodes)
+
+        self._data_node = GraphDataStorage(graph_id)
 
     def get_save_data(self):
         flow_data = self.to_save_dict()
@@ -2702,17 +2737,20 @@ class Flow:
         else:
             raise NotImplementedError
 
-    async def query_data_items(self, graph_id: str, node_id: str):
-        node_desp = self._get_node_desp(graph_id, node_id)
-        node = node_desp.node
-        assert isinstance(node, DataStorageNodeBase)
-        return node.get_items()
+    def _get_data_node(self, graph_id: str, node_id: Optional[str]):
+        if node_id is not None:
+            node_desp = self._get_node_desp(graph_id, node_id)
+            node = node_desp.node
+            assert isinstance(node, DataStorageNodeBase)
+        else:
+            node = self.flow_dict[graph_id]._data_node
+        return node
 
-    async def has_data_item(self, graph_id: str, node_id: str, key: str):
-        node_desp = self._get_node_desp(graph_id, node_id)
-        node = node_desp.node
-        assert isinstance(node, DataStorageNodeBase)
-        return node.has_data_item(key)
+    async def query_data_items(self, graph_id: str, node_id: Optional[str]):
+        return self._get_data_node(graph_id, node_id).get_items()
+
+    async def has_data_item(self, graph_id: str, node_id: Optional[str], key: str):
+        return self._get_data_node(graph_id, node_id).has_data_item(key)
 
     async def query_all_data_node_ids(self, graph_id: str):
         assert graph_id in self.flow_dict, f"can't find graph {graph_id}"
@@ -2723,13 +2761,11 @@ class Flow:
                 res.append((n.id, n.readable_id))
         return res
 
-    async def save_data_to_storage(self, graph_id: str, node_id: str, key: str,
+    async def save_data_to_storage(self, graph_id: str, node_id: Optional[str], key: str,
                                    data: bytes, meta: JsonLikeNode,
                                    timestamp: int,
                                    raise_if_exist: bool = False):
-        node_desp = self._get_node_desp(graph_id, node_id)
-        node = node_desp.node
-        assert isinstance(node, DataStorageNodeBase)
+        node = self._get_data_node(graph_id, node_id)
         res = node.save_data(key, data, meta, timestamp, raise_if_exist)
         if isinstance(node, DataStorageNode):
             await self._user_ev_q.put(
@@ -2738,13 +2774,11 @@ class Flow:
 
     async def read_data_from_storage(self,
                                      graph_id: str,
-                                     node_id: str,
+                                     node_id: Optional[str],
                                      key: str,
                                      timestamp: Optional[int] = None,
                                      raise_if_not_found: bool = True):
-        node_desp = self._get_node_desp(graph_id, node_id)
-        node = node_desp.node
-        assert isinstance(node, DataStorageNodeBase)
+        node = self._get_data_node(graph_id, node_id)
         if raise_if_not_found:
             if timestamp is not None:
                 return node.read_data_if_need_update(key, timestamp)
@@ -2760,24 +2794,18 @@ class Flow:
                 return None 
 
     async def read_data_from_storage_by_glob_prefix(self, graph_id: str,
-                                     node_id: str,
+                                     node_id: Optional[str],
                                      glob_prefix: str):
-        node_desp = self._get_node_desp(graph_id, node_id)
-        node = node_desp.node
-        assert isinstance(node, DataStorageNodeBase)
+        node = self._get_data_node(graph_id, node_id)
         return node.read_data_by_glob_prefix(glob_prefix)
 
-    async def query_data_attrs(self, graph_id: str, node_id: str, glob_prefix: Optional[str] = None):
-        node_desp = self._get_node_desp(graph_id, node_id)
-        node = node_desp.node
-        assert isinstance(node, DataStorageNodeBase), f"{type(node)}"
+    async def query_data_attrs(self, graph_id: str, node_id: Optional[str], glob_prefix: Optional[str] = None):
+        node = self._get_data_node(graph_id, node_id)
         return node.get_data_attrs(glob_prefix)
 
     async def delete_datastorage_data(self, graph_id: str, node_id: str,
                                       key: Optional[str]):
-        node_desp = self._get_node_desp(graph_id, node_id)
-        node = node_desp.node
-        assert isinstance(node, DataStorageNodeBase)
+        node = self._get_data_node(graph_id, node_id)
         res = node.remove_data(key)
         if isinstance(node, DataStorageNode):
             await self._user_ev_q.put(
@@ -2786,9 +2814,7 @@ class Flow:
 
     async def rename_datastorage_data(self, graph_id: str, node_id: str,
                                       key: str, newname: str):
-        node_desp = self._get_node_desp(graph_id, node_id)
-        node = node_desp.node
-        assert isinstance(node, DataStorageNodeBase)
+        node = self._get_data_node(graph_id, node_id)
         res = node.rename_data(key, newname)
         if isinstance(node, DataStorageNode):
             await self._user_ev_q.put(
