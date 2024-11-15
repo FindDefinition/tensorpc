@@ -21,7 +21,7 @@ from tensorpc.dbg.constants import (
     TENSORPC_DBG_TRACE_VIEW_KEY,
     TENSORPC_ENV_DBG_DEFAULT_BREAKPOINT_ENABLE, BackgroundDebugToolsConfig,
     BreakpointEvent, BreakpointType,
-    DebugDistributedMeta, DebugFrameInfo, DebugInfo, DebugMetric,
+    DebugDistributedInfo, DebugFrameInfo, DebugInfo, DebugMetric,
     DebugServerStatus, ExternalTrace, RecordMode, TraceMetrics, TraceResult,
     TracerConfig,
     TracerType)
@@ -90,10 +90,10 @@ class BackgroundDebugTools:
 
         self._debug_metric = DebugMetric(0)
 
-        self._distributed_meta: Optional[DebugDistributedMeta] = None
+        self._distributed_meta: Optional[DebugDistributedInfo] = None
 
 
-    def set_distributed_meta(self, meta: DebugDistributedMeta):
+    def set_distributed_meta(self, meta: DebugDistributedInfo):
         self._distributed_meta = meta
 
     @marker.mark_server_event(event_type=ServiceEventType.Exit)
@@ -274,7 +274,7 @@ class BackgroundDebugTools:
                 TENSORPC_DBG_TRACE_VIEW_KEY)
         assert isinstance(tv_obj, TraceView)
         with enter_app_context(tv_app):
-            await tv_obj._obj_preview.set_obj_preview_layout(var_obj, header=var_name)
+            await tv_obj.set_variable_trace_result(var_name, var_obj)
 
     def set_tracer(self, tracer: Any):
         assert self._cur_tracer_state is not None

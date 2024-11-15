@@ -74,7 +74,7 @@ class FlowProps(ContainerBaseProps):
                                Literal["top-left", "top-right", "bottom-left",
                                        "bottom-right"]] = undefined
     connectionRadius: Union[Undefined, int] = undefined
-    ConnectionLineStyle: Union[Undefined, Any] = undefined
+    connectionLineStyle: Union[Undefined, Any] = undefined
     style: Union[Undefined, Any] = undefined
     onlyRenderVisibleElements: Union[Undefined, bool] = undefined
     preventScrolling: Union[Undefined, bool] = undefined
@@ -106,11 +106,13 @@ class FlowProps(ContainerBaseProps):
     targetValidConnectMap: Union[Dict[str, Dict[str, Any]], Undefined] = undefined
     paneContextMenuItems: Union[Undefined, List[MenuItem]] = undefined
     nodeContextMenuItems: Union[Undefined, List[MenuItem]] = undefined
-    nodeTypeMap: Union[Undefined, Dict[str, str]] = undefined
+    nodeTypeMap: Union[Undefined, Dict[str, Literal["app", "appTemplate", "input", "default", "output", "group"]]] = undefined
     preventCycle: Union[Undefined, bool] = undefined
 
     invisiblizeAllResizer: Union[Undefined, bool] = undefined
     invisiblizeAllToolbar: Union[Undefined, bool] = undefined
+
+    defaultLayoutSize: Union[Undefined, Tuple[NumberType, NumberType]] = undefined
 
 @dataclasses.dataclass
 class XYPosition:
@@ -133,9 +135,6 @@ class NodeData:
 class Node:
     id: str
     data: Union[Undefined, NodeData] = undefined
-    # type: Union[Undefined,
-    #             Literal["app", "appTemplate", "input", "default", "output",
-    #                     "group", "annotation"]] = undefined
     type: Union[Undefined, str] = undefined
 
     position: XYPosition = dataclasses.field(
@@ -150,6 +149,9 @@ class Node:
     deletable: Union[Undefined, bool] = undefined
     width: Union[Undefined, NumberType] = undefined
     height: Union[Undefined, NumberType] = undefined
+    initialWidth: Union[Undefined, NumberType] = undefined
+    initialHeight: Union[Undefined, NumberType] = undefined
+
     parentId: Union[Undefined, str] = undefined
     focusable: Union[Undefined, bool] = undefined
     extent: Union[Undefined, Literal["parent"],
@@ -159,6 +161,19 @@ class Node:
                                                 "bottom"]] = undefined
     targetPosition: Union[Undefined, Literal["left", "top", "right",
                                                 "bottom"]] = undefined
+    
+    def set_component(self, comp: Component):
+        if isinstance(self.data, Undefined):
+            self.data = NodeData()
+        self.data.component = comp
+
+    def set_component_replaced(self, comp: Component):
+        if isinstance(self.data, Undefined):
+            node_data = NodeData()
+        else:
+            node_data = dataclasses.replace(self.data, component=comp)
+        return dataclasses.replace(self, data=node_data)
+
     def get_component(self) -> Optional[Component]:
         if not isinstance(self.data, Undefined):
             if not isinstance(self.data.component, Undefined):
@@ -225,6 +240,7 @@ class FlowControlType(enum.IntEnum):
     DeleteEdgeByIds = 8
     UpdatePaneContextMenuItem = 9
     SetFlowAndDagreLayout = 10
+    LocateNode = 11
 
 @dataclasses.dataclass
 class DagreLayoutOptions:
@@ -581,7 +597,6 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         """
         new_layout: Dict[str, Component] = {}
         for node in nodes:
-            assert node.id not in self._id_to_node, f"node id {node.id} already exists"
             comp = node.get_component()
             if comp is not None:
                 new_layout[node.id] = comp
@@ -605,6 +620,13 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                                             create_comp_event(ev_new_node))
         else:
             return await self.send_and_wait(self.create_comp_event(ev_new_node))
+
+    async def locate_node(self, node_id: str):
+        res = {
+            "type": FlowControlType.LocateNode,
+            "nodeId": node_id,
+        }
+        return await self.send_and_wait(self.create_comp_event(res))
 
     async def fit_view(self):
         res = {
@@ -956,3 +978,178 @@ class NodeToolbar(MUIContainerBase[NodeToolbarProps, MUIComponentType]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class SymbolicImmediate:
+    id: str
+    source_id: str
+    source_handle: Optional[str] = None
+    name: Optional[str] = None # for ui only
+    userdata: Optional[Any] = None
+    is_input: bool = False
+
+class SymbolicFlowBuilder:
+    """A symbolic flow builder to help you build symbolic flow."""
+    def __init__(self):
+        self._id_to_node: Dict[str, Node] = {}
+        self._id_to_immedinate: Dict[str, SymbolicImmediate] = {}
+        # (edge_id, source_handle, target_handle)
+        # if handle is None, means default handle
+        self._node_id_to_sources: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = {}
+        self._node_id_to_targets: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = {}
+        self._node_id_to_inp_handle_to_edges: Dict[str, Dict[Optional[str], List[Edge]]] = {}
+        self._node_id_to_out_handle_to_edges: Dict[str, Dict[Optional[str], List[Edge]]] = {}
+        self._node_id_to_immedinates: Dict[str, List[SymbolicImmediate]] = {}
+
+        self._unique_name_pool_imme = UniqueNamePool()
+
+        self._unique_name_pool = UniqueNamePool()
+        self._unique_name_pool_edge = UniqueNamePool()
+
+    def create_input(self, name: Optional[str] = None, id: Optional[str] = None):
+        if id is not None:
+            assert id not in self._id_to_immedinate, f"immedinate id {id} already exists"
+        imme_id = self._unique_name_pool_imme(id if id is not None else "Immedinate")
+        node_id = self._unique_name_pool(imme_id)
+        node = self.create_op_node(name if name is not None else "Input", [], [None], type="input", node_id=node_id)
+        res = SymbolicImmediate(id=imme_id, source_id=node.id, name=name, is_input=True)
+        self._id_to_immedinate[imme_id] = res
+        self._node_id_to_immedinates[node_id] = [res]
+        return res, node
+
+    def get_immedinate_node(self, immedinate: SymbolicImmediate):
+        source_id = immedinate.source_id
+        return self._id_to_node[source_id]
+
+    def create_op_node(self, name: str, inp_handles: List[Optional[str]], 
+                       out_handles: List[Optional[str]], type: Optional[str] = None, node_id: Optional[str] = None):
+        if node_id is None:
+            node_id = self._unique_name_pool(name)
+        else:
+            assert node_id not in self._id_to_node, f"node id {node_id} already exists"
+        assert node_id not in self._node_id_to_inp_handle_to_edges
+        assert node_id not in self._node_id_to_out_handle_to_edges
+        self._node_id_to_inp_handle_to_edges[node_id] = {}
+        self._node_id_to_out_handle_to_edges[node_id] = {}
+        node = Node(id=node_id, data=NodeData(label=name))
+        if type is not None:
+            node.type = type
+        self._id_to_node[node_id] = node
+        # fill _node_id_to_out_handle_to_edges and _node_id_to_inp_handle_to_edges
+        for handle in inp_handles:
+            if handle not in self._node_id_to_inp_handle_to_edges[node_id]:
+                self._node_id_to_inp_handle_to_edges[node_id][handle] = []
+        for handle in out_handles:
+            if handle not in self._node_id_to_out_handle_to_edges[node_id]:
+                self._node_id_to_out_handle_to_edges[node_id][handle] = []
+        self._node_id_to_immedinates[node_id] = []
+        self._node_id_to_sources[node_id] = []
+        self._node_id_to_targets[node_id] = []
+        return node 
+
+    def call_op_node(self, op_node: Node, op_inp_handle_to_imme: Dict[Optional[str], Union[SymbolicImmediate, List[SymbolicImmediate]]]):
+        assert op_node.id in self._id_to_node
+        inp_handle_to_edges = self._node_id_to_inp_handle_to_edges[op_node.id]
+        out_handle_to_edges = self._node_id_to_out_handle_to_edges[op_node.id]
+        for handle in op_inp_handle_to_imme.keys():
+            assert handle in inp_handle_to_edges
+        # for handle in outputs:
+        #     assert handle in out_handle_to_edges
+        # connect source node to op node
+        for handle, immes in op_inp_handle_to_imme.items():
+            if not isinstance(immes, list):
+                immes = [immes]
+            for imme in immes:
+                edge_id = self._unique_name_pool_edge(f"{imme.source_id}=>{op_node.id}")
+                edge = Edge(id=edge_id, source=imme.source_id, target=op_node.id, sourceHandle=imme.source_handle, targetHandle=handle)
+                self._node_id_to_inp_handle_to_edges[op_node.id][handle].append(edge)
+                self._node_id_to_sources[op_node.id].append((edge_id, imme.source_handle, handle))
+                self._node_id_to_out_handle_to_edges[imme.source_id][imme.source_handle].append(edge)
+                # add to source node metas
+                self._node_id_to_targets[imme.source_id].append((edge_id, handle, imme.source_handle))
+        res_immes: List[SymbolicImmediate] = []
+        # create output immedinate node
+        op_node_output_handles = list(out_handle_to_edges.keys())
+        for handle in op_node_output_handles:
+            imme_id = self._unique_name_pool_imme(f"{op_node.id}-{handle}")
+            imme = SymbolicImmediate(id=imme_id, name=handle, source_id=op_node.id, source_handle=handle)
+            self._id_to_immedinate[imme_id] = imme
+            self._node_id_to_immedinates[op_node.id].append(imme)
+            res_immes.append(imme)
+        return res_immes 
+
+    def get_immedinate_by_id(self, id: str):
+        return self._id_to_immedinate[id]
+
+    def change_immedinate_id(self, imme: SymbolicImmediate, new_id: str):
+        if imme.id == new_id:
+            return imme
+        assert new_id not in self._id_to_immedinate, f"immedinate id {new_id} already exists"
+        del self._id_to_immedinate[imme.id]
+        imme = dataclasses.replace(imme, id=new_id)
+        self._id_to_immedinate[new_id] = imme
+        return imme
+
+    def is_node_input(self, node_id: str):
+        node_immes = self._node_id_to_immedinates[node_id]
+        return len(node_immes) > 0 and node_immes[0].is_input
+
+    def build_detached_flow(self, out_immedinates: List[SymbolicImmediate], disable_handle: bool = True):
+        """Build flow with different config without modifying 
+        the current symbolic flow states.
+        Args:
+            out_immedinates (List[SymbolicImmediate]): output immedinates of flow graph.
+            disable_handle (bool, optional): disable all handle logic and set all handle to None. used if you don't provide 
+                custom node ui. Defaults to True.
+        Returns:
+            node_and_edges: nodes and edges of the flow graph.
+        """
+        # validate inputs
+        for imme in out_immedinates:
+            assert imme.id in self._id_to_immedinate, f"immedinate id {imme.id} not exists"
+
+        # create output nodes
+        out_nodes = []
+        out_edges = []
+        node_umap_copy = self._unique_name_pool.copy()
+        edge_umap_copy = self._unique_name_pool_edge.copy()
+        for imme in out_immedinates:
+            imme_id = imme.name if imme.name is not None else imme.id
+            node_id = node_umap_copy(imme_id)
+            node = Node(id=node_id, data=NodeData(label=imme_id), type="output")
+            out_nodes.append(node)
+            # connect to immedinate
+            edge_id = edge_umap_copy(f"{imme.source_id}=>{node_id}")
+            edge = Edge(id=edge_id, source=imme.source_id, target=node_id, sourceHandle=imme.source_handle)
+            if disable_handle:
+                edge.sourceHandle = None
+                edge.targetHandle = None
+            out_edges.append(edge)
+        # get nodes and edges
+        all_nodes = list(self._id_to_node.values())
+        all_edges: List[Edge] = []
+        for node_id, handle_to_edges in self._node_id_to_inp_handle_to_edges.items():
+            for edges in handle_to_edges.values():
+                if disable_handle:
+                    for edge in edges:
+                        edge = dataclasses.replace(edge, sourceHandle=None, targetHandle=None)
+                        all_edges.append(edge)
+                else:
+                    all_edges.extend(edges)
+        # remap node types if you use type to store op meta such as
+        # Conv2d, we will remap these types to "default" if you 
+        # don't provide custom node ui.
+        
+        default_node_types = set(["app", "input", "default", "output", "group", "appTemplate"])
+        node_type_map: Dict[str, Literal["app", "input", "default", "output", "group", "appTemplate"]] = {}
+        for node in all_nodes:
+            if not isinstance(node.type, Undefined):
+                if node.type not in default_node_types:
+                    is_inp = self.is_node_input(node.id)
+                    node_type_map[node.type] = "input" if is_inp else "default"
+        
+        if node_type_map:
+            node_type_map_res = node_type_map
+        else:
+            node_type_map_res = undefined
+        return all_nodes + out_nodes, all_edges + out_edges, node_type_map_res

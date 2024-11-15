@@ -1,1 +1,2 @@
-from .basic import Tree, Image, ImageBatch, Video, Unique, HistogramPlot, ScatterPlot, LinePlot
+from .basic import (DataFrame, DataFrameTransposed, HistogramPlot, Image,
+                    ImageBatch, LinePlot, ScatterPlot, Tree, Unique, Video)

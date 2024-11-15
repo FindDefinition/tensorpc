@@ -1194,6 +1194,9 @@ class AppNode(CommandNode, DataStorageNodeBase):
         # TODO add to node data
         return 10 * 1024 * 1024
 
+    def get_store_root(self) -> Path:
+        return FLOW_FOLDER_DATA_PATH
+
     @property
     def module_name(self):
         return self.node_data["module"]

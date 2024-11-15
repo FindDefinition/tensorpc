@@ -672,9 +672,14 @@ class ConfigPanelV2(mui.SimpleControls):
             SliderMeta(begin=begin, end=end, step=step, alias=alias)
         }
 
+@dataclasses.dataclass
+class ConfigDialogEvent(Generic[T]):
+    cfg: T 
+    userdata: Any = None
+
 
 class ConfigPanelDialog(mui.Dialog):
-    def __init__(self, callback: Callable[[Any], mui._CORO_NONE], children: Optional[mui.LayoutType] = None):
+    def __init__(self, callback: Callable[[ConfigDialogEvent[T]], mui._CORO_NONE], children: Optional[mui.LayoutType] = None):
         self._content = mui.VBox([
 
         ]).prop(flex=1)
@@ -687,12 +692,14 @@ class ConfigPanelDialog(mui.Dialog):
                                     callback,
                                     backend_only=True)
 
-        self._cur_cfg: Any = None
+        self._cur_cfg: T = None
+        self._cur_user_data: Any = None
 
-    async def open_config_dialog(self, config_obj: Any, inplace: bool = False):
+    async def open_config_dialog(self, config_obj: T, userdata: Any = None):
         assert dataclasses.is_dataclass(config_obj) and not isinstance(config_obj, type), "config_obj should be a dataclass"
         config_obj = dataclasses.replace(config_obj)
         self._cur_cfg = config_obj
+        self._cur_user_data = userdata
         panel = ConfigPanelV2(config_obj)
         await self.update_childs({
             self.__layout_key: panel,
@@ -704,15 +711,16 @@ class ConfigPanelDialog(mui.Dialog):
         try:
             if handlers is not None and ev.ok:
                 for handler in handlers.handlers:
-                    coro = handler.cb(self._cur_cfg)
+                    coro = handler.cb(ConfigDialogEvent(self._cur_cfg, self._cur_user_data))
                     if inspect.iscoroutine(coro):
                         await coro
         finally:
             self._cur_cfg = None
+            self._cur_user_data = None
             await self.remove_childs_by_keys([self.__layout_key])
 
 class ConfigPanelDialogPersist(mui.Dialog):
-    def __init__(self, cfg: Any, callback: Callable[[Any], mui._CORO_NONE], children: Optional[mui.LayoutType] = None):
+    def __init__(self, cfg: T, callback: Callable[[ConfigDialogEvent[T]], mui._CORO_NONE], children: Optional[mui.LayoutType] = None):
         self._config_container = mui.HBox([]).prop(flex=1)
         super().__init__([], self._on_dialog_close)
         self.init_add_layout([self._config_container])
@@ -726,16 +734,18 @@ class ConfigPanelDialogPersist(mui.Dialog):
         assert dataclasses.is_dataclass(cfg) and not isinstance(cfg, type), "config_obj should be a dataclass"
 
         self._cur_cfg = cfg
+        self._cur_user_data: Any = None
 
     @property
     def config(self):
         return self._cur_cfg
 
-    async def open_config_dialog(self, inplace: bool = True):
+    async def open_config_dialog(self, userdata: Any = None, inplace: bool = True):
         config_obj = self._cur_cfg
         if not inplace:
             config_obj = dataclasses.replace(config_obj)
             self._cur_cfg = config_obj
+        self._cur_user_data = userdata
         panel = ConfigPanelV2(config_obj)
         await self._config_container.set_new_layout([panel], post_ev_creator=lambda: self.update_event(open=True)) 
 
@@ -744,7 +754,7 @@ class ConfigPanelDialogPersist(mui.Dialog):
         try:
             if handlers is not None and ev.ok:
                 for handler in handlers.handlers:
-                    coro = handler.cb(self._cur_cfg)
+                    coro = handler.cb(ConfigDialogEvent(self._cur_cfg, self._cur_user_data))
                     if inspect.iscoroutine(coro):
                         await coro
         finally:

@@ -85,6 +85,14 @@ class TracerUIConfig:
     replace_sitepkg_prefix: Annotated[bool, typemetas.CommonObject(alias="Remove site-packages Prefix")] = True
 
 @dataclasses.dataclass
+class TargetTraceConfig:
+    target_filename: str 
+    target_func_qname: str
+    target_expr: str
+    is_distributed: bool = False
+    max_num_variable: int = 1
+
+@dataclasses.dataclass
 class TracerConfig(TracerUIConfig):
     enable: bool = True
     # trace until this number of breakpoints is reached
@@ -92,9 +100,7 @@ class TracerConfig(TracerUIConfig):
     record_filter: RecordFilterConfig = dataclasses.field(default_factory=RecordFilterConfig)
     launch_type: TraceLaunchType = TraceLaunchType.DEFAULT
 
-    target_filename: Optional[str] = None
-    target_func_qname: Optional[str] = None
-    target_expr: Optional[str] = None
+    target_trace_cfg: Optional[TargetTraceConfig] = None
 
 @dataclasses.dataclass
 class TraceMetrics:
@@ -122,7 +128,7 @@ class ExternalTrace:
     data: Any
 
 @dataclasses.dataclass
-class DebugDistributedMeta:
+class DebugDistributedInfo:
     rank: int = 0
     world_size: int = 1
     backend: Optional[Literal["pytorch", "openmpi"]] = None
@@ -142,7 +148,7 @@ class DebugInfo:
     metric: DebugMetric
     frame_meta: Optional[DebugFrameInfo]
     trace_cfg: Optional[TracerConfig]
-    dist_meta: Optional[DebugDistributedMeta] = None
+    dist_info: Optional[DebugDistributedInfo] = None
 
 class BreakpointType(enum.IntEnum):
     Normal = 0
@@ -160,10 +166,12 @@ class RemoteDebugEvent:
 
 @dataclasses.dataclass
 class RemoteDebugTargetTrace(RemoteDebugEvent):
-    meta: DebugDistributedMeta
+    dist_info: DebugDistributedInfo
     target_filename: str 
     target_func_qname: str
     target_expr: str
+    is_distributed: bool = False
+    max_num_variable: int = 1
 
 TENSORPC_ENV_DBG_ENABLE = os.getenv("TENSORPC_DBG_ENABLE", "1") != "0"
 TENSORPC_ENV_DBG_DEFAULT_BREAKPOINT_ENABLE = os.getenv("TENSORPC_DBG_DEFAULT_BREAKPOINT_ENABLE", "1") != "0"

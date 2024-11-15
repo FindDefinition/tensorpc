@@ -128,7 +128,7 @@ def _default_compute_flow_css():
             "top": "50%",
         },
         f".{ComputeFlowClasses.NodeItem}": {
-            "borderBottom": "1px solid grey"
+            "borderBottom": "1px solid lightgrey"
         },
         f".{ComputeFlowClasses.NodeItem}:last-child": {
             "borderBottom": "none",
@@ -137,10 +137,13 @@ def _default_compute_flow_css():
             "justifyContent": "center",
             "alignItems": "center",
         },
-        ".react-flow__node.selected": {
-            f".{ComputeFlowClasses.NodeWrappedSelected}": {
-                "borderStyle": "dashed",
-            }
+        # ".react-flow__node.selected": {
+        #     f".{ComputeFlowClasses.NodeWrappedSelected}": {
+        #         "borderStyle": "dashed",
+        #     }
+        # },
+        ".react-flow__node": {
+            "padding": "0px",
         },
         ".react-flow__handle": {
             "borderRadius": "100%",
@@ -662,7 +665,7 @@ class ComputeNodeWrapper(mui.FlexBox):
             className=
             f"{ComputeFlowClasses.NodeWrapper} {ComputeFlowClasses.NodeWrappedSelected}"
         )
-        self.prop(borderWidth="1px", borderStyle="solid", borderColor="black")
+        # self.prop(borderWidth="1px", borderStyle="solid", borderColor="black")
         if cnode.init_wrapper_config is not None:
             if  cnode.init_wrapper_config.boxProps is not None:
                 merge_props_not_undefined(self.props,

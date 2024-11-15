@@ -1868,6 +1868,9 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         ev = self.create_comp_event(data)
         await self.send_and_wait(ev)
 
+    async def write(self, content: str):
+        await self.send_and_wait(self.update_event(value=content))
+
 
 @dataclasses.dataclass
 class SimpleCodeEditorProps(MUIComponentBaseProps):
@@ -5503,7 +5506,11 @@ class IFrameProps(MUIComponentBaseProps):
     # controlled post message.
     data: Union[Undefined, Any] = undefined
     targetOrigin: Union[Undefined, str] = undefined
-
+    # if set this, we will set a message handler
+    # and wait for some message equal to this
+    # then update data instead of 
+    # rely on onLoad.
+    pingPongMessage: Union[Undefined, Tuple[str, str]] = undefined
 
 class IFrame(MUIComponentBase[IFrameProps]):
 
@@ -5535,7 +5542,7 @@ class IFrame(MUIComponentBase[IFrameProps]):
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
-    async def post_message(self, data: Any, target_origin: str = "*"):
+    async def post_message(self, data: Any, target_origin: str = "*", store_data: bool = True):
         # TODO should we use controlled manner instead of post message?
         # the problem is some component (tabs) won't mount iframe
         # until it's selected, so the component msg handler won't be
@@ -5545,7 +5552,8 @@ class IFrame(MUIComponentBase[IFrameProps]):
             "data": data,
             "targetOrigin": target_origin,
         })
-        self.prop(data=data, targetOrigin=target_origin)
+        if store_data:
+            self.prop(data=data, targetOrigin=target_origin)
         await self.send_and_wait(ev)
 
 @dataclasses.dataclass

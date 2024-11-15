@@ -125,7 +125,7 @@ class ObjectPreview(ObjectPreviewBase):
             childs = list(self.preview_container._child_comps.values())
             if not childs or childs[0] is not handler:
                 await self.preview_container.set_new_layout([handler])
-            await handler.bind(obj, None)
+            await handler.bind(obj, uid)
         if header is not None:
             await self.preview_header.write(header)
 

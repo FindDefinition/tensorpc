@@ -14,6 +14,7 @@ from tensorpc.dbg.core.frame_id import VariableMetaType, get_storage_frame_path
 from tensorpc.flow import appctx
 from tensorpc.flow.components import mui, three
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
+from tensorpc.flow.components.plus.objview.script import get_frame_obj_layout_from_code, get_init_obj_convert_code
 from tensorpc.flow.components.plus.styles import get_tight_icon_tab_theme
 from tensorpc.flow.core.objtree import UserObjTreeProtocol
 from tensorpc.utils.rich_logging import get_logger
@@ -47,24 +48,6 @@ class FrameObjectPreviewState:
 @dataclasses.dataclass
 class FrameObjectMeta:
     convert_code: str
-
-
-def _get_init_obj_convert_code():
-    torch_import_stmt = ""
-    # if "torch" in sys.modules:
-    #     torch_import_stmt = "import torch"
-    code = f"""
-from tensorpc.flow import mui, three
-from tensorpc.flow.components.plus.objview import (HistogramPlot, Image,
-                                                   ImageBatch, LinePlot,
-                                                   ScatterPlot, Tree, Unique,
-                                                   Video)
-import numpy as np 
-{torch_import_stmt}
-def convert(x):
-    return x
-    """
-    return code
 
 @dataclasses.dataclass
 class _FrameHolder:
@@ -250,7 +233,7 @@ class FrameObjectPreview(ObjectPreviewBase):
             var_storage_path = self._get_storage_var_path(self._cur_state.frame_id, self._cur_state.name)
             prev_obj_meta_dict = await appctx.read_data_storage(var_storage_path, raise_if_not_found=False)
             if prev_obj_meta_dict is None:
-                init_code = _get_init_obj_convert_code()
+                init_code = get_init_obj_convert_code()
                 meta = FrameObjectMeta(init_code)
             else:
                 meta = FrameObjectMeta(**prev_obj_meta_dict)
@@ -267,17 +250,11 @@ class FrameObjectPreview(ObjectPreviewBase):
     async def _set_frame_obj_layout_from_code(self, value: str):
         if self._cur_state is not None and self._cur_state.name is not None:
             header = f"{self._cur_state.frame_qualname}::{self._cur_state.name}"
-            init_code_for_compare = _get_init_obj_convert_code()
+            init_code_for_compare = get_init_obj_convert_code()
             await self._obj_original_preview.set_obj_preview_layout(self._cur_state.value, None, header=header)
             if value.strip() == init_code_for_compare.strip():
                 return await self._obj_preview.set_obj_preview_layout(self._cur_state.value, None, header=header)
-            fname = f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-{self._cur_state.frame_object_path}>"
             var_storage_path = self._get_storage_var_path(self._cur_state.frame_id, self._cur_state.name)
-            code_comp = compile(value, fname, "exec")
-            mod_globals = {}
-            exec(code_comp, mod_globals)
-            assert "convert" in mod_globals
-            convert_func = mod_globals["convert"]
             prev_obj_meta_dict = await appctx.read_data_storage(var_storage_path, raise_if_not_found=False)
             if prev_obj_meta_dict is not None:
                 meta = FrameObjectMeta(**prev_obj_meta_dict)
@@ -285,34 +262,15 @@ class FrameObjectPreview(ObjectPreviewBase):
             else:
                 meta = FrameObjectMeta(value)
             await appctx.save_data_storage(var_storage_path, dataclasses.asdict(meta))
-            obj_converted = convert_func(self._cur_state.value)
-            if self._cur_state.value is obj_converted:
-                return await self._obj_preview.set_obj_preview_layout(obj_converted, None, header=header)
-            if not isinstance(obj_converted, (str, mui.Component, list)):
-                return await self._obj_preview.set_obj_preview_layout(obj_converted, None, header=header)
-            # we support str (markdown), official view layout (FlexBox) or list of FlexBox/str.
-            # we limit the length of list to 10 to make sure user code won't crash the app.
-            layouts = self._create_frame_obj_view_layout(obj_converted)
+            fname = f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-{self._cur_state.frame_object_path}>"
+            obj_converted, layouts = get_frame_obj_layout_from_code(fname, value, self._cur_state.value, )
             if layouts is None:
                 return await self._obj_preview.set_obj_preview_layout(obj_converted, None, header=header)
             await self._obj_preview.set_preview_layout(layouts, header=header)
+
 
     async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
         if self._cur_state is not None:
             value = ev.value
             await self._set_frame_obj_layout_from_code(value)
 
-    def _create_frame_obj_view_layout(self, obj_converted: Any):
-        if not isinstance(obj_converted, list):
-            obj_converted_lst = [obj_converted]
-        else:
-            obj_converted_lst = obj_converted
-        layouts = []
-        for item in obj_converted_lst[:10]:
-            if isinstance(item, str):
-                layouts.append(mui.Markdown(item))
-            elif isinstance(item, mui.Component):
-                layouts.append(item)
-        if not layouts:
-            return None 
-        return layouts

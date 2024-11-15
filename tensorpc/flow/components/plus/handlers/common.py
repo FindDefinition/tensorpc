@@ -1,17 +1,19 @@
 import inspect
 from pathlib import PosixPath, WindowsPath
 import traceback
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Type
 
 import numpy as np
 import io
+from tensorpc.core.core_io import extract_arrays_from_data, extract_object_from_data
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import ObservedFunction
 from tensorpc.flow import appctx
-from tensorpc.flow.components import mui
+from tensorpc.flow.components import mui, flowui
 from tensorpc.flow.components.plus.canvas import SimpleCanvas
 from tensorpc.flow.components.plus.config import ConfigPanelV2
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
+from tensorpc.flow.components.plus.objview.script import get_frame_obj_layout_from_code, get_init_obj_convert_code
 
 from ..common import CommonQualNames
 from ..core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler, DataClassesType
@@ -156,7 +158,7 @@ class TensorHandler(ObjectPreviewHandler):
             hasinf = torch.isinf(obj.data).any().item()
 
         elif get_qualname_of_type(type(obj)) == CommonQualNames.TVTensor:
-            from cumm.dtypes import get_dtype_from_tvdtype
+            from cumm.dtypes import get_dtype_from_tvdtype # type: ignore
             qualname = "tv.Tensor"
             device = "cpu" if obj.device == -1 else "cuda"
             is_contig = obj.is_contiguous()
@@ -265,14 +267,12 @@ class DataclassesHandler(ObjectPreviewHandler):
         # await self.cfg_ctrl_container.set_new_layout([panel])
         await self._simple_tree.set_object(obj, expand_level=2)
 
-
-
 class DefaultHandler(ObjectPreviewHandler):
     """
     TODO if the object support any-layout, add a button to enable it.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, tail_btns: Optional[List[mui.Button]] = None, tail_dialogs: Optional[List[mui.Dialog]] = None) -> None:
         self.tags = mui.FlexBox().prop(flexFlow="row wrap")
         self.title = mui.Typography("").prop(wordBreak="break-word")
         self.path = mui.Typography("").prop(wordBreak="break-word")
@@ -281,21 +281,42 @@ class DefaultHandler(ObjectPreviewHandler):
                                                   fontSize="12px",
                                                   wordBreak="break-word")
         self._simple_tree = BasicObjectTree(use_fast_tree=False, clear_data_when_unmount=True)
-        layout = {
+        
+        self._objscript_editor = mui.MonacoEditor("", "python", "").prop(minHeight=0)
+        self._objscript_editor.event_editor_save.on(self._on_editor_save)
+        self._objscript_show = mui.VBox([])
+        self._uid_to_code = {}
+        self._objscript_dialog = mui.Dialog([
+            mui.VBox([
+                self._objscript_editor.prop(flex=1),
+                mui.Divider(),
+                self._objscript_show.prop(flex=1),
+            ]).prop(height="100%")
+        ]).prop(dialogMaxWidth="xl", fullWidth=True, height="70vh")
+        layout: mui.LayoutType = {
             "title": self.title.prop(fontSize="14px", fontFamily="monospace"),
             "path": self.path.prop(fontSize="14px", fontFamily="monospace"),
             "tags": self.tags,
             "divider": mui.Divider().prop(padding="3px"),
-            "buttons": mui.HBox([
+            "buttons": mui.ButtonGroup([
                 mui.Button("print", self._on_print).prop(size="small"),
                 mui.Button("tree", self._on_tree_print).prop(size="small"),
-
-            ]),
+                mui.Button("script", self._on_dialog_open).prop(size="small"),
+                *(tail_btns or [])
+            ]).prop(size="small"),
             "data": self.data_print,
+            "objscript": self._objscript_dialog,
         }
+        
+        if tail_dialogs is not None:
+            for i, d in enumerate(tail_dialogs):
+                layout[f"dialog-{i}"] = d
         super().__init__(layout)
         self.prop(flexDirection="column")
         self.obj: Any = np.zeros([1])
+        self.obj_uid: Optional[str] = None
+
+        self.event_after_unmount.on(self._on_unmount)
 
     async def _on_print(self):
         string = str(self.obj)
@@ -311,11 +332,32 @@ class DefaultHandler(ObjectPreviewHandler):
         await self.update_childs({
             "data": self._simple_tree
         })
-        await self._simple_tree.set_object(self.obj)
+        await self._simple_tree.set_object(self.obj, expand_level=2)
+        await self._simple_tree.expand_all()
+
+    async def _on_dialog_open(self):
+        if self.obj is not None and self.obj_uid is not None:
+            if self.obj_uid in self._uid_to_code:
+                await self._objscript_editor.write(self._uid_to_code[self.obj_uid])
+            else:
+                code = get_init_obj_convert_code()
+                await self._objscript_editor.write(code)
+            await self._objscript_dialog.set_open(True)
+
+    async def _on_dialog_close(self, ev: mui.DialogCloseEvent):
+        await self._objscript_editor.write("")
+        await self._objscript_show.set_new_layout([])
+
+    async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
+        if self.obj is not None and self.obj_uid is not None:
+            _, layouts = get_frame_obj_layout_from_code(self.obj_uid, ev.value, self.obj)
+            if layouts is not None:
+                await self._objscript_show.set_new_layout(layouts)
 
     async def bind(self, obj: Any, uid: Optional[str] = None):
         # bind np object, update all metadata
         self.obj = obj
+        self.obj_uid = uid
         await self.update_childs({
             "data": self.data_print
         })
@@ -329,3 +371,123 @@ class DefaultHandler(ObjectPreviewHandler):
             sf = ""
         ev += self.path.update_event(value=sf)
         await self.send_and_wait(ev)
+
+    async def _on_unmount(self):
+        self.obj = None
+            
+
+@ALL_OBJECT_PREVIEW_HANDLERS.register("torch.fx.graph_module.GraphModule.__new__.<locals>.GraphModuleImpl")
+class PytorchGraphHandler(DefaultHandler):
+    def __init__(self):
+        graph = flowui.Flow([], [], [
+            flowui.MiniMap(),
+            flowui.Controls(),
+            flowui.Background()
+        ])
+        self._graph = graph
+        self.view_pane_menu_items = [
+            mui.MenuItem("layout",
+                         "Dagre Layout"),
+        ]
+        self._graph.event_pane_context_menu.on(self._on_pane_contextmenu)
+        self._graph.prop(paneContextMenuItems=self.view_pane_menu_items)
+
+        self._flow_dialog = mui.Dialog([
+            graph.prop(defaultLayoutSize=(150, 40))
+        ]).prop(dialogMaxWidth="xl", fullWidth=True, height="70vh")
+        self._tmp_graph_data = None 
+
+        super().__init__([
+            mui.Button("Open Graph", self._open_graph),
+        ], tail_dialogs=[self._flow_dialog])
+
+    async def _on_pane_contextmenu(self, data):
+        item_id = data["itemId"]
+        dagre = flowui.DagreLayoutOptions(
+            ranksep=20,
+        )
+        if item_id == "layout":
+            await self._graph.do_dagre_layout(dagre)
+
+    async def _open_graph(self):
+        await self._flow_dialog.set_open(True)
+        dagre = flowui.DagreLayoutOptions(
+            ranksep=20,
+        )
+        import torch.fx
+        from tensorpc.flow.components.flowplus.network.pthfx import FlowUIInterpreter
+        gm = self.obj
+        builder = flowui.SymbolicFlowBuilder()
+        interpreter = FlowUIInterpreter(gm, builder, True)
+        outputs = interpreter.run_on_graph_placeholders()
+        arrs, _ = extract_object_from_data(outputs, (flowui.SymbolicImmediate,))
+        nodes, edges, node_type_map = builder.build_detached_flow(arrs)
+        await self._graph.set_flow_and_do_dagre_layout(nodes, edges, dagre)
+
+    async def bind(self, obj: Any, uid: Optional[str] = None):
+        await super().bind(obj, uid)
+
+
+_TORCH_MODULE_KEYS = [
+    "register_load_state_dict_post_hook",
+    "register_module",
+    "state_dict",
+    "forward",
+    "named_parameters",
+]
+
+def _check_type_is_torch_module(type: Type) -> bool:
+    for key in _TORCH_MODULE_KEYS:
+        if not hasattr(type, key):
+            return False
+    return True 
+
+@ALL_OBJECT_PREVIEW_HANDLERS.register(_check_type_is_torch_module)
+class PytorchModuleHandler(DefaultHandler):
+    def __init__(self):
+        graph = flowui.Flow([], [], [
+            flowui.MiniMap(),
+            flowui.Controls(),
+            flowui.Background()
+        ])
+        self._graph = graph
+        self.view_pane_menu_items = [
+            mui.MenuItem("layout",
+                         "Dagre Layout"),
+        ]
+        self._graph.event_pane_context_menu.on(self._on_pane_contextmenu)
+        self._graph.prop(paneContextMenuItems=self.view_pane_menu_items)
+
+        self._flow_dialog = mui.Dialog([
+            graph.prop(defaultLayoutSize=(150, 40))
+        ]).prop(dialogMaxWidth="xl", fullWidth=True, height="70vh")
+        self._tmp_graph_data = None 
+
+        super().__init__([
+            mui.Button("Open Module Graph", self._open_graph),
+        ], tail_dialogs=[self._flow_dialog])
+
+    async def _on_pane_contextmenu(self, data):
+        item_id = data["itemId"]
+        dagre = flowui.DagreLayoutOptions(
+            ranksep=20,
+        )
+        if item_id == "layout":
+            await self._graph.do_dagre_layout(dagre)
+
+    async def _open_graph(self):
+        await self._flow_dialog.set_open(True)
+        dagre = flowui.DagreLayoutOptions(
+            ranksep=20,
+        )
+        import torch.fx
+        from tensorpc.flow.components.flowplus.network.pthfx import FlowUIInterpreter
+        gm = torch.fx.symbolic_trace(self.obj)
+        builder = flowui.SymbolicFlowBuilder()
+        interpreter = FlowUIInterpreter(gm, builder, True)
+        outputs = interpreter.run_on_graph_placeholders()
+        arrs, _ = extract_object_from_data(outputs, (flowui.SymbolicImmediate,))
+        nodes, edges, node_type_map = builder.build_detached_flow(arrs)
+        await self._graph.set_flow_and_do_dagre_layout(nodes, edges, dagre)
+
+

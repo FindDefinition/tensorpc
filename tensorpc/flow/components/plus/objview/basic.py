@@ -1,6 +1,6 @@
 from pathlib import Path
 import time
-from typing import Any, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from tensorpc.flow.components import mui, three
 from tensorpc.flow.components.plus.arraycommon import can_cast_to_np_array, try_cast_to_np_array
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
@@ -110,6 +110,78 @@ class VideoMp4(Video):
     def __init__(self, bytes_or_path: Union[bytes, str]):
         super().__init__(bytes_or_path, suffix=".mp4")
 
+def _parse_df_to_table(df, column_width: int = 75):
+    import pandas as pd
+
+    columns = df.columns
+    dtypes = list(df.dtypes)
+    column_defs: List[mui.DataGridColumnDef] = [
+        mui.DataGrid.ColumnDef("id", accessorKey="id", width=column_width),
+    ]
+    column_def_dict: Dict[str, mui.DataGridColumnDef] = {}
+    for column, dt in zip(columns, dtypes):
+        if not isinstance(column, str):
+            column = str(column)
+        if dt != np.object_:
+            col_type = mui.DataGridColumnSpecialType.Number
+        else:
+            col_type = mui.undefined 
+        cdef = mui.DataGridColumnDef(id=column, header=column, specialType=col_type, width=column_width) 
+        if dt != np.object_:
+            cdef.specialProps = mui.DataGridColumnSpecialProps(
+                mui.DataGridNumberCell(precision=6))
+        column_defs.append(cdef)
+        column_def_dict[column] = cdef
+    # get rows
+    rows = []
+    for idx, row in df.iterrows():
+        # get row dict, e.g. {id: xxx, ...columns}
+        row_dict = row.to_dict()
+        new_row_dict = {}
+        for k, v in row_dict.items():
+            if not isinstance(k, str):
+                k = str(k)
+            if v is None:
+                new_row_dict[k] = ""
+            else:
+                if column_def_dict[k].specialType != mui.DataGridColumnSpecialType.Number:
+                    new_row_dict[k] = str(v)
+                else:
+                    new_row_dict[k] = v
+        new_row_dict["id"] = str(idx)
+        rows.append(new_row_dict)
+    
+    dgrid = mui.DataGrid(column_defs, rows)
+    dgrid.prop(rowHover=True,
+                stickyHeader=False,
+                virtualized=True,
+                size="small",
+                # enableColumnFilter=True,
+                fullWidth=True,
+                tableLayout="fixed")
+    dgrid.prop(tableSxProps={
+        '& .MuiTableCell-sizeSmall': {
+            "padding": '2px 2px',
+        },
+    })
+    return dgrid
+
+
+class DataFrame(mui.FlexBox):
+    def __init__(self, data: Any, column_width: int = 75):
+        import pandas as pd
+        df = pd.DataFrame(data)
+        self.dgrid = _parse_df_to_table(df, column_width)
+        super().__init__([self.dgrid])
+        self.prop(flex=1)
+
+class DataFrameTransposed(mui.FlexBox):
+    def __init__(self, data: Any, column_width: int = 75):
+        import pandas as pd
+        df = pd.DataFrame(data).transpose()
+        self.dgrid = _parse_df_to_table(df, column_width)
+        super().__init__([self.dgrid])
+        self.prop(flex=1)
 
 class Unique(mui.FlexBox):
     pass

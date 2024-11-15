@@ -381,6 +381,7 @@ class Perfetto(IFrame):
                 }
             }
         super().__init__("https://ui.perfetto.dev", init_data)
+        self.prop(pingPongMessage=("PING", "PONG"))
 
     # async def set_trace_data(self, data: bytes, title: str):
     #     assert isinstance(data, bytes)
@@ -412,7 +413,8 @@ class Perfetto(IFrame):
         if view_percentage is not None:
             assert view_percentage >= 0 and view_percentage <= 1
             msg["viewPercentage"] = view_percentage
+        # control msg, so don't store data
         await self.post_message(data=({
             "perfetto": msg
-        }))
+        }), store_data=False)
 

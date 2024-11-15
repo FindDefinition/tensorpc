@@ -20,7 +20,6 @@ BUILTIN_SERVICES = [
     Service(f"tensorpc.services.collection{TENSORPC_SPLIT}SpeedTestServer",
             {}),
     Service(f"tensorpc.flow.serv.core{TENSORPC_SPLIT}Flow", {}),
-    Service(f"tensorpc.flow.serv.worker{TENSORPC_SPLIT}FlowWorker", {}),
     Service(f"tensorpc.flow.serv.remote_comp{TENSORPC_SPLIT}RemoteComponentService", {}),
     Service(f"tensorpc.services.collection{TENSORPC_SPLIT}Simple", {}),
     Service(f"tensorpc.autossh.services.scheduler{TENSORPC_SPLIT}Scheduler",

@@ -1887,12 +1887,15 @@ class Component(Generic[T_base_props, T_child]):
                        tb_from_sys: bool = True):
         ss = io.StringIO()
         traceback.print_exc(file=ss)
-        assert self._flow_uid is not None
+        if self._flow_uid is None:
+            uid = "UNKNOWN"
+        else:
+            uid = self._flow_uid.uid_encoded
         if tb_from_sys:
             tb = sys.exc_info()[2]
         return self.put_app_event(
             self.create_user_msg_event(
-                UserMessage.from_exception(self._flow_uid_encoded, e, tb)))
+                UserMessage.from_exception(uid, e, tb)))
 
     async def __event_emitter_on_exc(self, exc_param: ExceptionParam):
         traceback.print_exc()

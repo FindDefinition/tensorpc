@@ -8,6 +8,7 @@ import json
 import os
 import threading
 from pathlib import Path
+import traceback
 from types import FrameType
 from typing import Any, List, Optional
 
@@ -18,9 +19,9 @@ from tensorpc.core.tracers.targettracer import TargetTracer
 from tensorpc.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
                                     TENSORPC_DBG_TRACE_VIEW_KEY,
                                     TENSORPC_ENV_DBG_ENABLE, BreakpointEvent,
-                                    BreakpointType, TraceLaunchType, TracerConfig, TraceResult,
-                                    TracerType, RecordFilterConfig,
-                                    DebugDistributedMeta)
+                                    BreakpointType, TraceLaunchType,
+                                    TracerConfig, TraceResult, TracerType,
+                                    RecordFilterConfig, DebugDistributedInfo)
 from tensorpc.dbg.tracer import DebugTracerWrapper, VizTracerAndPytorchTracer
 from tensorpc.flow.client import is_inside_app_session
 from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
@@ -36,6 +37,7 @@ RECORDING = False
 
 _TRACER_WRAPPER = DebugTracerWrapper()
 
+
 def _try_get_distributed_meta():
     # try find torch dist (only support torchrun since it set enought env)
     if "torch" in sys.modules:
@@ -43,7 +45,9 @@ def _try_get_distributed_meta():
         if dist.is_initialized():
             rank = dist.get_rank()
             world_size = dist.get_world_size()
-            res = DebugDistributedMeta(rank=rank, world_size=world_size, backend="pytorch")
+            res = DebugDistributedInfo(rank=rank,
+                                       world_size=world_size,
+                                       backend="pytorch")
             if os.getenv("TORCHELASTIC_RUN_ID", None) is not None:
                 run_id = os.getenv("TORCHELASTIC_RUN_ID", None)
                 local_world_size = os.getenv("LOCAL_WORLD_SIZE", None)
@@ -56,13 +60,14 @@ def _try_get_distributed_meta():
         mpi_rank = os.getenv("OMPI_COMM_WORLD_RANK", None)
         mpi_local_world_size = os.getenv("OMPI_COMM_WORLD_LOCAL_SIZE", None)
         if mpi_world_size is not None and mpi_rank is not None:
-            res = DebugDistributedMeta(rank=int(mpi_rank),
-                                         world_size=int(mpi_world_size),
-                                         backend="openmpi")
+            res = DebugDistributedInfo(rank=int(mpi_rank),
+                                       world_size=int(mpi_world_size),
+                                       backend="openmpi")
             if mpi_local_world_size is not None:
                 res.local_world_size = int(mpi_local_world_size)
             return res
-    return DebugDistributedMeta() 
+    return DebugDistributedInfo()
+
 
 def _extract_module_path(module: str):
     spec = importlib.util.find_spec(module)
@@ -91,22 +96,76 @@ def _parse_record_filter(cfg: RecordFilterConfig):
             exclude_files.extend(_extract_module_path(mod))
     return include_files, exclude_files
 
-def _special_trace_target_variable(frame: FrameType, target_expr: str):
-    # eval expr in frame 
-    try:
-        res = eval(target_expr, frame.f_globals, frame.f_locals)
-        BACKGROUND_SERVER.execute_service(serv_names.DBG_TRACEVIEW_SET_VARIABLE_INSPECT, target_expr, res)
-    except Exception as e:
-        LOGGER.error(f"Eval target variable error: {e}")
+
+class _TargetTraceHandler:
+    def __init__(self, target_expr: str, target_qname: str, is_dist: bool):
+        self.target_expr = target_expr
+        self.target_qname = target_qname
+        self.is_dist = is_dist
+        self.var_uid = f"{self.target_qname}::{self.target_expr}"
+
+        self._var_collected = []
+
+
+    def _handler_collect(self, frame: FrameType):
+        try:
+            res = eval(self.target_expr, frame.f_globals, frame.f_locals)
+            self._var_collected.append(res)
+        except Exception as e:
+            LOGGER.error(f"Eval target expr {self.target_expr} error: {e}")
+
+    def _handler_stop(self):
+        try:
+            res = self._var_collected
+            if self.is_dist:
+                import torch.distributed as dist 
+                if dist.is_initialized():
+                    res_list = [None] * dist.get_world_size()
+                    dist.all_gather_object(res_list, self._var_collected)
+                    res = res_list
+            BACKGROUND_SERVER.execute_service(
+                serv_names.DBG_TRACEVIEW_SET_VARIABLE_INSPECT, self.var_uid, res)
+        except Exception as e:
+            LOGGER.error(f"Set Target {self.target_expr} error: {e}")
+
+    def _handler_single(self, frame: FrameType):
+        # eval expr in frame
+        try:
+            res = eval(self.target_expr, frame.f_globals, frame.f_locals)
+            if self.is_dist:
+                import torch.distributed as dist 
+                if dist.is_initialized():
+                    res_list = [None] * dist.get_world_size()
+                    dist.all_gather_object(res_list, res)
+                    res = res_list
+            BACKGROUND_SERVER.execute_service(
+                serv_names.DBG_TRACEVIEW_SET_VARIABLE_INSPECT, self.var_uid, res)
+        except Exception as e:
+            LOGGER.error(f"Eval target expr {self.target_expr} error: {e}")
+
 
 def _get_viztracer(cfg: Optional[TracerConfig], name: Optional[str] = None):
     if cfg is not None and cfg.launch_type != TraceLaunchType.DEFAULT:
         # handle special trace.
-        if (cfg.launch_type == TraceLaunchType.TARGET_VARIABLE and cfg.target_filename is not None and cfg.target_func_qname is not None):
-            if cfg.target_expr is not None:
-                handler = partial(_special_trace_target_variable, target_expr=cfg.target_expr)
-                tracer = TargetTracer(cfg.target_filename, cfg.target_func_qname, handler, max_depth=cfg.max_stack_depth)
-                return tracer, TracerType.TARGET_TRACER
+        if (cfg.launch_type == TraceLaunchType.TARGET_VARIABLE
+                and cfg.target_trace_cfg is not None):
+            tcfg = cfg.target_trace_cfg
+            handler = _TargetTraceHandler(tcfg.target_expr,
+                                            tcfg.target_func_qname,
+                                            tcfg.is_distributed)
+            if tcfg.max_num_variable == 1:
+                tracer = TargetTracer(tcfg.target_filename,
+                                    tcfg.target_func_qname,
+                                    handler._handler_single,
+                                    max_depth=cfg.max_stack_depth)
+            else:
+                tracer = TargetTracer(tcfg.target_filename,
+                                    tcfg.target_func_qname,
+                                    handler._handler_collect,
+                                    handler._handler_stop,
+                                    max_depth=cfg.max_stack_depth,
+                                    max_num_variable=tcfg.max_num_variable)
+            return tracer, TracerType.TARGET_TRACER
         return None, TracerType.VIZTRACER
     try:
         from viztracer import VizTracer
@@ -120,6 +179,7 @@ def _get_viztracer(cfg: Optional[TracerConfig], name: Optional[str] = None):
             if not exc_files:
                 exc_files = None
             tracer_type = cfg.tracer
+            LOGGER.warning("%s %s", inc_files, exc_files)
             if tracer_type == TracerType.VIZTRACER:
                 tracer = VizTracer(process_name=name,
                                    file_info=False,
@@ -176,8 +236,7 @@ def should_enable_debug() -> bool:
     return enable
 
 
-def init(proc_name: Optional[str] = None,
-         port: int = -1):
+def init(proc_name: Optional[str] = None, port: int = -1):
     """Initialize the background server with the given process name
     if already started, this function does nothing.
     TODO setup pytorch extra
@@ -213,23 +272,25 @@ def init(proc_name: Optional[str] = None,
 
     return True
 
-def _patch_events_for_pytorch_dist(events: List[Any]):
-    import torch.distributed as dist 
-    rank = dist.get_rank()
 
+def _patch_events_for_pytorch_dist(events: List[Any]):
+    import torch.distributed as dist
+    rank = dist.get_rank()
     for ev in events:
         if ev["ph"] == "X":
             # set thread id to rank
             ev["tid"] = rank
 
+
 def _patch_events_pid_for_pytorch_dist(events: List[Any]):
-    import torch.distributed as dist 
+    import torch.distributed as dist
     rank = dist.get_rank()
     pid = os.getpid()
     for ev in events:
         if ev["ph"] == "X":
             # set thread id to rank
             ev["pid"] = pid
+
 
 def breakpoint(name: Optional[str] = None,
                timeout: Optional[float] = None,
@@ -296,8 +357,10 @@ def breakpoint(name: Optional[str] = None,
                         import torch.distributed as dist
                         ws = dist.get_world_size()
                         output = [None for _ in range(ws)]
-                        _patch_events_for_pytorch_dist(single_res.external_events)
-                        dist.all_gather_object(output, single_res.external_events)
+                        _patch_events_for_pytorch_dist(
+                            single_res.external_events)
+                        dist.all_gather_object(output,
+                                               single_res.external_events)
                         events_all_rank = []
                         for events in output:
                             assert events is not None
@@ -310,12 +373,12 @@ def breakpoint(name: Optional[str] = None,
         LOGGER.warning(f"Record Stop.")
         if trace_res_obj is not None:
             BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACE_DATA,
-                                            trace_res_obj, tracer_cfg)
+                                              trace_res_obj, tracer_cfg)
 
     bev.event.wait(timeout)
     if bev.enable_trace_in_main_thread:
         # tracer must be create/start/stop in main thread (or same thread)
-        meta = BACKGROUND_SERVER.get_userdata_typed(DebugDistributedMeta)
+        meta = BACKGROUND_SERVER.get_userdata_typed(DebugDistributedInfo)
         tracer_name: Optional[str] = None
         if meta.backend is not None:
             tracer_name = f"{meta.backend}|{meta.rank}/{meta.world_size}"
@@ -463,7 +526,8 @@ def record_duration(name: str,
                     args: Any = None,
                     *,
                     _frame_cnt: int = 1,
-                    thread_id: int = 0):
+                    thread_id: int = 0,
+                    cat: Optional[str] = None):
     if RECORDING:
         frame = inspect.currentframe()
         if frame is None:
@@ -482,7 +546,7 @@ def record_duration(name: str,
             return
         if args is None:
             args = {"path": frame.f_code.co_filename, "lineno": frame.f_lineno}
-        with _TRACER_WRAPPER.log_duration(name, args, thread_id):
+        with _TRACER_WRAPPER.log_duration(name, args, thread_id, cat):
             yield
     else:
         yield

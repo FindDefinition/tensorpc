@@ -75,9 +75,11 @@ class HashableRegistryKeyOnly(Generic[T]):
 
     def __init__(self, allow_duplicate: bool = False):
         self.global_dict: Dict[Hashable, T] = {}
+        self.fallback_validators_dict: Dict[Callable, T] = {}
+
         self.allow_duplicate = allow_duplicate
 
-    def register(self, key: Optional[Hashable] = None):
+    def register(self, key: Optional[Union[Hashable, Callable[[Hashable], bool]]] = None):
 
         def wrapper(func: T) -> T:
             key_ = key
@@ -85,7 +87,10 @@ class HashableRegistryKeyOnly(Generic[T]):
                 key_ = func.__name__
             if not self.allow_duplicate and key_ in self.global_dict:
                 raise KeyError("key {} already exists".format(key_))
-            self.global_dict[key_] = func
+            if inspect.isfunction(key_):
+                self.fallback_validators_dict[key_] = func
+            else:
+                self.global_dict[key_] = func
             return func
 
         return wrapper
@@ -98,6 +103,14 @@ class HashableRegistryKeyOnly(Generic[T]):
 
     def items(self):
         yield from self.global_dict.items()
+
+    def check_fallback_validators(self, key: Any) -> Optional[T]:
+        for validator, func in self.fallback_validators_dict.items():
+            validator_res = validator(key)
+            assert isinstance(validator_res, bool)
+            if validator_res:
+                return func
+        return None
 
 
 class HashableSeqRegistryKeyOnly(Generic[T]):

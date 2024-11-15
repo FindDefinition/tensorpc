@@ -1,3 +1,4 @@
+import pickle
 from typing import Any, Dict, List, Union
 from typing_extensions import TypeAlias
 from tensorpc.flow.components import mui, three
@@ -39,10 +40,12 @@ class MarkdownTutorialsTree:
                                                         height="100%",
                                                         overflow="auto")
         self.tutorials = tutorials
-        self.panel = plus.InspectPanel({
+        init_data = {
             "points": np.random.uniform(-10, 10, size=[100, 3]),
             "wtf": False,
-        }, use_fast_tree=True)
+            "data": {'Name': ['a', 'b', None], 'Age': [10, 11, 12]},
+        }
+        self.panel = plus.InspectPanel(init_data, use_fast_tree=True)
         return self.panel.prop(width="100%", height="100%", overflow="hidden")
 
     @mark_did_mount

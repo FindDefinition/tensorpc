@@ -183,6 +183,9 @@ class ObjectPreviewLayoutHandleManager:
                     handler_type = ALL_OBJECT_PREVIEW_HANDLERS[
                         DataClassesType]
                     modified_obj_type = DataClassesType
+            if handler_type is None:
+                handler_type = ALL_OBJECT_PREVIEW_HANDLERS.check_fallback_validators(
+                    obj_type)
             if handler_type is not None:
                 handler = handler_type()
                 self._type_to_handler_object[modified_obj_type] = handler

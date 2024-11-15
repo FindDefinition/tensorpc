@@ -11,7 +11,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 from typing_extensions import Literal
 
-from .constants import TENSORPC_DBG_USER_DURATION_EVENT_KEY, DebugDistributedMeta, TracerSingleResult, TracerType, TracerConfig
+from .constants import TENSORPC_DBG_USER_DURATION_EVENT_KEY, DebugDistributedInfo, TracerSingleResult, TracerType, TracerConfig
 
 try:
     import orjson as json  # type: ignore
@@ -51,7 +51,7 @@ class DebugTracerWrapper:
 
         self._tracer_proc_name: Optional[str] = None
         self._trace_cfg: Optional[TracerConfig] = None
-        self._trace_dist_meta: Optional[DebugDistributedMeta] = None
+        self._trace_dist_meta: Optional[DebugDistributedInfo] = None
 
         self._trace_events_external: List[Any] = []
         self._trace_tid = None
@@ -59,7 +59,7 @@ class DebugTracerWrapper:
 
     def set_tracer(self, cfg: Optional[TracerConfig], tracer: Any,
                    tracer_type: TracerType, proc_name: str,
-                   meta: DebugDistributedMeta) -> None:
+                   meta: DebugDistributedInfo) -> None:
         self._tracer = tracer
         self._tracer_type = tracer_type
         self._tracer_proc_name = proc_name
@@ -129,9 +129,8 @@ class DebugTracerWrapper:
     def log_duration(self,
                     name: str,
                     args: Any = None,
-                    thread_id: int = 0):
-        """only log to thread 0.
-        """
+                    thread_id: int = 0,
+                    cat: Optional[str] = None):
         if self._tracer_type == TracerType.TARGET_TRACER:
             yield 
             return 
@@ -148,19 +147,19 @@ class DebugTracerWrapper:
                 ts_end = time.monotonic_ns() / 1000  # us
             else:
                 ts_end = time.time_ns() / 1000  # us
+            res = {
+                "name": name,
+                "pid": pid,
+                # "tid": pid,
+                "tid": thread_id, # TODO pid or 0?
+                "ph": "X",
+                "ts": ts,
+                "dur": ts_end - ts,
+                "cat": cat or TENSORPC_DBG_USER_DURATION_EVENT_KEY,
+            }
+            if args is not None:
+                res["args"] = args
             with self._trace_lock:
-                res = {
-                    "name": name,
-                    "pid": pid,
-                    # "tid": pid,
-                    "tid": thread_id, # TODO pid or 0?
-                    "ph": "X",
-                    "ts": ts,
-                    "dur": ts_end - ts,
-                    "cat": TENSORPC_DBG_USER_DURATION_EVENT_KEY,
-                }
-                if args is not None:
-                    res["args"] = args
                 self._trace_events_external.append(res)
 
     def start(self):
@@ -181,7 +180,7 @@ class DebugTracerWrapper:
             elif self._tracer_type == TracerType.PYTORCH:
                 self._tracer.__exit__(None, None, None)
             elif self._tracer_type == TracerType.TARGET_TRACER:
-                self._tracer.start()
+                self._tracer.stop()
             else:
                 raise ValueError(f"Invalid tracer type: {self._tracer_type}")
 
@@ -219,6 +218,10 @@ class DebugTracerWrapper:
                 # pad zeros to meta.rank
                 rank_padded_str = str(
                     meta.rank).zfill(digits) + "0" * MAX_FLOW_ID_NUM_PAD
+                if suppress_user_anno:
+                    data = data.replace(
+                        b'"ph": "X", "cat": "user_annotation"',
+                        b'"ph": "M", "cat": "user_annotation"')
                 if meta.world_size > 1:
                     # fix duplicated flow event across ranks
                     # TODO pytorch may remove beautiful json dump (remove whitespace) in future
@@ -233,11 +236,6 @@ class DebugTracerWrapper:
                         b'"process_name"',
                         b'"process_name_change_name_to_be_invalid"')
                     # supress all user annotation events when use v+p tracer
-                    if suppress_user_anno:
-                        data = data.replace(
-                            b'"ph": "X", "cat": "user_annotation"',
-                            b'"ph": "M", "cat": "user_annotation"')
-
                     # append our process name meta event
                     pid = os.getpid()
                     external_events.append({

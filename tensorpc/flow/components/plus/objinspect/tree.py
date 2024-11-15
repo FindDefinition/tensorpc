@@ -250,7 +250,7 @@ class BasicObjectTree(mui.FlexBox):
                  custom_tree_handler: Optional[CustomTreeItemHandler] = None,
                  use_init_as_root: bool = False,
                  drag_userdata: Any = None,
-                 clear_data_when_unmount: bool = False) -> None:
+                 clear_data_when_unmount: bool = True) -> None:
         if use_fast_tree:
             self.tree = mui.TanstackJsonLikeTree()
         else:

@@ -378,6 +378,15 @@ def _extract_arrays_from_data(arrays,
             data_skeleton = data
         return data_skeleton
 
+def extract_object_from_data(data,
+                             object_classes):
+    arrays: List[Any] = []
+    data_skeleton = _extract_arrays_from_data(arrays,
+                                              data,
+                                              object_classes=object_classes,
+                                              json_index=True)
+    return arrays, data_skeleton
+
 
 def extract_arrays_from_data(data,
                              object_classes=(np.ndarray, bytes, JSArrayBuffer),

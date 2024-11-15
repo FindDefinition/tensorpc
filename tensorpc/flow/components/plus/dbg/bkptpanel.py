@@ -10,7 +10,7 @@ from tensorpc.core import inspecttools
 from tensorpc.dbg.core.frame_id import get_frame_uid
 from tensorpc.flow import appctx
 from tensorpc.flow.components import chart, mui
-from tensorpc.flow.components.plus.config import ConfigPanelDialog
+from tensorpc.flow.components.plus.config import ConfigDialogEvent, ConfigPanelDialog
 from tensorpc.flow.components.plus.dbg.frameobj import FrameObjectPreview
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
 from tensorpc.flow.components.plus.scriptmgr import ScriptManager
@@ -204,7 +204,8 @@ class BreakpointDebugPanel(mui.FlexBox):
                 await self._trace_launch_dialog.open_config_dialog(
                     TracerUIConfig())
 
-    async def _on_trace_launch(self, config: TracerUIConfig):
+    async def _on_trace_launch(self, cfg_ev: ConfigDialogEvent[TracerUIConfig]):
+        config = cfg_ev.cfg
         if self._cur_leave_bkpt_cb is not None:
             await self._cur_leave_bkpt_cb(
                 TracerConfig(enable=True,

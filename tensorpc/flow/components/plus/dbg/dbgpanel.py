@@ -21,14 +21,14 @@ from tensorpc.core.asyncclient import (simple_chunk_call_async,
                                        simple_remote_call_async)
 from tensorpc.core.client import simple_remote_call
 from tensorpc.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
-                                    TENSORPC_DBG_SPLIT, TENSORPC_DBG_TRACE_VIEW_KEY, DebugDistributedMeta, DebugFrameInfo,
-                                    DebugInfo, RecordFilterConfig, RecordMode, RemoteDebugEventType, RemoteDebugTargetTrace, TraceLaunchType,
+                                    TENSORPC_DBG_SPLIT, TENSORPC_DBG_TRACE_VIEW_KEY, DebugDistributedInfo, DebugFrameInfo,
+                                    DebugInfo, RecordFilterConfig, RecordMode, RemoteDebugEventType, RemoteDebugTargetTrace, TargetTraceConfig, TraceLaunchType,
                                     TracerConfig, TraceResult, TracerType,
                                     TracerUIConfig)
 from tensorpc.dbg.serv_names import serv_names as dbg_serv_names
 from tensorpc.flow import appctx, marker
 from tensorpc.flow.components import chart, mui
-from tensorpc.flow.components.plus.config import ConfigPanelDialog, ConfigPanelDialogPersist
+from tensorpc.flow.components.plus.config import ConfigDialogEvent, ConfigPanelDialog, ConfigPanelDialogPersist
 from tensorpc.flow.components.plus.styles import (CodeStyles,
                                                   get_tight_icon_tab_theme)
 from tensorpc.flow.core.appcore import AppSpecialEventType
@@ -53,7 +53,7 @@ except ImportError:
 FILE_RESOURCE_KEY = "tensorpc_dbg_trace.json"
 
 @dataclasses.dataclass
-class DebugServerProcessMeta:
+class DebugServerProcessInfo:
     id: str
     name: str
     pid: int
@@ -64,7 +64,7 @@ class DebugServerProcessMeta:
     is_tracing: bool = False
     primaryColor: Union[mui.Undefined, mui._StdColorNoDefault] = mui.undefined
     secondaryColor: Union[mui.Undefined, mui._StdColorNoDefault] = mui.undefined
-    dist_meta: Optional[DebugDistributedMeta] = None
+    dist_info: Optional[DebugDistributedInfo] = None
     is_mounted: bool = False
     @property
     def url_with_port(self):
@@ -110,13 +110,13 @@ exclude_files:
 """
 
 def list_all_dbg_server_in_machine():
-    res: List[DebugServerProcessMeta] = []
+    res: List[DebugServerProcessInfo] = []
     for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
         proc_name = proc.info["name"]
         proc_cmdline = proc.info["cmdline"]
         if proc_name.startswith(TENSORPC_BG_PROCESS_NAME_PREFIX):
             parts = proc_name.split(TENSORPC_DBG_SPLIT)[1:]
-            meta = DebugServerProcessMeta(str(proc.info["pid"]), proc_name,
+            meta = DebugServerProcessInfo(str(proc.info["pid"]), proc_name,
                                           proc.info["pid"], parts[-1],
                                           parts[0], int(parts[1]))
             res.append(meta)
@@ -125,7 +125,7 @@ def list_all_dbg_server_in_machine():
                 TENSORPC_BG_PROCESS_NAME_PREFIX):
             # some platform need cmdline
             parts = proc_cmdline[0].split(TENSORPC_DBG_SPLIT)[1:]
-            meta = DebugServerProcessMeta(str(proc.info["pid"]),
+            meta = DebugServerProcessInfo(str(proc.info["pid"]),
                                           proc_cmdline[0], proc.info["pid"],
                                           parts[-1], parts[0], int(parts[1]))
             res.append(meta)
@@ -335,7 +335,7 @@ class MasterDebugPanel(mui.FlexBox):
                                                                  Any]]] = None
 
         self._current_mount_uid = ""
-        self._current_metas: List[DebugServerProcessMeta] = []
+        self._current_proc_infos: List[DebugServerProcessInfo] = []
 
         self._scan_duration = 2  # seconds
 
@@ -370,7 +370,7 @@ class MasterDebugPanel(mui.FlexBox):
             return mui.FileResource(name=f"{self._perfetto_select.value}{suffix}", content=self._dist_trace_data_for_download)
         return mui.FileResource(name=f"{self._perfetto_select.value}.json", content="{}".encode()) 
 
-    async def _mount_remote_server_apps(self, meta: DebugServerProcessMeta):
+    async def _mount_remote_server_apps(self, meta: DebugServerProcessInfo):
         async with self._serv_list_lock:
             await self._remote_comp_container.set_new_layout([
                 mui.RemoteBoxGrpc(
@@ -388,19 +388,16 @@ class MasterDebugPanel(mui.FlexBox):
         await self._remote_comp_tv_container.set_new_layout([])
         await self._set_selected_remote_list(None)
 
-    async def _set_selected_remote_list(self, selected_meta: Optional[DebugServerProcessMeta] = None):
-        metas = self._current_metas
+    async def _set_selected_remote_list(self, selected_meta: Optional[DebugServerProcessInfo] = None):
+        process_infos = self._current_proc_infos
         metas_with_selected = []
-        for m in metas:
-            if selected_meta is not None:
-                print(m.uid, selected_meta.uid)
+        for m in process_infos:
             if selected_meta is not None and m.uid == selected_meta.uid:
                 m = dataclasses.replace(m, is_mounted=True)
             else:
                 m = dataclasses.replace(m, is_mounted=False)
             metas_with_selected.append(m)
         metas_dict = [as_dict_no_undefined(meta) for meta in metas_with_selected]
-        print(metas_with_selected)
         await self.send_and_wait(
             self._remote_server_discover_lst.update_event(
                 dataList=metas_dict))
@@ -408,7 +405,7 @@ class MasterDebugPanel(mui.FlexBox):
     async def _on_server_item_click(self, ev: mui.Event):
         indexes = ev.indexes
         assert not isinstance(indexes, mui.Undefined)
-        meta = self._current_metas[indexes[0]]
+        meta = self._current_proc_infos[indexes[0]]
         if self._current_mount_uid == meta.uid:
             return
         await self._mount_remote_server_apps(meta)
@@ -434,29 +431,29 @@ class MasterDebugPanel(mui.FlexBox):
 
     async def _update_remote_server_discover_lst(self):
         async with self._serv_list_lock:
-            metas = list_all_dbg_server_in_machine()
-            metas.sort(key=lambda x: x.server_id)
-            self._current_metas = metas
+            process_infos = list_all_dbg_server_in_machine()
+            process_infos.sort(key=lambda x: x.server_id)
+            self._current_proc_infos = process_infos
             bkpts = appctx.get_vscode_state().get_all_breakpoints()
-            for i, meta in enumerate(metas):
+            for i, info in enumerate(process_infos):
                 try:
                     debug_info: DebugInfo = await simple_remote_call_async(
-                        meta.url_with_port,
+                        info.url_with_port,
                         dbg_serv_names.DBG_SET_BKPTS_AND_GET_CURRENT_INFO,
                         bkpts,
                         rpc_timeout=1)
                     frame_meta = debug_info.frame_meta
-                    dist_meta = debug_info.dist_meta
+                    dist_info = debug_info.dist_info
                     trace_cfg = debug_info.trace_cfg
-                    meta.dist_meta = dist_meta
+                    info.dist_info = dist_info
                     skipped_count = str(debug_info.metric.total_skipped_bkpt)
                     if debug_info.metric.total_skipped_bkpt > 100:
                         skipped_count = "100+"
                     status_str = f"running ({skipped_count})"
-                    meta.primaryColor = mui.undefined
-                    prefix = str(meta.pid)
-                    if dist_meta is not None and dist_meta.run_id is not None:
-                        prefix = f"{dist_meta.run_id[:6]}"
+                    info.primaryColor = mui.undefined
+                    prefix = str(info.pid)
+                    if dist_info is not None and dist_info.run_id is not None:
+                        prefix = f"{dist_info.run_id[:6]}"
                     if trace_cfg is not None:
                         tracer = trace_cfg.tracer
                         if tracer == TracerType.VIZTRACER:
@@ -471,37 +468,37 @@ class MasterDebugPanel(mui.FlexBox):
                             status_str = f"rec-{tracer_str} ({skipped_count}-inf)"
                         else:
                             status_str = f"rec-{tracer_str} ({skipped_count})"
-                        meta.is_tracing = True
-                        meta.primaryColor = "success"
+                        info.is_tracing = True
+                        info.primaryColor = "success"
                     if frame_meta is not None:
-                        meta.secondary_name = f"{prefix}|{frame_meta.name}:{frame_meta.lineno}"
-                        meta.primaryColor = "primary"
+                        info.secondary_name = f"{prefix}|{frame_meta.name}:{frame_meta.lineno}"
+                        info.primaryColor = "primary"
                     else:
-                        meta.secondary_name = f"{prefix}|{status_str}"
-                    if self._current_mount_uid == meta.uid:
-                        meta.is_mounted = True
+                        info.secondary_name = f"{prefix}|{status_str}"
+                    if self._current_mount_uid == info.uid:
+                        info.is_mounted = True
                 except grpc.aio.AioRpcError as e:
                     if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
-                        meta.secondary_name = f"{meta.pid}|disconnected"
+                        info.secondary_name = f"{info.pid}|disconnected"
                     elif e.code() == grpc.StatusCode.UNAVAILABLE:
-                        meta.secondary_name = f"{meta.pid}|unavailable"
+                        info.secondary_name = f"{info.pid}|unavailable"
                     else:
                         traceback.print_exc()
-                        meta.secondary_name = f"{meta.pid}|{e.code().name}"
-                    meta.primaryColor = "error"
+                        info.secondary_name = f"{info.pid}|{e.code().name}"
+                    info.primaryColor = "error"
                 except:
-                    print("Failed to connect to", meta.url_with_port)
+                    print("Failed to connect to", info.url_with_port)
                     traceback.print_exc()
-                    meta.secondary_name = f"{meta.pid}|error"
-                    meta.primaryColor = "error"
+                    info.secondary_name = f"{info.pid}|error"
+                    info.primaryColor = "error"
                     continue
-            metas_dict = [as_dict_no_undefined(meta) for meta in metas]
+            infos_dict = [as_dict_no_undefined(info) for info in process_infos]
             await self.send_and_wait(
                 self._remote_server_discover_lst.update_event(
-                    dataList=metas_dict))
+                    dataList=infos_dict))
             found = False
-            for meta in metas:
-                if meta.uid == self._current_mount_uid:
+            for info in process_infos:
+                if info.uid == self._current_mount_uid:
                     found = True
                     break
             if not found:
@@ -547,9 +544,9 @@ class MasterDebugPanel(mui.FlexBox):
 
     async def start_record(self, trace_cfg: Optional[TracerConfig] = None, dist_id: Optional[str] = None):
         ts = time.time_ns()
-        for meta in self._current_metas:
-            if dist_id is not None and meta.dist_meta is not None:
-                if meta.dist_meta.run_id != dist_id:
+        for info in self._current_proc_infos:
+            if dist_id is not None and info.dist_info is not None:
+                if info.dist_info.run_id != dist_id:
                     continue
             if trace_cfg is None:
                 trace_cfg = TracerConfig(enable=True,
@@ -559,7 +556,7 @@ class MasterDebugPanel(mui.FlexBox):
                 trace_cfg = dataclasses.replace(trace_cfg, trace_timestamp=ts)
             try:
                 await simple_remote_call_async(
-                    meta.url_with_port,
+                    info.url_with_port,
                     dbg_serv_names.DBG_LEAVE_BREAKPOINT,
                     trace_cfg,
                     rpc_timeout=1)
@@ -572,11 +569,12 @@ class MasterDebugPanel(mui.FlexBox):
                     traceback.print_exc()
 
     async def force_trace_stop(self):
-        await self._run_rpc_on_metas(self._current_metas,
+        await self._run_rpc_on_processes(self._current_proc_infos,
                                      dbg_serv_names.DBG_FORCE_TRACE_STOP,
                                      rpc_timeout=3)
 
-    async def _on_trace_launch(self, config: TracerUIConfig):
+    async def _on_trace_launch(self, cfg_ev: ConfigDialogEvent[TracerUIConfig]):
+        config = cfg_ev.cfg
         filter_cfg_value = self._trace_yaml_cfg_editor.props.value
         if not isinstance(filter_cfg_value, mui.Undefined):
             filter_cfg = yaml.safe_load(filter_cfg_value)
@@ -599,8 +597,8 @@ class MasterDebugPanel(mui.FlexBox):
         await self.start_record(cfg)
 
     async def query_record_data_keys(self):
-        all_keys_may_none = await self._run_rpc_on_metas(
-            self._current_metas,
+        all_keys_may_none = await self._run_rpc_on_processes(
+            self._current_proc_infos,
             dbg_serv_names.DBG_GET_TRACE_DATA_KEYS,
             rpc_timeout=1)
         all_keys = []
@@ -613,7 +611,7 @@ class MasterDebugPanel(mui.FlexBox):
     async def query_record_data_by_key(self, key: str):
         if key in self._record_data_cache:
             all_timestamps_with_none: List[Optional[int]] = await self._run_rpc_on_metas_chunk_call(
-                self._current_metas,
+                self._current_proc_infos,
                 dbg_serv_names.DBG_GET_TRACE_DATA_TIMESTAMP,
                 key,
                 rpc_timeout=1)
@@ -624,7 +622,7 @@ class MasterDebugPanel(mui.FlexBox):
                 return cached_data, cached_timestamps
         
         all_data_gzipped: List[Optional[Tuple[int, TraceResult]]] = await self._run_rpc_on_metas_chunk_call(
-            self._current_metas,
+            self._current_proc_infos,
             dbg_serv_names.DBG_GET_TRACE_DATA,
             key,
             rpc_timeout=30)
@@ -700,24 +698,24 @@ class MasterDebugPanel(mui.FlexBox):
                 await self._on_dist_perfetto_select(self._perfetto_select.value)
 
     async def release_all_breakpoints(self):
-        await self._run_rpc_on_metas(self._current_metas,
+        await self._run_rpc_on_processes(self._current_proc_infos,
                                      dbg_serv_names.DBG_LEAVE_BREAKPOINT,
                                      rpc_timeout=1)
 
     async def skip_all_breakpoints(self):
-        await self._run_rpc_on_metas(self._current_metas,
+        await self._run_rpc_on_processes(self._current_proc_infos,
                                      dbg_serv_names.DBG_SET_SKIP_BREAKPOINT,
                                      True,
                                      rpc_timeout=1)
 
     async def enable_all_breakpoints(self):
-        await self._run_rpc_on_metas(self._current_metas,
+        await self._run_rpc_on_processes(self._current_proc_infos,
                                      dbg_serv_names.DBG_SET_SKIP_BREAKPOINT,
                                      False,
                                      rpc_timeout=1)
 
-    async def _run_rpc_on_meta(self,
-                               meta: DebugServerProcessMeta,
+    async def _run_rpc_on_process(self,
+                               meta: DebugServerProcessInfo,
                                service_key: str,
                                *args,
                                rpc_timeout: float = 1,
@@ -741,29 +739,29 @@ class MasterDebugPanel(mui.FlexBox):
                 traceback.print_exc()
                 return None
 
-    async def _run_rpc_on_metas(self,
-                                metas: List[DebugServerProcessMeta],
+    async def _run_rpc_on_processes(self,
+                                process_infos: List[DebugServerProcessInfo],
                                 service_key: str,
                                 *args,
                                 rpc_timeout: float = 1):
         all_tasks = []
-        for meta in metas:
+        for info in process_infos:
             all_tasks.append(
-                self._run_rpc_on_meta(meta,
+                self._run_rpc_on_process(info,
                                       service_key,
                                       *args,
                                       rpc_timeout=rpc_timeout))
         return await asyncio.gather(*all_tasks)
 
     async def _run_rpc_on_metas_chunk_call(self,
-                                           metas: List[DebugServerProcessMeta],
+                                           process_infos: List[DebugServerProcessInfo],
                                            service_key: str,
                                            *args,
                                            rpc_timeout: float = 10):
         all_tasks = []
-        for meta in metas:
+        for info in process_infos:
             all_tasks.append(
-                self._run_rpc_on_meta(meta,
+                self._run_rpc_on_process(info,
                                       service_key,
                                       *args,
                                       rpc_timeout=rpc_timeout,
@@ -773,8 +771,8 @@ class MasterDebugPanel(mui.FlexBox):
     async def release_server_breakpoint(self, event: mui.Event):
         indexes = event.indexes
         assert not isinstance(indexes, mui.Undefined)
-        meta = self._current_metas[indexes[0]]
-        url = meta.url_with_port
+        info = self._current_proc_infos[indexes[0]]
+        url = info.url_with_port
         await simple_remote_call_async(url,
                                        dbg_serv_names.DBG_LEAVE_BREAKPOINT,
                                        rpc_timeout=1)
@@ -789,10 +787,13 @@ class MasterDebugPanel(mui.FlexBox):
         cfg.mode = RecordMode.NEXT_BREAKPOINT
         cfg.tracer = TracerType.TARGET_TRACER
         cfg.launch_type = TraceLaunchType.TARGET_VARIABLE
-        cfg.target_expr = trace_ev.target_expr
-        cfg.target_filename = trace_ev.target_filename
-        cfg.target_func_qname = trace_ev.target_func_qname
-        await self.start_record(cfg, trace_ev.meta.run_id)
+        target_trace_cfg = TargetTraceConfig(trace_ev.target_filename, 
+            trace_ev.target_func_qname,
+                trace_ev.target_expr,
+                trace_ev.is_distributed,
+                trace_ev.max_num_variable)
+        cfg.target_trace_cfg = target_trace_cfg
+        await self.start_record(cfg, trace_ev.dist_info.run_id)
 
     def _register_handlers(self):
         if self._vscode_handler_registered:
@@ -822,7 +823,7 @@ class MasterDebugPanel(mui.FlexBox):
 
     async def _handle_vscode_bkpt_change(self, bkpts: Dict[str, List[VscodeBreakpoint]]):
         async with self._serv_list_lock:
-            await self._run_rpc_on_metas(self._current_metas,
+            await self._run_rpc_on_processes(self._current_proc_infos,
                                          dbg_serv_names.DBG_SET_VSCODE_BKPTS,
                                          bkpts,
                                          rpc_timeout=1)
@@ -839,7 +840,7 @@ class MasterDebugPanel(mui.FlexBox):
                 end_lineno = sel.end.line + 1
                 end_col = sel.end.character
                 code_range = (lineno, col, end_lineno, end_col)
-                for meta in self._current_metas:
+                for meta in self._current_proc_infos:
                     try:
                         await simple_remote_call_async(
                             meta.url_with_port,
