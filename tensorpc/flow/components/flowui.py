@@ -396,6 +396,11 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         all_edge_ids = set(self._id_to_edge.keys())
         self._unique_name_pool_edge = UniqueNamePool(init_set=all_edge_ids)
 
+    def set_nodes_edges_locally(self, nodes: List[Node], edges: List[Edge]):
+        self.childs_complex.nodes = nodes
+        self.childs_complex.edges = edges
+        self._update_graph_data()
+
     def get_node_by_id(self, node_id: str):
         return self._id_to_node[node_id]
 

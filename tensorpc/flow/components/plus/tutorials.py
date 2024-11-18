@@ -216,7 +216,7 @@ class MarkdownTutorial(mui.FlexBox):
                     blocks.append(
                         CodeBlock(block.content.lstrip()).prop(height="200px",
                                                                padding="10px"))
-            book = mui.VirtualizedBox(blocks).prop(overflow="auto", flex=1)
+            book = mui.VBox(blocks).prop(overflow="auto", flex=1)
             layout = [complex_canvas, book]
         else:
             blocks: mui.LayoutType = []
@@ -230,7 +230,7 @@ class MarkdownTutorial(mui.FlexBox):
                         AppInMemory(f"{path_uid}-{i}",
                                     block.content.lstrip()).prop(
                                         minHeight="400px", padding="10px"))
-            book = mui.VirtualizedBox(blocks)
+            book = mui.VBox(blocks)
             layout = [book]
         super().__init__(layout)
         self.prop(flexFlow="column nowrap",

@@ -24,7 +24,7 @@ class ModifiedRichHandler(RichHandler):
                     record.lineno = path_lineno[1]
         super().emit(record)
 
-def get_logger(name: str, level: str = "WARNING", show_path: bool = True) -> logging.Logger:
+def get_logger(name: str, level: str = "WARNING", show_path: bool = False) -> logging.Logger:
     logger = logging.getLogger(name)
     if logger.handlers:
         for handler in logger.handlers:

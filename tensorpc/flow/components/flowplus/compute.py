@@ -1482,8 +1482,7 @@ class ComputeFlow(mui.FlexBox):
                         # so we set them here based on wrapper state.
                         node.data.contextMenuItems = node.get_component_checked(
                             ComputeNodeWrapper).get_context_menus()
-                self.graph.childs_complex.nodes = graph_child_def.nodes
-                self.graph.childs_complex.edges = graph_child_def.edges
+                self.graph.set_nodes_edges_locally(graph_child_def.nodes, graph_child_def.edges)
                 await self.graph.set_new_layout(self.graph.childs_complex)
             else:
                 for node in self.graph.nodes:

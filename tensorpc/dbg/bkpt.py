@@ -299,7 +299,8 @@ def breakpoint(name: Optional[str] = None,
                type: BreakpointType = BreakpointType.Normal,
                *,
                _frame_cnt: int = 1,
-               pytorch_dist_extra: bool = False):
+               pytorch_dist_extra: bool = False,
+               external_frame: Optional[FrameType] = None):
     """Enter a breakpoint in the background server.
     you must use specific UI or command tool to exit breakpoint.
     WARNING: currently don't support multi-thread
@@ -319,15 +320,18 @@ def breakpoint(name: Optional[str] = None,
     if not should_enable_debug():
         return
     bev = BreakpointEvent(threading.Event())
-    frame = inspect.currentframe()
-    if frame is None:
-        return
-    while _frame_cnt > 0:
-        if frame is not None:
-            frame = frame.f_back
-        _frame_cnt -= 1
-    if frame is None:
-        return
+    if external_frame is not None:
+        frame = external_frame
+    else:
+        frame = inspect.currentframe()
+        if frame is None:
+            return
+        while _frame_cnt > 0:
+            if frame is not None:
+                frame = frame.f_back
+            _frame_cnt -= 1
+        if frame is None:
+            return
     if init_proc_name is None:
         init_proc_name = frame.f_code.co_name
 
@@ -550,3 +554,24 @@ def record_duration(name: str,
             yield
     else:
         yield
+
+@contextlib.contextmanager
+def exception_breakpoint():
+    """Enter a breakpoint when exception is raised."""
+    try:
+        yield
+    except Exception as e:
+        _, _, exc_traceback = sys.exc_info()
+        if exc_traceback is None:
+            raise e
+        frame: Optional[FrameType] = None
+        cnt = 2
+        for frame, _ in traceback.walk_tb(exc_traceback):
+            if cnt == 0:
+                break
+            cnt -= 1
+        if frame is None:
+            raise e
+        traceback.print_exc()
+        breakpoint(external_frame=frame)
+        raise e
