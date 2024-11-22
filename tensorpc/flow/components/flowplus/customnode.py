@@ -11,7 +11,7 @@ import uuid
 
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 
-from .compute import TENSORPC_FLOWUI_NODEDATA_KEY, ComputeFlow, NodeSideLayoutOptions, ComputeNode, ComputeNodeWrapper, NodeConfig, ReservedNodeTypes, WrapperConfig, enter_flow_ui_context_object, get_compute_flow_context, register_compute_node, get_cflow_shared_node_key
+from .compute import FLOWUI_CNODE_NODEDATA_KEY, ComputeFlow, NodeSideLayoutOptions, ComputeNode, ComputeNodeWrapper, NodeConfig, ReservedNodeTypes, WrapperConfig, enter_flow_ui_context_object, get_compute_flow_context, register_compute_node, get_cflow_shared_node_key
 
 from tensorpc.flow.components import flowui, mui
 from tensorpc.flow.appctx import read_data_storage, save_data_storage, find_all_components
@@ -230,7 +230,7 @@ class CustomNode(ComputeNode):
         res = self._cnode.state_dict()
         this_state_dict = super().state_dict()
         # internal data use this
-        res[TENSORPC_FLOWUI_NODEDATA_KEY] = this_state_dict[TENSORPC_FLOWUI_NODEDATA_KEY]
+        res[FLOWUI_CNODE_NODEDATA_KEY] = this_state_dict[FLOWUI_CNODE_NODEDATA_KEY]
         res["__custom_node_code"] = self._code_editor.props.value
         res["__template_key"] = self._shared_key
         return res

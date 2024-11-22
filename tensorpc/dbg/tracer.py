@@ -281,11 +281,11 @@ class DebugTracerWrapper:
                             break
                 if is_first_digit_find:
                     base_ts = int("".join(map(str, digits)))
-            if base_ts is None:
+            # if base_ts is None:
                 # fast check failed, load entire json file
-                pth_trace_dict = json.loads(data)
-                if "baseTimeNanoseconds" in pth_trace_dict:
-                    base_ts = pth_trace_dict["baseTimeNanoseconds"]
+                # pth_trace_dict = json.loads(data)
+                # if "baseTimeNanoseconds" in pth_trace_dict:
+                #     base_ts = pth_trace_dict["baseTimeNanoseconds"]
         return data, base_ts
 
     def _filter_viztracer_data_inplace(self, data: Dict[str, Any]):

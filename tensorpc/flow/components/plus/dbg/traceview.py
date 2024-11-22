@@ -14,7 +14,6 @@ import zipfile
 import grpc
 import psutil
 import rich
-from torch import is_distributed
 import yaml
 import os
 

@@ -257,11 +257,11 @@ class ObjectInspector(mui.FlexBox):
             header: Optional[str] = None):
         return await self._obj_preview.set_obj_preview_layout(obj, uid, root, header)
 
-    async def set_object(self,
+    async def add_object_to_tree(self,
                          obj,
                          key: str = _DEFAULT_OBJ_NAME,
                          expand_level: int = 0):
-        await self.tree.set_object(obj, key, expand_level=expand_level)
+        await self.tree.add_object_to_tree(obj, key, expand_level=expand_level)
 
     async def update_locals(self,
                             key: str = _DEFAULT_LOCALS_NAME,
@@ -283,7 +283,7 @@ class ObjectInspector(mui.FlexBox):
         frame_name = cur_frame.f_code.co_name
         del frame
         del cur_frame
-        await self.tree.set_object(inspecttools.filter_local_vars(local_vars),
+        await self.tree.add_object_to_tree(inspecttools.filter_local_vars(local_vars),
                                    key + f"-{frame_name}")
 
     def update_locals_sync(self,
@@ -313,7 +313,7 @@ class ObjectInspector(mui.FlexBox):
         del cur_frame
         if get_app()._flowapp_thread_id == threading.get_ident():
             task = asyncio.create_task(
-                self.tree.set_object(
+                self.tree.add_object_to_tree(
                     inspecttools.filter_local_vars(local_vars),
                     key + f"-{frame_name}"))
             # we can't wait fut here
@@ -321,7 +321,7 @@ class ObjectInspector(mui.FlexBox):
         else:
             # we can wait fut here.
             fut = asyncio.run_coroutine_threadsafe(
-                self.tree.set_object(
+                self.tree.add_object_to_tree(
                     inspecttools.filter_local_vars(local_vars),
                     key + f"-{frame_name}"), loop)
             return fut.result()
@@ -337,7 +337,7 @@ class ObjectInspector(mui.FlexBox):
             loop = asyncio.get_running_loop()
         if get_app()._flowapp_thread_id == threading.get_ident():
             # we can't wait fut here
-            task = asyncio.create_task(self.set_object(obj, key, expand_level))
+            task = asyncio.create_task(self.add_object_to_tree(obj, key, expand_level))
             # we can't wait fut here
             return task
 
@@ -345,7 +345,7 @@ class ObjectInspector(mui.FlexBox):
         else:
             # we can wait fut here.
             fut = asyncio.run_coroutine_threadsafe(
-                self.set_object(obj, key, expand_level), loop)
+                self.add_object_to_tree(obj, key, expand_level), loop)
 
             return fut.result()
 
@@ -387,7 +387,7 @@ class ObjectInspector(mui.FlexBox):
             return func(*args, **kwargs)
         except:
             asyncio.run_coroutine_threadsafe(
-                self.set_object(get_exception_frame_stack(), "exception"),
+                self.add_object_to_tree(get_exception_frame_stack(), "exception"),
                 loop)
             raise
 
@@ -401,7 +401,7 @@ class ObjectInspector(mui.FlexBox):
             else:
                 return res
         except:
-            await self.set_object(get_exception_frame_stack(), "exception")
+            await self.add_object_to_tree(get_exception_frame_stack(), "exception")
             raise
 
     async def run_in_executor_with_exception_inspect(self, func: Callable[P,
@@ -421,7 +421,7 @@ class ObjectInspector(mui.FlexBox):
             else:
                 return await loop.run_in_executor(None, func, app, func, *args)
         except:
-            await self.set_object(get_exception_frame_stack(), "exception")
+            await self.add_object_to_tree(get_exception_frame_stack(), "exception")
             raise
 
     @contextlib.contextmanager
@@ -525,4 +525,4 @@ class ObjectInspector(mui.FlexBox):
             tree_items = parse_frame_result_to_trace_item(
                 trace_res, use_return_locals)
             show_dict = {v.get_uid(): v for v in tree_items}
-            await self.set_object(show_dict, key)
+            await self.add_object_to_tree(show_dict, key)

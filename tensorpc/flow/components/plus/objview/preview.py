@@ -33,7 +33,7 @@ class ObjectPreviewBase(mui.FlexBox, abc.ABC):
 
 class ObjectPreview(ObjectPreviewBase):
     def __init__(self, enable_reload: bool = True):
-        self.preview_container = mui.VBox([]).prop(overflow="auto",
+        self.preview_container = mui.VBox([]).prop(overflow="hidden",
                                                    flex=1,
                                                    alignItems="stretch")
         self.preview_header = mui.Typography("").prop(

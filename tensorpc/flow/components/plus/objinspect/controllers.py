@@ -99,7 +99,7 @@ class ThreadLocker(mui.FlexBox):
         inspector = appctx.find_component(plus.ObjectInspector)
         assert inspector is not None
         local_vars = self._prev_frame.f_locals.copy()
-        await inspector.tree.set_object(
+        await inspector.tree.add_object_to_tree(
             inspecttools.filter_local_vars(local_vars),
             "locals" + f"-{frame_name}")
 

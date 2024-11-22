@@ -1,3 +1,4 @@
+import ast
 import inspect
 from pathlib import PosixPath, WindowsPath
 import traceback
@@ -8,13 +9,16 @@ import io
 from tensorpc.core.core_io import extract_arrays_from_data, extract_object_from_data
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import ObservedFunction
+from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.flow import appctx
 from tensorpc.flow.components import mui, flowui
 from tensorpc.flow.components.plus.canvas import SimpleCanvas
 from tensorpc.flow.components.plus.config import ConfigPanelV2
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
 from tensorpc.flow.components.plus.objview.script import get_frame_obj_layout_from_code, get_init_obj_convert_code
+import humanize
 
+from tensorpc.flow.jsonlike import TreeItem
 from ..common import CommonQualNames
 from ..core import ALL_OBJECT_PREVIEW_HANDLERS, ObjectPreviewHandler, DataClassesType
 from ..arraygrid import NumpyArrayGrid
@@ -265,14 +269,15 @@ class DataclassesHandler(ObjectPreviewHandler):
         # FIXME currently no way to update if obj dataclass def is changed with same uid.
         # panel = ConfigPanelV2(obj).prop(reactKey=uid)
         # await self.cfg_ctrl_container.set_new_layout([panel])
-        await self._simple_tree.set_object(obj, expand_level=2)
+        await self._simple_tree.add_object_to_tree(obj, expand_level=2)
 
 class DefaultHandler(ObjectPreviewHandler):
     """
     TODO if the object support any-layout, add a button to enable it.
     """
 
-    def __init__(self, tail_btns: Optional[List[mui.Button]] = None, tail_dialogs: Optional[List[mui.Dialog]] = None) -> None:
+    def __init__(self, tail_btns: Optional[List[mui.Button]] = None, tail_dialogs: Optional[List[mui.Dialog]] = None, 
+                 external_infos: Optional[mui.LayoutType] = None) -> None:
         self.tags = mui.FlexBox().prop(flexFlow="row wrap")
         self.title = mui.Typography("").prop(wordBreak="break-word")
         self.path = mui.Typography("").prop(wordBreak="break-word")
@@ -280,7 +285,13 @@ class DefaultHandler(ObjectPreviewHandler):
         self.data_print = mui.Typography("").prop(fontFamily="monospace",
                                                   fontSize="12px",
                                                   wordBreak="break-word")
-        self._simple_tree = BasicObjectTree(use_fast_tree=False, clear_data_when_unmount=True)
+        self._data_container = mui.VBox([]).prop(overflow="auto", flex=1)
+        if external_infos is not None:
+            self._ext_info_container = mui.VBox(external_infos)
+        else:
+            self._ext_info_container = mui.VBox([])
+
+        self._simple_tree = BasicObjectTree(use_fast_tree=True, clear_data_when_unmount=True).prop(flex=1)
         
         self._objscript_editor = mui.MonacoEditor("", "python", "").prop(minHeight=0)
         self._objscript_editor.event_editor_save.on(self._on_editor_save)
@@ -297,6 +308,7 @@ class DefaultHandler(ObjectPreviewHandler):
             "title": self.title.prop(fontSize="14px", fontFamily="monospace"),
             "path": self.path.prop(fontSize="14px", fontFamily="monospace"),
             "tags": self.tags,
+            "ext_info": self._ext_info_container,
             "divider": mui.Divider().prop(padding="3px"),
             "buttons": mui.ButtonGroup([
                 mui.Button("print", self._on_print).prop(size="small"),
@@ -304,7 +316,7 @@ class DefaultHandler(ObjectPreviewHandler):
                 mui.Button("script", self._on_dialog_open).prop(size="small"),
                 *(tail_btns or [])
             ]).prop(size="small"),
-            "data": self.data_print,
+            "data": self._data_container,
             "objscript": self._objscript_dialog,
         }
         
@@ -312,7 +324,7 @@ class DefaultHandler(ObjectPreviewHandler):
             for i, d in enumerate(tail_dialogs):
                 layout[f"dialog-{i}"] = d
         super().__init__(layout)
-        self.prop(flexDirection="column")
+        self.prop(flexDirection="column", overflow="hidden", flex=1)
         self.obj: Any = np.zeros([1])
         self.obj_uid: Optional[str] = None
 
@@ -323,16 +335,13 @@ class DefaultHandler(ObjectPreviewHandler):
         if len(string) > _MAX_STRING_IN_DETAIL:
             string = string[:_MAX_STRING_IN_DETAIL] + "..."
         self.data_print.props.value = string
-        await self.update_childs({
-            "data": self.data_print
-        })
+        await self._data_container.set_new_layout([self.data_print])
         # await self.data_print.write(string)
 
     async def _on_tree_print(self):
-        await self.update_childs({
-            "data": self._simple_tree
-        })
-        await self._simple_tree.set_object(self.obj, expand_level=2)
+        await self._data_container.set_new_layout([self._simple_tree])
+
+        await self._simple_tree.add_object_to_tree(self.obj, expand_level=2)
         await self._simple_tree.expand_all()
 
     async def _on_dialog_open(self):
@@ -358,9 +367,7 @@ class DefaultHandler(ObjectPreviewHandler):
         # bind np object, update all metadata
         self.obj = obj
         self.obj_uid = uid
-        await self.update_childs({
-            "data": self.data_print
-        })
+        await self._data_container.set_new_layout([self.data_print])
         ev = self.data_print.update_event(value="")
         ev += self.title.update_event(value=get_qualname_of_type(type(obj)))
         try:
@@ -415,13 +422,15 @@ class PytorchGraphHandler(DefaultHandler):
             ranksep=20,
         )
         import torch.fx
-        from tensorpc.flow.components.flowplus.network.pthfx import FlowUIInterpreter
+        from tensorpc.flow.components.flowplus.network.pthfx import FlowUIInterpreter, PytorchExportBuilder
         gm = self.obj
-        builder = flowui.SymbolicFlowBuilder()
+        builder = PytorchExportBuilder()
         interpreter = FlowUIInterpreter(gm, builder, True)
         outputs = interpreter.run_on_graph_placeholders()
         arrs, _ = extract_object_from_data(outputs, (flowui.SymbolicImmediate,))
-        nodes, edges, node_type_map = builder.build_detached_flow(arrs)
+        graph_res = builder.build_detached_flow(arrs)
+        nodes, edges, node_type_map = graph_res.nodes, graph_res.edges, graph_res.node_type_map
+
         await self._graph.set_flow_and_do_dagre_layout(nodes, edges, dagre)
 
     async def bind(self, obj: Any, uid: Optional[str] = None):
@@ -442,6 +451,118 @@ def _check_type_is_torch_module(type: Type) -> bool:
             return False
     return True 
 
+class PytorchModuleTreeItem(TreeItem):
+    def __init__(self, mod: Any):
+        self._mod = mod
+        self._num_submodules = len(list(mod.children()))
+
+    async def get_child_desps(self, parent_ns: UniqueTreeIdForTree) -> Dict[str, mui.JsonLikeNode]:
+        res = {}
+        import torch 
+        assert isinstance(self._mod, torch.nn.Module)
+        self._mod.modules
+        for name, child_mod in self._mod.named_children():
+            res[name] = PytorchModuleTreeItem(child_mod).get_json_like_node(parent_ns.append_part(name))
+        return res 
+
+    def _get_tensor_meta(self, ten: Any):
+        try:
+            from torch.distributed.tensor import DTensor # type: ignore
+            is_dtensor = isinstance(ten, DTensor)
+        except ImportError:
+            is_dtensor = False 
+        shape_str = ",".join(map(str, ten.shape))
+        placements_str = None 
+        if is_dtensor:
+            from torch.distributed.tensor import Shard, Partial, Replicate # type: ignore
+            p_strs = []
+            for p in ten.placements:
+                if isinstance(p, Shard):
+                    p_strs.append(f"S({p.dim})")
+                elif isinstance(p, Partial):
+                    p_strs.append(f"P")
+                elif isinstance(p, Replicate):
+                    p_strs.append(f"R")
+            placements_str = ",".join(p_strs)
+            return f"[{shape_str}]:[{placements_str}]"
+        return f"[{shape_str}]"
+    
+    def _reduce_list_tuple_to_single_if_same(self, tup: Any):
+        if isinstance(tup, (list, tuple)):
+            if len(tup) == 1:
+                return tup[0]
+            val = tup[0]
+            for v in tup[1:]:
+                if v != val:
+                    return tup
+            return val
+        return tup
+
+    def _get_pytorch_module_str(self, mod: Any) -> str:
+        total_size = 0
+        import torch 
+        for name, param in mod.named_parameters():
+            total_size += param.numel() * param.element_size()
+        res = humanize.naturalsize(total_size)
+        if isinstance(mod, torch.nn.Linear):
+            w_str = f"{self._get_tensor_meta(mod.weight)}"
+            if mod.bias is not None:
+                res = f"{w_str}+B {res}"
+            else:
+                res = f"{w_str} {res}"
+
+        if isinstance(mod, (torch.nn.Conv2d, torch.nn.Conv3d, torch.nn.Conv1d)):
+            w_str = f"{self._get_tensor_meta(mod.weight)}"
+            ks = self._reduce_list_tuple_to_single_if_same(mod.kernel_size)
+            s = self._reduce_list_tuple_to_single_if_same(mod.stride)
+            p = self._reduce_list_tuple_to_single_if_same(mod.padding)
+            d = self._reduce_list_tuple_to_single_if_same(mod.dilation)
+            kspd_str = f"K={ks}"
+            if s != 1:
+                kspd_str += f" S={s}"
+            if p != 0:
+                kspd_str += f" P={p}"
+            if d != 1:
+                kspd_str += f" D={d}"
+            if mod.bias is not None:
+                res = f"{w_str}+B {kspd_str} {res}"
+            else:
+                res = f"{w_str} {kspd_str} {res}"
+
+        elif isinstance(mod, torch.nn.Embedding):
+            w_str = f"{self._get_tensor_meta(mod.weight)}"
+            res = f"{w_str} {res}"
+        return res
+
+    def get_json_like_node(self, id: UniqueTreeIdForTree) -> mui.JsonLikeNode:
+        return mui.JsonLikeNode(id,
+                            id.parts[-1],
+                            mui.JsonLikeType.Object.value,
+                            typeStr=type(self._mod).__name__,
+                            cnt=self._num_submodules,
+                            drag=False,
+                            value=self._get_pytorch_module_str(self._mod))
+
+
+    async def get_child(self, key: str) -> Any:
+        return PytorchModuleTreeItem(self._mod.get_submodule(key))
+    
+_FX_ARG_PROVIDER_KEY = "fx_args_provider"
+_FX_KWARG_PROVIDER_KEY = "fx_kwargs_provider"
+
+_INIT_FX_ARG_EDITOR = f"""
+import torch 
+
+def { _FX_ARG_PROVIDER_KEY }():
+    # None or tuple
+    return None
+
+def { _FX_KWARG_PROVIDER_KEY }():
+    # None or dict
+    return None
+
+"""
+
 @ALL_OBJECT_PREVIEW_HANDLERS.register(_check_type_is_torch_module)
 class PytorchModuleHandler(DefaultHandler):
     def __init__(self):
@@ -457,15 +578,25 @@ class PytorchModuleHandler(DefaultHandler):
         ]
         self._graph.event_pane_context_menu.on(self._on_pane_contextmenu)
         self._graph.prop(paneContextMenuItems=self.view_pane_menu_items)
-
+        self._model_size = mui.Typography("Model Size: 0 MB").prop(fontSize="14px")
+        self._fx_trace_input_editor = mui.MonacoEditor(_INIT_FX_ARG_EDITOR, "python", "").prop(minHeight=0, flex=1)
+        self._fx_trace_input_editor.event_editor_save.on(self._on_fx_trace_editor_save)
         self._flow_dialog = mui.Dialog([
-            graph.prop(defaultLayoutSize=(150, 40))
+            mui.HBox([
+                self._fx_trace_input_editor,
+                mui.VBox([
+                    graph.prop(defaultLayoutSize=(150, 40))
+                ]).prop(flex=3, height="100%"),
+            ]).prop(height="100%")
         ]).prop(dialogMaxWidth="xl", fullWidth=True, height="70vh")
         self._tmp_graph_data = None 
 
         super().__init__([
-            mui.Button("Open Module Graph", self._open_graph),
-        ], tail_dialogs=[self._flow_dialog])
+            mui.Button("Module Tree", self._on_mod_tree_print),
+            mui.Button("FX Graph", self._open_graph),
+        ], tail_dialogs=[self._flow_dialog], external_infos=[
+            self._model_size,
+        ])
 
     async def _on_pane_contextmenu(self, data):
         item_id = data["itemId"]
@@ -475,19 +606,62 @@ class PytorchModuleHandler(DefaultHandler):
         if item_id == "layout":
             await self._graph.do_dagre_layout(dagre)
 
-    async def _open_graph(self):
-        await self._flow_dialog.set_open(True)
+    async def bind(self, obj: Any, uid: Optional[str] = None):
+        await super().bind(obj, uid)
+        # obj is nn.Module
+        # get weight size
+        total_size = 0
+        for name, param in obj.named_parameters():
+            total_size += param.numel() * param.element_size()
+        total_size_str = humanize.naturalsize(total_size)
+        await self._model_size.write(f"Model Size: {total_size_str}")
+
+    async def _open_graph(self, open_dialog: bool = True):
+        if open_dialog:
+            await self._flow_dialog.set_open(True)
+        # fetch fake args from editor
+        code = self._fx_trace_input_editor.props.value
+        provider_fn = None
+        provider_kw_fn = None
+        if not isinstance(code, mui.Undefined):
+            try:
+                # validate code
+                ast.parse(code)
+                code_comp = compile(code, "test", "exec")
+                module_dict = {}
+                exec(code_comp, module_dict)
+                provider_fn = module_dict.get(_FX_ARG_PROVIDER_KEY)
+                provider_kw_fn = module_dict.get(_FX_KWARG_PROVIDER_KEY)
+            except:
+                traceback.print_exc()
         dagre = flowui.DagreLayoutOptions(
             ranksep=20,
         )
         import torch.fx
-        from tensorpc.flow.components.flowplus.network.pthfx import FlowUIInterpreter
-        gm = torch.fx.symbolic_trace(self.obj)
-        builder = flowui.SymbolicFlowBuilder()
-        interpreter = FlowUIInterpreter(gm, builder, True)
+        import torch.export
+        from tensorpc.flow.components.flowplus.network.pthfx import FlowUIInterpreter, PytorchExportBuilder
+        if provider_fn is None or provider_kw_fn is None:
+            gm = torch.fx.symbolic_trace(self.obj)
+        else:
+            with torch.device("meta"):
+                args = provider_fn()
+                kwargs = provider_kw_fn()
+                if args is None and kwargs is None:
+                    gm = torch.fx.symbolic_trace(self.obj)
+                else:
+                    gm = torch.export.export(self.obj.to("meta"), args=args, kwargs=kwargs)
+        builder = PytorchExportBuilder()
+        interpreter = FlowUIInterpreter(gm, builder, original_mod=self.obj)
         outputs = interpreter.run_on_graph_placeholders()
         arrs, _ = extract_object_from_data(outputs, (flowui.SymbolicImmediate,))
-        nodes, edges, node_type_map = builder.build_detached_flow(arrs)
+        graph_res = builder.build_detached_flow(arrs)
+        nodes, edges, node_type_map = graph_res.nodes, graph_res.edges, graph_res.node_type_map
         await self._graph.set_flow_and_do_dagre_layout(nodes, edges, dagre)
 
+    async def _on_fx_trace_editor_save(self, ev):
+        await self._open_graph(False)
 
+    async def _on_mod_tree_print(self):
+        await self._data_container.set_new_layout([self._simple_tree])
+        await self._simple_tree.add_object_to_tree(PytorchModuleTreeItem(self.obj), expand_level=2)
+        await self._simple_tree.expand_all()

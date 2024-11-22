@@ -11,7 +11,8 @@ from tensorpc.flow.components.plus.objview import (HistogramPlot, Image,
                                                    ImageBatch, LinePlot,
                                                    ScatterPlot, Tree, Unique,
                                                    Video, DataFrame, 
-                                                   DataFrameTransposed)
+                                                   DataFrameTransposed,
+                                                   ImageBatchChannelFirst)
 import numpy as np 
 {torch_import_stmt}
 def convert(x):

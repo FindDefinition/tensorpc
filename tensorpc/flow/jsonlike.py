@@ -379,7 +379,20 @@ class CommonQualNames:
     TorchTensor = "torch.Tensor"
     TVTensor = "cumm.core_cc.tensorview_bind.Tensor"
     TorchParameter = "torch.nn.parameter.Parameter"
+    TorchDTensor = "torch.distributed.tensor.DTensor"
 
+def _get_torch_dtensor_placements(ten: Any):
+    from torch.distributed.tensor import Shard, Partial, Replicate # type: ignore
+    p_strs = []
+    for p in ten.placements:
+        if isinstance(p, Shard):
+            p_strs.append(f"S({p.dim})")
+        elif isinstance(p, Partial):
+            p_strs.append(f"P")
+        elif isinstance(p, Replicate):
+            p_strs.append(f"R")
+    placements_str = ",".join(p_strs)
+    return placements_str
 
 class TensorType(enum.Enum):
     Unknown = ""
@@ -697,6 +710,16 @@ def parse_obj_to_jsonlike(obj, name: str, id: UniqueTreeIdForTree):
                                 t.value,
                                 typeStr="torch.Parameter",
                                 value=f"[{shape_short}]{obj.data.dtype}",
+                                drag=True)
+        elif qname == CommonQualNames.TorchDTensor:
+            t = JsonLikeType.Tensor
+            shape_short = ",".join(map(str, obj.data.shape))
+            shape_local_short = ",".join(map(str, obj._local_tensor.shape))
+            return JsonLikeNode(id,
+                                name,
+                                t.value,
+                                typeStr="torch.DTensor",
+                                value=f"[{shape_short}]({shape_local_short})<{_get_torch_dtensor_placements(obj)}>{obj.data.dtype}",
                                 drag=True)
         elif qname == CommonQualNames.TVTensor:
             t = JsonLikeType.Tensor

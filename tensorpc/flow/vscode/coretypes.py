@@ -100,5 +100,5 @@ class VscodeBreakpoint:
     line: int 
     character: int 
     enabled: bool 
-    lineText: Optional[str]
+    lineText: Optional[str] = None
 

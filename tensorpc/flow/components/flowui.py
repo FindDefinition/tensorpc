@@ -22,6 +22,7 @@ from typing_extensions import Literal, TypeAlias
 
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.asynctools import cancel_task
+from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.flow.core.appcore import Event
 from tensorpc.flow.core.common import handle_standard_event
 from tensorpc.flow.jsonlike import merge_props_not_undefined
@@ -260,6 +261,106 @@ class EventSelection:
     nodes: List[str]
     edges: List[str]
 
+@dataclasses.dataclass
+class GraphInternals:
+    id_to_node: Dict[str, Node] = dataclasses.field(default_factory=dict)
+    id_to_edge: Dict[str, Edge] = dataclasses.field(default_factory=dict)
+    node_id_to_sources: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = dataclasses.field(default_factory=dict)
+    node_id_to_targets: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = dataclasses.field(default_factory=dict)
+    node_id_to_inp_handle_to_edges: Dict[str, Dict[Optional[str], List[Edge]]] = dataclasses.field(default_factory=dict)
+    node_id_to_out_handle_to_edges: Dict[str, Dict[Optional[str], List[Edge]]] = dataclasses.field(default_factory=dict)
+    unique_name_pool_node: UniqueNamePool = dataclasses.field(default_factory=UniqueNamePool)
+    unique_name_pool_edge: UniqueNamePool = dataclasses.field(default_factory=UniqueNamePool)
+    def set_from_nodes_edges(self, nodes: List[Node], edges: List[Edge]):
+        # node id must unique
+        self.id_to_node = {node.id: node for node in nodes}
+        assert len(self.id_to_node) == len(nodes)
+
+        self.id_to_edge = {edge.id: edge for edge in edges}
+        # edge id must unique
+        assert len(self.id_to_edge) == len(edges)
+        self.node_id_to_sources = {node.id: [] for node in nodes}
+        self.node_id_to_targets = {node.id: [] for node in nodes}
+        self.node_id_to_inp_handle_to_edges = {node.id: {} for node in nodes}
+        self.node_id_to_out_handle_to_edges = {node.id: {} for node in nodes}
+        for edge in edges:
+            self.node_id_to_targets[edge.source].append(
+                (edge.target, edge.sourceHandle, edge.targetHandle))
+            self.node_id_to_sources[edge.target].append(
+                (edge.source, edge.sourceHandle, edge.targetHandle))
+            if edge.sourceHandle not in self.node_id_to_out_handle_to_edges[edge.source]:
+                self.node_id_to_out_handle_to_edges[edge.source][edge.sourceHandle] = []
+            self.node_id_to_out_handle_to_edges[edge.source][edge.sourceHandle].append(edge)
+            if edge.targetHandle not in self.node_id_to_inp_handle_to_edges[edge.target]:
+                self.node_id_to_inp_handle_to_edges[edge.target][edge.targetHandle] = []
+            self.node_id_to_inp_handle_to_edges[edge.target][edge.targetHandle].append(edge)
+        all_node_ids = set(self.id_to_node.keys())
+        self.unique_name_pool_node = UniqueNamePool(init_set=all_node_ids)
+        all_edge_ids = set(self.id_to_node.keys())
+        self.unique_name_pool_edge = UniqueNamePool(init_set=all_edge_ids)
+
+    def merge_nodes(self, merge_list: List[Tuple[Node, List[str]]]) -> "GraphInternals":
+        """merge nodes, then return a new GraphInternals, remain self unchanged"""
+        # check merged node id is valid and have no intersection
+        node_id_set_to_merge: Set[str] = set()
+        for _, merge_ids in merge_list:
+            for merge_id in merge_ids:
+                assert merge_id in self.id_to_node
+                assert merge_id not in node_id_set_to_merge, f"node id {merge_id} already merged"
+                node_id_set_to_merge.add(merge_id)
+        for merged_node, _ in merge_list:
+            if merged_node.id not in node_id_set_to_merge:
+                assert merged_node.id not in self.id_to_node, "merged node id already exists"
+        # append nodes and edges that not in merge list
+        new_nodes: List[Node] = [x[0] for x in merge_list]
+        new_edges: List[Edge] = []
+        for node in self.id_to_node.values():
+            if node.id not in node_id_set_to_merge:
+                new_nodes.append(node)
+        for edge in self.id_to_edge.values():
+            if edge.source not in node_id_set_to_merge and edge.target not in node_id_set_to_merge:
+                new_edges.append(edge)
+        edge_name_pool = UniqueNamePool(init_set=set([edge.id for edge in new_edges]))
+        for merged_node, merged_node_ids in merge_list:
+            node_id_inp_handle_to_edges: Dict[Tuple[str, Optional[str]], List[Edge]] = {}
+            node_id_out_handle_to_edges: Dict[Tuple[str, Optional[str]], List[Edge]] = {}
+            for node_id_to_merge in merged_node_ids:
+                inp_handle_to_edges = self.node_id_to_inp_handle_to_edges[node_id_to_merge]
+                out_handle_to_edges = self.node_id_to_out_handle_to_edges[node_id_to_merge]
+                for handle, edges in inp_handle_to_edges.items():
+                    # check edge connect to outside
+                    for edge in edges:
+                        if edge.source not in node_id_set_to_merge:
+                            key = (edge.source, handle)
+                            if key not in node_id_inp_handle_to_edges:
+                                node_id_inp_handle_to_edges[key] = []
+                            node_id_inp_handle_to_edges[key].append(edge)
+                for handle, edges in out_handle_to_edges.items():
+                    # check edge connect to outside
+                    for edge in edges:
+                        if edge.target not in node_id_set_to_merge:
+                            key = (edge.target, handle)
+                            if key not in node_id_out_handle_to_edges:
+                                node_id_out_handle_to_edges[key] = []
+                            node_id_out_handle_to_edges[key].append(edge) 
+            # now we get all edges that connect to outside
+            # determine input handles of this node
+            handle_unique_name_pool = UniqueNamePool()
+
+            for (node_id, handle), edges in node_id_inp_handle_to_edges.items():
+                new_edge_id = edge_name_pool(edges[0].id)
+                new_handle = handle_unique_name_pool(handle)
+                edge = Edge(new_edge_id, source=node_id, target=merged_node.id, sourceHandle=handle, targetHandle=new_handle)
+                new_edges.append(edge)
+            for (node_id, handle), edges in node_id_out_handle_to_edges.items():
+                new_edge_id = edge_name_pool(edges[0].id)
+                new_handle = handle_unique_name_pool(handle)
+                edge = Edge(new_edge_id, source=merged_node.id, target=node_id, sourceHandle=new_handle, targetHandle=handle)
+                new_edges.append(edge)
+        res_internals = GraphInternals()
+        res_internals.set_from_nodes_edges(new_nodes, new_edges)
+        return res_internals
+
 class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
     @dataclasses.dataclass
@@ -306,7 +407,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             FrontendEventType.FlowNodeDelete)
         self.event_node_logic_change = self._create_event_slot(
             FrontendEventType.FlowNodeLogicChange)
-
+        self._internals = GraphInternals()
         self.event_drop = self._create_event_slot(FrontendEventType.Drop)
         self.event_pane_context_menu = self._create_event_slot(FrontendEventType.FlowPaneContextMenu)
         self.event_node_context_menu = self._create_event_slot(FrontendEventType.FlowNodeContextMenu)
@@ -316,9 +417,6 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         self.event_edge_delete.on(self._handle_edge_delete)
         self.event_edge_connection.on(self._handle_new_edge)
         self.event_node_logic_change.on(self._handle_node_logic_change)
-
-        self._unique_name_pool_node = UniqueNamePool()
-        self._unique_name_pool_edge = UniqueNamePool()
 
         self.set_flow_event_context_creator(lambda: enter_flow_ui_context(self))
 
@@ -341,10 +439,10 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         return self._prop_base(propcls, self)
 
     def create_unique_node_id(self, id: str):
-        return self._unique_name_pool_node(id)
+        return self._internals.unique_name_pool_node(id)
 
     def create_unique_edge_id(self, id: str):
-        return self._unique_name_pool_edge(id)
+        return self._internals.unique_name_pool_edge(id)
 
     def _find_comps_in_dataclass(self, child: "Flow.ChildDef"):
         unique_name_pool = UniqueNamePool()
@@ -364,72 +462,50 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         return res
 
     def _update_graph_data(self):
-        # node id must unique
-        self._id_to_node = {node.id: node for node in self.nodes}
-        assert len(self._id_to_node) == len(self.nodes)
-        self._id_to_edge = {edge.id: edge for edge in self.edges}
-        # edge id must unique
-        assert len(self._id_to_edge) == len(self.edges)
-        self._source_id_to_edge = {edge.source: edge for edge in self.edges}
-        self._target_id_to_edge = {edge.target: edge for edge in self.edges}
-        self._node_id_to_sources: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = {node.id: [] for node in self.nodes}
-        self._node_id_to_targets: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = {node.id: [] for node in self.nodes}
-        self._node_id_to_handle_to_edges: Dict[str, Dict[Optional[str], List[Edge]]] = {node.id: {} for node in self.nodes}
-        for edge in self.edges:
-            self._node_id_to_targets[edge.source].append(
-                (self._id_to_node[edge.target].id, edge.sourceHandle, edge.targetHandle))
-            self._node_id_to_sources[edge.target].append(
-                (self._id_to_node[edge.source].id, edge.sourceHandle, edge.targetHandle))
-            if edge.sourceHandle not in self._node_id_to_handle_to_edges[edge.source]:
-                self._node_id_to_handle_to_edges[edge.source][edge.sourceHandle] = []
-            self._node_id_to_handle_to_edges[edge.source][edge.sourceHandle].append(edge)
-            if edge.targetHandle not in self._node_id_to_handle_to_edges[edge.target]:
-                self._node_id_to_handle_to_edges[edge.target][edge.targetHandle] = []
-            self._node_id_to_handle_to_edges[edge.target][edge.targetHandle].append(edge)
-
+        self._internals.set_from_nodes_edges(self.nodes, self.edges)
         # TODO detection cycle
         for n in self.nodes:
             if not isinstance(n, Undefined):
-                assert n.id in self._id_to_node
-        all_node_ids = set(self._id_to_node.keys())
-        self._unique_name_pool_node = UniqueNamePool(init_set=all_node_ids)
-        all_edge_ids = set(self._id_to_edge.keys())
-        self._unique_name_pool_edge = UniqueNamePool(init_set=all_edge_ids)
-
+                assert n.id in self._internals.id_to_node
+        
     def set_nodes_edges_locally(self, nodes: List[Node], edges: List[Edge]):
         self.childs_complex.nodes = nodes
         self.childs_complex.edges = edges
         self._update_graph_data()
 
     def get_node_by_id(self, node_id: str):
-        return self._id_to_node[node_id]
+        return self._internals.id_to_node[node_id]
 
     def has_node_id(self, node_id: str):
-        return node_id in self._id_to_node 
+        return node_id in self._internals.id_to_node 
 
     def get_source_nodes(self, node_id: str):
         return [
-            self._id_to_node[idh[0]] for idh in self._node_id_to_sources[node_id]
+            self._internals.id_to_node[idh[0]] for idh in self._internals.node_id_to_sources[node_id]
         ]
 
     def get_target_nodes(self, node_id: str):
         return [
-            self._id_to_node[idh[0]] for idh in self._node_id_to_targets[node_id]
+            self._internals.id_to_node[idh[0]] for idh in self._internals.node_id_to_targets[node_id]
         ]
 
     def get_source_node_and_handles(self, node_id: str):
         return [
-            (self._id_to_node[idh[0]], idh[1], idh[2]) for idh in self._node_id_to_sources[node_id]
+            (self._internals.id_to_node[idh[0]], idh[1], idh[2]) for idh in self._internals.node_id_to_sources[node_id]
         ]
 
     def get_target_node_and_handles(self, node_id: str):
         return [
-            (self._id_to_node[idh[0]], idh[1], idh[2]) for idh in self._node_id_to_targets[node_id]
+            (self._internals.id_to_node[idh[0]], idh[1], idh[2]) for idh in self._internals.node_id_to_targets[node_id]
         ]
 
     def get_edges_by_node_and_handle_id(self, node_id: str, handle_id: Optional[str]):
-        content = self._node_id_to_handle_to_edges[node_id]
-        return content.get(handle_id, [])
+        inp_content = self._internals.node_id_to_inp_handle_to_edges[node_id]
+        out_content = self._internals.node_id_to_out_handle_to_edges[node_id]
+        if handle_id in inp_content:
+            return inp_content.get(handle_id, [])
+        else:
+            return out_content.get(handle_id, [])
 
     def get_all_parent_nodes(self, node_id: str):
         res: List[Node] = []
@@ -523,7 +599,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
     def _validate_node_ids(self, node_ids: List[str]):
         for node_id in node_ids:
-            assert node_id in self._id_to_node, f"node id {node_id} not exists"
+            assert node_id in self._internals.id_to_node, f"node id {node_id} not exists"
 
     async def update_node_internals(self, node_ids: List[str]):
         self._validate_node_ids(node_ids)
@@ -660,7 +736,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         """Update node context menu items based on id.
         this function won't add or remove items, only update the existing items.
         """
-        node = self._id_to_node[node_id]
+        node = self._internals.id_to_node[node_id]
         if isinstance(node.data, Undefined):
             return 
         if not isinstance(node.data.contextMenuItems, Undefined):
@@ -689,7 +765,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
         new_layout: Dict[str, Component] = {}
         for node in nodes:
-            assert node.id not in self._id_to_node, f"node id {node.id} already exists"
+            assert node.id not in self._internals.id_to_node, f"node id {node.id} already exists"
             comp = node.get_component()
             if comp is not None:
                 new_layout[node.id] = comp
@@ -993,17 +1069,29 @@ class SymbolicImmediate:
     userdata: Optional[Any] = None
     is_input: bool = False
 
-class SymbolicFlowBuilder:
+@dataclasses.dataclass
+class SymbolicGraphOutput:
+    nodes: List[Node]
+    edges: List[Edge]
+    node_type_map: Union[Undefined, Dict[str, Literal["app", "input", "default", "output", "group", "appTemplate"]]] = undefined
+    node_id_to_data: Dict[str, Any] = dataclasses.field(default_factory=dict)
+
+T = TypeVar("T")
+
+class SymbolicFlowBuilder(Generic[T]):
     """A symbolic flow builder to help you build symbolic flow."""
     def __init__(self):
-        self._id_to_node: Dict[str, Node] = {}
+        # self._internals.id_to_node: Dict[str, Node] = {}
+        self._id_to_node_data: Dict[str, T] = {}
         self._id_to_immedinate: Dict[str, SymbolicImmediate] = {}
         # (edge_id, source_handle, target_handle)
         # if handle is None, means default handle
-        self._node_id_to_sources: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = {}
-        self._node_id_to_targets: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = {}
-        self._node_id_to_inp_handle_to_edges: Dict[str, Dict[Optional[str], List[Edge]]] = {}
-        self._node_id_to_out_handle_to_edges: Dict[str, Dict[Optional[str], List[Edge]]] = {}
+        # self._internals.node_id_to_sources: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = {}
+        # self._internals.node_id_to_targets: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = {}
+        # self._internals.node_id_to_inp_handle_to_edges: Dict[str, Dict[Optional[str], List[Edge]]] = {}
+        # self._internals.node_id_to_out_handle_to_edges: Dict[str, Dict[Optional[str], List[Edge]]] = {}
+        self._internals = GraphInternals()
+
         self._node_id_to_immedinates: Dict[str, List[SymbolicImmediate]] = {}
 
         self._unique_name_pool_imme = UniqueNamePool()
@@ -1024,38 +1112,41 @@ class SymbolicFlowBuilder:
 
     def get_immedinate_node(self, immedinate: SymbolicImmediate):
         source_id = immedinate.source_id
-        return self._id_to_node[source_id]
+        return self._internals.id_to_node[source_id]
 
     def create_op_node(self, name: str, inp_handles: List[Optional[str]], 
-                       out_handles: List[Optional[str]], type: Optional[str] = None, node_id: Optional[str] = None):
+                       out_handles: List[Optional[str]], type: Optional[str] = None, node_id: Optional[str] = None,
+                       node_data: Optional[T] = None):
         if node_id is None:
             node_id = self._unique_name_pool(name)
         else:
-            assert node_id not in self._id_to_node, f"node id {node_id} already exists"
-        assert node_id not in self._node_id_to_inp_handle_to_edges
-        assert node_id not in self._node_id_to_out_handle_to_edges
-        self._node_id_to_inp_handle_to_edges[node_id] = {}
-        self._node_id_to_out_handle_to_edges[node_id] = {}
+            assert node_id not in self._internals.id_to_node, f"node id {node_id} already exists"
+        assert node_id not in self._internals.node_id_to_inp_handle_to_edges
+        assert node_id not in self._internals.node_id_to_out_handle_to_edges
+        self._internals.node_id_to_inp_handle_to_edges[node_id] = {}
+        self._internals.node_id_to_out_handle_to_edges[node_id] = {}
         node = Node(id=node_id, data=NodeData(label=name))
         if type is not None:
             node.type = type
-        self._id_to_node[node_id] = node
+        self._internals.id_to_node[node_id] = node
         # fill _node_id_to_out_handle_to_edges and _node_id_to_inp_handle_to_edges
         for handle in inp_handles:
-            if handle not in self._node_id_to_inp_handle_to_edges[node_id]:
-                self._node_id_to_inp_handle_to_edges[node_id][handle] = []
+            if handle not in self._internals.node_id_to_inp_handle_to_edges[node_id]:
+                self._internals.node_id_to_inp_handle_to_edges[node_id][handle] = []
         for handle in out_handles:
-            if handle not in self._node_id_to_out_handle_to_edges[node_id]:
-                self._node_id_to_out_handle_to_edges[node_id][handle] = []
+            if handle not in self._internals.node_id_to_out_handle_to_edges[node_id]:
+                self._internals.node_id_to_out_handle_to_edges[node_id][handle] = []
         self._node_id_to_immedinates[node_id] = []
-        self._node_id_to_sources[node_id] = []
-        self._node_id_to_targets[node_id] = []
+        self._internals.node_id_to_sources[node_id] = []
+        self._internals.node_id_to_targets[node_id] = []
+        if node_data is not None:
+            self._id_to_node_data[node_id] = node_data
         return node 
 
     def call_op_node(self, op_node: Node, op_inp_handle_to_imme: Dict[Optional[str], Union[SymbolicImmediate, List[SymbolicImmediate]]]):
-        assert op_node.id in self._id_to_node
-        inp_handle_to_edges = self._node_id_to_inp_handle_to_edges[op_node.id]
-        out_handle_to_edges = self._node_id_to_out_handle_to_edges[op_node.id]
+        assert op_node.id in self._internals.id_to_node
+        inp_handle_to_edges = self._internals.node_id_to_inp_handle_to_edges[op_node.id]
+        out_handle_to_edges = self._internals.node_id_to_out_handle_to_edges[op_node.id]
         for handle in op_inp_handle_to_imme.keys():
             assert handle in inp_handle_to_edges
         # for handle in outputs:
@@ -1067,11 +1158,11 @@ class SymbolicFlowBuilder:
             for imme in immes:
                 edge_id = self._unique_name_pool_edge(f"{imme.source_id}=>{op_node.id}")
                 edge = Edge(id=edge_id, source=imme.source_id, target=op_node.id, sourceHandle=imme.source_handle, targetHandle=handle)
-                self._node_id_to_inp_handle_to_edges[op_node.id][handle].append(edge)
-                self._node_id_to_sources[op_node.id].append((edge_id, imme.source_handle, handle))
-                self._node_id_to_out_handle_to_edges[imme.source_id][imme.source_handle].append(edge)
+                self._internals.node_id_to_inp_handle_to_edges[op_node.id][handle].append(edge)
+                self._internals.node_id_to_sources[op_node.id].append((edge_id, imme.source_handle, handle))
+                self._internals.node_id_to_out_handle_to_edges[imme.source_id][imme.source_handle].append(edge)
                 # add to source node metas
-                self._node_id_to_targets[imme.source_id].append((edge_id, handle, imme.source_handle))
+                self._internals.node_id_to_targets[imme.source_id].append((edge_id, handle, imme.source_handle))
         res_immes: List[SymbolicImmediate] = []
         # create output immedinate node
         op_node_output_handles = list(out_handle_to_edges.keys())
@@ -1099,7 +1190,7 @@ class SymbolicFlowBuilder:
         node_immes = self._node_id_to_immedinates[node_id]
         return len(node_immes) > 0 and node_immes[0].is_input
 
-    def build_detached_flow(self, out_immedinates: List[SymbolicImmediate], disable_handle: bool = True):
+    def build_detached_flow(self, out_immedinates: List[SymbolicImmediate], disable_handle: bool = True, nodes_to_merge: Optional[List[Tuple[Node, List[str]]]] = None):
         """Build flow with different config without modifying 
         the current symbolic flow states.
         Args:
@@ -1131,9 +1222,9 @@ class SymbolicFlowBuilder:
                 edge.targetHandle = None
             out_edges.append(edge)
         # get nodes and edges
-        all_nodes = list(self._id_to_node.values())
+        all_nodes = list(self._internals.id_to_node.values())
         all_edges: List[Edge] = []
-        for node_id, handle_to_edges in self._node_id_to_inp_handle_to_edges.items():
+        for node_id, handle_to_edges in self._internals.node_id_to_inp_handle_to_edges.items():
             for edges in handle_to_edges.values():
                 if disable_handle:
                     for edge in edges:
@@ -1157,4 +1248,4 @@ class SymbolicFlowBuilder:
             node_type_map_res = node_type_map
         else:
             node_type_map_res = undefined
-        return all_nodes + out_nodes, all_edges + out_edges, node_type_map_res
+        return SymbolicGraphOutput(all_nodes + out_nodes, all_edges + out_edges, node_type_map_res, self._id_to_node_data.copy())

@@ -50,6 +50,6 @@ class MarkdownTutorialsTree:
 
     @mark_did_mount
     async def _on_init(self):
-        await self.panel.inspector.set_object(self.tutorials,
+        await self.panel.inspector.add_object_to_tree(self.tutorials,
                                               key="tutorials",
                                               expand_level=2)

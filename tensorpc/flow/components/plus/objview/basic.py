@@ -49,7 +49,7 @@ class Image(mui.Image):
         # })
 
 class ImageBatch(mui.FlexBox):
-    def __init__(self, arr, *, lower: float = 0.0, upper: float = 1.0):
+    def __init__(self, arr, *, lower: float = 0.0, upper: float = 1.0, is_channel_first: bool = False):
         assert can_cast_to_np_array(arr)
         imgs = try_cast_to_np_array(arr)
         assert imgs is not None and imgs.ndim == 4
@@ -68,7 +68,11 @@ class ImageBatch(mui.FlexBox):
         # self._img.update_raw_props({
         #     "object-fit": "contain",
         # })
-        self._img.prop(image=self._img.encode_image_bytes(imgs[0]))
+        if is_channel_first:
+            self._img.prop(image=self._img.encode_image_bytes(imgs[0].transpose(1, 2, 0)))
+        else:
+            self._img.prop(image=self._img.encode_image_bytes(imgs[0]))
+        self._is_channel_first = is_channel_first
 
         super().__init__([
             self._img,
@@ -77,7 +81,15 @@ class ImageBatch(mui.FlexBox):
         self.prop(maxWidth="400px", flexFlow="column nowrap", alignItems="stretch")
 
     async def _on_slider(self, val):
-        await self._img.show(self._imgs[val])
+        if self._is_channel_first:
+            await self._img.show(self._imgs[val].transpose(1, 2, 0))
+        else:
+            await self._img.show(self._imgs[val])
+
+class ImageBatchChannelFirst(ImageBatch):
+    def __init__(self, arr, *, lower: float = 0.0, upper: float = 1.0):
+        super().__init__(arr, lower=lower, upper=upper, is_channel_first=True)
+
 
 class Video(mui.VideoPlayer):
     def __init__(self, bytes_or_path: Union[bytes, str], suffix: Optional[str] = None):

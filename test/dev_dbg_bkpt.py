@@ -15,6 +15,8 @@ import torch
 import torch
 import numpy as np
 from torch import nn
+from torch.nn import functional as F
+
 import torch.profiler as profiler
 
 
@@ -33,6 +35,17 @@ class MyModule(nn.Module):
             hi_idx = torch.from_numpy(hi_idx).cuda()
 
         return out, hi_idx
+
+class MyModule2(nn.Module):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True):
+        super().__init__()
+        self.linear = nn.Linear(in_features, out_features, bias)
+
+    def forward(self, input):
+        # if input.shape[1] >= 64:
+        return F.relu(self.linear(input))
+        # else:
+        #     return F.relu(self.linear(input) + input)
 
 def mp_func(rank):
     a = 5
@@ -75,8 +88,9 @@ def mp_func_inf_record(rank):
         ten2 = torch.rand(1).to(torch.float16)
 
         # tensorpc.dbg.vscode_breakpoint(name=f"WTF-{rank}")
-        tensorpc.dbg.breakpoint(name="WTF")
+        # tensorpc.dbg.breakpoint(name="WTF")
         model = MyModule(500, 10).cuda()
+        model2 = MyModule2(500, 10).cuda()
         input = torch.rand(128, 500).cuda()
         mask = torch.rand((500, 500, 500), dtype=torch.double).cuda()
         model(input, mask)

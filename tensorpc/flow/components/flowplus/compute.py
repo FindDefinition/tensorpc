@@ -49,7 +49,15 @@ from tensorpc.flow.jsonlike import (as_dict_no_undefined,
 if TYPE_CHECKING:
     from tensorpc.flow.components.flowplus.customnode import CustomNode
 
-TENSORPC_FLOWUI_NODEDATA_KEY = "__tensorpc_flowui_nodedata_key"
+FLOWUI_CNODE_NODEDATA_KEY = "__tensorpc_flowui_compute_nodedata_key"
+
+FLOWUI_CNODE_STATE_KEY = "cnode"
+FLOWUI_DNODE_STATE_KEY = "dnode"
+
+class ComputeFlowNodeType(enum.Enum):
+    COMPUTE = "cnode"
+    DRIVER = "dnode"
+
 NoneType = type(None)
 
 
@@ -69,8 +77,13 @@ class ComputeFlowClasses:
     NodeWrappedSelected = "ComputeFlowNodeWrapperSelected"
     Header = "ComputeFlowHeader"
     IOHandleContainer = "ComputeFlowIOHandleContainer"
+    IOHandleBase = "ComputeFlowIOHandleBase"
+    DriverIOHandleBase = "ComputeFlowDriverIOHandleBase"
     InputHandle = "ComputeFlowInputHandle"
     OutputHandle = "ComputeFlowOutputHandle"
+    DriverInputHandle = "ComputeFlowDriverInputHandle"
+    DriverOutputHandle = "ComputeFlowDriverOutputHandle"
+
     NodeItem = "ComputeFlowNodeItem"
     CodeTypography = "ComputeFlowCodeTypography"
     BottomStatus = "ComputeFlowBottomStatus"
@@ -110,10 +123,6 @@ def _default_compute_flow_css():
             "minWidth": "150px",
             "background": "white",
         },
-        f".{ComputeFlowClasses.InputHandle}": {
-            "position": "absolute",
-            "top": "50%",
-        },
         f".{ComputeFlowClasses.IOHandleContainer}": {
             "flexDirection": "row",
             "alignItems": "center",
@@ -123,9 +132,18 @@ def _default_compute_flow_css():
         f".{ComputeFlowClasses.CodeTypography}": {
             "fontFamily": CodeStyles.fontFamily,
         },
+        f".{ComputeFlowClasses.InputHandle}": {
+            "position": "absolute",
+            "top": "50%",
+        },
         f".{ComputeFlowClasses.OutputHandle}": {
             "position": "absolute",
             "top": "50%",
+        },
+        f".{ComputeFlowClasses.DriverInputHandle}": {
+            "position": "absolute",
+            "left": "50%",
+            "clipPath": "polygon(0 50%, 100% 50%, 100% 100%, 0 100%)",
         },
         f".{ComputeFlowClasses.NodeItem}": {
             "borderBottom": "1px solid lightgrey"
@@ -142,19 +160,32 @@ def _default_compute_flow_css():
         #         "borderStyle": "dashed",
         #     }
         # },
-        ".react-flow__node": {
-            "padding": "0px",
-        },
-        ".react-flow__handle": {
+        f".{ComputeFlowClasses.IOHandleBase}": {
             "borderRadius": "100%",
             "height": "12px",
             "width": "12px",
             "border": "1px solid red",
             "background": "#eee"
         },
-        ".react-flow__handle.connecting": {
-            "background": "#ff6060"
+        f".{ComputeFlowClasses.DriverIOHandleBase}": {
+            "borderRadius": "25%",
+            "height": "8px",
+            "width": "24px",
+            "background": "silver",
+            "border": "none",
+            "opacity": 0,
+            ":hover": {
+                "opacity": 1,
+            }
         },
+        ".react-flow__node": {
+            "padding": "0px",
+        },
+        ".react-flow__handle": {
+        },
+        # ".react-flow__handle.connecting": {
+        #     "background": "#ff6060"
+        # },
         ".react-flow__handle.valid": {
             "background": "#55dd99"
         },
@@ -175,6 +206,8 @@ class HandleTypePrefix:
     Input = "inp"
     Output = "out"
     SpecialDict = "specialdict"
+    DriverInput = "driverinp"
+    DriverOutput = "driverout"
 
 def is_typeddict_or_typeddict_async_gen(type):
     is_tdict = is_typeddict(type)
@@ -359,7 +392,7 @@ class ComputeNode:
         if self._init_cfg is not None:
             init_cfg_dict = dataclasses.asdict(self._init_cfg)
         return {
-            TENSORPC_FLOWUI_NODEDATA_KEY: {
+            FLOWUI_CNODE_NODEDATA_KEY: {
                 "id": self.id,
                 "name": self.name,
                 "module_id": get_module_id_of_type(type(self)),
@@ -381,7 +414,7 @@ class ComputeNode:
     @staticmethod
     def from_state_dict_default(data: Dict[str, Any],
                                 cls: Type[T_cnode]) -> T_cnode:
-        internal = data[TENSORPC_FLOWUI_NODEDATA_KEY]
+        internal = data[FLOWUI_CNODE_NODEDATA_KEY]
         init_cfg = None
         if "init_cfg" in internal:
             if internal["init_cfg"] is not None:
@@ -542,7 +575,7 @@ class IOHandle(mui.FlexBox):
         else:
             handle_style = mui.undefined
         layout: mui.LayoutType = [
-            flowui.Handle(htype, hpos, self.id).prop(className=handle_classes,
+            flowui.Handle(htype, hpos, self.id).prop(className=f"{ComputeFlowClasses.IOHandleBase} {handle_classes}",
                                                      style=handle_style),
             mui.Typography(name).prop(
                 variant="caption",
@@ -593,7 +626,7 @@ class ComputeNodeWrapper(mui.FlexBox):
     def __init__(self,
                  cnode: ComputeNode,
                  init_state: Optional[ComputeNodeWrapperState] = None):
-        self.header = mui.Typography(cnode.name).prop(variant="body1")
+        self.header = mui.Typography(cnode.name).prop(variant="body2")
         self.icon_container = mui.Fragment([])
         icon_cfg = cnode.icon_cfg
         if icon_cfg is None:
@@ -658,6 +691,7 @@ class ComputeNodeWrapper(mui.FlexBox):
             self.resizers = [resizer]
         self._resizer_container = mui.Fragment([*self.resizers])
         super().__init__([
+            flowui.Handle("target", "top", f"{HandleTypePrefix.DriverInput}-driver").prop(className=f"{ComputeFlowClasses.DriverIOHandleBase} {ComputeFlowClasses.DriverInputHandle}"),
             self.header_container, self.input_args, self.middle_node_container,
             self.output_args, self.status_box, self._resizer_container
         ])
@@ -882,12 +916,12 @@ class ComputeNodeWrapper(mui.FlexBox):
 
     def state_dict(self) -> Dict[str, Any]:
         res = self.cnode.state_dict()
-        return {"cnode": res, "state": dataclasses.asdict(self._state)}
+        return {FLOWUI_CNODE_STATE_KEY: res, "state": dataclasses.asdict(self._state)}
 
     @classmethod
     async def from_state_dict(cls, data: Dict[str, Any],
                               cnode_cls: Type[ComputeNode]):
-        cnode = await (cnode_cls.from_state_dict(data["cnode"]))
+        cnode = await (cnode_cls.from_state_dict(data[FLOWUI_CNODE_STATE_KEY]))
         await cnode.init_node_async(False)
         init_state: Optional[ComputeNodeWrapperState] = None
         if "state" in data:
@@ -1100,6 +1134,9 @@ class ComputeFlow(mui.FlexBox):
                 # inf number of handle
                 HandleTypePrefix.Output: -1
             },
+            HandleTypePrefix.DriverInput: {
+                HandleTypePrefix.DriverOutput: -1
+            }
         }
         self.prop(width="100%", height="100%", overflow="hidden")
         self.graph.prop(targetValidConnectMap=target_conn_valid_map)
@@ -1437,28 +1474,36 @@ class ComputeFlow(mui.FlexBox):
                     if node_id in node_states:
                         state = node_states[node_id]
                         assert "data" in node
-                        internals = state["cnode"][
-                            TENSORPC_FLOWUI_NODEDATA_KEY]
-                        node_type = internals["node_type"]
-                        node_module_id = internals["module_id"]
-                        if node_type in self.type_to_cnode_cls:
-                            cnode_cls = self.type_to_cnode_cls[node_type]
-                        else:
-                            cnode_cls = get_object_type_from_module_id(
-                                node_module_id)
-                            if cnode_cls is None:
+                        if FLOWUI_CNODE_STATE_KEY in state:
+                            # compute node
+                            internals = state[FLOWUI_CNODE_STATE_KEY][
+                                FLOWUI_CNODE_NODEDATA_KEY]
+                            node_type = internals["node_type"]
+                            node_module_id = internals["module_id"]
+                            if node_type in self.type_to_cnode_cls:
+                                cnode_cls = self.type_to_cnode_cls[node_type]
+                            else:
+                                cnode_cls = get_object_type_from_module_id(
+                                    node_module_id)
+                                if cnode_cls is None:
+                                    node_id_to_remove.append(node_id)
+                                    continue
+                            try:
+                                wrapper = await ComputeNodeWrapper.from_state_dict(
+                                    state, cnode_cls)
+                            except Exception as e:
                                 node_id_to_remove.append(node_id)
+                                await self.send_exception(e)
+                                traceback.print_exc()
                                 continue
-                        try:
-                            wrapper = await ComputeNodeWrapper.from_state_dict(
-                                state, cnode_cls)
-                        except Exception as e:
-                            node_id_to_remove.append(node_id)
-                            await self.send_exception(e)
-                            traceback.print_exc()
-                            continue
-                        node_data = node["data"]
-                        node_data["component"] = wrapper
+                            node_data = node["data"]
+                            node_data["component"] = wrapper
+                        elif FLOWUI_DNODE_STATE_KEY in state:
+                            internals = state[FLOWUI_DNODE_STATE_KEY]
+
+                            # driver node
+                            # TODO
+                            raise NotImplementedError
                     else:
                         if node["type"] == "app":
                             node_id_to_remove.append(node_id)

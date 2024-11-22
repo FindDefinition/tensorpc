@@ -158,9 +158,9 @@ class FrameObjectPreview(ObjectPreviewBase):
         assert self._cur_state is not None 
         self._cur_state.name = var_name
         self._cur_state.value = value
-        await self._obj_simple_tree.update_root_object_dict({
+        await self._obj_simple_tree.set_root_object_dict({
             var_name: value
-        }, keep_old=False)
+        })
         if appctx.get_app_storage().is_available():
             await self._on_editor_ready() 
 
@@ -209,7 +209,7 @@ class FrameObjectPreview(ObjectPreviewBase):
         await self._obj_preview.clear_preview_layout()
         await self._obj_original_preview.clear_preview_layout()
         await self._obj_user_sel_preview.clear_preview_layout()
-        await self._obj_simple_tree.update_root_object_dict({}, keep_old=False)
+        await self._obj_simple_tree.set_root_object_dict({})
         await self._fold_editor_container.set_new_layout([])
 
     def _determine_convert_code_is_trivial(self, tree: ast.Module):
@@ -266,7 +266,7 @@ class FrameObjectPreview(ObjectPreviewBase):
             obj_converted, layouts = get_frame_obj_layout_from_code(fname, value, self._cur_state.value, )
             if layouts is None:
                 return await self._obj_preview.set_obj_preview_layout(obj_converted, None, header=header)
-            await self._obj_preview.set_preview_layout(layouts, header=header)
+            await self._obj_preview.set_preview_layout([mui.VBox(layouts).prop(flex=1, overflow="auto")], header=header)
 
 
     async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):

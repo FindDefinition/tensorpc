@@ -263,6 +263,8 @@ class ObjectTreeParser:
             # if isinstance(v, TreeItem) and v.default_expand():
             #     should_expand = True
             # if should_expand:
+            if isinstance(obj, TreeItem):
+                v = await obj.get_child(k)
             await self.parse_obj_to_tree(v, child_node, total_expand_level - 1, validator)
 
     def _should_expand_node(self, obj, node: mui.JsonLikeNode,
@@ -274,7 +276,7 @@ class ObjectTreeParser:
                 return False 
         should_expand = node.id in self._cached_lazy_expand_uids or total_expand_level > 0
         if isinstance(obj, TreeItem) and obj.default_expand():
-            should_expand = True
+            should_expand = total_expand_level > 0
         elif isinstance(obj,
                         tuple(USER_OBJ_TREE_TYPES)) and obj.default_expand():
             should_expand = True

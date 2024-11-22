@@ -615,12 +615,18 @@ class BasicObjectTree(mui.FlexBox):
     def has_object(self, key: str):
         return key in self.root
 
-    async def set_object(self,
+    async def add_object_to_tree(self,
                          obj,
                          key: str = _DEFAULT_OBJ_NAME,
                          expand_level: int = 1,
                          validator: Optional[Callable[[Any], bool]] = None):
         return await self.update_root_object_dict({key: obj}, expand_level, validator)
+    
+    async def set_root_object_dict(self,
+                         obj_dict: Mapping[str, Any],
+                         expand_level: int = 1,
+                         validator: Optional[Callable[[Any], bool]] = None):
+        return await self.update_root_object_dict(obj_dict, expand_level, validator, keep_old=False)
 
     async def update_root_object_dict(self,
                          obj_dict: Mapping[str, Any],

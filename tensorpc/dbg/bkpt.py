@@ -557,7 +557,9 @@ def record_duration(name: str,
 
 @contextlib.contextmanager
 def exception_breakpoint():
-    """Enter a breakpoint when exception is raised."""
+    """Enter a breakpoint when exception is captured by this context manager. 
+    do nothing otherwise.
+    """
     try:
         yield
     except Exception as e:
@@ -565,11 +567,9 @@ def exception_breakpoint():
         if exc_traceback is None:
             raise e
         frame: Optional[FrameType] = None
-        cnt = 2
+        # walk to the innermost frame
         for frame, _ in traceback.walk_tb(exc_traceback):
-            if cnt == 0:
-                break
-            cnt -= 1
+            pass
         if frame is None:
             raise e
         traceback.print_exc()

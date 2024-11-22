@@ -127,6 +127,11 @@ class BreakpointDebugPanel(mui.FlexBox):
 
         filter_input = mui.TextField("filter").prop(
             valueChangeTarget=(self.tree_viewer.tree.tree, "globalFilter"))
+        tree = self.tree_viewer.tree.tree
+        if isinstance(tree, mui.TanstackJsonLikeTree):
+            filter_input.event_change.on(
+                lambda val: tree.prop(globalFilter=val))
+
         self.header_container = mui.HBox([
             filter_input.prop(flex=1),
             self._all_frame_select.prop(flex=2),
@@ -230,8 +235,8 @@ class BreakpointDebugPanel(mui.FlexBox):
     async def _set_frame_meta(self, frame: FrameType):
         frame_func_name = inspecttools.get_co_qualname_from_frame(frame)
         local_vars_for_inspect = self._get_filtered_local_vars(frame)
-        await self.tree_viewer.tree.update_root_object_dict(
-            local_vars_for_inspect, keep_old=False)
+        await self.tree_viewer.tree.set_root_object_dict(
+            local_vars_for_inspect)
         await self.header.write(f"{frame_func_name}({frame.f_lineno})")
         await self.frame_script.mount_frame(
             dataclasses.replace(self._cur_frame_state, frame=frame))
@@ -269,7 +274,7 @@ class BreakpointDebugPanel(mui.FlexBox):
 
     async def leave_breakpoint(self, is_record_start: bool = False):
         await self.header.write("")
-        await self.tree_viewer.tree.update_root_object_dict({}, keep_old=False)
+        await self.tree_viewer.tree.set_root_object_dict({})
         ev = self.copy_path_btn.update_event(disabled=True)
         if is_record_start:
             ev += self.record_btn.update_event(disabled=True,

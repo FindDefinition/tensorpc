@@ -1042,7 +1042,7 @@ class App:
         try:
             comp = self.find_component(plus.ObjectInspector)
             if comp is not None and comp.enable_exception_inspect:
-                await comp.set_object(get_exception_frame_stack(), "exception")
+                await comp.add_object_to_tree(get_exception_frame_stack(), "exception")
         except:
             traceback.print_exc()
 

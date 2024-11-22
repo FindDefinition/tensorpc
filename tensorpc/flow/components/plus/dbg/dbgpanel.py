@@ -36,6 +36,7 @@ from tensorpc.flow.jsonlike import as_dict_no_undefined
 from tensorpc.flow.vscode.coretypes import (VscodeBreakpoint,
                                             VscodeTensorpcMessage,
                                             VscodeTensorpcMessageType)
+from tensorpc.utils.rich_logging import get_logger
 
 try:
     import orjson as json  # type: ignore
@@ -49,6 +50,8 @@ except ImportError:
 
     def json_dump_to_bytes(obj: Any) -> bytes:
         return json.dumps(obj).encode()
+
+LOGGER = get_logger("tensorpc.dbg")
 
 FILE_RESOURCE_KEY = "tensorpc_dbg_trace.json"
 
@@ -609,6 +612,10 @@ class MasterDebugPanel(mui.FlexBox):
         return list(set(all_keys))
 
     async def query_record_data_by_key(self, key: str):
+        # perfetto support zip of gzip trace in their source code.
+        # so we can just use already gzipped data to avoid expensive zip again.
+        _use_perfetto_undoc_zip_of_gzip = False
+        LOGGER.warning("Querying record data by key %s", key)
         if key in self._record_data_cache:
             all_timestamps_with_none: List[Optional[int]] = await self._run_rpc_on_metas_chunk_call(
                 self._current_proc_infos,
@@ -626,6 +633,8 @@ class MasterDebugPanel(mui.FlexBox):
             dbg_serv_names.DBG_GET_TRACE_DATA,
             key,
             rpc_timeout=30)
+        LOGGER.warning("Finish querying record data by key %s", key)
+
         # print("RPC TIME", time.time() - t)
         all_data = []
         all_data_external_evs = []
@@ -633,17 +642,24 @@ class MasterDebugPanel(mui.FlexBox):
         for data_gzipped in all_data_gzipped:
             if data_gzipped is None:
                 continue
-            datas = [gzip.decompress(d.data) for d in data_gzipped[1].single_results]
+            if not _use_perfetto_undoc_zip_of_gzip:
+                datas = [gzip.decompress(d.data) for d in data_gzipped[1].single_results]
+            else:
+                datas = [d.data for d in data_gzipped[1].single_results]
             for single_res in data_gzipped[1].single_results:
                 if single_res.external_events is not None:
                     all_data_external_evs.append(single_res.external_events)
             all_data.extend(datas)
             all_timestamps.append(data_gzipped[0])
+        LOGGER.warning("Decompressing record data by key %s", key)
+
         if not all_data:
             raise ValueError("No trace data found for key", key)
         if self._debug_use_zip_instead_of_merge:
             zip_ss = io.BytesIO()
-            with zipfile.ZipFile(zip_ss, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+            zip_mode = zipfile.ZIP_DEFLATED if not _use_perfetto_undoc_zip_of_gzip else zipfile.ZIP_STORED
+            compresslevel = 9 if not _use_perfetto_undoc_zip_of_gzip else None
+            with zipfile.ZipFile(zip_ss, mode="w", compression=zip_mode, compresslevel=compresslevel) as zf:
                 for i, data in enumerate(all_data):
                     zf.writestr(f"{i}.json", data)
                 for i, data in enumerate(all_data_external_evs):
@@ -652,6 +668,10 @@ class MasterDebugPanel(mui.FlexBox):
                             "traceEvents": data
                         }))
             res = zip_ss.getvalue()
+            if _use_perfetto_undoc_zip_of_gzip:
+                LOGGER.warning("Zip (store mode) to file with length %d", len(res))
+            else:
+                LOGGER.warning("Zip (best compress) to file with length %d", len(res))
             self._record_data_cache[key] = (all_timestamps, res)
             return res, all_timestamps
         else:
