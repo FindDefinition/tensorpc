@@ -19,7 +19,7 @@ from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Dict, Generic, Iter
                     List, Optional, Sequence, Set, Tuple, Type, TypeVar, Union)
 
 from typing_extensions import Literal, TypeAlias
-
+import dataclasses as dataclasses_plain
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.tree_id import UniqueTreeIdForTree
@@ -261,16 +261,16 @@ class EventSelection:
     nodes: List[str]
     edges: List[str]
 
-@dataclasses.dataclass
+@dataclasses_plain.dataclass
 class GraphInternals:
-    id_to_node: Dict[str, Node] = dataclasses.field(default_factory=dict)
-    id_to_edge: Dict[str, Edge] = dataclasses.field(default_factory=dict)
-    node_id_to_sources: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = dataclasses.field(default_factory=dict)
-    node_id_to_targets: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = dataclasses.field(default_factory=dict)
-    node_id_to_inp_handle_to_edges: Dict[str, Dict[Optional[str], List[Edge]]] = dataclasses.field(default_factory=dict)
-    node_id_to_out_handle_to_edges: Dict[str, Dict[Optional[str], List[Edge]]] = dataclasses.field(default_factory=dict)
-    unique_name_pool_node: UniqueNamePool = dataclasses.field(default_factory=UniqueNamePool)
-    unique_name_pool_edge: UniqueNamePool = dataclasses.field(default_factory=UniqueNamePool)
+    id_to_node: Dict[str, Node] = dataclasses_plain.field(default_factory=dict)
+    id_to_edge: Dict[str, Edge] = dataclasses_plain.field(default_factory=dict)
+    node_id_to_sources: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = dataclasses_plain.field(default_factory=dict)
+    node_id_to_targets: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = dataclasses_plain.field(default_factory=dict)
+    node_id_to_inp_handle_to_edges: Dict[str, Dict[Optional[str], List[Edge]]] = dataclasses_plain.field(default_factory=dict)
+    node_id_to_out_handle_to_edges: Dict[str, Dict[Optional[str], List[Edge]]] = dataclasses_plain.field(default_factory=dict)
+    unique_name_pool_node: UniqueNamePool = dataclasses_plain.field(default_factory=UniqueNamePool)
+    unique_name_pool_edge: UniqueNamePool = dataclasses_plain.field(default_factory=UniqueNamePool)
     def set_from_nodes_edges(self, nodes: List[Node], edges: List[Edge]):
         # node id must unique
         self.id_to_node = {node.id: node for node in nodes}
@@ -303,6 +303,8 @@ class GraphInternals:
         """merge nodes, then return a new GraphInternals, remain self unchanged"""
         # check merged node id is valid and have no intersection
         node_id_set_to_merge: Set[str] = set()
+        for j in range(len(merge_list)):
+            merge_list[j] = (dataclasses.replace(merge_list[j][0]), merge_list[j][1])
         for _, merge_ids in merge_list:
             for merge_id in merge_ids:
                 assert merge_id in self.id_to_node
@@ -310,7 +312,9 @@ class GraphInternals:
                 node_id_set_to_merge.add(merge_id)
         for merged_node, _ in merge_list:
             if merged_node.id not in node_id_set_to_merge:
-                assert merged_node.id not in self.id_to_node, "merged node id already exists"
+                if merged_node.id in self.id_to_node:
+                    merged_node.id = self.unique_name_pool_node(merged_node.id)
+                # assert merged_node.id not in self.id_to_node, "merged node id already exists"
         # append nodes and edges that not in merge list
         new_nodes: List[Node] = [x[0] for x in merge_list]
         new_edges: List[Edge] = []
@@ -1060,6 +1064,8 @@ class NodeToolbar(MUIContainerBase[NodeToolbarProps, MUIComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+T = TypeVar("T")
+
 @dataclasses.dataclass
 class SymbolicImmediate:
     id: str
@@ -1070,13 +1076,12 @@ class SymbolicImmediate:
     is_input: bool = False
 
 @dataclasses.dataclass
-class SymbolicGraphOutput:
+class SymbolicGraphOutput(Generic[T]):
     nodes: List[Node]
     edges: List[Edge]
     node_type_map: Union[Undefined, Dict[str, Literal["app", "input", "default", "output", "group", "appTemplate"]]] = undefined
-    node_id_to_data: Dict[str, Any] = dataclasses.field(default_factory=dict)
+    node_id_to_data: Dict[str, T] = dataclasses.field(default_factory=dict)
 
-T = TypeVar("T")
 
 class SymbolicFlowBuilder(Generic[T]):
     """A symbolic flow builder to help you build symbolic flow."""
@@ -1086,10 +1091,6 @@ class SymbolicFlowBuilder(Generic[T]):
         self._id_to_immedinate: Dict[str, SymbolicImmediate] = {}
         # (edge_id, source_handle, target_handle)
         # if handle is None, means default handle
-        # self._internals.node_id_to_sources: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = {}
-        # self._internals.node_id_to_targets: Dict[str, List[Tuple[str, Optional[str], Optional[str]]]] = {}
-        # self._internals.node_id_to_inp_handle_to_edges: Dict[str, Dict[Optional[str], List[Edge]]] = {}
-        # self._internals.node_id_to_out_handle_to_edges: Dict[str, Dict[Optional[str], List[Edge]]] = {}
         self._internals = GraphInternals()
 
         self._node_id_to_immedinates: Dict[str, List[SymbolicImmediate]] = {}
@@ -1190,7 +1191,7 @@ class SymbolicFlowBuilder(Generic[T]):
         node_immes = self._node_id_to_immedinates[node_id]
         return len(node_immes) > 0 and node_immes[0].is_input
 
-    def build_detached_flow(self, out_immedinates: List[SymbolicImmediate], disable_handle: bool = True, nodes_to_merge: Optional[List[Tuple[Node, List[str]]]] = None):
+    def build_detached_flow(self, out_immedinates: List[SymbolicImmediate], disable_handle: bool = True):
         """Build flow with different config without modifying 
         the current symbolic flow states.
         Args:
