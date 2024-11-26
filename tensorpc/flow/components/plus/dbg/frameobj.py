@@ -78,7 +78,7 @@ class FrameObjectPreview(ObjectPreviewBase):
                         overflow="hidden")
         self._editor.event_editor_save.on(
             self._on_editor_save)
-        self._editor.event_editor_ready.on(
+        self._editor.event_component_ready.on(
             self._on_editor_ready)
         tabdefs = [
             mui.TabDef("",

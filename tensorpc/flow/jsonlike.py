@@ -779,6 +779,9 @@ class TreeItem(abc.ABC):
     async def handle_button(self, button_key: str) -> Optional[bool]:
         return None
 
+    async def handle_lazy_expand(self) -> Any:
+        return None
+
     async def handle_child_button(self, button_key: str,
                                   child_key: str) -> Optional[bool]:
         return None

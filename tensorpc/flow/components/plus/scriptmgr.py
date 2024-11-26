@@ -146,7 +146,7 @@ class ScriptManager(mui.FlexBox):
             mui.Divider("horizontal"),
             "app_show_box":
             self.app_show_box
-        }).prop(flex=1)
+        }).prop(flex=1, minHeight=0)
         self.scripts = mui.Autocomplete(
             "Scripts",
             [],
@@ -193,9 +193,11 @@ class ScriptManager(mui.FlexBox):
                   flexDirection="column",
                   width="100%",
                   height="100%",
+                  minHeight=0,
+                  minWidth=0,
                   overflow="hidden")
         self.code_editor.event_editor_save.on(self._on_editor_save)
-        self.code_editor.event_editor_ready.on(self._on_editor_ready)
+        self.code_editor.event_component_ready.on(self._on_editor_ready)
         self.scripts.event_select_new_item.on(self._on_new_script)
 
     @marker.mark_did_mount

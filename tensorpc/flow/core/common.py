@@ -82,7 +82,7 @@ _ONEARG_EVENTS = _ONEARG_EVENTS | _ONEARG_DATAGRID_EVENTS
 
 _NOARG_EVENTS = set([
     FrontendEventType.Click.value,
-    FrontendEventType.EditorReady.value,
+    FrontendEventType.ComponentReady.value,
     FrontendEventType.DoubleClick.value,
     FrontendEventType.EditorQueryState.value,
     FrontendEventType.Delete.value,

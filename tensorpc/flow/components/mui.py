@@ -1781,7 +1781,7 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
             FrontendEventType.EditorQueryState.value,
             FrontendEventType.EditorSave.value,
             FrontendEventType.EditorSaveState.value,
-            FrontendEventType.EditorReady.value,
+            FrontendEventType.ComponentReady.value,
             FrontendEventType.EditorAction.value,
             FrontendEventType.EditorCursorSelection.value,
         ]
@@ -1800,8 +1800,8 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         self.event_editor_save = self._create_event_slot(
             FrontendEventType.EditorSave,
             converter=lambda x: MonacoEditorSaveEvent(**x))
-        self.event_editor_ready = self._create_event_slot_noarg(
-            FrontendEventType.EditorReady)
+        self.event_component_ready = self._create_event_slot_noarg(
+            FrontendEventType.ComponentReady)
         self.event_editor_action = self._create_event_slot(
             FrontendEventType.EditorAction, converter=lambda x: MonacoEditorActionEvent(**x))
         self.event_editor_save.on(self._default_on_editor_save)

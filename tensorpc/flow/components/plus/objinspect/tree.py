@@ -28,7 +28,7 @@ from tensorpc.flow.components.plus.core import (
     ALL_OBJECT_LAYOUT_HANDLERS, ALL_OBJECT_PREVIEW_HANDLERS,
     USER_OBJ_TREE_TYPES, ContextMenuType, CustomTreeItemHandler,
     ObjectLayoutCreator, ObjectLayoutHandler)
-from tensorpc.flow.core.component import FlowSpecialMethods, FrontendEventType
+from tensorpc.flow.core.component import EventSlotEmitter, FlowSpecialMethods, FrontendEventType
 from tensorpc.flow.core.coretypes import TreeDragTarget
 from tensorpc.flow.core.objtree import UserObjTree, UserObjTreeProtocol
 from tensorpc.flow.core.reload import reload_object_methods
@@ -228,6 +228,7 @@ class BasicTreeEventType(enum.IntEnum):
 
 @dataclasses.dataclass
 class SelectSingleEvent:
+    uid: UniqueTreeIdForTree
     nodes: List[mui.JsonLikeNode]
     objs: Optional[List[Any]] = None
 
@@ -303,7 +304,7 @@ class BasicObjectTree(mui.FlexBox):
                                          backend_only=True)
         self.default_expand_level = default_expand_level
 
-        self.event_async_select_single = self._create_emitter_event_slot(
+        self.event_async_select_single: EventSlotEmitter[SelectSingleEvent] = self._create_emitter_event_slot(
             BasicTreeEventType.SelectSingle)
 
     @mark_did_mount
@@ -443,9 +444,9 @@ class BasicObjectTree(mui.FlexBox):
         return await self.flow_event_emitter.emit_async(
             BasicTreeEventType.SelectSingle,
             mui.Event(BasicTreeEventType.SelectSingle,
-                      SelectSingleEvent(nodes, objs if found else None)))
+                      SelectSingleEvent(uid_obj, nodes, objs if found else None)))
 
-    async def _on_expand(self, uid_encoded: str):
+    async def _on_expand(self, uid_encoded: str, lazy_expand_event: bool = True):
         with enter_tree_context(TreeContext(self._tree_parser, self.tree,
                                             self)):
             uid = UniqueTreeIdForTree(uid_encoded)
@@ -501,6 +502,8 @@ class BasicObjectTree(mui.FlexBox):
                     obj_dict, node.id)
             node.children = tree
             upd = self.tree.update_event(tree=self._objinspect_root)
+            if isinstance(obj, TreeItem) and lazy_expand_event:
+                await obj.handle_lazy_expand()
             return await self.tree.send_and_wait(upd)
 
     async def _on_rename(self, uid_newname: Tuple[str, str]):

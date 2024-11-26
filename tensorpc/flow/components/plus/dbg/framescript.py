@@ -109,7 +109,7 @@ class FrameScript(mui.FlexBox):
                   overflow="hidden")
         self.code_editor.event_editor_save.on(
             self._on_editor_save)
-        self.code_editor.event_editor_ready.on(
+        self.code_editor.event_component_ready.on(
             self._on_editor_ready)
         self.scripts.event_select_new_item.on(
             self._on_new_script)

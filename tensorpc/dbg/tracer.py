@@ -8,6 +8,7 @@ import random
 import tempfile
 import threading
 import time
+import traceback
 from typing import Any, Dict, List, Optional, Tuple
 from typing_extensions import Literal
 
@@ -217,7 +218,7 @@ class DebugTracerWrapper:
                     digits = 1
                 # pad zeros to meta.rank
                 rank_padded_str = str(
-                    meta.rank).zfill(digits) + "0" * MAX_FLOW_ID_NUM_PAD
+                    meta.rank + 1).zfill(digits) + "0" * MAX_FLOW_ID_NUM_PAD
                 if suppress_user_anno:
                     data = data.replace(
                         b'"ph": "X", "cat": "user_annotation"',
@@ -286,6 +287,38 @@ class DebugTracerWrapper:
                 # pth_trace_dict = json.loads(data)
                 # if "baseTimeNanoseconds" in pth_trace_dict:
                 #     base_ts = pth_trace_dict["baseTimeNanoseconds"]
+        if self._trace_cfg is not None and self._trace_cfg.profile_memory:
+            # load pytorch data, filter memory instant events, then construct counter events
+            try:
+                pth_trace_dict = json.loads(data)
+                if "baseTimeNanoseconds" in pth_trace_dict:
+                    base_ts = pth_trace_dict["baseTimeNanoseconds"]
+            except:
+                # in some pytorch version, json is not valid
+                traceback.print_exc()
+                return data, base_ts
+            pid = os.getpid()
+            if base_ts is not None:
+                base_ts_us = base_ts / 1000.0
+            else:
+                base_ts_us = 0
+            for ev in pth_trace_dict["traceEvents"]:
+                if (ev["ph"] == "I" or ev["ph"] == "i") and "args" in ev:
+                    if "Total Allocated" in ev["args"]:
+                        total_alloc = ev["args"]["Total Allocated"]
+                        total_reserv = ev["args"]["Total Reserved"]
+                        if ev["args"]["Device Id"] >= 0:
+                            external_events.append({
+                                "name": "pth_memory",
+                                "ph": "C",
+                                "pid": pid,
+                                "tid": 0,
+                                "ts": ev["ts"] + base_ts_us,
+                                "args": {
+                                    "Total Allocated": total_alloc,
+                                    "Total Reserved": total_reserv,
+                                },
+                            })
         return data, base_ts
 
     def _filter_viztracer_data_inplace(self, data: Dict[str, Any]):

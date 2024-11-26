@@ -1,4 +1,10 @@
 # Changelog
+
+# [0.13.0] - 2024-11-2x
+### Added 
+- add pytorch `torch.export` flow graph support
+- BREAKING CHANGE: change implementation of component event handling, you must use devflow v0.13.x to work with this version.
+
 # [0.12.0] - 2024-10-2x
 ### Added 
 - add remote component support.

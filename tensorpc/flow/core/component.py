@@ -375,7 +375,9 @@ class FrontendEventType(enum.IntEnum):
     Drag = 24
     Drop = 25
     SelectNewItem = 26
+    Error = 27
     ContextMenuSelect = 28
+    ComponentReady = 29
 
     TreeLazyExpand = 30
     TreeItemSelectChange = 31
@@ -396,7 +398,6 @@ class FrontendEventType(enum.IntEnum):
     EditorChange = 51
     EditorQueryState = 52
     EditorSaveState = 53
-    EditorReady = 54
     EditorAction = 55
     EditorCursorSelection = 56
 
@@ -1114,6 +1115,10 @@ class _EventSlotBase:
                                            dont_send_to_backend=True)
         return self
 
+    def clear(self):
+        self.comp.remove_event_handlers(self.event_type)
+        return self
+
 
 class EventSlot(_EventSlotBase, Generic[TEventData]):
 
@@ -1175,6 +1180,9 @@ class _EventSlotEmitterBase:
         self.emitter.on(self.event_type, handler)
         return self
 
+    def clear(self):
+        self.emitter.remove_all_listeners(self.event_type)
+        return self
 
 class EventSlotEmitter(_EventSlotEmitterBase, Generic[TEventData]):
     # TODO remove this
@@ -1541,7 +1549,7 @@ class Component(Generic[T_base_props, T_child]):
             self._task = None
         self._parent = ""
 
-    async def _cancel_task(self):
+    async def _cancel_task(self, source: str = ""):
         # ignore all task error here.
         if self._task is not None:
             self._task.cancel()
@@ -2608,7 +2616,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         for deleted_uid, deleted in removed_dict.items():
             if comp_dont_need_cancel is not None and comp_dont_need_cancel == deleted_uid:
                 continue
-            await deleted._cancel_task()
+            await deleted._cancel_task(f"set_new_layout-{deleted_uid}-{type(deleted)}")
         await self.put_app_event(new_ev)
         if post_ev_creator is not None:
             await self.put_app_event(post_ev_creator())
@@ -2655,7 +2663,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         for k, comp in detached_uid_to_comp.items():
             if comp_dont_need_cancel is not None and comp_dont_need_cancel == k:
                 continue
-            await comp._cancel_task()
+            await comp._cancel_task("remove_childs_by_keys")
         for k in keys:
             self._child_comps.pop(k)
         if not detached_uid_to_comp:
@@ -2765,7 +2773,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         for deleted_uid, deleted in removed_dict.items():
             if comp_dont_need_cancel == deleted_uid:
                 continue
-            await deleted._cancel_task()
+            await deleted._cancel_task("update_childs")
         # if post_ev_creator is not None:
         #     new_ev = new_ev + post_ev_creator()
         await self.put_app_event(new_ev)
