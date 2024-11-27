@@ -47,6 +47,9 @@ class FlowFitViewOptions:
     maxZoom: Union[Undefined, int] = undefined
 
 
+NodeTypeLiteral: TypeAlias = Literal["app", "appTemplate", "input", "default", "output",
+                            "group"]
+
 @dataclasses.dataclass
 class FlowProps(ContainerBaseProps):
     className: Union[Undefined, str] = undefined
@@ -114,9 +117,7 @@ class FlowProps(ContainerBaseProps):
     paneContextMenuItems: Union[Undefined, List[MenuItem]] = undefined
     nodeContextMenuItems: Union[Undefined, List[MenuItem]] = undefined
     nodeTypeMap: Union[Undefined,
-                       Dict[str,
-                            Literal["app", "appTemplate", "input", "default",
-                                    "output", "group"]]] = undefined
+                       Dict[str, NodeTypeLiteral]] = undefined
     preventCycle: Union[Undefined, bool] = undefined
 
     invisiblizeAllResizer: Union[Undefined, bool] = undefined
@@ -141,6 +142,9 @@ class NodeData:
     label: Union[Undefined, str] = undefined
     sourceEdgeOverrides: Union[Undefined, Dict[str, Any]] = undefined
     contextMenuItems: Union[Undefined, List[MenuItem]] = undefined
+    # used by default nodes with multiple handles
+    sourceHandleIds: Union[Undefined, List[Optional[str]]] = undefined
+    targetHandleIds: Union[Undefined, List[Optional[str]]] = undefined
 
 
 @dataclasses.dataclass
@@ -644,7 +648,11 @@ class FlowInternals:
         return res_internals
 
 class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
-
+    """
+    ## Style
+    you can use official css to style the flow component.
+    We also provide `react-flow__node__content` to style texts in reactflow default nodes.
+    """
     @dataclasses.dataclass
     class ChildDef:
         nodes: List[Node]
@@ -734,7 +742,8 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
     def create_unique_edge_id(self, id: str):
         return self._internals.unique_name_pool_edge(id)
 
-    def _find_comps_in_dataclass(self, child: "Flow.ChildDef"):
+    def _find_comps_in_dataclass(self, child: DataclassType):
+        assert isinstance(child, Flow.ChildDef)
         unique_name_pool = UniqueNamePool()
         res: List[Tuple[Component, str]] = []
         for node in child.nodes:
@@ -1437,9 +1446,7 @@ class SymbolicGraphOutput(Generic[T, T_edge]):
     nodes: List[Node]
     edges: List[Edge]
     node_type_map: Union[Undefined,
-                         Dict[str,
-                              Literal["app", "input", "default", "output",
-                                      "group", "appTemplate"]]] = undefined
+                         Dict[str, NodeTypeLiteral]] = undefined
     node_id_to_data: Dict[str, T] = dataclasses.field(default_factory=dict)
     edge_id_to_data: Dict[str,
                           T_edge] = dataclasses.field(default_factory=dict)
@@ -1448,7 +1455,7 @@ class SymbolicGraphOutput(Generic[T, T_edge]):
 class SymbolicFlowBuilder(Generic[T, T_edge]):
     """A symbolic flow builder to help you build symbolic flow."""
 
-    def __init__(self):
+    def __init__(self, use_multiple_handle_node: bool = False) -> None:
         # self._internals.id_to_node: Dict[str, Node] = {}
         self._id_to_node_data: Dict[str, T] = {}
         # _id_to_edge_data use userdata in SymbolicImmediate, added when a new edge is created
@@ -1465,6 +1472,9 @@ class SymbolicFlowBuilder(Generic[T, T_edge]):
 
         self._unique_name_pool = UniqueNamePool()
         self._unique_name_pool_edge = UniqueNamePool()
+        self._use_multiple_handle_node = use_multiple_handle_node
+        self._input_node_type = "input"
+        self._output_node_type = "output"
 
     def create_input(self,
                      name: Optional[str] = None,
@@ -1477,7 +1487,7 @@ class SymbolicFlowBuilder(Generic[T, T_edge]):
         node_id = self._unique_name_pool(imme_id)
         node = self.create_op_node(name if name is not None else "Input", [],
                                    [None],
-                                   type="input",
+                                   type=self._input_node_type,
                                    node_id=node_id)
         res = SymbolicImmediate(id=imme_id,
                                 source_id=node.id,
@@ -1508,9 +1518,12 @@ class SymbolicFlowBuilder(Generic[T, T_edge]):
         assert node_id not in self._internals.node_id_to_out_handle_to_edges
         self._internals.node_id_to_inp_handle_to_edges[node_id] = {}
         self._internals.node_id_to_out_handle_to_edges[node_id] = {}
-        node = Node(id=node_id, data=NodeData(label=name))
+        node_data_base = NodeData(label=name)
+        node = Node(id=node_id, data=node_data_base)
         if type is not None:
             node.type = type
+        node_data_base.sourceHandleIds = inp_handles
+        node_data_base.targetHandleIds = out_handles
         self._internals.id_to_node[node_id] = node
         # fill _node_id_to_out_handle_to_edges and _node_id_to_inp_handle_to_edges
         for handle in inp_handles:
@@ -1625,7 +1638,7 @@ class SymbolicFlowBuilder(Generic[T, T_edge]):
             node_id = node_umap_copy(imme_id)
             node = Node(id=node_id,
                         data=NodeData(label=imme_id),
-                        type="output")
+                        type=self._output_node_type)
             out_nodes.append(node)
             if out_node_datas is not None:
                 self._id_to_node_data[node_id] = out_node_datas[i]
@@ -1661,14 +1674,12 @@ class SymbolicFlowBuilder(Generic[T, T_edge]):
 
         default_node_types = set(
             ["app", "input", "default", "output", "group", "appTemplate"])
-        node_type_map: Dict[str, Literal["app", "input", "default", "output",
-                                         "group", "appTemplate"]] = {}
+        node_type_map: Dict[str, NodeTypeLiteral] = {}
         for node in all_nodes:
             if not isinstance(node.type, Undefined):
                 if node.type not in default_node_types:
                     is_inp = self.is_node_input(node.id)
                     node_type_map[node.type] = "input" if is_inp else "default"
-
         if node_type_map:
             node_type_map_res = node_type_map
         else:

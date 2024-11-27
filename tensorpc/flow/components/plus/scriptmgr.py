@@ -139,14 +139,19 @@ class ScriptManager(mui.FlexBox):
                                                             minWidth=0)
         self.app_show_box = mui.FlexBox()  # .prop(flex=1)
 
-        self.code_editor_container = mui.HBox({
-            "editor":
-            self.code_editor,
-            "divider":
-            mui.Divider("horizontal"),
-            "app_show_box":
-            self.app_show_box
-        }).prop(flex=1, minHeight=0)
+        # self.code_editor_container = mui.HBox({
+        #     "editor":
+        #     self.code_editor,
+        #     "divider":
+        #     mui.Divider("horizontal"),
+        #     "app_show_box":
+        #     self.app_show_box
+        # }).prop(flex=1, minHeight=0)
+        self.code_editor_container = mui.Allotment(mui.Allotment.ChildDef([
+            mui.Allotment.Pane(self.code_editor.prop(height="100%")),
+            mui.Allotment.Pane(self.app_show_box.prop(height="100%"), visible=False),
+        ])).prop(flex=1, minHeight=0)
+
         self.scripts = mui.Autocomplete(
             "Scripts",
             [],
@@ -328,9 +333,12 @@ class ScriptManager(mui.FlexBox):
     async def _on_lang_select(self, value):
         if value != "app":
             await self.app_show_box.set_new_layout({})
-        await self.send_and_wait(
-            self.app_show_box.update_event(
-                flex=1 if value == "app" else mui.undefined))
+        # await self.send_and_wait(
+        #     self.app_show_box.update_event(
+        #         flex=1 if value == "app" else mui.undefined))
+        await self.code_editor_container.update_pane_props(1, {
+            "visible": True if value == "app" else False
+        })
 
         if self.scripts.value is not None:
             storage_key = self.scripts.value["storage_key"]
@@ -392,9 +400,12 @@ class ScriptManager(mui.FlexBox):
                                        self._storage_node_rid, self._graph_id)
         if lang != "app":
             await self.app_show_box.set_new_layout({})
-        await self.send_and_wait(
-            self.app_show_box.update_event(
-                flex=1 if lang == "app" else mui.undefined))
+        await self.code_editor_container.update_pane_props(1, {
+            "visible": True if lang == "app" else False
+        })
+        # await self.send_and_wait(
+        #     self.app_show_box.update_event(
+        #         flex=1 if lang == "app" else mui.undefined))
         await self.send_and_wait(
             self.code_editor.update_event(
                 language=_LANG_TO_VSCODE_MAPPING[lang],
@@ -427,9 +438,12 @@ class ScriptManager(mui.FlexBox):
                                               self._storage_node_rid,
                                               self._graph_id)
         assert isinstance(item, Script)
-        await self.send_and_wait(
-            self.app_show_box.update_event(
-                flex=1 if item.lang == "app" else mui.undefined))
+        # await self.send_and_wait(
+        #     self.app_show_box.update_event(
+        #         flex=1 if item.lang == "app" else mui.undefined))
+        await self.code_editor_container.update_pane_props(1, {
+            "visible": True if item.lang == "app" else False
+        })
 
         await self.langs.set_value(item.lang)
         await self.send_and_wait(

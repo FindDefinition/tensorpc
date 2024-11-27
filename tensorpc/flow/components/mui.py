@@ -573,6 +573,7 @@ class IconType(enum.IntEnum):
     Link = 66
     LinkOff = 67
     Search = 68
+    Info = 69
 
 
 @dataclasses.dataclass
@@ -4084,6 +4085,9 @@ class JsonViewer(MUIComponentBase[JsonViewerProps]):
         super().__init__(UIType.JsonViewer, JsonViewerProps)
         self.props.data = init_data
 
+    async def write(self, data: Any):
+        await self.send_and_wait(self.update_event(data=data))
+
     @property
     def prop(self):
         propcls = self.propcls
@@ -4311,18 +4315,21 @@ class JsonLikeTree(JsonLikeTreeBase[JsonLikeTreeProps]):
     async def select(self, ids: List[str]):
         await self.send_and_wait(self.update_event(rowSelection=ids))
 
-    async def expand_all(self):
+    async def expand_all(self, use_comp_event: bool = False):
         if self.props.ignoreRoot == True:
             all_expandable = self.get_all_expandable_node_ids(
                 self.props.tree.children)
         else:
             all_expandable = self.get_all_expandable_node_ids(
                 [self.props.tree])
-        self.props.expanded = all_expandable
-        return await self.send_and_wait(
-            self.create_comp_event({
-                "type": _TreeControlType.ExpandAll,
-            }))
+        if use_comp_event:
+            self.props.expanded = all_expandable
+            return await self.send_and_wait(
+                self.create_comp_event({
+                    "type": _TreeControlType.ExpandAll,
+                }))
+        else:
+            return await self.send_and_wait(self.update_event(expanded=all_expandable))
 
 
 class TanstackJsonLikeTree(JsonLikeTreeBase[TanstackJsonLikeTreeProps]):
@@ -4375,18 +4382,21 @@ class TanstackJsonLikeTree(JsonLikeTreeBase[TanstackJsonLikeTreeProps]):
             self.update_event(rowSelection={k: True
                                             for k in ids}))
 
-    async def expand_all(self):
+    async def expand_all(self, use_comp_event: bool = False):
         if self.props.ignoreRoot == True:
             all_expandable = self.get_all_expandable_node_ids(
                 self.props.tree.children)
         else:
             all_expandable = self.get_all_expandable_node_ids(
                 [self.props.tree])
-        self.props.expanded = {k: True for k in all_expandable}
-        return await self.send_and_wait(
-            self.create_comp_event({
-                "type": _TreeControlType.ExpandAll,
-            }))
+        if use_comp_event:
+            self.props.expanded = {k: True for k in all_expandable}
+            return await self.send_and_wait(
+                self.create_comp_event({
+                    "type": _TreeControlType.ExpandAll,
+                }))
+        else:
+            return await self.send_and_wait(self.update_event(expanded={k: True for k in all_expandable}))
 
 
 class RawJsonLikeTreeBase(MUIComponentBase[T_raw_tview_base_props]):
@@ -4520,7 +4530,7 @@ class RawTanstackJsonLikeTree(RawJsonLikeTreeBase[RawTanstackJsonLikeTreeProps])
             self.update_event(rowSelection={k: True
                                             for k in ids}))
 
-    async def expand_all(self):
+    async def expand_all(self, use_comp_event: bool = False):
         tree_root = self.props.tree
         if isinstance(tree_root, bytes):
             raise ValueError("expand all not supported for binary data")
@@ -4531,11 +4541,14 @@ class RawTanstackJsonLikeTree(RawJsonLikeTreeBase[RawTanstackJsonLikeTreeProps])
         else:
             all_expandable = self.get_all_expandable_node_ids(
                 [tree_root])
-        self.props.expanded = {k: True for k in all_expandable}
-        return await self.send_and_wait(
-            self.create_comp_event({
-                "type": _TreeControlType.ExpandAll,
-            }))
+        if use_comp_event:
+            self.props.expanded = {k: True for k in all_expandable}
+            return await self.send_and_wait(
+                self.create_comp_event({
+                    "type": _TreeControlType.ExpandAll,
+                }))
+        else:
+            return await self.send_and_wait(self.update_event(expanded={k: True for k in all_expandable}))
 
 class ControlNodeType(enum.IntEnum):
     Number = 0

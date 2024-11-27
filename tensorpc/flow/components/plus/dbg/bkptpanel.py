@@ -12,11 +12,12 @@ from tensorpc.flow import appctx
 from tensorpc.flow.components import chart, mui
 from tensorpc.flow.components.plus.config import ConfigDialogEvent, ConfigPanelDialog
 from tensorpc.flow.components.plus.dbg.frameobj import FrameObjectPreview
+from tensorpc.flow.components.plus.dbg.perfetto_utils import zip_trace_result
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
 from tensorpc.flow.components.plus.scriptmgr import ScriptManager
 from tensorpc.flow.components.plus.styles import CodeStyles
 from tensorpc.flow.components.plus.objinspect.inspector import ObjectInspector
-from tensorpc.dbg.constants import BackgroundDebugToolsConfig, DebugFrameInfo, DebugFrameState, RecordMode, TracerConfig, TracerUIConfig
+from tensorpc.dbg.constants import BackgroundDebugToolsConfig, DebugFrameInfo, DebugFrameState, RecordMode, TracerConfig, TracerSingleResult, TracerUIConfig
 from tensorpc.utils.loader import FrameModuleMeta
 from .framescript import FrameScript
 
@@ -308,5 +309,6 @@ class BreakpointDebugPanel(mui.FlexBox):
             expr, obj)
         # await self.tree_viewer.set_obj_preview_layout(obj, header=expr)
 
-    async def set_perfetto_data(self, data: bytes):
-        await self._perfetto.set_trace_data(data, title="trace")
+    async def set_perfetto_data(self, trace_res: TracerSingleResult):
+        zip_data = zip_trace_result([trace_res.data], [trace_res.external_events])
+        await self._perfetto.set_trace_data(zip_data, title="trace")

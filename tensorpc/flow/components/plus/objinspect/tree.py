@@ -446,6 +446,16 @@ class BasicObjectTree(mui.FlexBox):
             mui.Event(BasicTreeEventType.SelectSingle,
                       SelectSingleEvent(uid_obj, nodes, objs if found else None)))
 
+    def _get_new_expanded_event(self, new_tree: mui.JsonLikeNode, new_node_id: UniqueTreeIdForTree):
+        if isinstance(self.tree, mui.TanstackJsonLikeTree):
+            if not isinstance(self.tree.props.expanded, bool):
+                self.tree.props.expanded[new_node_id.uid_encoded] = True
+                return self.tree.update_event(tree=new_tree, expanded=self.tree.props.expanded)
+            return self.tree.update_event(tree=new_tree)
+        else:
+            self.tree.props.expanded.append(new_node_id.uid_encoded)
+            return self.tree.update_event(tree=new_tree, expanded=self.tree.props.expanded)
+
     async def _on_expand(self, uid_encoded: str, lazy_expand_event: bool = True):
         with enter_tree_context(TreeContext(self._tree_parser, self.tree,
                                             self)):
@@ -480,14 +490,14 @@ class BasicObjectTree(mui.FlexBox):
                 tree = await self._tree_parser.parse_obj_dict_to_nodes(
                     obj_dict, node.id)
                 node.children = tree
-                upd = self.tree.update_event(tree=self._objinspect_root)
+                upd = self._get_new_expanded_event(self._objinspect_root, node.id)
                 return await self.tree.send_and_wait(upd)
             obj, found = await self._get_obj_by_uid(uid, nodes)
             if node.type in CONTAINER_TYPES and node._is_divisible(self.limit):
                 if node.type == mui.JsonLikeType.Dict.value:
                     node.keys = mui.BackendOnlyProp(list(obj.keys()))
                 node.children = node._get_divided_tree(self.limit, 0)
-                upd = self.tree.update_event(tree=self._objinspect_root)
+                upd = self._get_new_expanded_event(self._objinspect_root, node.id)
                 return await self.tree.send_and_wait(upd)
             # if not found, we expand (update) the deepest valid object.
             # if the object is special (extend TreeItem), we use used-defined
@@ -501,7 +511,7 @@ class BasicObjectTree(mui.FlexBox):
                 tree = await self._tree_parser.parse_obj_dict_to_nodes(
                     obj_dict, node.id)
             node.children = tree
-            upd = self.tree.update_event(tree=self._objinspect_root)
+            upd = self._get_new_expanded_event(self._objinspect_root, node.id)
             if isinstance(obj, TreeItem) and lazy_expand_event:
                 await obj.handle_lazy_expand()
             return await self.tree.send_and_wait(upd)

@@ -286,7 +286,7 @@ class BackgroundDebugTools:
                 TENSORPC_DBG_FRAME_INSPECTOR_KEY)
         assert isinstance(obj, BreakpointDebugPanel)
         with enter_app_context(app):
-            await obj.set_perfetto_data(trace_res.single_results[0].data)
+            await obj.set_perfetto_data(trace_res.single_results[0])
         for single_trace_res in trace_res.single_results:
             if single_trace_res.tracer_type == TracerType.VIZTRACER:
                 tv_obj, tv_app = prim.get_service(

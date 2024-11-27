@@ -1,6 +1,9 @@
 from functools import partial
+import inspect
+from pathlib import Path
+import time
 
-from sympy import expand
+from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.flow import mui, flowui, three, plus, appctx, mark_did_mount, mark_create_layout
 from tensorpc.flow.components.flowplus.network.pthfx import (
@@ -12,8 +15,13 @@ import torch.fx
 import torch.export
 import dataclasses
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple, Union
+from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
 from tensorpc.flow.components.plus.pthcommon import PytorchModuleTreeItem
-from tensorpc.flow.jsonlike import IconButtonData
+from tensorpc.flow.components.plus.styles import get_tight_icon_tab_theme, get_tight_icon_tab_theme_horizontal
+from tensorpc.flow.jsonlike import IconButtonData, as_dict_no_undefined
+from tensorpc.utils.rich_logging import get_logger
+from tensorpc import compat
+LOGGER = get_logger("tensorpc.flowui.pytorch")
 
 
 @dataclasses.dataclass
@@ -45,15 +53,66 @@ class PytorchModuleViewer(mui.FlexBox):
         self.is_external_mode = external_submodule_id is not None and external_pth_flow is not None and external_module is not None
         self._simple_tree = plus.BasicObjectTree(use_fast_tree=True,
                                                  clear_data_when_unmount=True)
-        self._info_container = mui.VBox([]).prop(margin="5px")
+        self._info_container = mui.VBox([]).prop(padding="5px", width="100%",
+                                                        height="100%",
+                                                        overflow="auto")
+        
+        self._args_tree = BasicObjectTree(use_fast_tree=True, clear_data_when_unmount=True).prop(flex=1)
+        self._args_container = mui.VBox([self._args_tree]).prop(padding="5px", width="100%",
+                                                        height="100%",
+                                                        overflow="hidden")
+        self._debug_json_tree = mui.JsonViewer()
+        self._dbg_container = mui.VBox([self._debug_json_tree]).prop(padding="5px", width="100%",
+                                                        height="100%",
+                                                        overflow="auto")
+        
+        self._stack_trace_container = mui.VBox([]).prop(padding="5px", width="100%",
+                                                        height="100%",
+                                                        overflow="auto")
+
+
+        tab_defs = [
+            mui.TabDef("",
+                       "Info",
+                       self._info_container,
+                       icon=mui.IconType.Info,
+                       tooltip="Info"),
+            mui.TabDef("",
+                       "Args",
+                       self._args_container,
+                       icon=mui.IconType.DataObject,
+                       tooltip="Args"),
+            mui.TabDef("",
+                       "StackTrace",
+                       self._stack_trace_container,
+                       icon=mui.IconType.Timeline,
+                       tooltip="stacktrace"),
+            mui.TabDef("",
+                       "Debug",
+                       self._dbg_container,
+                       icon=mui.IconType.BugReport,
+                       tooltip="Flow Debug Info"),
+        ]
+
+        self._tabs = mui.Tabs(tab_defs, init_value="Info").prop(panelProps=mui.FlexBoxProps(
+                                  width="100%", padding=0, overflow="hidden", flex=1),
+                                                  borderBottom=1,
+                                                  borderColor='divider')
+
+            # mui.ThemeProvider([mui.HBox([self._tabs]).prop(flex=1)],
+            #                   get_tight_icon_tab_theme()),
+
+        
         self._simple_tree.tree.prop(expansionIconTrigger=True)
         self._simple_tree.event_async_select_single.on(
             self._on_module_tree_select)
         self._side_container = mui.VBox([
             self._simple_tree.prop(flex=1),
-            mui.Divider(),
-            self._info_container.prop(flex=1, overflow="auto"),
-        ]).prop(height="100%")
+                mui.Divider(),
+                mui.VBox([
+                    mui.ThemeProvider([self._tabs], get_tight_icon_tab_theme_horizontal())
+                ]).prop(flex=1, overflow="hidden"),
+        ]).prop(height="100%", overflow="hidden")
         node_menu_items = [
             mui.MenuItem("expand", "Expand Node"),
             mui.MenuItem("subflow", "Show Sub Flow"),
@@ -82,9 +141,10 @@ class PytorchModuleViewer(mui.FlexBox):
                 mui.Allotment.Pane(self._side_container),
             ])).prop(defaultSizes=[200, 100])
         self._subflow_dialog = mui.Dialog([])
-        self._subflow_dialog.prop(height="70vh",
-                                  width="70vw",
-                                  dialogMaxWidth="xl")
+        self._subflow_dialog.prop(height="80vh",
+                                  width="80vw",
+                                  dialogMaxWidth="xl",
+                                  includeFormControl=False)
         self._subflow_dialog.event_modal_close.on(
             self._handle_subflow_dialog_close)
         if not self.is_external_mode:
@@ -97,6 +157,16 @@ class PytorchModuleViewer(mui.FlexBox):
                 self.global_container,
             ])
         self.prop(width="100%", height="100%", overflow="hidden")
+        self.graph_container.update_raw_props({
+            ".react-flow__node__content": {
+                # add ellipsis to node text
+                "overflow": "hidden",
+                "textOverflow": "ellipsis",
+                "whiteSpace": "nowrap",
+                "width": "100%",
+            }
+        })
+
         self._external_ftree_id = external_ftree_id
         self._external_submodule_id = external_submodule_id
         self._cur_pth_flow: Optional[PytorchFlowOutput] = None
@@ -122,6 +192,7 @@ class PytorchModuleViewer(mui.FlexBox):
             ext_mod_id = self._external_submodule_id
         merged_graph_res = pth_flow.create_graph_with_expanded_modules(
             self._current_state.expanded,
+            module=self._cur_module,
             submodule_id=ext_mod_id,
             submodule_id_is_module=self._external_ftree_id is None)
         self._cur_graph_metadata = merged_graph_res
@@ -165,7 +236,7 @@ class PytorchModuleViewer(mui.FlexBox):
                                                self._cur_module)
 
     def _patch_module_uid(self, module_uid: str):
-        if self._external_submodule_id is None:
+        if self._external_submodule_id is None or self._external_submodule_id == "":
             return module_uid
         # module_uid has format ["root", ""] + module_parts
         # _external_submodule_id don't contains prefix ["root", ""]
@@ -181,11 +252,13 @@ class PytorchModuleViewer(mui.FlexBox):
             selections: List[str] = []
             for k, v in self._cur_graph_metadata.node_id_to_data.items():
                 module_id = v.module_id
-                if module_id is not None:
-                    module_id_str = ".".join(module_id.parts)
-                    if module_id_str.startswith(module_uid_to_sel):
-                        selections.append(k)
-                        continue
+                # TODO we don't clear node_id_to_data when create subflow. should we clear?
+                if k in self._cur_graph_metadata.id_to_nodes:
+                    if module_id is not None:
+                        module_id_str = ".".join(module_id.parts)
+                        if module_id_str.startswith(module_uid_to_sel):
+                            selections.append(k)
+                            continue
             await self.graph.select_nodes(selections)
             await self.graph.locate_nodes(selections,
                                           keep_zoom=True,
@@ -206,6 +279,8 @@ class PytorchModuleViewer(mui.FlexBox):
         parts = uid_str_patched.split(".")
         module_uid_to_sel = ".".join(
             parts[2:])  # first part is "root", second part is ""
+        # print([ev.uid, self._external_submodule_id, self._external_ftree_id, module_uid_to_sel])
+
         return await self._module_tree_select(module_uid_to_sel)
 
     async def _handle_subflow_dialog_close(self, ev: mui.DialogCloseEvent):
@@ -244,7 +319,7 @@ class PytorchModuleViewer(mui.FlexBox):
     async def _on_tree_item_lazy_expand(self, module_id: str):
         # we already set prefix to external_module_id if exists
         # so we don't need to patch here.
-        dagre = flowui.DagreLayoutOptions(ranksep=20, )
+        dagre = self._dagre_options
         if self._current_state is not None and self._cur_pth_flow is not None:
             new_ids = [module_id]
             for expanded_module_id in self._current_state.expanded:
@@ -257,6 +332,7 @@ class PytorchModuleViewer(mui.FlexBox):
                 ext_mod_id = self._external_submodule_id
             merged_graph_res = self._cur_pth_flow.create_graph_with_expanded_modules(
                 self._current_state.expanded,
+                module=self._cur_module,
                 submodule_id=ext_mod_id,
                 submodule_id_is_module=self._external_ftree_id is None)
             await self.graph.set_flow_and_do_dagre_layout(
@@ -285,10 +361,14 @@ class PytorchModuleViewer(mui.FlexBox):
                                     kwargs: Optional[Dict[str, Any]] = None):
         if self.is_external_mode:
             raise ValueError("Cannot export module to flow in external mode")
+        t = time.time()
+        mod_qname = get_qualname_of_type(type(module))
         with torch.device("meta"):
             mod_meta = module.to("meta")
+            LOGGER.warning(f"Start export {mod_qname}")
             gm = torch.export.export(mod_meta, args, kwargs)
-        builder = PytorchExportBuilder()
+        LOGGER.warning(f"Export {mod_qname} time: {time.time() - t}")
+        builder = PytorchExportBuilder(use_multiple_handle_node=False)
         interpreter = FlowUIInterpreter(gm, builder, module, verbose=False)
         outputs = interpreter.run_on_graph_placeholders()
         assert isinstance(outputs, (list, tuple))
@@ -339,6 +419,7 @@ class PytorchModuleViewer(mui.FlexBox):
                             state.expanded.append(module_id_str)
                             merged_graph_res = pth_flow.create_graph_with_expanded_modules(
                                 state.expanded,
+                                module=self._cur_module,
                                 submodule_id=ext_mod_id,
                                 submodule_id_is_module=self._external_ftree_id
                                 is None)
@@ -378,18 +459,51 @@ class PytorchModuleViewer(mui.FlexBox):
     async def _on_selection_change(self, ev: flowui.EventSelection):
         if ev.nodes and len(ev.nodes) == 1:
             node_id = ev.nodes[0]
+            if self._cur_graph_metadata is not None:
+                node = self._cur_graph_metadata.id_to_nodes[node_id]
+                node_json = as_dict_no_undefined(node)
+                inp_edges: List[flowui.Edge] = []
+                for edges in self._cur_graph_metadata.node_id_to_inp_handle_to_edges[node_id].values():
+                    inp_edges.extend(edges)
+                out_edges: List[flowui.Edge] = []
+                for edges in self._cur_graph_metadata.node_id_to_out_handle_to_edges[node_id].values():
+                    out_edges.extend(edges)
+                await self._debug_json_tree.write({
+                    "node": node_json,
+                    "inp_edges": [as_dict_no_undefined(e) for e in inp_edges],
+                    "out_edges": [as_dict_no_undefined(e) for e in out_edges],
+                })
             if self._cur_graph_metadata is not None and self._cur_module is not None:
                 if node_id in self._cur_graph_metadata.node_id_to_data:
+                    node = self._cur_graph_metadata.id_to_nodes[node_id]
                     data = self._cur_graph_metadata.node_id_to_data[node_id]
-                    layouts: List[mui.MUIComponentBase] = []
+                    layouts: List[Union[mui.MUIComponentBase, mui.MUIContainerBase]] = []
                     module_id = data.module_id
                     qname = data.module_qname
+                    if data.additional_args is not None:
+                        await self._args_tree.set_root_object_dict(data.additional_args)
+                        await self._args_tree.expand_all()
+                    else:
+                        await self._args_tree.set_root_object_dict({})
+                    if data.stack_trace is not None:
+                        await self._stack_trace_container.set_new_layout([
+                            mui.Markdown(f"```\n{data.stack_trace}\n```")
+                        ])
+                        # await self._stack_trace_container.set_new_layout([
+                        #     mui.Typography(f"{data.stack_trace}")
+                        # ])
+
+                    else:
+                        await self._stack_trace_container.set_new_layout([])
                     if data.is_io_node:
                         if data.output_desps is not None:
                             out = data.output_desps[0]
                             type_str, shape = self._get_shape_type_from_raw(
                                 out)
-                            layouts.append(mui.Markdown(f"`{type_str}`"))
+                            if not isinstance(node.data, mui.Undefined) and not isinstance(node.data.label, mui.Undefined):
+                                layouts.append(mui.Markdown(f"`{node.data.label}`: `{type_str}`"))
+                            else:
+                                layouts.append(mui.Markdown(f"`{type_str}`"))
                             layouts.append(mui.Markdown(f"`{shape}`"))
                     else:
                         if module_id is not None and qname is not None:
@@ -402,25 +516,54 @@ class PytorchModuleViewer(mui.FlexBox):
                                         self._external_submodule_id) + 1:]
                             try:
                                 module = self._cur_module.get_submodule(module_id_str)
+                                copy_data = None
+                                try:
+                                    if compat.Python3_13AndLater:
+                                        lineno = type(module).__firstlineno__ # type: ignore
+                                    else:
+                                        _, lineno = inspect.getsourcelines(type(module))
+                                    path = inspect.getabsfile(type(module))
+                                    Path(path).exists()
+                                    copy_data = f"{path}:({lineno})"
+                                except:
+                                    pass
                                 layouts.append(
-                                    mui.Markdown(f"`Module`: `{qname}`"))
-                                layouts.append(
-                                    mui.Markdown(f"`id`: `{module_id_str}`"))
+                                    mui.Markdown(f":deepskyblue[`{qname}`]"))
+                                if data.is_merged:
+                                    id_or_op_md = mui.Markdown(f"`id`: `{module_id_str}`")
+                                else:
+                                    id_or_op_md = mui.Markdown(f":forestgreen[`{data.op}`]")
+                                if copy_data is not None:
+                                    btn = mui.IconButton(mui.IconType.ContentCopy, partial(appctx.copy_text_to_clipboard, copy_data))
+                                    btn.prop(size="small", iconSize="small")
+                                    layouts.append(
+                                        mui.HBox([
+                                            btn,
+                                            id_or_op_md,
+                                        ]))
+                                else:
+                                    layouts.append(
+                                        id_or_op_md)
+
                                 is_seq = "Sequential" in qname
                                 is_module_list = "ModuleList" in qname
                                 is_module_dict = "ModuleDict" in qname
                                 is_container = is_seq or is_module_list or is_module_dict
                                 if qname.startswith("torch.") and not is_container:
                                     # official torch module
-                                    layouts.append(mui.Divider())
+                                    param_md_lines: List[str] = []
                                     for name, param in module.named_parameters():
                                         shape_str = ",".join(map(str, param.shape))
-                                        layouts.append(
-                                            mui.Markdown(f"`{name}(P)`: `[{shape_str}]`"))
+                                        param_md_lines.append(
+                                            f"* `{name}(P)`: `[{shape_str}]`")
                                     for name, param in module.named_buffers():
                                         shape_str = ",".join(map(str, param.shape))
+                                        param_md_lines.append(
+                                            f"* `{name}(B)`: `[{shape_str}]`")
+                                    if param_md_lines:
+                                        layouts.append(mui.Divider())
                                         layouts.append(
-                                            mui.Markdown(f"`{name}(B)`: `[{shape_str}]`"))
+                                            mui.Markdown("\n".join(param_md_lines)))
 
                             except AttributeError:
                                 pass
@@ -428,9 +571,10 @@ class PytorchModuleViewer(mui.FlexBox):
 
                             inp_handle_to_edges = self._cur_graph_metadata.node_id_to_inp_handle_to_edges[node_id]
                             out_handle_to_edges = self._cur_graph_metadata.node_id_to_out_handle_to_edges[node_id]
-                            md_lines = []
                             for i, handle_to_edges in enumerate([inp_handle_to_edges, out_handle_to_edges]):
-                                md_lines.append("#### Inputs" if i == 0 else "#### Outputs")
+                                btns: List[mui.Button] = []
+                                layouts.append(mui.Typography(
+                                    "Inputs" if i == 0 else "Outputs").prop(variant="body1"))
                                 for handle, edges in handle_to_edges.items():
                                     # print(handle, len(edges))
                                     for edge in edges:
@@ -442,13 +586,23 @@ class PytorchModuleViewer(mui.FlexBox):
                                             type_str, shape = self._get_shape_type_from_raw(
                                                 raw)
                                             if type(raw).__name__ == "FakeTensor":
-                                                md_lines.append(f"`{shape}`")
+                                                btn_name = (f"{shape}")
                                             else:
-                                                md_lines.append(f"`{type_str}`")
-                            layouts.append(
-                                mui.Markdown("\n\n".join(md_lines)))
+                                                btn_name = (f"{type_str}")
+                                        else:
+                                            btn_name = "Unknown"
+                                        target_node_id = edge.source if i == 0 else edge.target
+                                        if handle is not None:
+                                            btn_name = f"{handle}: {btn_name}"
+                                        btn = mui.Button(
+                                            btn_name,
+                                            partial(self._node_tree_select, [target_node_id]))
+                                        btns.append(btn.prop(loading=False))
+                                layouts.append(mui.ButtonGroup(btns).prop(fullWidth=True, size="small", variant="outlined", orientation="vertical"))
                     if layouts:
                         await self._info_container.set_new_layout([*layouts])
+                    return 
+            
                     # print(data)
         elif ev.edges and len(ev.edges) == 1:
             edge_id = ev.edges[0]
@@ -464,8 +618,12 @@ class PytorchModuleViewer(mui.FlexBox):
                         mui.Divider(),
                         mui.Button(
                             "Input",
-                            lambda: self._node_tree_select([edge.source])),
+                            partial(self._node_tree_select, ([edge.source]))),
                         mui.Button(
                             "Output",
-                            lambda: self._node_tree_select([edge.target])),
+                            partial(self._node_tree_select, ([edge.target]))),
                     ])
+                    return
+        await self._info_container.set_new_layout([])
+        await self._args_tree.set_root_object_dict({})
+        await self._stack_trace_container.set_new_layout([])
