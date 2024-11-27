@@ -238,13 +238,6 @@ class PytorchFlowOutput(flowui.SymbolicGraphOutput[PytorchNodeMeta,
                     if edges[0].id in prev_edge_id_to_data:
                         new_data.output_desps = [prev_edge_id_to_data[edges[0].id].raw]
                     prev_node_id_to_data[n.id] = new_data
-        # import rich 
-        # rich.print("---- X ----")
-        # for node_id, handle_to_edges in internals.node_id_to_inp_handle_to_edges.items():
-        #     out_handle_to_edges = internals.node_id_to_out_handle_to_edges[node_id]
-
-        #     rich.print(node_id, list(handle_to_edges.keys()), list(out_handle_to_edges.keys()), 
-        #         [len(v) for v in handle_to_edges.values()],  [len(v) for v in out_handle_to_edges.values()])
         
         internals = internals.create_internals_with_none_handle()
         return PytorchFlowOutputPartial(nodes=internals.nodes,

@@ -350,8 +350,6 @@ class FlowInternals:
         self,
         node_ids: List[str],
         group_id: Optional[str] = None,
-        merged_inp_to_merged_id: Optional[Dict[Tuple[str, Optional[str]],
-                                               str]] = None,
         merged_out_to_merged_id: Optional[Dict[Tuple[str, Optional[str]],
                                                str]] = None):
         inside_node_id_out_handle_to_edges: Dict[Tuple[str, Optional[str]],
@@ -369,44 +367,26 @@ class FlowInternals:
                 node_id_to_merge]
             out_handle_to_edges = node_id_to_out_handle_to_edges[
                 node_id_to_merge]
-            # import rich 
-            # print(node_id_to_merge, list(inp_handle_to_edges.keys()), [len(v) for v in inp_handle_to_edges.values()])
-            # print("O", node_id_to_merge, list(out_handle_to_edges.keys()), [len(v) for v in out_handle_to_edges.values()])
-
             for handle, edges in inp_handle_to_edges.items():
                 # check edge connect to outside
                 for edge in edges:
                     if edge.source not in node_ids_set:
                         key = (edge.source, edge.sourceHandle)
-                        # key2 = (edge.target, handle)
-                        # import rich 
-                        # print("???", key)
                         if key not in outside_node_id_out_handle_to_edges:
                             outside_node_id_out_handle_to_edges[key] = []
-                            # if outside_out_to_merged_id is not None and group_id is not None:
-                            #     outside_out_to_merged_id[key] = group_id
-                        if merged_inp_to_merged_id is not None and group_id is not None:
-                            if key not in merged_inp_to_merged_id:
-                                merged_inp_to_merged_id[key] = group_id
                         outside_node_id_out_handle_to_edges[key].append(edge)
             for handle, edges in out_handle_to_edges.items():
                 # check edge connect to outside
                 for edge in edges:
                     if edge.target not in node_ids_set:
-                        # key = (edge.target, edge.targetHandle)
-                        key2 = (edge.source, handle)
-                        # import rich 
-                        # print("XXX", key)
-
-                        if key2 not in inside_node_id_out_handle_to_edges:
-                            inside_node_id_out_handle_to_edges[key2] = []
-                            # if outside_inp_to_merged_id is not None and group_id is not None:
-
-                            #     outside_inp_to_merged_id[key] = group_id
+                        key = (edge.source, handle)
+                        if key not in inside_node_id_out_handle_to_edges:
+                            inside_node_id_out_handle_to_edges[key] = []
+                        inside_node_id_out_handle_to_edges[key].append(edge)
                         if merged_out_to_merged_id is not None and group_id is not None:
-                            if key2 not in merged_out_to_merged_id:
-                                merged_out_to_merged_id[key2] = group_id
-                        inside_node_id_out_handle_to_edges[key2].append(edge)
+                            if key not in merged_out_to_merged_id:
+                                merged_out_to_merged_id[key] = group_id
+
         return inside_node_id_out_handle_to_edges, outside_node_id_out_handle_to_edges
 
     def merge_nodes_with_data(
@@ -438,6 +418,10 @@ class FlowInternals:
         # append nodes and edges that not in merge list
         new_nodes: List[Node] = [x[0] for x in merge_list]
         new_edges: List[Edge] = []
+        node_id_to_merged_id: Dict[str, str] = {}
+        for merged_node, merge_ids in merge_list:
+            for merge_id in merge_ids:
+                node_id_to_merged_id[merge_id] = merged_node.id
         for node in self.id_to_node.values():
             if node.id not in node_id_set_to_merge:
                 new_nodes.append(node)
@@ -446,75 +430,26 @@ class FlowInternals:
                 new_edges.append(edge)
         edge_name_pool = UniqueNamePool(
             init_set=set([edge.id for edge in new_edges]))
-        node_id_to_inp_handle_to_edges = self.node_id_to_inp_handle_to_edges.copy(
-        )
-        node_id_to_out_handle_to_edges = self.node_id_to_out_handle_to_edges.copy(
-        )
-
         merged_id_to_outside_out_to_edges: Dict[str, Dict[Tuple[str,
                                                                 Optional[str]],
                                                           List[Edge]]] = {}
         merged_id_to_inside_out_to_edges: Dict[str, Dict[Tuple[str,
                                                                 Optional[str]],
                                                           List[Edge]]] = {}
-        # outside_out_to_merged_id: Dict[Tuple[str, Optional[str]], str] = {}
         merged_out_to_merged_id: Dict[Tuple[str, Optional[str]], str] = {}
 
-        # outside_inp_to_merged_id: Dict[Tuple[str, Optional[str]], str] = {}
-        merged_inp_to_merged_id: Dict[Tuple[str, Optional[str]], str] = {}
-
-        outside_out_to_merged_handle: Dict[Tuple[str, Optional[str]],
+        outside_out_to_merged_handle: Dict[Tuple[str, Optional[str], str],
                                            Optional[str]] = {}
         inside_out_to_merged_handle: Dict[Tuple[str, Optional[str]],
                                            Optional[str]] = {}
         for merged_node, merged_node_ids in merge_list:
-            # merged_id_to_outside_out_to_edges[merged_node.id] = {}
-            # merged_id_to_inside_out_to_edges[merged_node.id] = {}
-            # inside_node_id_out_handle_to_edges = merged_id_to_inside_out_to_edges[
-            #     merged_node.id]
-            # outside_node_id_out_handle_to_edges = merged_id_to_outside_out_to_edges[
-            #     merged_node.id]
-
             inside_node_id_out_handle_to_edges, outside_node_id_out_handle_to_edges = self._calculate_node_group_meta(
-                merged_node_ids, merged_node.id, merged_inp_to_merged_id,
+                merged_node_ids, merged_node.id,
                 merged_out_to_merged_id)
             merged_id_to_inside_out_to_edges[
                 merged_node.id] = inside_node_id_out_handle_to_edges
             merged_id_to_outside_out_to_edges[
                 merged_node.id] = outside_node_id_out_handle_to_edges
-            # merged_node_ids_set = set(merged_node_ids)
-            # for node_id_to_merge in merged_node_ids:
-            #     inp_handle_to_edges = node_id_to_inp_handle_to_edges[
-            #         node_id_to_merge]
-            #     out_handle_to_edges = node_id_to_out_handle_to_edges[
-            #         node_id_to_merge]
-            #     for handle, edges in inp_handle_to_edges.items():
-            #         # check edge connect to outside
-            #         for edge in edges:
-            #             if edge.source not in merged_node_ids_set:
-            #                 key = (edge.source, handle)
-            #                 key2 = (edge.target, handle)
-
-            #                 if key not in outside_node_id_out_handle_to_edges:
-            #                     outside_node_id_out_handle_to_edges[key] = []
-            #                     outside_out_to_merged_id[key] = merged_node.id
-            #                 if key2 not in merged_inp_to_merged_id:
-            #                     merged_inp_to_merged_id[key2] = merged_node.id
-            #                 outside_node_id_out_handle_to_edges[key].append(
-            #                     edge)
-            #     for handle, edges in out_handle_to_edges.items():
-            #         # check edge connect to outside
-            #         for edge in edges:
-            #             if edge.target not in merged_node_ids_set:
-            #                 key = (edge.target, handle)
-            #                 key2 = (edge.source, handle)
-            #                 if key not in inside_node_id_out_handle_to_edges:
-            #                     inside_node_id_out_handle_to_edges[key] = []
-            #                     outside_inp_to_merged_id[key] = merged_node.id
-            #                 if key2 not in merged_out_to_merged_id:
-            #                     merged_out_to_merged_id[key2] = merged_node.id
-            #                 inside_node_id_out_handle_to_edges[key].append(
-            #                     edge)
             # determine new handle id
             handle_unique_name_pool = UniqueNamePool()
             for (node_id,
@@ -523,7 +458,7 @@ class FlowInternals:
                     new_handle = None
                 else:
                     new_handle = handle_unique_name_pool(handle)
-                outside_out_to_merged_handle[(node_id, handle)] = new_handle
+                outside_out_to_merged_handle[(node_id, handle, merged_node.id)] = new_handle
             for (node_id,
                  handle), edges in inside_node_id_out_handle_to_edges.items():
                 if handle is None:
@@ -536,24 +471,15 @@ class FlowInternals:
 
         new_edge_id_to_edges: Dict[str, List[Edge]] = {}
         node_id_handle_pair_set: Set[Tuple[str, str, Optional[str], Optional[str]]] = set()
-        import rich 
-        rich.print(merged_out_to_merged_id)
-        rich.print("NodeIds", [n.id for n in new_nodes])
-
         for merged_node, merged_node_ids in merge_list:
             outside_node_id_out_handle_to_edges = merged_id_to_outside_out_to_edges[
                 merged_node.id]
             inside_node_id_out_handle_to_edges = merged_id_to_inside_out_to_edges[
                 merged_node.id]
-            import rich 
-            rich.print(f"---- {merged_node.id} ----")
-            rich.print(list(outside_node_id_out_handle_to_edges.keys()), [len(v) for v in outside_node_id_out_handle_to_edges.values()])
-            rich.print(list(inside_node_id_out_handle_to_edges.keys()), [len(v) for v in inside_node_id_out_handle_to_edges.values()])
-
             for (node_id,
                  handle), edges in outside_node_id_out_handle_to_edges.items():
                 key = (node_id, handle)
-                cur_merge_handle = outside_out_to_merged_handle[key]
+                cur_merge_handle = outside_out_to_merged_handle[(key[0], key[1], merged_node.id)]
                 edge: Optional[Edge] = None
                 if key in merged_out_to_merged_id:
                     # connect to another merged node
@@ -581,42 +507,41 @@ class FlowInternals:
                 if edge is not None:
                     new_edge_id_to_edges[edge.id] = edges
                     new_edges.append(edge)
-                # if "M-layer2-torch.nn.modules.container.Sequential" in merged_node.id:
-                #     rich.print(merged_node.id, node_id, handle, len(edges), edge.id)
 
             for (node_id,
                  handle), edges in inside_node_id_out_handle_to_edges.items():
-                key = (node_id, handle)
-                edge: Optional[Edge] = None
-                cur_merge_handle = inside_out_to_merged_handle[key]
-                if key in merged_inp_to_merged_id:
-                    # connect to another merged node
-                    new_node_id = merged_inp_to_merged_id[key]
-                    new_handle = outside_out_to_merged_handle[key]
-                    edge_dup_key = (merged_node.id, new_node_id, cur_merge_handle, new_handle)
-                    if edge_dup_key in node_id_handle_pair_set:
-                        continue
-                    new_edge_id = edge_name_pool(
-                        f"{merged_node.id}-{new_node_id}")
-                    edge = Edge(new_edge_id,
-                                source=merged_node.id,
-                                target=new_node_id,
-                                sourceHandle=cur_merge_handle,
-                                targetHandle=new_handle)
-                    node_id_handle_pair_set.add(edge_dup_key)
-                else:
-                    # connect to outside original node
-                    new_edge_id = edge_name_pool(f"{merged_node.id}-{node_id}")
-                    edge = Edge(new_edge_id,
-                                source=merged_node.id,
-                                target=edges[0].target,
-                                sourceHandle=cur_merge_handle,
-                                targetHandle=edges[0].targetHandle)
-                # if "M-layer2-torch.nn.modules.container.Sequential" in merged_node.id:
-                #     print("X", merged_node.id, node_id, handle, len(edges), edge.id)
+                cur_merge_handle = inside_out_to_merged_handle[(node_id, handle)]
 
-                new_edge_id_to_edges[new_edge_id] = edges
-                new_edges.append(edge)
+                for prev_edge in edges:
+                    prev_edge_target = prev_edge.target 
+                    edge: Optional[Edge] = None
+                    if prev_edge_target in node_id_to_merged_id:
+                        new_node_id = node_id_to_merged_id[prev_edge_target]
+                        new_handle = outside_out_to_merged_handle[(node_id, handle, new_node_id)]
+                        edge_dup_key = (merged_node.id, new_node_id, cur_merge_handle, new_handle)
+                        if edge_dup_key in node_id_handle_pair_set:
+                            continue
+                        new_edge_id = edge_name_pool(
+                            f"{merged_node.id}-{new_node_id}")
+                        edge = Edge(new_edge_id,
+                                    source=merged_node.id,
+                                    target=new_node_id,
+                                    sourceHandle=cur_merge_handle,
+                                    targetHandle=new_handle)
+                        node_id_handle_pair_set.add(edge_dup_key)
+                    else:
+                        # connect to outside original node
+                        new_edge_id = edge_name_pool(f"{merged_node.id}-{node_id}")
+                        edge = Edge(new_edge_id,
+                                    source=merged_node.id,
+                                    target=prev_edge.target,
+                                    sourceHandle=cur_merge_handle,
+                                    targetHandle=prev_edge.targetHandle)
+                    # if "M-layer2-torch.nn.modules.container.Sequential" in merged_node.id:
+                    #     print("X", merged_node.id, node_id, handle, len(edges), edge.id)
+
+                    new_edge_id_to_edges[new_edge_id] = edges
+                    new_edges.append(edge)
         res_internals = FlowInternals()
 
         res_internals.set_from_nodes_edges(new_nodes, new_edges)
@@ -674,11 +599,6 @@ class FlowInternals:
             if edge.source in node_ids_set and edge.target in node_ids_set:
                 new_edges.append(edge)
                 # print(edge.id, edge.source, edge.target)
-        import rich 
-        rich.print([n.id for n in new_nodes])
-        rich.print(list(outside_out_to_edges.keys()))
-        rich.print(list(outside_inp_to_edges.keys()))
-
         node_uniq_pool = UniqueNamePool(init_set=node_ids_set)
         input_node_edge_pairs: List[Tuple[Node, List[Edge]]] = []
         output_node_edge_pairs: List[Tuple[Node, List[Edge]]] = []
