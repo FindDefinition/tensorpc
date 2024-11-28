@@ -1002,7 +1002,8 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             nodes: List[Node],
             edges: List[Edge],
             options: Optional[DagreLayoutOptions] = None,
-            fit_view: bool = False):
+            fit_view: bool = False,
+            duration: Optional[NumberType] = None):
         """Inorder to handle init static flow layout, you should use this function to set flow and do dagre layout.
         """
         new_layout: Dict[str, Component] = {}
@@ -1023,6 +1024,8 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             "graphOptions": options,
             "fitView": fit_view,
         }
+        if duration is not None:
+            ev_new_node["fitViewDuration"] = duration
         if new_layout:
             return await self.update_childs(
                 new_layout,
@@ -1047,9 +1050,9 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             "nodeId": node_ids,
         }
         if keep_zoom is not None:
-            res["keepZoom"] = keep_zoom
+            res["fitViewKeepZoom"] = keep_zoom
         if duration is not None:
-            res["duration"] = duration
+            res["fitViewDuration"] = duration
         return await self.send_and_wait(self.create_comp_event(res))
 
     async def fit_view(self):

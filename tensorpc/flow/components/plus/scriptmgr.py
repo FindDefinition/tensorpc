@@ -139,14 +139,6 @@ class ScriptManager(mui.FlexBox):
                                                             minWidth=0)
         self.app_show_box = mui.FlexBox()  # .prop(flex=1)
 
-        # self.code_editor_container = mui.HBox({
-        #     "editor":
-        #     self.code_editor,
-        #     "divider":
-        #     mui.Divider("horizontal"),
-        #     "app_show_box":
-        #     self.app_show_box
-        # }).prop(flex=1, minHeight=0)
         self.code_editor_container = mui.Allotment(mui.Allotment.ChildDef([
             mui.Allotment.Pane(self.code_editor.prop(height="100%")),
             mui.Allotment.Pane(self.app_show_box.prop(height="100%"), visible=False),
@@ -178,7 +170,7 @@ class ScriptManager(mui.FlexBox):
                 progressColor="primary",
                 confirmTitle="Warning",
                 confirmMessage="Are you sure to delete this script?")
-
+        self._show_editor_btn = mui.ToggleButton(icon=mui.IconType.Code, callback=self._handle_show_editor).prop(size="small", selected=True)
         self.init_add_layout({
             "header":
             mui.HBox([
@@ -187,6 +179,7 @@ class ScriptManager(mui.FlexBox):
                 # self._enable_save_watch,
                 self.langs,
                 self._delete_button,
+                self._show_editor_btn,
             ]).prop(alignItems="center"),
             "editor":
             self.code_editor_container,
@@ -225,6 +218,12 @@ class ScriptManager(mui.FlexBox):
 
     async def _on_remote_comp_mount(self, data: Any):
         await self._on_editor_ready()
+
+    async def _handle_show_editor(self, selected: bool):
+        if self.langs.value == "app":
+            await self.code_editor_container.update_pane_props(0, {
+                "visible": selected
+            })
 
     async def _on_editor_ready(self):
         items = await appctx.list_data_storage(
@@ -330,15 +329,24 @@ class ScriptManager(mui.FlexBox):
                 layout = mui.flex_wrapper(app_cls())
                 await self.app_show_box.set_new_layout({"layout": layout})
 
+    async def _handle_pane_visible_status(self, lang: str):
+        await self.code_editor_container.update_panes_props({
+            0: {
+                "visible": self._show_editor_btn.value if lang == "app" else True
+            },
+            1: {
+                "visible": True if lang == "app" else False
+            },
+        })
+
+
     async def _on_lang_select(self, value):
         if value != "app":
             await self.app_show_box.set_new_layout({})
         # await self.send_and_wait(
         #     self.app_show_box.update_event(
         #         flex=1 if value == "app" else mui.undefined))
-        await self.code_editor_container.update_pane_props(1, {
-            "visible": True if value == "app" else False
-        })
+        await self._handle_pane_visible_status(value)
 
         if self.scripts.value is not None:
             storage_key = self.scripts.value["storage_key"]
@@ -400,9 +408,7 @@ class ScriptManager(mui.FlexBox):
                                        self._storage_node_rid, self._graph_id)
         if lang != "app":
             await self.app_show_box.set_new_layout({})
-        await self.code_editor_container.update_pane_props(1, {
-            "visible": True if lang == "app" else False
-        })
+        await self._handle_pane_visible_status(lang)
         # await self.send_and_wait(
         #     self.app_show_box.update_event(
         #         flex=1 if lang == "app" else mui.undefined))
@@ -441,9 +447,7 @@ class ScriptManager(mui.FlexBox):
         # await self.send_and_wait(
         #     self.app_show_box.update_event(
         #         flex=1 if item.lang == "app" else mui.undefined))
-        await self.code_editor_container.update_pane_props(1, {
-            "visible": True if item.lang == "app" else False
-        })
+        await self._handle_pane_visible_status(item.lang)
 
         await self.langs.set_value(item.lang)
         await self.send_and_wait(

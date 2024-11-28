@@ -240,3 +240,57 @@ class MarkdownTutorial(mui.FlexBox):
                   minWidth=0,
                   height="100%",
                   width="100%")
+
+class MarkdownTutorialV2(mui.FlexBox):
+    """ this component parse markdowns in a very simple way, then convert 
+    code to custom components in markdown. don't use it in production, 
+    it's only for tutorials.
+
+    WARNING: since markdown style affect nested `AppInMemory` (add margin), we use legacy
+    `MarkdownTutorial` instead of this markdown + nested component.
+    """
+
+    def __init__(self, md_content: str, path_uid: str):
+        res_blocks, metadata = _parse_markdown_very_trivial(md_content)
+        layout: mui.LayoutType = []
+        comp_map: Dict[str, mui.MUIComponentType] = {}
+        if metadata.type == "Canvas":
+            from tensorpc.flow import plus
+            complex_canvas = plus.ComplexCanvas(init_enable_grid=False).prop(
+                width="100%", flex=1)
+            md_blocks: List[str] = []
+            for i, block in enumerate(res_blocks):
+                if block.type == "markdown":
+                    if block.content.strip() == "":
+                        continue
+                    md_blocks.append(block.content)
+                elif block.type == "code":
+                    comp_map[str(i)] = CodeBlock(block.content.lstrip()).prop(height="200px",
+                                                               padding="10px")
+                    md_blocks.append(f":::component{{#{str(i)}}}")
+                    md_blocks.append(f":::")
+            book = mui.Markdown("\n".join(md_blocks), comp_map)
+            layout = [complex_canvas, book]
+        else:
+            md_blocks: List[str] = []
+            for i, block in enumerate(res_blocks):
+                if block.type == "markdown":
+                    if block.content.strip() == "":
+                        continue
+                    md_blocks.append(block.content)
+                elif block.type == "code":
+                    comp_map[str(i)] = AppInMemory(f"{path_uid}-{i}",
+                                    block.content.lstrip()).prop(
+                                        minHeight="400px", padding="10px")
+                    md_blocks.append(f":::component{{#{str(i)}}}")
+                    md_blocks.append(f":::")
+            book = mui.Markdown("\n".join(md_blocks), comp_map)
+            layout = [book]
+        super().__init__(layout)
+        self.prop(flexFlow="column nowrap",
+                  padding="10px",
+                  overflow="hidden",
+                  minHeight=0,
+                  minWidth=0,
+                  height="100%",
+                  width="100%")

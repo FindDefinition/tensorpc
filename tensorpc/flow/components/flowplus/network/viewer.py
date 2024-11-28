@@ -1,6 +1,9 @@
+import enum
 from functools import partial
 import inspect
+import os
 from pathlib import Path
+import re
 import time
 
 from tensorpc.core.moduleid import get_qualname_of_type
@@ -8,7 +11,7 @@ from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.flow import mui, flowui, three, plus, appctx, mark_did_mount, mark_create_layout
 from tensorpc.flow.components.flowplus.network.pthfx import (
     FlowUIInterpreter, PytorchExportBuilder, PytorchFlowOutput,
-    PytorchFlowOutputPartial, PytorchFlowOutputPartial)
+    PytorchFlowOutputPartial, PytorchFlowOutputPartial, PytorchNodeMeta)
 import torch
 from torch.nn import ModuleDict, ModuleList
 import torch.fx
@@ -21,6 +24,9 @@ from tensorpc.flow.components.plus.styles import get_tight_icon_tab_theme, get_t
 from tensorpc.flow.jsonlike import IconButtonData, as_dict_no_undefined
 from tensorpc.utils.rich_logging import get_logger
 from tensorpc import compat
+import torch.utils
+
+from tensorpc.utils.tb_parser import parse_python_traceback
 LOGGER = get_logger("tensorpc.flowui.pytorch")
 
 
@@ -37,6 +43,11 @@ class PytorchModuleTreeItemEx(PytorchModuleTreeItem):
             res.iconBtns = mui.undefined
         return res
 
+class TabType(enum.Enum):
+    INFO = "Info"
+    ARGS = "Args"
+    STACKTRACE = "StackTrace"
+    DEBUG = "Debug"
 
 class PytorchModuleViewer(mui.FlexBox):
 
@@ -51,8 +62,9 @@ class PytorchModuleViewer(mui.FlexBox):
                      flowui.Background()])
         self.graph = graph
         self.is_external_mode = external_submodule_id is not None and external_pth_flow is not None and external_module is not None
-        self._simple_tree = plus.BasicObjectTree(use_fast_tree=True,
-                                                 clear_data_when_unmount=True)
+        self._module_tree = plus.BasicObjectTree(use_fast_tree=True,
+                                                 clear_data_when_unmount=True,
+                                                 auto_folder_limit=-1)
         self._info_container = mui.VBox([]).prop(padding="5px", width="100%",
                                                         height="100%",
                                                         overflow="auto")
@@ -68,33 +80,34 @@ class PytorchModuleViewer(mui.FlexBox):
         
         self._stack_trace_container = mui.VBox([]).prop(padding="5px", width="100%",
                                                         height="100%",
-                                                        overflow="auto")
+                                                        overflow="auto",
+                                                        alignItems="flex-start")
 
 
         tab_defs = [
             mui.TabDef("",
-                       "Info",
+                       TabType.INFO.value,
                        self._info_container,
                        icon=mui.IconType.Info,
                        tooltip="Info"),
             mui.TabDef("",
-                       "Args",
+                       TabType.ARGS.value,
                        self._args_container,
                        icon=mui.IconType.DataObject,
                        tooltip="Args"),
             mui.TabDef("",
-                       "StackTrace",
+                       TabType.STACKTRACE.value,
                        self._stack_trace_container,
                        icon=mui.IconType.Timeline,
                        tooltip="stacktrace"),
             mui.TabDef("",
-                       "Debug",
+                       TabType.DEBUG.value,
                        self._dbg_container,
                        icon=mui.IconType.BugReport,
                        tooltip="Flow Debug Info"),
         ]
 
-        self._tabs = mui.Tabs(tab_defs, init_value="Info").prop(panelProps=mui.FlexBoxProps(
+        self._tabs = mui.Tabs(tab_defs, init_value=TabType.INFO.value).prop(panelProps=mui.FlexBoxProps(
                                   width="100%", padding=0, overflow="hidden", flex=1),
                                                   borderBottom=1,
                                                   borderColor='divider')
@@ -102,12 +115,13 @@ class PytorchModuleViewer(mui.FlexBox):
             # mui.ThemeProvider([mui.HBox([self._tabs]).prop(flex=1)],
             #                   get_tight_icon_tab_theme()),
 
-        
-        self._simple_tree.tree.prop(expansionIconTrigger=True)
-        self._simple_tree.event_async_select_single.on(
+        self._current_tabs_value = "Info"
+        self._tabs.event_change.on(self._on_tabs_change)
+        self._module_tree.tree.prop(expansionIconTrigger=True)
+        self._module_tree.event_async_select_single.on(
             self._on_module_tree_select)
         self._side_container = mui.VBox([
-            self._simple_tree.prop(flex=1),
+            self._module_tree.prop(flex=1),
                 mui.Divider(),
                 mui.VBox([
                     mui.ThemeProvider([self._tabs], get_tight_icon_tab_theme_horizontal())
@@ -180,6 +194,11 @@ class PytorchModuleViewer(mui.FlexBox):
 
         self._dagre_options = flowui.DagreLayoutOptions(ranksep=25, )
 
+        self._torch_util_path = Path(torch.utils.__file__).parent.resolve()
+
+    async def _on_tabs_change(self, value: str):
+        self._current_tabs_value = value
+
     async def _init_set_exported_flow(self, pth_flow: PytorchFlowOutput,
                                       module: torch.nn.Module):
         if self.is_external_mode and self._external_submodule_id is not None:
@@ -203,7 +222,8 @@ class PytorchModuleViewer(mui.FlexBox):
                     state=self._current_state))
         await self.graph.set_flow_and_do_dagre_layout(merged_graph_res.nodes,
                                                       merged_graph_res.edges,
-                                                      self._dagre_options)
+                                                      self._dagre_options,
+                                                      fit_view=True)
         await self._info_container.set_new_layout([])
         with torch.device("meta"):
             mod_meta = module.to("meta")
@@ -215,7 +235,7 @@ class PytorchModuleViewer(mui.FlexBox):
                 module_id_prefix = self._external_submodule_id
                 expand_level = 1
                 btns = mui.undefined
-            await self._simple_tree.set_root_object_dict(
+            await self._module_tree.set_root_object_dict(
                 {
                     "":
                     PytorchModuleTreeItemEx(
@@ -225,7 +245,8 @@ class PytorchModuleViewer(mui.FlexBox):
                         on_button_click=self._on_tree_item_button_click,
                         btns=btns),
                 },
-                expand_level=expand_level)
+                expand_level=expand_level,
+                expand_all=True)
 
     async def _on_graph_ready(self):
         # do init when flow is external (e.g. created from main flow)
@@ -409,7 +430,7 @@ class PytorchModuleViewer(mui.FlexBox):
                                 parts.insert(0, "")
                             uid_obj = UniqueTreeIdForTree.from_parts(
                                 ["root", *parts]).uid_encoded
-                            await self._simple_tree._on_expand(uid_obj)
+                            await self._module_tree.expand_uid(uid_obj)
                             await self._info_container.set_new_layout([])
                     else:
                         module_id = node_meta.module_id
@@ -435,9 +456,11 @@ class PytorchModuleViewer(mui.FlexBox):
                                 parts.insert(0, "")
                             uid_obj = UniqueTreeIdForTree.from_parts(
                                 ["root", *parts]).uid_encoded
-                            await self._simple_tree._on_expand(
+                            await self._module_tree.expand_uid(
                                 uid_obj, lazy_expand_event=False)
                             await self._info_container.set_new_layout([])
+                            await self._module_tree_select(module_id_str)
+
         elif item_id == "subflow":
             if self._cur_graph_metadata is not None and not self.is_external_mode:
                 node_meta = self._cur_graph_metadata.node_id_to_data.get(
@@ -455,6 +478,128 @@ class PytorchModuleViewer(mui.FlexBox):
             shape = []
             type_str = type(raw).__name__
         return type_str, shape
+
+    def _stacktrace_path_validator(self, path: str):
+        path_resolved = Path(path).resolve()
+        common_path_util_path = os.path.commonpath(
+            [path_resolved, self._torch_util_path])
+        if Path(common_path_util_path) == self._torch_util_path:
+            return False
+        return True
+
+    async def _set_stacktrace_tab(self, stack_trace_str: str, is_merged_node: bool):
+        # parse python stack trace to format: List[Tuple[(path, lineno), stmts]]
+        stack_trace = parse_python_traceback(stack_trace_str, self._stacktrace_path_validator)
+        stacktrace_layouts: List[Union[mui.MUIComponentBase, mui.MUIContainerBase]] = []
+        if is_merged_node:
+            stacktrace_layouts.append(mui.Markdown("> Stack trace of first child node."))
+        for (path, lineno), lines in stack_trace:
+            # keep last three parts of path
+            path_last_three_parts = Path(path).parts[-3:]
+            path_short = os.path.join(*path_last_three_parts)
+            link = mui.Link(f"{path_short}:{lineno}").prop(isButton=True, href=mui.undefined, 
+                textOverflow="ellipsis", overflow="hidden", whiteSpace="nowrap", variant="caption")
+            link.event_click.on(partial(appctx.copy_text_to_clipboard, f"{path}:{lineno}"))
+            stacktrace_layouts.append(mui.TooltipFlexBox(f"Copy (click): {path}:{lineno}", [
+                link,
+            ]).prop(enterDelay=500))
+            md_lines: List[str] = []
+            if lines:
+                md_lines.append("```")
+                for line in lines:
+                    md_lines.append(line)
+                md_lines.append("```")
+                stacktrace_layouts.append(mui.Markdown("\n".join(md_lines)))
+        await self._stack_trace_container.set_new_layout([*stacktrace_layouts])
+
+    def _get_node_io_layouts(self, node_id: str):
+        layouts: List[Union[mui.MUIComponentBase, mui.MUIContainerBase]] = []
+        if self._cur_graph_metadata is not None:
+            inp_handle_to_edges = self._cur_graph_metadata.node_id_to_inp_handle_to_edges[node_id]
+            out_handle_to_edges = self._cur_graph_metadata.node_id_to_out_handle_to_edges[node_id]
+            for i, handle_to_edges in enumerate([inp_handle_to_edges, out_handle_to_edges]):
+                btns: List[mui.Button] = []
+                layouts.append(mui.Typography(
+                    "Inputs" if i == 0 else "Outputs").prop(variant="body1"))
+                for handle, edges in handle_to_edges.items():
+                    # print(handle, len(edges))
+                    for edge in edges:
+                        # print(edge.id, edge.source, edge.target)
+                        edge_data = self._cur_graph_metadata.edge_id_to_data.get(edge.id)
+                        if edge_data is not None:
+                            raw = edge_data.raw 
+                            type_str = ""
+                            type_str, shape = self._get_shape_type_from_raw(
+                                raw)
+                            if type(raw).__name__ == "FakeTensor":
+                                btn_name = (f"{shape}")
+                            else:
+                                btn_name = (f"{type_str}")
+                        else:
+                            btn_name = "Unknown"
+                        target_node_id = edge.source if i == 0 else edge.target
+                        if handle is not None:
+                            btn_name = f"{handle}: {btn_name}"
+                        btn = mui.Button(
+                            btn_name,
+                            partial(self._node_tree_select, [target_node_id]))
+                        btns.append(btn.prop(loading=False))
+                layouts.append(mui.ButtonGroup(btns).prop(fullWidth=True, size="small", variant="outlined", orientation="vertical"))
+        return layouts
+
+    def _get_node_desp_layouts(self, data: PytorchNodeMeta, module_id_str: str, module: torch.nn.Module):
+        qname = data.module_qname
+        assert qname is not None 
+        layouts: List[Union[mui.MUIComponentBase, mui.MUIContainerBase]] = []
+        copy_data = None
+        try:
+            if compat.Python3_13AndLater:
+                lineno = type(module).__firstlineno__ # type: ignore
+            else:
+                _, lineno = inspect.getsourcelines(type(module))
+            path = inspect.getabsfile(type(module))
+            Path(path).exists()
+            copy_data = f"{path}:({lineno})"
+        except:
+            pass
+        layouts.append(
+            mui.Markdown(f":deepskyblue[`{qname}`]"))
+        if data.is_merged:
+            id_or_op_md = mui.Markdown(f"`id`: `{module_id_str}`")
+        else:
+            id_or_op_md = mui.Markdown(f":forestgreen[`{data.op}`]")
+        if copy_data is not None:
+            btn = mui.IconButton(mui.IconType.ContentCopy, partial(appctx.copy_text_to_clipboard, copy_data))
+            btn.prop(size="small", iconSize="small")
+            layouts.append(
+                mui.HBox([
+                    btn,
+                    id_or_op_md,
+                ]))
+        else:
+            layouts.append(
+                id_or_op_md)
+
+        is_seq = "Sequential" in qname
+        is_module_list = "ModuleList" in qname
+        is_module_dict = "ModuleDict" in qname
+        is_container = is_seq or is_module_list or is_module_dict
+        if qname.startswith("torch.") and not is_container:
+            # official torch module
+            param_md_lines: List[str] = []
+            for name, param in module.named_parameters():
+                shape_str = ",".join(map(str, param.shape))
+                param_md_lines.append(
+                    f"* `{name}(P)`: `[{shape_str}]`")
+            for name, param in module.named_buffers():
+                shape_str = ",".join(map(str, param.shape))
+                param_md_lines.append(
+                    f"* `{name}(B)`: `[{shape_str}]`")
+            if param_md_lines:
+                layouts.append(mui.Divider())
+                layouts.append(
+                    mui.Markdown("\n".join(param_md_lines)))
+        return layouts
 
     async def _on_selection_change(self, ev: flowui.EventSelection):
         if ev.nodes and len(ev.nodes) == 1:
@@ -475,26 +620,24 @@ class PytorchModuleViewer(mui.FlexBox):
                 })
             if self._cur_graph_metadata is not None and self._cur_module is not None:
                 if node_id in self._cur_graph_metadata.node_id_to_data:
+                    tab_is_empty = {x.value: False for x in TabType}
                     node = self._cur_graph_metadata.id_to_nodes[node_id]
                     data = self._cur_graph_metadata.node_id_to_data[node_id]
                     layouts: List[Union[mui.MUIComponentBase, mui.MUIContainerBase]] = []
                     module_id = data.module_id
                     qname = data.module_qname
-                    if data.additional_args is not None:
-                        await self._args_tree.set_root_object_dict(data.additional_args)
+                    if data.additional_args is not None and len(data.additional_args) > 0:
+                        await self._args_tree.set_root_object_dict(data.additional_args, expand_all=True)
                         await self._args_tree.expand_all()
                     else:
                         await self._args_tree.set_root_object_dict({})
+                        tab_is_empty[TabType.ARGS.value] = True
                     if data.stack_trace is not None:
-                        await self._stack_trace_container.set_new_layout([
-                            mui.Markdown(f"```\n{data.stack_trace}\n```")
-                        ])
-                        # await self._stack_trace_container.set_new_layout([
-                        #     mui.Typography(f"{data.stack_trace}")
-                        # ])
-
+                        await self._set_stacktrace_tab(data.stack_trace, data.is_merged)
                     else:
                         await self._stack_trace_container.set_new_layout([])
+                        # if stacktrace not available, reset tabs to info if stacktrace is selected
+                        tab_is_empty[TabType.STACKTRACE.value] = True
                     if data.is_io_node:
                         if data.output_desps is not None:
                             out = data.output_desps[0]
@@ -516,91 +659,26 @@ class PytorchModuleViewer(mui.FlexBox):
                                         self._external_submodule_id) + 1:]
                             try:
                                 module = self._cur_module.get_submodule(module_id_str)
-                                copy_data = None
-                                try:
-                                    if compat.Python3_13AndLater:
-                                        lineno = type(module).__firstlineno__ # type: ignore
-                                    else:
-                                        _, lineno = inspect.getsourcelines(type(module))
-                                    path = inspect.getabsfile(type(module))
-                                    Path(path).exists()
-                                    copy_data = f"{path}:({lineno})"
-                                except:
-                                    pass
-                                layouts.append(
-                                    mui.Markdown(f":deepskyblue[`{qname}`]"))
-                                if data.is_merged:
-                                    id_or_op_md = mui.Markdown(f"`id`: `{module_id_str}`")
-                                else:
-                                    id_or_op_md = mui.Markdown(f":forestgreen[`{data.op}`]")
-                                if copy_data is not None:
-                                    btn = mui.IconButton(mui.IconType.ContentCopy, partial(appctx.copy_text_to_clipboard, copy_data))
-                                    btn.prop(size="small", iconSize="small")
-                                    layouts.append(
-                                        mui.HBox([
-                                            btn,
-                                            id_or_op_md,
-                                        ]))
-                                else:
-                                    layouts.append(
-                                        id_or_op_md)
-
-                                is_seq = "Sequential" in qname
-                                is_module_list = "ModuleList" in qname
-                                is_module_dict = "ModuleDict" in qname
-                                is_container = is_seq or is_module_list or is_module_dict
-                                if qname.startswith("torch.") and not is_container:
-                                    # official torch module
-                                    param_md_lines: List[str] = []
-                                    for name, param in module.named_parameters():
-                                        shape_str = ",".join(map(str, param.shape))
-                                        param_md_lines.append(
-                                            f"* `{name}(P)`: `[{shape_str}]`")
-                                    for name, param in module.named_buffers():
-                                        shape_str = ",".join(map(str, param.shape))
-                                        param_md_lines.append(
-                                            f"* `{name}(B)`: `[{shape_str}]`")
-                                    if param_md_lines:
-                                        layouts.append(mui.Divider())
-                                        layouts.append(
-                                            mui.Markdown("\n".join(param_md_lines)))
-
+                                node_desp_layouts = self._get_node_desp_layouts(
+                                    data, module_id_str, module)
+                                layouts.extend(node_desp_layouts)
                             except AttributeError:
                                 pass
                             layouts.append(mui.Divider())
-
-                            inp_handle_to_edges = self._cur_graph_metadata.node_id_to_inp_handle_to_edges[node_id]
-                            out_handle_to_edges = self._cur_graph_metadata.node_id_to_out_handle_to_edges[node_id]
-                            for i, handle_to_edges in enumerate([inp_handle_to_edges, out_handle_to_edges]):
-                                btns: List[mui.Button] = []
-                                layouts.append(mui.Typography(
-                                    "Inputs" if i == 0 else "Outputs").prop(variant="body1"))
-                                for handle, edges in handle_to_edges.items():
-                                    # print(handle, len(edges))
-                                    for edge in edges:
-                                        # print(edge.id, edge.source, edge.target)
-                                        edge_data = self._cur_graph_metadata.edge_id_to_data.get(edge.id)
-                                        if edge_data is not None:
-                                            raw = edge_data.raw 
-                                            type_str = ""
-                                            type_str, shape = self._get_shape_type_from_raw(
-                                                raw)
-                                            if type(raw).__name__ == "FakeTensor":
-                                                btn_name = (f"{shape}")
-                                            else:
-                                                btn_name = (f"{type_str}")
-                                        else:
-                                            btn_name = "Unknown"
-                                        target_node_id = edge.source if i == 0 else edge.target
-                                        if handle is not None:
-                                            btn_name = f"{handle}: {btn_name}"
-                                        btn = mui.Button(
-                                            btn_name,
-                                            partial(self._node_tree_select, [target_node_id]))
-                                        btns.append(btn.prop(loading=False))
-                                layouts.append(mui.ButtonGroup(btns).prop(fullWidth=True, size="small", variant="outlined", orientation="vertical"))
+                            io_layouts = self._get_node_io_layouts(node_id)
+                            if io_layouts:
+                                layouts.extend(io_layouts)
                     if layouts:
                         await self._info_container.set_new_layout([*layouts])
+                    if self._tabs.props.value != self._current_tabs_value:
+                        # switch to previous user clicked tab if not empty
+                        if not tab_is_empty[self._current_tabs_value]:
+                            await self._tabs.set_value(self._current_tabs_value)
+                        elif tab_is_empty[self._tabs.props.value]:
+                            await self._tabs.set_value(TabType.INFO.value)
+                    else:
+                        if tab_is_empty[self._tabs.props.value]:
+                            await self._tabs.set_value(TabType.INFO.value)
                     return 
             
                     # print(data)

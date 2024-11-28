@@ -271,12 +271,12 @@ class PytorchFlowOutput(flowui.SymbolicGraphOutput[PytorchNodeMeta,
                         merged_meta.stack_trace = self.node_id_to_data[node_id].stack_trace
 
                 # for merged node, we use first stack trace from child nodes 
-                # for node_id_test in nodes_to_merge:
-                #     if node_id_test in self.node_id_to_data:
-                #         stt = self.node_id_to_data[node_id_test].stack_trace
-                #         if stt is not None:
-                #             merged_meta.stack_trace = self.node_id_to_data[node_id_test].stack_trace
-                #             break   
+                for node_id_test in nodes_to_merge:
+                    if node_id_test in self.node_id_to_data:
+                        stt = self.node_id_to_data[node_id_test].stack_trace
+                        if stt is not None:
+                            merged_meta.stack_trace = self.node_id_to_data[node_id_test].stack_trace
+                            break   
                 merged_meta.additional_args = additional_args
                 merged_node_data.append(
                     merged_meta)

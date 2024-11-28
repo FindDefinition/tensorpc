@@ -614,11 +614,6 @@ class SampleThreeHudApp(EditableApp):
                 "mesh0":
                 three.Button("RTX", 2, 1, lambda x: print("HELLO")),
             }).prop(centerAnchor=True),
-            "mesh1":
-            three.ItemBox({
-                "mesh0":
-                three.ToggleButton("RTX2", 2, 1, lambda x: print("HELLO2", x)),
-            }).prop(centerAnchor=True),
             "text":
             three.ItemBox({
                 "text0": self.html,

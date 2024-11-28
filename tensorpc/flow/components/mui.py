@@ -937,6 +937,8 @@ class ButtonGroup(MUIContainerBase[ButtonGroupProps, Button]):
 
 @dataclasses.dataclass
 class ToggleButtonProps(MUIComponentBaseProps, IconBaseProps):
+    # unused, but react component requires it.
+    # TODO remove this.
     value: ValueType = ""
     name: str = ""
     selected: Union[Undefined, bool] = undefined
@@ -949,21 +951,15 @@ class ToggleButtonProps(MUIComponentBaseProps, IconBaseProps):
 
 
 class ToggleButton(MUIComponentBase[ToggleButtonProps]):
-    """value is used in toggle group. for standalone toggle button, it isn't used,
-    you can use it as name.
-    """
-
     def __init__(
             self,
-            value: ValueType = "",
-            icon: Union[IconType, str, Undefined] = undefined,
+            *,
             name: str = "",
+            icon: Union[IconType, str, Undefined] = undefined,
             callback: Optional[Callable[[bool], _CORO_NONE]] = None) -> None:
         super().__init__(UIType.ToggleButton,
                          ToggleButtonProps,
                          allowed_events=[FrontendEventType.Change.value])
-        if name == "" and isinstance(value, str) and value != "":
-            name = value
         if isinstance(icon, Undefined):
             assert name != "", "if icon not provided, you must provide a valid name"
         elif isinstance(icon, IconType):
@@ -971,11 +967,14 @@ class ToggleButton(MUIComponentBase[ToggleButtonProps]):
         else:
             self.props.icon = Icon.encode_svg(icon)
         self.props.name = name
-        self.props.value = value
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
         self.event_change = self._create_event_slot(FrontendEventType.Change)
+
+    @property 
+    def value(self):
+        return self.props.selected
 
     def get_sync_props(self) -> Dict[str, Any]:
         res = super().get_sync_props()
@@ -1068,6 +1067,10 @@ class ToggleButtonGroup(MUIComponentBase[ToggleButtonGroupProps]):
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
         self.event_change = self._create_event_slot(FrontendEventType.Change)
+
+    @property 
+    def value(self):
+        return self.props.value
 
     async def update_items(self,
                            btns: List[GroupToggleButtonDef],
@@ -3157,6 +3160,10 @@ class Link(MUIComponentBase[LinkProps]):
         }
         return urllib.parse.urlencode(params, doseq=True)
 
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self,
+                                           ev,
+                                           is_sync=is_sync)
 
 class Typography(MUIComponentBase[TypographyProps]):
 
@@ -3187,32 +3194,41 @@ class Typography(MUIComponentBase[TypographyProps]):
 
 
 @dataclasses.dataclass
-class MarkdownProps(MUIComponentBaseProps):
+class MarkdownProps(ContainerBaseProps):
     katex: Union[bool, Undefined] = undefined
     codeHighlight: Union[bool, Undefined] = undefined
     emoji: Union[bool, Undefined] = undefined
     value: str = ""
 
 
-class Markdown(MUIComponentBase[MarkdownProps]):
+class Markdown(MUIContainerBase[MarkdownProps, MUIComponentType]):
     """markdown with color support, gfm, latex math,
-    code highlight and :emoji: support. note that only colored
+    code highlight, :emoji: support and nested component. note that only colored
     text and gfm are enabled by default, other features need to be
     enabled explicitly.
 
-    Colored text: using the syntax :color[text to be colored], where color needs to be replaced with any of the color string in tensorpc.flow.flowapp.colors (e.g. :green[green text]).
+    * Colored text: using the syntax :color[text to be colored], where color needs to be replaced with any of the color string in tensorpc.flow.flowapp.colors (e.g. :green[green text]).
 
-    LaTeX expressions: by wrapping them in "$" or "$$" (the "$$" must be on their own lines). Supported LaTeX functions are listed at https://katex.org/docs/supported.html.
+    * LaTeX expressions: by wrapping them in "$" or "$$" (the "$$" must be on their own lines). Supported LaTeX functions are listed at https://katex.org/docs/supported.html.
 
-    Emoji: :EMOJICODE:. see https://github.com/ikatyang/emoji-cheat-sheet
+    * Emoji: :EMOJICODE:. see https://github.com/ikatyang/emoji-cheat-sheet
+
+    * Nested Component: firstly you need to provide all childs via `comp_map` (Markdown.ChildDef), then use `:component{#key_in_comp_map}` to render inline component
+        or use block syntax `:::component{#key_in_comp_map}:::` to render inside block
+
+    WARNING: When you use nested component, the styles inside github markdown css can affect some nested component, 
+        so you may need to provide your own css to fix this.
 
     Examples:
         ":green[$\\sqrt{x^2+y^2}=1$] is a Pythagorean identity. :+1:"
         contains a colored text, a latex expression and a emoji.
     """
+    @dataclasses.dataclass
+    class ChildDef:
+        componentMap: Union[Dict[str, MUIComponentType], Undefined] = undefined
 
-    def __init__(self, init: str = "") -> None:
-        super().__init__(UIType.Markdown, MarkdownProps)
+    def __init__(self, init: str = "", comp_map: Union[Dict[str, MUIComponentType], Undefined] = undefined) -> None:
+        super().__init__(UIType.Markdown, MarkdownProps, Markdown.ChildDef(comp_map))
         self.props.value = init
 
     async def write(self, content: str):
@@ -3236,6 +3252,8 @@ class Markdown(MUIComponentBase[MarkdownProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+    async def set_new_component_map(self, comp_map: Dict[str, MUIComponentType]):
+        await self.set_new_layout(Markdown.ChildDef(comp_map))
 
 @dataclasses.dataclass
 class PaperProps(MUIFlexBoxProps):
@@ -3604,6 +3622,10 @@ class Tabs(MUIContainerBase[TabsProps, MUIComponentType]):
             setattr(self.childs_complex.tabDefs[index], k, v)
         await self.update_childs_complex()
 
+    async def set_value(self, value: str):
+        assert value in [x.value for x in self.childs_complex.tabDefs]
+        await self.send_and_wait(self.update_event(value=value))
+
 
 @dataclasses.dataclass
 class AllotmentProps(MUIFlexBoxProps):
@@ -3666,23 +3688,13 @@ class Allotment(MUIContainerBase[AllotmentProps, MUIComponentType]):
         return await self.send_and_wait(
             self.update_pane_props_event(index, props))
 
-
-# class AllotmentPane(MUIContainerBase[AllotmentPaneProps, MUIComponentType]):
-#     def __init__(self, children: LayoutType) -> None:
-#         if isinstance(children, Sequence):
-#             children = {str(i): v for i, v in enumerate(children)}
-#         super().__init__(UIType.AllotmentPane, AllotmentPaneProps, children,
-#                          False)
-
-#     @property
-#     def prop(self):
-#         propcls = self.propcls
-#         return self._prop_base(propcls, self)
-
-#     @property
-#     def update_event(self):
-#         propcls = self.propcls
-#         return self._update_props_base(propcls)
+    async def update_panes_props(self, index_to_props: Dict[int, Dict[str, Any]]):
+        for index, props in index_to_props.items():
+            props["component"] = self.childs_complex.paneDefs[index].component
+            Allotment.Pane(**props)
+            for k, v in props.items():
+                setattr(self.childs_complex.paneDefs[index], k, v)
+        return await self.send_and_wait(self.update_childs_complex_event())
 
 
 @dataclasses.dataclass
@@ -4312,6 +4324,10 @@ class JsonLikeTree(JsonLikeTreeBase[JsonLikeTreeProps]):
         res["expanded"] = self.props.expanded
         return res
 
+    def get_tree_update_event_with_expand(self, new_tree: JsonLikeNode, expands: List[JsonLikeNode]):
+        all_expandable = self.get_all_expandable_node_ids(expands)
+        return self.update_event(tree=new_tree, expanded=all_expandable)
+
     async def select(self, ids: List[str]):
         await self.send_and_wait(self.update_event(rowSelection=ids))
 
@@ -4398,6 +4414,9 @@ class TanstackJsonLikeTree(JsonLikeTreeBase[TanstackJsonLikeTreeProps]):
         else:
             return await self.send_and_wait(self.update_event(expanded={k: True for k in all_expandable}))
 
+    def get_tree_update_event_with_expand(self, new_tree: JsonLikeNode, expands: List[JsonLikeNode]):
+        all_expandable = self.get_all_expandable_node_ids(expands)
+        return self.update_event(tree=new_tree, expanded={k: True for k in all_expandable})
 
 class RawJsonLikeTreeBase(MUIComponentBase[T_raw_tview_base_props]):
 
@@ -5650,4 +5669,41 @@ class VideoPlayer(MUIComponentBase[VideoPlayerProps]):
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
+
+
+@dataclasses.dataclass
+class TooltipFlexBoxProps(MUIFlexBoxProps):
+    title: str = ""
+    placement: Union[Undefined, _TooltipPlacement] = undefined
+    multiline: Union[Undefined, bool] = undefined
+    enterDelay: Union[Undefined, NumberType] = undefined
+    enterNextDelay: Union[Undefined, NumberType] = undefined
+    leaveDelay: Union[Undefined, NumberType] = undefined
+    arrow: Union[Undefined, bool] = undefined
+    followCursor: Union[Undefined, bool] = undefined
+
+
+class TooltipFlexBox(MUIContainerBase[TooltipFlexBoxProps,
+                                      MUIComponentType]):
+    """ TooltipFlexBox is a flexbox with tooltip.
+    Don't support pointer events because tooltip need to
+    control child (flexbox) events.
+    """
+    def __init__(self, title: str, children: Optional[LayoutType] = None,) -> None:
+        if children is not None and isinstance(children, Sequence):
+            children = {str(i): v for i, v in enumerate(children)}
+
+        super().__init__(UIType.TooltipFlexBox,
+                         TooltipFlexBoxProps, children)
+        self.prop(title=title)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
 

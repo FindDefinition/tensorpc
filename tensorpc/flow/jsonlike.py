@@ -538,12 +538,12 @@ class JsonLikeNode:
         assert found
         return [self] + nodes
 
-    def _get_node_by_uid_trace_found(self, uid_parts: List[str]):
+    def _get_node_by_uid_trace_found(self, uid_parts: List[str], check_missing: bool = False):
         parts = uid_parts
         if len(parts) == 1:
             return [self], True
         # uid contains root, remove it at first.
-        res = self._get_node_by_uid_resursive_trace(parts[1:])
+        res = self._get_node_by_uid_resursive_trace(parts[1:], check_missing)
         return [self] + res[0], res[1]
 
     def _get_node_by_uid_resursive_trace(

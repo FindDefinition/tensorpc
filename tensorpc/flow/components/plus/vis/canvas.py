@@ -495,29 +495,25 @@ class ComplexCanvas(mui.FlexBox):
             self.canvas.prop(zIndex=1),
             mui.HBox([
                 mui.VBox([
-                    mui.ToggleButton("switch",
-                                     icon=mui.IconType.SwapVert,
+                    mui.ToggleButton(icon=mui.IconType.SwapVert,
                                      callback=self._on_pan_to_fwd).prop(
                                          selected=True,
                                          size="small",
                                          tooltip="Mouse Right Button Mode",
                                          tooltipPlacement="right"),
-                    mui.ToggleButton("enableGrid",
-                                     icon=mui.IconType.Grid3x3,
+                    mui.ToggleButton(icon=mui.IconType.Grid3x3,
                                      callback=self._on_enable_grid).prop(
                                          selected=True,
                                          size="small",
                                          tooltip="Enable Grid",
                                          tooltipPlacement="right"),
-                    mui.ToggleButton("enableCfgPanel",
-                                     icon=mui.IconType.Settings,
+                    mui.ToggleButton(icon=mui.IconType.Settings,
                                      callback=self._on_enable_cfg_panel).prop(
                                          selected=False,
                                          size="small",
                                          tooltip="Enable Config Panel",
                                          tooltipPlacement="right"),
-                    mui.ToggleButton("enableTData",
-                                     icon=mui.IconType.DataArray,
+                    mui.ToggleButton(icon=mui.IconType.DataArray,
                                      callback=self._on_enable_tdata_pane).prop(
                                          selected=bottom_pane_visible,
                                          size="small",

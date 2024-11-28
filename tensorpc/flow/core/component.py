@@ -72,7 +72,9 @@ from ..jsonlike import (BackendOnlyProp, DataClassWithUndefined, Undefined,
                         undefined_dict_factory)
 from .appcore import RemoteCompEvent, SimpleEventType, NumberType, ValueType, enter_event_handling_conetxt, get_app, Event, EventDataType, get_event_handling_context
 from tensorpc.flow.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_FLOW_COMP_UID_STRUCTURE_SPLIT
+from tensorpc.utils.rich_logging import get_logger
 
+LOGGER = get_logger("tensorpc.ui")
 
 class DataclassType(Protocol):
     # as already noted in comments, checking for this attribute is currently
@@ -183,6 +185,7 @@ class UIType(enum.IntEnum):
     AppTerminal = 0x104
     ThemeProvider = 0x105
     Handle = 0x106
+    TooltipFlexBox = 0x107
 
     # special containers
     # react fragment
@@ -433,7 +436,7 @@ class FrontendEventType(enum.IntEnum):
 UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
     UIType.DataGrid, UIType.MatchCase, UIType.DataFlexBox, UIType.Tabs,
     UIType.Allotment, UIType.GridLayout, UIType.MenuList,
-    UIType.MatrixDataGrid, UIType.Flow
+    UIType.MatrixDataGrid, UIType.Flow, UIType.Markdown
 }
 
 
@@ -1511,7 +1514,8 @@ class Component(Generic[T_base_props, T_child]):
         return wrapper
 
     async def handle_event(self, ev: Event, is_sync: bool = False) -> Any:
-        pass
+        ev_type = FrontendEventType(ev.type)
+        LOGGER.warning(f"Receive event {ev_type.name}, but `handle_event` not implemented for `{self.__class__.__name__}`")
 
     def __repr__(self):
         if self._flow_uid is None:

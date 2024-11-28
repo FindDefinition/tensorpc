@@ -3160,67 +3160,6 @@ class Button(Group):
         return self._update_props_base(propcls)
 
 
-# class ToggleButton(Group):
-#     def __init__(self,
-#                  name: str,
-#                  width: float,
-#                  height: float,
-#                  callback: Callable[[bool], _CORO_ANY],
-#                  radius: Optional[float] = None,
-#                  font_size: Optional[float] = None) -> None:
-#         if radius is None:
-#             radius = min(width, height) * 0.25
-#         if font_size is None:
-#             font_size = min(width, height) * 0.5
-#         material = MeshBasicMaterialV1()
-#         material.prop(color="#393939")
-#         mesh = MeshV1(RoundedRectGeometry(width, height, radius), material)
-#         mesh.register_event_handler(FrontendEventType.Click.value, callback, stop_propagation=True)
-#         self.event_click = self._create_event_slot_noarg(FrontendEventType.Click)
-
-#         mesh.prop(hoverColor="#222222",
-#                   clickColor="#009A63",
-#                   toggleMode=True)
-#         self.mesh = mesh
-
-#         text = Text(name)
-#         text.prop(fontSize=font_size,
-#                   color="white",
-#                   position=(0, 0, 0),
-#                   maxWidth=width)
-#         children = {
-#             "mesh": mesh,
-#             "text": text,
-#         }
-#         super().__init__(children)
-#         self.name = name
-
-#     @property
-#     def toggled(self):
-#         return self.mesh.props.toggled
-
-#     def to_dict(self):
-#         res = super().to_dict()
-#         res["name"] = self.name
-#         return res
-
-#     async def headless_toggle(self):
-#         uiev = UIEvent(
-#             {self._flow_uid: (FrontendEventType.Change.value, self.name)})
-#         return await self.put_app_event(
-#             AppEvent("", {AppEventType.UIEvent: uiev}))
-
-#     @property
-#     def prop(self):
-#         propcls = self.propcls
-#         return self._prop_base(propcls, self)
-
-#     @property
-#     def update_event(self):
-#         propcls = self.propcls
-#         return self._update_props_base(propcls)
-
-
 @dataclasses.dataclass
 class PivotControlsProps(ContainerBaseProps, PivotControlsCommonProps):
     offset: Union[Vector3Type, Undefined] = undefined
