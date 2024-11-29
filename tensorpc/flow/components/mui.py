@@ -3202,7 +3202,7 @@ class MarkdownProps(ContainerBaseProps):
 
 
 class Markdown(MUIContainerBase[MarkdownProps, MUIComponentType]):
-    """markdown with color support, gfm, latex math,
+    r"""markdown with color support, gfm, latex math,
     code highlight, :emoji: support and nested component. note that only colored
     text and gfm are enabled by default, other features need to be
     enabled explicitly.
@@ -3214,9 +3214,11 @@ class Markdown(MUIContainerBase[MarkdownProps, MUIComponentType]):
     * Emoji: :EMOJICODE:. see https://github.com/ikatyang/emoji-cheat-sheet
 
     * Nested Component: firstly you need to provide all childs via `comp_map` (Markdown.ChildDef), then use `:component{#key_in_comp_map}` to render inline component
-        or use block syntax `:::component{#key_in_comp_map}:::` to render inside block
+        or use block syntax `:::component{#key_in_comp_map}\n:::` to render inside block. 
+        **the start and the end of the block must be in different line**.
+        see https://github.com/remarkjs/remark-directive for grammar.
 
-    WARNING: When you use nested component, the styles inside github markdown css can affect some nested component, 
+    WARNING: When you use nested component, styles inside github markdown css can affect some nested component, 
         so you may need to provide your own css to fix this.
 
     Examples:

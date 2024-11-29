@@ -6,11 +6,9 @@ import time
 import traceback
 import types
 from functools import partial
-from pathlib import Path, PurePath
 from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
                     Set, Tuple, Type, Union)
 
-import numpy as np
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 
 from tensorpc.flow.client import MasterMeta, is_inside_devflow
@@ -968,7 +966,7 @@ class ObjectTree(BasicObjectTree):
             self.root.update(default_builtins)
 
     @mark_did_mount
-    async def _on_mount(self):
+    async def _on_mount1(self):
         userdata = {
             "type": ContextMenuType.CopyReadItemCode.value,
         }

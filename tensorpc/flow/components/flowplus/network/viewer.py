@@ -1,9 +1,9 @@
 import enum
 from functools import partial
 import inspect
+import json
 import os
 from pathlib import Path
-import re
 import time
 
 from tensorpc.core.moduleid import get_qualname_of_type
@@ -29,11 +29,49 @@ import torch.utils
 from tensorpc.utils.tb_parser import parse_python_traceback
 LOGGER = get_logger("tensorpc.flowui.pytorch")
 
+def _get_flow_css(use_multiple_handle_node: bool):
+    multiple_handle_css = {
+        ".react-flow__node__handles": {
+            # add ellipsis to node text
+            "position": "absolute",
+            "display": "flex",
+            # "flexDirection": "row",
+            "justifyContent": "space-around",
+            "width": "100%",
+            "left": "0",
+        },
+        ".react-flow__node__handles_target": {
+            "top": "0",
+            "transform": "50%"
+        },
+        ".react-flow__node__handles_source": {
+            "bottom": "0",
+            "transform": "-50%"
+
+        },
+        ".react-flow__handle": {
+            "position": "relative",
+            "left": "0",
+        },
+    }
+    res = {
+        ".react-flow__node__content": {
+            # add ellipsis to node text
+            "overflow": "hidden",
+            "textOverflow": "ellipsis",
+            "whiteSpace": "nowrap",
+            "width": "100%",
+        },
+    }
+    if use_multiple_handle_node:
+        res.update(multiple_handle_css)
+    return res
 
 @dataclasses.dataclass
 class ExpandState:
     expanded: List[str]
 
+ELK_FILE_RESOURCE_KEY = "flow_elk.json"
 
 class PytorchModuleTreeItemEx(PytorchModuleTreeItem):
 
@@ -48,6 +86,7 @@ class TabType(enum.Enum):
     ARGS = "Args"
     STACKTRACE = "StackTrace"
     DEBUG = "Debug"
+    GLOBAL = "global"
 
 class PytorchModuleViewer(mui.FlexBox):
 
@@ -83,6 +122,13 @@ class PytorchModuleViewer(mui.FlexBox):
                                                         overflow="auto",
                                                         alignItems="flex-start")
 
+        self._global_container = mui.VBox([
+            mui.IconButton(
+                mui.IconType.Download).prop(size="small", href=f"tensorpc://{ELK_FILE_RESOURCE_KEY}", target="_blank"),
+        ])
+        self._global_container.prop(padding="5px", width="100%",
+                                    height="100%",
+                                    overflow="auto")
 
         tab_defs = [
             mui.TabDef("",
@@ -105,6 +151,11 @@ class PytorchModuleViewer(mui.FlexBox):
                        self._dbg_container,
                        icon=mui.IconType.BugReport,
                        tooltip="Flow Debug Info"),
+            mui.TabDef("",
+                       TabType.GLOBAL.value,
+                       self._global_container,
+                       icon=mui.IconType.Settings,
+                       tooltip="Global Info Settings"),
         ]
 
         self._tabs = mui.Tabs(tab_defs, init_value=TabType.INFO.value).prop(panelProps=mui.FlexBoxProps(
@@ -135,6 +186,8 @@ class PytorchModuleViewer(mui.FlexBox):
             mui.MenuItem("layout", "Dagre Layout"),
             mui.MenuItem("layout-tight", "Dagre Layout Tight"),
             mui.MenuItem("layout-longest", "Dagre Layout Longest"),
+            mui.MenuItem("elklayout", "Elk Layout"),
+
         ]
         self.graph.event_pane_context_menu.on(self._on_pane_contextmenu)
         self.graph.event_selection_change.on(self._on_selection_change)
@@ -171,15 +224,8 @@ class PytorchModuleViewer(mui.FlexBox):
                 self.global_container,
             ])
         self.prop(width="100%", height="100%", overflow="hidden")
-        self.graph_container.update_raw_props({
-            ".react-flow__node__content": {
-                # add ellipsis to node text
-                "overflow": "hidden",
-                "textOverflow": "ellipsis",
-                "whiteSpace": "nowrap",
-                "width": "100%",
-            }
-        })
+        self._use_multiple_handle_node = True
+        self.graph_container.update_raw_props(_get_flow_css(use_multiple_handle_node=False))
 
         self._external_ftree_id = external_ftree_id
         self._external_submodule_id = external_submodule_id
@@ -193,8 +239,19 @@ class PytorchModuleViewer(mui.FlexBox):
         self._current_state: Optional[ExpandState] = None
 
         self._dagre_options = flowui.DagreLayoutOptions(ranksep=25, )
+        self._layout_use_elk = True
 
         self._torch_util_path = Path(torch.utils.__file__).parent.resolve()
+        self.event_after_mount.on(self._on_init)
+        self.event_after_unmount.on(self._on_unmount)
+
+    async def _on_init(self):
+        if not self.is_external_mode:
+            appctx.get_app().add_file_resource(ELK_FILE_RESOURCE_KEY, self._elk_format_download)
+
+    async def _on_unmount(self):
+        if not self.is_external_mode:
+            appctx.get_app().remove_file_resource(ELK_FILE_RESOURCE_KEY)
 
     async def _on_tabs_change(self, value: str):
         self._current_tabs_value = value
@@ -220,9 +277,8 @@ class PytorchModuleViewer(mui.FlexBox):
             partial(self._on_node_contextmenu,
                     pth_flow=pth_flow,
                     state=self._current_state))
-        await self.graph.set_flow_and_do_dagre_layout(merged_graph_res.nodes,
+        await self._set_graph_node_edges_and_layout(merged_graph_res.nodes,
                                                       merged_graph_res.edges,
-                                                      self._dagre_options,
                                                       fit_view=True)
         await self._info_container.set_new_layout([])
         with torch.device("meta"):
@@ -285,6 +341,12 @@ class PytorchModuleViewer(mui.FlexBox):
                                           keep_zoom=True,
                                           duration=200)
 
+    async def _set_graph_node_edges_and_layout(self, nodes: List[flowui.Node], edges: List[flowui.Edge], fit_view: bool = False):
+        if self._layout_use_elk:
+            await self.graph.set_flow_and_do_elk_layout(nodes, edges, fit_view=fit_view)
+        else:
+            await self.graph.set_flow_and_do_dagre_layout(nodes, edges, self._dagre_options, fit_view=fit_view)
+
     async def _node_tree_select(self, node_ids: List[str]):
         if self._cur_graph_metadata is not None:
             await self.graph.locate_nodes(node_ids,
@@ -340,7 +402,6 @@ class PytorchModuleViewer(mui.FlexBox):
     async def _on_tree_item_lazy_expand(self, module_id: str):
         # we already set prefix to external_module_id if exists
         # so we don't need to patch here.
-        dagre = self._dagre_options
         if self._current_state is not None and self._cur_pth_flow is not None:
             new_ids = [module_id]
             for expanded_module_id in self._current_state.expanded:
@@ -356,8 +417,8 @@ class PytorchModuleViewer(mui.FlexBox):
                 module=self._cur_module,
                 submodule_id=ext_mod_id,
                 submodule_id_is_module=self._external_ftree_id is None)
-            await self.graph.set_flow_and_do_dagre_layout(
-                merged_graph_res.nodes, merged_graph_res.edges, dagre)
+            await self._set_graph_node_edges_and_layout(
+                merged_graph_res.nodes, merged_graph_res.edges)
             self._cur_graph_metadata = merged_graph_res
             await self._module_tree_select(module_id)
             await self._info_container.set_new_layout([])
@@ -375,6 +436,8 @@ class PytorchModuleViewer(mui.FlexBox):
         if item_id == "layout-longest":
             dagre.ranker = "longest-path"
             await self.graph.do_dagre_layout(dagre)
+        if item_id == "elklayout":
+            await self.graph.do_elk_layout()
 
     async def export_module_to_flow(self,
                                     module: torch.nn.Module,
@@ -389,7 +452,7 @@ class PytorchModuleViewer(mui.FlexBox):
             LOGGER.warning(f"Start export {mod_qname}")
             gm = torch.export.export(mod_meta, args, kwargs)
         LOGGER.warning(f"Export {mod_qname} time: {time.time() - t}")
-        builder = PytorchExportBuilder(use_multiple_handle_node=False)
+        builder = PytorchExportBuilder(use_multiple_handle_node=self._use_multiple_handle_node)
         interpreter = FlowUIInterpreter(gm, builder, module, verbose=False)
         outputs = interpreter.run_on_graph_placeholders()
         assert isinstance(outputs, (list, tuple))
@@ -422,9 +485,8 @@ class PytorchModuleViewer(mui.FlexBox):
                             state.expanded.append(ftree_id)
                             merged_graph_res = pth_flow.create_graph_with_expanded_ids(
                                 state.expanded)
-                            await self.graph.set_flow_and_do_dagre_layout(
-                                merged_graph_res.nodes, merged_graph_res.edges,
-                                dagre)
+                            await self._set_graph_node_edges_and_layout(
+                                merged_graph_res.nodes, merged_graph_res.edges)
                             self._cur_graph_metadata = merged_graph_res
                             if module_id_str != "":
                                 parts.insert(0, "")
@@ -444,9 +506,8 @@ class PytorchModuleViewer(mui.FlexBox):
                                 submodule_id=ext_mod_id,
                                 submodule_id_is_module=self._external_ftree_id
                                 is None)
-                            await self.graph.set_flow_and_do_dagre_layout(
-                                merged_graph_res.nodes, merged_graph_res.edges,
-                                dagre)
+                            await self._set_graph_node_edges_and_layout(
+                                merged_graph_res.nodes, merged_graph_res.edges)
                             self._cur_graph_metadata = merged_graph_res
                             if self._external_submodule_id is not None:
                                 num_ex_part = len(
@@ -456,6 +517,7 @@ class PytorchModuleViewer(mui.FlexBox):
                                 parts.insert(0, "")
                             uid_obj = UniqueTreeIdForTree.from_parts(
                                 ["root", *parts]).uid_encoded
+                                
                             await self._module_tree.expand_uid(
                                 uid_obj, lazy_expand_event=False)
                             await self._info_container.set_new_layout([])
@@ -705,3 +767,69 @@ class PytorchModuleViewer(mui.FlexBox):
         await self._info_container.set_new_layout([])
         await self._args_tree.set_root_object_dict({})
         await self._stack_trace_container.set_new_layout([])
+
+    def _elk_format_download(self, req: mui.FileResourceRequest):
+        if self._cur_graph_metadata is not None:
+            nodes = self._cur_graph_metadata.nodes 
+            edges = self._cur_graph_metadata.edges
+            elk = {
+                "id": "root",
+                "layoutOptions": {
+                    "elk.algorithm": "layered",
+                    "elk.direction": "DOWN",
+                },
+                "children": [],
+                "edges": [],
+            }
+            for n in nodes:
+                inp_handle_to_edges = self._cur_graph_metadata.node_id_to_inp_handle_to_edges[n.id]
+                out_handle_to_edges = self._cur_graph_metadata.node_id_to_out_handle_to_edges[n.id]
+                ports = []
+                handle_idx = 0
+                for handle, _ in inp_handle_to_edges.items():
+                    ports.append({
+                        "id": f"{n.id}_PORT_in_{handle}",
+                        # "properties": {
+                        #     "side": "NORTH",
+                        #     "index": handle_idx,
+                        # }
+                    })
+                    handle_idx += 1
+                for handle, _ in out_handle_to_edges.items():
+                    ports.append({
+                        "id": f"{n.id}_PORT_out_{handle}",
+                        # "properties": {
+                        #     "side": "SOUTH",
+                        #     "index": handle_idx,
+                        # }
+                    })
+                    handle_idx += 1
+
+                elk["children"].append({
+                    "id": n.id,
+                    "width": 150,
+                    "height": 40,
+                    "ports": ports,
+                    # "properties": {
+                    #     "org.eclipse.elk.portConstraints": "FIXED_ORDER",
+                    # }
+                })
+                node_data = n.get_node_data()
+                if node_data is not None:
+                    elk["children"][-1]["labels"] = [
+                        {
+                            "text": node_data.label,
+                        }
+                    ]
+            for e in edges:
+                elk["edges"].append({
+                    "id": e.id,
+                    "source": e.source,
+                    "target": e.target,
+                    "sourcePort": f"{e.source}_PORT_out_{e.sourceHandle}",
+                    "targetPort": f"{e.target}_PORT_in_{e.targetHandle}",
+                })
+            elk_binary = json.dumps(elk, indent=2).encode()
+            return mui.FileResource(name=ELK_FILE_RESOURCE_KEY, content=elk_binary)
+
+        return mui.FileResource.empty()

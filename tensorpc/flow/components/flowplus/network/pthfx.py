@@ -1,15 +1,11 @@
 import ast
 from collections import namedtuple
 import contextlib
-from curses import meta
 import dataclasses
 from operator import getitem
 import traceback
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
-from cv2 import merge
-from regex import F
-import rich
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.flow.components import flowui, mui
@@ -23,6 +19,7 @@ from torch.export.graph_signature import (
     OutputSpec,
     TensorArgument,
 )
+from tensorpc.flow.components.flowplus.network.defs import PytorchNodeMeta, EdgeTensorMeta
 import contextvars
 from tensorpc.utils.rich_logging import get_logger
 
@@ -96,22 +93,6 @@ _ATEN_NAME_MAP = {
 
 
 @dataclasses.dataclass
-class PytorchNodeMeta:
-    op: str
-    module_id: Optional[UniqueTreeIdForTree] = None
-    # (module_id, module_qname)
-    module_stack: Optional[List[Tuple[str, str]]] = None
-    module_qname: Optional[str] = None
-    output_desps: Optional[Sequence[Any]] = None
-    is_merged: bool = False
-    ftree_id: Optional[str] = None
-    is_io_node: bool = False
-    io_name: Optional[str] = None
-    stack_trace: Optional[str] = None
-    additional_args: Optional[Dict[str, Any]] = None
-
-
-@dataclasses.dataclass
 class FunctionalFlowTree:
     root: Dict
     module_id_to_tree_ids: Dict[str, List[List[int]]]
@@ -125,9 +106,6 @@ class FunctionalFlowTree:
         return cur
 
 
-@dataclasses.dataclass
-class EdgeTensorMeta:
-    raw: Any  # FakeTensor or SymInt
 
 @dataclasses.dataclass
 class PytorchFlowOutputPartial(flowui.SymbolicGraphOutput[PytorchNodeMeta,
@@ -144,26 +122,40 @@ class PytorchFlowOutputPartial(flowui.SymbolicGraphOutput[PytorchNodeMeta,
 def _default_qname_to_cared_params_and_name(name: str, qname: str, submodule_id: str, module: torch.nn.Module) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     try:
         subm = module.get_submodule(submodule_id)
+        layer_params: Optional[Dict[str, Any]] = None
+        if qname.startswith("torch.nn.modules"):
+            # use __constants__ to get constant params
+            if hasattr(subm, "__constants__"):
+                try:
+                    constants = subm.__constants__
+                    layer_params = {}
+                    for k in constants:
+                        layer_params[k] = getattr(subm, k)
+                except:
+                    traceback.print_exc()
+                
         if qname.startswith("torch.nn.modules.conv.Conv"):
             conv_layer_types = (torch.nn.Conv2d, torch.nn.ConvTranspose2d, torch.nn.Conv1d, torch.nn.ConvTranspose1d,
                                 torch.nn.Conv3d, torch.nn.ConvTranspose3d)
             assert isinstance(subm, conv_layer_types)
-            layer_params = {
-                "in_channels": subm.in_channels,
-                "out_channels": subm.out_channels,
-                "kernel_size": subm.kernel_size,
-                "stride": subm.stride,
-                "padding": subm.padding,
-                "dilation": subm.dilation,
-                "groups": subm.groups,
-            }
+            if layer_params is None:
+                layer_params = {
+                    "in_channels": subm.in_channels,
+                    "out_channels": subm.out_channels,
+                    "kernel_size": subm.kernel_size,
+                    "stride": subm.stride,
+                    "padding": subm.padding,
+                    "dilation": subm.dilation,
+                    "groups": subm.groups,
+                }
             return layer_params, f"{name}({subm.in_channels}x{subm.out_channels})"
         elif qname == "torch.nn.modules.linear.Linear":
             assert isinstance(subm, torch.nn.Linear)
-            layer_params = {
-                "in_features": subm.in_features,
-                "out_features": subm.out_features,
-            }
+            if layer_params is None:
+                layer_params = {
+                    "in_features": subm.in_features,
+                    "out_features": subm.out_features,
+                }
             return layer_params, f"{name}({subm.in_features}x{subm.out_features})"
         elif qname == "torch.nn.modules.container.Sequential":
             assert isinstance(subm, torch.nn.Sequential)
@@ -174,6 +166,21 @@ def _default_qname_to_cared_params_and_name(name: str, qname: str, submodule_id:
                 "childs": child_type_names,
             }
             return layer_params, f"{name}({len(subm)})"
+        elif qname == "torch.nn.modules.sparse.Embedding":
+            assert isinstance(subm, torch.nn.modules.sparse.Embedding)
+            if layer_params is None:
+                layer_params = {
+                    "num_embeddings": subm.num_embeddings,
+                    "embedding_dim": subm.embedding_dim,
+                    "padding_idx": subm.padding_idx,
+                    "max_norm": subm.max_norm,
+                    "norm_type": subm.norm_type,
+                    "scale_grad_by_freq": subm.scale_grad_by_freq,
+                    "sparse": subm.sparse
+                }
+            return layer_params, f"{name}({subm.num_embeddings}, {subm.embedding_dim})"
+        else:
+            return layer_params, None
 
     except AttributeError:
         traceback.print_exc()
@@ -298,8 +305,8 @@ class PytorchFlowOutput(flowui.SymbolicGraphOutput[PytorchNodeMeta,
                 inp_handles = list(internals.node_id_to_inp_handle_to_edges[merged_node.id].keys())
                 out_handles = list(internals.node_id_to_out_handle_to_edges[merged_node.id].keys())
                 assert not isinstance(merged_node.data, mui.Undefined)
-                merged_node.data.sourceHandleIds = inp_handles
-                merged_node.data.targetHandleIds = out_handles
+                merged_node.data.sourceHandleIds = out_handles
+                merged_node.data.targetHandleIds = inp_handles
 
         if submodule_id is not None:
             submod_node_ids = self.ftree.all_node_ids_with_stack[submod_node_range[0]:submod_node_range[1]]
@@ -570,7 +577,7 @@ class FlowUIInterpreter(Interpreter):
                 name = schema.name
                 num_output = len(schema.returns)
                 if num_output > 1:
-                    op_ret_type_fields = [f"out-{i}" for i in range(num_output)]
+                    op_ret_type_fields = [f"O-{i}" for i in range(num_output)]
             elif target is getitem:
                 # come from split
                 if not isinstance(args[0], flowui.SymbolicImmediate):
@@ -598,7 +605,7 @@ class FlowUIInterpreter(Interpreter):
                     if not isinstance(val, (tuple, list)):
                         # list of faketensor or symint
                         val = [val]
-                    out_fields = [f"out-{i}" for i in range(len(val))]
+                    out_fields = [f"O-{i}" for i in range(len(val))]
                 else:
                     out_fields = [f"out"]
             else:
@@ -797,12 +804,12 @@ class FlowUIInterpreter(Interpreter):
         if schema is not None:
             for i, arg in enumerate(args):
                 if i < len(schema.arguments):
-                    kwargs_merged[f"inp-{schema.arguments[i].name}"] = arg
+                    kwargs_merged[f"I-{schema.arguments[i].name}"] = arg
                 else:
-                    kwargs_merged[f"inp-{i}"] = arg
+                    kwargs_merged[f"I-{i}"] = arg
         else:
             for i, arg in enumerate(args):
-                kwargs_merged[f"inp-{i}"] = arg
+                kwargs_merged[f"I-{i}"] = arg
         kwargs_merged.update(kwargs)
         inp_handles = {}
         additional_args = {}
@@ -851,15 +858,15 @@ class FlowUIInterpreter(Interpreter):
             else:
                 if self._is_export:
                     inp_meta = PytorchNodeMeta("placeholder", is_io_node=True)
-                    inp, inp_node = self._builder.create_input(arg.name, node_data=inp_meta)
+                    inp, inp_node = self._builder.create_input(arg.name, node_data=inp_meta, default_input_handle=arg.name)
                     if "val" in arg.meta:
                         assert not isinstance(arg.meta["val"],
                                               (tuple, list)), f"TODO {arg.meta['val']}"
                         inp.userdata = EdgeTensorMeta(raw=arg.meta["val"])
                         inp_meta.output_desps = [arg.meta["val"]]
                 else:
-                    inp, inp_node = self._builder.create_input(arg.name)
-
+                    inp, inp_node = self._builder.create_input(arg.name, default_input_handle=arg.name)
+                inp.source_handle = arg.name
             inputs.append(inp)
         graph_ctx = GraphContext()
         with enter_graph_context(graph_ctx):

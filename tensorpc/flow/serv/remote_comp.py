@@ -457,7 +457,8 @@ class RemoteComponentService:
                         res.length = len(res.content)
                         res.content = None
                         if res.stat is None:
-                            res.modify_timestamp_ns = time.time_ns()
+                            if res.modify_timestamp_ns is None:
+                                res.modify_timestamp_ns = time.time_ns()
                     msg = "file metadata must return stat or length if not path"
                     assert res.stat is not None or res.length is not None, msg
                 return res  

@@ -22,7 +22,6 @@ import pickle
 from runpy import run_path
 from typing import Any, Dict, List, Optional
 
-import async_timeout
 import grpc
 from tensorpc.core.asyncclient import simple_chunk_call_async
 from tensorpc.core.defs import FileDesp, FileResource, FileResourceRequest
@@ -377,7 +376,8 @@ class FlowApp:
                         res.content = None
                         if res.stat is None:
                             # mtime must exist to resolve cache problem
-                            res.modify_timestamp_ns = time.time_ns()
+                            if res.modify_timestamp_ns is None:
+                                res.modify_timestamp_ns = time.time_ns()
                     msg = "file metadata must return stat or length if not path"
                     assert res.stat is not None or res.length is not None, msg
                 return res  
