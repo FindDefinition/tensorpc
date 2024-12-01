@@ -49,7 +49,7 @@ from tensorpc.flow.jsonlike import (as_dict_no_undefined,
 if TYPE_CHECKING:
     from tensorpc.flow.components.flowplus.customnode import CustomNode
 
-FLOWUI_CNODE_NODEDATA_KEY = "__tensorpc_flowui_compute_nodedata_key"
+FLOWUI_CNODE_NODEDATA_KEY = "__tensorpc_flowui_nodedata_key"
 
 FLOWUI_CNODE_STATE_KEY = "cnode"
 FLOWUI_DNODE_STATE_KEY = "dnode"

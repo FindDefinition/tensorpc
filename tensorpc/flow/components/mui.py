@@ -4601,8 +4601,8 @@ class ControlNode:
     id: str
     name: str
     type: int
-    initValue: Union[Undefined, NumberType, bool, str, ControlColorRGBA,
-                     Vector3Type, List[NumberType]] = undefined
+    value: Union[Undefined, NumberType, bool, str, ControlColorRGBA,
+            Vector3Type, List[NumberType]] = undefined
     children: "List[ControlNode]" = dataclasses.field(default_factory=list)
     # for range
     min: Union[Undefined, NumberType] = undefined
@@ -4619,54 +4619,22 @@ class ControlNode:
     count: Union[Undefined, int] = undefined
     isInteger: Union[Undefined, bool] = undefined
 
-
 @dataclasses.dataclass
-class DynamicControlsProps(MUIFlexBoxProps):
-    nodes: List[ControlNode] = dataclasses.field(default_factory=list)
-    # use_leva_style: bool = True
-    collapsed: Union[Undefined, bool] = undefined
-    debounce: Union[Undefined, NumberType] = undefined
-    throttle: Union[Undefined, NumberType] = undefined
-    title: Union[Undefined, str] = undefined
-    # leva is uncontrolled component. if we change nodes,
-    # the control won't be updated, so we must provide
-    # a different react key to force component
-    # remount.
-    reactKey: Union[Undefined, str] = undefined
-
-
-class DynamicControls(MUIComponentBase[DynamicControlsProps]):
-
-    def __init__(self,
-                 callback: Optional[Callable[[Tuple[str, Any]],
-                                             _CORO_NONE]] = None,
-                 init: Optional[List[ControlNode]] = None) -> None:
-        super().__init__(UIType.DynamicControls,
-                         DynamicControlsProps,
-                         allowed_events=[FrontendEventType.Change.value])
-        if init is not None:
-            self.props.nodes = init
-        if callback is not None:
-            self.register_event_handler(FrontendEventType.Change.value,
-                                        callback)
-        self.event_change = self._create_event_slot(FrontendEventType.Change)
-
-    @property
-    def prop(self):
-        propcls = self.propcls
-        return self._prop_base(propcls, self)
-
-    @property
-    def update_event(self):
-        propcls = self.propcls
-        return self._update_props_base(propcls)
-
-    async def handle_event(self, ev: Event, is_sync: bool = False):
-        return await handle_standard_event(self,
-                                           ev,
-                                           sync_status_first=False,
-                                           is_sync=is_sync)
-
+class SimpleControlsItem:
+    type: int
+    value: Union[Undefined, NumberType, bool, str, ControlColorRGBA,
+                     Vector3Type, List[NumberType]] = undefined
+    # for range
+    min: Union[Undefined, NumberType] = undefined
+    max: Union[Undefined, NumberType] = undefined
+    step: Union[Undefined, NumberType] =undefined
+    # for select
+    selects: Union[Undefined, List[Tuple[str,ValueType]]] = undefined
+    # for string
+    rows: Union[Undefined, bool, int] = undefined
+    # for vectorN
+    count: Union[Undefined, int] = undefined
+    isInteger: Union[Undefined, bool] = undefined
 
 @dataclasses.dataclass
 class SimpleControlsProps(MUIFlexBoxProps):
@@ -4674,6 +4642,9 @@ class SimpleControlsProps(MUIFlexBoxProps):
     contextMenus: Union[Undefined, List[ContextMenuData]] = undefined
     reactKey: Union[Undefined, str] = undefined
     variant: Union[Undefined, Literal["mui", "native"]] = undefined # mui by default
+    controlled: Union[Undefined, bool] = undefined
+    expanded: Union[bool, Dict[str,
+                               bool]] = dataclasses.field(default_factory=dict)
 
 
 class SimpleControls(MUIComponentBase[SimpleControlsProps]):
@@ -4703,11 +4674,52 @@ class SimpleControls(MUIComponentBase[SimpleControlsProps]):
         return self._update_props_base(propcls)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
+        sync_state = True
+        if ev.type == FrontendEventType.TreeItemSelectChange.value:
+            sync_state = False
         return await handle_standard_event(self,
                                            ev,
                                            sync_status_first=False,
+                                           sync_state_after_change=sync_state,
+                                           change_status=False,
                                            is_sync=is_sync)
 
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["tree"] = self.props.tree
+        res["expanded"] = self.props.expanded
+        return res
+
+    def state_change_callback(
+            self,
+            value: Any,
+            type: ValueType = FrontendEventType.Change.value):
+        if type == FrontendEventType.TreeItemSelectChange.value:
+            # row selection in simple control is uncontrolled
+            return
+        if type == FrontendEventType.TreeItemExpandChange:
+            self.prop(expanded=value)
+            return
+        if not self.props.controlled:
+            return 
+        node_id = UniqueTreeIdForTree(value[0])
+        parts = node_id.parts
+        # locate node
+        nodes = self.props.tree
+        node = None
+        for part in parts:
+            found = False
+            for n in nodes:
+                if n.id.parts[-1] == part:
+                    node = n
+                    nodes = node.children
+                    found = True
+                    break
+            if not found:
+                raise ValueError(f"node {node_id} not found, should not happen")
+        if node is None:
+            raise ValueError(f"node {node_id} not found, should not happen")
+        node.get_userdata_typed(SimpleControlsItem).value = value[1]
 
 @dataclasses.dataclass
 class MUIVirtualizedBoxProps(MUIFlexBoxWithDndProps):

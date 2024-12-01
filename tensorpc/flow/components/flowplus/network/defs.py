@@ -20,6 +20,7 @@ class PytorchNodeMeta:
     io_name: Optional[str] = None
     stack_trace: Optional[str] = None
     additional_args: Optional[Dict[str, Any]] = None
+    op_sig: Optional[str] = None
 
 @dataclasses.dataclass
 class EdgeTensorMeta:

@@ -32,7 +32,6 @@ from tensorpc.flow import appctx
 from tensorpc.flow.jsonlike import TreeItem
 from tensorpc.utils.registry import HashableSeqRegistryKeyOnly
 from tensorpc.flow.components.core import get_tensor_container
-from tensorpc.flow.components.plus.config import ConfigPanelV2
 from tensorpc.flow.components.plus.scriptmgr import ScriptManager
 
 from .treeview import CanvasTreeItemHandler, lock_component
@@ -811,7 +810,7 @@ class ComplexCanvas(mui.FlexBox):
             await self._cfg_container.set_new_layout([])
 
     def __get_cfg_panel(self):
-        _cfg_panel = ConfigPanelV2(self.cfg, self._on_cfg_change)
+        _cfg_panel = ConfigPanel(self.cfg, self._on_cfg_change)
         _cfg_panel.prop(
             border="1px solid",
             borderColor="gray",
@@ -948,8 +947,7 @@ class ComplexCanvas(mui.FlexBox):
             else:
                 if three.is_three_component(obj):
                     if obj._flow_uid is not None:
-                        panel = self._get_default_detail_layout(obj).prop(
-                            reactKey=data.nodes[-1].id.uid_encoded)
+                        panel = self._get_default_detail_layout(obj)
                         self._cur_detail_layout_uid = data.nodes[-1].id
                         self._cur_detail_layout_object_id = obj._flow_uid
                         await self.prop_container.set_new_layout([panel])
@@ -979,7 +977,7 @@ class ComplexCanvas(mui.FlexBox):
             await self.tdata_container_v2.set_new_layout([])
 
     def _get_default_detail_layout(self, obj: three.Component):
-        panel = ConfigPanelV2(obj.props,
+        panel = ConfigPanel(obj.props,
                               partial(self._on_cfg_panel_change, obj=obj),
                               ignored_field_names=set([
                                   "status",
@@ -995,8 +993,7 @@ class ComplexCanvas(mui.FlexBox):
                     [obj_cfg.detail_layout])
             else:
                 if three.is_three_component(obj):
-                    panel = self._get_default_detail_layout(obj).prop(
-                        reactKey=self._cur_detail_layout_uid.uid_encoded)
+                    panel = self._get_default_detail_layout(obj).prop()
                     await self.prop_container.set_new_layout([panel])
 
     async def _install_table_layout(self, obj: three.Component):

@@ -11,7 +11,7 @@ from tensorpc.core.serviceunit import ObservedFunction
 from tensorpc.flow import appctx
 from tensorpc.flow.components import mui
 from tensorpc.flow.components.plus.canvas import SimpleCanvas
-from tensorpc.flow.components.plus.config import ConfigPanelV2
+from tensorpc.flow.components.plus.config import ConfigPanel
 
 from ..common import CommonQualNames
 from ..core import ALL_OBJECT_LAYOUT_HANDLERS, ObjectGridItemConfig, ObjectLayoutHandler, DataClassesType, PriorityCommon

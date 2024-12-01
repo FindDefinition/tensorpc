@@ -13,7 +13,7 @@ from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.flow import appctx
 from tensorpc.flow.components import mui, flowui
 from tensorpc.flow.components.plus.canvas import SimpleCanvas
-from tensorpc.flow.components.plus.config import ConfigPanelV2
+from tensorpc.flow.components.plus.config import ConfigPanel
 from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
 from tensorpc.flow.components.plus.objview.script import get_frame_obj_layout_from_code, get_init_obj_convert_code
 import humanize
@@ -267,10 +267,6 @@ class DataclassesHandler(ObjectPreviewHandler):
         self.prop(flexDirection="column", flex=1)
 
     async def bind(self, obj: Any, uid: Optional[str] = None):
-        # for uncontrolled component, use react_key to force remount.
-        # FIXME currently no way to update if obj dataclass def is changed with same uid.
-        # panel = ConfigPanelV2(obj).prop(reactKey=uid)
-        # await self.cfg_ctrl_container.set_new_layout([panel])
         await self._simple_tree.add_object_to_tree(obj, expand_level=2)
 
 class DefaultHandler(ObjectPreviewHandler):

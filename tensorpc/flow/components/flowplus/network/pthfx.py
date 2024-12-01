@@ -541,7 +541,7 @@ class FlowUIInterpreter(Interpreter):
         if not inp_handles:
             return super().call_function(mod, args, kwargs)
 
-        op, output_desps = self.create_op_node(name, list(inp_handles.keys()),
+        op, output_desps, _ = self.create_op_node(name, list(inp_handles.keys()),
                                                [f"{name}-out"], target, args,
                                                kwargs)
         op.style = {"backgroundColor": "aliceblue"}
@@ -582,7 +582,7 @@ class FlowUIInterpreter(Interpreter):
                 # come from split
                 if not isinstance(args[0], flowui.SymbolicImmediate):
                     return super().call_function(target, args, kwargs)
-        msg = f"call_function {type(target)} {target} {name} "
+        msg = f"call_function {get_qualname_of_type(type(target))} {target} {name} "
         if self._verbose:
             print(msg)
         raw_op_name = name
@@ -622,9 +622,11 @@ class FlowUIInterpreter(Interpreter):
                     end = None
                 if (start == 0 or start is None) and end is None:
                     return args[0]
-        op, output_desps = self.create_op_node(name, list(inp_handles.keys()),
+        op, output_desps, meta = self.create_op_node(name, list(inp_handles.keys()),
                                                out_fields, target, args,
                                                kwargs, raw_op_name, additional_args)
+        if schema is not None:
+            meta.op_sig = str(schema)
         op.style = {
             "backgroundColor": "aliceblue" if op_has_param else "silver"
         }
@@ -797,7 +799,7 @@ class FlowUIInterpreter(Interpreter):
                                                 inputs,
                                                 outputs,
                                                 node_data=meta)
-        return sym_node, output_desps
+        return sym_node, output_desps, meta
 
     def _get_inp_handles_and_addi_args(self, name: str, args, kwargs, schema=None):
         kwargs_merged = {}
@@ -838,7 +840,7 @@ class FlowUIInterpreter(Interpreter):
             name, args, kwargs)
         if not inp_handles:
             return super().call_function(target, args, kwargs)
-        op, output_desps = self.create_op_node(name, list(inp_handles.keys()),
+        op, output_desps, _ = self.create_op_node(name, list(inp_handles.keys()),
                                                [f"{name}-out"], target, args,
                                                kwargs)
 

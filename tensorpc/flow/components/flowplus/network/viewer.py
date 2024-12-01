@@ -1,3 +1,4 @@
+import copy
 import enum
 from functools import partial
 import inspect
@@ -25,6 +26,7 @@ from tensorpc.flow.jsonlike import IconButtonData, as_dict_no_undefined
 from tensorpc.utils.rich_logging import get_logger
 from tensorpc import compat
 import torch.utils
+from tensorpc.flow.components.plus.config import ConfigDialogEvent, ConfigPanelDialog, ConfigPanelDialogPersist
 
 from tensorpc.utils.tb_parser import parse_python_traceback
 LOGGER = get_logger("tensorpc.flowui.pytorch")
@@ -183,10 +185,12 @@ class PytorchModuleViewer(mui.FlexBox):
             mui.MenuItem("subflow", "Show Sub Flow"),
         ]
         view_pane_menu_items = [
-            mui.MenuItem("layout", "Dagre Layout"),
-            mui.MenuItem("layout-tight", "Dagre Layout Tight"),
-            mui.MenuItem("layout-longest", "Dagre Layout Longest"),
-            mui.MenuItem("elklayout", "Elk Layout"),
+            mui.MenuItem("dagre", "Dagre Layout"),
+            mui.MenuItem("elk", "Elk Layout"),
+            mui.MenuItem("d1", divider=True),
+
+            mui.MenuItem("dagre-cfg", "Dagre Layout Advanced"),
+            mui.MenuItem("elk-cfg", "Elk Layout Advanced"),
 
         ]
         self.graph.event_pane_context_menu.on(self._on_pane_contextmenu)
@@ -214,14 +218,39 @@ class PytorchModuleViewer(mui.FlexBox):
                                   includeFormControl=False)
         self._subflow_dialog.event_modal_close.on(
             self._handle_subflow_dialog_close)
+
+        self._dagre_options_default = flowui.DagreLayoutOptions(ranksep=25, )
+        self._elk_options_default = flowui.ElkLayoutOptions(
+            spacing=flowui.ElkSpacing(nodeNodeBetweenLayers=25),
+            considerModelOrder=flowui.ElkConsiderModelOrder(),
+            nodePlacement=flowui.ElkNodePlacement())
+        reset_btn = mui.Button("Reset").prop(fullWidth=True, size="small")
+        self._dagre_cfg_dialog = ConfigPanelDialogPersist(
+            copy.deepcopy(self._dagre_options_default), lambda ev: self.graph.do_dagre_layout(ev.cfg), [
+                reset_btn
+            ])
+        reset_btn.event_click.on(lambda: self._dagre_cfg_dialog.set_config_object(copy.deepcopy(self._dagre_options_default)))
+        self._dagre_cfg_dialog.prop(okLabel="Launch Layout", title="Dagre Layout Config", dividers=True)
+        reset_btn = mui.Button("Reset").prop(fullWidth=True, size="small")
+
+        self._elk_cfg_dialog = ConfigPanelDialogPersist(
+            copy.deepcopy(self._elk_options_default), lambda ev: self.graph.do_elk_layout(ev.cfg), [
+                reset_btn
+            ])
+        self._elk_cfg_dialog.prop(okLabel="Launch Layout", title="Elk Layout Config", dividers=True)
+        reset_btn.event_click.on(lambda: self._elk_cfg_dialog.set_config_object(copy.deepcopy(self._elk_options_default)))
         if not self.is_external_mode:
             super().__init__([
                 self.global_container,
                 self._subflow_dialog,
+                self._dagre_cfg_dialog,
+                self._elk_cfg_dialog,
             ])
         else:
             super().__init__([
                 self.global_container,
+                self._dagre_cfg_dialog,
+                self._elk_cfg_dialog,
             ])
         self.prop(width="100%", height="100%", overflow="hidden")
         self._use_multiple_handle_node = True
@@ -237,8 +266,6 @@ class PytorchModuleViewer(mui.FlexBox):
 
         self._cur_graph_metadata: Optional[PytorchFlowOutputPartial] = None
         self._current_state: Optional[ExpandState] = None
-
-        self._dagre_options = flowui.DagreLayoutOptions(ranksep=25, )
         self._layout_use_elk = True
 
         self._torch_util_path = Path(torch.utils.__file__).parent.resolve()
@@ -343,9 +370,9 @@ class PytorchModuleViewer(mui.FlexBox):
 
     async def _set_graph_node_edges_and_layout(self, nodes: List[flowui.Node], edges: List[flowui.Edge], fit_view: bool = False):
         if self._layout_use_elk:
-            await self.graph.set_flow_and_do_elk_layout(nodes, edges, fit_view=fit_view)
+            await self.graph.set_flow_and_do_elk_layout(nodes, edges, self._elk_cfg_dialog.config, fit_view=fit_view)
         else:
-            await self.graph.set_flow_and_do_dagre_layout(nodes, edges, self._dagre_options, fit_view=fit_view)
+            await self.graph.set_flow_and_do_dagre_layout(nodes, edges, self._dagre_cfg_dialog.config, fit_view=fit_view)
 
     async def _node_tree_select(self, node_ids: List[str]):
         if self._cur_graph_metadata is not None:
@@ -425,19 +452,14 @@ class PytorchModuleViewer(mui.FlexBox):
 
     async def _on_pane_contextmenu(self, data):
         item_id = data["itemId"]
-        dagre = dataclasses.replace(self._dagre_options)
-        # network-simplex, tight-tree or longest-path
-        if item_id == "layout":
-            dagre.ranker = "network-simplex"
-            await self.graph.do_dagre_layout(dagre)
-        if item_id == "layout-tight":
-            dagre.ranker = "tight-tree"
-            await self.graph.do_dagre_layout(dagre)
-        if item_id == "layout-longest":
-            dagre.ranker = "longest-path"
-            await self.graph.do_dagre_layout(dagre)
-        if item_id == "elklayout":
-            await self.graph.do_elk_layout()
+        if item_id == "dagre":
+            await self.graph.do_dagre_layout(self._dagre_cfg_dialog.config)
+        if item_id == "elk":
+            await self.graph.do_elk_layout(self._elk_cfg_dialog.config)
+        if item_id == "dagre-cfg":
+            await self._dagre_cfg_dialog.open_config_dialog()
+        if item_id == "elk-cfg":
+            await self._elk_cfg_dialog.open_config_dialog()
 
     async def export_module_to_flow(self,
                                     module: torch.nn.Module,
@@ -464,7 +486,7 @@ class PytorchModuleViewer(mui.FlexBox):
                                    state: ExpandState):
         item_id = data["itemId"]
         node_id = data["nodeId"]
-        dagre = self._dagre_options
+        dagre = self._dagre_cfg_dialog.config
         if self._external_ftree_id is not None:
             ext_mod_id = self._external_ftree_id
         else:
@@ -629,7 +651,12 @@ class PytorchModuleViewer(mui.FlexBox):
         if data.is_merged:
             id_or_op_md = mui.Markdown(f"`id`: `{module_id_str}`")
         else:
-            id_or_op_md = mui.Markdown(f":forestgreen[`{data.op}`]")
+            if data.op_sig is not None:
+                id_or_op_md = mui.TooltipFlexBox(data.op_sig, [
+                    mui.Markdown(f":forestgreen[`{data.op}`]")
+                ])
+            else:
+                id_or_op_md = mui.Markdown(f":forestgreen[`{data.op}`]")
         if copy_data is not None:
             btn = mui.IconButton(mui.IconType.ContentCopy, partial(appctx.copy_text_to_clipboard, copy_data))
             btn.prop(size="small", iconSize="small")
@@ -781,6 +808,7 @@ class PytorchModuleViewer(mui.FlexBox):
                 "children": [],
                 "edges": [],
             }
+            fixed_order = True
             for n in nodes:
                 inp_handle_to_edges = self._cur_graph_metadata.node_id_to_inp_handle_to_edges[n.id]
                 out_handle_to_edges = self._cur_graph_metadata.node_id_to_out_handle_to_edges[n.id]
@@ -793,7 +821,17 @@ class PytorchModuleViewer(mui.FlexBox):
                         #     "side": "NORTH",
                         #     "index": handle_idx,
                         # }
+                        "labels": [
+                            {
+                                "text": f"{handle}",
+                            }
+                        ]
                     })
+                    if fixed_order:
+                        ports[-1]["properties"] = {
+                            "side": "NORTH",
+                            "index": handle_idx,
+                        }
                     handle_idx += 1
                 for handle, _ in out_handle_to_edges.items():
                     ports.append({
@@ -802,7 +840,17 @@ class PytorchModuleViewer(mui.FlexBox):
                         #     "side": "SOUTH",
                         #     "index": handle_idx,
                         # }
+                        "labels": [
+                            {
+                                "text": f"{handle}",
+                            }
+                        ]
                     })
+                    if fixed_order:
+                        ports[-1]["properties"] = {
+                            "side": "SOUTH",
+                            "index": handle_idx,
+                        }
                     handle_idx += 1
 
                 elk["children"].append({
@@ -814,6 +862,10 @@ class PytorchModuleViewer(mui.FlexBox):
                     #     "org.eclipse.elk.portConstraints": "FIXED_ORDER",
                     # }
                 })
+                if fixed_order:
+                    elk["children"][-1]["properties"] = {
+                        "org.eclipse.elk.portConstraints": "FIXED_ORDER",
+                    }
                 node_data = n.get_node_data()
                 if node_data is not None:
                     elk["children"][-1]["labels"] = [
@@ -833,3 +885,7 @@ class PytorchModuleViewer(mui.FlexBox):
             return mui.FileResource(name=ELK_FILE_RESOURCE_KEY, content=elk_binary)
 
         return mui.FileResource.empty()
+
+
+    async def _on_dagre_layout_with_cfg(self, cfg_ev: ConfigDialogEvent[flowui.DagreLayoutOptions]):
+        await self.graph.do_dagre_layout(cfg_ev.cfg) 

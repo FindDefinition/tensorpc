@@ -42,7 +42,7 @@ from tensorpc.flow.client import is_inside_app_session
 from ... import mui
 from tensorpc.flow import appctx
 from tensorpc.flow.core.appcore import get_app
-from tensorpc.flow.components.plus.config import ConfigPanelV2
+from tensorpc.flow.components.plus.config import ConfigPanel
 from tensorpc.flow.core.component import AppEvent
 from tensorpc.utils.typeutils import take_annotation_from
 from ... import three
@@ -770,6 +770,6 @@ def program(name: str, func: Callable):
                                     group._flow_uid,
                                     update_iff_change=True)
 
-    pcfg.detail_layout = ConfigPanelV2(func_dcls_obj, callback)
+    pcfg.detail_layout = ConfigPanel(func_dcls_obj, callback)
     pcfg.proxy = GroupProxy("")
     return

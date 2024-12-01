@@ -26,7 +26,7 @@ from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.flow.core.appcore import Event
 from tensorpc.flow.core.common import handle_standard_event
-from tensorpc.flow.jsonlike import merge_props_not_undefined
+from tensorpc.flow.jsonlike import asdict_flatten_field_only, asdict_flatten_field_only_no_undefined, merge_props_not_undefined, undefined_dict_factory
 from tensorpc.utils.uniquename import UniqueNamePool
 
 from ..core.component import (AppEvent, AppEventType, BasicProps, Component,
@@ -137,14 +137,14 @@ class NodeData:
     component: Union[Undefined, Component] = undefined
     selectedTheme: Union[Undefined, Theme] = undefined
     selectedBoxSxProps: Union[Undefined, Dict[str, Any]] = undefined
-    data: Union[Undefined, Any] = undefined
+    userdata: Union[Undefined, Any] = undefined
     label: Union[Undefined, str] = undefined
     sourceEdgeOverrides: Union[Undefined, Dict[str, Any]] = undefined
     contextMenuItems: Union[Undefined, List[MenuItem]] = undefined
     # used by default nodes with multiple handles
     targetHandleIds: Union[Undefined, List[Optional[str]]] = undefined
     sourceHandleIds: Union[Undefined, List[Optional[str]]] = undefined
-
+    partition: Union[Undefined, int] = undefined
 
 @dataclasses.dataclass
 class Node:
@@ -204,8 +204,8 @@ class Node:
 
     def get_user_data(self) -> Optional[Any]:
         if not isinstance(self.data, Undefined):
-            if not isinstance(self.data.data, Undefined):
-                return self.data.data
+            if not isinstance(self.data.userdata, Undefined):
+                return self.data.userdata
         return None
 
     def get_node_data(self):
@@ -233,7 +233,7 @@ class Edge:
     sourceHandle: Optional[str] = None
     targetHandle: Optional[str] = None
     type: Union[Undefined, Literal["default", "straight", "step",
-                                   "smoothstep", "svgstep"]] = undefined
+                                   "smoothstep", "multistep", "multismoothstep"]] = undefined
     style: Union[Undefined, Any] = undefined
     animated: Union[Undefined, bool] = undefined
     hidden: Union[Undefined, bool] = undefined
@@ -243,7 +243,7 @@ class Edge:
     markerEnd: Union[Undefined, EdgeMarker, str] = undefined
     # only available when type is svgstep
     # if undefined, it becomes a smoothstep edge
-    svgPath: Union[Undefined, str] = undefined
+    data: Union[Undefined, Any] = undefined
 
 
 @dataclasses.dataclass
@@ -289,6 +289,52 @@ class DagreLayoutOptions:
     ranker: Union[Undefined, Literal["network-simplex", "tight-tree",
                                      "longest-path"]] = undefined
 
+@dataclasses.dataclass
+class ElkGlobalOptions:
+    direction: Union[Undefined, Literal["DOWN", "UP", "RIGHT", "LEFT"]] = "DOWN"
+    padding: Union[Undefined, str] = undefined
+
+@dataclasses.dataclass
+class ElkSpacing:
+    commentComment: Union[Undefined, NumberType] = undefined
+    commentNode: Union[Undefined, NumberType] = undefined
+    nodeNodeBetweenLayers: Union[Undefined, NumberType] = undefined
+    nodeNode: Union[Undefined, NumberType] = undefined
+    edgeNode: Union[Undefined, NumberType] = undefined
+    edgeNodeBetweenLayers: Union[Undefined, NumberType] = undefined
+    edgeEdge: Union[Undefined, NumberType] = undefined
+    edgeEdgeBetweenLayers: Union[Undefined, NumberType] = undefined
+    componentComponent: Union[Undefined, NumberType] = undefined
+    portPort: Union[Undefined, NumberType] = undefined
+    portsSurrounding: Union[Undefined, str] = undefined
+
+@dataclasses.dataclass
+class ElkConsiderModelOrder:
+    components: Union[Undefined, Literal["NONE", "INSIDE_PORT_SIDE_GROUPS", "GROUP_MODEL_ORDER", "MODEL_ORDER"]] = undefined
+    strategy: Union[Undefined, Literal["NONE", "NODES_AND_EDGES", "PREFER_EDGES", "PREFER_NODES"]] = undefined
+    portModelOrder: Union[Undefined, bool] = undefined
+    noModelOrder: Union[Undefined, bool] = undefined
+    longEdgeStrategy: Union[Undefined, Literal["DUMMY_NODE_OVER", "DUMMY_NODE_UNDER", "EQUAL"]] = undefined
+    crossingCounterNodeInfluence: Union[Undefined, NumberType] = undefined
+    crossingCounterPortInfluence: Union[Undefined, NumberType] = undefined
+
+@dataclasses.dataclass
+class ElkPartitioning:
+    activate: Union[Undefined, bool] = undefined
+
+@dataclasses.dataclass
+class ElkNodePlacement:
+    strategy: Union[Undefined, Literal["LINEAR_SEGMENTS", "SIMPLE", "BRANDES_KOEPF", "NETWORK_SIMPLEX"]] = undefined
+    favorStraightEdges: Union[Undefined, bool] = undefined
+
+@dataclasses.dataclass
+class ElkLayoutOptions:
+    algorithm: Literal["layered", "mrtree"] = "layered"
+    elk: Union[Undefined, ElkGlobalOptions] = dataclasses.field(default_factory=ElkGlobalOptions)
+    considerModelOrder: Union[Undefined, ElkConsiderModelOrder] = undefined
+    nodePlacement: Union[Undefined, ElkNodePlacement] = undefined
+    partitioning: Union[Undefined, ElkPartitioning] = undefined
+    spacing: Union[Undefined, ElkSpacing] = undefined
 
 @dataclasses.dataclass
 class EventSelection:
@@ -483,9 +529,11 @@ class FlowInternals:
             if node.id not in node_id_set_to_merge:
                 new_nodes.append(node)
                 prev_no_merge_nodes.append(node)
-        for edge in self.id_to_edge.values():
-            if edge.source not in node_id_set_to_merge and edge.target not in node_id_set_to_merge:
-                new_edges.append(edge)
+        if not correct_inp_edge_order:
+            # if we want correct order, we can't add non-merged edges first
+            for edge in self.id_to_edge.values():
+                if edge.source not in node_id_set_to_merge and edge.target not in node_id_set_to_merge:
+                    new_edges.append(edge)
         edge_name_pool = UniqueNamePool(
             init_set=set([edge.id for edge in new_edges]))
         merged_id_to_outside_out_to_edges: Dict[str, Dict[Tuple[str,
@@ -545,6 +593,8 @@ class FlowInternals:
             # iterate all non-merged nodes, add edges first to make sure the edge order 
             # of these nodes are correct
             node_id_to_inp = self.node_id_to_inp_handle_to_edges
+            node_id_to_out = self.node_id_to_out_handle_to_edges
+            non_merge_edge_id_set: Set[str] = set()
             for node in prev_no_merge_nodes:
                 inp_handle_to_edges = node_id_to_inp[node.id]
                 for handle, edges in inp_handle_to_edges.items():
@@ -567,6 +617,19 @@ class FlowInternals:
                             node_id_handle_pair_set.add(edge_dup_key)
                             new_edge_id_to_edges[new_edge.id] = edges
                             new_edges.append(new_edge)
+                        else:
+                            if edge.id not in non_merge_edge_id_set:
+                                non_merge_edge_id_set.add(edge.id)
+                                new_edges.append(edge)
+            for node in prev_no_merge_nodes:
+                out_handle_to_edges = node_id_to_out[node.id]
+                for handle, edges in out_handle_to_edges.items():
+                    for edge in edges:
+                        if edge.target not in node_id_to_merged_id:
+                            if edge.id not in non_merge_edge_id_set:
+                                non_merge_edge_id_set.add(edge.id)
+                                new_edges.append(edge)
+
         for merged_node, merged_node_ids in merge_list:
             outside_node_id_out_handle_to_edges = merged_id_to_outside_out_to_edges[
                 merged_node.id]
@@ -1115,16 +1178,14 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         return await self.send_and_wait(self.create_comp_event(res))
 
     async def do_elk_layout(self,
-                              options: Optional[Dict[str, Any]] = None,
+                              options: Optional[ElkLayoutOptions] = None,
                               fit_view: bool = False):
         if options is None:
-            options = {
-                "elk.algorithm": "layered",
-                "elk.direction": "DOWN",
-            }
+            options = ElkLayoutOptions()
+        opt_dict = asdict_flatten_field_only_no_undefined(options)
         res = {
             "type": FlowControlType.ElkLayout,
-            "graphOptions": options,
+            "graphOptions": opt_dict,
             "fitView": fit_view,
         }
         return await self.send_and_wait(self.create_comp_event(res))
@@ -1151,10 +1212,10 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             if algo_type == LayoutAlgoType.Dagre:
                 options = DagreLayoutOptions()
             elif algo_type == LayoutAlgoType.Elk:
-                options = {
-                    "elk.algorithm": "layered",
-                    "elk.direction": "DOWN",
-                }
+                options = asdict_flatten_field_only_no_undefined(ElkLayoutOptions())
+        else:
+            if algo_type == LayoutAlgoType.Elk:
+                options = asdict_flatten_field_only_no_undefined(options)
 
         ev_new_node = {
             "type": FlowControlType.SetFlowAndDagreLayout if algo_type == LayoutAlgoType.Dagre else FlowControlType.SetFlowAndElkLayout,
@@ -1190,7 +1251,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             self,
             nodes: List[Node],
             edges: List[Edge],
-            options: Optional[Dict[str, Any]] = None,
+            options: Optional[ElkLayoutOptions] = None,
             fit_view: bool = False,
             duration: Optional[NumberType] = None):
         """Inorder to handle init static flow layout, you should use this function to set flow and do dagre layout.

@@ -2,7 +2,7 @@ from dataclasses import is_dataclass
 import enum
 
 import json
-from typing import Any, Callable, Dict, Generic, Hashable, List, Optional, TypeVar, Union, Tuple
+from typing import Any, Callable, Dict, Generic, Hashable, List, Optional, Type, TypeVar, Union, Tuple
 import tensorpc.core.dataclass_dispatch as dataclasses
 import re
 import numpy as np
@@ -196,6 +196,15 @@ def asdict_flatten_field_only(obj,
     if not dataclasses.is_dataclass(obj):
         raise TypeError("asdict() should be called on dataclass instances")
     return _asdict_flatten_field_only(obj, dict_factory)
+
+
+def asdict_flatten_field_only_no_undefined(obj):
+    """same as dataclasses.asdict except that this function
+    won't recurse into nested container.
+    """
+    if not dataclasses.is_dataclass(obj):
+        raise TypeError("asdict() should be called on dataclass instances")
+    return _asdict_flatten_field_only(obj, undefined_dict_factory)
 
 
 def _asdict_flatten_field_only(obj,
@@ -629,6 +638,10 @@ class JsonLikeNode:
     @staticmethod 
     def create_dummy_dict_binary():
         return json.dumps(JsonLikeNode.create_dummy_dict()).encode()
+        
+    def get_userdata_typed(self, type: Type[T]) -> T:
+        assert isinstance(self.userdata, type)
+        return self.userdata
 
 def parse_obj_to_jsonlike(obj, name: str, id: UniqueTreeIdForTree):
     obj_type = type(obj)
@@ -757,7 +770,6 @@ def parse_obj_to_jsonlike(obj, name: str, id: UniqueTreeIdForTree):
                                 t.value,
                                 value=value,
                                 typeStr=obj_type.__qualname__)
-
 
 class TreeItem(abc.ABC):
 

@@ -54,7 +54,6 @@ from tensorpc.flow.components.mui import (Button, HBox, ListItemButton,
                                                   MUIComponentType, VBox,
                                                   VList)
 from tensorpc.core import typemetas
-from tensorpc.flow.components.plus.config import ConfigPanel
 from tensorpc.flow.sampleapp.sample_reload_fn import func_support_reload
 from tensorpc.flow.core.objtree import get_objtree_context
 from tensorpc.flow.sampleapp.sample_preview import TestPreview0
@@ -1536,7 +1535,7 @@ class CollectionApp:
             mui.ControlNode("1",
                             "color",
                             mui.ControlNodeType.ColorRGB.value,
-                            initValue="#ffffff")
+                            value="#ffffff")
         ]
         self.code = f"""
     @mark_create_layout
@@ -1552,12 +1551,11 @@ class CollectionApp:
             mui.ControlNode("1",
                             "color",
                             mui.ControlNodeType.Color.value,
-                            initValue="#ffffff")
+                            value="#ffffff")
         ]
         """
-        self.wtf = mui.DynamicControls(init=nodes, callback=lambda x: print(x))
         self.cfg = WTF(1, 0.5, WTF1(2), "WTF", [])
-        self.wtf2 = plus.ConfigPanelV2(self.cfg, lambda x, y: print(x, y))
+        self.wtf2 = plus.ConfigPanel(self.cfg, lambda x, y: print(x, y))
         self.wtf3 = plus.ConfigPanel(self.cfg, lambda x, y: print(x, y))
 
         self.locker = ThreadLockerApp()

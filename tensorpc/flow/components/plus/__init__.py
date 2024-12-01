@@ -17,7 +17,7 @@ from .grid_preview_layout import GridPreviewLayout
 
 from .canvas import SimpleCanvas
 from .vis.canvas import ComplexCanvas
-from .config import ConfigPanel, ConfigPanelV2
+from .config import ConfigPanel
 from .sliders import ListSlider, BlenderListSlider
 from .figure import HomogeneousMetricFigure
 from .monitor import ComputeResourceMonitor

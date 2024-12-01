@@ -160,7 +160,7 @@ def _parse_base_type(ty: Type, current_obj, field_name: str,
         # if meta is not None:
         #     assert isinstance(meta, SwitchMeta)
         child_node.type = mui.ControlNodeType.Bool.value
-        child_node.initValue = getattr(current_obj, field_name)
+        child_node.value = getattr(current_obj, field_name)
         setter = partial(setattr_single,
                          obj=current_obj,
                          name=field_name,
@@ -184,7 +184,7 @@ def _parse_base_type(ty: Type, current_obj, field_name: str,
 
             # setter = lambda x: setattrV2(current_obj, f.name, float(x))
         child_node.type = mui.ControlNodeType.Number.value
-        child_node.initValue = getattr(current_obj, field_name)
+        child_node.value = getattr(current_obj, field_name)
         if ty is int:
             child_node.isInteger = True
         if ty is int:
@@ -199,13 +199,13 @@ def _parse_base_type(ty: Type, current_obj, field_name: str,
 
         # setter = lambda x: setattr(current_obj, f.name, str(x))
         child_node.type = mui.ControlNodeType.String.value
-        child_node.initValue = getattr(current_obj, field_name)
+        child_node.value = getattr(current_obj, field_name)
     elif ty is mui.ControlColorRGB or ty is mui.ControlColorRGBA:
         if ty is mui.ControlColorRGB:
             child_node.type = mui.ControlNodeType.ColorRGB.value
         else:
             child_node.type = mui.ControlNodeType.ColorRGBA.value
-        child_node.initValue = getattr(current_obj, field_name)
+        child_node.value = getattr(current_obj, field_name)
         if ty is mui.ControlColorRGB:
             mapper = lambda x: mui.ControlColorRGB(x["r"], x["g"], x["b"])
         else:
@@ -224,7 +224,7 @@ def _parse_base_type(ty: Type, current_obj, field_name: str,
         # print(ty, ty_origin, type(ty), type(ty_origin))
         if ty_origin is Literal:
             child_node.type = mui.ControlNodeType.Select.value
-            child_node.initValue = getattr(current_obj, field_name)
+            child_node.value = getattr(current_obj, field_name)
             child_node.selects = list((str(x), x) for x in get_args(ty))
             # setter = lambda x: setattr(current_obj, f.name, x)
             setter = partial(setattr_single, obj=current_obj, name=field_name)
@@ -233,7 +233,7 @@ def _parse_base_type(ty: Type, current_obj, field_name: str,
             child_node.type = mui.ControlNodeType.Select.value
             item = getattr(current_obj, field_name)
             if not isinstance(item, mui.Undefined):
-                child_node.initValue = getattr(current_obj, field_name).value
+                child_node.value = getattr(current_obj, field_name).value
             child_node.selects = list((x.name, x.value) for x in ty)
             # setter = lambda x: setattr(current_obj, f.name, ty(x))
             # print(ty, child_node.selects)
@@ -316,8 +316,8 @@ def parse_to_control_nodes(origin_obj,
         ty_origin = get_origin(ty)
         # if f.name == "a":
         #     print(f.name, ty_origin, ty, type(ty), not _check_is_basic_type(ty) and ty not in _BUILTIN_DCLS_TYPE, annotated_metas)
-
-        if dataclasses.is_dataclass(ty) and ty not in _BUILTIN_DCLS_TYPE:
+        field_value = getattr(current_obj, f.name)
+        if (dataclasses.is_dataclass(ty) or dataclasses.is_dataclass(field_value)) and ty not in _BUILTIN_DCLS_TYPE:
             res = parse_to_control_nodes(origin_obj,
                                          getattr(current_obj, f.name),
                                          next_name, obj_uid_to_meta)
@@ -342,11 +342,11 @@ def parse_to_control_nodes(origin_obj,
                     child_node.type = mui.ControlNodeType.ColorRGBA.value
                 val = getattr(current_obj, f.name)
                 if not isinstance(val, mui.Undefined):
-                    child_node.initValue = val
+                    child_node.value = val
                 else:
                     if first_anno_meta.default is not None:
-                        child_node.initValue = first_anno_meta.default
-                # child_node.initValue = getattr(current_obj, f.name)
+                        child_node.value = first_anno_meta.default
+                # child_node.value = getattr(current_obj, f.name)
                 ty_valid_color = ty is str or ty is mui.ValueType
                 if ty_origin is Union:
                     # handle "Union[..., Undefined]" in component props
@@ -389,10 +389,10 @@ def parse_to_control_nodes(origin_obj,
                     if isinstance(val, (int, float)):
                         val = (val, val, val)
                     # TODO validate val
-                    child_node.initValue = val
+                    child_node.value = val
                 else:
                     if first_anno_meta.default is not None:
-                        child_node.initValue = list(first_anno_meta.default)
+                        child_node.value = list(first_anno_meta.default)
                 if isinstance(first_anno_meta, (typemetas.RangedVector3, typemetas.RangedVector2)):
                     child_node.min = first_anno_meta.lo
                     child_node.max = first_anno_meta.hi
@@ -419,8 +419,8 @@ def parse_to_control_nodes(origin_obj,
                 if res is not None:
                     child_node.type = mui.ControlNodeType.RangeNumber.value
                     if first_anno_meta.default is not None:
-                        if isinstance(child_node.initValue, mui.Undefined):
-                            child_node.initValue = first_anno_meta.default
+                        if isinstance(child_node.value, mui.Undefined):
+                            child_node.value = first_anno_meta.default
                     child_node.min = first_anno_meta.lo
                     child_node.max = first_anno_meta.hi
                     child_node.isInteger = isinstance(first_anno_meta,
@@ -449,8 +449,8 @@ def parse_to_control_nodes(origin_obj,
                     if first_anno_meta.alias is not None:
                         child_node.alias = first_anno_meta.alias
                     if first_anno_meta.default is not None:
-                        if isinstance(child_node.initValue, mui.Undefined):
-                            child_node.initValue = first_anno_meta.default
+                        if isinstance(child_node.value, mui.Undefined):
+                            child_node.value = first_anno_meta.default
                     res_node.children.append(child_node)
                     obj_uid_to_meta[child_node.id] = res
                     continue
@@ -473,8 +473,8 @@ def control_nodes_v1_to_v2(
         control_nodes_v1_to_v2(c, uid_to_json_like_node)
         for c in ctrl_node_v1.children
     ]
-    ctrl_desp = ControlDesp(type=ctrl_node_v1.type,
-                                initValue=ctrl_node_v1.initValue,
+    ctrl_desp = mui.SimpleControlsItem(type=ctrl_node_v1.type,
+                                value=ctrl_node_v1.value,
                                 min=ctrl_node_v1.min,
                                 max=ctrl_node_v1.max,
                                 step=ctrl_node_v1.step,
@@ -494,97 +494,7 @@ def control_nodes_v1_to_v2(
     return node
 
 
-class ConfigPanel(mui.DynamicControls):
-
-    def __init__(self,
-                 config_obj: Any,
-                 callback: Optional[Callable[[str, Any],
-                                             mui._CORO_NONE]] = None):
-        assert dataclasses.is_dataclass(config_obj)
-        # parse config dataclass.
-        self._obj_to_ctrl_meta: Dict[str, ControlItemMeta] = {}
-        node = parse_to_control_nodes(config_obj, config_obj, "",
-                                      self._obj_to_ctrl_meta)
-        super().__init__(init=node.children, callback=self.callback)
-        self.__config_obj = config_obj
-        self.__callback_key = "config_panel_v2_handler"
-        if callback is not None:
-            self.register_event_handler(self.__callback_key,
-                                        callback,
-                                        backend_only=True)
-
-    async def callback(self, value: Tuple[str, Any]):
-        uid = value[0]
-        cmeta = self._obj_to_ctrl_meta[uid]
-        compare_res = cmeta.compare(value[1])
-        if not compare_res:
-            # here we need to compare value, emit event iff
-            # the value is changed.
-            # TODO this is due to limitation of leva control.
-            # we may need to write own dynamic control
-            # based on tanstack table.
-            cmeta.setter(value[1])
-            handlers = self.get_event_handlers(self.__callback_key)
-            if handlers is not None:
-                for handler in handlers.handlers:
-                    coro = handler.cb(uid, cmeta.getter())
-                    if inspect.iscoroutine(coro):
-                        await coro
-
-    @property
-    def config(self):
-        return self.__config_obj
-
-    @staticmethod
-    def base_meta(alias: Optional[str] = None):
-        return {_CONFIG_META_KEY: ConfigMeta(alias)}
-
-    @staticmethod
-    def switch_meta(alias: Optional[str] = None):
-        return {_CONFIG_META_KEY: SwitchMeta(alias)}
-
-    @staticmethod
-    def input_meta(multiline: bool,
-                   rows: int,
-                   font_size: mui.ValueType,
-                   font_family: str,
-                   alias: Optional[str] = None):
-        return {
-            _CONFIG_META_KEY:
-            InputMeta(alias=alias,
-                      multiline=multiline,
-                      rows=rows,
-                      font_size=font_size,
-                      font_family=font_family)
-        }
-
-    @staticmethod
-    def slider_meta(begin: mui.NumberType,
-                    end: mui.NumberType,
-                    alias: Optional[str] = None):
-        return {
-            _CONFIG_META_KEY: SliderMeta(begin=begin, end=end, alias=alias)
-        }
-
-@dataclasses.dataclass
-class ControlDesp:
-    type: int
-    initValue: Union[mui.Undefined, mui.NumberType, bool, str, mui.ControlColorRGBA,
-                     mui.Vector3Type, List[mui.NumberType]] = mui.undefined
-    # for range
-    min: Union[mui.Undefined, mui.NumberType] = mui.undefined
-    max: Union[mui.Undefined, mui.NumberType] = mui.undefined
-    step: Union[mui.Undefined, mui.NumberType] =mui.undefined
-    # for select
-    selects: Union[mui.Undefined, List[Tuple[str,mui.ValueType]]] = mui.undefined
-    # for string
-    rows: Union[mui.Undefined, bool, int] = mui.undefined
-    # for vectorN
-    count: Union[mui.Undefined, int] = mui.undefined
-    isInteger: Union[mui.Undefined, bool] = mui.undefined
-
-
-class ConfigPanelV2(mui.SimpleControls):
+class ConfigPanel(mui.SimpleControls):
 
     def __init__(self,
                  config_obj: Any,
@@ -593,16 +503,9 @@ class ConfigPanelV2(mui.SimpleControls):
                  ignored_field_names: Optional[Set[str]] = None):
         assert dataclasses.is_dataclass(config_obj)
         # parse config dataclass.
-        self._obj_to_ctrl_meta: Dict[str, ControlItemMeta] = {}
-        self.uid_to_json_like_node: Dict[str, mui.JsonLikeNode] = {}
-        node = parse_to_control_nodes(config_obj,
-                                      config_obj,
-                                      "",
-                                      self._obj_to_ctrl_meta,
-                                      ignored_field_names=ignored_field_names)
-        node_v2 = control_nodes_v1_to_v2(
-            node, self.uid_to_json_like_node)
-        super().__init__(init=node_v2.children,
+        items, self._obj_to_ctrl_meta, self.uid_to_json_like_node = self._get_controls_tree(
+            config_obj)
+        super().__init__(init=items,
                          callback=self.callback)
         self.__config_obj = config_obj
         self.__callback_key = "config_panel_v3_handler"
@@ -610,6 +513,15 @@ class ConfigPanelV2(mui.SimpleControls):
             self.register_event_handler(self.__callback_key,
                                         callback,
                                         backend_only=True)
+
+    def _get_controls_tree(self, cfg: Any):
+        # parse config dataclass.
+        _obj_to_ctrl_meta = {}
+        uid_to_json_like_node = {}
+        node = parse_to_control_nodes(cfg, cfg, "", _obj_to_ctrl_meta)
+        node_v2 = control_nodes_v1_to_v2(
+            node, uid_to_json_like_node)
+        return node_v2.children, _obj_to_ctrl_meta, uid_to_json_like_node
 
     async def callback(self, value: Tuple[str, Any]):
         uid = value[0]
@@ -625,15 +537,22 @@ class ConfigPanelV2(mui.SimpleControls):
             # based on tanstack table.
             assert uid in self.uid_to_json_like_node
             userdata = self.uid_to_json_like_node[uid].userdata
-            assert isinstance(userdata, ControlDesp)
+            assert isinstance(userdata, mui.SimpleControlsItem)
             cmeta.setter(value[1])
-            userdata.initValue = value[1]
+            userdata.value = value[1]
             handlers = self.get_event_handlers(self.__callback_key)
             if handlers is not None:
                 for handler in handlers.handlers:
                     coro = handler.cb(uid_dot_split, cmeta.getter())
                     if inspect.iscoroutine(coro):
                         await coro
+
+    async def set_config_object(self, cfg: Any):
+        if not isinstance(self.props.controlled, mui.Undefined) and not self.props.controlled:
+            raise ValueError("you must use controlled simple control to use set_config_object")
+        items, self._obj_to_ctrl_meta, self.uid_to_json_like_node = self._get_controls_tree(
+            cfg)
+        await self.send_and_wait(self.update_event(tree=items))
 
     @property
     def config(self):
@@ -678,7 +597,7 @@ class ConfigDialogEvent(Generic[T]):
     userdata: Any = None
 
 
-class ConfigPanelDialog(mui.Dialog):
+class ConfigPanelDialog(mui.Dialog, Generic[T]):
     def __init__(self, callback: Callable[[ConfigDialogEvent[T]], mui._CORO_NONE], children: Optional[mui.LayoutType] = None):
         self._content = mui.VBox([
 
@@ -692,7 +611,7 @@ class ConfigPanelDialog(mui.Dialog):
                                     callback,
                                     backend_only=True)
 
-        self._cur_cfg: T = None
+        self._cur_cfg: Optional[T] = None
         self._cur_user_data: Any = None
 
     async def open_config_dialog(self, config_obj: T, userdata: Any = None):
@@ -700,7 +619,7 @@ class ConfigPanelDialog(mui.Dialog):
         config_obj = dataclasses.replace(config_obj)
         self._cur_cfg = config_obj
         self._cur_user_data = userdata
-        panel = ConfigPanelV2(config_obj)
+        panel = ConfigPanel(config_obj)
         await self.update_childs({
             self.__layout_key: panel,
         }, post_ev_creator=lambda: self.update_event(open=True)) 
@@ -719,11 +638,14 @@ class ConfigPanelDialog(mui.Dialog):
             self._cur_user_data = None
             await self.remove_childs_by_keys([self.__layout_key])
 
-class ConfigPanelDialogPersist(mui.Dialog):
+class ConfigPanelDialogPersist(mui.Dialog, Generic[T]):
     def __init__(self, cfg: T, callback: Callable[[ConfigDialogEvent[T]], mui._CORO_NONE], children: Optional[mui.LayoutType] = None):
-        self._config_container = mui.HBox([]).prop(flex=1)
-        super().__init__([], self._on_dialog_close)
-        self.init_add_layout([self._config_container])
+        self._config = ConfigPanel(cfg)
+        super().__init__([
+            mui.HBox([
+                self._config
+            ]).prop(flex=1, overflow="auto")
+        ], self._on_dialog_close)
         if children is not None:
             self.init_add_layout(children)
         # save callback to standard flow event handlers to enable reload for user callback
@@ -732,8 +654,8 @@ class ConfigPanelDialogPersist(mui.Dialog):
                                     callback,
                                     backend_only=True)
         assert dataclasses.is_dataclass(cfg) and not isinstance(cfg, type), "config_obj should be a dataclass"
-
-        self._cur_cfg = cfg
+        self.prop(display="flex", flexDirection="column", overflow="hidden")
+        self._cur_cfg: T = cfg
         self._cur_user_data: Any = None
 
     @property
@@ -743,19 +665,22 @@ class ConfigPanelDialogPersist(mui.Dialog):
     async def open_config_dialog(self, userdata: Any = None, inplace: bool = True):
         config_obj = self._cur_cfg
         if not inplace:
+            assert dataclasses.is_dataclass(config_obj) and not isinstance(config_obj, type), "config_obj should be a dataclass"
             config_obj = dataclasses.replace(config_obj)
             self._cur_cfg = config_obj
+            await self._config.set_config_object(config_obj)
         self._cur_user_data = userdata
-        panel = ConfigPanelV2(config_obj)
-        await self._config_container.set_new_layout([panel], post_ev_creator=lambda: self.update_event(open=True)) 
+        await self.set_open(True)
 
     async def _on_dialog_close(self, ev: mui.DialogCloseEvent):
         handlers = self.get_event_handlers(self.__callback_key)
-        try:
-            if handlers is not None and ev.ok:
-                for handler in handlers.handlers:
-                    coro = handler.cb(ConfigDialogEvent(self._cur_cfg, self._cur_user_data))
-                    if inspect.iscoroutine(coro):
-                        await coro
-        finally:
-            await self._config_container.set_new_layout([])
+        if handlers is not None and ev.ok:
+            for handler in handlers.handlers:
+                coro = handler.cb(ConfigDialogEvent(self._cur_cfg, self._cur_user_data))
+                if inspect.iscoroutine(coro):
+                    await coro
+
+    async def set_config_object(self, cfg: T):
+        assert dataclasses.is_dataclass(cfg) and not isinstance(cfg, type), "config_obj should be a dataclass"
+        self._cur_cfg = cfg
+        await self._config.set_config_object(cfg)

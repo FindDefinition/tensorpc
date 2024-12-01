@@ -24,7 +24,7 @@ from tensorpc.flow import marker
 from tensorpc.flow.components import mui
 from tensorpc.flow.core.appcore import find_component_by_uid
 from tensorpc.flow.components import three
-from tensorpc.flow.components.plus.config import ConfigPanel, ConfigPanelV2
+from tensorpc.flow.components.plus.config import ConfigPanel
 from tensorpc.flow.core.component import FrontendEventType, RemoteComponentBase
 from tensorpc.flow.core.coretypes import TreeDragTarget
 from tensorpc.flow.core import colors
@@ -250,7 +250,7 @@ class SimpleCanvas(mui.FlexBox):
         self.init_add_layout([*self._layout_func()])
 
     def __get_cfg_panel(self):
-        _cfg_panel = ConfigPanelV2(self.cfg, self._on_cfg_change)
+        _cfg_panel = ConfigPanel(self.cfg, self._on_cfg_change)
         _cfg_panel.prop(
             border="1px solid",
             borderColor="gray",
