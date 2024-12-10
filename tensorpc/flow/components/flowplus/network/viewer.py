@@ -89,6 +89,7 @@ class TabType(enum.Enum):
     STACKTRACE = "StackTrace"
     DEBUG = "Debug"
     GLOBAL = "global"
+    MODULE_TREE = "ModuleTree"
 
 class PytorchModuleViewer(mui.FlexBox):
 
@@ -96,7 +97,10 @@ class PytorchModuleViewer(mui.FlexBox):
                  external_submodule_id: Optional[str] = None,
                  external_module: Optional[torch.nn.Module] = None,
                  external_pth_flow: Optional[PytorchFlowOutput] = None,
-                 external_ftree_id: Optional[str] = None):
+                 external_ftree_id: Optional[str] = None,
+                 max_nested_depth: int = 4,
+                 *,
+                 _nested_depth: int = 0):
         graph = flowui.Flow(
             [], [], [flowui.MiniMap(),
                      flowui.Controls(),
@@ -131,7 +135,10 @@ class PytorchModuleViewer(mui.FlexBox):
         self._global_container.prop(padding="5px", width="100%",
                                     height="100%",
                                     overflow="auto")
-
+        self._module_prop_tree = BasicObjectTree(use_fast_tree=True, clear_data_when_unmount=True).prop(flex=1)
+        self._module_prop_container = mui.VBox([self._module_prop_tree]).prop(padding="5px", width="100%",
+                                                        height="100%",
+                                                        overflow="auto")
         tab_defs = [
             mui.TabDef("",
                        TabType.INFO.value,
@@ -153,6 +160,11 @@ class PytorchModuleViewer(mui.FlexBox):
                        self._dbg_container,
                        icon=mui.IconType.BugReport,
                        tooltip="Flow Debug Info"),
+            mui.TabDef("",
+                       TabType.MODULE_TREE.value,
+                       self._module_prop_container,
+                       icon=mui.IconType.AccountTree,
+                       tooltip="Module Tree"),
             mui.TabDef("",
                        TabType.GLOBAL.value,
                        self._global_container,
@@ -180,15 +192,16 @@ class PytorchModuleViewer(mui.FlexBox):
                     mui.ThemeProvider([self._tabs], get_tight_icon_tab_theme_horizontal())
                 ]).prop(flex=1, overflow="hidden"),
         ]).prop(height="100%", overflow="hidden")
+        self._enable_nested_dialog = _nested_depth < max_nested_depth
         node_menu_items = [
             mui.MenuItem("expand", "Expand Node"),
-            mui.MenuItem("subflow", "Show Sub Flow"),
         ]
+        if self._enable_nested_dialog:
+            node_menu_items.append(mui.MenuItem("subflow", "Show Sub Flow"))
         view_pane_menu_items = [
             mui.MenuItem("dagre", "Dagre Layout"),
             mui.MenuItem("elk", "Elk Layout"),
             mui.MenuItem("d1", divider=True),
-
             mui.MenuItem("dagre-cfg", "Dagre Layout Advanced"),
             mui.MenuItem("elk-cfg", "Elk Layout Advanced"),
 
@@ -212,18 +225,24 @@ class PytorchModuleViewer(mui.FlexBox):
                 mui.Allotment.Pane(self._side_container),
             ])).prop(defaultSizes=[200, 100])
         self._subflow_dialog = mui.Dialog([])
-        self._subflow_dialog.prop(height="80vh",
-                                  width="80vw",
-                                  dialogMaxWidth="xl",
-                                  includeFormControl=False)
+        self._subflow_dialog.prop(height=f"{85 - 4 * _nested_depth}vh",
+                                  width=f"{80 - 4 * _nested_depth}vw",
+                                  dialogMaxWidth=False,
+                                  includeFormControl=False,
+                                  fullWidth=False)
         self._subflow_dialog.event_modal_close.on(
             self._handle_subflow_dialog_close)
 
         self._dagre_options_default = flowui.DagreLayoutOptions(ranksep=25, )
+        # auto config items of a dataclass object only available when its value exists (not undefined), so we
+        # init some default values here.
         self._elk_options_default = flowui.ElkLayoutOptions(
             spacing=flowui.ElkSpacing(nodeNodeBetweenLayers=25),
             considerModelOrder=flowui.ElkConsiderModelOrder(),
-            nodePlacement=flowui.ElkNodePlacement())
+            nodePlacement=flowui.ElkNodePlacement(),
+            defaultNodeProps=flowui.ElkDefaultNodeProps(
+                portAlignment=flowui.ElkPortAlignment(default="CENTER"),
+            ))
         reset_btn = mui.Button("Reset").prop(fullWidth=True, size="small")
         self._dagre_cfg_dialog = ConfigPanelDialogPersist(
             copy.deepcopy(self._dagre_options_default), lambda ev: self.graph.do_dagre_layout(ev.cfg), [
@@ -239,7 +258,7 @@ class PytorchModuleViewer(mui.FlexBox):
             ])
         self._elk_cfg_dialog.prop(okLabel="Launch Layout", title="Elk Layout Config", dividers=True)
         reset_btn.event_click.on(lambda: self._elk_cfg_dialog.set_config_object(copy.deepcopy(self._elk_options_default)))
-        if not self.is_external_mode:
+        if not self.is_external_mode or self._enable_nested_dialog:
             super().__init__([
                 self.global_container,
                 self._subflow_dialog,
@@ -258,11 +277,11 @@ class PytorchModuleViewer(mui.FlexBox):
 
         self._external_ftree_id = external_ftree_id
         self._external_submodule_id = external_submodule_id
-        self._cur_pth_flow: Optional[PytorchFlowOutput] = None
-        self._cur_module: Optional[torch.nn.Module] = None
+        self._toplevel_pth_flow: Optional[PytorchFlowOutput] = None
+        self._toplevel_module: Optional[torch.nn.Module] = None
         if external_pth_flow is not None and external_submodule_id is not None and external_module is not None:
-            self._cur_pth_flow = external_pth_flow
-            self._cur_module = external_module
+            self._toplevel_pth_flow = external_pth_flow
+            self._toplevel_module = external_module
 
         self._cur_graph_metadata: Optional[PytorchFlowOutputPartial] = None
         self._current_state: Optional[ExpandState] = None
@@ -271,6 +290,9 @@ class PytorchModuleViewer(mui.FlexBox):
         self._torch_util_path = Path(torch.utils.__file__).parent.resolve()
         self.event_after_mount.on(self._on_init)
         self.event_after_unmount.on(self._on_unmount)
+
+        self._nested_depth = _nested_depth
+        self._max_nested_depth = max_nested_depth
 
     async def _on_init(self):
         if not self.is_external_mode:
@@ -283,6 +305,11 @@ class PytorchModuleViewer(mui.FlexBox):
     async def _on_tabs_change(self, value: str):
         self._current_tabs_value = value
 
+    def get_current_submodule(self):
+        if self._external_submodule_id is not None and self._toplevel_module is not None:
+            return self._toplevel_module.get_submodule(self._external_submodule_id)
+        return self._toplevel_module
+
     async def _init_set_exported_flow(self, pth_flow: PytorchFlowOutput,
                                       module: torch.nn.Module):
         if self.is_external_mode and self._external_submodule_id is not None:
@@ -293,9 +320,11 @@ class PytorchModuleViewer(mui.FlexBox):
             ext_mod_id = self._external_ftree_id
         else:
             ext_mod_id = self._external_submodule_id
+
+        module_may_be_sub = self.get_current_submodule()
         merged_graph_res = pth_flow.create_graph_with_expanded_modules(
             self._current_state.expanded,
-            module=self._cur_module,
+            module=module_may_be_sub,
             submodule_id=ext_mod_id,
             submodule_id_is_module=self._external_ftree_id is None)
         self._cur_graph_metadata = merged_graph_res
@@ -304,17 +333,20 @@ class PytorchModuleViewer(mui.FlexBox):
             partial(self._on_node_contextmenu,
                     pth_flow=pth_flow,
                     state=self._current_state))
+        await self.clear_tabs()
         await self._set_graph_node_edges_and_layout(merged_graph_res.nodes,
                                                       merged_graph_res.edges,
                                                       fit_view=True)
         await self._info_container.set_new_layout([])
         with torch.device("meta"):
             mod_meta = module.to("meta")
-            self._cur_module = mod_meta
+            self._toplevel_module = mod_meta
             module_id_prefix = ""
             expand_level = 0
             btns = [IconButtonData("subflow", mui.IconType.Preview)]
             if self._external_submodule_id is not None:
+                # we need to get submodule from external_submodule_id
+                mod_meta = mod_meta.get_submodule(self._external_submodule_id)
                 module_id_prefix = self._external_submodule_id
                 expand_level = 1
                 btns = mui.undefined
@@ -334,10 +366,10 @@ class PytorchModuleViewer(mui.FlexBox):
     async def _on_graph_ready(self):
         # do init when flow is external (e.g. created from main flow)
         if self.is_external_mode:
-            assert self._cur_pth_flow is not None
-            assert self._cur_module is not None
-            await self._init_set_exported_flow(self._cur_pth_flow,
-                                               self._cur_module)
+            assert self._toplevel_pth_flow is not None
+            assert self._toplevel_module is not None
+            await self._init_set_exported_flow(self._toplevel_pth_flow,
+                                               self._toplevel_module)
 
     def _patch_module_uid(self, module_uid: str):
         if self._external_submodule_id is None or self._external_submodule_id == "":
@@ -396,31 +428,37 @@ class PytorchModuleViewer(mui.FlexBox):
     async def _handle_subflow_dialog_close(self, ev: mui.DialogCloseEvent):
         await self._subflow_dialog.set_new_layout([])
 
+    async def clear_tabs(self):
+        await self._info_container.set_new_layout([])
+        await self._args_tree.set_root_object_dict({})
+        await self._stack_trace_container.set_new_layout([])
+        await self._module_prop_tree.set_root_object_dict({})
+
     async def _on_tree_item_button_click(self,
                                          module_id: str,
                                          btn_key: str,
                                          is_ftree_id: bool = False):
         if btn_key == "subflow":
-            if self._cur_pth_flow is not None and self._cur_module is not None:
-                assert self._cur_pth_flow.ftree is not None
+            if self._toplevel_pth_flow is not None and self._toplevel_module is not None:
+                assert self._toplevel_pth_flow.ftree is not None
                 ftree_id = None
                 if is_ftree_id:
                     ftree_id = module_id
-                    if module_id not in self._cur_pth_flow.ftree.tree_id_to_node:
+                    if module_id not in self._toplevel_pth_flow.ftree.tree_id_to_node:
                         return
-                    module_id = self._cur_pth_flow.ftree.tree_id_to_node[
+                    module_id = self._toplevel_pth_flow.ftree.tree_id_to_node[
                         module_id]["module"]
-                    submodule = self._cur_module.get_submodule(module_id)
                 else:
-                    if module_id not in self._cur_pth_flow.ftree.module_id_to_tree_ids:
+                    if module_id not in self._toplevel_pth_flow.ftree.module_id_to_tree_ids:
                         # modules that con't contains forward ops
                         return
-                    submodule = self._cur_module.get_submodule(module_id)
                 viewer_subflow = PytorchModuleViewer(
                     external_submodule_id=module_id,
-                    external_module=submodule,
-                    external_pth_flow=self._cur_pth_flow,
-                    external_ftree_id=ftree_id)
+                    external_module=self._toplevel_module,
+                    external_pth_flow=self._toplevel_pth_flow,
+                    external_ftree_id=ftree_id, 
+                    max_nested_depth=self._max_nested_depth,
+                    _nested_depth=self._nested_depth + 1)
                 await self._subflow_dialog.set_new_layout([
                     viewer_subflow.prop(width="100%", height="100%"),
                 ])
@@ -429,7 +467,7 @@ class PytorchModuleViewer(mui.FlexBox):
     async def _on_tree_item_lazy_expand(self, module_id: str):
         # we already set prefix to external_module_id if exists
         # so we don't need to patch here.
-        if self._current_state is not None and self._cur_pth_flow is not None:
+        if self._current_state is not None and self._toplevel_pth_flow is not None:
             new_ids = [module_id]
             for expanded_module_id in self._current_state.expanded:
                 if not expanded_module_id.startswith(module_id):
@@ -439,9 +477,9 @@ class PytorchModuleViewer(mui.FlexBox):
                 ext_mod_id = self._external_ftree_id
             else:
                 ext_mod_id = self._external_submodule_id
-            merged_graph_res = self._cur_pth_flow.create_graph_with_expanded_modules(
+            merged_graph_res = self._toplevel_pth_flow.create_graph_with_expanded_modules(
                 self._current_state.expanded,
-                module=self._cur_module,
+                module=self.get_current_submodule(),
                 submodule_id=ext_mod_id,
                 submodule_id_is_module=self._external_ftree_id is None)
             await self._set_graph_node_edges_and_layout(
@@ -464,24 +502,33 @@ class PytorchModuleViewer(mui.FlexBox):
     async def export_module_to_flow(self,
                                     module: torch.nn.Module,
                                     args: Tuple[Any, ...],
-                                    kwargs: Optional[Dict[str, Any]] = None):
+                                    kwargs: Optional[Dict[str, Any]] = None,
+                                    strict: bool = True,
+                                    for_training: bool = False,
+                                    verbose: bool = False):
         if self.is_external_mode:
             raise ValueError("Cannot export module to flow in external mode")
         t = time.time()
         mod_qname = get_qualname_of_type(type(module))
-        with torch.device("meta"):
-            mod_meta = module.to("meta")
-            LOGGER.warning(f"Start export {mod_qname}")
-            gm = torch.export.export(mod_meta, args, kwargs)
+        if isinstance(module, torch.fx.GraphModule):
+            gm = module
+        else: 
+            with torch.device("meta"):
+                mod_meta = module.to("meta")
+                LOGGER.warning(f"Start export {mod_qname}")
+                if for_training:
+                    gm = torch.export.export_for_training(mod_meta, args, kwargs, strict=strict)
+                else:
+                    gm = torch.export.export(mod_meta, args, kwargs, strict=strict)
         LOGGER.warning(f"Export {mod_qname} time: {time.time() - t}")
         builder = PytorchExportBuilder(use_multiple_handle_node=self._use_multiple_handle_node)
-        interpreter = FlowUIInterpreter(gm, builder, module, verbose=False)
+        interpreter = FlowUIInterpreter(gm, builder, module, verbose=verbose)
         outputs = interpreter.run_on_graph_placeholders()
         assert isinstance(outputs, (list, tuple))
         pth_flow = builder.build_pytorch_detached_flow(module, outputs)
-        self._cur_pth_flow = pth_flow
+        self._toplevel_pth_flow = pth_flow
         await self._init_set_exported_flow(pth_flow, module)
-
+        
     async def _on_node_contextmenu(self, data, pth_flow: PytorchFlowOutput,
                                    state: ExpandState):
         item_id = data["itemId"]
@@ -500,7 +547,7 @@ class PytorchModuleViewer(mui.FlexBox):
             if self._cur_graph_metadata is not None:
                 node_meta = self._cur_graph_metadata.node_id_to_data.get(
                     node_id)
-                if node_meta is not None:
+                if node_meta is not None and node_meta.is_merged:
                     if not use_module_expand:
                         ftree_id = node_meta.ftree_id
                         if ftree_id is not None:
@@ -524,7 +571,7 @@ class PytorchModuleViewer(mui.FlexBox):
                             state.expanded.append(module_id_str)
                             merged_graph_res = pth_flow.create_graph_with_expanded_modules(
                                 state.expanded,
-                                module=self._cur_module,
+                                module=self.get_current_submodule(),
                                 submodule_id=ext_mod_id,
                                 submodule_id_is_module=self._external_ftree_id
                                 is None)
@@ -546,10 +593,9 @@ class PytorchModuleViewer(mui.FlexBox):
                             await self._module_tree_select(module_id_str)
 
         elif item_id == "subflow":
-            if self._cur_graph_metadata is not None and not self.is_external_mode:
+            if self._cur_graph_metadata is not None and (not self.is_external_mode or self._enable_nested_dialog):
                 node_meta = self._cur_graph_metadata.node_id_to_data.get(
                     node_id)
-
                 if node_meta is not None and node_meta.ftree_id is not None:
                     await self._on_tree_item_button_click(
                         node_meta.ftree_id, "subflow", is_ftree_id=True)
@@ -596,6 +642,22 @@ class PytorchModuleViewer(mui.FlexBox):
                 stacktrace_layouts.append(mui.Markdown("\n".join(md_lines)))
         await self._stack_trace_container.set_new_layout([*stacktrace_layouts])
 
+    def _dtype_shortcut(self, dtype: torch.dtype):
+        if dtype == torch.bool:
+            return "bool"
+        if dtype.is_floating_point:
+            if dtype.is_complex:
+                return f"cf{dtype.itemsize * 8}"
+            if dtype == torch.bfloat16:
+                return "bf16"
+            else:
+                return f"f{dtype.itemsize * 8}"
+        else:
+            if dtype.is_signed:
+                return f"i{dtype.itemsize * 8}"
+            else:
+                return f"u{dtype.itemsize * 8}"
+
     def _get_node_io_layouts(self, node_id: str):
         layouts: List[Union[mui.MUIComponentBase, mui.MUIContainerBase]] = []
         if self._cur_graph_metadata is not None:
@@ -603,8 +665,6 @@ class PytorchModuleViewer(mui.FlexBox):
             out_handle_to_edges = self._cur_graph_metadata.node_id_to_out_handle_to_edges[node_id]
             for i, handle_to_edges in enumerate([inp_handle_to_edges, out_handle_to_edges]):
                 btns: List[mui.Button] = []
-                layouts.append(mui.Typography(
-                    "Inputs" if i == 0 else "Outputs").prop(variant="body1"))
                 for handle, edges in handle_to_edges.items():
                     # print(handle, len(edges))
                     for edge in edges:
@@ -616,7 +676,9 @@ class PytorchModuleViewer(mui.FlexBox):
                             type_str, shape = self._get_shape_type_from_raw(
                                 raw)
                             if type(raw).__name__ == "FakeTensor":
-                                btn_name = (f"{shape}")
+                                dtype_str = self._dtype_shortcut(raw.dtype)
+
+                                btn_name = (f"{shape}|{dtype_str}")
                             else:
                                 btn_name = (f"{type_str}")
                         else:
@@ -628,7 +690,10 @@ class PytorchModuleViewer(mui.FlexBox):
                             btn_name,
                             partial(self._node_tree_select, [target_node_id]))
                         btns.append(btn.prop(loading=False))
-                layouts.append(mui.ButtonGroup(btns).prop(fullWidth=True, size="small", variant="outlined", orientation="vertical"))
+                if btns:
+                    layouts.append(mui.Typography(
+                        "Inputs" if i == 0 else "Outputs").prop(variant="body1"))
+                    layouts.append(mui.ButtonGroup(btns).prop(fullWidth=True, size="small", variant="outlined", orientation="vertical"))
         return layouts
 
     def _get_node_desp_layouts(self, data: PytorchNodeMeta, module_id_str: str, module: torch.nn.Module):
@@ -673,21 +738,22 @@ class PytorchModuleViewer(mui.FlexBox):
         is_module_list = "ModuleList" in qname
         is_module_dict = "ModuleDict" in qname
         is_container = is_seq or is_module_list or is_module_dict
-        if qname.startswith("torch.") and not is_container:
-            # official torch module
-            param_md_lines: List[str] = []
-            for name, param in module.named_parameters():
-                shape_str = ",".join(map(str, param.shape))
-                param_md_lines.append(
-                    f"* `{name}(P)`: `[{shape_str}]`")
-            for name, param in module.named_buffers():
-                shape_str = ",".join(map(str, param.shape))
-                param_md_lines.append(
-                    f"* `{name}(B)`: `[{shape_str}]`")
-            if param_md_lines:
-                layouts.append(mui.Divider())
-                layouts.append(
-                    mui.Markdown("\n".join(param_md_lines)))
+        recurse = qname.startswith("torch.") and not is_container
+        # official torch module
+        param_md_lines: List[str] = []
+        for name, param in module.named_parameters(recurse=recurse):
+            shape_str = ",".join(map(str, param.shape))
+            param_md_lines.append(
+                f"* `{name}(P)`: `[{shape_str}]`")
+        for name, param in module.named_buffers(recurse=recurse):
+            shape_str = ",".join(map(str, param.shape))
+            param_md_lines.append(
+                f"* `{name}(B)`: `[{shape_str}]`")
+        if param_md_lines:
+            layouts.append(mui.Divider())
+            layouts.append(
+                mui.Markdown("\n".join(param_md_lines)))
+            
         return layouts
 
     async def _on_selection_change(self, ev: flowui.EventSelection):
@@ -707,7 +773,9 @@ class PytorchModuleViewer(mui.FlexBox):
                     "inp_edges": [as_dict_no_undefined(e) for e in inp_edges],
                     "out_edges": [as_dict_no_undefined(e) for e in out_edges],
                 })
-            if self._cur_graph_metadata is not None and self._cur_module is not None:
+            cur_submodule = self.get_current_submodule()
+
+            if self._cur_graph_metadata is not None and cur_submodule is not None:
                 if node_id in self._cur_graph_metadata.node_id_to_data:
                     tab_is_empty = {x.value: False for x in TabType}
                     node = self._cur_graph_metadata.id_to_nodes[node_id]
@@ -727,13 +795,19 @@ class PytorchModuleViewer(mui.FlexBox):
                         await self._stack_trace_container.set_new_layout([])
                         # if stacktrace not available, reset tabs to info if stacktrace is selected
                         tab_is_empty[TabType.STACKTRACE.value] = True
+                    should_clear_module_prop_tree = True
                     if data.is_io_node:
                         if data.output_desps is not None:
                             out = data.output_desps[0]
                             type_str, shape = self._get_shape_type_from_raw(
                                 out)
+                            
                             if not isinstance(node.data, mui.Undefined) and not isinstance(node.data.label, mui.Undefined):
-                                layouts.append(mui.Markdown(f"`{node.data.label}`: `{type_str}`"))
+                                if type_str == "Tensor":
+                                    dtype_shortcut = self._dtype_shortcut(out.dtype)
+                                    layouts.append(mui.Markdown(f"`{node.data.label}`: `{type_str}|{dtype_shortcut}`"))
+                                else:
+                                    layouts.append(mui.Markdown(f"`{node.data.label}`: `{type_str}`"))
                             else:
                                 layouts.append(mui.Markdown(f"`{type_str}`"))
                             layouts.append(mui.Markdown(f"`{shape}`"))
@@ -747,16 +821,21 @@ class PytorchModuleViewer(mui.FlexBox):
                                     module_id_str = module_id_str[len(
                                         self._external_submodule_id) + 1:]
                             try:
-                                module = self._cur_module.get_submodule(module_id_str)
+                                module = cur_submodule.get_submodule(module_id_str)
+                                if data.is_merged:
+                                    should_clear_module_prop_tree = False
+                                    await self._module_prop_tree.set_root_object_dict({module_id.parts[-1]: module}, expand_all=True)
                                 node_desp_layouts = self._get_node_desp_layouts(
                                     data, module_id_str, module)
                                 layouts.extend(node_desp_layouts)
                             except AttributeError:
                                 pass
-                            layouts.append(mui.Divider())
-                            io_layouts = self._get_node_io_layouts(node_id)
-                            if io_layouts:
-                                layouts.extend(io_layouts)
+                    io_layouts = self._get_node_io_layouts(node_id)
+                    if io_layouts:
+                        layouts.append(mui.Divider())
+                        layouts.extend(io_layouts)
+                    if should_clear_module_prop_tree:
+                        await self._module_prop_tree.set_root_object_dict({})
                     if layouts:
                         await self._info_container.set_new_layout([*layouts])
                     if self._tabs.props.value != self._current_tabs_value:

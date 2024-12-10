@@ -112,9 +112,9 @@ class TensorHandler(ObjectPreviewHandler):
             await self.data_print.write(ss.getvalue())
             return
         if get_qualname_of_type(type(res)) == CommonQualNames.TVTensor:
-            res = res.cpu().numpy()
+            res = res # .cpu().numpy()
         if get_qualname_of_type(type(res)) == CommonQualNames.TorchParameter:
-            res = res.data.cpu().numpy()
+            res = res.data # .cpu().numpy()
         else:
             res = res
         await self.data_print.write(str(res))

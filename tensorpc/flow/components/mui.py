@@ -768,7 +768,7 @@ class DialogProps(MUIFlexBoxProps):
     title: Union[str, Undefined] = undefined
     fullScreen: Union[bool, Undefined] = undefined
     fullWidth: Union[bool, Undefined] = undefined
-    dialogMaxWidth: Union[Literal['xs', 'sm', "md", "lg", "xl"],
+    dialogMaxWidth: Union[Literal['xs', 'sm', "md", "lg", "xl", False],
                     Undefined] = undefined
     scroll: Union[Literal["body", "paper"], Undefined] = undefined
     includeFormControl: Union[bool, Undefined] = undefined
@@ -4642,7 +4642,7 @@ class SimpleControlsProps(MUIFlexBoxProps):
     contextMenus: Union[Undefined, List[ContextMenuData]] = undefined
     reactKey: Union[Undefined, str] = undefined
     variant: Union[Undefined, Literal["mui", "native"]] = undefined # mui by default
-    controlled: Union[Undefined, bool] = undefined
+    controlled: Union[Undefined, bool] = undefined # True by default
     expanded: Union[bool, Dict[str,
                                bool]] = dataclasses.field(default_factory=dict)
 
@@ -4700,7 +4700,12 @@ class SimpleControls(MUIComponentBase[SimpleControlsProps]):
         if type == FrontendEventType.TreeItemExpandChange:
             self.prop(expanded=value)
             return
-        if not self.props.controlled:
+        controlled = False 
+        if isinstance(self.props.controlled, Undefined):
+            controlled = True # by default
+        else:
+            controlled = self.props.controlled
+        if not controlled:
             return 
         node_id = UniqueTreeIdForTree(value[0])
         parts = node_id.parts

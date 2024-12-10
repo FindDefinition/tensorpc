@@ -1834,8 +1834,13 @@ class Flow:
             assert isinstance(ev, ComponentEvent)
             name_to_data: List[Tuple[str, Any]] = []
             for k, v in ev.uid_to_data.items():
-                new_k = f"{appev.uid}-{AppEventType.ComponentEvent.value}-{k}"
-                name_to_data.append((new_k, v))
+                # new_k = f"{appev.uid}-{AppEventType.ComponentEvent.value}-{k}"
+                # name_to_data.append((new_k, v))
+                new_k = f"{appev.uid}-{AppEventType.ComponentEvent.value}"
+                name_to_data.append((new_k, {
+                    "uid": k,
+                    "data": v,
+                }))
             appev.type_to_event.pop(AppEventType.ComponentEvent)
             if appev.type_to_event:
                 name_to_data.append((appev.get_event_uid(), appev.to_dict()))

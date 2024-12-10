@@ -294,6 +294,21 @@ class ElkGlobalOptions:
     direction: Union[Undefined, Literal["DOWN", "UP", "RIGHT", "LEFT"]] = "DOWN"
     padding: Union[Undefined, str] = undefined
 
+_PortAlignmentLiteral: TypeAlias = Literal["BEGIN", "END", "CENTER", "JUSTIFIED", "DISTRIBUTED"]
+
+@dataclasses.dataclass
+class ElkPortAlignment:
+    default: Union[_PortAlignmentLiteral, Undefined] = undefined 
+    west: Union[_PortAlignmentLiteral, Undefined] = undefined
+    east: Union[_PortAlignmentLiteral, Undefined] = undefined
+    north: Union[_PortAlignmentLiteral, Undefined] = undefined
+    south: Union[_PortAlignmentLiteral, Undefined] = undefined
+
+@dataclasses.dataclass
+class ElkDefaultNodeProps:
+    portAlignment: Union[Undefined, ElkPortAlignment] = undefined
+    portConstraints: Union[Undefined, str] = undefined
+
 @dataclasses.dataclass
 class ElkSpacing:
     commentComment: Union[Undefined, NumberType] = undefined
@@ -335,6 +350,7 @@ class ElkLayoutOptions:
     nodePlacement: Union[Undefined, ElkNodePlacement] = undefined
     partitioning: Union[Undefined, ElkPartitioning] = undefined
     spacing: Union[Undefined, ElkSpacing] = undefined
+    defaultNodeProps: Union[Undefined, ElkDefaultNodeProps] = undefined
 
 @dataclasses.dataclass
 class EventSelection:

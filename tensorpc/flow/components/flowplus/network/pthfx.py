@@ -201,6 +201,16 @@ class PytorchFlowOutput(flowui.SymbolicGraphOutput[PytorchNodeMeta,
         submodule_id: Optional[str] = None,
         submodule_id_is_module: bool = True,
     ) -> PytorchFlowOutputPartial:
+        """Create a new graph with expanded nodes.
+
+        Args:
+            expanded_ids (List[str]): list of expanded ids
+            expanded_id_is_module (bool, optional): if True, expanded_ids are module ids. Defaults to False.
+            module (Optional[torch.nn.Module], optional): module. When `submodule_id` exists, it is submodule, not
+                original module. Defaults to None.
+            submodule_id (Optional[str], optional): submodule id. Defaults to None.
+            submodule_id_is_module (bool, optional): if True, submodule_id is module id. Defaults to True.
+        """
         assert self.ftree is not None
         if not expanded_id_is_module:
             id_need_expand: Set[str] = set(expanded_ids)
@@ -295,8 +305,6 @@ class PytorchFlowOutput(flowui.SymbolicGraphOutput[PytorchNodeMeta,
         edges = self.edges
         internals = flowui.FlowInternals()
         internals.set_from_nodes_edges(nodes, edges)
-        # internals, new_edge_id_to_prev_edges = internals.merge_nodes(
-        #     merge_list)
         internals, _, prev_node_id_to_data, prev_edge_id_to_data = internals.merge_nodes_with_data(
             merge_list, merged_node_data, self.node_id_to_data, self.edge_id_to_data)
 
@@ -331,11 +339,11 @@ class PytorchFlowOutput(flowui.SymbolicGraphOutput[PytorchNodeMeta,
                     prev_node_id_to_data[n.id] = new_data
             for n, edges in out_node_edges:
                 n.style = mui.undefined
-                if n.id in prev_node_id_to_data:
-                    new_data = PytorchNodeMeta("placeholder", is_io_node=True)
-                    if edges[0].id in prev_edge_id_to_data:
-                        new_data.output_desps = [prev_edge_id_to_data[edges[0].id].raw]
-                    prev_node_id_to_data[n.id] = new_data
+                # since we just copy node as output node, we need to create a io meta. 
+                new_data = PytorchNodeMeta("placeholder", is_io_node=True)
+                if edges[0].id in prev_edge_id_to_data:
+                    new_data.output_desps = [prev_edge_id_to_data[edges[0].id].raw]
+                prev_node_id_to_data[n.id] = new_data
 
         if not self.use_multiple_handle_node:
             internals = internals.create_internals_with_none_handle()
@@ -543,7 +551,7 @@ class FlowUIInterpreter(Interpreter):
 
         op, output_desps, _ = self.create_op_node(name, list(inp_handles.keys()),
                                                [f"{name}-out"], target, args,
-                                               kwargs)
+                                               kwargs, module_stack_fx=[(target, get_qualname_of_type(type(mod)))])
         op.style = {"backgroundColor": "aliceblue"}
 
         c_list = self._builder.call_op_node(op, inp_handles)
@@ -564,6 +572,7 @@ class FlowUIInterpreter(Interpreter):
                     op_ret_type = self._op_name_to_th_ret_types[name]
                     op_ret_type_fields = _inspect_th_ret_type(op_ret_type)
         op_has_param = False
+        op_has_buffer = False
         schema = None
         if self._is_export:
             qname = get_qualname_of_type(type(target))
@@ -571,6 +580,10 @@ class FlowUIInterpreter(Interpreter):
                 for arg in args:
                     if isinstance(arg, torch.nn.Parameter):
                         op_has_param = True
+                        break
+                for arg in args:
+                    if not isinstance(arg, torch.nn.Parameter) and isinstance(arg, torch.Tensor):
+                        op_has_buffer = True
                         break
                 # analysis aten ops schema to get number of outputs
                 schema = target._schema
@@ -627,10 +640,13 @@ class FlowUIInterpreter(Interpreter):
                                                kwargs, raw_op_name, additional_args)
         if schema is not None:
             meta.op_sig = str(schema)
-        op.style = {
-            "backgroundColor": "aliceblue" if op_has_param else "silver"
-        }
-
+        op.style = {}
+        if op_has_buffer:
+            op.style["backgroundColor"] = "azure"
+        elif op_has_param:
+            op.style["backgroundColor"] = "beige"
+        else:
+            op.style["backgroundColor"] = "silver"
         c_list = self._builder.call_op_node(op, inp_handles)
         if output_desps is not None:
             assert len(output_desps) == len(c_list), "TODO"
@@ -701,7 +717,8 @@ class FlowUIInterpreter(Interpreter):
                        args: Tuple,
                        kwargs: dict,
                        raw_op_name: Optional[str] = None,
-                       addi_args: Optional[Dict[str, Any]] = None):
+                       addi_args: Optional[Dict[str, Any]] = None,
+                       module_stack_fx: Optional[List[Tuple[str, str]]] = None):
         if name == "linear":
             w = args[1]
             name = f"Linear {w.shape[1]}x{w.shape[0]}"
@@ -761,6 +778,12 @@ class FlowUIInterpreter(Interpreter):
         module_scope_uid: Optional[UniqueTreeIdForTree] = None
         module_stack: Optional[List[Tuple[str, str]]] = None
         module_qname: Optional[str] = None
+        if module_stack_fx is not None:
+            module_stack = module_stack_fx
+            module_scope = module_stack[-1][0]
+            module_scope_uid = UniqueTreeIdForTree.from_parts(
+                module_scope.split("."))
+            module_qname = module_stack[-1][1]
         if "nn_module_stack" in node.meta and len(
                 node.meta["nn_module_stack"]) > 0:
             nn_module_stack = node.meta["nn_module_stack"]
@@ -770,6 +793,9 @@ class FlowUIInterpreter(Interpreter):
             #     'L__self___layer3_1': ('layer3.1', 'torchvision.models.resnet.BasicBlock'),
             #     'getattr_L__self___layer3___1___bn1': ('layer3.1.bn1', 'torch.nn.modules.batchnorm.BatchNorm2d')
             # },
+
+            # TODO known issue: if top-level node contains any decorator or is nn.Sequential, 
+            # nn_module_stack will contains wrong module id.
             module_stack = [v for v in nn_module_stack.values()]
             for i in range(len(module_stack)):
                 module_scope_item = module_stack[i][0]
@@ -790,7 +816,8 @@ class FlowUIInterpreter(Interpreter):
                 val = [val]
             assert len(val) == len(outputs), f"TODO {val}"
             output_desps = val
-        assert raw_op_name is not None
+        if raw_op_name is None:
+            raw_op_name = name
         meta = PytorchNodeMeta(raw_op_name, module_scope_uid, module_stack,
                                module_qname, output_desps, additional_args=addi_args)
         if "stack_trace" in node.meta:
@@ -887,111 +914,3 @@ class FlowUIInterpreter(Interpreter):
             return tuple(new_res_list)
         else:
             return res
-
-
-def _main():
-    from torchvision.models import resnet18
-    from torch.nn import functional as F
-
-    class TestNoForwardMod(torch.nn.Module):
-
-        def __init__(self):
-            super().__init__()
-            self.linear = torch.nn.Conv2d(10, 10, 1, 1)
-
-        def forward(self, x):
-            return F.relu(self.linear(x))
-
-        def func(self, x):
-            return F.gelu(x)
-
-    class TestMod(torch.nn.Module):
-
-        def __init__(self):
-            super().__init__()
-            self.conv = torch.nn.Conv2d(3, 64, 7)
-            self.bn = torch.nn.BatchNorm2d(64)
-            self.relu = torch.nn.ReLU()
-            self.pool = torch.nn.MaxPool2d(2)
-            self.fc = torch.nn.Conv2d(64, 10, 1, 1)
-            self.mod = TestNoForwardMod()
-
-        def forward(self, x):
-            x = self.conv(x)
-            x = self.bn(x)
-            x = F.gelu(x)
-            x = self.pool(x)
-            # x = torch.flatten(x, 1)
-            x = self.fc(x)
-            return self.mod(x)
-
-    class TestModX(torch.nn.Module):
-
-        def __init__(self):
-            super().__init__()
-            self.mod = TestMod()
-
-        def forward(self, x):
-            return self.mod(x)
-
-    r18 = resnet18()
-    # r18 = TestModX()
-    # gm = torch.fx.symbolic_trace(m)
-    # gm = torch.export.export(m, (torch.rand(8, 4),))
-    with torch.device("meta"):
-        gm = torch.export.export(r18.to("meta"),
-                                 (torch.rand(1, 3, 224, 224), ))
-    import rich
-    for node in gm.graph.nodes:
-        rich.print(node.name, node.op, node.meta)
-    # rich.print(gm.graph_module)
-    return
-    # rich.print(gm.module())
-    # print(gm.graph_module)
-    # print(gm.graph_module)
-    builder = PytorchExportBuilder()
-    interpreter = FlowUIInterpreter(gm,
-                                    builder,
-                                    original_mod=r18,
-                                    verbose=False)
-    # inp, inp_node = builder.create_input("inp")
-    # outputs = interpreter.run(inp)
-    outputs = interpreter.run_on_graph_placeholders()
-    ftree = builder._build_tree_from_module_stack(builder._id_to_node_data)
-    pth_flow = builder.build_pytorch_detached_flow(r18, outputs)
-    pth_flow.create_graph_with_expanded_modules(["layer3.1"], r18)
-    # rich.print(ftree.root)
-    # rich.print(ftree.all_node_ids_with_stack)
-    return
-
-    res = [outputs]
-    rich.print(outputs)
-    graph_res = builder.build_detached_flow(outputs)
-
-
-def _main_fx():
-    from torchvision.models import resnet18
-
-    r18 = resnet18()
-    gm = torch.fx.symbolic_trace(r18)
-    # gm = torch.export.export(m, (torch.rand(8, 4),))
-    import rich
-    for node in gm.graph.nodes:
-        rich.print(node.meta)
-    # print(gm.graph_module)
-    # print(gm.graph_module)
-    builder = PytorchExportBuilder()
-    interpreter = FlowUIInterpreter(gm,
-                                    builder,
-                                    original_mod=r18,
-                                    verbose=True)
-    # inp, inp_node = builder.create_input("inp")
-    # outputs = interpreter.run(inp)
-    outputs = interpreter.run_on_graph_placeholders()
-    res = [outputs]
-    rich.print(outputs)
-    # graph_res = builder.build_detached_flow(outputs)
-
-
-if __name__ == "__main__":
-    _main()

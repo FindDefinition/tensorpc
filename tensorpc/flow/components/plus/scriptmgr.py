@@ -19,9 +19,10 @@ import enum
 import inspect
 import os
 import time
-from typing import Any, Callable, Coroutine, Dict, Iterable, List, Optional, Set, Tuple, Union
-from regex import F
-from typing_extensions import Literal
+from typing import Any, Callable, Coroutine, Dict, Iterable, List, Mapping, Optional, Set, Tuple, TypeVar, Union
+from typing_extensions import Literal, overload
+
+from tensorpc.utils.containers.dict_proxy import DictProxy
 
 import numpy as np
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
@@ -77,16 +78,25 @@ async def _read_stream(stream, cb):
 
 SCRIPT_STORAGE_KEY_PREFIX = "__tensorpc_flow_plus_script_manager"
 
+SCRIPT_TEMP_STORAGE_KEY = "STORAGE"
+
 _INITIAL_SCRIPT_PER_LANG = {
-    "python": """
+    "python": f"""
 from tensorpc.flow import appctx
+from tensorpc.utils.containers.dict_proxy import DictProxy
 import asyncio
+{SCRIPT_TEMP_STORAGE_KEY}: DictProxy[str, Any] = DictProxy() # global storage of manager
+
 async def main():
     pass
 asyncio.get_running_loop().create_task(main())
     """,
-    "app": """
+    "app": f"""
 from tensorpc.flow import mui, three, plus, appctx, mark_create_layout
+from tensorpc.utils.containers.dict_proxy import DictProxy
+from typing import Any, Dict
+{SCRIPT_TEMP_STORAGE_KEY}: DictProxy[str, Any] = DictProxy() # global storage of manager
+
 class App:
     @mark_create_layout
     def my_layout(self):
@@ -159,9 +169,6 @@ class ScriptManager(mui.FlexBox):
             mui.GroupToggleButtonDef("app", name="APP"),
         ], True, self._on_lang_select).prop(value="python",
                                             enforceValueSet=True)
-        # self._enable_save_watch = mui.ToggleButton(
-        #             "value",
-        #             mui.IconType.Visibility).prop(muiColor="secondary", size="small")
         self._save_and_run_btn = mui.IconButton(
             mui.IconType.PlayArrow,
             self._on_save_and_run).prop(progressColor="primary")
@@ -197,6 +204,8 @@ class ScriptManager(mui.FlexBox):
         self.code_editor.event_editor_save.on(self._on_editor_save)
         self.code_editor.event_component_ready.on(self._on_editor_ready)
         self.scripts.event_select_new_item.on(self._on_new_script)
+        # used for apps and python scripts
+        self._manager_global_storage: Dict[str, Any] = {}
 
     @marker.mark_did_mount
     async def _on_mount(self):
@@ -214,6 +223,8 @@ class ScriptManager(mui.FlexBox):
     
     @marker.mark_will_unmount
     async def _on_unmount(self):
+        # we clear the global storage when unmount to provide a way for user to reset the global storage
+        self._manager_global_storage.clear()
         appctx.unregister_app_special_event_handler(AppSpecialEventType.RemoteCompMount, self._on_remote_comp_mount)
 
     async def _on_remote_comp_mount(self, data: Any):
@@ -285,8 +296,13 @@ class ScriptManager(mui.FlexBox):
                 lines.append(f"__tensorpc_script_res[0] = _{run_name}()")
                 code = "\n".join(lines)
                 code_comp = compile(code, fname, "exec")
-                exec(code_comp, {},
+                gs = {}
+                exec(code_comp, gs,
                      {"__tensorpc_script_res": __tensorpc_script_res})
+                if SCRIPT_TEMP_STORAGE_KEY in gs:
+                    storage_var = gs[SCRIPT_TEMP_STORAGE_KEY]
+                    if isinstance(storage_var, DictProxy):
+                        storage_var.set_internal(self._manager_global_storage)
                 res = __tensorpc_script_res[0]
                 assert res is not None
                 await res
@@ -325,6 +341,10 @@ class ScriptManager(mui.FlexBox):
                 mod_dict = {}
                 code_comp = compile(code, fname, "exec")
                 exec(code_comp, mod_dict)
+                if SCRIPT_TEMP_STORAGE_KEY in mod_dict:
+                    storage_var = mod_dict[SCRIPT_TEMP_STORAGE_KEY]
+                    if isinstance(storage_var, DictProxy):
+                        storage_var.set_internal(self._manager_global_storage)
                 app_cls = mod_dict["App"]
                 layout = mui.flex_wrapper(app_cls())
                 await self.app_show_box.set_new_layout({"layout": layout})

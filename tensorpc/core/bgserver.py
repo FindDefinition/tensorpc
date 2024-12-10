@@ -44,17 +44,8 @@ class BackgroundServer:
     """
     def __init__(self):
         self._state: Optional[_BackgroundServerState] = None
-        # self._thread: Optional[threading.Thread] = None
-        # self._userdata: Optional[Any] = None
-        # self.port = -1
         # if you use forked process, this won't be called in python < 3.13
         atexit.register(self.stop)
-
-        # self._service_core: Optional[ServiceCore] = None
-
-        # self.server_id: Optional[str] = None
-        # self.server_uuid: Optional[str] = None
-
         self._is_fork_handler_registered = False
 
         self._prev_proc_title: Optional[str] = None
@@ -110,14 +101,12 @@ class BackgroundServer:
                 service_def = ServiceDef([])
                 service_def.services.extend(BUILTIN_SERVICES)
             port_res_queue = queue.Queue()
-            # if port < 0:
             service_def.services.append(
                 Service("tensorpc.services.collection::ProcessObserver",
                         {"q": port_res_queue}))
             url = '[::]:{}'.format(port)
             smeta = ServerMeta(port=port, http_port=-1)
             service_core = ProtobufServiceCore(url, service_def, False, smeta)
-            # self._service_core = service_core
             ev = threading.Event()
             thread = threading.Thread(target=serve_service_core_async,
                                             kwargs={
@@ -132,10 +121,7 @@ class BackgroundServer:
                     os.register_at_fork(before=partial(self.stop, is_fork=True))
                     self._is_fork_handler_registered = True
             uid = uuid.uuid4().hex # [:8]
-            # self.server_uuid = uid
-            # if port < 0:
             port = port_res_queue.get(timeout=20)
-            # self.port = port
             state = _BackgroundServerState(
                 thread=thread,
                 service_core=service_core,
@@ -188,8 +174,6 @@ class BackgroundServer:
                         pass
             if loop is not None:
                 loop.call_soon_threadsafe(self._state.service_core.async_shutdown_event.set)
-            # robj = RemoteManager(f"localhost:{self.port}")
-            # robj.shutdown()
             _thread = self._state.thread
             self._state = None
             self._cur_proc_title = None 
