@@ -33,6 +33,10 @@ from tensorpc.compat import InWindows
 from tensorpc.constants import PACKAGE_ROOT, TENSORPC_READUNTIL
 from tensorpc.core.rprint_dispatch import rprint
 
+from tensorpc.utils.rich_logging import get_logger
+
+LOGGER = get_logger("tensorpc.ssh")
+
 # 7-bit C1 ANSI sequences
 ANSI_ESCAPE_REGEX = re.compile(
     br'''
@@ -414,22 +418,6 @@ def _warp_exception_to_event(exc: Exception, uid: str):
 
 _ENCODE = "utf-8"
 # _ENCODE = "latin-1"
-
-
-class SocketProxyTunnel:
-    """A wrapper which opens a socket you can run an SSH connection over"""
-
-    def __init__(self, proxy_url):
-        self.proxy_url = proxy_url
-
-    async def create_connection(self, protocol_factory, host, port):
-        from python_socks.sync import Proxy
-        """Return a channel and transport to run SSH over"""
-        proxy = Proxy.from_url(self.proxy_url)
-        loop = asyncio.get_event_loop()
-        sock = proxy.connect(host, port)
-        return (await loop.create_connection(protocol_factory, sock=sock))
-
 
 class PeerSSHClient:
     """
@@ -1026,17 +1014,7 @@ class SSHClient:
 
         self.bash_file_inited: bool = False
         self.encoding = encoding
-        if TENSORPC_ASYNCSSH_PROXY is not None:
-            try:
-                import python_socks
-                self.tunnel = SocketProxyTunnel(TENSORPC_ASYNCSSH_PROXY)
-            except ImportError:
-                warnings.warn(
-                    "you provide TENSORPC_ASYNCSSH_PROXY but python_socks not installed."
-                    " use 'pip install python-socks' and restart server.")
-                self.tunnel = None
-        else:
-            self.tunnel = None
+        self.tunnel = None
 
     @classmethod
     def from_ssh_target(cls, target: SSHTarget):
@@ -1249,35 +1227,11 @@ class SSHClient:
                     asyncio.create_task(inp_queue.get()), shutdown_task,
                     loop_task
                 ]
-                rfwd_ports: List[int] = []
-                fwd_ports: List[int] = []
-
-                if r_forward_ports is not None:
-                    for p in r_forward_ports:
-                        if isinstance(p, (tuple, list)):
-                            listener = await conn.forward_remote_port(
-                                '', p[0], 'localhost', p[1])
-                        else:
-                            listener = await conn.forward_remote_port(
-                                '', 0, 'localhost', p)
-
-                        rfwd_ports.append(listener.get_port())
-                        print(
-                            f'Listening on Remote port {p} <- {listener.get_port()}...'
-                        )
-                        wait_tasks.append(
-                            asyncio.create_task(listener.wait_closed()))
-                if forward_ports is not None:
-                    for p in forward_ports:
-                        listener = await conn.forward_local_port(
-                            '', 0, 'localhost', p)
-                        fwd_ports.append(listener.get_port())
-                        print(
-                            f'Listening on Local port {listener.get_port()} -> {p}...'
-                        )
-                        wait_tasks.append(
-                            asyncio.create_task(listener.wait_closed()))
-                # await listener.wait_closed()
+                fwd_ports, rfwd_ports, fwd_listeners, rfwd_listeners = await self._handle_forward_ports(conn, forward_ports, r_forward_ports)
+                for listener in rfwd_listeners:
+                    wait_tasks.append(asyncio.create_task(listener.wait_closed()))
+                for listener in fwd_listeners:
+                    wait_tasks.append(asyncio.create_task(listener.wait_closed()))
                 if env_port_modifier is not None and (rfwd_ports or fwd_ports):
                     env_port_modifier(fwd_ports, rfwd_ports, env)
                 if init_event is not None:
@@ -1320,11 +1274,9 @@ class SSHClient:
                     text = wait_tasks[0].result()
                     if isinstance(text, SSHRequest):
                         if text.type == SSHRequestType.ChangeSize:
-                            # print("CHANGE SIZE", text.data)
                             chan.change_terminal_size(text.data[0],
                                                       text.data[1])
                     else:
-                        # print("INPUTWTF", text.encode("utf-8"))
                         if self.encoding is None:
                             stdin.write(text.encode("utf-8"))
                         else:
@@ -1343,6 +1295,36 @@ class SSHClient:
                 exit_event.set()
             if exit_callback is not None:
                 await exit_callback()
+
+    async def _handle_forward_ports(self, conn: asyncssh.SSHClientConnection, forward_ports: Optional[List[int]], r_forward_ports: Optional[List[Union[Tuple[int, int], int]]]):
+        rfwd_ports: List[int] = []
+        fwd_ports: List[int] = []
+        rfwd_listeners: List[asyncssh.SSHListener] = []
+        fwd_listeners: List[asyncssh.SSHListener] = []
+        if r_forward_ports is not None:
+            for p in r_forward_ports:
+                if isinstance(p, (tuple, list)):
+                    listener = await conn.forward_remote_port(
+                        '', p[0], 'localhost', p[1])
+                else:
+                    listener = await conn.forward_remote_port(
+                        '', 0, 'localhost', p)
+
+                rfwd_ports.append(listener.get_port())
+                LOGGER.warning(
+                    f'Listening on Remote port {p} <- {listener.get_port()}...'
+                )
+                rfwd_listeners.append(listener)
+        if forward_ports is not None:
+            for p in forward_ports:
+                listener = await conn.forward_local_port(
+                    '', 0, 'localhost', p)
+                fwd_ports.append(listener.get_port())
+                LOGGER.warning(
+                    f'Listening on Local port {listener.get_port()} -> {p}...'
+                )
+                fwd_listeners.append(listener)
+        return fwd_ports, rfwd_ports, fwd_listeners, rfwd_listeners
 
 
 async def main2():
