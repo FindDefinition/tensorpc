@@ -85,6 +85,7 @@ _INITIAL_SCRIPT_PER_LANG = {
 from tensorpc.flow import appctx
 from tensorpc.utils.containers.dict_proxy import DictProxy
 import asyncio
+from typing import Any, Dict
 {SCRIPT_TEMP_STORAGE_KEY}: DictProxy[str, Any] = DictProxy() # global storage of manager
 
 async def main():

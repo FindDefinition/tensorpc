@@ -12,10 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import dataclasses
+import inspect
 from pathlib import Path
 import queue
 import threading
-from typing import Optional, Union, List, Dict
+from typing import Callable, Optional, Union, List, Dict
 import multiprocessing
 import sys
 from tensorpc import marker, prim, AsyncRemoteManager
@@ -208,3 +210,46 @@ class ProcessObserveManager:
                 except Exception as e:
                     async with self._lock:
                         self.clients.pop(identifier)
+
+@dataclasses.dataclass
+class HandlerItem:
+    type: str
+    handler: Callable
+    once: bool = False
+    loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+class SubprocessCallServer:
+    """usually used when you want to run some python function inside
+    subprocess/SSH (can't pass python objects directly).
+    User can run a client in subprocess, load args from this service,
+    run python code and store results to this service.
+    """
+    def __init__(self) -> None:
+        self._msg_single_handlers: Dict[str, HandlerItem] = {}
+
+    def on(self, event: str, f: Callable, force_replace: bool = False, once: bool = False, loop: Optional[asyncio.AbstractEventLoop] = None):
+        if not force_replace:
+            assert event not in self._msg_single_handlers, f"event {event} already registered."
+        self._msg_single_handlers[event] = HandlerItem(event, f, once, loop)
+
+    def once(self, event: str, f: Callable, force_replace: bool = False, loop: Optional[asyncio.AbstractEventLoop] = None):
+        return self.on(event, f, force_replace, True, loop)
+
+    def off(self, event: str):
+        return self._msg_single_handlers.pop(event, None)
+
+    async def call_event(self, event: str, *args, **kwargs):
+        handler_item = self._msg_single_handlers.get(event)
+        assert handler_item is not None, f"event {event} not registered."
+        res = handler_item.handler(*args, **kwargs)
+        res_handler = res
+        if inspect.iscoroutine(res):
+            if handler_item.loop is not None:
+                res_handler = asyncio.run_coroutine_threadsafe(res, handler_item.loop).result()
+            else:
+                res_handler = await res
+        if handler_item.once:
+            self._msg_single_handlers.pop(event)
+        return res_handler
+

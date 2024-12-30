@@ -1,15 +1,20 @@
 import abc
+import ast
 import asyncio
 import bisect
 import contextlib
 import dataclasses
 import enum
+from functools import partial
 import getpass
 import io
 import os
 from pathlib import Path
 import re
 import sys
+import threading
+import uuid
+import async_timeout
 from typing_extensions import Literal
 import warnings
 import time
@@ -31,11 +36,17 @@ from tensorpc.autossh.constants import TENSORPC_ASYNCSSH_PROXY
 from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.compat import InWindows
 from tensorpc.constants import PACKAGE_ROOT, TENSORPC_READUNTIL
+from tensorpc.core import prim
+from tensorpc.core.moduleid import get_module_id_of_type, get_object_type_from_module_id
 from tensorpc.core.rprint_dispatch import rprint
 
 from tensorpc.utils.rich_logging import get_logger
-
+from tensorpc.core.bgserver import BACKGROUND_SERVER
+from tensorpc.core.prim import is_in_server_context, check_is_service_available, get_server_grpc_port
+from tensorpc.core.client import RemoteManager, simple_remote_call
 LOGGER = get_logger("tensorpc.ssh")
+
+_SSH_RPC_CALL_SERV_NAME = "tensorpc.services.collection::SubprocessCallServer"
 
 # 7-bit C1 ANSI sequences
 ANSI_ESCAPE_REGEX = re.compile(
@@ -81,6 +92,24 @@ BASH_HOOKS_FILE_NAME = "hooks-bash.sh"
 class ShellInfo:
     type: Literal["bash", "zsh", "fish", "powershell", "cmd", "cygwin"]
     os_type: Literal["linux", "macos", "windows"]
+
+    def multiple_cmd(self, cmds: List[str]):
+        if self.type == "powershell":
+            return ";".join(cmds)
+        elif self.type == "bash" or self.type == "zsh" or self.type == "fish" or self.type == "cygwin":
+            return " && ".join(cmds)
+        elif self.type == "cmd":
+            return " && ".join(cmds)
+        raise NotImplementedError
+
+    def single_cmd_shell_wrapper(self, cmd: str):
+        if self.type == "powershell":
+            return f"powershell -c {cmd}"
+        elif self.type == "bash" or self.type == "zsh" or self.type == "fish" or self.type == "cygwin":
+            return f"{self.type} -ic \"{cmd}\""
+        elif self.type == "cmd":
+            return f"cmd /c {cmd}"
+        raise NotImplementedError
 
 async def terminal_shell_type_detector(cmd_runner: Callable[[str, bool], Coroutine[None, None, Optional[str]]]):
     # TODO pwsh in linux
@@ -990,6 +1019,101 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
 
                 await self._block_read(datatype)
 
+class SSHRpcClient:
+    def __init__(self, conn: asyncssh.SSHClientConnection, port: int, shell_init_cmd: str, 
+            bkgd_loop: Optional[asyncio.AbstractEventLoop] = None, 
+            remote_fwd_listeners: Optional[List[asyncssh.SSHListener]] = None,
+            manual_close: bool = False):
+        self._conn = conn
+        self._bkgd_loop = bkgd_loop
+        self._port = port
+        self._is_bkgd = self._bkgd_loop is not None
+
+        self.timeout = 10
+        self._shell_init_cmd = shell_init_cmd
+        self._cmd: str = ""
+        self._remote_fwd_listeners = remote_fwd_listeners
+        self._manual_close = manual_close
+
+    async def close_and_wait(self):
+        if self._manual_close:
+            self._conn.close()
+            if self._remote_fwd_listeners is not None:
+                for listener in self._remote_fwd_listeners:
+                    listener.close()
+            await self._conn.wait_closed()
+        else:
+            raise RuntimeError("closed by context manager")
+
+    def set_init_cmd(self, cmd: str):
+        self._cmd = cmd
+
+    async def _call_base(self, func_id: str, is_code: bool, *args, **kwargs):
+        arg_event_id = f"arg-{uuid.uuid4().hex}"
+        ret_event_id = f"ret-{uuid.uuid4().hex}"
+        ev = asyncio.Event()
+        result = {}
+        once_serv_key = f"{_SSH_RPC_CALL_SERV_NAME}.once"
+        off_serv_key = f"{_SSH_RPC_CALL_SERV_NAME}.off"
+        if self._is_bkgd:
+            BACKGROUND_SERVER.execute_service(once_serv_key, arg_event_id, partial(self._get_args_and_params, args, kwargs, func_id, is_code), loop=self._bkgd_loop)
+            BACKGROUND_SERVER.execute_service(once_serv_key, ret_event_id, partial(self._set_ret, ret_ev=ev, ret_container=result), loop=self._bkgd_loop)
+        else:
+            prim.get_service(once_serv_key)(arg_event_id, partial(self._get_args_and_params, args, kwargs, func_id, is_code))
+            prim.get_service(once_serv_key)(ret_event_id, partial(self._set_ret, ret_ev=ev, ret_container=result))
+
+        run_cmd = f"python -m tensorpc.cli.cmd_rpc_call {arg_event_id} {ret_event_id} {self._port}"
+        final_cmds = [
+            run_cmd,
+        ]
+        if self._cmd != "":
+            final_cmds.insert(0, self._cmd)
+        final_cmd = " && ".join(final_cmds)
+        # print(self._shell_init_cmd, final_cmd)
+        proc_res = await self._conn.run(f"{self._shell_init_cmd} \"{final_cmd}\"")
+        if proc_res.exit_status != 0 and proc_res.exit_status is not None:
+            if self._is_bkgd:
+                BACKGROUND_SERVER.execute_service(off_serv_key, arg_event_id)
+                BACKGROUND_SERVER.execute_service(off_serv_key, ret_event_id)
+            else:
+                prim.get_service(off_serv_key)(arg_event_id)
+                prim.get_service(off_serv_key)(ret_event_id)
+            print(proc_res.exit_status, proc_res.stdout, proc_res.stderr)
+            raise Exception(proc_res.stderr)
+
+        async with async_timeout.timeout(self.timeout):
+            await ev.wait()
+        if "exception" in result:
+            if self._is_bkgd:
+                BACKGROUND_SERVER.execute_service(off_serv_key, arg_event_id)
+                BACKGROUND_SERVER.execute_service(off_serv_key, ret_event_id)
+            else:
+                prim.get_service(off_serv_key)(arg_event_id)
+                prim.get_service(off_serv_key)(ret_event_id)
+            print(proc_res.stdout, proc_res.stderr)
+            raise Exception(result["exception"])
+        else:
+            return result["ret"]
+
+    async def call(self, func_id: Union[str, Callable], *args, **kwargs):
+        if not isinstance(func_id, str):
+            func_id = get_module_id_of_type(type(func_id))
+        return await self._call_base(func_id, False, *args, **kwargs)
+
+    async def _get_args_and_params(self, args, kwargs, code: str, is_func_id: bool):
+        return args, kwargs, code, is_func_id
+
+    async def _set_ret(self, ret, exception_msg: Optional[str] = None, ret_ev: Optional[asyncio.Event] = None, ret_container: Optional[dict] = None):
+        if ret_container is None or ret_ev is None:
+            return # shouldn't happen
+        if exception_msg is not None:
+            ret_container["exception"] = exception_msg
+        else:
+            ret_container["ret"] = ret
+        ret_ev.set()
+
+    async def call_with_code(self, func_code: str, *args, **kwargs):
+        return await self._call_base(func_code, True, *args, **kwargs)
 
 class SSHClient:
 
@@ -997,7 +1121,7 @@ class SSHClient:
                  url: str,
                  username: str,
                  password: str,
-                 known_hosts,
+                 known_hosts: Any = None,
                  uid: str = "",
                  encoding: Optional[str] = None) -> None:
         url_parts = url.split(":")
@@ -1083,6 +1207,58 @@ class SSHClient:
                 self.bash_file_inited = True
             yield conn
 
+    async def simple_connect_with_rpc(self, init_bash: bool = True):
+        conn_task = asyncssh.connection.connect(self.url_no_port,
+                                                self.port,
+                                                username=self.username,
+                                                password=self.password,
+                                                keepalive_interval=15,
+                                                login_timeout=10,
+                                                known_hosts=self.known_hosts,
+                                                tunnel=self.tunnel)
+        
+        conn = await asyncio.wait_for(conn_task, timeout=10)
+        rfwd_listeners: List[asyncssh.SSHListener] = []
+        try:
+            assert isinstance(conn, asyncssh.SSHClientConnection)
+            shell_info = await self.determine_shell_type_by_conn(conn)
+            if (not self.bash_file_inited) and init_bash:
+                await self._sync_sh_init_file(conn, shell_info)
+                self.bash_file_inited = True
+            loop: Optional[asyncio.AbstractEventLoop] = None
+            if is_in_server_context() and check_is_service_available(_SSH_RPC_CALL_SERV_NAME):
+                # if some service (such as App) is running, we use the service port
+                serv_port = get_server_grpc_port()
+            elif BACKGROUND_SERVER.is_started and BACKGROUND_SERVER.service_core.service_units.has_service_unit(_SSH_RPC_CALL_SERV_NAME):
+                serv_port = BACKGROUND_SERVER.port
+                # when we run main coroutines in background server, we need to use thread-safe version and provide loop.
+                loop = asyncio.get_running_loop()
+            else:
+                raise NotImplementedError("you must run bg server or app to use RPC based ssh")
+            # remote forward port that client inside ssh process can connect to server in current process.
+            fwd_ports, rfwd_ports, fwd_listeners, rfwd_listeners = await self._handle_forward_ports(conn, None, [serv_port])
+            # client inside ssh can use this port to connect to server
+            forwarded_port = rfwd_ports[0]
+            rpc_client = SSHRpcClient(conn, forwarded_port, 
+                self._get_shell_single_cmd(shell_info), bkgd_loop=loop,
+                remote_fwd_listeners=rfwd_listeners,
+                manual_close=True)
+            return rpc_client
+        finally:
+            conn.close()
+            await conn.wait_closed()
+            for listener in rfwd_listeners:
+                await listener.wait_closed()
+
+
+    @contextlib.asynccontextmanager
+    async def simple_connect_with_rpc_ctx(self, init_bash: bool = True):
+        client = await self.simple_connect_with_rpc(init_bash)
+        try:
+            async with client._conn:
+                yield client
+        finally:
+            await client.close_and_wait()
     # async def simple_run_command(self, cmd: str):
     #     async with self.simple_connect() as conn:
     #         stdin, stdout, stderr = await conn.open_session(
@@ -1114,6 +1290,83 @@ class SSHClient:
             done, pending = await asyncio.wait(
                 wait_tasks, return_when=asyncio.FIRST_COMPLETED)
             return
+
+    async def _sync_sh_init_file(self, conn: asyncssh.SSHClientConnection, shell_type: ShellInfo):
+        bash_file_path = determine_hook_path_by_shell_info(shell_type)
+        if InWindows:
+            # remove CRLF
+            with open(bash_file_path, "r") as f:
+                content = f.readlines()
+            await conn.run(f'cat > ~/.tensorpc_hooks-bash{bash_file_path.suffix}',
+                            input="\n".join(content))
+        else:
+            if shell_type.type == "zsh":
+                await asyncsshscp(str(bash_file_path.parent),
+                                (conn, f'~/'), recurse=True)
+            else:
+                await asyncsshscp(str(bash_file_path),
+                                (conn, f'~/.tensorpc_hooks-bash{bash_file_path.suffix}'))
+
+    def _get_shell_init_cmd(self, shell_type: ShellInfo, bash_file_path: Optional[Path] = None):
+        if bash_file_path is not None:
+            init_cmd = f"bash --init-file ~/.tensorpc_hooks-bash{bash_file_path.suffix}"
+            init_cmd_2 = ""
+            if shell_type.os_type == "windows":
+                pwsh_win_cmds = ['-l', '-noexit', '-command', 'try { . ~/.tensorpc_hooks-bash{bash_file_path.suffix} } catch {}{}']
+                init_cmd = f"powershell {' '.join(pwsh_win_cmds)}"
+                init_cmd_2 = f". ~/.tensorpc_hooks-bash{bash_file_path.suffix}"
+                init_cmd_2 = ""                
+            elif shell_type.type != "bash" and shell_type.type != "zsh":
+                init_cmd =shell_type.type
+                init_cmd_2 = f"source ~/.tensorpc_hooks-bash{bash_file_path.suffix}"
+            elif shell_type.type == "zsh":
+                init_cmd_2 = ""
+                user_zdotdir = os.getenv("ZDOTDIR", "$HOME")
+                init_cmd = f"export ZDOTDIR=~/.tensorpc_hooks-zsh && export USER_ZDOTDIR={user_zdotdir} && zsh -il"
+        else:
+            init_cmd = f"bash"
+            init_cmd_2 = ""
+            if shell_type.os_type == "windows":
+                pwsh_win_cmds = ['-l', '-noexit']
+                init_cmd = f"powershell {' '.join(pwsh_win_cmds)}"
+                init_cmd_2 = ""                
+            elif shell_type.type != "bash" and shell_type.type != "zsh":
+                init_cmd = shell_type.type
+                init_cmd_2 = f""
+            elif shell_type.type == "zsh":
+                init_cmd_2 = ""
+                user_zdotdir = os.getenv("ZDOTDIR", "$HOME")
+                init_cmd = f"zsh -il"
+        return init_cmd, init_cmd_2
+
+    def _get_shell_single_cmd(self, shell_type: ShellInfo):
+        if shell_type.os_type == "windows":
+            return f"powershell -c"         
+        else:
+            return f"{shell_type.type} -ic"
+
+    async def _create_controlled_session(self, conn: asyncssh.SSHClientConnection, shell_type: ShellInfo, init_bash_file: bool = True):
+        session: MySSHClientStreamSession
+        bash_file_path = determine_hook_path_by_shell_info(shell_type)
+        if init_bash_file:
+            await self._sync_sh_init_file(conn, shell_type)
+        init_cmd, init_cmd_2 = self._get_shell_init_cmd(shell_type, bash_file_path)
+
+        chan, session = await conn.create_session(
+            VscodeStyleSSHClientStreamSession,
+            init_cmd,
+            request_pty="force",
+            env=None,
+            encoding=self.encoding) # type: ignore
+        stdin, stdout, stderr = (
+            asyncssh.stream.SSHWriter(session, chan),
+            asyncssh.stream.SSHReader(session, chan),
+            asyncssh.stream.SSHReader(
+                session, chan,
+                asyncssh.constants.EXTENDED_DATA_STDERR))
+        if init_cmd_2:
+            stdin.write((init_cmd_2 + "\n").encode("utf-8"))
+        return chan, session, stdin, stdout, stderr
 
     async def connect_queue(
             self,
@@ -1147,22 +1400,7 @@ class SSHClient:
             async with conn_ctx as conn:
                 assert isinstance(conn, asyncssh.SSHClientConnection)
                 shell_type = await self.determine_shell_type_by_conn(conn)
-                bash_file_path = determine_hook_path_by_shell_info(shell_type)
-                if not self.bash_file_inited:
-                    if InWindows:
-                        # remove CRLF
-                        with open(bash_file_path, "r") as f:
-                            content = f.readlines()
-                        await conn.run(f'cat > ~/.tensorpc_hooks-bash{bash_file_path.suffix}',
-                                       input="\n".join(content))
-                    else:
-                        if shell_type.type == "zsh":
-                            await asyncsshscp(str(bash_file_path.parent),
-                                            (conn, f'~/'), recurse=True)
-                        else:
-                            await asyncsshscp(str(bash_file_path),
-                                            (conn, f'~/.tensorpc_hooks-bash{bash_file_path.suffix}'))
-                    self.bash_file_inited = True
+                
                 if client_ip_callback is not None and shell_type.os_type != "windows":
                     # TODO if fail?
                     result = await conn.run(
@@ -1177,46 +1415,14 @@ class SSHClient:
                         if stdout_content.strip() == "::1":
                             stdout_content = "localhost"
                         client_ip_callback(stdout_content)
-                # assert self.encoding is None
-                init_cmd = f"bash --init-file ~/.tensorpc_hooks-bash{bash_file_path.suffix}"
-                init_cmd_2 = ""
-                init_env: Optional[Dict[str, Any]] = None
-                if shell_type.os_type == "windows":
-                    pwsh_win_cmds = ['-l', '-noexit', '-command', 'try { . ~/.tensorpc_hooks-bash{bash_file_path.suffix} } catch {}{}']
-                    init_cmd = f"powershell {' '.join(pwsh_win_cmds)}"
-                    init_cmd_2 = f". ~/.tensorpc_hooks-bash{bash_file_path.suffix}"
-                    init_cmd_2 = ""                
-                elif shell_type.type != "bash" and shell_type.type != "zsh":
-                    init_cmd =shell_type.type
-                    init_cmd_2 = f"source ~/.tensorpc_hooks-bash{bash_file_path.suffix}"
-                elif shell_type.type == "zsh":
-                    init_cmd_2 = ""
-                    user_zdotdir = os.getenv("ZDOTDIR", "$HOME")
-                    init_cmd = f"export ZDOTDIR=~/.tensorpc_hooks-zsh && export USER_ZDOTDIR={user_zdotdir} && zsh -il"
-                    # init_cmd_2 = f"source ~/.tensorpc_hooks-zsh/.zshrc"
-
-                chan, session = await conn.create_session(
-                    VscodeStyleSSHClientStreamSession,
-                    init_cmd,
-                    request_pty="force",
-                    env=init_env,
-                    encoding=self.encoding)  # type: ignore
-                # chan, session = await conn.create_session(
-                #             MySSHClientStreamSession, request_pty="force") # type: ignore
+                if not self.bash_file_inited:
+                    init_bash_file = True
+                    self.bash_file_inited = True
+                else:
+                    init_bash_file = False
+                chan, session, stdin, stdout, stderr = await self._create_controlled_session(conn, shell_type, init_bash_file=init_bash_file)
                 session.uid = self.uid
                 session.callback = callback
-                # stdin, stdout, stderr = await conn.open_session(
-                #     "bash --init-file ~/.tensorpc_hooks-bash.sh",
-                #     request_pty="force")
-                stdin, stdout, stderr = (
-                    asyncssh.stream.SSHWriter(session, chan),
-                    asyncssh.stream.SSHReader(session, chan),
-                    asyncssh.stream.SSHReader(
-                        session, chan,
-                        asyncssh.constants.EXTENDED_DATA_STDERR))
-                if init_cmd_2:
-                    stdin.write((init_cmd_2 + "\n").encode("utf-8"))
-
                 peer_client = PeerSSHClient(stdin,
                                             stdout,
                                             stderr,
@@ -1326,6 +1532,37 @@ class SSHClient:
                 fwd_listeners.append(listener)
         return fwd_ports, rfwd_ports, fwd_listeners, rfwd_listeners
 
+def run_ssh_rpc_call(arg_event_id: str, ret_event_id: str, rf_port: int):
+    # should be run inside remote ssh 
+    with RemoteManager(f"localhost:{rf_port}") as robj:
+        args, kwargs, code, is_func_code = robj.remote_call(f"{_SSH_RPC_CALL_SERV_NAME}.call_event", arg_event_id)
+        try:
+            if not is_func_code:
+                func_id = code
+                func = get_object_type_from_module_id(func_id)
+                assert func is not None, f"func {func_id} not found"
+            else:
+                func_code = code
+                tree = ast.parse(func_code)
+                all_func_nodes: List[ast.FunctionDef] = []
+                for node in tree.body:
+                    if isinstance(node, ast.FunctionDef):
+                        all_func_nodes.append(node)
+                assert all_func_nodes, "no function found in code"
+                func_name_in_code = all_func_nodes[-1].name
+                # compile code
+                code = compile(tree, "<string>", "exec")
+                # run code
+                module_dict = {}
+                exec(code, module_dict)
+                func = module_dict[func_name_in_code]
+            res = func(*args, **kwargs)
+            robj.remote_call(f"{_SSH_RPC_CALL_SERV_NAME}.call_event", ret_event_id, res)
+        except Exception as exc:
+            exc_msg_ss = io.StringIO()
+            traceback.print_exc(file=exc_msg_ss)
+            exc_msg = exc_msg_ss.getvalue()
+            robj.remote_call(f"{_SSH_RPC_CALL_SERV_NAME}.call_event", ret_event_id, None, exc_msg)
 
 async def main2():
     from prompt_toolkit.shortcuts.prompt import PromptSession
@@ -1428,6 +1665,17 @@ async def main3():
             break
     await task
 
+async def _main_ssh_rpc():
+    BACKGROUND_SERVER.start_async()
+    client = SSHClient('localhost', "root", "1")
+    async with client.simple_connect_with_rpc(True) as rpc_client:
+        rpc_client.set_init_cmd("conda activate torchdev")
+        for j in range(5):
+            res = await rpc_client.call_with_code(f"""
+def add(a, b):
+    return a + b
+            """, 1, 2)
+            print(res)
 
 if __name__ == "__main__":
-    asyncio.run(main3())
+    asyncio.run(_main_ssh_rpc())

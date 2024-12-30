@@ -208,10 +208,7 @@ class PytorchModuleViewer(mui.FlexBox):
         ]
         self.graph.event_pane_context_menu.on(self._on_pane_contextmenu)
         self.graph.event_selection_change.on(self._on_selection_change)
-        # we need to use component ready instead of after_mount
-        # because we send component event, the handler will ready
-        # when event_component_ready received.
-        self.graph.event_component_ready.on(self._on_graph_ready)
+        self.graph.event_after_mount.on(self._on_graph_ready)
 
         self.graph.prop(onlyRenderVisibleElements=True,
                         paneContextMenuItems=view_pane_menu_items,
@@ -505,13 +502,16 @@ class PytorchModuleViewer(mui.FlexBox):
                                     kwargs: Optional[Dict[str, Any]] = None,
                                     strict: bool = True,
                                     for_training: bool = False,
-                                    verbose: bool = False):
+                                    verbose: bool = False,
+                                    external_program: Optional[torch.export.ExportedProgram] = None):
         if self.is_external_mode:
             raise ValueError("Cannot export module to flow in external mode")
         t = time.time()
         mod_qname = get_qualname_of_type(type(module))
-        if isinstance(module, torch.fx.GraphModule):
+        if isinstance(module, (torch.fx.GraphModule,)):
             gm = module
+        elif external_program is not None:
+            gm = external_program
         else: 
             with torch.device("meta"):
                 mod_meta = module.to("meta")
@@ -528,6 +528,7 @@ class PytorchModuleViewer(mui.FlexBox):
         pth_flow = builder.build_pytorch_detached_flow(module, outputs)
         self._toplevel_pth_flow = pth_flow
         await self._init_set_exported_flow(pth_flow, module)
+        return gm
         
     async def _on_node_contextmenu(self, data, pth_flow: PytorchFlowOutput,
                                    state: ExpandState):

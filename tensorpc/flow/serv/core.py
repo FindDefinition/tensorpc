@@ -1269,6 +1269,7 @@ class AppNode(CommandNode, DataStorageNodeBase):
         else:
             # query two local ports in flow remote worker, then use them as app ports
             ports = get_free_ports(num_port)
+        print("WILL USE PORTS", ports)
         if len(ports) != num_port:
             raise ValueError("get free port failed. exit.")
         # if langserv_port != -1:
@@ -1643,24 +1644,15 @@ async def _get_free_port(count: int,
     async with client.simple_connect() as conn:
         shell_type = await client.determine_shell_type_by_conn(conn)
         try:
+            
             if init_cmds:
-                if shell_type.os_type == "windows":
-                    cmd = (
-                        f"powershell -c "
-                        f'"{init_cmds} ; python -m tensorpc.cli.free_port {count}"'
-                    )
-                else:
-                    cmd = (
-                        f"{shell_type.type} -i -c "
-                        f'"{init_cmds} && python -m tensorpc.cli.free_port {count}"'
-                    )
+                cmds = [
+                    init_cmds,
+                    f"python -m tensorpc.cli.free_port {count}",
+                ]
             else:
-                if shell_type.os_type == "windows":
-                    cmd = (f"powershell -c "
-                           f'"python -m tensorpc.cli.free_port {count}"')
-                else:
-                    cmd = (f"{shell_type.type} -i -c "
-                        f'"python -m tensorpc.cli.free_port {count}"')
+                cmds = [f"python -m tensorpc.cli.free_port {count}"]
+            cmd = shell_type.single_cmd_shell_wrapper(shell_type.multiple_cmd(cmds))
             result = await conn.run(cmd, check=True)
             stdout = result.stdout
             if stdout is not None:

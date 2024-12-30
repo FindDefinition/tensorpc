@@ -17,6 +17,7 @@ from tensorpc.constants import TENSORPC_SPLIT
 
 BUILTIN_SERVICES = [
     Service(f"tensorpc.services.collection{TENSORPC_SPLIT}FileOps", {}),
+    Service(f"tensorpc.services.collection{TENSORPC_SPLIT}SubprocessCallServer", {}),
     Service(f"tensorpc.services.collection{TENSORPC_SPLIT}SpeedTestServer",
             {}),
     Service(f"tensorpc.flow.serv.core{TENSORPC_SPLIT}Flow", {}),

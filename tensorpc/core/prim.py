@@ -12,7 +12,6 @@ from tensorpc.core.defs import DynamicEvent, DynamicEvents
 def get_server_exposed_props():
     return get_server_context().exposed_props
 
-
 def get_exec_lock():
     return get_server_exposed_props().exec_lock
 
@@ -28,6 +27,9 @@ def get_shutdown_event() -> threading.Event:
 def get_async_shutdown_event() -> asyncio.Event:
     return get_server_exposed_props().async_shutdown_event
 
+def check_is_service_available(service: str):
+    su = get_service_units()
+    return su.has_service_unit(service) 
 
 def is_json_call():
     """tell service whether rpc is a json call, used for support client 

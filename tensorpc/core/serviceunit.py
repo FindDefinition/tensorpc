@@ -1201,6 +1201,7 @@ class ServiceUnit(DynamicClass):
         assert config is not None, "please use {} in yaml if config is empty"
         # self.obj_type, self.alias, self.module_key = get_cls_obj_from_module_name(
         #     module_name)
+        self.module_name = module_name
         self.services: Dict[str, ServFunctionMeta] = {}
         self._event_to_handlers: Dict[ServiceEventType,
                                       List[ServFunctionMeta]] = {}
@@ -1390,6 +1391,7 @@ class ServiceUnits:
 
     def __init__(self, sus: List[ServiceUnit]) -> None:
         self.sus = sus
+        self.module_name_to_su: Dict[str, ServiceUnit] = {n.module_name: n for n in sus}
         self.key_to_su: Dict[str, ServiceUnit] = {}
         self._service_id_to_key: Dict[int, str] = {}
         unique_module_ids: Set[str] = set()
@@ -1406,6 +1408,12 @@ class ServiceUnits:
     def init_service(self):
         for s in self.sus:
             s.init_service()
+
+    def has_service_unit(self, module_name: str):
+        return module_name in self.module_name_to_su
+
+    def get_service_unit(self, module_name: str):
+        return self.module_name_to_su[module_name]
 
     def get_service_and_meta(self, serv_key: str):
         return self.key_to_su[serv_key].get_service_and_meta(serv_key)

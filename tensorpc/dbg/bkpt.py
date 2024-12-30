@@ -23,10 +23,6 @@ from tensorpc.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
                                     TracerConfig, TraceResult, TracerType,
                                     RecordFilterConfig, DebugDistributedInfo)
 from tensorpc.dbg.tracer import DebugTracerWrapper, VizTracerAndPytorchTracer
-from tensorpc.flow.client import is_inside_app_session
-from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
-from tensorpc.flow.components.plus.dbg.traceview import TraceView
-from tensorpc.flow.serv_names import serv_names as app_serv_names
 from tensorpc.utils.rich_logging import get_logger
 import sys
 from .serv_names import serv_names
@@ -231,6 +227,7 @@ def _get_viztracer(cfg: Optional[TracerConfig], name: Optional[str] = None):
 
 def should_enable_debug() -> bool:
     """Check if the debug environment is enabled"""
+    from tensorpc.flow.client import is_inside_app_session
     enable = is_inside_app_session()
     enable |= TENSORPC_ENV_DBG_ENABLE
     return enable
@@ -244,6 +241,9 @@ def init(proc_name: Optional[str] = None, port: int = -1):
     if not should_enable_debug():
         return False
     if not BACKGROUND_SERVER.is_started:
+        # put app import here to reduce import time
+        from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
+        from tensorpc.flow.components.plus.dbg.traceview import TraceView
         assert not InWindows, "init is not supported in Windows due to setproctitle."
         cur_pid = os.getpid()
         if proc_name is None:
@@ -318,20 +318,20 @@ def breakpoint(name: Optional[str] = None,
     """
     global RECORDING
     if not should_enable_debug():
-        return
+        return False
     bev = BreakpointEvent(threading.Event())
     if external_frame is not None:
         frame = external_frame
     else:
         frame = inspect.currentframe()
         if frame is None:
-            return
+            return False
         while _frame_cnt > 0:
             if frame is not None:
                 frame = frame.f_back
             _frame_cnt -= 1
         if frame is None:
-            return
+            return False
     if init_proc_name is None:
         init_proc_name = frame.f_code.co_name
 
@@ -402,7 +402,7 @@ def breakpoint(name: Optional[str] = None,
             LOGGER.error(
                 "viztracer is not installed, can't record trace data. use `pip install viztracer` to install."
             )
-
+    return True
 
 def breakpoint_dist_pth(name: Optional[str] = None,
                         timeout: Optional[float] = None,
@@ -459,6 +459,7 @@ def vscode_breakpoint_dist_pth(name: Optional[str] = None,
 def set_background_layout(key: str, layout: Any):
     if not should_enable_debug():
         return
+    from tensorpc.flow.serv_names import serv_names as app_serv_names
     BACKGROUND_SERVER.execute_service(
         app_serv_names.REMOTE_COMP_SET_LAYOUT_OBJECT, key, layout)
 
@@ -562,6 +563,8 @@ def exception_breakpoint():
     """
     try:
         yield
+    except KeyboardInterrupt:
+        raise 
     except Exception as e:
         _, _, exc_traceback = sys.exc_info()
         if exc_traceback is None:

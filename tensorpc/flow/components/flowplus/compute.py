@@ -56,7 +56,10 @@ FLOWUI_DNODE_STATE_KEY = "dnode"
 
 class ComputeFlowNodeType(enum.Enum):
     COMPUTE = "cnode"
-    DRIVER = "dnode"
+    MONITOR = "node_monitor"
+    # for subflow
+    INPUT_HANDLE = "input_handle"
+    OUTPUT_HANDLE = "output_handle"
 
 NoneType = type(None)
 
@@ -621,8 +624,15 @@ def enter_flow_ui_node_context_object(ctx: ComputeFlowNodeContext):
     finally:
         COMPUTE_FLOW_NODE_CONTEXT_VAR.reset(token)
 
+class BaseNodeWrapper(mui.FlexBox):
+    def __init__(self, node_type: ComputeFlowNodeType, children: Optional[mui.LayoutType] = None):
+        super().__init__(children)
+        self._node_type = node_type
 
-class ComputeNodeWrapper(mui.FlexBox):
+    def state_dict(self) -> Dict[str, Any]:
+        return {"type": self._node_type.value}
+
+class ComputeNodeWrapper(BaseNodeWrapper):
     def __init__(self,
                  cnode: ComputeNode,
                  init_state: Optional[ComputeNodeWrapperState] = None):
@@ -690,7 +700,7 @@ class ComputeNodeWrapper(mui.FlexBox):
         if resizer is not None:
             self.resizers = [resizer]
         self._resizer_container = mui.Fragment([*self.resizers])
-        super().__init__([
+        super().__init__(ComputeFlowNodeType.COMPUTE, [
             flowui.Handle("target", "top", f"{HandleTypePrefix.DriverInput}-driver").prop(className=f"{ComputeFlowClasses.DriverIOHandleBase} {ComputeFlowClasses.DriverInputHandle}"),
             self.header_container, self.input_args, self.middle_node_container,
             self.output_args, self.status_box, self._resizer_container
@@ -915,8 +925,13 @@ class ComputeNodeWrapper(mui.FlexBox):
             self.update_status_event(status, duration))
 
     def state_dict(self) -> Dict[str, Any]:
-        res = self.cnode.state_dict()
-        return {FLOWUI_CNODE_STATE_KEY: res, "state": dataclasses.asdict(self._state)}
+        res = super().state_dict()
+        cnode_res = self.cnode.state_dict()
+        res.update({
+            FLOWUI_CNODE_STATE_KEY: cnode_res, 
+            "state": dataclasses.asdict(self._state),
+        })
+        return res
 
     @classmethod
     async def from_state_dict(cls, data: Dict[str, Any],
@@ -1647,6 +1662,8 @@ class ComputeFlow(mui.FlexBox):
                             node_inputs: Dict[str, Any],
                             sync: bool = False):
         node = self.graph.get_node_by_id(node_id)
+        base_wrapper = node.get_component_checked(BaseNodeWrapper)
+        assert base_wrapper._node_type == ComputeFlowNodeType.COMPUTE, f"node {node_id} is not a compute node"
         if self._schedule_task is not None and not sync:
             self.graph_ctx._wait_node_inputs.update({node.id: node_inputs})
         else:
@@ -1665,6 +1682,8 @@ class ComputeFlow(mui.FlexBox):
         new_nodes: List[flowui.Node] = []
         nodes_dont_have_enough_inp: List[flowui.Node] = []
         for n in nodes:
+            base_wrapper = n.get_component_checked(BaseNodeWrapper)
+            assert base_wrapper._node_type == ComputeFlowNodeType.COMPUTE
             wrapper = n.get_component_checked(ComputeNodeWrapper)
             if n.id in anode_iters:
                 new_nodes.append(n)
