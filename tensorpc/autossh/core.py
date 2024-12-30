@@ -23,7 +23,7 @@ from asyncio.tasks import FIRST_COMPLETED
 from collections import deque
 from contextlib import suppress
 from typing import (TYPE_CHECKING, Any, AnyStr, Awaitable, Callable, Coroutine, Deque,
-                    Dict, Iterable, List, Optional, Set, Tuple, Type, Union,
+                    Dict, Iterable, List, Optional, ParamSpec, Set, Tuple, Type, TypeVar, Union,
                     cast)
 
 import asyncssh
@@ -1019,11 +1019,15 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
 
                 await self._block_read(datatype)
 
+_T_ret = TypeVar("_T_ret")
+P = ParamSpec("P")
+
 class SSHRpcClient:
     def __init__(self, conn: asyncssh.SSHClientConnection, port: int, shell_init_cmd: str, 
             bkgd_loop: Optional[asyncio.AbstractEventLoop] = None, 
             remote_fwd_listeners: Optional[List[asyncssh.SSHListener]] = None,
-            manual_close: bool = False):
+            manual_close: bool = False,
+            user_init_cmd: str = ""):
         self._conn = conn
         self._bkgd_loop = bkgd_loop
         self._port = port
@@ -1031,7 +1035,7 @@ class SSHRpcClient:
 
         self.timeout = 10
         self._shell_init_cmd = shell_init_cmd
-        self._cmd: str = ""
+        self._cmd: str = user_init_cmd
         self._remote_fwd_listeners = remote_fwd_listeners
         self._manual_close = manual_close
 
@@ -1069,7 +1073,7 @@ class SSHRpcClient:
         if self._cmd != "":
             final_cmds.insert(0, self._cmd)
         final_cmd = " && ".join(final_cmds)
-        # print(self._shell_init_cmd, final_cmd)
+        # print(func_id, self._shell_init_cmd, final_cmd)
         proc_res = await self._conn.run(f"{self._shell_init_cmd} \"{final_cmd}\"")
         if proc_res.exit_status != 0 and proc_res.exit_status is not None:
             if self._is_bkgd:
@@ -1078,7 +1082,7 @@ class SSHRpcClient:
             else:
                 prim.get_service(off_serv_key)(arg_event_id)
                 prim.get_service(off_serv_key)(ret_event_id)
-            print(proc_res.exit_status, proc_res.stdout, proc_res.stderr)
+            print("proc status", proc_res.exit_status, proc_res.stdout, proc_res.stderr)
             raise Exception(proc_res.stderr)
 
         async with async_timeout.timeout(self.timeout):
@@ -1090,14 +1094,14 @@ class SSHRpcClient:
             else:
                 prim.get_service(off_serv_key)(arg_event_id)
                 prim.get_service(off_serv_key)(ret_event_id)
-            print(proc_res.stdout, proc_res.stderr)
+            print("exception", proc_res.stdout, proc_res.stderr, result["exception"])
             raise Exception(result["exception"])
         else:
             return result["ret"]
 
-    async def call(self, func_id: Union[str, Callable], *args, **kwargs):
+    async def call(self, func_id: Union[str, Callable[P, _T_ret]], *args: P.args, **kwargs: P.kwargs) -> _T_ret:
         if not isinstance(func_id, str):
-            func_id = get_module_id_of_type(type(func_id))
+            func_id = get_module_id_of_type(func_id)
         return await self._call_base(func_id, False, *args, **kwargs)
 
     async def _get_args_and_params(self, args, kwargs, code: str, is_func_id: bool):
@@ -1207,7 +1211,7 @@ class SSHClient:
                 self.bash_file_inited = True
             yield conn
 
-    async def simple_connect_with_rpc(self, init_bash: bool = True):
+    async def simple_connect_with_rpc(self, user_init_cmd: str = "", init_bash: bool = False):
         conn_task = asyncssh.connection.connect(self.url_no_port,
                                                 self.port,
                                                 username=self.username,
@@ -1242,21 +1246,21 @@ class SSHClient:
             rpc_client = SSHRpcClient(conn, forwarded_port, 
                 self._get_shell_single_cmd(shell_info), bkgd_loop=loop,
                 remote_fwd_listeners=rfwd_listeners,
-                manual_close=True)
+                manual_close=True,
+                user_init_cmd=user_init_cmd)
             return rpc_client
-        finally:
+        except:
             conn.close()
             await conn.wait_closed()
             for listener in rfwd_listeners:
                 await listener.wait_closed()
-
+            raise
 
     @contextlib.asynccontextmanager
-    async def simple_connect_with_rpc_ctx(self, init_bash: bool = True):
-        client = await self.simple_connect_with_rpc(init_bash)
+    async def simple_connect_with_rpc_ctx(self, user_init_cmd: str = "", init_bash: bool = False):
+        client = await self.simple_connect_with_rpc(user_init_cmd, init_bash)
         try:
-            async with client._conn:
-                yield client
+            yield client
         finally:
             await client.close_and_wait()
     # async def simple_run_command(self, cmd: str):

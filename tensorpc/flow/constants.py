@@ -15,6 +15,8 @@
 from pathlib import Path
 import os
 
+from tensorpc.utils.app.process import TENSORPC_FLOW_PROCESS_NAME_PREFIX
+
 _FLOW_FOLDER_PATH_ENV = os.getenv("TENSORPC_FLOW_ROOT",
                                   str(Path.home() / ".tensorpc" / "flow"))
 FLOW_FOLDER_PATH = Path(_FLOW_FOLDER_PATH_ENV)
@@ -58,9 +60,6 @@ TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT = "$&&"
 TENSORPC_FLOW_COMP_UID_STRUCTURE_SPLIT = ":"
 
 TENSORPC_FLOW_EFFECTS_OBSERVE = "TENSORPC_FLOW_EFFECTS_OBSERVE"
-
-TENSORPC_FLOW_PROCESS_NAME_PREFIX = "__tensorpc_flow_app"
-
 
 TENSORPC_LSP_EXTRA_PATH = "TENSORPC_LSP_EXTRA_PATH"
 

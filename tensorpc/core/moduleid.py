@@ -28,13 +28,13 @@ import importlib.machinery
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 
 
-def get_qualname_of_type(klass: Type) -> str:
+def get_qualname_of_type(klass: Union[Type, Callable]) -> str:
     module = klass.__module__
     if module == 'builtins':
         return klass.__qualname__  # avoid outputs like 'builtins.str'
     return module + '.' + klass.__qualname__
 
-def get_module_id_of_type(klass: Type) -> str:
+def get_module_id_of_type(klass: Union[Type, Callable]) -> str:
     module = klass.__module__
     if module == 'builtins':
         return klass.__qualname__  # avoid outputs like 'builtins.str'

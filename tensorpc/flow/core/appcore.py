@@ -51,6 +51,13 @@ class Event:
     # for template control components.
     indexes: Union[Undefined, List[int]] = undefined
 
+    def get_keys_checked(self) -> List[str]:
+        assert not isinstance(self.keys, Undefined)
+        return self.keys
+
+    def get_indexes_checked(self) -> List[int]:
+        assert not isinstance(self.indexes, Undefined)
+        return self.indexes
 
 class EventHandler:
 

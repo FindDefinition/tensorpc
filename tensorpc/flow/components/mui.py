@@ -4875,6 +4875,10 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps,
                                            sync_status_first=False,
                                            is_sync=is_sync)
 
+    async def update_data(self, data_list: List[Dict[str, Any]]):
+        return await self.send_and_wait(
+            self.update_event(dataList=data_list))
+
     async def update_data_in_index(self, index: int, updates: Dict[str, Any]):
         return await self.update_datas_in_index([DataUpdate(index, updates)])
 
@@ -5659,6 +5663,12 @@ class Pagination(MUIComponentBase[PaginationProps]):
         res = super().get_sync_props()
         res["value"] = self.props.value
         return res
+
+    async def update_count(self, count: int):
+        cur_value = self.props.value
+        if cur_value >= count:
+            cur_value = count - 1
+        await self.send_and_wait(self.update_event(count=count, value=cur_value))
 
 @dataclasses.dataclass
 class VideoPlayerProps(MUIComponentBaseProps):

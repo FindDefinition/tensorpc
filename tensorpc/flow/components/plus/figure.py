@@ -58,7 +58,7 @@ class HomogeneousMetricFigure(FlexBox):
         ev = AppEvent("", {})
         for trace_id in trace_ids:
             assert trace_id in self._trace_dict, "your trace id not exists"
-            for k in self.props.childs:
+            for k in self._child_comps:
                 trace = self._trace_dict[trace_id][k]
                 trace.visible = visible
                 plot = self[k]
@@ -79,7 +79,7 @@ class HomogeneousMetricFigure(FlexBox):
                                                            List[NumberType]]):
         figure_to_update: Dict[str, str] = {}
         for k in metric_dict.keys():
-            if k not in self.props.childs:
+            if k not in self._child_comps:
                 figure_to_update[k] = k
         await self.update_figures(figure_to_update)
         ev = AppEvent("", {})
@@ -107,7 +107,7 @@ class HomogeneousMetricFigure(FlexBox):
         layout_dict = as_dict_no_undefined_first_level(layout)
         self.base_layout = dataclasses.replace(self.base_layout, **layout_dict)
         ev = AppEvent("", {})
-        for k in self.props.childs:
+        for k in self._child_comps:
             plot = self[k]
             assert isinstance(plot, chart.Plotly)
             new_layout = dataclasses.replace(plot.props.layout, **layout_dict)

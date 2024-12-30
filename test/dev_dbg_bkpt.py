@@ -89,15 +89,16 @@ def mp_func_inf_record(rank):
 
         # tensorpc.dbg.vscode_breakpoint(name=f"WTF-{rank}")
         # tensorpc.dbg.breakpoint(name="WTF")
-        model = MyModule(500, 10).cuda()
-        model2 = MyModule2(500, 10).cuda()
-        input = torch.rand(128, 500).cuda()
-        mask = torch.rand((500, 500, 500), dtype=torch.double).cuda()
+        model = MyModule(50, 10).cuda()
+        model2 = MyModule2(50, 10).cuda()
+        input = torch.rand(128, 50).cuda()
+        mask = torch.rand((50, 50, 50), dtype=torch.double).cuda()
         model(input, mask)
         complex_obj = mui.Button("Hello")
         arr = np.random.uniform(-1, 1, size=[1000, 3])
         _trace_func()
-        tensorpc.dbg.breakpoint(name="WTF")
+
+        tensorpc.dbg.vscode_breakpoint(name="WTF")
     print("Finish!")
 
 def main(c = 5):

@@ -2,7 +2,7 @@ import contextlib
 import socket
 import time
 import asyncio
-from typing import List
+from typing import Coroutine, List
 from async_timeout import timeout
 
 import threading
@@ -143,3 +143,35 @@ def debounce(interval: float):
         return cast(VoidFunction, Debouncer(f, interval))
 
     return decorator
+
+async def _period_loop(duration: float, shutdown_ev: asyncio.Event, user_callback: Callable[[], Coroutine[None, None, Any]], is_pre: bool = True):
+    shutdown_task = asyncio.create_task(shutdown_ev.wait())
+    sleep_task = asyncio.create_task(asyncio.sleep(duration))
+    wait_tasks = [shutdown_task, sleep_task]
+    while True:
+        if is_pre:
+            await user_callback()
+        done, pending = await asyncio.wait(
+            wait_tasks, return_when=asyncio.FIRST_COMPLETED)
+        if shutdown_task in done:
+            break
+        if sleep_task in done:
+            wait_tasks.remove(sleep_task)
+            sleep_task = asyncio.create_task(
+                asyncio.sleep(duration))
+            wait_tasks.append(sleep_task)
+            if not is_pre:
+                await user_callback()
+
+class PeriodicTask:
+    def __init__(self, duration: float, user_callback: Callable[[], Coroutine[None, None, Any]], is_pre: bool = True):
+        self.duration = duration
+        self.user_callback = user_callback
+        self.is_pre = is_pre
+        self.shutdown_ev = asyncio.Event()
+        self.task = asyncio.create_task(
+            _period_loop(duration, self.shutdown_ev, user_callback, is_pre))
+
+    async def close(self):
+        self.shutdown_ev.set()
+        await self.task

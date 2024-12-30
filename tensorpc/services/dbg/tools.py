@@ -372,6 +372,8 @@ class BackgroundDebugTools:
             for bkpts in vscode_bkpt_dict.values():
                 if key in bkpts:
                     return bkpts[key].enabled
+        
+        print("WTFWTF", bkpt_meta.mapped_lineno)
         return False
 
     def _set_vscode_breakpoints_and_dict(
