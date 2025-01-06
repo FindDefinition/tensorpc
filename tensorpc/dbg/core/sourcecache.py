@@ -291,20 +291,18 @@ class SourceChangeDiffCache:
         if not opcodes:
             return -1
         line_idx = lineno - 1
-        lo = bisect.bisect_left(opcodes, line_idx, key=lambda x: x[0])
-        if lo >= len(opcodes):
-            last_opcode = opcodes[-1]
-            if line_idx >= last_opcode[0] and line_idx < last_opcode[1]:
-                return last_opcode[2] + line_idx - last_opcode[0] + 1
-            return -1 
-        opcode = opcodes[lo]
-        if opcode[0] != lineno and lo > 0:
-            # x[lo - 1] < x[lo] <= x[lo + 1]
-            opcode = opcodes[lo - 1]
-        if line_idx < opcode[0] or line_idx > opcode[1]:
-            return -1 
-        # plus 1 because lineno is 1-based
-        return opcode[2] + line_idx - opcode[0] + 1
+        lo = 0
+        hi = len(opcodes) - 1
+        while lo <= hi:
+            mid = lo + (hi - lo) // 2
+            if (opcodes[mid][0] <= line_idx and line_idx < opcodes[mid][1]):
+                # plus 1 because lineno is 1-based
+                return opcodes[mid][2] + line_idx - opcodes[mid][0] + 1
+            if opcodes[mid][0] < line_idx:
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return -1
 
     def query_mapped_linenos(self, filename, lineno: int, module_globals=None):
         """Get the lines for a Python source file from the cache.
@@ -319,6 +317,7 @@ class SourceChangeDiffCache:
         try:
             success = self.updatecache(filename, module_globals)
             if not success:
+                print("HERE?")
                 return -1
             entry = self.cache[filename]
             if entry.diff_opcodes_equal is None:
@@ -327,6 +326,8 @@ class SourceChangeDiffCache:
             return self._bisect_mapped_lineno(entry.diff_opcodes_equal, lineno)
         except MemoryError:
             self.clearcache()
+            print("HERE?2")
+
             return -1
 
     def checkcache(self, filename=None):

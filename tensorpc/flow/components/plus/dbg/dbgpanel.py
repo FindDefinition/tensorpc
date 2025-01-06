@@ -841,7 +841,7 @@ class MasterDebugPanel(mui.FlexBox):
         appctx.unregister_remote_comp_event_handler(RemoteDebugEventType.DIST_TARGET_VARIABLE_TRACE.value, 
             self._handle_target_trace_from_distributed_group_worker)
 
-    async def _handle_vscode_bkpt_change(self, bkpts: Dict[str, List[VscodeBreakpoint]]):
+    async def _handle_vscode_bkpt_change(self, bkpts: Dict[str, tuple[list[VscodeBreakpoint], int]]):
         async with self._serv_list_lock:
             await self._run_rpc_on_processes(self._current_proc_infos,
                                          dbg_serv_names.DBG_SET_VSCODE_BKPTS,

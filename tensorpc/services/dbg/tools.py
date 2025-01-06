@@ -3,6 +3,7 @@ import asyncio
 import dataclasses
 import os
 import threading
+import time
 import traceback
 from pathlib import Path
 from types import FrameType
@@ -81,6 +82,7 @@ class BackgroundDebugTools:
         # workspaceUri -> (path, lineno) -> VscodeBreakpoint
         self._vscode_breakpoints_dict: Dict[str, Dict[Tuple[Path, int],
                                                       VscodeBreakpoint]] = {}
+        self._vscode_breakpoints_ts_dict: Dict[Path, int] = {}
 
         self._bkpt_lock = asyncio.Lock()
 
@@ -363,7 +365,7 @@ class BackgroundDebugTools:
         return eval(expr, None, local_vars)
 
     def _determine_vscode_bkpt_status(
-            self, bkpt_meta: BreakpointMeta,
+            self, bkpt_meta: BreakpointMeta, 
             vscode_bkpt_dict: Dict[str, Dict[Tuple[Path, int],
                                              VscodeBreakpoint]]):
         if bkpt_meta.type == BreakpointType.Vscode:
@@ -372,13 +374,11 @@ class BackgroundDebugTools:
             for bkpts in vscode_bkpt_dict.values():
                 if key in bkpts:
                     return bkpts[key].enabled
-        
-        print("WTFWTF", bkpt_meta.mapped_lineno)
         return False
 
     def _set_vscode_breakpoints_and_dict(
-            self, bkpt_dict: Dict[str, List[VscodeBreakpoint]]):
-        for wuri, bkpts in bkpt_dict.items():
+            self, bkpt_dict: Dict[str, tuple[List[VscodeBreakpoint], int]]):
+        for wuri, (bkpts, ts) in bkpt_dict.items():
             new_bkpts: List[VscodeBreakpoint] = []
             for x in bkpts:
                 if x.enabled and x.lineText is not None and (
@@ -391,12 +391,30 @@ class BackgroundDebugTools:
                 (Path(x.path).resolve(), x.line + 1): x
                 for x in new_bkpts
             }
+            # save bkpt timestamp
+            for x in new_bkpts:
+                self._vscode_breakpoints_ts_dict[Path(x.path).resolve()] = ts
             self._vscode_breakpoints[wuri] = new_bkpts
 
     async def set_vscode_breakpoints(self,
-                                     bkpts: Dict[str, List[VscodeBreakpoint]]):
+                                     bkpts: Dict[str, tuple[list[VscodeBreakpoint], int]]):
         self._set_vscode_breakpoints_and_dict(bkpts)
         if self._cur_breakpoint is not None and self._cur_breakpoint.type == BreakpointType.Vscode:
+            # update mapped lineno here because file may change during breakpoint
+            mtime = None 
+            may_changed_frame_lineno = self._scd_cache.query_mapped_linenos(
+                self._cur_breakpoint.path, self._cur_breakpoint.lineno)
+            cache_entry = self._scd_cache.cache[self._cur_breakpoint.path]
+            mtime = cache_entry.mtime
+            if mtime is None:
+                return 
+            self._cur_breakpoint.mapped_lineno = may_changed_frame_lineno
+            mtime_ns = int(mtime * 1e9)
+            if Path(self._cur_breakpoint.path).resolve() in self._vscode_breakpoints_ts_dict:
+                vscode_bkpt_ts = self._vscode_breakpoints_ts_dict[Path(self._cur_breakpoint.path).resolve()]
+                if mtime_ns > vscode_bkpt_ts:
+                    # vscode bkpt state is outdated, skip current check.
+                    return
             is_cur_bkpt_is_vscode = self._determine_vscode_bkpt_status(
                 self._cur_breakpoint, self._vscode_breakpoints_dict)
             # if not found, release this breakpoint
@@ -404,7 +422,7 @@ class BackgroundDebugTools:
                 await self.leave_breakpoint()
 
     async def set_vscode_breakpoints_and_get_cur_info(
-            self, bkpts: Dict[str, List[VscodeBreakpoint]]):
+            self, bkpts: Dict[str, tuple[List[VscodeBreakpoint], int]]):
         info = self.get_cur_debug_info()
         await self.set_vscode_breakpoints(bkpts)
         return info

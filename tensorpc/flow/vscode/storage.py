@@ -13,11 +13,11 @@ class AppVscodeState:
     """Sync vscode storage, no touch on app storage.
     """
     is_init: bool = False
-    breakpoint_dict: Dict[str, List[VscodeBreakpoint]] = dataclass_dispatch.field(default_factory=dict)
+    breakpoint_dict: Dict[str, tuple[List[VscodeBreakpoint], int]] = dataclass_dispatch.field(default_factory=dict)
 
     def set_workspace_breakpoints(self, workspace_uri: str, breakpoints: List[VscodeBreakpoint]):
         self.is_init = True
-        self.breakpoint_dict[workspace_uri] = breakpoints
+        self.breakpoint_dict[workspace_uri] = (breakpoints, time.time_ns())
 
     def get_all_breakpoints(self):
         return self.breakpoint_dict
