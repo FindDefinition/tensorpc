@@ -12,20 +12,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import enum
 from tensorpc.core.defs import Service, ServiceDef, from_yaml_path
 from tensorpc.constants import TENSORPC_SPLIT
 
+class BuiltinServiceKeys(enum.Enum):
+    FileOps = f"tensorpc.services.collection{TENSORPC_SPLIT}FileOps"
+    SubprocessSimpleRPCHandler = f"tensorpc.services.collection{TENSORPC_SPLIT}SubprocessSimpleRPCHandler"
+    SpeedTestServer = f"tensorpc.services.collection{TENSORPC_SPLIT}SpeedTestServer"
+    Flow = f"tensorpc.flow.serv.core{TENSORPC_SPLIT}Flow"
+    RemoteComponentService = f"tensorpc.flow.serv.remote_comp{TENSORPC_SPLIT}RemoteComponentService"
+    BackgroundDebugTools = f"tensorpc.services.dbg.tools{TENSORPC_SPLIT}BackgroundDebugTools"
+    RTTraceStorageService = f"tensorpc.services.dbg.rttrace{TENSORPC_SPLIT}RTTraceStorageService"
+    Simple = f"tensorpc.services.collection{TENSORPC_SPLIT}Simple"
+    Scheduler = f"tensorpc.autossh.services.scheduler{TENSORPC_SPLIT}Scheduler"
+    TaskWrapper = f"tensorpc.autossh.services.taskwrapper{TENSORPC_SPLIT}TaskWrapper"
+
 BUILTIN_SERVICES = [
-    Service(f"tensorpc.services.collection{TENSORPC_SPLIT}FileOps", {}),
-    Service(f"tensorpc.services.collection{TENSORPC_SPLIT}SubprocessCallServer", {}),
-    Service(f"tensorpc.services.collection{TENSORPC_SPLIT}SpeedTestServer",
-            {}),
-    Service(f"tensorpc.flow.serv.core{TENSORPC_SPLIT}Flow", {}),
-    Service(f"tensorpc.flow.serv.remote_comp{TENSORPC_SPLIT}RemoteComponentService", {}),
-    Service(f"tensorpc.services.collection{TENSORPC_SPLIT}Simple", {}),
-    Service(f"tensorpc.autossh.services.scheduler{TENSORPC_SPLIT}Scheduler",
-            {}),
-    Service(f"tensorpc.services.dbg.tools{TENSORPC_SPLIT}BackgroundDebugTools", {}),
+    Service(BuiltinServiceKeys.FileOps.value, {}),
+    Service(BuiltinServiceKeys.SubprocessSimpleRPCHandler.value, {}),
+    Service(BuiltinServiceKeys.SpeedTestServer.value, {}),
+    Service(BuiltinServiceKeys.Flow.value, {}),
+    Service(BuiltinServiceKeys.RemoteComponentService.value, {}),
+    Service(BuiltinServiceKeys.Simple.value, {}),
+    Service(BuiltinServiceKeys.BackgroundDebugTools.value, {}),
+    Service(BuiltinServiceKeys.RTTraceStorageService.value, {}),
+    Service(BuiltinServiceKeys.Scheduler.value, {}),
+    Service(BuiltinServiceKeys.TaskWrapper.value, {}),
 ]
 
 

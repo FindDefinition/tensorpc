@@ -235,10 +235,10 @@ _TypographyVarient: TypeAlias = Literal['body1', 'body2', 'button', 'caption',
                                         'inherit', 'overline', 'subtitle1',
                                         'subtitle2']
 
-_StdColor: TypeAlias = Literal['default', 'primary', 'secondary', 'error',
+_StdColor: TypeAlias = Literal['inherit', 'default', 'primary', 'secondary', 'error',
                                'info', 'success', 'warning']
 
-_StdColorNoDefault: TypeAlias = Literal['primary', 'secondary', 'error',
+_StdColorNoDefault: TypeAlias = Literal['inherit', 'primary', 'secondary', 'error',
                                         'info', 'success', 'warning']
 _IconColorNoDefault: TypeAlias = Literal['primary', 'secondary', 'error',
                                          'info', 'success', 'warning',
@@ -2738,8 +2738,6 @@ class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
                 init_value = begin
             self.props.value = init_value
         else:
-            begin = 0
-            end = 10
             # inf slider 
             assert init_value is not None and step is not None, "you must specify `init_value` and `step` if you use infinite."
             self.props.value = init_value
@@ -2753,6 +2751,10 @@ class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
 
     @property
     def value(self):
+        return self.props.value
+
+    def int(self) -> int:
+        assert self.props.isInteger == True and isinstance(self.props.value, int)
         return self.props.value
 
     def validate_props(self, props: Dict[str, Any]):
@@ -2775,7 +2777,9 @@ class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
             step = self.props.ranges[2]
         self.props.ranges = (begin, end, step)
         assert end >= begin and step <= end - begin
-        self.props.value = begin
+        # clip value
+        if not self.props.infSlider:
+            self.props.value = max(begin, min(end, self.props.value))
         await self.put_app_event(
             self.create_update_event({
                 "ranges": (begin, end, step),
@@ -2811,6 +2815,8 @@ class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+    
 
 
 _T = TypeVar("_T")
@@ -4733,7 +4739,7 @@ class MUIVirtualizedBoxProps(MUIFlexBoxWithDndProps):
 
 class VirtualizedBox(MUIContainerBase[MUIVirtualizedBoxProps,
                                       MUIComponentType]):
-    """ flex box that use data list and template component to render
+    """ flex box that use data list and data model component to render
     list of data with same UI components.
     """
 
@@ -4813,7 +4819,7 @@ class DataUpdate:
 
 class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps,
                                    MUIComponentType]):
-    """ flex box that use data list and template component to render
+    """ flex box that use data list and data model component to render
     list of data with same UI components.
     """
 
@@ -4913,7 +4919,7 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps,
 
     def bind_prop(self, comp: Component, prop_name: str):
         """bind a data prop with control component. no type check.
-        **WARNING**: don't bind prop in nested template component, you 
+        **WARNING**: don't bind prop in nested data model component, you 
         need to handle change event in nested template container
         by yourself.
         """
@@ -5736,3 +5742,46 @@ class TooltipFlexBox(MUIContainerBase[TooltipFlexBoxProps,
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+@dataclasses.dataclass
+class BreadcrumbsProps(MUIComponentBaseProps):
+    value: List[str] = dataclasses.field(default_factory=list)
+    expandText: Union[Undefined, str] = undefined
+    itemsAfterCollapse: Union[Undefined, int] = undefined
+    itemsBeforeCollapse: Union[Undefined, int] = undefined
+    maxItems: Union[Undefined, int] = undefined
+    separator: Union[Undefined, str] = undefined
+    typographyProps: Union[Undefined, TypographyProps] = undefined
+    underline: Union[Undefined, Literal["always", "hover", "none"]] = undefined
+    variant: Union[Undefined, _TypographyVarient] = undefined
+    muiColor: Union[Undefined, _StdColorNoDefault] = undefined
+    muiLastColor: Union[Undefined, _StdColorNoDefault] = undefined
+
+class Breadcrumbs(MUIComponentBase[BreadcrumbsProps]):
+    def __init__(self, value: List[str]) -> None:
+        super().__init__(UIType.Breadcrumbs, BreadcrumbsProps, allowed_events=[FrontendEventType.Change.value])
+        self.prop(value=value)
+        self.event_change = self._create_event_slot(FrontendEventType.Change)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def handle_event(self, ev: Event, is_sync: bool = False):
+        return await handle_standard_event(self, ev, is_sync=is_sync)
+    
+    def state_change_callback(
+            self,
+            value: List[str],
+            type: ValueType = FrontendEventType.Change.value):
+        self.props.value = value
+
+    def get_sync_props(self) -> Dict[str, Any]:
+        res = super().get_sync_props()
+        res["value"] = self.props.value
+        return res

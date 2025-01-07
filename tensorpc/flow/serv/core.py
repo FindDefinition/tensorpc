@@ -16,6 +16,7 @@ import abc
 import asyncio
 import base64
 import bisect
+from collections.abc import MutableMapping
 import enum
 import itertools
 import json
@@ -530,7 +531,7 @@ class NodeWithSSHBase(RunnableNodeBase):
 
     @staticmethod
     def _env_port_modifier(fwd_ports: List[int], rfwd_ports: List[int],
-                           env: Dict[str, str]):
+                           env: MutableMapping[str, str]):
         if (len(rfwd_ports) > 0):
             env[TENSORPC_FLOW_MASTER_GRPC_PORT] = str(rfwd_ports[0])
             env[TENSORPC_FLOW_MASTER_HTTP_PORT] = str(rfwd_ports[1])
@@ -649,7 +650,7 @@ class RemoteSSHNode(NodeWithSSHBase):
         return ports_str
 
     def _env_port_modifier(self, fports: List[int], rfports: List[int],
-                           env: Dict[str, str]):
+                           env: MutableMapping[str, str]):
         if fports:
             self.worker_port = fports[0]
             self.worker_http_port = fports[1]
@@ -755,9 +756,9 @@ class RemoteSSHNode(NodeWithSSHBase):
         if cmd_renderer is not None and init_cmd:
             init_cmd = cmd_renderer(init_cmd)
         if init_cmd:
-            await self.input_queue.put(init_cmd + "\n")
+            await self.input_queue.put(" " + init_cmd + "\n")
         await self.input_queue.put((
-            f"python -m tensorpc.cli.start_worker --name={TENSORPC_FLOW_DEFAULT_TMUX_NAME} "
+            f" python -m tensorpc.cli.start_worker --name={TENSORPC_FLOW_DEFAULT_TMUX_NAME} "
             f"--port={self.remote_port} "
             f"--http_port={self.remote_http_port} && while :; do sleep 2073600; done\n"
             # f"--http_port={self.remote_http_port}\n"
@@ -1103,7 +1104,7 @@ class CommandNode(NodeWithSSHBase):
             envs_stmt = [f"export {k}={v}" for k, v in newenvs.items()]
             cmd = " && ".join(envs_stmt + [cmd])
         self._previous_cmd = cmd
-        await self.input_queue.put(cmd + "\n")
+        await self.input_queue.put(" " + cmd + "\n")
 
     # async def push_new_envs(self, envs: Dict[str, Any]):
     #     envs_stmt = [f"export {k}={v}" for k, v in envs.items()]
@@ -1208,7 +1209,7 @@ class AppNode(CommandNode, DataStorageNodeBase):
         return json.loads(self.node_data["initConfig"])
 
     def _app_env_port_modifier(self, fports: List[int], rfports: List[int],
-                               env: Dict[str, str]):
+                               env: MutableMapping[str, str]):
         if fports:
             self.fwd_grpc_port = fports[0]
             self.fwd_http_port = fports[1]
@@ -1338,7 +1339,7 @@ class AppNode(CommandNode, DataStorageNodeBase):
         option = base64.b64encode(
             json.dumps(option).encode("utf-8")).decode("utf-8")
 
-        alias_cmd = f"alias appscript=\"python -m tensorpc.serve.flowapp_script \"{option}\"\""
+        alias_cmd = f" alias appscript=\"python -m tensorpc.serve.flowapp_script \"{option}\"\""
         await self.input_queue.put(alias_cmd + "\n")
 
         return True, init_event
@@ -1360,7 +1361,7 @@ class AppNode(CommandNode, DataStorageNodeBase):
                           cmd_renderer: Optional[Callable[[str], str]] = None):
         serv_name, cfg_encoded = self._get_cfg_encoded()
         # TODO only use http port
-        cmd = (f"python -m tensorpc.serve {serv_name} "
+        cmd = (f" python -m tensorpc.serve {serv_name} "
                f"--port={self.grpc_port} --http_port={self.http_port} "
                f"--serv_config_b64 '{cfg_encoded}'")
         await self.input_queue.put(cmd + "\n")

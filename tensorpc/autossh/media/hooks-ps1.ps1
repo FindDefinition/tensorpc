@@ -236,3 +236,5 @@ function Send-Completions {
 if (Get-Module -Name PSReadLine) {
 	Set-MappedKeyHandlers
 }
+
+$Env:TENSORPC_SSH_CURRENT_PID = $PID

@@ -99,5 +99,58 @@ class _ServiceNames:
         return get_service_key_by_type(
             Scheduler, Scheduler.query_task_tmux_lines.__name__)
 
+    @property
+    def TASK_WRAPPER_LOG_EVENT(self):
+        from tensorpc.autossh.services.taskwrapper import TaskWrapper
+        return get_service_key_by_type(
+            TaskWrapper, TaskWrapper.log_event.__name__)
+
+    @property
+    def TASK_WRAPPER_RUN_DYNAMIC_FUNC_RATE_LIMITED(self):
+        from tensorpc.autossh.services.taskwrapper import TaskWrapper
+        return get_service_key_by_type(
+            TaskWrapper, TaskWrapper.run_dynamic_func_rate_limited.__name__)
+
+    @property
+    def TASK_WRAPPER_RUN_DYNAMIC_FUNC(self):
+        from tensorpc.autossh.services.taskwrapper import TaskWrapper
+        return get_service_key_by_type(
+            TaskWrapper, TaskWrapper.run_dynamic_func.__name__)
+
+    @property
+    def TASK_WRAPPER_GET_EVENTS_PICKLED(self):
+        from tensorpc.autossh.services.taskwrapper import TaskWrapper
+        return get_service_key_by_type(
+            TaskWrapper, TaskWrapper.get_events_pickled.__name__)
+
+    @property
+    def TASK_WRAPPER_GET_LAST_ACTIVE_DURATION(self):
+        from tensorpc.autossh.services.taskwrapper import TaskWrapper
+        return get_service_key_by_type(
+            TaskWrapper, TaskWrapper.get_last_active_duration.__name__)
+
+    @property
+    def TASK_WRAPPER_DISTRIBUTED_INIT_ADDR(self):
+        from tensorpc.autossh.services.taskwrapper import TaskWrapper
+        return get_service_key_by_type(
+            TaskWrapper, TaskWrapper.init_set_worker_addr.__name__)
+
+    @property
+    def _TASK_WRAPPER_DISTRIBUTED_CANCEL(self):
+        from tensorpc.autossh.services.taskwrapper import TaskWrapper
+        return get_service_key_by_type(
+            TaskWrapper, TaskWrapper.cancel_ctrl_c.__name__)
+
+    @property
+    def _TASK_WRAPPER_DISTRIBUTED_INIT_WORKER_ADDRS(self):
+        from tensorpc.autossh.services.taskwrapper import TaskWrapper
+        return get_service_key_by_type(
+            TaskWrapper, TaskWrapper.distributed_set_all_worker_addr.__name__)
+    
+    @property
+    def _TASK_WRAPPER_DISTRIBUTED_WORKER_CLOSE(self):
+        from tensorpc.autossh.services.taskwrapper import TaskWrapper
+        return get_service_key_by_type(
+            TaskWrapper, TaskWrapper.worker_msg_command_end.__name__)
 
 serv_names = _ServiceNames()

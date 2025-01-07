@@ -1,5 +1,4 @@
 import contextlib
-import socket
 import time
 import asyncio
 from typing import Coroutine, List
@@ -7,6 +6,8 @@ from async_timeout import timeout
 
 import threading
 from typing import Any, Callable, Optional, TypeVar, cast
+import socket
+import psutil
 
 
 def wait_until(func,
@@ -112,6 +113,14 @@ def get_primary_ip():
         s.close()
     return IP
 
+
+def get_all_ip_addresses(family: socket.AddressFamily):
+    for interface, snics in psutil.net_if_addrs().items():
+        for snic in snics:
+            if snic.family == family:
+                yield (interface, snic.address)
+
+
 class Debouncer:
     def __init__(self, f: Callable[..., Any], interval: float):
         self.f = f
@@ -144,7 +153,11 @@ def debounce(interval: float):
 
     return decorator
 
-async def _period_loop(duration: float, shutdown_ev: asyncio.Event, user_callback: Callable[[], Coroutine[None, None, Any]], is_pre: bool = True):
+
+def _div_up(a: int, b: int) -> int:
+    return (a + b - 1) // b
+
+async def _period_loop(duration: float, shutdown_ev: asyncio.Event, user_callback: Callable[[], Coroutine[None, None, Any]], is_pre: bool = True, align_ts: bool = False):
     shutdown_task = asyncio.create_task(shutdown_ev.wait())
     sleep_task = asyncio.create_task(asyncio.sleep(duration))
     wait_tasks = [shutdown_task, sleep_task]
@@ -157,20 +170,27 @@ async def _period_loop(duration: float, shutdown_ev: asyncio.Event, user_callbac
             break
         if sleep_task in done:
             wait_tasks.remove(sleep_task)
+            cur_ts = time.time_ns()
+            real_duration = duration
+            if align_ts:
+                # align to next duration
+                duration_ns = int(duration * 1_000_000_000)
+                next_ts = _div_up(cur_ts, duration_ns) * duration_ns
+                real_duration = (next_ts - cur_ts) / 1_000_000_000
             sleep_task = asyncio.create_task(
-                asyncio.sleep(duration))
+                asyncio.sleep(real_duration))
             wait_tasks.append(sleep_task)
             if not is_pre:
                 await user_callback()
 
 class PeriodicTask:
-    def __init__(self, duration: float, user_callback: Callable[[], Coroutine[None, None, Any]], is_pre: bool = True):
+    def __init__(self, duration: float, user_callback: Callable[[], Coroutine[None, None, Any]], is_pre: bool = True, align_ts: bool = False):
         self.duration = duration
         self.user_callback = user_callback
         self.is_pre = is_pre
         self.shutdown_ev = asyncio.Event()
         self.task = asyncio.create_task(
-            _period_loop(duration, self.shutdown_ev, user_callback, is_pre))
+            _period_loop(duration, self.shutdown_ev, user_callback, is_pre, align_ts))
 
     async def close(self):
         self.shutdown_ev.set()

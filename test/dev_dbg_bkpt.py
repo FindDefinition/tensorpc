@@ -77,6 +77,7 @@ def mp_func_for_fork_debug(rank):
 
 def mp_func_inf_record(rank):
     print("FORK START", os.getpid())
+    tensorpc.dbg.init()
     for j in range(1000):
         a = 5
         b = 3
@@ -93,12 +94,13 @@ def mp_func_inf_record(rank):
         model2 = MyModule2(50, 10).cuda()
         input = torch.rand(128, 50).cuda()
         mask = torch.rand((50, 50, 50), dtype=torch.double).cuda()
+        # with tensorpc.dbg.rttracer.enter_tracer("debug"):
         model(input, mask)
         complex_obj = mui.Button("Hello")
         arr = np.random.uniform(-1, 1, size=[1000, 3])
         _trace_func()
 
-        tensorpc.dbg.vscode_breakpoint(name="WTF")
+        tensorpc.dbg.breakpoint(name="WTF")
     print("Finish!")
 
 def main(c = 5):

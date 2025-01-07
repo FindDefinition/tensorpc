@@ -2,6 +2,7 @@ import abc
 import ast
 import asyncio
 import bisect
+from collections.abc import Mapping, MutableMapping
 import contextlib
 import dataclasses
 import enum
@@ -32,21 +33,21 @@ from asyncssh.misc import SoftEOFReceived
 from asyncssh.scp import scp as asyncsshscp
 
 import tensorpc
-from tensorpc.autossh.constants import TENSORPC_ASYNCSSH_PROXY
+from tensorpc.autossh.constants import TENSORPC_ASYNCSSH_ENV_INIT_INDICATE, TENSORPC_ASYNCSSH_PROXY
 from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.compat import InWindows
 from tensorpc.constants import PACKAGE_ROOT, TENSORPC_READUNTIL
 from tensorpc.core import prim
-from tensorpc.core.moduleid import get_module_id_of_type, get_object_type_from_module_id
+from tensorpc.core.moduleid import get_module_id_of_type, get_object_type_from_module_id, import_dynamic_func
 from tensorpc.core.rprint_dispatch import rprint
 
 from tensorpc.utils.rich_logging import get_logger
 from tensorpc.core.bgserver import BACKGROUND_SERVER
 from tensorpc.core.prim import is_in_server_context, check_is_service_available, get_server_grpc_port
 from tensorpc.core.client import RemoteManager, simple_remote_call
-LOGGER = get_logger("tensorpc.ssh")
+LOGGER = get_logger("ssh")
 
-_SSH_RPC_CALL_SERV_NAME = "tensorpc.services.collection::SubprocessCallServer"
+_SSH_RPC_CALL_SERV_NAME = "tensorpc.services.collection::SubprocessSimpleRPCHandler"
 
 # 7-bit C1 ANSI sequences
 ANSI_ESCAPE_REGEX = re.compile(
@@ -95,7 +96,7 @@ class ShellInfo:
 
     def multiple_cmd(self, cmds: List[str]):
         if self.type == "powershell":
-            return ";".join(cmds)
+            return "; ".join(cmds)
         elif self.type == "bash" or self.type == "zsh" or self.type == "fish" or self.type == "cygwin":
             return " && ".join(cmds)
         elif self.type == "cmd":
@@ -263,9 +264,15 @@ class Event:
             return self.timestamp != other
         raise NotImplementedError
 
+class EventType(enum.Enum):
+    Line = "L"
+    Eof = "Eof"
+    Exception = "Exc"
+    Raw = "R"
+    Command = "C"
 
 class EofEvent(Event):
-    name = "EofEvent"
+    name = EventType.Eof.value
 
     def __init__(self,
                  timestamp: int,
@@ -293,15 +300,25 @@ class EofEvent(Event):
 
 
 class LineEvent(Event):
-    name = "LineEvent"
+    name = EventType.Line.value
 
     def __init__(self,
                  timestamp: int,
                  line: bytes,
                  is_stderr=False,
-                 uid: str = ""):
+                 uid: str = "",
+                 is_command: bool = False):
         super().__init__(timestamp, is_stderr, uid)
         self.line = line
+        self.is_command = is_command
+
+        self._line_str_cache = None
+
+    def get_line_str(self):
+        if self._line_str_cache is not None:
+            return self._line_str_cache
+        self._line_str_cache = self.line.decode("utf-8")
+        return self._line_str_cache
 
     def __repr__(self):
         return "{}({}|{}|line={})".format(self.name, self.is_stderr,
@@ -319,7 +336,7 @@ class LineEvent(Event):
 
 
 class RawEvent(Event):
-    name = "RawEvent"
+    name = EventType.Raw.value
 
     def __init__(self,
                  timestamp: int,
@@ -348,7 +365,7 @@ class RawEvent(Event):
 
 
 class ExceptionEvent(Event):
-    name = "ExceptionEvent"
+    name = EventType.Exception.value
 
     def __init__(self,
                  timestamp: int,
@@ -373,7 +390,7 @@ class ExceptionEvent(Event):
 
 
 class CommandEvent(Event):
-    name = "CommandEvent"
+    name = EventType.Command.value
 
     def __init__(self,
                  timestamp: int,
@@ -384,6 +401,14 @@ class CommandEvent(Event):
         super().__init__(timestamp, is_stderr, uid)
         self.type = CommandEventType(type)
         self.arg = arg
+
+        self._line_str_cache = None
+        
+    def get_arg_str(self):
+        if self.arg is None or self._line_str_cache is not None:
+            return self._line_str_cache
+        self._line_str_cache = self.arg.decode("utf-8")
+        return self._line_str_cache
 
     def __repr__(self):
         return "{}({}|{}|type={}|arg={})".format(self.name, self.is_stderr,
@@ -553,9 +578,12 @@ class PeerSSHClient:
                             LineEvent(ts,
                                       data[:match.start()],
                                       is_stderr=is_stderr,
-                                      uid=self.uid))
+                                      uid=self.uid,
+                                      is_command=True))
                 await callback(ce)
             else:
+                # if b"\x1b" in data:
+                #     print("DEBUG???", data, match, self._vsc_re)
                 await callback(
                     LineEvent(ts, data, is_stderr=is_stderr, uid=self.uid))
         return False
@@ -583,16 +611,25 @@ class PeerSSHClient:
             # if read_line_task in done or read_err_line_task in done:
             if read_line_task in done:
                 res = read_line_task.result()
-                if await self._handle_result(res, self.stdout, ts, callback,
-                                             False):
+                try:
+                    if await self._handle_result(res, self.stdout, ts, callback,
+                                                False):
+                        break
+                except:
+                    traceback.print_exc()
                     break
                 read_line_task = asyncio.create_task(
                     self._readuntil(self.stdout))
             if read_err_line_task in done:
                 res = read_err_line_task.result()
-                if await self._handle_result(res, self.stderr, ts, callback,
-                                             True):
+                try:
+                    if await self._handle_result(res, self.stderr, ts, callback,
+                                                True):
+                        break
+                except:
+                    traceback.print_exc()
                     break
+
                 read_err_line_task = asyncio.create_task(
                     self._readuntil(self.stderr))
 
@@ -735,6 +772,7 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
         self.uid = ""
 
         self.state = CommandEventParseState.VscPromptEnd  # idle
+        self._rbuf_max_length = 4000
 
     def data_received(self, data: bytes, datatype) -> None:
         res = super().data_received(data, datatype)
@@ -867,7 +905,7 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
                                 recv_buf.pop(0)
                             self._maybe_resume_reading()
                             return buf
-                        if idx_r_buf >= 4000:
+                        if idx_r_buf >= self._rbuf_max_length:
                             idx = idx_r_buf + 1
                             recv_buf[:curbuf] = []
                             recv_buf[0] = buf[idx:]
@@ -1027,7 +1065,8 @@ class SSHRpcClient:
             bkgd_loop: Optional[asyncio.AbstractEventLoop] = None, 
             remote_fwd_listeners: Optional[List[asyncssh.SSHListener]] = None,
             manual_close: bool = False,
-            user_init_cmd: str = ""):
+            user_init_cmd: str = "",
+            host_url: str = ""):
         self._conn = conn
         self._bkgd_loop = bkgd_loop
         self._port = port
@@ -1038,6 +1077,8 @@ class SSHRpcClient:
         self._cmd: str = user_init_cmd
         self._remote_fwd_listeners = remote_fwd_listeners
         self._manual_close = manual_close
+
+        self.host_url = host_url
 
     async def close_and_wait(self):
         if self._manual_close:
@@ -1127,7 +1168,8 @@ class SSHClient:
                  password: str,
                  known_hosts: Any = None,
                  uid: str = "",
-                 encoding: Optional[str] = None) -> None:
+                 encoding: Optional[str] = None,
+                 enable_vscode_cmd_util: bool = True) -> None:
         url_parts = url.split(":")
         if len(url_parts) == 1:
             self.url_no_port = url
@@ -1135,6 +1177,7 @@ class SSHClient:
         else:
             self.url_no_port = url_parts[0]
             self.port = int(url_parts[1])
+        self._enable_vscode_cmd_util = enable_vscode_cmd_util
         self.username = username
         self.password = password
         self.known_hosts = known_hosts
@@ -1247,7 +1290,8 @@ class SSHClient:
                 self._get_shell_single_cmd(shell_info), bkgd_loop=loop,
                 remote_fwd_listeners=rfwd_listeners,
                 manual_close=True,
-                user_init_cmd=user_init_cmd)
+                user_init_cmd=user_init_cmd,
+                host_url=self.url_no_port)
             return rpc_client
         except:
             conn.close()
@@ -1349,19 +1393,25 @@ class SSHClient:
         else:
             return f"{shell_type.type} -ic"
 
-    async def _create_controlled_session(self, conn: asyncssh.SSHClientConnection, shell_type: ShellInfo, init_bash_file: bool = True):
-        session: MySSHClientStreamSession
+    async def _create_controlled_session(self, conn: asyncssh.SSHClientConnection, 
+            shell_type: ShellInfo, init_bash_file: bool = True, 
+            request_pty: Union[Literal["force", "auto"], bool] = "force",
+            rbuf_max_length: int = 4000,
+            env: Optional[MutableMapping[str, str]] = None):
+        session: VscodeStyleSSHClientStreamSession
         bash_file_path = determine_hook_path_by_shell_info(shell_type)
         if init_bash_file:
             await self._sync_sh_init_file(conn, shell_type)
-        init_cmd, init_cmd_2 = self._get_shell_init_cmd(shell_type, bash_file_path)
+        init_cmd, init_cmd_2 = self._get_shell_init_cmd(shell_type, bash_file_path if self._enable_vscode_cmd_util else None)
 
         chan, session = await conn.create_session(
             VscodeStyleSSHClientStreamSession,
             init_cmd,
-            request_pty="force",
-            env=None,
+            request_pty=request_pty,
+            # we don't use this env here
+            env=list(env.items()) if env is not None else None,
             encoding=self.encoding) # type: ignore
+        session._rbuf_max_length = rbuf_max_length
         stdin, stdout, stderr = (
             asyncssh.stream.SSHWriter(session, chan),
             asyncssh.stream.SSHReader(session, chan),
@@ -1370,6 +1420,17 @@ class SSHClient:
                 asyncssh.constants.EXTENDED_DATA_STDERR))
         if init_cmd_2:
             stdin.write((init_cmd_2 + "\n").encode("utf-8"))
+        # set ignore space in history
+        if shell_type.os_type == "windows":
+            stdin.write(b"Set-PSReadlineOption -AddToHistoryHandler {\n"
+                         b"param([string]$line)\n"
+                         b"return $line.Length -gt 3 -and $line[0] -ne ' ' -and $line[0] -ne ';'\n"
+                         b"}\n")
+        else:
+            if shell_type.type == "zsh":
+                stdin.write(b"setopt HIST_IGNORE_SPACE\n")
+            elif shell_type.type == "bash":
+                stdin.write(b"export HISTCONTROL=ignorespace\n")
         return chan, session, stdin, stdout, stderr
 
     async def connect_queue(
@@ -1377,20 +1438,23 @@ class SSHClient:
             inp_queue: asyncio.Queue,
             callback: Callable[[Event], Awaitable[None]],
             shutdown_task: asyncio.Task,
-            env: Optional[Dict[str, str]] = None,
+            env: Optional[MutableMapping[str, str]] = None,
             forward_ports: Optional[List[int]] = None,
             r_forward_ports: Optional[List[Union[Tuple[int, int],
                                                  int]]] = None,
             env_port_modifier: Optional[Callable[
-                [List[int], List[int], Dict[str, str]], None]] = None,
+                [List[int], List[int], MutableMapping[str, str]], None]] = None,
             exit_callback: Optional[Callable[[], Awaitable[None]]] = None,
             client_ip_callback: Optional[Callable[[str], None]] = None,
             init_event: Optional[asyncio.Event] = None,
-            exit_event: Optional[asyncio.Event] = None):
+            exit_event: Optional[asyncio.Event] = None,
+            request_pty: Union[Literal["force", "auto"], bool] = "force",
+            rbuf_max_length: int = 4000,
+            enable_raw_event: bool = True):
         if env is None:
             env = {}
         # TODO better keepalive
-        session: MySSHClientStreamSession
+        session: VscodeStyleSSHClientStreamSession
         try:
             conn_task = asyncssh.connection.connect(self.url_no_port,
                                                     self.port,
@@ -1408,7 +1472,7 @@ class SSHClient:
                 if client_ip_callback is not None and shell_type.os_type != "windows":
                     # TODO if fail?
                     result = await conn.run(
-                        "echo $SSH_CLIENT | awk '{ print $1}'", check=True)
+                        " echo $SSH_CLIENT | awk '{ print $1}'", check=True)
                     if result.stdout is not None:
                         stdout_content = result.stdout
                         if isinstance(stdout_content, (bytes, bytearray)):
@@ -1424,9 +1488,12 @@ class SSHClient:
                     self.bash_file_inited = True
                 else:
                     init_bash_file = False
-                chan, session, stdin, stdout, stderr = await self._create_controlled_session(conn, shell_type, init_bash_file=init_bash_file)
+                chan, session, stdin, stdout, stderr = await self._create_controlled_session(conn, 
+                    shell_type, init_bash_file=init_bash_file, request_pty=request_pty,
+                    rbuf_max_length=rbuf_max_length)
                 session.uid = self.uid
-                session.callback = callback
+                if enable_raw_event:
+                    session.callback = callback
                 peer_client = PeerSSHClient(stdin,
                                             stdout,
                                             stderr,
@@ -1449,28 +1516,28 @@ class SSHClient:
                 if env:
                     if self.encoding is None:
                         cmds2: List[bytes] = []
+                        cmds2.append(f"echo \"{TENSORPC_ASYNCSSH_ENV_INIT_INDICATE}\"".encode("utf-8"))
                         for k, v in env.items():
                             if shell_type.os_type == "windows":
                                 cmds2.append(f"$Env:{k} = '{v}'".encode("utf-8"))
                             else:
                                 cmds2.append(f"export {k}=\"{v}\"".encode("utf-8"))
                         if shell_type.os_type == "windows":
-                            for cmd in cmds2:
-                                stdin.write(cmd + b"\n")
+                            stdin.write(b" " + b"; ".join(cmds2) + b"\n")
                         else:
-                            stdin.write(b" && ".join(cmds2) + b"\n")
+                            stdin.write(b" " + b" && ".join(cmds2) + b"\n")
                     else:
                         cmds: List[str] = []
+                        cmds.append(f"echo \"{TENSORPC_ASYNCSSH_ENV_INIT_INDICATE}\"")
                         for k, v in env.items():
                             if shell_type.os_type == "windows":
                                 cmds.append(f"$Env:{k} = '{v}'")
                             else:
                                 cmds.append(f"export {k}=\"{v}\"")
                         if shell_type.os_type == "windows":
-                            for cmd in cmds:
-                                stdin.write(cmd + "\n")
+                            stdin.write(" " + "; ".join(cmds) + "\n")
                         else:
-                            stdin.write(" && ".join(cmds) + "\n")
+                            stdin.write(" " + " && ".join(cmds) + "\n")
                 while True:
                     done, pending = await asyncio.wait(
                         wait_tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -1541,25 +1608,7 @@ def run_ssh_rpc_call(arg_event_id: str, ret_event_id: str, rf_port: int):
     with RemoteManager(f"localhost:{rf_port}") as robj:
         args, kwargs, code, is_func_code = robj.remote_call(f"{_SSH_RPC_CALL_SERV_NAME}.call_event", arg_event_id)
         try:
-            if not is_func_code:
-                func_id = code
-                func = get_object_type_from_module_id(func_id)
-                assert func is not None, f"func {func_id} not found"
-            else:
-                func_code = code
-                tree = ast.parse(func_code)
-                all_func_nodes: List[ast.FunctionDef] = []
-                for node in tree.body:
-                    if isinstance(node, ast.FunctionDef):
-                        all_func_nodes.append(node)
-                assert all_func_nodes, "no function found in code"
-                func_name_in_code = all_func_nodes[-1].name
-                # compile code
-                code = compile(tree, "<string>", "exec")
-                # run code
-                module_dict = {}
-                exec(code, module_dict)
-                func = module_dict[func_name_in_code]
+            func = import_dynamic_func(code, not is_func_code)
             res = func(*args, **kwargs)
             robj.remote_call(f"{_SSH_RPC_CALL_SERV_NAME}.call_event", ret_event_id, res)
         except Exception as exc:
@@ -1568,118 +1617,3 @@ def run_ssh_rpc_call(arg_event_id: str, ret_event_id: str, rf_port: int):
             exc_msg = exc_msg_ss.getvalue()
             robj.remote_call(f"{_SSH_RPC_CALL_SERV_NAME}.call_event", ret_event_id, None, exc_msg)
 
-async def main2():
-    from prompt_toolkit.shortcuts.prompt import PromptSession
-    prompt_session = PromptSession(">")
-
-    # with tensorpc.RemoteManager("localhost:51051") as robj:
-    def handler(ev: Event):
-        # print(ev)
-        if isinstance(ev, CommandEvent):
-            if ev.type == CommandEventType.PROMPT_END:
-                print(ev.arg, end="", flush=True)
-            # tensorpc.simple_remote_call("localhost:51051", "tensorpc.services.collection:FileOps.print_in_server", str(ev).encode("utf-8"))
-            # robj.remote_call("tensorpc.services.collection:FileOps.print_in_server", str(ev))
-            # print(ev)
-        if isinstance(ev, LineEvent):
-            # line = remove_ansi_seq(ev.line)
-            # print("\033]633;A\007" in ev.line)
-            # tensorpc.simple_remote_call("localhost:51051", "tensorpc.services.collection:FileOps.print_in_server", str(ev).encode("utf-8"))
-
-            print(ev.line, end="")
-
-    username = input("username:")
-    password = getpass.getpass("password:")
-    async with asyncssh.connection.connect('localhost',
-                                           username=username,
-                                           password=password,
-                                           known_hosts=None) as conn:
-        p = PACKAGE_ROOT / "autossh" / "media" / BASH_HOOKS_FILE_NAME
-        await asyncsshscp(str(p), (conn, '~/.tensorpc_hooks-bash.sh'))
-        stdin, stdout, stderr = await conn.open_session(
-            "bash --init-file ~/.tensorpc_hooks-bash.sh", request_pty="force")
-        peer_client = PeerSSHClient(stdin, stdout, stderr)
-
-        q = asyncio.Queue()
-
-        async def callback(ev: Event):
-            await q.put(ev)
-
-        shutdown_ev = asyncio.Event()
-        shutdown_task = asyncio.create_task(shutdown_ev.wait())
-        task = asyncio.create_task(
-            peer_client.wait_loop_queue(callback, shutdown_task))
-        task2 = asyncio.create_task(
-            wait_queue_until_event(handler, q, shutdown_ev))
-
-        while True:
-            try:
-                text = await prompt_session.prompt_async("")
-                text = text.strip()
-                if text == "exit":
-                    shutdown_ev.set()
-                    break
-                stdin.write(text + "\n")
-            except KeyboardInterrupt:
-                shutdown_ev.set()
-                break
-        await asyncio.gather(task, task2)
-
-
-async def main3():
-    from prompt_toolkit.shortcuts.prompt import PromptSession
-    prompt_session = PromptSession(">")
-    shutdown_ev = asyncio.Event()
-
-    async def handler(ev: Event):
-        if isinstance(ev, CommandEvent):
-            if ev.type == CommandEventType.PROMPT_END:
-                print(ev.arg, end="", flush=True)
-        if isinstance(ev, LineEvent):
-            # print(ev.line.encode("utf-8"))
-            print(ev.line, end="")
-        if isinstance(ev, ExceptionEvent):
-            print("ERROR", ev.data)
-            shutdown_ev.set()
-
-    username = input("username:")
-    password = getpass.getpass("password:")
-    client = SSHClient('localhost',
-                       username=username,
-                       password=password,
-                       known_hosts=None)
-    q = asyncio.Queue()
-    shutdown_task = asyncio.create_task(shutdown_ev.wait())
-    task = asyncio.create_task(
-        client.connect_queue(q,
-                             handler,
-                             shutdown_task,
-                             r_forward_ports=[51051]))
-    while True:
-        try:
-            text = await prompt_session.prompt_async("")
-            text = text.strip()
-            if text == "exit":
-                shutdown_ev.set()
-                break
-            await q.put(text + "\n")
-            # stdin.write(text + "\n")
-        except KeyboardInterrupt:
-            shutdown_ev.set()
-            break
-    await task
-
-async def _main_ssh_rpc():
-    BACKGROUND_SERVER.start_async()
-    client = SSHClient('localhost', "root", "1")
-    async with client.simple_connect_with_rpc(True) as rpc_client:
-        rpc_client.set_init_cmd("conda activate torchdev")
-        for j in range(5):
-            res = await rpc_client.call_with_code(f"""
-def add(a, b):
-    return a + b
-            """, 1, 2)
-            print(res)
-
-if __name__ == "__main__":
-    asyncio.run(_main_ssh_rpc())

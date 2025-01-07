@@ -1,5 +1,11 @@
 # Changelog
 
+# [0.14.0] - 2025-01-xx
+### Added
+- add task wrapper based on asyncssh.
+- add data model based components for `MVC` design pattern.
+- add terminal component.
+
 # [0.13.0] - 2024-11-2x
 ### Added 
 - add pytorch `torch.export` flow graph support

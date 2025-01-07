@@ -179,6 +179,11 @@ class _ServiceNames:
                                        FlowApp.run_single_event.__name__)
 
     @property
+    def APP_SIMPLE_RPC(self):
+        from tensorpc.flow.serv.flowapp import FlowApp
+        return get_service_key_by_type(FlowApp, FlowApp.handle_simple_rpc.__name__)
+
+    @property
     def APP_RELAY_APP_EVENT_FROM_REMOTE(self):
         from tensorpc.flow.serv.flowapp import FlowApp
         return get_service_key_by_type(FlowApp,
@@ -278,7 +283,12 @@ class _ServiceNames:
     def REMOTE_COMP_RUN_SINGLE_EVENT(self):
         from tensorpc.flow.serv.remote_comp import RemoteComponentService
         return get_service_key_by_type(RemoteComponentService, RemoteComponentService.run_single_event.__name__)
-    
+
+    @property
+    def REMOTE_COMP_SIMPLE_RPC(self):
+        from tensorpc.flow.serv.remote_comp import RemoteComponentService
+        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.handle_simple_rpc.__name__)
+
     @property
     def REMOTE_COMP_MOUNT_APP(self):
         from tensorpc.flow.serv.remote_comp import RemoteComponentService

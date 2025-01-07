@@ -370,3 +370,4 @@ if [[ -z "${bash_preexec_imported:-}" ]]; then
 	fi
 fi
 export TERM=xterm-256color
+export TENSORPC_SSH_CURRENT_PID=$$

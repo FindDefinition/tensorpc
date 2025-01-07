@@ -25,7 +25,7 @@ import traceback
 import asyncio
 import numpy as np
 import time
-
+from tensorpc.core.event_emitter.call_server import SimpleRPCHandler
 from tensorpc.core.serviceunit import ServiceEventType
 
 
@@ -219,37 +219,22 @@ class HandlerItem:
     loop: Optional[asyncio.AbstractEventLoop] = None
 
 
-class SubprocessCallServer:
+class SubprocessSimpleRPCHandler(SimpleRPCHandler):
     """usually used when you want to run some python function inside
     subprocess/SSH (can't pass python objects directly).
     User can run a client in subprocess, load args from this service,
     run python code and store results to this service.
     """
-    def __init__(self) -> None:
-        self._msg_single_handlers: Dict[str, HandlerItem] = {}
 
     def on(self, event: str, f: Callable, force_replace: bool = False, once: bool = False, loop: Optional[asyncio.AbstractEventLoop] = None):
-        if not force_replace:
-            assert event not in self._msg_single_handlers, f"event {event} already registered."
-        self._msg_single_handlers[event] = HandlerItem(event, f, once, loop)
+        return super().on(event, f, force_replace, once, loop)
 
     def once(self, event: str, f: Callable, force_replace: bool = False, loop: Optional[asyncio.AbstractEventLoop] = None):
         return self.on(event, f, force_replace, True, loop)
 
     def off(self, event: str):
-        return self._msg_single_handlers.pop(event, None)
+        return super().off(event)
 
     async def call_event(self, event: str, *args, **kwargs):
-        handler_item = self._msg_single_handlers.get(event)
-        assert handler_item is not None, f"event {event} not registered."
-        res = handler_item.handler(*args, **kwargs)
-        res_handler = res
-        if inspect.iscoroutine(res):
-            if handler_item.loop is not None:
-                res_handler = asyncio.run_coroutine_threadsafe(res, handler_item.loop).result()
-            else:
-                res_handler = await res
-        if handler_item.once:
-            self._msg_single_handlers.pop(event)
-        return res_handler
+        return await super().call_event(event, *args, **kwargs)
 

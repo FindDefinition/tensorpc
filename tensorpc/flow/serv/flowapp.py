@@ -286,6 +286,9 @@ class FlowApp:
             res_list.append(qres)
         return res_list
 
+    async def handle_simple_rpc(self, event: str, *args, **kwargs):
+        return await self.app._flowapp_simple_rpc_handlers.call_event(event, *args, **kwargs)
+
     def get_vscode_breakpoints(self):
         state = self.app.get_vscode_state()
         if not state.is_init:
@@ -346,7 +349,7 @@ class FlowApp:
             comp = self.app.root._get_comp_by_uid(comp_uid)
             if isinstance(comp, RemoteComponentBase):
                 return await comp.get_file_metadata(file_key)
-        if base in self.app._flowapp_file_resource_handlers:
+        if self.app._flowapp_file_resource_handlers.has_event_handler(base):
             # we only use first value
             if len(file_key_qparams) > 0:
                 file_key_qparams = {
@@ -356,8 +359,7 @@ class FlowApp:
             else:
                 file_key_qparams = {}
             try:
-                handler = self.app._flowapp_file_resource_handlers[base]
-                res = handler(FileResourceRequest(base, True, None, file_key_qparams))
+                res = self.app._flowapp_file_resource_handlers.call_event(base, FileResourceRequest(base, True, None, file_key_qparams))
                 if inspect.iscoroutine(res):
                     res = await res
                 assert isinstance(res, FileResource)
@@ -397,7 +399,7 @@ class FlowApp:
                 async for x in comp.get_file(file_key, offset, count, chunk_size):
                     yield x
                 return 
-        if base in self.app._flowapp_file_resource_handlers:
+        if self.app._flowapp_file_resource_handlers.has_event_handler(base):
             # we only use first value
             if len(file_key_qparams) > 0:
                 file_key_qparams = {
@@ -408,7 +410,7 @@ class FlowApp:
                 file_key_qparams = {}
             try:
                 req = FileResourceRequest(base, False, offset, file_key_qparams)
-                handler = self.app._flowapp_file_resource_handlers[base]
+                handler = self.app._flowapp_file_resource_handlers.get_event_handler(base).handler
                 async for chunk in handle_file_resource(req, handler, chunk_size, count):
                     yield chunk
             except:

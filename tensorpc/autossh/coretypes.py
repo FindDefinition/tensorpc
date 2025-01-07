@@ -1,7 +1,7 @@
-import dataclasses
-
 import enum
 from typing import Dict, Any, List, Optional, Tuple
+from typing_extensions import Literal
+import tensorpc.core.dataclass_dispatch as dataclasses
 
 
 @dataclasses.dataclass
@@ -30,3 +30,42 @@ class SSHTarget:
 
     def is_localhost(self):
         return self.hostname == "localhost"
+
+@dataclasses.dataclass
+class TaskWrapperArgs:
+    cmd: str
+    password: str
+    username: str = "root"
+    max_retries: int = 1
+    log_path: Optional[str] = None
+    # rate limit for sending message to slack or other notification service
+    msg_throttle: int = 30
+    # distributed arguments
+    master_url: Optional[str] = None
+    num_workers: int = 1
+    init_timeout: int = 60
+    # message parser arguments
+    # called every time a new line event is received
+    # sig: def func(events: list[Event], current_cmd: str)
+    msg_handler: Optional[str] = None
+    # called once after init, can be used to log environment info
+    # to file.
+    init_info_getter: Optional[str] = None
+    # called when error happens.
+    # sig: def func(title: str, msg: str)
+    error_handle_throttle: int = 15
+    error_handler: Optional[str] = None
+    # if set, log traceback of all child process to file (main-thread only)
+    # only enabled if log_path is set and pyspy_period is set, 
+    # won't be logged to stdout.
+    pyspy_period: Optional[int] = None
+
+@dataclasses.dataclass
+class TaskWrapperWorkerState:
+    status: Literal["idle", "running", "error", "done"]
+    addr: str
+    last_timestamp: int = -1
+    is_master: bool = False
+    init_timestamp: int = -1
+    pid: Optional[int] = None
+    userinfo: Any = None

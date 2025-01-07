@@ -57,6 +57,7 @@ from tensorpc.constants import PACKAGE_ROOT, TENSORPC_FILE_NAME_PREFIX, TENSORPC
 from tensorpc.core.astex.astcache import AstCache
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.defs import FileDesp, FileResource, FileResourceRequest
+from tensorpc.core.event_emitter.call_server import SimpleRPCHandler
 from tensorpc.core.funcid import remove_common_indent_from_code
 from tensorpc.core.inspecttools import get_all_members_by_type
 from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
@@ -330,7 +331,8 @@ class App:
         self._flowapp_internal_lsp_config.python.analysis.pythonPath = sys.executable
         self._flowapp_observed_func_registry: Optional[
             ObservedFunctionRegistryProtocol] = None
-        self._flowapp_file_resource_handlers: Dict[str, Callable[[FileResourceRequest], Union[FileResource, Coroutine[None, None, FileResource]]]] = {}
+        self._flowapp_file_resource_handlers: SimpleRPCHandler[Callable[[FileResourceRequest], Union[FileResource, Coroutine[None, None, FileResource]]]] = SimpleRPCHandler()
+        self._flowapp_simple_rpc_handlers: SimpleRPCHandler = SimpleRPCHandler()
 
     @property
     def _flow_reload_manager(self):
@@ -339,14 +341,13 @@ class App:
     def add_file_resource(
         self, key: str,
         handler: Callable[[FileResourceRequest], Union[FileResource, Coroutine[None, None, FileResource]]]):
-        self._flowapp_file_resource_handlers[key] = handler
+        self._flowapp_file_resource_handlers.on(key, handler)
 
     def remove_file_resource(
         self,
         key: str,
     ):
-        if key in self._flowapp_file_resource_handlers:
-            self._flowapp_file_resource_handlers.pop(key)
+        self._flowapp_file_resource_handlers.off(key)
 
     def set_enable_language_server(self, enable: bool):
         """must be setted before app init (in layout function), only valid
@@ -395,6 +396,15 @@ class App:
                 return False
             return True 
         return False 
+
+    def register_app_simple_rpc_handler(self, type: str,
+                                           handler: Callable[[Any],
+                                                             mui._CORO_NONE]):
+        assert isinstance(type, AppSpecialEventType)
+        self._flowapp_simple_rpc_handlers.on(type, handler)
+
+    def unregister_app_simple_rpc_handler(self, type: str):
+        self._flowapp_simple_rpc_handlers.off(type)
 
     def register_app_special_event_handler(self, type: AppSpecialEventType,
                                            handler: Callable[[Any],

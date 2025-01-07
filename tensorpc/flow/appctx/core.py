@@ -229,3 +229,11 @@ def unregister_remote_comp_event_handler(key: str,
                                         handler: Callable[[RemoteCompEvent], Any]):
     app = get_app()
     return app.unregister_remote_comp_event_handler(key, handler)
+
+def register_simple_rpc_handler(key: str, handler: Callable):
+    app = get_app()
+    return app.register_app_simple_rpc_handler(key, handler)
+
+def unregister_simple_rpc_handler(key: str):
+    app = get_app()
+    return app.unregister_app_simple_rpc_handler(key)

@@ -93,4 +93,14 @@ class _ServiceNames:
         from tensorpc.services.dbg.tools import BackgroundDebugTools
         return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.set_traceview_variable_inspect.__name__)
 
+    @property
+    def RT_TRACE_SET_STORAGE(self):
+        from tensorpc.services.dbg.rttrace import RTTraceStorageService
+        return get_service_key_by_type(RTTraceStorageService, RTTraceStorageService.store_trace.__name__)
+
+    @property
+    def RT_TRACE_GET_TRACE_RESULT(self):
+        from tensorpc.services.dbg.rttrace import RTTraceStorageService
+        return get_service_key_by_type(RTTraceStorageService, RTTraceStorageService.get_trace_result.__name__)
+
 serv_names = _ServiceNames()

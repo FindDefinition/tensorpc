@@ -140,7 +140,8 @@ async def serve_service(
         ssl_key_path: str = "",
         ssl_crt_path: str = "",
         grpc_options: Optional[List[Tuple[str, Union[str, int]]]] = None,
-        start_thread_ev: Optional[threading.Event] = None):
+        start_thread_ev: Optional[threading.Event] = None,
+        max_port_retry: int = TENSORPC_PORT_MAX_TRY):
     assert isinstance(service, AsyncRemoteObjectService)
     if is_local and process_id >= 0:
         if hasattr(os, "sched_setaffinity"):
@@ -169,7 +170,7 @@ async def serve_service(
         credentials = grpc.ssl_server_credentials([(private_key,
                                                     certificate_chain)])
 
-    for i in range(TENSORPC_PORT_MAX_TRY):
+    for i in range(max_port_retry):
         if port == -1:
             port = get_free_ports(1)[0]
         url = '[::]:{}'.format(port)
@@ -221,7 +222,8 @@ async def serve_with_http_async(server_core: ProtobufServiceCore,
                                 max_threads=10,
                                 process_id=-1,
                                 ssl_key_path: str = "",
-                                ssl_crt_path: str = ""):
+                                ssl_crt_path: str = "",
+                                max_port_retry: int = TENSORPC_PORT_MAX_TRY):
     smeta = ServerMeta(port=port, http_port=http_port)
 
     # server_core = ProtobufServiceCore(url, service_def, False, smeta)
@@ -236,7 +238,8 @@ async def serve_with_http_async(server_core: ProtobufServiceCore,
             service = AsyncRemoteObjectService(server_core, is_local, length)
             grpc_task = serve_service(service, wait_time, port, length,
                                       is_local, max_threads, process_id,
-                                      ssl_key_path, ssl_crt_path)
+                                      ssl_key_path, ssl_crt_path,
+                                      max_port_retry=max_port_retry)
             http_task = httpserver.serve_service_core_task(
                 server_core,
                 http_port,
@@ -267,7 +270,8 @@ async def serve_async(sc: ProtobufServiceCore,
                       process_id=-1,
                       ssl_key_path: str = "",
                       ssl_crt_path: str = "",
-                      start_thread_ev: Optional[threading.Event] = None):
+                      start_thread_ev: Optional[threading.Event] = None,
+                      max_port_retry: int = TENSORPC_PORT_MAX_TRY):
     server_core = sc
     with server_core.enter_global_context():
         with server_core.enter_exec_context():
@@ -276,7 +280,8 @@ async def serve_async(sc: ProtobufServiceCore,
         service = AsyncRemoteObjectService(server_core, is_local, length)
         grpc_task = serve_service(service, wait_time, port, length, is_local,
                                   max_threads, process_id, ssl_key_path,
-                                  ssl_crt_path, start_thread_ev=start_thread_ev)
+                                  ssl_crt_path, start_thread_ev=start_thread_ev,
+                                  max_port_retry=max_port_retry)
 
         return await grpc_task
 
@@ -290,12 +295,14 @@ def serve(service_def: ServiceDef,
           process_id=-1,
           ssl_key_path: str = "",
           ssl_crt_path: str = "",
-          create_loop: bool = False):
+          create_loop: bool = False,
+          max_port_retry: int = TENSORPC_PORT_MAX_TRY):
     url = '[::]:{}'.format(port)
     smeta = ServerMeta(port=port, http_port=-1)
     server_core = ProtobufServiceCore(url, service_def, False, smeta)
     return serve_service_core(server_core, wait_time, length, is_local,
-                              max_threads, process_id, ssl_key_path, ssl_crt_path,)
+                              max_threads, process_id, ssl_key_path, ssl_crt_path,
+                              max_port_retry=max_port_retry)
 
 def serve_service_core(service_core: ProtobufServiceCore,
           wait_time=-1,
@@ -306,7 +313,8 @@ def serve_service_core(service_core: ProtobufServiceCore,
           ssl_key_path: str = "",
           ssl_crt_path: str = "",
           create_loop: bool = False,
-          start_thread_ev: Optional[threading.Event] = None):
+          start_thread_ev: Optional[threading.Event] = None,
+          max_port_retry: int = TENSORPC_PORT_MAX_TRY):
     # url = '[::]:{}'.format(port)
     # smeta = ServerMeta(port=port, http_port=-1)
     # server_core = ProtobufServiceCore(url, service_def, False, smeta)
@@ -325,7 +333,8 @@ def serve_service_core(service_core: ProtobufServiceCore,
                         process_id=process_id,
                         ssl_key_path=ssl_key_path,
                         ssl_crt_path=ssl_crt_path,
-                        start_thread_ev=start_thread_ev))
+                        start_thread_ev=start_thread_ev,
+                        max_port_retry=max_port_retry))
     except KeyboardInterrupt:
         loop.run_until_complete(run_exit_async(service_core))
         print("shutdown by keyboard interrupt")
@@ -348,7 +357,8 @@ def serve_with_http(service_def: ServiceDef,
                     max_threads=10,
                     process_id=-1,
                     ssl_key_path: str = "",
-                    ssl_crt_path: str = ""):
+                    ssl_crt_path: str = "",
+                    max_port_retry: int = TENSORPC_PORT_MAX_TRY):
     url = '[::]:{}'.format(port)
     smeta = ServerMeta(port=port, http_port=http_port)
     server_core = ProtobufServiceCore(url, service_def, False, smeta)
@@ -368,7 +378,8 @@ def serve_with_http(service_def: ServiceDef,
                                   max_threads=max_threads,
                                   process_id=process_id,
                                   ssl_key_path=ssl_key_path,
-                                  ssl_crt_path=ssl_crt_path))
+                                  ssl_crt_path=ssl_crt_path,
+                                  max_port_retry=max_port_retry))
     except KeyboardInterrupt:
         loop.run_until_complete(run_exit_async(server_core))
         print("shutdown by keyboard interrupt")

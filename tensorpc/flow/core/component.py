@@ -176,6 +176,8 @@ class UIType(enum.IntEnum):
     VideoPlayer = 0x3f
 
     GridLayout = 0x40
+    Breadcrumbs = 0x41
+    Terminal = 0x42
 
     # special
     TaskLoop = 0x100
@@ -431,6 +433,12 @@ class FrontendEventType(enum.IntEnum):
 
     PlotlyClickData = 100
     PlotlyClickAnnotation = 101
+
+    # Terminal Events
+    TerminalInput = 110
+    TerminalResize = 111
+    TerminalSaveState = 112
+
 
 
 UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
@@ -1023,7 +1031,7 @@ class _DataclassHelper:
 class BasicProps(DataClassWithUndefined):
     # status: int = UIRunStatus.Stop.value
     tensorpc_dynamic_eval: Union[Undefined, Dict[str, Any]] = undefined
-    # used for template component
+    # used for data model component
     override_props: Union[Dict[str, str], Undefined] = undefined
 
 

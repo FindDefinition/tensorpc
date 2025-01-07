@@ -75,10 +75,16 @@ _ONEARG_DATAGRID_EVENTS = set([
     FrontendEventType.DataBoxSecondaryActionClick.value,
 ])
 
+_ONEARG_TERMINAL_EVENTS = set([
+    FrontendEventType.TerminalInput.value,
+    FrontendEventType.TerminalResize.value,
+    FrontendEventType.TerminalSaveState.value,
+])
+
 _ONEARG_EVENTS = set(
     ALL_POINTER_EVENTS
 ) | _ONEARG_TREE_EVENTS | _ONEARG_COMPLEXL_EVENTS | _ONEARG_SPECIAL_EVENTS | _ONEARG_EDITOR_EVENTS
-_ONEARG_EVENTS = _ONEARG_EVENTS | _ONEARG_DATAGRID_EVENTS
+_ONEARG_EVENTS = _ONEARG_EVENTS | _ONEARG_DATAGRID_EVENTS | _ONEARG_TERMINAL_EVENTS
 
 _NOARG_EVENTS = set([
     FrontendEventType.Click.value,
@@ -87,7 +93,6 @@ _NOARG_EVENTS = set([
     FrontendEventType.EditorQueryState.value,
     FrontendEventType.Delete.value,
 ])
-
 
 async def handle_raw_event(event: Event,
                            comp: Component,
@@ -127,7 +132,7 @@ async def handle_standard_event(comp: Component,
         return
     elif comp._flow_comp_status == UIRunStatus.Stop.value:
         if not isinstance(event.keys, Undefined):
-            # for all template components, we must disable
+            # for all data model components, we must disable
             # status change and sync. status indicator
             # in Button and IconButton will be disabled.
             sync_status_first = False
@@ -139,7 +144,7 @@ async def handle_standard_event(comp: Component,
 
             handlers = comp.get_event_handlers(event.type)
             sync_state = False
-            # for template components, we don't need to sync state.
+            # for data model components, we don't need to sync state.
             if isinstance(event.keys, Undefined):
                 comp.state_change_callback(event.data, event.type)
                 sync_state = True

@@ -15,7 +15,7 @@
 from tensorpc.core.moduleid import loose_isinstance
 
 from . import appctx, constants, marker
-from .components import chart, flowplus, flowui, leaflet, mui, plus, three
+from .components import chart, flowplus, flowui, leaflet, mui, plus, three, terminal
 from .components.plus.vis import vapi_core as V
 from .core.appcore import AppSpecialEventType, observe_function
 from .core.objtree import UserObjTree

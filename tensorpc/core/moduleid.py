@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import ast
 import dataclasses
 import importlib
 import importlib.util
@@ -301,3 +302,31 @@ def get_object_type_from_module_id(module_id: str):
         obj = getattr(obj, part)
     return obj
 
+def import_dynamic_func(func_id_or_code: str, is_func_id: bool):
+    """Import runtime func from function id (mod1.mod2.mod3::SubClass::Func) or 
+    code (only use last func defined in code).
+    If func id or code is a class, we assume it contains no argument.
+    """
+    if is_func_id:
+        func_id = func_id_or_code
+        func = get_object_type_from_module_id(func_id)
+        assert func is not None, f"func {func_id} not found"
+    else:
+        func_code = func_id_or_code
+        tree = ast.parse(func_code)
+        all_func_nodes: List[ast.FunctionDef] = []
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef):
+                all_func_nodes.append(node)
+        assert all_func_nodes, "no function found in code"
+        func_name_in_code = all_func_nodes[-1].name
+        # compile code
+        code = compile(tree, "<string>", "exec")
+        # run code
+        module_dict = {}
+        exec(code, module_dict)
+        func = module_dict[func_name_in_code]
+    if inspect.isclass(func):
+        # assume zero-arg functor
+        func = func()
+    return func 

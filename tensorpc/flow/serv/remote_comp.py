@@ -390,6 +390,10 @@ class RemoteComponentService:
             ev.unpatch_keys_prefix_inplace(prefixes)
             return await app_obj.app._handle_event_with_ctx(ev, is_sync)
 
+    async def handle_simple_rpc(self, key: str, event: str, *args, **kwargs):
+        app_obj = self._app_objs[key]
+        return await app_obj.app._flowapp_simple_rpc_handlers.call_event(event, *args, **kwargs)
+
     @marker.mark_server_event(event_type=ServiceEventType.Exit)
     async def on_exit(self):
         for app_obj in self._app_objs.values():
@@ -428,7 +432,7 @@ class RemoteComponentService:
         url = parse.urlparse(file_key)
         base = url.path
         file_key_qparams = parse.parse_qs(url.query)
-        if base in app_obj.app._flowapp_file_resource_handlers:
+        if app_obj.app._flowapp_file_resource_handlers.has_event_handler(base):
             # we only use first value
             if len(file_key_qparams) > 0:
                 file_key_qparams = {
@@ -438,8 +442,7 @@ class RemoteComponentService:
             else:
                 file_key_qparams = {}
             try:
-                handler = app_obj.app._flowapp_file_resource_handlers[base]
-                res = handler(FileResourceRequest(base, True, None, file_key_qparams))
+                res = app_obj.app._flowapp_file_resource_handlers.call_event(base, FileResourceRequest(base, True, None, file_key_qparams))
                 if inspect.iscoroutine(res):
                     res = await res
                 assert isinstance(res, FileResource)
@@ -475,7 +478,7 @@ class RemoteComponentService:
         base = url.path
         file_key_qparams = parse.parse_qs(url.query)
 
-        if base in app_obj.app._flowapp_file_resource_handlers:
+        if app_obj.app._flowapp_file_resource_handlers.has_event_handler(base):
             # we only use first value
             if len(file_key_qparams) > 0:
                 file_key_qparams = {
@@ -486,7 +489,7 @@ class RemoteComponentService:
                 file_key_qparams = {}
             try:
                 req = FileResourceRequest(base, False, offset, file_key_qparams)
-                handler = app_obj.app._flowapp_file_resource_handlers[base]
+                handler = app_obj.app._flowapp_file_resource_handlers.get_event_handler(base).handler
                 async for chunk in handle_file_resource(req, handler, chunk_size, count):
                     yield chunk
             except GeneratorExit:

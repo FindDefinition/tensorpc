@@ -45,7 +45,7 @@ T_comp = TypeVar("T_comp")
 class Event:
     type: EventDataType
     data: Any
-    # only used for template component such as table.
+    # only used for data model component such as table.
     # key indicates the id of template item.
     keys: Union[Undefined, List[str]] = undefined
     # for template control components.
@@ -307,6 +307,9 @@ class AppSpecialEventType(enum.Enum):
     # emitted in remote comp server only
     RemoteCompMount = "RemoteCompMount"
     RemoteCompUnmount = "RemoteCompUnmount"
+
+    # for comp rpc event
+    ComponentRPCEvent = "ComponentRPCEvent"
 
 
 @dataclasses.dataclass

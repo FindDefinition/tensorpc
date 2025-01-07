@@ -511,3 +511,37 @@ class AsyncAppLocalClient(AsyncAppClientBase):
                  enabled: bool = True):
         super().__init__("", "", "", name, channel_options, credentials,
                          print_stdout, enabled)
+
+
+class RemoteCompRpcManager(tensorpc.AsyncRemoteManager):
+
+    def __init__(self,
+                 url: str,
+                 name="",
+                 channel_options=None,
+                 credentials=None,
+                 print_stdout=True,
+                 enabled: bool = True):
+        super().__init__(url,
+                         name,
+                         channel_options,
+                         credentials,
+                         print_stdout,
+                         enabled=enabled)
+        self.serv_key = serv_names.REMOTE_COMP_SIMPLE_RPC
+
+    async def comp_remote_call(self,
+                            app_key: str,
+                            *args,
+                            timeout: Optional[int] = None,
+                            rpc_callback="",
+                            rpc_flags: int = rpc_message_pb2.PickleArray,
+                            **kwargs):
+
+        return await self.remote_call(self.serv_key,
+                                      app_key,
+                                      *args,
+                                      timeout=timeout,
+                                      rpc_callback=rpc_callback,
+                                      rpc_flags=rpc_flags,
+                                      **kwargs)

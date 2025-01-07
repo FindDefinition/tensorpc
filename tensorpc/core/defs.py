@@ -83,10 +83,7 @@ def from_yaml_path(path: Union[Path, str]) -> ServiceDef:
         data = f.read()
     return ServiceDef.from_yaml(data)
 
-
-def decode_config_b64_and_update(cfg_b64: str, servs: List[Service]):
-    serv_config_str = base64.b64decode(cfg_b64).decode("utf-8")
-    serv_config = json.loads(serv_config_str)
+def update_service_def_config(serv_config: Any, servs: List[Service]):
     key_to_serv: Dict[str, Service] = {}
     for serv in servs:
         key = serv.module_name
@@ -95,3 +92,8 @@ def decode_config_b64_and_update(cfg_b64: str, servs: List[Service]):
     for k, v in serv_config.items():
         assert k in key_to_serv, f"{k} not exist in services"
         key_to_serv[k].config = v
+
+def decode_config_b64_and_update(cfg_b64: str, servs: List[Service]):
+    serv_config_str = base64.b64decode(cfg_b64).decode("utf-8")
+    serv_config = json.loads(serv_config_str)
+    return update_service_def_config(serv_config, servs)

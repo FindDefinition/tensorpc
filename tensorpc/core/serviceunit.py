@@ -1021,9 +1021,9 @@ class ReloadableDynamicClass(DynamicClass):
                  code: str = "") -> None:
         super().__init__(module_name, code)
         if reload_mgr is not None:
-            self.serv_metas = reload_mgr.query_type_method_meta(self.obj_type)
+            self.serv_metas = reload_mgr.query_type_method_meta(self.obj_type, include_base=True)
         else:
-            self.serv_metas = self.get_metas_of_regular_methods(self.obj_type)
+            self.serv_metas = self.get_metas_of_regular_methods(self.obj_type, include_base=True)
 
     @staticmethod
     def get_metas_of_regular_methods(
