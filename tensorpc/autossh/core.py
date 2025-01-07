@@ -1177,6 +1177,7 @@ class SSHClient:
         else:
             self.url_no_port = url_parts[0]
             self.port = int(url_parts[1])
+        self.url = url
         self._enable_vscode_cmd_util = enable_vscode_cmd_util
         self.username = username
         self.password = password
@@ -1397,6 +1398,7 @@ class SSHClient:
             shell_type: ShellInfo, init_bash_file: bool = True, 
             request_pty: Union[Literal["force", "auto"], bool] = "force",
             rbuf_max_length: int = 4000,
+            term_type: Optional[str] = None,
             env: Optional[MutableMapping[str, str]] = None):
         session: VscodeStyleSSHClientStreamSession
         bash_file_path = determine_hook_path_by_shell_info(shell_type)
@@ -1410,6 +1412,7 @@ class SSHClient:
             request_pty=request_pty,
             # we don't use this env here
             env=list(env.items()) if env is not None else None,
+            term_type=term_type,
             encoding=self.encoding) # type: ignore
         session._rbuf_max_length = rbuf_max_length
         stdin, stdout, stderr = (
@@ -1448,6 +1451,7 @@ class SSHClient:
             client_ip_callback: Optional[Callable[[str], None]] = None,
             init_event: Optional[asyncio.Event] = None,
             exit_event: Optional[asyncio.Event] = None,
+            term_type: Optional[str] = "xterm-256color",
             request_pty: Union[Literal["force", "auto"], bool] = "force",
             rbuf_max_length: int = 4000,
             enable_raw_event: bool = True):
@@ -1490,7 +1494,7 @@ class SSHClient:
                     init_bash_file = False
                 chan, session, stdin, stdout, stderr = await self._create_controlled_session(conn, 
                     shell_type, init_bash_file=init_bash_file, request_pty=request_pty,
-                    rbuf_max_length=rbuf_max_length)
+                    rbuf_max_length=rbuf_max_length, term_type=term_type)
                 session.uid = self.uid
                 if enable_raw_event:
                     session.callback = callback
@@ -1560,7 +1564,7 @@ class SSHClient:
                             stdin.write(text)
 
                     wait_tasks = [
-                        asyncio.create_task(inp_queue.get()), shutdown_task
+                        asyncio.create_task(inp_queue.get()), shutdown_task, loop_task
                     ]
                 await loop_task
         except Exception as exc:

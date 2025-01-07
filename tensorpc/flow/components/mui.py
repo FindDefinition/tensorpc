@@ -5506,7 +5506,7 @@ class MenuListProps(MUIFlexBoxProps):
     dense: Union[Undefined, bool] = undefined
     disablePadding: Union[Undefined, bool] = undefined
     paperProps: Union[Undefined, PaperProps] = undefined
-    boxProps: Union[Undefined, MUIFlexBoxProps] = undefined
+    boxProps: Union[Undefined, FlexBoxProps] = undefined
     triggerMethod: Union[Undefined, Literal["click",
                                             "contextmenu"]] = undefined
     anchorOrigin: Union[Undefined, Anchor] = undefined
