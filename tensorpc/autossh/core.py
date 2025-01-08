@@ -49,44 +49,6 @@ LOGGER = get_logger("ssh")
 
 _SSH_RPC_CALL_SERV_NAME = "tensorpc.services.collection::SubprocessSimpleRPCHandler"
 
-# 7-bit C1 ANSI sequences
-ANSI_ESCAPE_REGEX = re.compile(
-    br'''
-    (?: # either 7-bit C1, two bytes, ESC Fe (omitting CSI)
-        \x1B
-        [@-Z\\-_]
-    |   # or a single 8-bit byte Fe (omitting CSI)
-        [\x80-\x9A\x9C-\x9F]
-    |   # or CSI + control codes
-        (?: # 7-bit CSI, ESC [ 
-            \x1B\[
-        |   # 8-bit CSI, 9B
-            \x9B
-        )
-        [0-?]*  # Parameter bytes
-        [ -/]*  # Intermediate bytes
-        [@-~]   # Final byte
-    )
-''', re.VERBOSE)
-ANSI_ESCAPE_REGEX_8BIT = re.compile(
-    br'''
-    (?: # either 7-bit C1, two bytes, ESC Fe (omitting CSI)
-        \x1B
-        [@-Z\\-_]
-    |   # or a single 8-bit byte Fe (omitting CSI)
-        [\x80-\x9A\x9C-\x9F]
-    |   # or CSI + control codes
-        (?: # 7-bit CSI, ESC [ 
-            \x1B\[
-        |   # 8-bit CSI, 9B
-            \x9B
-        )
-        [0-?]*  # Parameter bytes
-        [ -/]*  # Intermediate bytes
-        [@-~]   # Final byte
-    )
-''', re.VERBOSE)
-
 BASH_HOOKS_FILE_NAME = "hooks-bash.sh"
 
 @dataclasses.dataclass
@@ -189,16 +151,6 @@ class CommandParseSpecialCharactors:
 
 _DEFAULT_SEPARATORS = rb"(?:\r\n)|(?:\n)|(?:\r)|(?:\033\]784;[ABPCEFGD](?:;(.*?))?\007)"
 # _DEFAULT_SEPARATORS = "\n"
-
-
-def remove_ansi_seq(string: Union[str, bytes]):
-    # https://stackoverflow.com/questions/14693701/how-can-i-remove-the-ansi-escape-sequences-from-a-string-in-python
-    if isinstance(string, str):
-        return ANSI_ESCAPE_REGEX.sub(b'',
-                                     string.encode("utf-8")).decode("utf-8")
-    else:
-        return ANSI_ESCAPE_REGEX.sub(b'', string).decode("utf-8")
-
 
 class OutData:
 
@@ -474,12 +426,6 @@ _ENCODE = "utf-8"
 # _ENCODE = "latin-1"
 
 class PeerSSHClient:
-    """
-    during handle stdout/err message, client will 
-    1. identifier extraction
-    2. code path detection
-    """
-
     def __init__(self,
                  stdin: asyncssh.stream.SSHWriter,
                  stdout: asyncssh.stream.SSHReader,
@@ -492,7 +438,6 @@ class PeerSSHClient:
         self.stderr = stderr
         # stdout/err history
         # create read tasks. they should exists during peer open.
-        self.separators = separators
         self._vsc_re = re.compile(rb"\033\]784;([ABPCEFGD])(?:;(.*?))?\007")
 
         self.uid = uid
@@ -506,13 +451,10 @@ class PeerSSHClient:
 
     async def _readuntil(self, reader: asyncssh.stream.SSHReader):
         try:
-            # print(separators)
             res = await reader.readuntil(self._vsc_re)
-            # print("READ RES", res)
             is_eof = reader.at_eof()
             return ReadResult(res, is_eof, False)
         except asyncio.IncompleteReadError as exc:
-            # print("WTFWTF")
             tb_str = io.StringIO()
             traceback.print_exc(file=tb_str)
             is_eof = reader.at_eof()
@@ -582,8 +524,6 @@ class PeerSSHClient:
                                       is_command=True))
                 await callback(ce)
             else:
-                # if b"\x1b" in data:
-                #     print("DEBUG???", data, match, self._vsc_re)
                 await callback(
                     LineEvent(ts, data, is_stderr=is_stderr, uid=self.uid))
         return False
@@ -727,8 +667,6 @@ class MySSHClientStreamSession(asyncssh.stream.SSHClientStreamSession):
                             exc = recv_buf.pop(0)
 
                             if isinstance(exc, SoftEOFReceived):
-                                print("RTX2")
-
                                 return buf
                             else:
                                 raise cast(Exception, exc)
@@ -836,7 +774,10 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
                     newbuf = cast(AnyStr, recv_buf[curbuf])
                     buf += newbuf
                     start = 0
-                    # rprint(self.state, buf)
+                    # use regex to detect both shell events and \n is very slow if output contains many \r lines.
+                    # so we use following code to handle both shell events and `\n`.
+                    # if we find the first charactor of shell event, we will wait until the end exists in buffer.
+                    # we also limit the maximum buffer length to avoid stuck in the \r (e.g. progress bar).
                     idx_start_all = buf.find(
                         CommandParseSpecialCharactors.StartAll)
                     idx_start = buf.find(CommandParseSpecialCharactors.Start)
@@ -915,136 +856,6 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
                                 recv_buf.pop(0)
                             self._maybe_resume_reading()
                             return buf
-
-                    # if self.state == CommandEventParseState.VscPromptEnd:
-                    #     idx = buf.find(CommandParseSpecialCharactors.Start)
-                    #     if idx != -1:
-                    #         # clear buf before start
-                    #         self.state = CommandEventParseState.VscPromptStart
-                    #         recv_buf[:curbuf] = []
-                    #         recv_buf[0] = buf[idx:]
-                    #         buf = buf[:idx]
-                    #         self._recv_buf_len -= idx
-                    #         if not recv_buf[0]:
-                    #             recv_buf.pop(0)
-                    #         self._maybe_resume_reading()
-                    #         return buf
-                    #     else:
-                    #         # find \n, return first line
-                    #         idx = buf.find(b"\n")
-                    #     if idx != -1:
-                    #         idx += 1
-                    #         recv_buf[:curbuf] = []
-                    #         recv_buf[0] = buf[idx:]
-                    #         buf = buf[:idx]
-                    #         self._recv_buf_len -= idx
-                    #         if not recv_buf[0]:
-                    #             recv_buf.pop(0)
-                    #         self._maybe_resume_reading()
-                    #         return buf
-                    # elif self.state == CommandEventParseState.VscPromptStart:
-                    #     # we know buf start with \033, the following should be \]784;
-                    #     # if wrong, back to VscPromptEnd
-                    #     if len(buf) >= 7:
-                    #         cmd_code = buf[6]
-                    #         if buf[1:6] == b"]784;" and cmd_code in b"ABPCEFGD":
-                    #             if cmd_code == b"D":
-                    #                 self.state = CommandEventParseState.VscCmdCodeD
-                    #             elif cmd_code == b"E":
-                    #                 self.state = CommandEventParseState.VscCmdCodeE
-                    #             elif cmd_code == b"P":
-                    #                 self.state = CommandEventParseState.VscCmdCodeP
-                    #             else:
-                    #                 self.state = CommandEventParseState.VscCmdCodeABCFG
-                    #         else:
-                    #             self.state = CommandEventParseState.VscPromptEnd
-                    #             idx = buf.find(b"\n")
-                    #             if idx != -1:
-                    #                 idx += 1
-                    #                 recv_buf[:curbuf] = []
-                    #                 recv_buf[0] = buf[idx:]
-                    #                 buf = buf[:idx]
-                    #                 self._recv_buf_len -= idx
-                    #                 if not recv_buf[0]:
-                    #                     recv_buf.pop(0)
-                    #                 self._maybe_resume_reading()
-                    #                 return buf
-                    # elif self.state == CommandEventParseState.VscCmdCodeABCFG:
-                    #     # wait for \007
-                    #     if len(buf) >= 8:
-                    #         self.state = CommandEventParseState.VscPromptEnd
-                    #         # for ABCFG, we always return buffer even if it's wrong,
-                    #         # user should parse and handle it.
-                    #         idx = 8
-                    #         recv_buf[:curbuf] = []
-                    #         recv_buf[0] = buf[idx:]
-                    #         buf = buf[:idx]
-                    #         self._recv_buf_len -= idx
-                    #         if not recv_buf[0]:
-                    #             recv_buf.pop(0)
-                    #         self._maybe_resume_reading()
-                    #         return buf
-                    # elif self.state == CommandEventParseState.VscCmdCodeD or self.state == CommandEventParseState.VscCmdCodeP or self.state == CommandEventParseState.VscCmdCodeE:
-                    #     if len(buf) >= 8:
-                    #         if buf[7] != b";":
-                    #             self.state = CommandEventParseState.VscPromptEnd
-                    #             idx = 8
-                    #             recv_buf[:curbuf] = []
-                    #             recv_buf[0] = buf[idx:]
-                    #             buf = buf[:idx]
-                    #             self._recv_buf_len -= idx
-                    #             if not recv_buf[0]:
-                    #                 recv_buf.pop(0)
-                    #             self._maybe_resume_reading()
-                    #             return buf
-                    #         else:
-                    #             # find \007 in remain. if not found, find \033, if found,
-                    #             # back to VscPromptEnd
-                    #             idx = buf.find(CommandParseSpecialCharactors.End, 8)
-                    #             idx_start = buf.find(CommandParseSpecialCharactors.Start, 8)
-                    #             if idx_start != 1:
-                    #                 if idx_start < idx:
-                    #                     self.state = CommandEventParseState.VscPromptEnd
-                    #                     idx = idx_start
-                    #                     recv_buf[:curbuf] = []
-                    #                     recv_buf[0] = buf[idx:]
-                    #                     buf = buf[:idx]
-                    #                     self._recv_buf_len -= idx
-                    #                     if not recv_buf[0]:
-                    #                         recv_buf.pop(0)
-                    #                     self._maybe_resume_reading()
-                    #                     return buf
-                    #             if idx != -1:
-                    #                 self.state = CommandEventParseState.VscPromptEnd
-                    #                 idx += 1
-                    #                 recv_buf[:curbuf] = []
-                    #                 recv_buf[0] = buf[idx:]
-                    #                 buf = buf[:idx]
-                    #                 self._recv_buf_len -= idx
-                    #                 if not recv_buf[0]:
-                    #                     recv_buf.pop(0)
-                    #                 self._maybe_resume_reading()
-                    #                 return buf
-                    # else:
-                    #     raise NotImplementedError
-                    # rprint("AFTER", self.state, buf)
-
-                    # match = pat.search(buf, start)
-                    # if len(buf) >= 1970493 and len(buf) <= 1980493:
-                    #     print(buf)
-                    # print("RE", time.time() - t, len(buf), start, match)
-                    # if match:
-                    #     idx = match.end()
-                    #     recv_buf[:curbuf] = []
-                    #     recv_buf[0] = buf[idx:]
-                    #     buf = buf[:idx]
-                    #     self._recv_buf_len -= idx
-
-                    #     if not recv_buf[0]:
-                    #         recv_buf.pop(0)
-
-                    #     self._maybe_resume_reading()
-                    #     return buf
 
                     buflen += len(newbuf)
                     curbuf += 1
@@ -1308,14 +1119,6 @@ class SSHClient:
             yield client
         finally:
             await client.close_and_wait()
-    # async def simple_run_command(self, cmd: str):
-    #     async with self.simple_connect() as conn:
-    #         stdin, stdout, stderr = await conn.open_session(
-    #             "bash --init-file ~/.tensorpc_hooks-bash.sh",
-    #             request_pty="force")
-    #         stdin.write(cmd + "\n")
-    #         line = await stdout.readuntil(TENSORPC_READUNTIL)
-    #         return line
 
     async def create_local_tunnel(self, port_pairs: List[Tuple[int, int]],
                                   shutdown_task: asyncio.Task):
