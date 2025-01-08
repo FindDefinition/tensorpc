@@ -29,6 +29,7 @@ import io
 import json
 import time
 import uuid
+import jmespath 
 
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterable,
                     Awaitable, Callable, Coroutine, Dict, Iterable, List,
@@ -4783,6 +4784,7 @@ class VirtualizedBox(MUIContainerBase[MUIVirtualizedBoxProps,
 class DataListControlType(enum.IntEnum):
     SetData = 0
     ScrollToIndex = 1
+    OperateData = 2
 
 
 @dataclasses.dataclass
@@ -4816,6 +4818,41 @@ class DataUpdate:
     index: int
     update: Any
 
+class DataOperationType(enum.IntEnum):
+    Set = 0
+    Delete = 1
+    Extend = 2
+    Slice = 3
+    ArraySet = 4
+
+@dataclasses.dataclass
+class DataOpSet:
+    items: list[tuple[str, Any]]
+
+@dataclasses.dataclass
+class DataOpDelete:
+    keys: list[tuple[str, Any]]
+
+@dataclasses.dataclass
+class DataOpArraySet:
+    items: list[tuple[int, Any]]
+
+@dataclasses.dataclass
+class DataOpExtend:
+    items: list[tuple[int, Any]]
+    dropCount: Optional[int] = None
+
+@dataclasses.dataclass
+class DataOpSlice:
+    start: int
+    end: int
+
+@dataclasses.dataclass
+class DataOperation:
+    index: int
+    jmespath: str 
+    op: DataOperationType
+    opData: Union[DataOpSet, DataOpDelete, DataOpExtend, DataOpSlice, DataOpArraySet]
 
 class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps,
                                    MUIComponentType]):
@@ -4899,6 +4936,74 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps,
                     "index": x.index,
                     "update": x.update
                 } for x in updates],
+            }))
+
+    def _do_data_operation(self, updates: List[DataOperation], validate_only: bool):
+        # TODO validate data model
+        for upd in updates:
+            path = upd.jmespath
+            search_res = jmespath.search(path, self.props.dataList[upd.index])
+            if isinstance(search_res, list):
+                if upd.op == DataOperationType.Extend:
+                    assert isinstance(upd.opData, DataOpExtend)
+                    if not validate_only:
+                        if upd.opData.dropCount is not None:
+                            search_res = search_res[:-upd.opData.dropCount]
+                        search_res.extend(upd.opData.items)
+                elif upd.op == DataOperationType.Slice:
+                    assert isinstance(upd.opData, DataOpSlice)
+                    if not validate_only:
+                        search_res[:] = search_res[upd.opData.start:upd.opData.end]
+                elif upd.op == DataOperationType.ArraySet:
+                    assert isinstance(upd.opData, DataOpArraySet)
+                    if not validate_only:
+                        for i, item in upd.opData.items:
+                            search_res[i] = item
+                    else:
+                        # validate all indexes
+                        for i, _ in upd.opData.items:
+                            assert i >= 0 and i < len(search_res)
+                else:
+                    raise ValueError(f"invalid operation {upd.op}")
+            else:
+                assert dataclasses.is_dataclass(search_res) or isinstance(search_res, dict)
+                if isinstance(search_res, dict):
+                    if upd.op == DataOperationType.Set:
+                        assert isinstance(upd.opData, DataOpSet)
+                        if not validate_only:
+                            for k, v in upd.opData.items:
+                                search_res[k] = v
+                    elif upd.op == DataOperationType.Delete:
+                        assert isinstance(upd.opData, DataOpDelete)
+                        if not validate_only:
+                            for k, v in upd.opData.keys:
+                                del search_res[k]
+                        else:
+                            for k, v in upd.opData.keys:
+                                assert k in search_res
+                    else:
+                        raise ValueError(f"invalid operation {upd.op}")
+                else:
+                    # dataclass
+                    if upd.op == DataOperationType.Set:
+                        assert isinstance(upd.opData, DataOpSet)
+                        if not validate_only:
+                            for k, v in upd.opData.items:
+                                setattr(search_res, k, v)
+                        else:
+                            for k, v in upd.opData.items:
+                                assert hasattr(search_res, k)
+                    else:
+                        raise ValueError(f"invalid operation {upd.op} for dataclass object, only support `Set`")
+
+    async def _operate_datas_in_index(self, updates: List[DataOperation]):
+        self._do_data_operation(updates, False)
+        self._do_data_operation(updates, True)
+        return await self.send_and_wait(
+            self.create_comp_event({
+                "type":
+                DataListControlType.OperateData.value,
+                "updates": as_dict_no_undefined(updates),
             }))
 
     async def _comp_bind_update_data(self, event: Event, prop_name: str):

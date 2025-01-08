@@ -1846,6 +1846,11 @@ class Flow:
         ev = await self._msg_q.get()
         return ev.to_dict()
 
+    @marker.mark_client_stream
+    async def put_app_event_stream(self, ev_dict_iter):
+        async for ev_dict in ev_dict_iter:
+            await self.put_app_event(ev_dict)
+
     async def put_app_event(self, ev_dict: Dict[str, Any]):
         ev = app_event_from_data(ev_dict)
         new_t2e = {}

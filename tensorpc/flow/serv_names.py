@@ -49,6 +49,11 @@ class _ServiceNames:
         return get_service_key_by_type(Flow, Flow.put_app_event.__name__)
 
     @property
+    def FLOW_PUT_APP_EVENT_STREAM(self):
+        from tensorpc.flow.serv.core import Flow
+        return get_service_key_by_type(Flow, Flow.put_app_event_stream.__name__)
+
+    @property
     def FLOWWORKER_PUT_WORKER_EVENT(self):
         from tensorpc.flow.serv.worker import FlowWorker
         return get_service_key_by_type(FlowWorker,

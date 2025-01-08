@@ -209,9 +209,11 @@ class ServFunctionMeta:
         return self.binded_fn
 
     def get_binded_fn(self):
-        assert self.binded_fn is not None
-        return self.binded_fn
-
+        if not self.is_static:
+            assert self.binded_fn is not None
+            return self.binded_fn
+        else:
+            return self.fn
 
 class ObservedFunctionProtocol(Protocol):
     name: str
@@ -1358,6 +1360,11 @@ class ServiceUnit(DynamicClass):
         meta = self.services[serv_key]
         return meta.get_binded_fn(), meta
 
+    def get_service_meta_only(self, serv_key: str):
+        self.init_service()
+        meta = self.services[serv_key]
+        return meta
+
     def run_service(self, serv_key: str, *args, **kwargs):
         self.init_service()
         assert self.obj is not None
@@ -1417,6 +1424,9 @@ class ServiceUnits:
 
     def get_service_and_meta(self, serv_key: str):
         return self.key_to_su[serv_key].get_service_and_meta(serv_key)
+
+    def get_service_meta_only(self, serv_key: str):
+        return self.key_to_su[serv_key].get_service_meta_only(serv_key)
 
     def get_service_id_to_name(self):
         return self._service_id_to_key

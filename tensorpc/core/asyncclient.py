@@ -187,20 +187,34 @@ class AsyncRemoteObject(object):
                             rpc_flags: int = rpc_message_pb2.PickleArray,
                             **kwargs) -> Any:
         flags = rpc_flags
-
-        def wrapped_generator():
-            data_to_be_send = core_io.data_to_pb((args, kwargs), flags)
-            request = rpc_message_pb2.RemoteCallRequest(service_key=key,
-                                                        arrays=data_to_be_send,
-                                                        flags=flags)
-            yield request
-            for data in stream_iter:
-                data_to_be_send = core_io.data_to_pb(((data, ), {}), flags)
-                request = rpc_message_pb2.RemoteCallRequest(
-                    service_key=key, arrays=data_to_be_send, flags=flags)
+        if inspect.isasyncgen(stream_iter):
+            async def wrapped_generator_async():
+                data_to_be_send = core_io.data_to_pb((args, kwargs), flags)
+                request = rpc_message_pb2.RemoteCallRequest(service_key=key,
+                                                            arrays=data_to_be_send,
+                                                            flags=flags)
                 yield request
+                async for data in stream_iter:
+                    data_to_be_send = core_io.data_to_pb(((data, ), {}), flags)
+                    request = rpc_message_pb2.RemoteCallRequest(
+                        service_key=key, arrays=data_to_be_send, flags=flags)
+                    yield request
+            wrapped_func = wrapped_generator_async
+        else:
+            def wrapped_generator():
+                data_to_be_send = core_io.data_to_pb((args, kwargs), flags)
+                request = rpc_message_pb2.RemoteCallRequest(service_key=key,
+                                                            arrays=data_to_be_send,
+                                                            flags=flags)
+                yield request
+                for data in stream_iter:
+                    data_to_be_send = core_io.data_to_pb(((data, ), {}), flags)
+                    request = rpc_message_pb2.RemoteCallRequest(
+                        service_key=key, arrays=data_to_be_send, flags=flags)
+                    yield request
+            wrapped_func = wrapped_generator
 
-        response = await self.stub.ClientStreamRemoteCall(wrapped_generator())
+        response = await self.stub.ClientStreamRemoteCall(wrapped_func())
         return self.parse_remote_response(response)
 
     async def bi_stream(self,
@@ -211,21 +225,34 @@ class AsyncRemoteObject(object):
                         rpc_flags: int = rpc_message_pb2.PickleArray,
                         **kwargs) -> AsyncGenerator[Any, None]:
         flags = rpc_flags
-
-        def wrapped_generator():
-            data_to_be_send = core_io.data_to_pb((args, kwargs), flags)
-            request = rpc_message_pb2.RemoteCallRequest(service_key=key,
-                                                        arrays=data_to_be_send,
-                                                        flags=flags)
-            yield request
-            for data in stream_iter:
-                data_to_be_send = core_io.data_to_pb(((data, ), {}), flags)
-                request = rpc_message_pb2.RemoteCallRequest(
-                    service_key=key, arrays=data_to_be_send, flags=flags)
+        if inspect.isasyncgen(stream_iter):
+            async def wrapped_generator_async():
+                data_to_be_send = core_io.data_to_pb((args, kwargs), flags)
+                request = rpc_message_pb2.RemoteCallRequest(service_key=key,
+                                                            arrays=data_to_be_send,
+                                                            flags=flags)
                 yield request
-
+                async for data in stream_iter:
+                    data_to_be_send = core_io.data_to_pb(((data, ), {}), flags)
+                    request = rpc_message_pb2.RemoteCallRequest(
+                        service_key=key, arrays=data_to_be_send, flags=flags)
+                    yield request
+            wrapped_func = wrapped_generator_async
+        else:
+            def wrapped_generator():
+                data_to_be_send = core_io.data_to_pb((args, kwargs), flags)
+                request = rpc_message_pb2.RemoteCallRequest(service_key=key,
+                                                            arrays=data_to_be_send,
+                                                            flags=flags)
+                yield request
+                for data in stream_iter:
+                    data_to_be_send = core_io.data_to_pb(((data, ), {}), flags)
+                    request = rpc_message_pb2.RemoteCallRequest(
+                        service_key=key, arrays=data_to_be_send, flags=flags)
+                    yield request
+            wrapped_func = wrapped_generator
         async for response in self.stub.BiStreamRemoteCall(
-                wrapped_generator()):
+                wrapped_func()):
             yield self.parse_remote_response(response)
 
     async def stream_remote_call(

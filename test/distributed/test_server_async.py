@@ -67,7 +67,7 @@ async def server_client_local():
         async with asyncclient.AsyncRemoteManager(
                 "localhost:{}".format(port)) as robj:
             await robj.shutdown()
-        proc.wait()
+        print(proc.communicate())
 
 
 def local_func(a, b):
@@ -149,11 +149,14 @@ async def test_remote_generator(server_client: asyncclient.AsyncRemoteManager):
     expected = [4 + i for i in range(10)]
     assert np.allclose(res, expected)
 
-
 def gen_2():
     for i in range(10):
         yield i
 
+async def async_gen_2():
+    for i in range(10):
+        yield i
+        await asyncio.sleep(0.01)
 
 @pytest.mark.asyncio
 async def test_stream(server_client: asyncclient.AsyncRemoteManager):
@@ -163,8 +166,15 @@ async def test_stream(server_client: asyncclient.AsyncRemoteManager):
                                    gen_2(),
                                    a=4,
                                    b=6)
+    res2 = await robj.client_stream("Test3Async.client_stream",
+                                   async_gen_2(),
+                                   a=4,
+                                   b=6)
+
     expected = serv.client_stream(gen_2(), 4, 6)
     assert np.allclose(res, expected)
+    assert np.allclose(res2, expected)
+
     res = []
     async for x in robj.bi_stream("Test3Async.bi_stream", gen_2(), a=4, b=6):
         res.append(x)

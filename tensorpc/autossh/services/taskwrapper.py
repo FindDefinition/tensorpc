@@ -491,3 +491,7 @@ class TaskWrapper:
             "type": ExtendSSHEventType.TraceBack.value,
         }, compact=True)
 
+class TaskManager:
+    """this is used to launch autossh task by current process, e.g. launch shell task from a app"""
+    # TODO
+    pass

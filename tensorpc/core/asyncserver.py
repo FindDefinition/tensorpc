@@ -70,9 +70,13 @@ class AsyncRemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
         return rpc_message_pb2.SimpleReply(data=json.dumps(meta))
 
     async def QueryServiceMeta(self, request, context):
-        service_key = request.service_key
-        _, meta = self.server_core.service_units.get_service_and_meta(
-            service_key)
+        try:
+            service_key = request.service_key
+            meta = self.server_core.service_units.get_service_meta_only(
+                service_key)
+        except:
+            traceback.print_exc()
+            raise
         return rpc_message_pb2.SimpleReply(data=json.dumps(meta.to_json()))
 
     async def RemoteJsonCall(self, request, context):

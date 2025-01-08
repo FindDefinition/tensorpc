@@ -125,7 +125,7 @@ class FlowApp:
         self.app._flow_app_is_headless = headless
         self._send_loop_queue: "asyncio.Queue[AppEvent]" = self.app._queue
         # self.app._send_callback = self._send_http_event
-        self._send_loop_task = asyncio.create_task(self._send_loop())
+        self._send_loop_task = asyncio.create_task(self._send_loop_v2())
         self.lsp_port = self.master_meta.lsp_port
         if self.lsp_port is not None:
             assert self.master_meta.lsp_fwd_port is not None
@@ -555,6 +555,53 @@ class FlowApp:
                     ev.sent_event.set()
 
         self._send_loop_task = None
+
+    async def _send_loop_stream_main(self, robj: tensorpc.AsyncRemoteManager):
+        # TODO unlike flowworker, the app shouldn't disconnect to master/flowworker.
+        # so we should just use retry here.
+        shut_task = asyncio.create_task(self.shutdown_ev.wait())
+        send_task = asyncio.create_task(self._send_loop_queue.get())
+        wait_tasks: List[asyncio.Task] = [shut_task, send_task]
+        previous_event = AppEvent(self._uid, {})
+        while True:
+            # if send fail, MERGE incoming app events, and send again after some time.
+            # all app event is "replace" in frontend.
+            (done, pending) = await asyncio.wait(
+                wait_tasks, return_when=asyncio.FIRST_COMPLETED)
+            if shut_task in done:
+                break
+            ev: AppEvent = send_task.result()
+            if ev.is_loopback:
+                for k, v in ev.type_to_event.items():
+                    if k == AppEventType.UIEvent:
+                        assert isinstance(v, UIEvent)
+                        await self.app._handle_event_with_ctx(v)
+                send_task = asyncio.create_task(
+                    self._send_loop_queue.get())
+                wait_tasks: List[asyncio.Task] = [shut_task, send_task]
+                continue
+            ts = time.time()
+            # assign uid here.
+            ev.uid = self._uid
+            send_task = asyncio.create_task(self._send_loop_queue.get())
+            wait_tasks: List[asyncio.Task] = [shut_task, send_task]
+            yield ev.to_dict()
+            # trigger sent event here.
+            if ev.sent_event is not None:
+                ev.sent_event.set()
+
+        self._send_loop_task = None
+
+    async def _send_loop_v2(self):
+        # TODO unlike flowworker, the app shouldn't disconnect to master/flowworker.
+        # so we should just use retry here.
+        grpc_url = self.master_meta.grpc_url
+        try:
+            async with tensorpc.AsyncRemoteManager(grpc_url) as robj:
+                await robj.client_stream(serv_names.FLOW_PUT_APP_EVENT_STREAM, self._send_loop_stream_main(robj))
+        finally:
+            traceback.print_exc()
+            self._send_loop_task = None 
 
     @marker.mark_server_event(event_type=ServiceEventType.Exit)
     async def on_exit(self):

@@ -50,6 +50,7 @@ REQUIRED = [
     "pydantic>=2.7,<3.0",
     "setproctitle",
     "rich",
+    "jmespath-community",
 ]
 
 # What packages are optional?
