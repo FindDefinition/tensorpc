@@ -342,6 +342,40 @@ class ProtobufServiceCore(ServiceCore):
     """service with core io (protobuf)
     """
 
+    def _return_chunked_sender(self, key: str, req: rpc_msg_pb2.RemoteCallStream, res: Any):
+        res = [res]
+        arrays, data_skeleton = core_io.extract_arrays_from_data(res)
+        data_skeleton_bytes = core_io.dumps_method(
+            data_skeleton, req.flags)
+        res = arrays + [data_skeleton_bytes]
+        res_streams = core_io.to_protobuf_stream(
+            res, key, req.flags)
+        for chunk in res_streams:
+            yield chunk
+
+    def _extract_chunked_data(self, request_iter: Iterator[rpc_msg_pb2.RemoteCallStream]):
+        from_stream = core_io.FromBufferStream()
+        call_data = None
+        call_request = None
+        key = None
+        for call_request, call_data in from_stream.generator(request_iter):
+            key = call_request.func_key
+            break
+        assert call_request is not None and key is not None and call_data is not None
+        return key, call_request, call_data
+
+    async def _extract_chunked_data_async(self, request_iter: AsyncIterator[rpc_msg_pb2.RemoteCallStream]):
+        from_stream = core_io.FromBufferStream()
+        call_data = None
+        call_request = None
+        key = None
+        async for call_request, call_data in from_stream.generator_async(request_iter):
+            key = call_request.func_key
+            break
+
+        assert call_request is not None and key is not None and call_data is not None
+        return key, call_request, call_data
+
     def _process_data(self, arrays, method: int):
         return core_io.data_from_pb(arrays, method)
 
@@ -538,6 +572,73 @@ class ProtobufServiceCore(ServiceCore):
             yield rpc_msg_pb2.RemoteCallReply(arrays=res,
                                               flags=call_request.flags)
 
+    def chunked_bi_stream(
+            self, request_iter: Iterator[rpc_msg_pb2.RemoteCallStream]):
+        self._reset_timeout()
+        key, call_request, call_data = self._extract_chunked_data(request_iter)
+        args, kwargs = call_data
+
+        def generator():
+            from_stream = core_io.FromBufferStream()
+            for req, data in from_stream.generator(request_iter):
+                yield data[0]
+
+        for res, is_exc in self.execute_generator_service(
+                key, [generator(), *args],
+                kwargs,
+                False,
+                service_type=serviceunit.ServiceType.BiStream):
+            self._reset_timeout()
+            if is_exc:
+                yield rpc_msg_pb2.RemoteCallStream(
+                    exception=res,
+                    chunked_data=b'',
+                )
+                break
+            for chunk in self._return_chunked_sender(key, call_request, res):
+                yield chunk
+
+    def chunked_client_stream(self, request_iter: Iterator[rpc_msg_pb2.RemoteCallStream]):
+        self._reset_timeout()
+        key, call_request, call_data = self._extract_chunked_data(request_iter)
+        args, kwargs = call_data
+
+        def generator():
+            from_stream = core_io.FromBufferStream()
+            for req, data in from_stream.generator(request_iter):
+                yield data[0]
+
+        res, is_exc = self.execute_service(
+            key, [generator(), *args],
+            kwargs,
+            service_type=serviceunit.ServiceType.ClientStream)
+        if is_exc:
+            return rpc_msg_pb2.RemoteCallStream(exception=res)
+        for chunk in self._return_chunked_sender(key, call_request, res):
+            yield chunk
+
+    def chunked_remote_generator(
+            self, request_iter: Iterator[rpc_msg_pb2.RemoteCallStream]):
+        self._reset_timeout()
+        key, call_request, call_data = self._extract_chunked_data(request_iter)
+        args, kwargs = call_data
+
+        for res, is_exc in self.execute_generator_service(
+                key, args,
+                kwargs,
+                False,
+                service_type=serviceunit.ServiceType.Normal):
+            self._reset_timeout()
+            if is_exc:
+                # exception
+                yield rpc_msg_pb2.RemoteCallStream(
+                    exception=res,
+                    chunked_data=b'',
+                )
+                break
+            for chunk in self._return_chunked_sender(key, call_request, res):
+                yield chunk
+
     async def remote_generator_async(self,
                                      request: rpc_msg_pb2.RemoteCallRequest):
         self._reset_timeout()
@@ -603,35 +704,19 @@ class ProtobufServiceCore(ServiceCore):
             self, request_iter: AsyncIterator[rpc_msg_pb2.RemoteCallStream]):
         self._reset_timeout()
         from_stream = core_io.FromBufferStream()
-        async for request in request_iter:
-            res = from_stream(request)
-            if res is not None:
-                from_stream.clear()
-                incoming, func_key = res
-                arrays = incoming[:-1]
-                data_skeleton_bytes = incoming[-1]
-                data_skeleton = core_io.loads_method(data_skeleton_bytes,
-                                                     request.flags)
-                args, kwargs = core_io.put_arrays_to_data(
-                    arrays, data_skeleton)
-                res, is_exc = await self.execute_async_service(
-                    func_key, args, kwargs)
-                if is_exc:
-                    # exception
-                    yield rpc_msg_pb2.RemoteCallStream(
-                        exception=res,
-                        chunked_data=b'',
-                    )
-                    break
-                res = [res]
-                arrays, data_skeleton = core_io.extract_arrays_from_data(res)
-                data_skeleton_bytes = core_io.dumps_method(
-                    data_skeleton, request.flags)
-                res = arrays + [data_skeleton_bytes]
-                res_streams = core_io.to_protobuf_stream(
-                    res, func_key, request.flags)
-                for chunk in res_streams:
-                    yield chunk
+        async for req, (args, kwargs) in from_stream.generator_async(request_iter):
+            func_key = req.func_key
+            res, is_exc = await self.execute_async_service(
+                func_key, args, kwargs)
+            if is_exc:
+                # exception
+                yield rpc_msg_pb2.RemoteCallStream(
+                    exception=res,
+                    chunked_data=b'',
+                )
+                break
+            for chunk in self._return_chunked_sender(func_key, req, res):
+                yield chunk
         del from_stream
 
     async def remote_stream_call_async(
@@ -718,3 +803,111 @@ class ProtobufServiceCore(ServiceCore):
                 res = core_io.data_to_pb(res, call_request.flags)
                 yield rpc_msg_pb2.RemoteCallReply(arrays=res,
                                                   flags=call_request.flags)
+
+
+    async def chunked_bi_stream_async(
+            self, request_iter: AsyncIterator[rpc_msg_pb2.RemoteCallStream]):
+        self._reset_timeout()
+        key, call_request, call_data = await self._extract_chunked_data_async(request_iter)
+        args, kwargs = call_data
+        async def generator():
+            from_stream = core_io.FromBufferStream()
+            async for req, data in from_stream.generator_async(request_iter):
+                yield data[0]
+        _, meta = self.service_units.get_service_and_meta(key)
+        if not meta.is_async and meta.is_gen:
+            for res, is_exc in self.execute_generator_service(
+                    key, [generator(), *args],
+                    kwargs,
+                    False,
+                    service_type=serviceunit.ServiceType.BiStream):
+                self._reset_timeout()
+                if is_exc:
+                    # exception
+                    yield rpc_msg_pb2.RemoteCallStream(
+                        exception=res,
+                        chunked_data=b'',
+                    )
+                    break
+                for chunk in self._return_chunked_sender(key, call_request, res):
+                    yield chunk
+        else:
+            async for res, is_exc in self.execute_async_generator_service(
+                    key, [generator(), *args],
+                    kwargs,
+                    False,
+                    service_type=serviceunit.ServiceType.BiStream):
+                self._reset_timeout()
+                if is_exc:
+                    # exception
+                    yield rpc_msg_pb2.RemoteCallStream(
+                        exception=res,
+                        chunked_data=b'',
+                    )
+                    break
+                for chunk in self._return_chunked_sender(key, call_request, res):
+                    yield chunk
+
+
+    async def chunked_client_stream_async(
+            self, request_iter: AsyncIterator[rpc_msg_pb2.RemoteCallStream]):
+        self._reset_timeout()
+        key, call_request, call_data = await self._extract_chunked_data_async(request_iter)
+        args, kwargs = call_data
+
+        async def generator():
+            from_stream = core_io.FromBufferStream()
+            async for req, data in from_stream.generator_async(request_iter):
+                yield data[0]
+
+        res, is_exc = await self.execute_async_service(
+            key, [generator(), *args],
+            kwargs,
+            service_type=serviceunit.ServiceType.ClientStream)
+        if is_exc:
+            # exception
+            yield rpc_msg_pb2.RemoteCallStream(
+                exception=res,
+                chunked_data=b'',
+            )
+        for chunk in self._return_chunked_sender(key, call_request, res):
+            yield chunk
+
+    async def chunked_remote_generator_async(
+            self, request_iter: AsyncIterator[rpc_msg_pb2.RemoteCallStream]):
+        self._reset_timeout()
+        key, call_request, call_data = await self._extract_chunked_data_async(request_iter)
+        args, kwargs = call_data
+        _, meta = self.service_units.get_service_and_meta(key)
+        if not meta.is_async and meta.is_gen:
+            for res, is_exc in self.execute_generator_service(
+                    key, args,
+                    kwargs,
+                    False,
+                    service_type=serviceunit.ServiceType.Normal):
+                self._reset_timeout()
+                if is_exc:
+                    # exception
+                    yield rpc_msg_pb2.RemoteCallStream(
+                        exception=res,
+                        chunked_data=b'',
+                    )
+                    break
+                for chunk in self._return_chunked_sender(key, call_request, res):
+                    yield chunk
+        else:
+            async for res, is_exc in self.execute_async_generator_service(
+                    key, args,
+                    kwargs,
+                    False,
+                    service_type=serviceunit.ServiceType.BiStream):
+                self._reset_timeout()
+                if is_exc:
+                    # exception
+                    yield rpc_msg_pb2.RemoteCallStream(
+                        exception=res,
+                        chunked_data=b'',
+                    )
+                    break
+                for chunk in self._return_chunked_sender(key, call_request, res):
+                    yield chunk

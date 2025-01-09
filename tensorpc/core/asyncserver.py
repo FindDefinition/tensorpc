@@ -108,6 +108,21 @@ class AsyncRemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
         async for res in self.server_core.bi_stream_async(request_iterator):
             yield res
 
+    async def ChunkedBiStreamRemoteCall(self, request_iterator, context):
+        async for res in self.server_core.chunked_bi_stream_async(
+                request_iterator):
+            yield res
+
+    async def ChunkedRemoteGenerator(self, request_iterator, context):
+        async for res in self.server_core.chunked_remote_generator_async(
+                request_iterator):
+            yield res
+
+    async def ChunkedClientStreamRemoteCall(self, request_iterator, context):
+        async for res in self.server_core.chunked_client_stream_async(
+                request_iterator):
+            yield res
+
     def ServerShutdown(self, request, context):
         print("Shutdown message received")
         self.server_core._reset_timeout()

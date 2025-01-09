@@ -268,17 +268,6 @@ class RemoteComponentService:
             ev: AppEvent = send_task.result()
             if ev.is_loopback:
                 raise NotImplementedError("loopback not implemented")
-                for k, v in ev.type_to_event.items():
-                    if k == AppEventType.UIEvent:
-                        assert isinstance(v, UIEvent)
-                        await app._handle_event_with_ctx(v)
-                send_task = asyncio.create_task(app_obj.send_loop_queue.get())
-                wait_for_mount_task = asyncio.create_task(
-                    app_obj.mount_ev.wait())
-                wait_tasks: List[asyncio.Task] = [
-                    shut_task, send_task, wait_for_mount_task
-                ]
-                continue
             ts = time.time()
             # print(app_obj.mounted_app_meta, robj)
             if app_obj.mounted_app_meta is None:

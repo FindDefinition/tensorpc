@@ -108,6 +108,15 @@ class RemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
     def BiStreamRemoteCall(self, request_iterator, context):
         yield from self.server_core.bi_stream(request_iterator)
 
+    def ChunkedBiStreamRemoteCall(self, request_iterator, context):
+        yield from self.server_core.chunked_bi_stream(request_iterator)
+
+    def ChunkedRemoteGenerator(self, request_iterator, context):
+        yield from self.server_core.chunked_remote_generator(request_iterator)
+
+    def ChunkedClientStreamRemoteCall(self, request_iterator, context):
+        yield from self.server_core.chunked_client_stream(request_iterator)
+
     def ServerShutdown(self, request, context):
         print("Shutdown message received")
         self.server_core._reset_timeout()

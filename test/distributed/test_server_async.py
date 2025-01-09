@@ -148,6 +148,11 @@ async def test_remote_generator(server_client: asyncclient.AsyncRemoteManager):
         res.append(x)
     expected = [4 + i for i in range(10)]
     assert np.allclose(res, expected)
+    res = []
+    async for x in robj.chunked_remote_generator("Test3Async.gen_func", a=4):
+        res.append(x)
+    expected = [4 + i for i in range(10)]
+    assert np.allclose(res, expected)
 
 def gen_2():
     for i in range(10):
@@ -158,6 +163,12 @@ async def async_gen_2():
         yield i
         await asyncio.sleep(0.01)
 
+
+def gen_2_large():
+    for i in range(2):
+        yield np.zeros(2000000, dtype=np.float64) + i
+
+
 @pytest.mark.asyncio
 async def test_stream(server_client: asyncclient.AsyncRemoteManager):
     robj = server_client
@@ -166,7 +177,7 @@ async def test_stream(server_client: asyncclient.AsyncRemoteManager):
                                    gen_2(),
                                    a=4,
                                    b=6)
-    res2 = await robj.client_stream("Test3Async.client_stream",
+    res2 = await robj.chunked_client_stream("Test3Async.client_stream",
                                    async_gen_2(),
                                    a=4,
                                    b=6)
@@ -179,6 +190,12 @@ async def test_stream(server_client: asyncclient.AsyncRemoteManager):
     async for x in robj.bi_stream("Test3Async.bi_stream", gen_2(), a=4, b=6):
         res.append(x)
     expected = list(serv.bi_stream(gen_2(), 4, 6))
+    assert np.allclose(res, expected)
+
+    res = []
+    async for x in robj.chunked_bi_stream("Test3Async.bi_stream", gen_2_large(), a=np.full([2000000], 4.0), b=6):
+        res.append(x)
+    expected = list(serv.bi_stream(gen_2_large(), np.full([2000000], 4.0), 6))
     assert np.allclose(res, expected)
 
 

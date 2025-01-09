@@ -9,6 +9,7 @@ from typing import Any, Callable, Optional, TypeVar, cast
 import socket
 import psutil
 
+from contextlib import suppress
 
 def wait_until(func,
                max_retries: int = 200,
@@ -195,3 +196,28 @@ class PeriodicTask:
     async def close(self):
         self.shutdown_ev.set()
         await self.task
+
+async def _cancel(task):
+    # more info: https://stackoverflow.com/a/43810272/1113207
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
+
+async def wait_queue_until_event(handler: Callable[[Any], None],
+                                 q: asyncio.Queue, ev: asyncio.Event):
+    q_get_task = asyncio.create_task(q.get())
+    shut_task = asyncio.create_task(ev.wait())
+    wait_tasks: List[asyncio.Task] = [q_get_task, shut_task]
+    while True:
+        (done,
+         pending) = await asyncio.wait(wait_tasks,
+                                       return_when=asyncio.FIRST_COMPLETED)
+        if ev.is_set():
+            for task in pending:
+                await _cancel(task)
+            break
+        if q_get_task in done:
+            handler(q_get_task.result())
+            q_get_task = asyncio.create_task(q.get())
+        wait_tasks = [q_get_task, shut_task]
+

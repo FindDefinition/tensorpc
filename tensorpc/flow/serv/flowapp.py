@@ -585,7 +585,9 @@ class FlowApp:
             ev.uid = self._uid
             send_task = asyncio.create_task(self._send_loop_queue.get())
             wait_tasks: List[asyncio.Task] = [shut_task, send_task]
-            yield ev.to_dict()
+            # this is stream remote call, will use stream data to call a remote function, 
+            # so we must yield (args, kwargs) instead of data.
+            yield [ev.to_dict()], {}
             # trigger sent event here.
             if ev.sent_event is not None:
                 ev.sent_event.set()
@@ -598,7 +600,8 @@ class FlowApp:
         grpc_url = self.master_meta.grpc_url
         try:
             async with tensorpc.AsyncRemoteManager(grpc_url) as robj:
-                await robj.client_stream(serv_names.FLOW_PUT_APP_EVENT_STREAM, self._send_loop_stream_main(robj))
+                async for _ in robj.chunked_stream_remote_call(serv_names.FLOW_PUT_APP_EVENT, self._send_loop_stream_main(robj)):
+                    pass
         finally:
             traceback.print_exc()
             self._send_loop_task = None 

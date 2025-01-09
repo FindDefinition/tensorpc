@@ -3,9 +3,9 @@ import pickle
 from collections import abc
 from enum import Enum
 from functools import reduce
-from typing import Any, Callable, Dict, Hashable, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Any, AsyncIterable, AsyncIterator, Callable, Dict, Hashable, Iterable, Iterator, List, Optional, Sequence, Tuple, TypeVar, Union
 from typing_extensions import Literal
-
+from tensorpc.core.client import RemoteException
 import msgpack
 import numpy as np
 from tensorpc.core.tree_id import UniqueTreeIdForComp
@@ -218,14 +218,27 @@ class FromBufferStream(object):
         self.current_datas.append(buf.chunked_data)
         if buf.chunk_id == buf.num_chunk - 1:
             # single arg end, get array
-            data = b"".join(self.current_datas)
-            assert len(self.current_datas) > 0
-            single_buf = arraybuf_pb2.ndarray(
-                shape=self.current_buf_shape,
-                dtype=self.current_dtype,
-                data=data,
-            )
-            self.args.append(pb2data(single_buf))
+            if self.current_dtype is not None and self.current_dtype.type != arraybuf_pb2.dtype.CustomBytes and self.current_dtype.type != arraybuf_pb2.dtype.Base64:
+                # is array
+                assert self.current_buf_shape is not None 
+                byte_order = INV_NPBYTEORDER_TO_PB_MAP[self.current_dtype.byte_order]
+                dtype = INV_NPDTYPE_TO_PB_MAP[self.current_dtype.type].newbyteorder(byte_order)
+                res = np.empty(self.current_buf_shape, dtype=dtype)
+                res_u8_view = memoryview(res.view(np.uint8))
+                start = 0
+                for data in self.current_datas:
+                    res_u8_view[start:start + len(data)] = data
+                    start += len(data)
+                self.args.append(res)
+            else:
+                data = b"".join(self.current_datas)
+                assert len(self.current_datas) > 0
+                single_buf = arraybuf_pb2.ndarray(
+                    shape=self.current_buf_shape,
+                    dtype=self.current_dtype,
+                    data=data,
+                )
+                self.args.append(pb2data(single_buf))
             self.current_datas = []
             if buf.arg_id == buf.num_args - 1:
                 # end. return args
@@ -235,6 +248,41 @@ class FromBufferStream(object):
                 return res, self.func_key
         return None
 
+    def _check_remote_exception(self, exception_bytes: Union[bytes, str]):
+        if not exception_bytes:
+            return
+        exc_dict = json.loads(exception_bytes)
+        raise RemoteException(exc_dict["detail"])
+
+    async def generator_async(self, stream_iter: AsyncIterator[rpc_message_pb2.RemoteCallStream]):
+        async for request in stream_iter:
+            self._check_remote_exception(request.exception)
+            res = self(request)
+            if res is not None:
+                self.clear()
+                incoming, _ = res
+                arrays = incoming[:-1]
+                data_skeleton_bytes = incoming[-1]
+                data_skeleton = loads_method(data_skeleton_bytes,
+                                                    request.flags)
+                data = put_arrays_to_data(
+                    arrays, data_skeleton)
+                yield request, data
+
+    def generator(self, stream_iter: Iterator[rpc_message_pb2.RemoteCallStream]):
+        for request in stream_iter:
+            self._check_remote_exception(request.exception)
+            res = self(request)
+            if res is not None:
+                self.clear()
+                incoming, _ = res
+                arrays = incoming[:-1]
+                data_skeleton_bytes = incoming[-1]
+                data_skeleton = loads_method(data_skeleton_bytes,
+                                                    request.flags)
+                data = put_arrays_to_data(
+                    arrays, data_skeleton)
+                yield request, data
 
 def _div_up(a, b):
     return (a + b - 1) // b
@@ -246,7 +294,7 @@ def to_protobuf_stream(data_list: List[Any],
                        chunk_size=64 * 1024):
     if not isinstance(data_list, list):
         raise ValueError("input must be a list")
-    streams = []
+    streams: list[rpc_message_pb2.RemoteCallStream] = []
     arg_ids = list(range(len(data_list)))
     arg_ids[-1] = -1
     num_args = len(data_list)

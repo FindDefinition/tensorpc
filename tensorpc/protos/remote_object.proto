@@ -18,6 +18,10 @@ service RemoteObject {
   // first RemoteCallRequest will save paramsters of generator call, following are generator data.
   rpc ClientStreamRemoteCall (stream RemoteCallRequest) returns (RemoteCallReply) {}
   rpc BiStreamRemoteCall (stream RemoteCallRequest) returns (stream RemoteCallReply) {}
+  rpc ChunkedBiStreamRemoteCall (stream RemoteCallStream) returns (stream RemoteCallStream) {}
+  rpc ChunkedRemoteGenerator (stream RemoteCallStream) returns (stream RemoteCallStream) {}
+  rpc ChunkedClientStreamRemoteCall (stream RemoteCallStream) returns (stream RemoteCallStream) {}
+
   rpc SayHello(HelloRequest) returns (HelloReply) {}
 }
 

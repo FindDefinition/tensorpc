@@ -55,7 +55,7 @@ class Service2:
     def bi_stream(self, stream_iter, a, b):
         res = a
         for data in stream_iter:
-            res += data - b
+            res = res + data - b
             yield res
 
 
@@ -93,5 +93,5 @@ class Service2Async:
     async def bi_stream(stream_iter, a, b):
         res = a
         async for data in stream_iter:
-            res += data - b
+            res = res + data - b
             yield res
