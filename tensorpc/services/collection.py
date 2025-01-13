@@ -219,7 +219,7 @@ class HandlerItem:
     loop: Optional[asyncio.AbstractEventLoop] = None
 
 
-class SubprocessSimpleRPCHandler(SimpleRPCHandler):
+class ArgServer(SimpleRPCHandler):
     """usually used when you want to run some python function inside
     subprocess/SSH (can't pass python objects directly).
     User can run a client in subprocess, load args from this service,

@@ -7,7 +7,6 @@ import contextlib
 import dataclasses
 import enum
 from functools import partial
-import getpass
 import io
 import os
 from pathlib import Path
@@ -21,7 +20,6 @@ import warnings
 import time
 import traceback
 from asyncio.tasks import FIRST_COMPLETED
-from collections import deque
 from contextlib import suppress
 from typing import (TYPE_CHECKING, Any, AnyStr, Awaitable, Callable, Coroutine, Deque,
                     Dict, Iterable, List, Optional, ParamSpec, Set, Tuple, Type, TypeVar, Union,
@@ -47,7 +45,7 @@ from tensorpc.core.prim import is_in_server_context, check_is_service_available,
 from tensorpc.core.client import RemoteManager, simple_remote_call
 LOGGER = get_logger("ssh")
 
-_SSH_RPC_CALL_SERV_NAME = "tensorpc.services.collection::SubprocessSimpleRPCHandler"
+_SSH_RPC_CALL_SERV_NAME = "tensorpc.services.collection::ArgServer"
 
 BASH_HOOKS_FILE_NAME = "hooks-bash.sh"
 
@@ -222,6 +220,7 @@ class EventType(enum.Enum):
     Exception = "Exc"
     Raw = "R"
     Command = "C"
+    External = "Ex"
 
 class EofEvent(Event):
     name = EventType.Eof.value
@@ -249,6 +248,27 @@ class EofEvent(Event):
     def from_dict(cls, data: Dict[str, Any]):
         assert cls.name == data["type"]
         return cls(data["ts"], data["status"], data["is_stderr"], data["uid"])
+
+class ExternalEvent(Event):
+    name = EventType.External.value
+
+    def __init__(self,
+                 timestamp: int,
+                 data: Any,
+                 is_stderr=False,
+                 uid: str = ""):
+        super().__init__(timestamp, is_stderr, uid)
+        self._data = data
+
+    def to_dict(self):
+        res = super().to_dict()
+        res["data"] = self._data
+        return res
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        assert cls.name == data["type"]
+        return cls(data["ts"], data["data"], data["is_stderr"], data["uid"])
 
 
 class LineEvent(Event):
@@ -300,8 +320,6 @@ class RawEvent(Event):
 
     def __repr__(self):
         r = self.raw
-        # if not isinstance(r, bytes):
-        #     r = r.encode("utf-8")
         return "{}({}|{}|raw={})".format(self.name, self.is_stderr,
                                          self.timestamp, r)
 
@@ -382,7 +400,7 @@ class CommandEvent(Event):
 
 
 _ALL_EVENT_TYPES: List[Type[Event]] = [
-    LineEvent, CommandEvent, EofEvent, ExceptionEvent
+    LineEvent, CommandEvent, EofEvent, ExceptionEvent, ExternalEvent, RawEvent
 ]
 
 
@@ -753,19 +771,88 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
 _T_ret = TypeVar("_T_ret")
 P = ParamSpec("P")
 
-class SSHRpcClient:
+async def _get_args_and_params(args, kwargs, code: str, is_func_id: bool):
+    return args, kwargs, code, is_func_id
+
+async def _set_ret(ret, exception_msg: Optional[str] = None, ret_ev: Optional[asyncio.Event] = None, ret_container: Optional[dict] = None):
+    if ret_container is None or ret_ev is None:
+        return # shouldn't happen
+    if exception_msg is not None:
+        ret_container["exception"] = exception_msg
+    else:
+        ret_container["ret"] = ret
+    ret_ev.set()
+
+class SubprocessRpcClient(abc.ABC):
+    def __init__(self, port: int, timeout: int = 10, bkgd_loop: Optional[asyncio.AbstractEventLoop] = None):
+        self._port = port
+        self._bkgd_loop = bkgd_loop
+        self._is_bkgd = self._bkgd_loop is not None
+        self.timeout = timeout
+
+    @abc.abstractmethod
+    async def run_command(self, cmds: list[str]) -> Optional[str]: ...
+
+    async def _call_base(self, args, kwargs, func_id, is_code: bool, need_result: bool = True):
+        arg_event_id = f"arg-{uuid.uuid4().hex}"
+        ret_event_id = f"ret-{uuid.uuid4().hex}"
+        ev = asyncio.Event()
+        result = {}
+        once_serv_key = f"{_SSH_RPC_CALL_SERV_NAME}.once"
+        off_serv_key = f"{_SSH_RPC_CALL_SERV_NAME}.off"
+        if self._bkgd_loop is not None:
+            BACKGROUND_SERVER.execute_service(once_serv_key, arg_event_id, partial(_get_args_and_params, args, kwargs, func_id, is_code), loop=bkgd_loop)
+            BACKGROUND_SERVER.execute_service(once_serv_key, ret_event_id, partial(_set_ret, ret_ev=ev, ret_container=result), loop=bkgd_loop)
+        else:
+            prim.get_service(once_serv_key)(arg_event_id, partial(_get_args_and_params, args, kwargs, func_id, is_code))
+            prim.get_service(once_serv_key)(ret_event_id, partial(_set_ret, ret_ev=ev, ret_container=result))
+
+        run_cmd = f"python -m tensorpc.cli.cmd_rpc_call {arg_event_id} {ret_event_id} {self._port}"
+        final_cmds = [
+            run_cmd,
+        ]
+        try:
+            error_msg = await self.run_command(final_cmds)
+            async with async_timeout.timeout(self.timeout):
+                await ev.wait()
+            if "exception" in result:
+                if error_msg:
+                    LOGGER.error("Command Message: %s", error_msg)
+                raise Exception(result["exception"])
+            else:
+                return result["ret"]
+        finally:
+            if self._is_bkgd:
+                BACKGROUND_SERVER.execute_service(off_serv_key, arg_event_id)
+                BACKGROUND_SERVER.execute_service(off_serv_key, ret_event_id)
+            else:
+                prim.get_service(off_serv_key)(arg_event_id)
+                prim.get_service(off_serv_key)(ret_event_id)
+
+        
+    async def call(self, func_id: Union[str, Callable[P, _T_ret]], *args: P.args, **kwargs: P.kwargs) -> _T_ret:
+        if not isinstance(func_id, str):
+            func_id = get_module_id_of_type(func_id)
+        return await self._call_base(args, kwargs, func_id, False)
+
+    async def call_with_code(self, func_code: str, *args, **kwargs):
+        return await self._call_base(args, kwargs, func_code, True)
+
+    async def call_without_result(self, func_id: Union[str, Callable[P, _T_ret]], *args: P.args, **kwargs: P.kwargs) -> _T_ret:
+        if not isinstance(func_id, str):
+            func_id = get_module_id_of_type(func_id)
+        return await self._call_base(args, kwargs, func_id, False, False)
+
+class SSHRpcClient(SubprocessRpcClient):
     def __init__(self, conn: asyncssh.SSHClientConnection, port: int, shell_init_cmd: str, 
             bkgd_loop: Optional[asyncio.AbstractEventLoop] = None, 
             remote_fwd_listeners: Optional[List[asyncssh.SSHListener]] = None,
             manual_close: bool = False,
             user_init_cmd: str = "",
             host_url: str = ""):
+        super().__init__(port, 10, bkgd_loop)
         self._conn = conn
-        self._bkgd_loop = bkgd_loop
-        self._port = port
-        self._is_bkgd = self._bkgd_loop is not None
 
-        self.timeout = 10
         self._shell_init_cmd = shell_init_cmd
         self._cmd: str = user_init_cmd
         self._remote_fwd_listeners = remote_fwd_listeners
@@ -786,72 +873,16 @@ class SSHRpcClient:
     def set_init_cmd(self, cmd: str):
         self._cmd = cmd
 
-    async def _call_base(self, func_id: str, is_code: bool, *args, **kwargs):
-        arg_event_id = f"arg-{uuid.uuid4().hex}"
-        ret_event_id = f"ret-{uuid.uuid4().hex}"
-        ev = asyncio.Event()
-        result = {}
-        once_serv_key = f"{_SSH_RPC_CALL_SERV_NAME}.once"
-        off_serv_key = f"{_SSH_RPC_CALL_SERV_NAME}.off"
-        if self._is_bkgd:
-            BACKGROUND_SERVER.execute_service(once_serv_key, arg_event_id, partial(self._get_args_and_params, args, kwargs, func_id, is_code), loop=self._bkgd_loop)
-            BACKGROUND_SERVER.execute_service(once_serv_key, ret_event_id, partial(self._set_ret, ret_ev=ev, ret_container=result), loop=self._bkgd_loop)
-        else:
-            prim.get_service(once_serv_key)(arg_event_id, partial(self._get_args_and_params, args, kwargs, func_id, is_code))
-            prim.get_service(once_serv_key)(ret_event_id, partial(self._set_ret, ret_ev=ev, ret_container=result))
-
-        run_cmd = f"python -m tensorpc.cli.cmd_rpc_call {arg_event_id} {ret_event_id} {self._port}"
-        final_cmds = [
-            run_cmd,
-        ]
+    async def run_command(self, cmds: List[str]) -> Optional[str]:
+        final_cmds = cmds.copy()
         if self._cmd != "":
             final_cmds.insert(0, self._cmd)
         final_cmd = " && ".join(final_cmds)
-        # print(func_id, self._shell_init_cmd, final_cmd)
         proc_res = await self._conn.run(f"{self._shell_init_cmd} \"{final_cmd}\"")
         if proc_res.exit_status != 0 and proc_res.exit_status is not None:
-            if self._is_bkgd:
-                BACKGROUND_SERVER.execute_service(off_serv_key, arg_event_id)
-                BACKGROUND_SERVER.execute_service(off_serv_key, ret_event_id)
-            else:
-                prim.get_service(off_serv_key)(arg_event_id)
-                prim.get_service(off_serv_key)(ret_event_id)
             print("proc status", proc_res.exit_status, proc_res.stdout, proc_res.stderr)
-            raise Exception(proc_res.stderr)
-
-        async with async_timeout.timeout(self.timeout):
-            await ev.wait()
-        if "exception" in result:
-            if self._is_bkgd:
-                BACKGROUND_SERVER.execute_service(off_serv_key, arg_event_id)
-                BACKGROUND_SERVER.execute_service(off_serv_key, ret_event_id)
-            else:
-                prim.get_service(off_serv_key)(arg_event_id)
-                prim.get_service(off_serv_key)(ret_event_id)
-            print("exception", proc_res.stdout, proc_res.stderr, result["exception"])
-            raise Exception(result["exception"])
-        else:
-            return result["ret"]
-
-    async def call(self, func_id: Union[str, Callable[P, _T_ret]], *args: P.args, **kwargs: P.kwargs) -> _T_ret:
-        if not isinstance(func_id, str):
-            func_id = get_module_id_of_type(func_id)
-        return await self._call_base(func_id, False, *args, **kwargs)
-
-    async def _get_args_and_params(self, args, kwargs, code: str, is_func_id: bool):
-        return args, kwargs, code, is_func_id
-
-    async def _set_ret(self, ret, exception_msg: Optional[str] = None, ret_ev: Optional[asyncio.Event] = None, ret_container: Optional[dict] = None):
-        if ret_container is None or ret_ev is None:
-            return # shouldn't happen
-        if exception_msg is not None:
-            ret_container["exception"] = exception_msg
-        else:
-            ret_container["ret"] = ret
-        ret_ev.set()
-
-    async def call_with_code(self, func_code: str, *args, **kwargs):
-        return await self._call_base(func_code, True, *args, **kwargs)
+            return None
+        return None
 
 class SSHClient:
 
@@ -1292,14 +1323,15 @@ class SSHClient:
                 fwd_listeners.append(listener)
         return fwd_ports, rfwd_ports, fwd_listeners, rfwd_listeners
 
-def run_ssh_rpc_call(arg_event_id: str, ret_event_id: str, rf_port: int):
+def run_ssh_rpc_call(arg_event_id: str, ret_event_id: str, rf_port: int, need_result: bool = True):
     # should be run inside remote ssh 
     with RemoteManager(f"localhost:{rf_port}") as robj:
         args, kwargs, code, is_func_code = robj.remote_call(f"{_SSH_RPC_CALL_SERV_NAME}.call_event", arg_event_id)
         try:
             func = import_dynamic_func(code, not is_func_code)
             res = func(*args, **kwargs)
-            robj.remote_call(f"{_SSH_RPC_CALL_SERV_NAME}.call_event", ret_event_id, res)
+            if need_result:
+                robj.remote_call(f"{_SSH_RPC_CALL_SERV_NAME}.call_event", ret_event_id, res)
         except Exception as exc:
             exc_msg_ss = io.StringIO()
             traceback.print_exc(file=exc_msg_ss)

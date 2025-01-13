@@ -1327,20 +1327,20 @@ class AppNode(CommandNode, DataStorageNodeBase):
         await self.input_queue.put(
             SSHRequest(SSHRequestType.ChangeSize, self.init_terminal_size))
         # alias apppython
-        serv_name = f"tensorpc.flow.serv.flowapp{TENSORPC_SPLIT}FlowApp"
+        # serv_name = f"tensorpc.flow.serv.flowapp{TENSORPC_SPLIT}FlowApp"
 
-        serv_name, cfg_encoded = self._get_cfg_encoded()
-        option = {
-            "module": serv_name,
-            "port": self.grpc_port,
-            "http_port": self.http_port,
-            "serv_config_b64": cfg_encoded,
-        }
-        option = base64.b64encode(
-            json.dumps(option).encode("utf-8")).decode("utf-8")
+        # serv_name, cfg_encoded = self._get_cfg_encoded()
+        # option = {
+        #     "module": serv_name,
+        #     "port": self.grpc_port,
+        #     "http_port": self.http_port,
+        #     "serv_config_b64": cfg_encoded,
+        # }
+        # option = base64.b64encode(
+        #     json.dumps(option).encode("utf-8")).decode("utf-8")
 
-        alias_cmd = f" alias appscript=\"python -m tensorpc.serve.flowapp_script \"{option}\"\""
-        await self.input_queue.put(alias_cmd + "\n")
+        # alias_cmd = f" alias appscript=\"python -m tensorpc.serve.flowapp_script \"{option}\"\""
+        # await self.input_queue.put(alias_cmd + "\n")
 
         return True, init_event
 

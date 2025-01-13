@@ -59,6 +59,11 @@ class TaskWrapperArgs:
     # only enabled if log_path is set and pyspy_period is set, 
     # won't be logged to stdout.
     pyspy_period: Optional[int] = None
+    request_pty: bool = False
+
+    @staticmethod 
+    def empty():
+        return TaskWrapperArgs("", "")
 
 @dataclasses.dataclass
 class TaskWrapperWorkerState:

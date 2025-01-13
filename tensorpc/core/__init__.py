@@ -18,7 +18,7 @@ from tensorpc.constants import TENSORPC_SPLIT
 
 class BuiltinServiceKeys(enum.Enum):
     FileOps = f"tensorpc.services.collection{TENSORPC_SPLIT}FileOps"
-    SubprocessSimpleRPCHandler = f"tensorpc.services.collection{TENSORPC_SPLIT}SubprocessSimpleRPCHandler"
+    ArgServer = f"tensorpc.services.collection{TENSORPC_SPLIT}ArgServer"
     SpeedTestServer = f"tensorpc.services.collection{TENSORPC_SPLIT}SpeedTestServer"
     Flow = f"tensorpc.flow.serv.core{TENSORPC_SPLIT}Flow"
     RemoteComponentService = f"tensorpc.flow.serv.remote_comp{TENSORPC_SPLIT}RemoteComponentService"
@@ -27,10 +27,11 @@ class BuiltinServiceKeys(enum.Enum):
     Simple = f"tensorpc.services.collection{TENSORPC_SPLIT}Simple"
     Scheduler = f"tensorpc.autossh.services.scheduler{TENSORPC_SPLIT}Scheduler"
     TaskWrapper = f"tensorpc.autossh.services.taskwrapper{TENSORPC_SPLIT}TaskWrapper"
+    TaskManager = f"tensorpc.autossh.services.taskwrapper{TENSORPC_SPLIT}Manager"
 
 BUILTIN_SERVICES = [
     Service(BuiltinServiceKeys.FileOps.value, {}),
-    Service(BuiltinServiceKeys.SubprocessSimpleRPCHandler.value, {}),
+    Service(BuiltinServiceKeys.ArgServer.value, {}),
     Service(BuiltinServiceKeys.SpeedTestServer.value, {}),
     Service(BuiltinServiceKeys.Flow.value, {}),
     Service(BuiltinServiceKeys.RemoteComponentService.value, {}),
@@ -39,6 +40,7 @@ BUILTIN_SERVICES = [
     Service(BuiltinServiceKeys.RTTraceStorageService.value, {}),
     Service(BuiltinServiceKeys.Scheduler.value, {}),
     Service(BuiltinServiceKeys.TaskWrapper.value, {}),
+    Service(BuiltinServiceKeys.TaskManager.value, {}),
 ]
 
 

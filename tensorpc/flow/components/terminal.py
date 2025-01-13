@@ -69,10 +69,14 @@ class TerminalEventType(enum.IntEnum):
     Eof = 1
     ClearAndWrite = 2
 
+@dataclasses.dataclass
+class TerminalResizeEvent:
+    width: int
+    height: int
 
 class Terminal(MUIComponentBase[TerminalProps]):
 
-    def __init__(self, init_data: Optional[Union[bytes, str]] = None) -> None:
+    def __init__(self, init_data: Optional[Union[bytes, str]] = None, callback: Optional[Callable[[Union[str, bytes]], Any]] = None) -> None:
         super().__init__(UIType.Terminal,
                          TerminalProps,
                          allowed_events=[
@@ -85,10 +89,13 @@ class Terminal(MUIComponentBase[TerminalProps]):
         self.event_terminal_input = self._create_event_slot(
             FrontendEventType.TerminalInput)
         self.event_terminal_resize = self._create_event_slot(
-            FrontendEventType.TerminalResize)
+            FrontendEventType.TerminalResize, lambda x: TerminalResizeEvent(**x))
         self.event_terminal_save_state = self._create_event_slot(
             FrontendEventType.TerminalSaveState)
         self.event_terminal_save_state.on(self._default_on_save_state)
+
+        if callback is not None:
+            self.event_terminal_input.on(callback)
 
     def _default_on_save_state(self, state):
         self.props.initData = state
@@ -120,6 +127,20 @@ class Terminal(MUIComponentBase[TerminalProps]):
                 "data": content
             }))
 
+    async def send_raw(self, data: bytes):
+        await self.put_app_event(
+            self.create_comp_event({
+                "type": TerminalEventType.Raw.value,
+                "data": data
+            }))
+    
+    async def send_eof(self):
+        await self.put_app_event(
+            self.create_comp_event({
+                "type": TerminalEventType.Eof.value,
+                "data": ""
+            }))
+
 
 class AsyncSSHTerminal(Terminal):
 
@@ -142,7 +163,7 @@ class AsyncSSHTerminal(Terminal):
         self.event_terminal_resize.on(self._on_resize)
         self._ssh_task = None
 
-        self._init_size: Optional[dict] = None
+        self._init_size: Optional[TerminalResizeEvent] = None
 
     async def connect(self,
                       event_callback: Optional[Callable[[SSHEvent],
@@ -173,7 +194,7 @@ class AsyncSSHTerminal(Terminal):
             await self._cur_inp_queue.put(
                 SSHRequest(
                     SSHRequestType.ChangeSize,
-                    [self._init_size["width"], self._init_size["height"]]))
+                    [self._init_size.width, self._init_size.height]))
         self._ssh_task = asyncio.create_task(
             self._client.connect_queue(self._cur_inp_queue,
                                        partial(self._handle_ssh_queue,
@@ -201,16 +222,16 @@ class AsyncSSHTerminal(Terminal):
         await self.clear_and_write("disconnected.")
         self._init_size = None
 
-    async def _on_input(self, data):
+    async def _on_input(self, data: Union[str, bytes]):
         if self._ssh_task is not None:
             await self._cur_inp_queue.put(data)
 
-    async def _on_resize(self, data):
+    async def _on_resize(self, data: TerminalResizeEvent):
         self._init_size = data
         if self._ssh_task is not None:
             await self._cur_inp_queue.put(
                 SSHRequest(SSHRequestType.ChangeSize,
-                           [data["width"], data["height"]]))
+                           [data.width, data.height]))
 
     async def _handle_ssh_queue(self,
                                 event: SSHEvent,
@@ -225,19 +246,11 @@ class AsyncSSHTerminal(Terminal):
             except:
                 traceback.print_exc()
         if isinstance(event, RawEvent):
-            await self.put_app_event(
-                self.create_comp_event({
-                    "type": TerminalEventType.Raw.value,
-                    "data": event.raw
-                }))
+            await self.send_raw(event.raw)
         elif isinstance(event, (EofEvent, ExceptionEvent)):
             if isinstance(event, ExceptionEvent):
                 LOGGER.error(event.traceback_str)
             else:
                 LOGGER.warning(event)
             if self.is_mounted():
-                await self.put_app_event(
-                    self.create_comp_event({
-                        "type": TerminalEventType.Eof.value,
-                        "data": ""
-                    }))
+                await self.send_eof()

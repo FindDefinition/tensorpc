@@ -18,8 +18,8 @@ from enum import Enum
 from pathlib import Path
 from types import ModuleType
 from typing import (Any, Callable, ClassVar, Coroutine, Dict, Generator, List,
-                    Optional, Set, Tuple, Type, Union)
-from typing_extensions import TypeAlias
+                    Optional, Set, Tuple, Type, TypeVar, Union)
+from typing_extensions import TypeAlias, ParamSpec
 from tensorpc import compat
 from tensorpc.constants import (TENSORPC_FLOW_FUNC_META_KEY,
                                 TENSORPC_FUNC_META_KEY, TENSORPC_SPLIT)
@@ -1457,3 +1457,26 @@ class ServiceUnits:
     def run_init(self):
         pass
         # self.init_service()
+
+_P = ParamSpec("_P")
+
+async def run_callback(callback: Callable[_P, Any], *args: _P.args, **kwargs: _P.kwargs) -> Any:
+    res_may_coro = callback(*args, **kwargs)
+    if inspect.iscoroutine(res_may_coro):
+        res = await res_may_coro
+    else:
+        res = res_may_coro
+    return res
+
+async def run_callback_noexcept(callback: Callable[_P, Any], *args: _P.args, **kwargs: _P.kwargs) -> tuple[Any, Optional[tuple[Any, str]]]:
+    try:
+        res_may_coro = callback(*args, **kwargs)
+        if inspect.iscoroutine(res_may_coro):
+            res = await res_may_coro
+        else:
+            res = res_may_coro
+        return res, None
+    except Exception as e:
+        ss = io.StringIO()
+        traceback.print_exc(file=ss)
+        return None, (e, ss.getvalue())
