@@ -15,7 +15,8 @@
 import abc
 import asyncio
 import base64
-from typing import Mapping, Sequence
+import contextlib
+from typing import Generic, Mapping, Sequence, cast
 import copy
 from functools import partial
 from typing_extensions import override
@@ -40,6 +41,7 @@ from PIL import Image as PILImage
 from typing_extensions import Literal, TypeAlias, TypedDict, Self
 from pydantic import field_validator, model_validator
 
+from tensorpc.core.datamodel.draft import DraftObject, JMESPathOp, JMESPathOpForBackend, apply_draft_jmes_ops_backend, capture_draft_update
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp, UniqueTreeIdForTree
 from tensorpc.flow import marker
 from ...core.typemetas import Vector3Type
@@ -5035,11 +5037,11 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps,
         if FrontendEventType.Change.value in comp._flow_allowed_events:
             # TODO change all control components to use value as its data prop name
             if "defaultValue" in comp._prop_field_names:
-                comp.set_override_props(defaultValue=prop_name)
+                comp.bind_fields(defaultValue=prop_name)
             elif "value" in comp._prop_field_names:
-                comp.set_override_props(value=prop_name)
+                comp.bind_fields(value=prop_name)
             elif "checked" in comp._prop_field_names:
-                comp.set_override_props(checked=prop_name)
+                comp.bind_fields(checked=prop_name)
             comp.register_event_handler(FrontendEventType.Change.value,
                                         partial(self._comp_bind_update_data,
                                                 prop_name=prop_name),
@@ -5149,6 +5151,7 @@ class DataGridPropsBase:
     cellEdit: Union[Undefined, bool] = undefined
     rowSelection: Union[Undefined, bool] = undefined
     enableColumnFilter: Union[Undefined, bool] = undefined
+    enableGlobalFilter: Union[Undefined, bool] = undefined
     globalFilter: Union[Undefined, str] = undefined
     fullWidth: Union[Undefined, bool] = undefined
     tableLayout: Union[Undefined, Literal["auto", "fixed"]] = undefined
@@ -5347,11 +5350,11 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
         if FrontendEventType.Change.value in comp._flow_allowed_events:
             # TODO change all control components to use value as its data prop name
             if "defaultValue" in comp._prop_field_names:
-                comp.set_override_props(defaultValue=prop_name)
+                comp.bind_fields(defaultValue=prop_name)
             elif "value" in comp._prop_field_names:
-                comp.set_override_props(value=prop_name)
+                comp.bind_fields(value=prop_name)
             elif "checked" in comp._prop_field_names:
-                comp.set_override_props(checked=prop_name)
+                comp.bind_fields(checked=prop_name)
             comp.register_event_handler(FrontendEventType.Change.value,
                                         partial(self._comp_bind_update_data,
                                                 prop_name=prop_name),
@@ -5890,3 +5893,78 @@ class Breadcrumbs(MUIComponentBase[BreadcrumbsProps]):
         res = super().get_sync_props()
         res["value"] = self.props.value
         return res
+
+_T = TypeVar("_T")
+T = TypeVar("T")
+
+@dataclasses.dataclass
+class DataModelProps(ContainerBaseProps):
+    dataObject: Any = dataclasses.field(default_factory=dict)
+
+class DataModel(MUIContainerBase[DataModelProps, MUIComponentType], Generic[_T]):
+    def __init__(self, model: _T, children: Optional[LayoutType] = None) -> None:
+        if children is not None and isinstance(children, Sequence):
+            children = {str(i): v for i, v in enumerate(children)}
+
+        super().__init__(UIType.DataModel, DataModelProps, children, allowed_events=[])
+        self.prop(dataObject=model)
+        self.model = model
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+    async def sync_model(self):
+        await self.send_and_wait(self.update_event(dataObject=self.model))
+
+    def get_draft(self) -> _T:
+        return cast(_T, DraftObject(self.model, userdata=self))
+
+    async def _update_with_jmes_ops(self, ops: list[JMESPathOpForBackend]):
+        apply_draft_jmes_ops_backend(self.model, ops)
+        frontend_ops = [op.to_jmes_path_op().to_dict() for op in ops]
+        return await self.send_and_wait(self.create_comp_event({
+            "type": 0,
+            "ops": frontend_ops,
+        }))
+
+    @contextlib.asynccontextmanager
+    async def draft_update(self):
+        draft = self.get_draft()
+        with capture_draft_update() as ctx:
+            yield draft
+        await self._update_with_jmes_ops(ctx._ops)
+
+    @staticmethod 
+    def get_draft_external(model: T) -> T:
+        return cast(T, DraftObject(model, userdata=None))
+
+@dataclasses.dataclass
+class DataForwardProps(ContainerBaseProps):
+    comps: List[Component] = dataclasses.field(default_factory=list)
+
+class DataForward(MUIContainerBase[DataForwardProps, MUIComponentType]):
+    def __init__(self, comps: List[Component], children: Optional[LayoutType] = None) -> None:
+        if children is not None and isinstance(children, Sequence):
+            children = {str(i): v for i, v in enumerate(children)}
+        for comp in comps:
+            assert comp._flow_comp_type != UIType.DataForward, "DataForward can't contain DataForward"
+        assert len(comps) > 0, "comps must have at least one component"
+        super().__init__(UIType.DataForward, DataForwardProps, children, allowed_events=[])
+        self.prop(comps=comps)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)

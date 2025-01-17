@@ -176,7 +176,7 @@ class UserTreeItemCard(mui.FlexBox):
                  init_width: mui.ValueType = "240px"):
         self.preview_layout = mui.VBox([])
         self._is_selected = mui.Checkbox(callback=callback).prop(checked=True)
-        self._print_blocks = mui.DataFlexBox(mui.Markdown().set_override_props(
+        self._print_blocks = mui.DataFlexBox(mui.Markdown().bind_fields(
             value="data")).prop(flexFlow="column nowrap",
                                 overflowY="auto",
                                 height="100%")

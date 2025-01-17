@@ -171,20 +171,20 @@ class NumpyArrayGrid(mui.FlexBox):
                 mui.MatchCase.Case("index", mui.Typography("min")),
                 mui.MatchCase.Case(
                     mui.undefined,
-                    mui.Typography().set_override_props(value="data").prop(
+                    mui.Typography().bind_fields(value="data").prop(
                         enableTooltipWhenOverflow=True,
                         tooltipEnterDelay=400,
                         fontSize="12px")),
-            ]).set_override_props(condition="condition"),
+            ]).bind_fields(condition="type"),
             mui.MatchCase([
                 mui.MatchCase.Case("index", mui.Typography("max")),
                 mui.MatchCase.Case(
                     mui.undefined,
-                    mui.Typography().set_override_props(value="data").prop(
+                    mui.Typography().bind_fields(value="data").prop(
                         enableTooltipWhenOverflow=True,
                         tooltipEnterDelay=400,
                         fontSize="12px")),
-            ]).set_override_props(condition="condition"),
+            ]).bind_fields(condition="type"),
         ]
 
         column_def = mui.DataGrid.ColumnDef(
@@ -270,7 +270,9 @@ class NumpyArrayGrid(mui.FlexBox):
                     min_val = str(min_val)
                 if isnan(max_val) or isinf(max_val):
                     max_val = str(max_val)
-                footer_min_datas[col_key] = min_val
+                footer_min_datas[col_key] = {
+                    "type"
+                }
                 footer_max_datas[col_key] = max_val
         return [footer_min_datas, footer_max_datas]
 
@@ -445,8 +447,8 @@ class NumpyArrayGridTable(mui.FlexBox):
             mui.MatchCase.ExprCase("x != \"scalar\"", btn),
             mui.MatchCase.Case(
                 mui.undefined,
-                mui.Typography("").set_override_props(value="value")),
-        ]).set_override_props(condition="shape")
+                mui.Typography("").bind_fields(value="value")),
+        ]).bind_fields(condition="shape")
         cbox = mui.Checkbox().prop(size="small", disabled=True)
         column_defs = [
             mui.DataGrid.ColumnDef("name", accessorKey="name"),

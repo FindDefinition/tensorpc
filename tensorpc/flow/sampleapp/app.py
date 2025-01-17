@@ -1211,10 +1211,10 @@ class DataListApp:
         ]
         datalist_checkbox = mui.Checkbox()
         datalist_comp = mui.HBox([
-            mui.Typography().set_override_props(value="name"),
+            mui.Typography().bind_fields(value="name"),
             datalist_checkbox,
-            mui.DataFlexBox(mui.Chip().prop(size="small").set_override_props(
-                label="tag")).set_override_props(dataList="tags").prop(
+            mui.DataFlexBox(mui.Chip().prop(size="small").bind_fields(
+                label="tag")).bind_fields(dataList="tags").prop(
                     flexFlow="row", virtualized=False),
         ]).prop(alignItems="center")
         datalist = mui.DataFlexBox(datalist_comp).prop(flexFlow="column",
@@ -1283,7 +1283,7 @@ class DataGridApp:
                                    cell=cbox),
             mui.DataGrid.ColumnDef("btn", cell=btn),
         ]
-        master_detail = mui.JsonViewer().set_override_props(data=".")
+        master_detail = mui.JsonViewer().bind_fields(data="$")
         master_detail = mui.VBox([
             mui.Typography("Master Detail").prop(variant="h4"),
             mui.DataGrid([
@@ -1294,13 +1294,13 @@ class DataGridApp:
                     stickyHeader=False,
                     virtualized=False,
                     size="small",
-                    enableColumnFilter=False).set_override_props(dataList="nested")
+                    enableColumnFilter=False).bind_fields(dataList="nested")
         ]).prop(width="100%", alignItems="center")
         # master_detail = mui.DataFlexBox(mui.HBox([
-        #     mui.Typography().set_override_props(value="id"),
+        #     mui.Typography().bind_fields(value="id"),
         #     mui.Divider(orientation="vertical"),
-        #     mui.Typography().set_override_props(value="iq"),
-        # ])).set_override_props(dataList="nested").prop(flexFlow="column")
+        #     mui.Typography().bind_fields(value="iq"),
+        # ])).bind_fields(dataList="nested").prop(flexFlow="column")
         btn = mui.Button("NAME!")
         md_root = mui.Markdown("")
         btn.event_click.on(lambda: md_root.write("FOOT!"))
@@ -1309,19 +1309,39 @@ class DataGridApp:
             column_defs,
             rows,
             master_detail,
+            customHeaderDatas=[
+                {
+                    "name": {
+                        "type": "name",
+                    },
+                    "calories": {
+                        "type": "calories",
+                    },
+                },
+            ],
             customHeaders=[
                 mui.MatchCase([
                     mui.MatchCase.Case("name", btn),
                     mui.MatchCase.Case(mui.undefined,
                                        mui.Typography("Other H!")),
-                ]).set_override_props(condition="condition")
+                ]).bind_fields(condition="type")
+            ],
+            customFooterDatas=[
+                {
+                    "name": {
+                        "type": "name",
+                    },
+                    "calories": {
+                        "type": "calories",
+                    },
+                },
             ],
             customFooters=[
                 mui.MatchCase([
                     mui.MatchCase.Case("name", md_root),
                     mui.MatchCase.Case(mui.undefined,
                                        mui.Typography("Other F!")),
-                ]).set_override_props(condition="condition")
+                ]).bind_fields(condition="type")
             ]).prop(idKey="id",
                     rowHover=True,
                     virtualized=True,
@@ -1416,11 +1436,11 @@ class MatrixDataGridApp:
                 mui.MatchCase.Case("index", mui.Typography("Max")),
                 mui.MatchCase.Case(
                     mui.undefined,
-                    mui.Typography().set_override_props(value="data").prop(
+                    mui.Typography().bind_fields(value="data").prop(
                         enableTooltipWhenOverflow=True,
                         tooltipEnterDelay=400,
                         fontSize="12px")),
-            ]).set_override_props(condition="condition")
+            ]).bind_fields(condition="condition")
         ]
         custom_footer_datas = [{
             "a-0": str(arr.max(0)[0]),

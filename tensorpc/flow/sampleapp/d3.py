@@ -348,20 +348,25 @@ class EnvmapGroupdProjectionApp:
         cam = three.PerspectiveCamera(fov=35,
                                       up=(0, 1, 0)).prop(position=(-30, 100,
                                                                    120))
-        car_group = three.Group([
-            three.CubeCamera([
+        
+        car = three.URILoaderContext(
+            three.URILoaderType.GLTF, "tensorpc://porsche-transformed.glb", [])
+        cubecam = three.CubeCamera([]).prop(frames=1, position=(0.0, 1.5, 0), near=0.1,
+                resolution=128)
+        cubecam.init_add_layout([
+            three.DataForward([car], [
                 three.Group([
                     three.Group([
                         three.Mesh([]).prop(
                             position=(-7.966238, -0.10155, -7.966238),
-                            scale=0.000973).set_override_props_unchecked(
+                            scale=0.000973).bind_fields_unchecked(
                                 geometry="nodes.mesh_1_instance_0.geometry",
-                                material="materials.930_plastics"),
+                                material="materials.\"930_plastics\""),
                         three.Mesh([]).prop(
                             position=(-7.966238, -0.10155, -7.966238),
-                            scale=0.000973).set_override_props_unchecked(
+                            scale=0.000973).bind_fields_unchecked(
                                 geometry="nodes.mesh_1_instance_1.geometry",
-                                material="materials.930_plastics"),
+                                material="materials.\"930_plastics\""),
                     ]).prop(rotation=(np.pi / 2, 0, 0)),
                     three.Group([
                         three.SelectionContext(
@@ -382,11 +387,11 @@ class EnvmapGroupdProjectionApp:
                                 three.Mesh([
                                     # three.MeshPhysicalMaterial(),
                                     # three.Outlines().prop(color="blue", thickness=50),
-                                ]).set_override_props_unchecked_dict(
+                                ]).bind_fields_unchecked_dict(
                                     {
                                         "geometry": "nodes.mesh_0.geometry",
                                         "material": "materials.paint",
-                                        "material-envMap": "CubeCameraTexture",
+                                        "material-envMap": (cubecam, "CubeCameraTexture"),
                                     }).update_raw_props({
                                         "material-color":
                                         "#ffdf71",
@@ -395,71 +400,74 @@ class EnvmapGroupdProjectionApp:
                                                 "material-color": "#aadf71",
                                             },
                                             userData={"RTX": "4090Ti"}),
-                                three.Mesh([]).set_override_props_unchecked(
+                                three.Mesh([]).bind_fields_unchecked(
                                     geometry="nodes.mesh_0_1.geometry",
-                                    material="materials.930_chromes"),
-                                three.Mesh([]).set_override_props_unchecked(
+                                    material="materials.\"930_chromes\""),
+                                three.Mesh([]).bind_fields_unchecked(
                                     geometry="nodes.mesh_0_2.geometry",
                                     material="materials.black"),
-                                three.Mesh([]).set_override_props_unchecked(
+                                three.Mesh([]).bind_fields_unchecked(
                                     geometry="nodes.mesh_0_3.geometry",
-                                    material="materials.930_lights"),
-                                three.Mesh([]).set_override_props_unchecked(
+                                    material="materials.\"930_lights\""),
+                                three.Mesh([]).bind_fields_unchecked(
                                     geometry="nodes.mesh_0_4.geometry",
                                     material="materials.glass"),
-                                three.Mesh([]).set_override_props_unchecked(
+                                three.Mesh([]).bind_fields_unchecked(
                                     geometry="nodes.mesh_0_5.geometry",
-                                    material="materials.930_stickers"),
-                                three.Mesh([]).set_override_props_unchecked(
+                                    material="materials.\"930_stickers\""),
+                                three.Mesh([]).bind_fields_unchecked(
                                     geometry="nodes.mesh_0_6.geometry",
-                                    material="materials.930_plastics").
+                                    material="materials.\"930_plastics\"").
                                 update_raw_props(
                                     {
                                         "material-polygonOffset": True,
                                         "material-polygonOffsetFactor": -10,
                                     }),
-                                three.Mesh([]).set_override_props_unchecked(
+                                three.Mesh([]).bind_fields_unchecked(
                                     geometry="nodes.mesh_0_7.geometry",
-                                    material="materials.930_lights_refraction"
+                                    material="materials.\"930_lights_refraction\""
                                 ),
-                                three.Mesh([]).set_override_props_unchecked(
+                                three.Mesh([]).bind_fields_unchecked(
                                     geometry="nodes.mesh_0_8.geometry",
-                                    material="materials.930_rim"),
-                                three.Mesh([]).set_override_props_unchecked(
+                                    material="materials.\"930_rim\""),
+                                three.Mesh([]).bind_fields_unchecked(
                                     geometry="nodes.mesh_0_9.geometry",
-                                    material="materials.930_tire"),
+                                    material="materials.\"930_tire\""),
                             ],
                             lambda x: print(x)),
                     ]).prop(position=(-7.966238, -0.10155, -7.966238),
                             scale=0.000973),
                 ]).prop(position=(0, -1.5, 0)),
-            ]).prop(frames=1, position=(0.0, 1.5, 0), near=0.1,
-                    resolution=128),
+
+            ])
+        ])
+
+        car_group = three.Group([
+            cubecam,
             three.Group([
-                three.Mesh([]).set_override_props_unchecked(
+                three.Mesh([]).bind_fields_unchecked(
                     geometry="nodes.mesh_2.geometry",
                     material="materials.plate").update_raw_props({
                         "material-roughness":
                         1,
                     }),
-                three.Mesh([]).set_override_props_unchecked(
+                three.Mesh([]).bind_fields_unchecked(
                     geometry="nodes.mesh_2_1.geometry",
                     material="materials.DefaultMaterial"),
-                three.Mesh([]).set_override_props_unchecked(
+                three.Mesh([]).bind_fields_unchecked(
                     geometry="nodes.mesh_2_2.geometry",
-                    material=r"materials.Material\.001").update_raw_props({
+                    material="materials.\"Material.001\"").update_raw_props({
                         "material-depthWrite":
                         False,
                         "material-opacity":
                         0.6,
                     }),
             ]).prop(position=(-7.966238, -0.10155, -7.966238), scale=0.000973),
+        ]).prop(position=(-8, 0, -2), scale=20).update_raw_props(
+                    {"rotation-y": -np.pi / 4})
+        car.init_add_layout([
+            car_group
         ])
-        car = three.URILoaderContext(
-            three.URILoaderType.GLTF, "tensorpc://porsche-transformed.glb", [
-                car_group.prop(position=(-8, 0, -2), scale=20).update_raw_props(
-                    {"rotation-y": -np.pi / 4}),
-            ])
         self.canvas = plus.SimpleCanvas(
             cam,
             init_canvas_childs=[

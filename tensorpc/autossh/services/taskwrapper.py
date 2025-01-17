@@ -12,8 +12,8 @@ from sys import stderr
 import sys
 import time
 import traceback
-from typing import Any, Callable, Optional, Union
-
+from typing import Any, Callable, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 import setproctitle
 import os
 from tensorpc.autossh.constants import (TENSORPC_ASYNCSSH_ENV_INIT_INDICATE,
@@ -23,11 +23,11 @@ from tensorpc.autossh.constants import (TENSORPC_ASYNCSSH_ENV_INIT_INDICATE,
 from tensorpc.autossh.core import (LOGGER, CommandEvent, CommandEventType,
                                    EofEvent, Event, EventType, ExceptionEvent, ExternalEvent,
                                    LineEvent, RawEvent, SSHClient, SSHRequest,
-                                   SSHRequestType)
+                                   SSHRequestType, SubprocessRpcClient)
 from tensorpc.autossh.coretypes import TaskWrapperArgs, TaskWrapperWorkerState
 from tensorpc.core import marker, prim
 from tensorpc.core.asyncclient import simple_remote_call_async
-from tensorpc.core.moduleid import get_object_type_from_module_id, import_dynamic_func
+from tensorpc.core.moduleid import get_module_id_of_type, get_object_type_from_module_id, import_dynamic_func
 from tensorpc.core.serviceunit import ServiceEventType, run_callback, run_callback_noexcept
 import json
 
@@ -606,6 +606,8 @@ class TaskWrapper:
             },
             compact=True)
 
+_T_ret = TypeVar("_T_ret")
+P = ParamSpec("P")
 
 class TaskManager:
     """this is used to launch autossh task by current process, e.g. launch shell task from a app"""
@@ -613,26 +615,67 @@ class TaskManager:
     def __init__(self):
         self._running_sshs: dict[str, TaskWrapper] = {}
 
+    async def _run_ssh_rpc_base(self, key: str, user: str, password: str, 
+            args, kwargs, func_id, is_code: bool, need_result: bool = True, addi_cmd: Optional[str] = None,
+            default_url: str = "localhost:22", msg_callback: Optional[Callable[[Event],
+                                                          Any]] = None):
+        if key in self._running_sshs:
+            raise ValueError(f"Task {key} already running.")
+        port = prim.get_server_grpc_port()
+        arg_event_id, ret_event_id, ev, result = SubprocessRpcClient.set_args_to_argserver(args, kwargs, func_id, is_code)
+        run_cmd = f"python -m tensorpc.cli.cmd_rpc_call {arg_event_id} {ret_event_id} {port} {need_result}"
+        final_cmds = [
+            run_cmd,
+        ]
+        if addi_cmd is not None:
+            final_cmds.insert(0, addi_cmd)
+        task_wrapper_args = TaskWrapperArgs(" && ".join(final_cmds), password, user)
+        try:
+            await self.launch_task(key, task_wrapper_args, default_url=default_url, msg_callback=msg_callback, exit_callback=lambda: ev.set())
+            await ev.wait()
+            if not result:
+                raise ValueError(f"Task {key} failed outside user code")
+            else:
+                if "exception" in result:
+                    raise ValueError(result["exception"])
+                else:
+                    return result["ret"]
+        finally:
+            SubprocessRpcClient.remove_args_to_argserver(arg_event_id, ret_event_id, False)
+
+    async def call_local_ssh(self, key: str, user: str, password: str, func_id: Union[str, Callable[P, _T_ret]], *args: P.args, **kwargs: P.kwargs) -> _T_ret:
+        if not isinstance(func_id, str):
+            func_id = get_module_id_of_type(func_id)
+        return await self._run_ssh_rpc_base(key, user, password, args, kwargs, func_id, False)
+
+    async def call_local_ssh_with_code(self, key: str, user: str, password: str, func_code: str, *args, **kwargs):
+        return await self._run_ssh_rpc_base(key, user, password, args, kwargs, func_code, True)
+
     async def launch_task(self,
                           key: str,
                           config: TaskWrapperArgs,
                           msg_callback: Optional[Callable[[Event],
-                                                          Any]] = None):
+                                                          Any]] = None,
+                          exit_callback: Optional[Callable[[], Any]] = None,
+                          default_url: str = "localhost:22") -> bool:
         if key in self._running_sshs:
             return False
         assert config.max_retries == 1 and config.master_url is None and config.num_workers == 1, "TaskManager only support non-dist one-shot task"
         task = TaskWrapper(config,
                            key=key,
                            msg_callback=msg_callback,
-                           exit_callback=partial(self.stop_task, key=key))
+                           default_url=default_url,
+                           exit_callback=partial(self.stop_task, key=key, user_exit_callback=exit_callback))
         await task.init_async()
         self._running_sshs[key] = task
         return True
 
-    async def stop_task(self, key: str):
+    async def stop_task(self, key: str, user_exit_callback: Optional[Callable[[], Any]] = None):
         if key in self._running_sshs:
             task = self._running_sshs.pop(key)
             await task.exit_async()
+            if user_exit_callback is not None:
+                await run_callback(user_exit_callback)
 
     async def change_task_terminal_size(self, key: str, width: int,
                                         height: int):

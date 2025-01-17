@@ -27,7 +27,7 @@ class BuiltinServiceKeys(enum.Enum):
     Simple = f"tensorpc.services.collection{TENSORPC_SPLIT}Simple"
     Scheduler = f"tensorpc.autossh.services.scheduler{TENSORPC_SPLIT}Scheduler"
     TaskWrapper = f"tensorpc.autossh.services.taskwrapper{TENSORPC_SPLIT}TaskWrapper"
-    TaskManager = f"tensorpc.autossh.services.taskwrapper{TENSORPC_SPLIT}Manager"
+    TaskManager = f"tensorpc.autossh.services.taskwrapper{TENSORPC_SPLIT}TaskManager"
 
 BUILTIN_SERVICES = [
     Service(BuiltinServiceKeys.FileOps.value, {}),

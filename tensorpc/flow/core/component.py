@@ -33,9 +33,10 @@ from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable, Cor
 
 from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec,
                                Protocol, Self, TypeAlias, TypeVar)
-
+import jmespath
 from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.client import RemoteManager, simple_chunk_call
+from tensorpc.core.datamodel.draft import DraftBase, get_draft_jmespath
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 from pydantic import (
     BaseModel,
@@ -106,6 +107,8 @@ nodefault = NoDefault()
 
 
 class UIType(enum.IntEnum):
+    MASK_DATA_MODEL = 0x10000
+
     # # placeholder
     # RemoteComponent = -1
     # controls
@@ -157,10 +160,10 @@ class UIType(enum.IntEnum):
     Icon = 0x2d
     Markdown = 0x2e
     TextField = 0x2f
-    DataGrid = 0x30
+    Breadcrumbs = 0x30
     Tabs = 0x31
     VirtualizedBox = 0x32
-    DataFlexBox = 0x33
+    Terminal = 0x33
     JsonViewer = 0x34
     ListItemIcon = 0x35
     Link = 0x36
@@ -174,10 +177,7 @@ class UIType(enum.IntEnum):
     IFrame = 0x3d
     Pagination = 0x3e
     VideoPlayer = 0x3f
-
     GridLayout = 0x40
-    Breadcrumbs = 0x41
-    Terminal = 0x42
 
     # special
     TaskLoop = 0x100
@@ -193,6 +193,12 @@ class UIType(enum.IntEnum):
     # react fragment
     Fragment = 0x200
     MatchCase = 0x201
+
+    # data model components
+    DataModel = 0x10000
+    DataGrid = 0x10001
+    DataFlexBox = 0x10002
+    DataForward = 0x10003
 
     MASK_THREE = 0x1000
     MASK_THREE_GEOMETRY = 0x0100
@@ -254,8 +260,8 @@ class UIType(enum.IntEnum):
     ThreeLightFormer = 0x103d
     ThreeAccumulativeShadows = 0x103e
     ThreeRandomizedLight = 0x103f
-    ThreeURILoaderContext = 0x1040
-    ThreeCubeCamera = 0x1041
+    ThreeURILoaderContext = 0x11040
+    ThreeCubeCamera = 0x11041
     ThreeContactShadows = 0x1042
     ThreeGizmoHelper = 0x1043
     ThreeSelectionContext = 0x1044
@@ -302,7 +308,7 @@ class UIType(enum.IntEnum):
     LeafletTracklet = 0x2100
 
     MASK_FLOW_COMPONENTS = 0x8000
-    Flow = 0x8001
+    Flow = 0x18001
     FlowMiniMap = 0x8002
     FlowControls = 0x8003
     FlowNodeResizer = 0x8004
@@ -1031,8 +1037,6 @@ class _DataclassHelper:
 class BasicProps(DataClassWithUndefined):
     # status: int = UIRunStatus.Stop.value
     tensorpc_dynamic_eval: Union[Undefined, Dict[str, Any]] = undefined
-    # used for data model component
-    override_props: Union[Dict[str, str], Undefined] = undefined
 
 
 @dataclasses_strict.dataclass
@@ -1319,6 +1323,8 @@ class Component(Generic[T_base_props, T_child]):
         self._flow_user_datas: List[Any] = []
         self._flow_comp_def_path = _get_obj_def_path(self)
         self._flow_reference_count = 0
+
+        self._flow_data_model_paths: Dict[str, Union[str, tuple[Component, str]]] = {}
         # tensorpc will scan your prop dict to find
         # np.ndarray and bytes by default.
         # this will cost time in deep and large json, if you use
@@ -1591,6 +1597,14 @@ class Component(Generic[T_base_props, T_child]):
             "type": self._flow_comp_type.value,
             "props": props,
         }
+        if self._flow_data_model_paths:
+            dm_paths_new = {}
+            for k, v in self._flow_data_model_paths.items():
+                if not isinstance(v, str):
+                    dm_paths_new[k] = (v[0]._flow_uid_encoded, v[1])
+                else:
+                    dm_paths_new[k] = v
+            res["dmProps"] = dm_paths_new
         evs = self._get_used_events_dict()
         if evs:
             res["props"]["usedEvents"] = evs
@@ -1670,37 +1684,38 @@ class Component(Generic[T_base_props, T_child]):
         if self.is_mounted():
             return await self.queue.put(ev)
 
-    def set_override_props(self, **kwargs: str):
+    def bind_fields(self, **kwargs: Union[str, tuple["Component", Union[str, DraftBase]], DraftBase]):
         for k in kwargs.keys():
             assert k in self._prop_field_names, f"overrided prop must be defined in props class, {k}"
-        new_kwargs: Dict[str, str] = {}
-        for k, v in kwargs.items():
-            new_kwargs[snake_to_camel(k)] = v
-        if isinstance(self.props.override_props, Undefined):
-            self.props.override_props = new_kwargs
-        else:
-            self.props.override_props.update(new_kwargs)
+        return self.bind_fields_unchecked(**kwargs)
+
+    def bind_fields_unchecked(self, **kwargs: Union[str, tuple["Component", Union[str, DraftBase]], DraftBase]):
+        new_kwargs: Dict[str, Union[str, tuple["Component", str]]] = {}
+        for k, v_may_draft in kwargs.items():
+            # validate expr
+            if isinstance(v_may_draft, DraftBase):
+                v = get_draft_jmespath(v_may_draft)
+            else:
+                v = v_may_draft
+            if isinstance(v, str):
+                jmespath.compile(v)
+                new_kwargs[snake_to_camel(k)] = v
+            else:
+                assert isinstance(v, tuple) and len(v) == 2
+                assert isinstance(v[0], Component)
+                vv = v[1] 
+                if isinstance(vv, DraftBase):
+                    vp = get_draft_jmespath(vv)
+                    jmespath.compile(vp)
+                    new_kwargs[snake_to_camel(k)] =  (v[0], vp)
+                else:
+                    jmespath.compile(vv)
+                    new_kwargs[snake_to_camel(k)] = (v[0], vv)
+        self._flow_data_model_paths.update(new_kwargs)
         return self
 
-    def set_override_props_unchecked(self, **kwargs: str):
-        new_kwargs: Dict[str, str] = {}
-        for k, v in kwargs.items():
-            new_kwargs[snake_to_camel(k)] = v
-        if isinstance(self.props.override_props, Undefined):
-            self.props.override_props = new_kwargs
-        else:
-            self.props.override_props.update(new_kwargs)
-        return self
-
-    def set_override_props_unchecked_dict(self, kwargs: Dict[str, str]):
-        new_kwargs: Dict[str, str] = {}
-        for k, v in kwargs.items():
-            new_kwargs[snake_to_camel(k)] = v
-        if isinstance(self.props.override_props, Undefined):
-            self.props.override_props = new_kwargs
-        else:
-            self.props.override_props.update(new_kwargs)
-        return self
+    def bind_fields_unchecked_dict(self, kwargs: Dict[str, Union[str, tuple["Component", Union[str, DraftBase]], DraftBase]]):
+        return self.bind_fields_unchecked(**kwargs)
 
     @property
     def queue(self):

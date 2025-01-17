@@ -171,7 +171,7 @@ class ThreeGeometryPropsBase(ThreeBasicProps):
 T_material_prop = TypeVar("T_material_prop", bound=ThreeMaterialPropsBase)
 T_geometry_prop = TypeVar("T_geometry_prop", bound=ThreeGeometryPropsBase)
 
-ThreeComponentType = Union[ThreeComponentBase, ThreeContainerBase, Fragment]
+ThreeComponentType = Union[ThreeComponentBase, ThreeContainerBase, Fragment, "DataForward"]
 
 
 def is_three_component(obj: Component):
@@ -3732,7 +3732,7 @@ class CubeCamera(Object3dContainerBase[CubeCameraProps, ThreeComponentType]):
             children = {}
         if isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
-        assert children, "CubeCamera must have children"
+        # assert children, "CubeCamera must have children"
         super().__init__(UIType.ThreeCubeCamera, CubeCameraProps, {**children})
 
     @property
@@ -4080,6 +4080,31 @@ class Outlines(ThreeComponentBase[OutlinesProps]):
 
     def __init__(self) -> None:
         super().__init__(UIType.ThreeOutlines, OutlinesProps)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+
+@dataclasses.dataclass
+class DataForwardProps(ContainerBaseProps):
+    comps: List[Component] = dataclasses.field(default_factory=list)
+
+class DataForward(ThreeContainerBase[DataForwardProps, ThreeComponentType]):
+    def __init__(self, comps: List[Component], children: Optional[ThreeLayoutType] = None) -> None:
+        if children is not None and isinstance(children, Sequence):
+            children = {str(i): v for i, v in enumerate(children)}
+        for comp in comps:
+            assert comp._flow_comp_type != UIType.DataForward, "DataForward can't contain DataForward"
+        assert len(comps) > 0, "comps must have at least one component"
+        super().__init__(UIType.DataForward, DataForwardProps, children, allowed_events=[])
+        self.prop(comps=comps)
 
     @property
     def prop(self):

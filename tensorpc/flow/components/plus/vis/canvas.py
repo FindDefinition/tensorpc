@@ -915,7 +915,7 @@ class ComplexCanvas(mui.FlexBox):
         # key_to_typo: Dict[str, mui.Typography] = {}
         for k in common_keys:
             typo = mui.Typography().prop(
-                precisionDigits=4, fontSize="14px").set_override_props(value=k)
+                precisionDigits=4, fontSize="14px").bind_fields(value=k)
             column_defs.append(
                 mui.DataGrid.ColumnDef(k, accessorKey=k, cell=typo))
 

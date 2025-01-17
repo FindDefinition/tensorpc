@@ -154,7 +154,6 @@ class ScriptManager(mui.FlexBox):
             mui.Allotment.Pane(self.code_editor.prop(height="100%")),
             mui.Allotment.Pane(self.app_show_box.prop(height="100%"), visible=False),
         ])).prop(flex=1, minHeight=0)
-
         self.scripts = mui.Autocomplete(
             "Scripts",
             [],

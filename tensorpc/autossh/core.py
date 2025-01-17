@@ -45,7 +45,7 @@ from tensorpc.core.prim import is_in_server_context, check_is_service_available,
 from tensorpc.core.client import RemoteManager, simple_remote_call
 LOGGER = get_logger("ssh")
 
-_SSH_RPC_CALL_SERV_NAME = "tensorpc.services.collection::ArgServer"
+_SSH_ARGSERVER_SERV_NAME = "tensorpc.services.collection::ArgServer"
 
 BASH_HOOKS_FILE_NAME = "hooks-bash.sh"
 
@@ -793,21 +793,36 @@ class SubprocessRpcClient(abc.ABC):
     @abc.abstractmethod
     async def run_command(self, cmds: list[str]) -> Optional[str]: ...
 
-    async def _call_base(self, args, kwargs, func_id, is_code: bool, need_result: bool = True):
+    @staticmethod 
+    def set_args_to_argserver(args, kwargs, func_id, is_code: bool, bkgd_loop: Optional[asyncio.AbstractEventLoop] = None):
         arg_event_id = f"arg-{uuid.uuid4().hex}"
         ret_event_id = f"ret-{uuid.uuid4().hex}"
         ev = asyncio.Event()
         result = {}
-        once_serv_key = f"{_SSH_RPC_CALL_SERV_NAME}.once"
-        off_serv_key = f"{_SSH_RPC_CALL_SERV_NAME}.off"
-        if self._bkgd_loop is not None:
+        once_serv_key = f"{_SSH_ARGSERVER_SERV_NAME}.once"
+        if bkgd_loop is not None:
             BACKGROUND_SERVER.execute_service(once_serv_key, arg_event_id, partial(_get_args_and_params, args, kwargs, func_id, is_code), loop=bkgd_loop)
             BACKGROUND_SERVER.execute_service(once_serv_key, ret_event_id, partial(_set_ret, ret_ev=ev, ret_container=result), loop=bkgd_loop)
         else:
             prim.get_service(once_serv_key)(arg_event_id, partial(_get_args_and_params, args, kwargs, func_id, is_code))
             prim.get_service(once_serv_key)(ret_event_id, partial(_set_ret, ret_ev=ev, ret_container=result))
+        return arg_event_id, ret_event_id, ev, result
+        
+    @staticmethod 
+    def remove_args_to_argserver(arg_event_id: str, ret_event_id: str, is_bkgd: bool):
+        off_serv_key = f"{_SSH_ARGSERVER_SERV_NAME}.off"
+        if is_bkgd:
+            BACKGROUND_SERVER.execute_service(off_serv_key, arg_event_id)
+            BACKGROUND_SERVER.execute_service(off_serv_key, ret_event_id)
+        else:
+            prim.get_service(off_serv_key)(arg_event_id)
+            prim.get_service(off_serv_key)(ret_event_id)
 
-        run_cmd = f"python -m tensorpc.cli.cmd_rpc_call {arg_event_id} {ret_event_id} {self._port}"
+
+    async def _call_base(self, args, kwargs, func_id, is_code: bool, need_result: bool = True):
+        arg_event_id, ret_event_id, ev, result = self.set_args_to_argserver(args, kwargs, func_id, is_code, self._is_bkgd)
+
+        run_cmd = f"python -m tensorpc.cli.cmd_rpc_call {arg_event_id} {ret_event_id} {self._port} {need_result}"
         final_cmds = [
             run_cmd,
         ]
@@ -822,12 +837,7 @@ class SubprocessRpcClient(abc.ABC):
             else:
                 return result["ret"]
         finally:
-            if self._is_bkgd:
-                BACKGROUND_SERVER.execute_service(off_serv_key, arg_event_id)
-                BACKGROUND_SERVER.execute_service(off_serv_key, ret_event_id)
-            else:
-                prim.get_service(off_serv_key)(arg_event_id)
-                prim.get_service(off_serv_key)(ret_event_id)
+            self.remove_args_to_argserver(arg_event_id, ret_event_id, self._is_bkgd)
 
         
     async def call(self, func_id: Union[str, Callable[P, _T_ret]], *args: P.args, **kwargs: P.kwargs) -> _T_ret:
@@ -998,10 +1008,10 @@ class SSHClient:
                 await self._sync_sh_init_file(conn, shell_info)
                 self.bash_file_inited = True
             loop: Optional[asyncio.AbstractEventLoop] = None
-            if is_in_server_context() and check_is_service_available(_SSH_RPC_CALL_SERV_NAME):
+            if is_in_server_context() and check_is_service_available(_SSH_ARGSERVER_SERV_NAME):
                 # if some service (such as App) is running, we use the service port
                 serv_port = get_server_grpc_port()
-            elif BACKGROUND_SERVER.is_started and BACKGROUND_SERVER.service_core.service_units.has_service_unit(_SSH_RPC_CALL_SERV_NAME):
+            elif BACKGROUND_SERVER.is_started and BACKGROUND_SERVER.service_core.service_units.has_service_unit(_SSH_ARGSERVER_SERV_NAME):
                 serv_port = BACKGROUND_SERVER.port
                 # when we run main coroutines in background server, we need to use thread-safe version and provide loop.
                 loop = asyncio.get_running_loop()
@@ -1274,11 +1284,16 @@ class SSHClient:
                             chan.change_terminal_size(text.data[0],
                                                       text.data[1])
                     else:
-                        if self.encoding is None:
-                            stdin.write(text.encode("utf-8"))
+                        if isinstance(text, bytes):
+                            if self.encoding is not None:
+                                stdin.write(text.decode(self.encoding))
+                            else:
+                                stdin.write(text)
                         else:
-                            stdin.write(text)
-
+                            if self.encoding is None:
+                                stdin.write(text.encode("utf-8"))
+                            else:
+                                stdin.write(text)
                     wait_tasks = [
                         asyncio.create_task(inp_queue.get()), shutdown_task, loop_task
                     ]
@@ -1326,15 +1341,15 @@ class SSHClient:
 def run_ssh_rpc_call(arg_event_id: str, ret_event_id: str, rf_port: int, need_result: bool = True):
     # should be run inside remote ssh 
     with RemoteManager(f"localhost:{rf_port}") as robj:
-        args, kwargs, code, is_func_code = robj.remote_call(f"{_SSH_RPC_CALL_SERV_NAME}.call_event", arg_event_id)
+        args, kwargs, code, is_func_code = robj.remote_call(f"{_SSH_ARGSERVER_SERV_NAME}.call_event", arg_event_id)
         try:
             func = import_dynamic_func(code, not is_func_code)
             res = func(*args, **kwargs)
             if need_result:
-                robj.remote_call(f"{_SSH_RPC_CALL_SERV_NAME}.call_event", ret_event_id, res)
+                robj.remote_call(f"{_SSH_ARGSERVER_SERV_NAME}.call_event", ret_event_id, res)
         except Exception as exc:
             exc_msg_ss = io.StringIO()
             traceback.print_exc(file=exc_msg_ss)
             exc_msg = exc_msg_ss.getvalue()
-            robj.remote_call(f"{_SSH_RPC_CALL_SERV_NAME}.call_event", ret_event_id, None, exc_msg)
+            robj.remote_call(f"{_SSH_ARGSERVER_SERV_NAME}.call_event", ret_event_id, None, exc_msg)
 

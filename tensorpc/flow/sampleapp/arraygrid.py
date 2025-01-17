@@ -75,11 +75,11 @@ class MatrixDataGridAppV1:
                 mui.MatchCase.Case("index", mui.Typography("Max")),
                 mui.MatchCase.Case(
                     mui.undefined,
-                    mui.Typography().set_override_props(value="data").prop(
+                    mui.Typography().bind_fields(value="data").prop(
                         enableTooltipWhenOverflow=True,
                         tooltipEnterDelay=400,
                         fontSize="12px")),
-            ]).set_override_props(condition="condition")
+            ]).bind_fields(condition="condition")
         ]
         custom_footer_datas = [{
             "a-0": str(arr.max(0)[0]),

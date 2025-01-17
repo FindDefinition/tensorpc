@@ -171,11 +171,11 @@ class MasterDebugPanel(mui.FlexBox):
         name = mui.ListItemText("").prop(
             primaryTypographyProps=lst_name_primary_prop,
             secondaryTypographyProps=lst_name_secondary_prop)
-        name.set_override_props(value="server_id", secondary="secondary_name", primaryColor="primaryColor", secondaryColor="secondaryColor")
+        name.bind_fields(value="server_id", secondary="secondary_name", primaryColor="primaryColor", secondaryColor="secondaryColor")
         remote_server_item = mui.ListItemButton([
             name,
         ])
-        remote_server_item.set_override_props(selected="is_mounted")
+        remote_server_item.bind_fields(selected="is_mounted")
         self._remote_server_discover_lst = mui.DataFlexBox(
             remote_server_item, [])
         filter_input = mui.Input("filter").prop(
