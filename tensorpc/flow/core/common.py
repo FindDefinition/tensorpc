@@ -96,7 +96,8 @@ _NOARG_EVENTS = set([
 
 async def handle_raw_event(event: Event,
                            comp: Component,
-                           just_run: bool = False):
+                           just_run: bool = False,
+                           capture_draft: bool = True):
     # ev: [type, data]
     type = event.type
     data = event.data
@@ -112,9 +113,9 @@ async def handle_raw_event(event: Event,
         run_funcs = handlers.get_bind_event_handlers(event)
         if not just_run:
             comp._task = asyncio.create_task(
-                comp.run_callbacks(run_funcs, True))
+                comp.run_callbacks(run_funcs, True, capture_draft=capture_draft))
         else:
-            return await comp.run_callbacks(run_funcs, True)
+            return await comp.run_callbacks(run_funcs, True, capture_draft=capture_draft)
 
 
 async def handle_standard_event(comp: Component,
@@ -122,7 +123,8 @@ async def handle_standard_event(comp: Component,
                                 sync_status_first: bool = False,
                                 sync_state_after_change: bool = True,
                                 is_sync: bool = False,
-                                change_status: bool = True):
+                                change_status: bool = True,
+                                capture_draft: bool = True):
     """ common event handler
     """
     # print("WTF", event.type, event.data, comp._flow_comp_status)
@@ -155,14 +157,16 @@ async def handle_standard_event(comp: Component,
                         handlers.get_bind_event_handlers(event),
                         sync_state,
                         sync_status_first=False,
-                        change_status=change_status)
+                        change_status=change_status,
+                        capture_draft=capture_draft)
                 else:
                     comp._task = asyncio.create_task(
                         comp.run_callbacks(
                             handlers.get_bind_event_handlers(event),
                             sync_state,
                             sync_status_first=sync_status_first,
-                            change_status=change_status))
+                            change_status=change_status,
+                            capture_draft=capture_draft))
             else:
                 # all controlled component must sync state after state change
                 if sync_state_after_change:
@@ -174,12 +178,14 @@ async def handle_standard_event(comp: Component,
                 run_funcs = handlers.get_bind_event_handlers_noarg(event)
                 if is_sync:
                     return await comp.run_callbacks(run_funcs,
-                                                    sync_status_first=False)
+                                                    sync_status_first=False,
+                                                    capture_draft=capture_draft)
                 else:
                     comp._task = asyncio.create_task(
                         comp.run_callbacks(run_funcs,
                                            sync_status_first=sync_status_first,
-                                           change_status=change_status))
+                                           change_status=change_status,
+                                           capture_draft=capture_draft))
         elif event.type in _ONEARG_EVENTS:
             handlers = comp.get_event_handlers(event.type)
             # other events don't need to sync state
@@ -189,12 +195,14 @@ async def handle_standard_event(comp: Component,
                     return await comp.run_callbacks(
                         run_funcs,
                         sync_status_first=False,
-                        change_status=change_status)
+                        change_status=change_status,
+                        capture_draft=capture_draft)
                 else:
                     comp._task = asyncio.create_task(
                         comp.run_callbacks(run_funcs,
                                            sync_status_first=sync_status_first,
-                                           change_status=change_status))
+                                           change_status=change_status,
+                                           capture_draft=capture_draft))
 
         else:
             raise NotImplementedError

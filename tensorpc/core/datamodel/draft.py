@@ -11,6 +11,7 @@ Supported update:
 draft.a.b = 1
 draft.arr[1] = 2
 draft.dic['key'] = 3
+draft.a.b += 4
 ```
 
 2. List/Dict methods (except sort)
@@ -27,60 +28,6 @@ draft.dic.pop('key')
 draft.dic.clear()
 ```
 
-
-type OpSet = {
-    items: [string, any][]
-}
-
-type OpDelete = {
-    keys: string[]
-}
-
-type OpArraySet = {
-    items: [number, any][]
-}
-
-type OpExtend = {
-    items: any[]
-    dropCount?: number
-}
-
-type OpArrayPop = {
-    index?: number | null
-}
-
-type OpArrayInsert = {
-    index: number
-    item: any
-}
-
-type OpArrayRemove = {
-    item: any
-}
-
-type OpDictUpdate = {
-    items: Record<string, any>
-}
-
-enum ScalarInplaceOpType {
-    Add = 0,
-    Sub = 1,
-    Mul = 2,
-    Div = 3,
-}
-
-type OpScalarInplaceOp = {
-    op: ScalarInplaceOpType
-    key: string
-    value: number
-}
-
-type OpSlice = {
-    start: number
-    end: number
-}
-
-
 """
 
 
@@ -90,7 +37,7 @@ import enum
 from typing import Any, Optional, Type, TypeVar, Union
 import tensorpc.core.dataclass_dispatch as dataclasses
 from collections.abc import Sequence, Mapping
-import jmespath 
+import tensorpc.core.datamodel.jmes as jmespath
 
 T = TypeVar("T")
 
@@ -215,6 +162,21 @@ def _get_jmes_path(path: list[_PathItem]) -> str:
         return "$"
     return "".join(res)
 
+
+def _tensorpc_draft_dispatch(new_obj: Any, path: list[_PathItem], userdata: Any) -> "DraftBase":
+    # TODO add annotation validate
+    if dataclasses.is_dataclass(new_obj):
+        return DraftObject(new_obj, path, userdata)
+    elif isinstance(new_obj, Sequence) and not isinstance(new_obj, str):
+        return DraftSequence(new_obj, path, userdata)
+    elif isinstance(new_obj, Mapping):
+        return DraftDict(new_obj, path, userdata)
+    elif isinstance(new_obj, (int, float)):
+        return DraftMutableScalar(new_obj, path, userdata)
+    else:
+        return DraftImmutableScalar(new_obj, path, userdata)
+
+
 class DraftBase:
     __known_attrs__ = {"_tensorpc_draft_attr_real_obj", "_tensorpc_draft_attr_cur_path", "_tensorpc_draft_attr_userdata"}
 
@@ -228,26 +190,15 @@ class DraftBase:
     def __str__(self) -> str:
         return get_draft_jmespath(self)
 
-    def _get_jmes_op(self, op_type: JMESPathOpType, opdata: Any, drop_last: bool = False) -> JMESPathOpForBackend:
+    def _tensorpc_draft_get_jmes_op(self, op_type: JMESPathOpType, opdata: Any, drop_last: bool = False) -> JMESPathOpForBackend:
         if drop_last:
             jpath = self._tensorpc_draft_attr_cur_path[:-1]
         else:
             jpath = self._tensorpc_draft_attr_cur_path
         return JMESPathOpForBackend(jpath, op_type, opdata, self._tensorpc_draft_attr_userdata)
 
-    def _draft_dispatch(self, new_obj: Any, new_path_item: _PathItem) -> "DraftBase":
-        # TODO add annotation validate
-        if dataclasses.is_dataclass(new_obj):
-            return DraftObject(new_obj, self._tensorpc_draft_attr_cur_path + [new_path_item], self._tensorpc_draft_attr_userdata)
-        elif isinstance(new_obj, Sequence) and not isinstance(new_obj, str):
-            return DraftSequence(new_obj, self._tensorpc_draft_attr_cur_path + [new_path_item], self._tensorpc_draft_attr_userdata)
-        elif isinstance(new_obj, Mapping):
-            return DraftDict(new_obj, self._tensorpc_draft_attr_cur_path + [new_path_item], self._tensorpc_draft_attr_userdata)
-        elif isinstance(new_obj, (int, float)):
-            return DraftMutableScalar(new_obj, self._tensorpc_draft_attr_cur_path + [new_path_item], self._tensorpc_draft_attr_userdata)
-        elif isinstance(new_obj, (str, bool)):
-            return DraftImmutableScalar(new_obj, self._tensorpc_draft_attr_cur_path + [new_path_item], self._tensorpc_draft_attr_userdata)
-        raise NotImplementedError
+    def _tensorpc_draft_dispatch(self, new_obj: Any, new_path_item: _PathItem) -> "DraftBase":
+        return _tensorpc_draft_dispatch(new_obj, self._tensorpc_draft_attr_cur_path + [new_path_item], self._tensorpc_draft_attr_userdata)
 
 class DraftObject(DraftBase):
     __known_attrs__ = {*DraftBase.__known_attrs__, "_tensorpc_draft_attr_obj_fields_dict"}
@@ -262,20 +213,30 @@ class DraftObject(DraftBase):
         if name not in self._tensorpc_draft_attr_obj_fields_dict:
             raise AttributeError(f"{type(self._tensorpc_draft_attr_real_obj)} has no attribute {name}")
         obj_child = getattr(self._tensorpc_draft_attr_real_obj, name)
-        return self._draft_dispatch(obj_child, _PathItem(_PathType.GET_ITEM, name))
+        return self._tensorpc_draft_dispatch(obj_child, _PathItem(_PathType.GET_ITEM, name))
 
     def __setattr__(self, name: str, value: Any):
         if name in DraftObject.__known_attrs__:
             super().__setattr__(name, value)
             return 
-        assert not isinstance(value, DraftBase), "you can't assign a Draft object to another Draft object, assign real value instead."
         if name not in self._tensorpc_draft_attr_obj_fields_dict:
             raise AttributeError(f"{type(self._tensorpc_draft_attr_real_obj)} has no attribute {name}")
-        # TODO do validate here
         ctx = get_draft_update_context()
-        ctx._ops.append(self._get_jmes_op(JMESPathOpType.Set, {
+        if isinstance(value, DraftBase):
+            if ctx._ops and ctx._ops[-1].op == JMESPathOpType.ScalarInplaceOp:
+                key = ctx._ops[-1].opData["key"]
+                if name == key and ctx._ops[-1].path == self._tensorpc_draft_attr_cur_path:
+                    # inplace operation, do nothing
+                    return
+        assert not isinstance(value, DraftBase), "you can't assign a Draft object to another Draft object, assign real value instead."
+        # TODO do validate here
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.Set, {
             "items": [(name, value)]
         }))
+
+def _assert_not_draft(*value: Any):
+    for v in value:
+        assert not isinstance(v, DraftBase), "you can't change a Draft object to another Draft object, use real value instead."
 
 class DraftSequence(DraftBase):
     def __getitem__(self, index: Union[int, slice | tuple[Union[int, slice]]]):
@@ -283,47 +244,58 @@ class DraftSequence(DraftBase):
             raise NotImplementedError("DraftSequence don't support N-D slice")
         if isinstance(index, slice):
             raise NotImplementedError("DraftSequence don't support slice")
-        return self._draft_dispatch(self._tensorpc_draft_attr_real_obj[index], _PathItem(_PathType.ARRAY_GET_ITEM, index))
+        return self._tensorpc_draft_dispatch(self._tensorpc_draft_attr_real_obj[index], _PathItem(_PathType.ARRAY_GET_ITEM, index))
 
     def __setitem__(self, index: int, value: Any):
         # TODO support list item inplace (`a[1] += 1`)
-        assert not isinstance(value, DraftBase), "you can't assign a Draft object to another Draft object, assign real value instead."
         ctx = get_draft_update_context()
-        ctx._ops.append(self._get_jmes_op(JMESPathOpType.ArraySet, {
+        if isinstance(value, DraftBase):
+            if ctx._ops and ctx._ops[-1].op == JMESPathOpType.ScalarInplaceOp:
+                key = ctx._ops[-1].opData["key"]
+                if index == key and ctx._ops[-1].path == self._tensorpc_draft_attr_cur_path:
+                    # inplace operation, do nothing
+                    return
+        _assert_not_draft(index, value)
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.ArraySet, {
             "items": [(index, value)]
         }))
 
     def append(self, value: Any):
+        _assert_not_draft(value)
         ctx = get_draft_update_context()
-        ctx._ops.append(self._get_jmes_op(JMESPathOpType.Extend, {
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.Extend, {
             "items": [value]
         }))
 
     def extend(self, value: list):
+        _assert_not_draft(value)
         ctx = get_draft_update_context()
-        ctx._ops.append(self._get_jmes_op(JMESPathOpType.Extend, {
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.Extend, {
             "items": value
         }))
 
     def pop(self, index: Optional[int] = None):
+        _assert_not_draft(index)
         ctx = get_draft_update_context()
-        ctx._ops.append(self._get_jmes_op(JMESPathOpType.ArrayPop, {
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.ArrayPop, {
             "index": index
         }))
 
     def remove(self, item: Any):
+        _assert_not_draft(item)
         ctx = get_draft_update_context()
-        ctx._ops.append(self._get_jmes_op(JMESPathOpType.ArrayRemove, {
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.ArrayRemove, {
             "item": item
         }))
 
     def clear(self):
         ctx = get_draft_update_context()
-        ctx._ops.append(self._get_jmes_op(JMESPathOpType.ContainerClear, {}))
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.ContainerClear, {}))
 
     def insert(self, index: int, item: Any):
+        _assert_not_draft(index, item)
         ctx = get_draft_update_context()
-        ctx._ops.append(self._get_jmes_op(JMESPathOpType.ArrayInsert, {
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.ArrayInsert, {
             "index": index,
             "item": item
         }))
@@ -334,47 +306,95 @@ class DraftDict(DraftBase):
         assert isinstance(self._tensorpc_draft_attr_real_obj, Mapping), f"DraftDict only support Mapping, got {type(self._tensorpc_draft_attr_real_obj)}"
 
     def __getitem__(self, key: str):
-        return self._draft_dispatch(self._tensorpc_draft_attr_real_obj[key], _PathItem(_PathType.DICT_GET_ITEM, key))
+        _assert_not_draft(key)
+        return self._tensorpc_draft_dispatch(self._tensorpc_draft_attr_real_obj[key], _PathItem(_PathType.DICT_GET_ITEM, key))
 
     def __setitem__(self, key: str, value: Any):
-        assert not isinstance(value, DraftBase), "you can't assign a Draft object to another Draft object, assign real value instead."
+        _assert_not_draft(key)
         ctx = get_draft_update_context()
-        ctx._ops.append(self._get_jmes_op(JMESPathOpType.DictUpdate, {
+        if isinstance(value, DraftBase):
+            if ctx._ops and ctx._ops[-1].op == JMESPathOpType.ScalarInplaceOp:
+                key = ctx._ops[-1].opData["key"]
+                if key == key and ctx._ops[-1].path == self._tensorpc_draft_attr_cur_path:
+                    # inplace operation, do nothing
+                    return
+        assert not isinstance(value, DraftBase), "you can't assign a Draft object to another Draft object, assign real value instead."
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.DictUpdate, {
             "items": {key: value}
         }))
 
     def pop(self, key: str):
+        _assert_not_draft(key)
         ctx = get_draft_update_context()
-        ctx._ops.append(self._get_jmes_op(JMESPathOpType.Delete, {
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.Delete, {
             "keys": [key]
         }))
 
     def clear(self):
         ctx = get_draft_update_context()
-        ctx._ops.append(self._get_jmes_op(JMESPathOpType.ContainerClear, {}))
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.ContainerClear, {}))
 
     def update(self, items: dict[str, Any]):
+        _assert_not_draft(items)
         ctx = get_draft_update_context()
-        ctx._ops.append(self._get_jmes_op(JMESPathOpType.DictUpdate, {
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.DictUpdate, {
             "items": items
         }))
 
 class DraftImmutableScalar(DraftBase):
-    def validate_obj(self):
-        assert isinstance(self._tensorpc_draft_attr_real_obj, (bool, str)), f"DraftImmutableScalar only support string and boolean, got {type(self._tensorpc_draft_attr_real_obj)}"
-
+    """Leaf draft object, user can't do any operation on it."""
+    pass
 
 class DraftMutableScalar(DraftBase):
-    def validate_obj(self):
-        assert isinstance(self._tensorpc_draft_attr_real_obj, (int, float,)), f"DraftImmutableScalar only support string, got {type(self._tensorpc_draft_attr_real_obj)}"
-
     def __iadd__(self, other: Union[int, float]):
+        _assert_not_draft(other)
         ctx = get_draft_update_context()
-        ctx._ops.append(self._get_jmes_op(JMESPathOpType.ScalarInplaceOp, {
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.ScalarInplaceOp, {
             "op": ScalarInplaceOpType.Add,
             "key": self._tensorpc_draft_attr_cur_path[-1].key,
             "value": other
         }, drop_last=True))
+        return self
+
+    def __isub__(self, other: Union[int, float]):
+        _assert_not_draft(other)
+        ctx = get_draft_update_context()
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.ScalarInplaceOp, {
+            "op": ScalarInplaceOpType.Sub,
+            "key": self._tensorpc_draft_attr_cur_path[-1].key,
+            "value": other
+        }, drop_last=True))
+        return self
+
+    def __imul__(self, other: Union[int, float]):
+        _assert_not_draft(other)
+        ctx = get_draft_update_context()
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.ScalarInplaceOp, {
+            "op": ScalarInplaceOpType.Mul,
+            "key": self._tensorpc_draft_attr_cur_path[-1].key,
+            "value": other
+        }, drop_last=True))
+        return self
+
+    def __itruediv__(self, other: Union[int, float]):
+        _assert_not_draft(other)
+        ctx = get_draft_update_context()
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.ScalarInplaceOp, {
+            "op": ScalarInplaceOpType.Div,
+            "key": self._tensorpc_draft_attr_cur_path[-1].key,
+            "value": other
+        }, drop_last=True))
+        return self
+
+    def __ifloordiv__(self, other: Union[int, float]):
+        _assert_not_draft(other)
+        ctx = get_draft_update_context()
+        ctx._ops.append(self._tensorpc_draft_get_jmes_op(JMESPathOpType.ScalarInplaceOp, {
+            "op": ScalarInplaceOpType.Div,
+            "key": self._tensorpc_draft_attr_cur_path[-1].key,
+            "value": other
+        }, drop_last=True))
+        return self
 
 def apply_draft_jmes_ops_backend(obj: Any, ops: list[JMESPathOpForBackend]):
     # we delay real operation on original object to make sure
@@ -469,3 +489,6 @@ def apply_draft_jmes_ops(obj: dict, ops: list[JMESPathOp]):
 
 def get_draft_jmespath(draft: DraftBase) -> str:
     return _get_jmes_path(draft._tensorpc_draft_attr_cur_path)
+
+def create_draft(obj: Any, userdata: Any = None):
+    return _tensorpc_draft_dispatch(obj, [], userdata)

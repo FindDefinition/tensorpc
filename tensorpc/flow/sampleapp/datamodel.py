@@ -1,7 +1,6 @@
 from tensorpc.flow import mui, marker
 import dataclasses
 
-
 @dataclasses.dataclass
 class Model:
     name: str 
@@ -11,6 +10,7 @@ class App:
     @marker.mark_create_layout
     def layout(self):
         model = Model("test", 1)
+        # this draft is only used for binding fields, don't use it to update values
         model_draft = mui.DataModel.get_draft_external(model)
         self.dm = mui.DataModel(Model("test", 1), [
             mui.Markdown().bind_fields(value=model_draft.name),
@@ -22,5 +22,5 @@ class App:
         ])
 
     async def _handle_button(self):
-        async with self.dm.draft_update() as draft:
-            draft.count += 1
+        draft = self.dm.get_draft()
+        draft.count += 1

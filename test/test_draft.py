@@ -35,11 +35,13 @@ def test_draft():
 
     with capture_draft_update() as ctx:
         draft.a = 2
+        draft.b += 5
         draft.h.a = 3
         draft.i[0].a = 4
         draft.e.extend([5, 6, 7])
 
         model_ref.a = 2
+        model_ref.b += 5
         model_ref.h.a = 3
         model_ref.i[0].a = 4
         model_ref.e.extend([5, 6, 7])

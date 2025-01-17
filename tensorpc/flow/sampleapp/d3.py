@@ -354,7 +354,7 @@ class EnvmapGroupdProjectionApp:
         cubecam = three.CubeCamera([]).prop(frames=1, position=(0.0, 1.5, 0), near=0.1,
                 resolution=128)
         cubecam.init_add_layout([
-            three.DataForward([car], [
+            three.DataPortal([car], [
                 three.Group([
                     three.Group([
                         three.Mesh([]).prop(

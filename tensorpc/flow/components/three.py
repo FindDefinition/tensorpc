@@ -171,7 +171,7 @@ class ThreeGeometryPropsBase(ThreeBasicProps):
 T_material_prop = TypeVar("T_material_prop", bound=ThreeMaterialPropsBase)
 T_geometry_prop = TypeVar("T_geometry_prop", bound=ThreeGeometryPropsBase)
 
-ThreeComponentType = Union[ThreeComponentBase, ThreeContainerBase, Fragment, "DataForward"]
+ThreeComponentType = Union[ThreeComponentBase, ThreeContainerBase, Fragment, "DataPortal"]
 
 
 def is_three_component(obj: Component):
@@ -4093,17 +4093,17 @@ class Outlines(ThreeComponentBase[OutlinesProps]):
 
 
 @dataclasses.dataclass
-class DataForwardProps(ContainerBaseProps):
+class DataPortalProps(ContainerBaseProps):
     comps: List[Component] = dataclasses.field(default_factory=list)
 
-class DataForward(ThreeContainerBase[DataForwardProps, ThreeComponentType]):
+class DataPortal(ThreeContainerBase[DataPortalProps, ThreeComponentType]):
     def __init__(self, comps: List[Component], children: Optional[ThreeLayoutType] = None) -> None:
         if children is not None and isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
         for comp in comps:
-            assert comp._flow_comp_type != UIType.DataForward, "DataForward can't contain DataForward"
+            assert comp._flow_comp_type != UIType.DataPortal, "DataPortal can't contain DataPortal"
         assert len(comps) > 0, "comps must have at least one component"
-        super().__init__(UIType.DataForward, DataForwardProps, children, allowed_events=[])
+        super().__init__(UIType.DataPortal, DataPortalProps, children, allowed_events=[])
         self.prop(comps=comps)
 
     @property

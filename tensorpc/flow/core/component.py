@@ -15,6 +15,7 @@
 import abc
 import asyncio
 import builtins
+from contextlib import nullcontext
 from typing import Mapping, Sequence
 import copy
 import dataclasses
@@ -33,10 +34,10 @@ from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable, Cor
 
 from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec,
                                Protocol, Self, TypeAlias, TypeVar)
-import jmespath
+import tensorpc.core.datamodel.jmes as jmespath
 from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.client import RemoteManager, simple_chunk_call
-from tensorpc.core.datamodel.draft import DraftBase, get_draft_jmespath
+from tensorpc.core.datamodel.draft import DraftBase, capture_draft_update, get_draft_jmespath
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 from pydantic import (
     BaseModel,
@@ -198,7 +199,8 @@ class UIType(enum.IntEnum):
     DataModel = 0x10000
     DataGrid = 0x10001
     DataFlexBox = 0x10002
-    DataForward = 0x10003
+    DataPortal = 0x10003
+    DataSubQuery = 0x10004
 
     MASK_THREE = 0x1000
     MASK_THREE_GEOMETRY = 0x0100
@@ -2024,7 +2026,8 @@ class Component(Generic[T_base_props, T_child]):
             sync_state: bool = False,
             sync_status_first: bool = False,
             res_callback: Optional[Callable[[Any], _CORO_NONE]] = None,
-            change_status: bool = True):
+            change_status: bool = True,
+            capture_draft: bool = False):
         """
         Runs the given callback function and handles its result and potential exceptions.
 
@@ -2056,42 +2059,58 @@ class Component(Generic[T_base_props, T_child]):
             await ev.wait()
         res = None
         assert self._flow_uid is not None
+        datamodel_ctx = nullcontext()
+        if capture_draft:
+            datamodel_ctx = capture_draft_update()
         with enter_event_handling_conetxt(self._flow_uid) as evctx:
-            for cb in cbs:
-                try:
-                    coro = cb()
-                    if inspect.iscoroutine(coro):
-                        res = await coro
-                    else:
-                        res = coro
-                    if res_callback is not None:
-                        res_coro = res_callback(res)
-                        if inspect.iscoroutine(res_coro):
-                            await res_coro
-                except Exception as e:
-                    traceback.print_exc()
-                    ss = io.StringIO()
-                    traceback.print_exc(file=ss)
-                    assert self._flow_uid is not None
-                    user_exc = UserMessage.create_error(
-                        self._flow_uid.uid_encoded, repr(e), ss.getvalue())
-                    await self.put_app_event(
-                        self.create_user_msg_event(user_exc))
-                    # app = get_app()
-                    # if app._flowapp_enable_exception_inspect:
-                    #     await app._inspect_exception()
-            # finally:
-            if change_status:
-                self._flow_comp_status = UIRunStatus.Stop.value
-                await self.sync_status(sync_state)
-            else:
-                if sync_state:
-                    await self.sync_state()
-            if evctx.delayed_callbacks:
-                for cb in evctx.delayed_callbacks:
-                    coro = cb()
-                    if inspect.iscoroutine(coro):
-                        await coro
+            with datamodel_ctx as ctx:
+                for cb in cbs:
+                    try:
+                        coro = cb()
+                        if inspect.iscoroutine(coro):
+                            res = await coro
+                        else:
+                            res = coro
+                        if res_callback is not None:
+                            res_coro = res_callback(res)
+                            if inspect.iscoroutine(res_coro):
+                                await res_coro
+                    except Exception as e:
+                        traceback.print_exc()
+                        ss = io.StringIO()
+                        traceback.print_exc(file=ss)
+                        assert self._flow_uid is not None
+                        user_exc = UserMessage.create_error(
+                            self._flow_uid.uid_encoded, repr(e), ss.getvalue())
+                        await self.put_app_event(
+                            self.create_user_msg_event(user_exc))
+                        # app = get_app()
+                        # if app._flowapp_enable_exception_inspect:
+                        #     await app._inspect_exception()
+                # finally:
+                if change_status:
+                    self._flow_comp_status = UIRunStatus.Stop.value
+                    await self.sync_status(sync_state)
+                else:
+                    if sync_state:
+                        await self.sync_state()
+                if evctx.delayed_callbacks:
+                    for cb in evctx.delayed_callbacks:
+                        coro = cb()
+                        if inspect.iscoroutine(coro):
+                            await coro
+            if ctx is not None:
+                ops = ctx._ops 
+                comp_uid_to_ops = {}
+                for op in ops:
+                    if isinstance(op.userdata, Component) and op.userdata._flow_comp_type == UIType.DataModel and op.userdata.is_mounted():
+                        if op.userdata._flow_uid not in comp_uid_to_ops:
+                            comp_uid_to_ops[op.userdata._flow_uid] = (op.userdata, [])
+                        comp_uid_to_ops[op.userdata._flow_uid][1].append(op)
+                for uid, (comp, ops) in comp_uid_to_ops.items():
+                    if ops:
+                        ev_comp = comp._update_with_jmes_ops_event(ops)
+                        await self.put_app_event(ev_comp)
         return res
 
     async def sync_status(self,

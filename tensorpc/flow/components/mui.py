@@ -30,7 +30,7 @@ import io
 import json
 import time
 import uuid
-import jmespath 
+import tensorpc.core.datamodel.jmes as jmespath
 
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterable,
                     Awaitable, Callable, Coroutine, Dict, Iterable, List,
@@ -41,7 +41,7 @@ from PIL import Image as PILImage
 from typing_extensions import Literal, TypeAlias, TypedDict, Self
 from pydantic import field_validator, model_validator
 
-from tensorpc.core.datamodel.draft import DraftObject, JMESPathOp, JMESPathOpForBackend, apply_draft_jmes_ops_backend, capture_draft_update
+from tensorpc.core.datamodel.draft import DraftObject, JMESPathOp, JMESPathOpForBackend, apply_draft_jmes_ops_backend, capture_draft_update, create_draft
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp, UniqueTreeIdForTree
 from tensorpc.flow import marker
 from ...core.typemetas import Vector3Type
@@ -3647,7 +3647,7 @@ class AllotmentProps(MUIFlexBoxProps):
     separator: Union[bool, Undefined] = undefined
     snap: Union[bool, Undefined] = undefined
     vertical: Union[bool, Undefined] = undefined
-
+    visibles: Union[List[bool], Undefined] = undefined
 
 class Allotment(MUIContainerBase[AllotmentProps, MUIComponentType]):
 
@@ -5924,15 +5924,19 @@ class DataModel(MUIContainerBase[DataModelProps, MUIComponentType], Generic[_T])
         await self.send_and_wait(self.update_event(dataObject=self.model))
 
     def get_draft(self) -> _T:
-        return cast(_T, DraftObject(self.model, userdata=self))
+        return cast(_T, create_draft(self.model, userdata=self))
 
-    async def _update_with_jmes_ops(self, ops: list[JMESPathOpForBackend]):
+    def _update_with_jmes_ops_event(self, ops: list[JMESPathOpForBackend]):
         apply_draft_jmes_ops_backend(self.model, ops)
         frontend_ops = [op.to_jmes_path_op().to_dict() for op in ops]
-        return await self.send_and_wait(self.create_comp_event({
+        return self.create_comp_event({
             "type": 0,
             "ops": frontend_ops,
-        }))
+        })
+
+    async def _update_with_jmes_ops(self, ops: list[JMESPathOpForBackend]):
+        return await self.send_and_wait(self._update_with_jmes_ops_event(ops))
+
 
     @contextlib.asynccontextmanager
     async def draft_update(self):
@@ -5943,21 +5947,54 @@ class DataModel(MUIContainerBase[DataModelProps, MUIComponentType], Generic[_T])
 
     @staticmethod 
     def get_draft_external(model: T) -> T:
-        return cast(T, DraftObject(model, userdata=None))
+        return cast(T, create_draft(model, userdata=None))
 
 @dataclasses.dataclass
-class DataForwardProps(ContainerBaseProps):
+class DataPortalProps(ContainerBaseProps):
     comps: List[Component] = dataclasses.field(default_factory=list)
+    query: Union[Undefined, str] = undefined
 
-class DataForward(MUIContainerBase[DataForwardProps, MUIComponentType]):
+class DataPortal(MUIContainerBase[DataPortalProps, MUIComponentType]):
+    """DataPortal is used to forward multiple container that isn't direct parent.
+    Can't be used with DataSubQuery.
+    """
     def __init__(self, comps: List[Component], children: Optional[LayoutType] = None) -> None:
         if children is not None and isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
         for comp in comps:
-            assert comp._flow_comp_type != UIType.DataForward, "DataForward can't contain DataForward"
+            assert comp._flow_comp_type != UIType.DataPortal, "DataPortal can't contain DataPortal"
         assert len(comps) > 0, "comps must have at least one component"
-        super().__init__(UIType.DataForward, DataForwardProps, children, allowed_events=[])
+        super().__init__(UIType.DataPortal, DataPortalProps, children, allowed_events=[])
         self.prop(comps=comps)
+
+    @property
+    def prop(self):
+        propcls = self.propcls
+        return self._prop_base(propcls, self)
+
+    @property
+    def update_event(self):
+        propcls = self.propcls
+        return self._update_props_base(propcls)
+
+@dataclasses.dataclass
+class DataSubQueryProps(ContainerBaseProps):
+    query: Union[Undefined, str] = undefined
+
+    @field_validator('query')
+    def jmes_query_validator(cls, v: Union[str, Undefined]):
+        assert isinstance(v, str), "query must be string"
+        # compile test
+        jmespath.compile(v)
+
+class DataSubQuery(MUIContainerBase[DataSubQueryProps, MUIComponentType]):
+    def __init__(self, query: str, children: Optional[LayoutType] = None) -> None:
+        # compile test
+        jmespath.compile(query)
+        if children is not None and isinstance(children, Sequence):
+            children = {str(i): v for i, v in enumerate(children)}
+        super().__init__(UIType.DataSubQuery, DataSubQueryProps, children, allowed_events=[])
+        self.prop(query=query)
 
     @property
     def prop(self):
