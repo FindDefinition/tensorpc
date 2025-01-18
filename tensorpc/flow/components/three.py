@@ -4100,8 +4100,9 @@ class DataPortal(ThreeContainerBase[DataPortalProps, ThreeComponentType]):
     def __init__(self, comps: List[Component], children: Optional[ThreeLayoutType] = None) -> None:
         if children is not None and isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
+        allowed_comp_types = {UIType.DataModel, UIType.ThreeURILoaderContext, UIType.ThreeCubeCamera}
         for comp in comps:
-            assert comp._flow_comp_type != UIType.DataPortal, "DataPortal can't contain DataPortal"
+            assert comp._flow_comp_type in allowed_comp_types, "DataPortal only support DataModel and resource loaders."
         assert len(comps) > 0, "comps must have at least one component"
         super().__init__(UIType.DataPortal, DataPortalProps, children, allowed_events=[])
         self.prop(comps=comps)

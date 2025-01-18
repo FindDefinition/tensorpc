@@ -37,7 +37,7 @@ from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec,
 import tensorpc.core.datamodel.jmes as jmespath
 from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.client import RemoteManager, simple_chunk_call
-from tensorpc.core.datamodel.draft import DraftBase, capture_draft_update, get_draft_jmespath
+from tensorpc.core.datamodel.draft import DraftASTType, DraftBase, JMESPathOpForBackend, capture_draft_update, get_draft_jmespath, insert_assign_draft_op
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 from pydantic import (
     BaseModel,
@@ -435,9 +435,10 @@ class FrontendEventType(enum.IntEnum):
     FlowPaneContextMenu = 86
     FlowNodeLogicChange = 87
     FlowEdgeLogicChange = 88
+    # visualization change such as position and size.
+    # FlowNodeVisChange = 89
+    # FlowEdgeVisChange = 90
 
-    # data box events
-    DataBoxSecondaryActionClick = 90
 
     PlotlyClickData = 100
     PlotlyClickAnnotation = 101
@@ -447,6 +448,8 @@ class FrontendEventType(enum.IntEnum):
     TerminalResize = 111
     TerminalSaveState = 112
 
+    # data box events
+    DataBoxSecondaryActionClick = 120
 
 
 UI_TYPES_SUPPORT_DATACLASS: Set[UIType] = {
@@ -1953,7 +1956,8 @@ class Component(Generic[T_base_props, T_child]):
                            sync_status_first: bool = False,
                            res_callback: Optional[Callable[[Any],
                                                            _CORO_ANY]] = None,
-                           change_status: bool = True) -> Optional[Any]:
+                           change_status: bool = True,
+                           capture_draft: bool = False) -> Optional[Any]:
         """
         Runs the given callback function and handles its result and potential exceptions.
 
@@ -1985,39 +1989,45 @@ class Component(Generic[T_base_props, T_child]):
             await ev.wait()
         res = None
         assert self._flow_uid is not None
+        datamodel_ctx = nullcontext()
+        if capture_draft:
+            datamodel_ctx = capture_draft_update()
         with enter_event_handling_conetxt(self._flow_uid) as evctx:
-            try:
-                coro = cb()
-                if inspect.iscoroutine(coro):
-                    res = await coro
-                else:
-                    res = coro
-                if res_callback is not None:
-                    res_coro = res_callback(res)
-                    if inspect.iscoroutine(res_coro):
-                        await res_coro
+            with datamodel_ctx as ctx:
+                try:
+                    coro = cb()
+                    if inspect.iscoroutine(coro):
+                        res = await coro
+                    else:
+                        res = coro
+                    if res_callback is not None:
+                        res_coro = res_callback(res)
+                        if inspect.iscoroutine(res_coro):
+                            await res_coro
 
-            except Exception as e:
-                traceback.print_exc()
-                ss = io.StringIO()
-                traceback.print_exc(file=ss)
-                user_exc = UserMessage.create_error(
-                    self._flow_uid.uid_encoded
-                    if self._flow_uid is not None else "", repr(e),
-                    ss.getvalue())
-                await self.put_app_event(self.create_user_msg_event(user_exc))
-                app = get_app()
-                if app._flowapp_enable_exception_inspect:
-                    await app._inspect_exception()
-            finally:
-                if change_status:
-                    self._flow_comp_status = UIRunStatus.Stop.value
-                    await self.sync_status(sync_state)
-                if evctx.delayed_callbacks:
-                    for cb in evctx.delayed_callbacks:
-                        coro = cb()
-                        if inspect.iscoroutine(coro):
-                            await coro
+                except Exception as e:
+                    traceback.print_exc()
+                    ss = io.StringIO()
+                    traceback.print_exc(file=ss)
+                    user_exc = UserMessage.create_error(
+                        self._flow_uid.uid_encoded
+                        if self._flow_uid is not None else "", repr(e),
+                        ss.getvalue())
+                    await self.put_app_event(self.create_user_msg_event(user_exc))
+                    app = get_app()
+                    if app._flowapp_enable_exception_inspect:
+                        await app._inspect_exception()
+                finally:
+                    if change_status:
+                        self._flow_comp_status = UIRunStatus.Stop.value
+                        await self.sync_status(sync_state)
+                    if evctx.delayed_callbacks:
+                        for cb in evctx.delayed_callbacks:
+                            coro = cb()
+                            if inspect.iscoroutine(coro):
+                                await coro
+            if ctx is not None:
+                await self._run_draft_update(ctx._ops)
         return res
 
     async def run_callbacks(
@@ -2100,18 +2110,46 @@ class Component(Generic[T_base_props, T_child]):
                         if inspect.iscoroutine(coro):
                             await coro
             if ctx is not None:
-                ops = ctx._ops 
-                comp_uid_to_ops = {}
-                for op in ops:
-                    if isinstance(op.userdata, Component) and op.userdata._flow_comp_type == UIType.DataModel and op.userdata.is_mounted():
-                        if op.userdata._flow_uid not in comp_uid_to_ops:
-                            comp_uid_to_ops[op.userdata._flow_uid] = (op.userdata, [])
-                        comp_uid_to_ops[op.userdata._flow_uid][1].append(op)
-                for uid, (comp, ops) in comp_uid_to_ops.items():
-                    if ops:
-                        ev_comp = comp._update_with_jmes_ops_event(ops)
-                        await self.put_app_event(ev_comp)
+                await self._run_draft_update(ctx._ops)
         return res
+
+    async def _run_draft_update(self, ops: list[JMESPathOpForBackend]):
+        if not ops:
+            return 
+        comp_uid_to_ops = {}
+        for op in ops:
+            if isinstance(op.userdata, Component) and op.userdata._flow_comp_type == UIType.DataModel and op.userdata.is_mounted():
+                if op.userdata._flow_uid not in comp_uid_to_ops:
+                    comp_uid_to_ops[op.userdata._flow_uid] = (op.userdata, [])
+                comp_uid_to_ops[op.userdata._flow_uid][1].append(op)
+        for uid, (comp, ops) in comp_uid_to_ops.items():
+            if ops:
+                ev_comp = comp._update_with_jmes_ops_event(ops)
+                await self.put_app_event(ev_comp)
+
+    def __data_model_auto_event_handler(self, value: Any, draft: Any):
+        assert isinstance(draft, DraftBase)
+        insert_assign_draft_op(draft, value)
+
+    def _bind_field_with_change_event(self, field_name: str, draft: Any):
+        """Bind a draft with change event. bind_fields is called automatically.
+        Equal to following code:
+
+        ```Python
+        origin_draft = ...
+        async def handle_change(self, value):
+            origin_draft.a.b = value
+        ```
+        """
+        assert isinstance(draft, DraftBase)
+        assert isinstance(draft._tensorpc_draft_attr_userdata, Component), "you must use comp.get_draft_target() to get draft"
+        if draft._tensorpc_draft_attr_cur_node.type == DraftASTType.FUNC_CALL:
+            raise ValueError("can't bind field with getitem or getattr result")
+        assert FrontendEventType.Change.value in self._flow_allowed_events
+        self.bind_fields(**{field_name: draft})
+        self.register_event_handler(FrontendEventType.Change, 
+            partial(self.__data_model_auto_event_handler, draft=draft), simple_event=True)
+        return self 
 
     async def sync_status(self,
                           sync_state: bool = False,
@@ -2146,15 +2184,21 @@ class Component(Generic[T_base_props, T_child]):
             await container_comp.run_callback(
                 special_methods.did_mount.get_binded_fn(),
                 sync_status_first=False,
-                change_status=False)
-        await self._flow_event_emitter.emit_async(FrontendEventType.AfterMount.value,
-                                                  Event(FrontendEventType.AfterMount.value, None)) 
+                change_status=False,
+                capture_draft=True)
+        with capture_draft_update() as ctx:
+            await self._flow_event_emitter.emit_async(FrontendEventType.AfterMount.value,
+                                                    Event(FrontendEventType.AfterMount.value, None)) 
+            if ctx._ops:
+                await self._run_draft_update(ctx._ops)
+
         # run effects
         for k, effects in self.effects._flow_effects.items():
             for effect in effects:
                 res = await container_comp.run_callback(effect,
                                                 sync_status_first=False,
-                                                change_status=False)
+                                                change_status=False,
+                                                capture_draft=True)
                 if res is not None:
                     # res is effect
                     self.effects._flow_unmounted_effects[k].append(

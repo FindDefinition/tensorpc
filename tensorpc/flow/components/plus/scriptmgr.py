@@ -119,7 +119,7 @@ echo "Hello World"
 }
 
 
-class ScriptManagerV1(mui.FlexBox):
+class ScriptManager(mui.FlexBox):
 
     def __init__(self,
                  storage_node_rid: Optional[str] = None,
@@ -482,30 +482,23 @@ class ScriptManagerV1(mui.FlexBox):
 
 def _create_states():
     return {
-        "cpp": {
-            "is_editor_visible": True,
-            "is_terminal_visible": False,
-        },
-        "python": {
-            "is_editor_visible": True,
-            "is_terminal_visible": False,
-        },
-        "bash": {
-            "is_editor_visible": True,
-            "is_terminal_visible": False,
-        },
-        "app": {
-            "is_editor_visible": True,
-            "is_terminal_visible": False,
-        },
+        "cpp": ScriptState(True, False),
+        "python": ScriptState(True, False),
+        "bash": ScriptState(True, False),
+        "app": ScriptState(True, True),
     }
+
+@dataclasses.dataclass
+class ScriptState:
+    is_editor_visible: bool
+    is_app_visible: bool
 
 @dataclasses.dataclass
 class ScriptModel:
     label: str 
     storage_key: str
     language: Literal["cpp", "python", "bash", "app"] = "python"
-    states: dict[str, Any] = dataclasses.field(default_factory=_create_states)
+    states: dict[str, ScriptState] = dataclasses.field(default_factory=_create_states)
 
 @dataclasses.dataclass
 class ScriptManagerModel:
@@ -513,7 +506,7 @@ class ScriptManagerModel:
     cur_script_idx: Optional[int] = None
 
 
-class ScriptManager(mui.FlexBox):
+class ScriptManagerV2(mui.FlexBox):
 
     def __init__(self,
                  storage_node_rid: Optional[str] = None,
@@ -549,6 +542,8 @@ class ScriptManager(mui.FlexBox):
             mui.Allotment.Pane(self.code_editor.prop(height="100%")),
             mui.Allotment.Pane(self.app_show_box.prop(height="100%"), visible=False),
         ])).prop(flex=1, minHeight=0)
+
+        self.code_editor_container.bind_fields(visibles="[getitem(states, language).is_editor_visible, getitem(states, language).is_app_visible]")
         self.scripts = mui.Autocomplete(
             "Scripts",
             [],
@@ -573,21 +568,21 @@ class ScriptManager(mui.FlexBox):
                 confirmTitle="Warning",
                 confirmMessage="Are you sure to delete this script?")
         self._show_editor_btn = mui.ToggleButton(icon=mui.IconType.Code, callback=self._handle_show_editor).prop(size="small")
-        self._show_editor_btn.bind_fields(selected="getitem(getitem(scripts, cur_script_idx).states, getitem(scripts, cur_script_idx).language).is_editor_visible")
+        self._show_editor_btn.bind_fields(selected="getitem(states, language).is_editor_visible")
         self.model = mui.DataModel(init_model, [
             mui.HBox([
-                self.scripts.prop(flex=1),
-                mui.MatchCase([
-                    mui.MatchCase.Case(True, mui.HBox([
-                        self._save_and_run_btn,
-                        # self._enable_save_watch,
-                        self.langs,
-                        self._delete_button,
-                        self._show_editor_btn,
-                    ]))
-                ]).bind_fields(condition="cur_script_idx != null"),
+                self.scripts.prop(flex=1).bind_fields(options="scripts", value="getitem(scripts, cur_script_idx)"),
+                mui.DataSubQuery("getitem(scripts, cur_script_idx)", [
+                    self._save_and_run_btn,
+                    # self._enable_save_watch,
+                    self.langs,
+                    self._delete_button,
+                    self._show_editor_btn,
+                ]).bind_fields(enable="cur_script_idx != null"),
             ]).prop(alignItems="center"),
-            self.code_editor_container
+            mui.DataSubQuery("getitem(scripts, cur_script_idx)", [
+                self.code_editor_container,
+            ]).bind_fields(enable="cur_script_idx != null"),
         ])
 
         self.init_add_layout([
@@ -605,7 +600,7 @@ class ScriptManager(mui.FlexBox):
                   minWidth=0,
                   overflow="hidden")
         self.code_editor.event_editor_save.on(self._on_editor_save)
-        self.code_editor.event_component_ready.on(self._on_editor_ready)
+        self.event_after_mount.on(self._on_editor_ready)
         self.scripts.event_select_new_item.on(self._on_new_script)
         # used for apps and python scripts
         self._manager_global_storage: Dict[str, Any] = {}
@@ -634,10 +629,11 @@ class ScriptManager(mui.FlexBox):
         await self._on_editor_ready()
 
     async def _handle_show_editor(self, selected: bool):
-        if self.langs.value == "app":
-            await self.code_editor_container.update_pane_props(0, {
-                "visible": selected
-            })
+        draft = self.model.get_draft()
+        if self.model.model.cur_script_idx is not None:
+            cur_script_real = self.model.model.scripts[self.model.model.cur_script_idx]
+            cur_script = draft.scripts[self.model.model.cur_script_idx]
+            cur_script.states[cur_script_real.language].is_editor_visible = selected
 
     async def _on_editor_ready(self):
         items = await appctx.list_data_storage(
@@ -647,22 +643,30 @@ class ScriptManager(mui.FlexBox):
                    if not isinstance(x.userdata, mui.Undefined) else 0,
                    reverse=True)
         options: List[Dict[str, Any]] = []
+        options_v2: List[ScriptModel] = []
         for item in items:
             if item.typeStr == Script.__name__:
                 options.append({
                     "label": Path(item.name).stem,
                     "storage_key": item.name
                 })
-        if options:
-            await self.scripts.update_options(options, 0)
-            await self._on_script_select(options[0])
+                options_v2.append(ScriptModel(label=Path(item.name).stem, storage_key=item.name))
+        if options_v2:
+            draft = self.model.get_draft()
+            draft.scripts = options_v2
+            draft.cur_script_idx = 0
         else:
-            default_opt = {
-                "label": "example",
-                "storage_key": f"{SCRIPT_STORAGE_KEY_PREFIX}/example"
-            }
-            await self._on_new_script(default_opt,
-                                      init_str=self._init_scripts["python"])
+            raise NotImplementedError
+        # if options:
+        #     await self.scripts.update_options(options, 0)
+        #     await self._on_script_select(options[0])
+        # else:
+        #     default_opt = {
+        #         "label": "example",
+        #         "storage_key": f"{SCRIPT_STORAGE_KEY_PREFIX}/example"
+        #     }
+        #     await self._on_new_script(default_opt,
+        #                               init_str=self._init_scripts["python"])
 
     async def _on_save_and_run(self):
         # we attach userdata to tell save handler run script after save

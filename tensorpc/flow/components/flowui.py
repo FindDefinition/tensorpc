@@ -1040,7 +1040,6 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         return self._update_props_base(propcls)
 
     async def handle_event(self, ev: Event, is_sync: bool = False):
-        # print("flow event", ev.type, ev.data)
         return await handle_standard_event(self,
                                            ev,
                                            is_sync=is_sync,

@@ -41,7 +41,7 @@ from PIL import Image as PILImage
 from typing_extensions import Literal, TypeAlias, TypedDict, Self
 from pydantic import field_validator, model_validator
 
-from tensorpc.core.datamodel.draft import DraftObject, JMESPathOp, JMESPathOpForBackend, apply_draft_jmes_ops_backend, capture_draft_update, create_draft
+from tensorpc.core.datamodel.draft import DraftBase, DraftObject, JMESPathOp, JMESPathOpForBackend, apply_draft_jmes_ops_backend, capture_draft_update, create_draft
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp, UniqueTreeIdForTree
 from tensorpc.flow import marker
 from ...core.typemetas import Vector3Type
@@ -944,7 +944,7 @@ class ToggleButtonProps(MUIComponentBaseProps, IconBaseProps):
     # TODO remove this.
     value: ValueType = ""
     name: str = ""
-    selected: Union[Undefined, bool] = undefined
+    selected: bool = False
     tooltip: Union[str, Undefined] = undefined
     tooltipPlacement: Union[_TooltipPlacement, Undefined] = undefined
     muiColor: Union[_BtnGroupColor, Undefined] = undefined
@@ -959,7 +959,8 @@ class ToggleButton(MUIComponentBase[ToggleButtonProps]):
             *,
             name: str = "",
             icon: Union[IconType, str, Undefined] = undefined,
-            callback: Optional[Callable[[bool], _CORO_NONE]] = None) -> None:
+            callback: Optional[Callable[[bool], _CORO_NONE]] = None,
+            init_value: bool = False) -> None:
         super().__init__(UIType.ToggleButton,
                          ToggleButtonProps,
                          allowed_events=[FrontendEventType.Change.value])
@@ -970,6 +971,7 @@ class ToggleButton(MUIComponentBase[ToggleButtonProps]):
         else:
             self.props.icon = Icon.encode_svg(icon)
         self.props.name = name
+        self.props.selected = init_value
         if callback is not None:
             self.register_event_handler(FrontendEventType.Change.value,
                                         callback)
@@ -1006,6 +1008,12 @@ class ToggleButton(MUIComponentBase[ToggleButtonProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+    def bind_draft_change(self, draft: Any):
+        # TODO validate type
+        assert isinstance(draft, DraftBase)
+        return self._bind_field_with_change_event("selected", draft)
+
 
 @dataclasses.dataclass
 class GroupToggleButtonDef:
@@ -1652,6 +1660,11 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+    def bind_draft_change(self, draft: Any):
+        # TODO validate type
+        assert isinstance(draft, DraftBase)
+        assert not isinstance(self.value, Undefined), "must be controlled component"
+        return self._bind_field_with_change_event("value", draft)
 
 @dataclasses.dataclass
 class TextFieldProps(InputBaseProps):
@@ -2008,6 +2021,10 @@ class SwitchBase(MUIComponentBase[SwitchProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+    def bind_draft_change(self, draft: Any):
+        # TODO validate type
+        assert isinstance(draft, DraftBase)
+        return self._bind_field_with_change_event("checked", draft)
 
 class Switch(SwitchBase):
 
@@ -2592,6 +2609,11 @@ class Slider(MUIComponentBase[SliderProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+    def bind_draft_change(self, draft: Any):
+        # TODO validate type
+        assert isinstance(draft, DraftBase)
+        assert not isinstance(self.value, Undefined), "must be controlled component"
+        return self._bind_field_with_change_event("value", draft)
 
 @dataclasses.dataclass
 class RangeSliderProps(SliderBaseProps):
@@ -2819,7 +2841,12 @@ class BlenderSlider(MUIComponentBase[BlenderSliderProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    
+    def bind_draft_change(self, draft: Any):
+        # TODO validate type
+        assert isinstance(draft, DraftBase)
+        assert not isinstance(self.value, Undefined), "must be controlled component"
+        return self._bind_field_with_change_event("value", draft)
+
 
 
 _T = TypeVar("_T")
@@ -3207,6 +3234,7 @@ class MarkdownProps(ContainerBaseProps):
     katex: Union[bool, Undefined] = undefined
     codeHighlight: Union[bool, Undefined] = undefined
     emoji: Union[bool, Undefined] = undefined
+    codeLangAlias: Union[Undefined, Dict[str, str]] = undefined
     value: str = ""
 
 
@@ -4791,7 +4819,7 @@ class DataListControlType(enum.IntEnum):
 
 @dataclasses.dataclass
 class MUIDataFlexBoxWithDndProps(MUIFlexBoxWithDndProps):
-    dataList: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
+    dataList: List[Any] = dataclasses.field(default_factory=list)
     idKey: str = "id"
     virtualized: Union[Undefined, bool] = undefined
 
@@ -4866,7 +4894,7 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps,
     class ChildDef:
         component: Component
 
-    def __init__(self, children: Component, init_data_list: Optional[List[Dict[str, Any]]] = None) -> None:
+    def __init__(self, children: Component, init_data_list: Optional[List[Any]] = None) -> None:
         super().__init__(UIType.DataFlexBox,
                          MUIDataFlexBoxWithDndProps,
                          DataFlexBox.ChildDef(children),
@@ -5937,6 +5965,8 @@ class DataModel(MUIContainerBase[DataModelProps, MUIComponentType], Generic[_T])
     async def _update_with_jmes_ops(self, ops: list[JMESPathOpForBackend]):
         return await self.send_and_wait(self._update_with_jmes_ops_event(ops))
 
+    def bind_fields_unchecked(self, **kwargs: Union[str, tuple["Component", Union[str, DraftBase]], DraftBase]) -> Self:
+        raise NotImplementedError("you can't bind fields on DataModel")
 
     @contextlib.asynccontextmanager
     async def draft_update(self):
@@ -5956,16 +5986,17 @@ class DataPortalProps(ContainerBaseProps):
 
 class DataPortal(MUIContainerBase[DataPortalProps, MUIComponentType]):
     """DataPortal is used to forward multiple container that isn't direct parent.
-    Can't be used with DataSubQuery.
+    can only be used with DataModel and resource loaders.
     """
-    def __init__(self, comps: List[Component], children: Optional[LayoutType] = None) -> None:
+    def __init__(self, sources: List[Component], children: Optional[LayoutType] = None) -> None:
         if children is not None and isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
-        for comp in comps:
-            assert comp._flow_comp_type != UIType.DataPortal, "DataPortal can't contain DataPortal"
-        assert len(comps) > 0, "comps must have at least one component"
+        allowed_comp_types = {UIType.DataModel, UIType.ThreeURILoaderContext, UIType.ThreeCubeCamera}
+        for comp in sources:
+            assert comp._flow_comp_type in allowed_comp_types, "DataPortal only support DataModel and resource loaders."
+        assert len(sources) > 0, "DataPortal must have at least one source"
         super().__init__(UIType.DataPortal, DataPortalProps, children, allowed_events=[])
-        self.prop(comps=comps)
+        self.prop(comps=sources)
 
     @property
     def prop(self):
@@ -5977,9 +6008,15 @@ class DataPortal(MUIContainerBase[DataPortalProps, MUIComponentType]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+    def bind_fields_unchecked(self, **kwargs: Union[str, tuple["Component", Union[str, DraftBase]], DraftBase]) -> Self:
+        if "comps" not in  kwargs and "query" not in kwargs:
+            return super().bind_fields_unchecked(**kwargs)
+        raise NotImplementedError("you can't bind `comps` and `query` on DataModel")
+
 @dataclasses.dataclass
 class DataSubQueryProps(ContainerBaseProps):
     query: Union[Undefined, str] = undefined
+    enable: Union[Undefined, bool] = undefined
 
     @field_validator('query')
     def jmes_query_validator(cls, v: Union[str, Undefined]):
@@ -6005,3 +6042,8 @@ class DataSubQuery(MUIContainerBase[DataSubQueryProps, MUIComponentType]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+    def bind_fields_unchecked(self, **kwargs: Union[str, tuple["Component", Union[str, DraftBase]], DraftBase]) -> Self:
+        if "query" not in kwargs:
+            return super().bind_fields_unchecked(**kwargs)
+        raise NotImplementedError("you can't bind `comps` and `query` on DataModel")

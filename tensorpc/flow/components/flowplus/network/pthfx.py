@@ -505,6 +505,7 @@ class FlowUIInterpreter(Interpreter):
                     if target is not None:
                         self._export_param_dict[
                             p.arg.name] = original_mod.get_buffer(target)
+                # TODO if it's constant tensor
 
             for p in gm.graph_signature.output_specs:
                 if p.kind == OutputKind.BUFFER_MUTATION:
