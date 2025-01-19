@@ -85,6 +85,10 @@ JINJA2_VARIABLE_ENV = Environment(loader=BaseLoader(),
 
 ALL_NODES = HashableRegistry()
 
+class StorageType(enum.IntEnum):
+    JSON = 0
+    JSON_ARRAY = 1
+    BINARY = 2
 
 class HandleTypes(enum.Enum):
     Driver = "driver"
@@ -832,18 +836,6 @@ class DataStorageNodeBase(abc.ABC):
                 res.append(str(relative_path_no_suffix))
         return res
 
-    # def get_item_metas(self, glob_prefix: Optional[str] = None):
-    #     res: List[str] = []
-    #     root = FLOW_FOLDER_DATA_PATH / self.get_node_id()
-    #     if not root.exists():
-    #         return res
-    #     for p in root.rglob("*.json"):
-    #         if (p.parent / f"{p.stem}.pkl").exists():
-    #             relative_path = p.relative_to(root)
-    #             relative_path_no_suffix = relative_path.with_suffix("")
-    #             res.append(str(relative_path_no_suffix))
-    #     return res
-
     def _get_and_create_storage_root_path(self, key: str):
         root = self.get_store_root() / self.get_node_id()
         parts = self._check_and_split_key(key)
@@ -866,6 +858,7 @@ class DataStorageNodeBase(abc.ABC):
         meta.userdata = {
             "timestamp": timestamp,
             "fileSize": len(data),
+            "version": 1,
         }
         if self.has_data_item(key) and raise_if_exist:
             raise DataStorageKeyError(f"{key} already exists")

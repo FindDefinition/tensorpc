@@ -44,7 +44,7 @@ from pydantic import field_validator, model_validator
 from tensorpc.core.datamodel.draft import DraftBase, DraftObject, JMESPathOp, JMESPathOpForBackend, apply_draft_jmes_ops_backend, capture_draft_update, create_draft
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp, UniqueTreeIdForTree
 from tensorpc.flow import marker
-from ...core.typemetas import Vector3Type
+from ...core.datamodel.typemetas import Vector3Type
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.defs import FileResource, FileResourceRequest
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter

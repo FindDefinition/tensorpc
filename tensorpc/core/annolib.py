@@ -2,6 +2,7 @@
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Set, Tuple, Type, TypeVar, TypedDict, Union, Generic
 from typing_extensions import Literal, Annotated, NotRequired, get_origin, get_args, get_type_hints
 from dataclasses import dataclass
+from dataclasses import Field, make_dataclass, field
 import inspect
 import sys 
 import typing 
@@ -85,6 +86,20 @@ def parse_annotated_function(func: Callable, is_dynamic_class: bool = False) -> 
         if name not in annos and param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD):
             anno_args.append(AnnotatedArg(name, param, Any))
     return anno_args, return_anno
+
+def annotated_function_to_dataclass(func: Callable, is_dynamic_class: bool = False):
+    if compat.Python3_10AndLater:
+        annos = get_type_hints(func, include_extras=True)
+    else:
+        annos = get_type_hints(func, include_extras=True, globalns={} if is_dynamic_class else None)
+    specs = inspect.signature(func)
+    name_to_parameter = {p.name: p for p in specs.parameters.values()}
+    fields: List[Tuple[str, Any, Field]] = []
+    for name, anno in annos.items():
+        param = name_to_parameter[name]
+        assert param.default is not inspect.Parameter.empty, "annotated function arg must have default value"
+        fields.append((name, anno, field(default=param.default)))
+    return make_dataclass(func.__name__, fields)
 
 class WTF(TypedDict):
     pass 

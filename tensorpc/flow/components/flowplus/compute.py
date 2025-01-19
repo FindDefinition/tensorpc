@@ -25,7 +25,7 @@ from tensorpc.flow.core.appcore import run_coro_sync
 from tensorpc import compat
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 import tensorpc.core.dataclass_dispatch as dataclasses
-from tensorpc.core.annocore import (AnnotatedArg, AnnotatedReturn,
+from tensorpc.core.annolib import (AnnotatedArg, AnnotatedReturn,
                                     extract_annotated_type_and_meta, get_args,
                                     is_async_gen, is_not_required, is_optional,
                                     lenient_issubclass,

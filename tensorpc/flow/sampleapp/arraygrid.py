@@ -51,7 +51,7 @@ from tensorpc.flow.components.mui import (Button, HBox, ListItemButton,
                                                   ListItemText,
                                                   MUIComponentType, VBox,
                                                   VList)
-from tensorpc.core import typemetas
+from tensorpc.core.datamodel import typemetas
 from tensorpc.flow.sampleapp.sample_reload_fn import func_support_reload
 from tensorpc.flow.core.objtree import get_objtree_context
 from tensorpc.flow.sampleapp.sample_preview import TestPreview0

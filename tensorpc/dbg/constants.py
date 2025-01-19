@@ -4,7 +4,7 @@ import os
 import threading
 from types import FrameType
 from typing import Any, List, Optional
-from tensorpc.core import typemetas
+from tensorpc.core.datamodel import typemetas
 from typing_extensions import Annotated, Literal
 from tensorpc.core import dataclass_dispatch as pydantic_dataclasses
 

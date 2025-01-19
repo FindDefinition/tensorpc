@@ -78,18 +78,3 @@ class Vector2:
 Vector2Type: TypeAlias = Tuple[float, float]
 
 Vector3Type: TypeAlias = Tuple[float, float, float]
-
-
-def annotated_function_to_dataclass(func: Callable, is_dynamic_class: bool = False):
-    if compat.Python3_10AndLater:
-        annos = get_type_hints(func, include_extras=True)
-    else:
-        annos = get_type_hints(func, include_extras=True, globalns={} if is_dynamic_class else None)
-    specs = inspect.signature(func)
-    name_to_parameter = {p.name: p for p in specs.parameters.values()}
-    fields: List[Tuple[str, Any, Field]] = []
-    for name, anno in annos.items():
-        param = name_to_parameter[name]
-        assert param.default is not inspect.Parameter.empty, "annotated function arg must have default value"
-        fields.append((name, anno, field(default=param.default)))
-    return make_dataclass(func.__name__, fields)

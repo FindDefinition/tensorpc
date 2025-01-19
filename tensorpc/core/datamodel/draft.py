@@ -70,16 +70,10 @@ class DraftASTType(enum.IntEnum):
     FUNC_CALL = 3
     NAME = 4
 
-
 @dataclasses.dataclass
-class _DraftPath:
+class DraftASTNode:
     type: DraftASTType
-    key: Union[int, str]
-
-@dataclasses.dataclass
-class _DraftASTNodeBase:
-    type: DraftASTType
-    children: list["_DraftASTNodeBase"]
+    children: list["DraftASTNode"]
     value: Any
 
     def get_jmes_path(self) -> str:
@@ -89,7 +83,7 @@ class _DraftASTNodeBase:
 
 _GET_ITEMS = set([DraftASTType.GET_ITEM, DraftASTType.ARRAY_GET_ITEM, DraftASTType.DICT_GET_ITEM])
 
-def _draft_ast_to_jmes_path_recursive(node: _DraftASTNodeBase) -> str:
+def _draft_ast_to_jmes_path_recursive(node: DraftASTNode) -> str:
     if node.type == DraftASTType.NAME:
         return node.value
     elif node.type in _GET_ITEMS:
@@ -109,7 +103,7 @@ def _draft_ast_to_jmes_path_recursive(node: _DraftASTNodeBase) -> str:
     else:
         raise NotImplementedError(f"node type {node.type} not implemented")
     
-def _evaluate_draft_ast(node: _DraftASTNodeBase, obj: Any, root_obj: Any) -> Any:
+def _evaluate_draft_ast(node: DraftASTNode, obj: Any, root_obj: Any) -> Any:
     if node.type == DraftASTType.NAME:
         if node.value == "" or node.value == "$":
             return obj
@@ -146,10 +140,10 @@ class JMESPathOp:
 class JMESPathOpForBackend:
     op: JMESPathOpType
     opData: Any
-    node: _DraftASTNodeBase
+    node: DraftASTNode
     userdata: Any = None
     # only used when evaluate object (not json object), jmes only support json.
-    additionalNodes: list[_DraftASTNodeBase] = dataclasses.field(default_factory=list)
+    additionalNodes: list[DraftASTNode] = dataclasses.field(default_factory=list)
 
     def __repr__(self) -> str:
         path_str = self.node.get_jmes_path()
@@ -187,28 +181,7 @@ def get_draft_update_context() -> DraftUpdateContext:
     assert ctx is not None, "This operation is only allowed in Draft context"
     return ctx
 
-def _get_jmes_path(path: list[_DraftPath]) -> str:
-    res: list[str] = []
-
-    for i in range(len(path)):
-        path_item = path[i]
-        if path_item.type == DraftASTType.GET_ITEM:
-            if i != 0:
-                res.append(".")
-            res.append(str(path_item.key))
-        elif path_item.type == DraftASTType.ARRAY_GET_ITEM:
-            res.append(f"[{path_item.key}]")
-        elif path_item.type == DraftASTType.DICT_GET_ITEM:
-            if i != 0:
-                res.append(".")
-            res.append(f"\"{path_item.key}\"")
-    if not res:
-        # $ means root
-        return "$"
-    return "".join(res)
-
-
-def _tensorpc_draft_dispatch(new_obj: Any, node: _DraftASTNodeBase, userdata: Any) -> "DraftBase":
+def _tensorpc_draft_dispatch(new_obj: Any, node: DraftASTNode, userdata: Any) -> "DraftBase":
     # TODO add annotation validate
     if dataclasses.is_dataclass(new_obj):
         return DraftObject(new_obj, userdata, node)
@@ -225,26 +198,26 @@ def _tensorpc_draft_dispatch(new_obj: Any, node: _DraftASTNodeBase, userdata: An
 class DraftBase:
     __known_attrs__ = {"_tensorpc_draft_attr_real_obj", "_tensorpc_draft_attr_userdata", "_tensorpc_draft_attr_cur_node"}
 
-    def __init__(self, obj: Any, userdata: Any = None, node: Optional[_DraftASTNodeBase] = None) -> None:
+    def __init__(self, obj: Any, userdata: Any = None, node: Optional[DraftASTNode] = None) -> None:
         self._tensorpc_draft_attr_real_obj = obj 
         self._tensorpc_draft_attr_userdata = userdata
-        self._tensorpc_draft_attr_cur_node: _DraftASTNodeBase = node or _DraftASTNodeBase(DraftASTType.NAME, [], "")
+        self._tensorpc_draft_attr_cur_node: DraftASTNode = node or DraftASTNode(DraftASTType.NAME, [], "")
 
     def __str__(self) -> str:
         return get_draft_jmespath(self)
 
-    def _tensorpc_draft_get_jmes_op(self, op_type: JMESPathOpType, opdata: Any, drop_last: bool = False, addi_nodes: Optional[list[_DraftASTNodeBase]] = None) -> JMESPathOpForBackend:
+    def _tensorpc_draft_get_jmes_op(self, op_type: JMESPathOpType, opdata: Any, drop_last: bool = False, addi_nodes: Optional[list[DraftASTNode]] = None) -> JMESPathOpForBackend:
         node = self._tensorpc_draft_attr_cur_node
         if drop_last:
             node = node.children[0]
         return JMESPathOpForBackend(op_type, opdata, node, self._tensorpc_draft_attr_userdata, addi_nodes if addi_nodes is not None else [])
 
-    def _tensorpc_draft_dispatch(self, new_obj: Any, new_path_item: _DraftPath, new_node: _DraftASTNodeBase) -> "DraftBase":
+    def _tensorpc_draft_dispatch(self, new_obj: Any, new_node: DraftASTNode) -> "DraftBase":
         return _tensorpc_draft_dispatch(new_obj, new_node, self._tensorpc_draft_attr_userdata)
 
 class DraftObject(DraftBase):
     __known_attrs__ = {*DraftBase.__known_attrs__, "_tensorpc_draft_attr_obj_fields_dict"}
-    def __init__(self, obj: Any, userdata: Any = None, node: Optional[_DraftASTNodeBase] = None) -> None:
+    def __init__(self, obj: Any, userdata: Any = None, node: Optional[DraftASTNode] = None) -> None:
         # TODO should we limit obj is a pydantic model to perform validate?
         super().__init__(obj, userdata, node)
         self._tensorpc_draft_attr_obj_fields_dict = {field.name: field for field in dataclasses.fields(self._tensorpc_draft_attr_real_obj)}
@@ -255,8 +228,8 @@ class DraftObject(DraftBase):
         if name not in self._tensorpc_draft_attr_obj_fields_dict:
             raise AttributeError(f"{type(self._tensorpc_draft_attr_real_obj)} has no attribute {name}")
         obj_child = getattr(self._tensorpc_draft_attr_real_obj, name)
-        new_ast_node = _DraftASTNodeBase(DraftASTType.GET_ITEM, [self._tensorpc_draft_attr_cur_node], name)
-        return self._tensorpc_draft_dispatch(obj_child, _DraftPath(DraftASTType.GET_ITEM, name), new_ast_node)
+        new_ast_node = DraftASTNode(DraftASTType.GET_ITEM, [self._tensorpc_draft_attr_cur_node], name)
+        return self._tensorpc_draft_dispatch(obj_child, new_ast_node)
 
     def __setattr__(self, name: str, value: Any):
         if name in DraftObject.__known_attrs__:
@@ -284,14 +257,14 @@ def _assert_not_draft(*value: Any):
 class DraftSequence(DraftBase):
     def __getitem__(self, index: Union[DraftBase, int, slice | tuple[Union[int, slice]]]):
         if isinstance(index, DraftBase):
-            ast_node = _DraftASTNodeBase(DraftASTType.FUNC_CALL, [self._tensorpc_draft_attr_cur_node, index._tensorpc_draft_attr_cur_node], "getitem")
-            return self._tensorpc_draft_dispatch(self._tensorpc_draft_attr_real_obj[index._tensorpc_draft_attr_real_obj], _DraftPath(DraftASTType.FUNC_CALL, "getitem"), ast_node)
+            ast_node = DraftASTNode(DraftASTType.FUNC_CALL, [self._tensorpc_draft_attr_cur_node, index._tensorpc_draft_attr_cur_node], "getitem")
+            return self._tensorpc_draft_dispatch(self._tensorpc_draft_attr_real_obj[index._tensorpc_draft_attr_real_obj], ast_node)
         if isinstance(index, tuple):
             raise NotImplementedError("DraftSequence don't support N-D slice")
         if isinstance(index, slice):
             raise NotImplementedError("DraftSequence don't support slice")
-        ast_node = _DraftASTNodeBase(DraftASTType.ARRAY_GET_ITEM, [self._tensorpc_draft_attr_cur_node], index)
-        return self._tensorpc_draft_dispatch(self._tensorpc_draft_attr_real_obj[index], _DraftPath(DraftASTType.ARRAY_GET_ITEM, index), ast_node)
+        ast_node = DraftASTNode(DraftASTType.ARRAY_GET_ITEM, [self._tensorpc_draft_attr_cur_node], index)
+        return self._tensorpc_draft_dispatch(self._tensorpc_draft_attr_real_obj[index], ast_node)
 
     def __setitem__(self, index: Union[int, DraftBase], value: Any):
         # TODO support list item inplace (`a[1] += 1`)
@@ -361,10 +334,10 @@ class DraftDict(DraftBase):
 
     def __getitem__(self, key: Union[str, DraftBase]):
         if isinstance(key, DraftBase):
-            ast_node = _DraftASTNodeBase(DraftASTType.FUNC_CALL, [self._tensorpc_draft_attr_cur_node, key._tensorpc_draft_attr_cur_node], "getitem")
-            return self._tensorpc_draft_dispatch(self._tensorpc_draft_attr_real_obj[key._tensorpc_draft_attr_real_obj], _DraftPath(DraftASTType.FUNC_CALL, "getitem"), ast_node)
-        ast_node = _DraftASTNodeBase(DraftASTType.DICT_GET_ITEM, [self._tensorpc_draft_attr_cur_node], key)
-        return self._tensorpc_draft_dispatch(self._tensorpc_draft_attr_real_obj[key], _DraftPath(DraftASTType.DICT_GET_ITEM, key), ast_node)
+            ast_node = DraftASTNode(DraftASTType.FUNC_CALL, [self._tensorpc_draft_attr_cur_node, key._tensorpc_draft_attr_cur_node], "getitem")
+            return self._tensorpc_draft_dispatch(self._tensorpc_draft_attr_real_obj[key._tensorpc_draft_attr_real_obj], ast_node)
+        ast_node = DraftASTNode(DraftASTType.DICT_GET_ITEM, [self._tensorpc_draft_attr_cur_node], key)
+        return self._tensorpc_draft_dispatch(self._tensorpc_draft_attr_real_obj[key], ast_node)
 
     def __setitem__(self, key: Union[str, DraftBase], value: Any):
         ctx = get_draft_update_context()
@@ -562,10 +535,10 @@ def get_draft_jmespath(draft: DraftBase) -> str:
     return draft._tensorpc_draft_attr_cur_node.get_jmes_path()
 
 def create_draft(obj: Any, userdata: Any = None):
-    new_node = _DraftASTNodeBase(DraftASTType.NAME, [], "")
+    new_node = DraftASTNode(DraftASTType.NAME, [], "")
     return _tensorpc_draft_dispatch(obj, new_node, userdata)
 
-def get_draft_ast_node(draft: Any) -> _DraftASTNodeBase:
+def get_draft_ast_node(draft: Any) -> DraftASTNode:
     return draft._tensorpc_draft_attr_cur_node
 
 def insert_assign_draft_op(draft: Any, value: Any):

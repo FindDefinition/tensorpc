@@ -20,10 +20,10 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, TypeVa
 import operator
 from typing_extensions import Literal, Annotated, get_origin, get_args
 from tensorpc.core.tree_id import UniqueTreeIdForTree
-from tensorpc.core.annocore import is_annotated
+from tensorpc.core.annolib import is_annotated
 
 from .. import mui
-from tensorpc.core import typemetas
+from tensorpc.core.datamodel import typemetas
 from tensorpc.flow.core.component import AppEvent
 from .. import three
 import inspect
