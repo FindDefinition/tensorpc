@@ -37,7 +37,7 @@ from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec,
 import tensorpc.core.datamodel.jmes as jmespath
 from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.client import RemoteManager, simple_chunk_call
-from tensorpc.core.datamodel.draft import DraftASTType, DraftBase, JMESPathOpForBackend, capture_draft_update, get_draft_jmespath, insert_assign_draft_op
+from tensorpc.core.datamodel.draft import DraftASTType, DraftBase, DraftUpdateOp, capture_draft_update, get_draft_jmespath, insert_assign_draft_op
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 from pydantic import (
     BaseModel,
@@ -2113,7 +2113,7 @@ class Component(Generic[T_base_props, T_child]):
                 await self._run_draft_update(ctx._ops)
         return res
 
-    async def _run_draft_update(self, ops: list[JMESPathOpForBackend]):
+    async def _run_draft_update(self, ops: list[DraftUpdateOp]):
         if not ops:
             return 
         comp_uid_to_ops = {}
@@ -2124,7 +2124,7 @@ class Component(Generic[T_base_props, T_child]):
                 comp_uid_to_ops[op.userdata._flow_uid][1].append(op)
         for uid, (comp, ops) in comp_uid_to_ops.items():
             if ops:
-                ev_comp = comp._update_with_jmes_ops_event(ops)
+                ev_comp = await comp._update_with_jmes_ops_event_for_internal(ops)
                 await self.put_app_event(ev_comp)
 
     def __data_model_auto_event_handler(self, value: Any, draft: Any):

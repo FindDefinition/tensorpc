@@ -505,7 +505,7 @@ class FlowUIInterpreter(Interpreter):
                     if target is not None:
                         self._export_param_dict[
                             p.arg.name] = original_mod.get_buffer(target)
-                # TODO if it's constant tensor
+                assert p.kind != InputKind.CONSTANT_TENSOR, "model shouldn't contain any constant tensor, convert them to buffer."
 
             for p in gm.graph_signature.output_specs:
                 if p.kind == OutputKind.BUFFER_MUTATION:
@@ -575,6 +575,7 @@ class FlowUIInterpreter(Interpreter):
         op_has_param = False
         op_has_buffer = False
         schema = None
+        schema_returns = None
         if self._is_export:
             qname = get_qualname_of_type(type(target))
             if qname.startswith("torch"):
@@ -590,6 +591,7 @@ class FlowUIInterpreter(Interpreter):
                 schema = target._schema
                 name = schema.name
                 num_output = len(schema.returns)
+                schema_returns = schema.returns
                 if num_output > 1:
                     op_ret_type_fields = [f"O-{i}" for i in range(num_output)]
             elif target is getitem:
@@ -658,6 +660,8 @@ class FlowUIInterpreter(Interpreter):
                 return c_list
             nt = namedtuple(name, op_ret_type_fields)
             return nt(*c_list)
+        if schema_returns is not None and isinstance(schema_returns[0].type, torch.ListType):
+            return c_list
         return c_list[0]
 
     def _resolve_wrong_module_id(self, module_scope: str):

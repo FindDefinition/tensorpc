@@ -1,8 +1,13 @@
+import json
 from typing import Dict
+
+import numpy as np
+from tensorpc.core import core_io
+from tensorpc.core.datamodel.draft import DraftUpdateOp
 from tensorpc.core.tree_id import UniqueTreeIdForTree, UniqueTreeId
 from tensorpc.flow.client import MasterMeta
 from tensorpc.flow.core.appcore import get_app, get_app_context
-from tensorpc.flow.coretypes import StorageDataItem, StorageDataLoadedItem
+from tensorpc.flow.coretypes import StorageDataItem, StorageDataLoadedItem, StorageType
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable,
                     Coroutine, Dict, Generic, Iterable, List, Optional, Set,
                     Tuple, Type, TypeVar, Union)
@@ -44,6 +49,28 @@ class AppStorage:
         else:
             return self._remote_grpc_url is not None
 
+    def _enc_data_to_bytes(self, data: Any, type: StorageType):
+        if type == StorageType.RAW:
+            return pickle.dumps(data)
+        elif type == StorageType.JSON:
+            return json.dumps(data).encode()
+        elif type == StorageType.JSONARRAY:
+            res = core_io.dumps(data)
+            assert not isinstance(res, np.ndarray)
+            return res
+        else:
+            raise ValueError(f"unsupported storage type: {type}")
+
+    def _dec_data_from_bytes(self, data: bytes, type: StorageType):
+        if type == StorageType.RAW or type == StorageType.PICKLE_DEPRECATED:
+            return pickle.loads(data)
+        elif type == StorageType.JSON:
+            return json.loads(data)
+        elif type == StorageType.JSONARRAY:
+            return core_io.loads(data)
+        else:
+            raise ValueError(f"unsupported storage type: {type}")
+
     async def _remote_call(self, serv_name: str, *args, **kwargs):
         if self._is_remote_comp:
             assert self._remote_grpc_url is not None, "app storage in remote comp can only be used when mounted"
@@ -62,9 +89,10 @@ class AppStorage:
                                 node_id: Optional[Union[str, Undefined]] = None,
                                 graph_id: Optional[str] = None,
                                 in_memory_limit: int = 1000,
-                                raise_if_exist: bool = False):
+                                raise_if_exist: bool = False,
+                                type: StorageType = StorageType.RAW):
         Path(key)  # check key is valid path
-        data_enc = pickle.dumps(data)
+        data_enc = self._enc_data_to_bytes(data, type)
         if not self._is_remote_comp:
             assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
@@ -146,9 +174,15 @@ class AppStorage:
             if res is None:
                 return None
             if res.empty():
-                return pickle.loads(item_may_invalid.data)
+                if item_may_invalid.version == 1:
+                    return self._dec_data_from_bytes(item_may_invalid.data, StorageType.PICKLE_DEPRECATED)
+                else:
+                    return self._dec_data_from_bytes(item_may_invalid.data, item_may_invalid.storage_type)
             else:
-                return pickle.loads(res.data)
+                if res.version == 1:
+                    return self._dec_data_from_bytes(res.data, StorageType.PICKLE_DEPRECATED)
+                else:
+                    return self._dec_data_from_bytes(res.data, res.storage_type)
         else:
             res: Optional[StorageDataItem] = await self._remote_call(
                 serv_names.FLOW_DATA_READ,
@@ -161,7 +195,10 @@ class AppStorage:
             if res is None:
                 return None
             in_memory_limit_bytes = in_memory_limit * 1024 * 1024
-            data = pickle.loads(res.data)
+            if res.version == 1:
+                data = self._dec_data_from_bytes(res.data, StorageType.PICKLE_DEPRECATED)
+            else:
+                data = self._dec_data_from_bytes(res.data, res.storage_type)
             if len(res.data) <= in_memory_limit_bytes:
                 self.__flowapp_storage_cache[key] = res
             return data
@@ -182,7 +219,7 @@ class AppStorage:
             node_id = None
         res: Dict[str, StorageDataItem] = await self._remote_call(
             serv_names.FLOW_DATA_READ_GLOB_PREFIX, graph_id, node_id, key)
-        return {k: StorageDataLoadedItem(pickle.loads(d.data), d.meta) for k, d in res.items()}
+        return {k: StorageDataLoadedItem(self._dec_data_from_bytes(d.data, d.storage_type), d.meta) for k, d in res.items()}
 
     async def remove_data_storage_item(self,
                                        key: Optional[str],
@@ -255,3 +292,14 @@ class AppStorage:
         res: List[str] = await self._remote_call(
             serv_names.FLOW_DATA_QUERY_DATA_NODE_IDS, graph_id)
         return res
+
+    async def update_data_storage(self,
+                                key: str,
+                                ops: list[DraftUpdateOp],
+                                node_id: Optional[Union[str, Undefined]] = None,
+                                graph_id: Optional[str] = None) -> bool:
+        # clear cache for next read
+        if key in self.__flowapp_storage_cache:
+            self.__flowapp_storage_cache.pop(key)
+        return await self._remote_call(
+            serv_names.FLOW_DATA_UPDATE, graph_id, node_id, key, ops, time.time_ns())

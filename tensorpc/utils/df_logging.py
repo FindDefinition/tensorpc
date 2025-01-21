@@ -28,7 +28,6 @@ from logging import INFO
 from logging import WARN
 import threading
 
-import six
 
 # Don't use this directly. Use get_logger() instead.
 _logger = None
@@ -296,6 +295,7 @@ def set_verbosity(v):
 
 
 def _get_thread_id():
+    import six
     """Get id of current thread, suitable for logging as an unsigned quantity."""
     # pylint: disable=protected-access
     thread_id = six.moves._thread.get_ident()

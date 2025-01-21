@@ -41,9 +41,10 @@ from PIL import Image as PILImage
 from typing_extensions import Literal, TypeAlias, TypedDict, Self
 from pydantic import field_validator, model_validator
 
-from tensorpc.core.datamodel.draft import DraftBase, DraftObject, JMESPathOp, JMESPathOpForBackend, apply_draft_jmes_ops_backend, capture_draft_update, create_draft
+from tensorpc.core.datamodel.draft import DraftBase, DraftObject, JMESPathOp, DraftUpdateOp, apply_draft_update_ops, capture_draft_update, create_draft
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp, UniqueTreeIdForTree
 from tensorpc.flow import marker
+from tensorpc.flow.coretypes import StorageType
 from ...core.datamodel.typemetas import Vector3Type
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.defs import FileResource, FileResourceRequest
@@ -57,7 +58,7 @@ from ..jsonlike import JsonLikeType, BackendOnlyProp, ContextMenuData, JsonLikeN
 from ..core import colors
 from ..core.component import (
     AppComponentCore, AppEvent, AppEventType, BasicProps, Component,
-    ContainerBase, ContainerBaseProps, EventHandler, EventSlot,
+    ContainerBase, ContainerBaseProps, EventHandler, EventSlot, EventSlotEmitter,
     SimpleEventType, FlowSpecialMethods, Fragment, FrontendEventType,
     NumberType, T_base_props, T_child, T_container_props, TaskLoopEvent,
     UIEvent, UIRunStatus, UIType, Undefined, ValueType, undefined,
@@ -5933,10 +5934,13 @@ class DataModel(MUIContainerBase[DataModelProps, MUIComponentType], Generic[_T])
     def __init__(self, model: _T, children: Optional[LayoutType] = None) -> None:
         if children is not None and isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
-
         super().__init__(UIType.DataModel, DataModelProps, children, allowed_events=[])
         self.prop(dataObject=model)
         self.model = model
+        self._backend_draft_update_event_key = "__backend_draft_update"
+        self.event_draft_update: EventSlotEmitter[list[DraftUpdateOp]] = self._create_emitter_event_slot(self._backend_draft_update_event_key)
+
+        self._app_storage_handler_registered: bool = False
 
     @property
     def prop(self):
@@ -5954,16 +5958,22 @@ class DataModel(MUIContainerBase[DataModelProps, MUIComponentType], Generic[_T])
     def get_draft(self) -> _T:
         return cast(_T, create_draft(self.model, userdata=self))
 
-    def _update_with_jmes_ops_event(self, ops: list[JMESPathOpForBackend]):
-        apply_draft_jmes_ops_backend(self.model, ops)
+    def _update_with_jmes_ops_event(self, ops: list[DraftUpdateOp]):
+        apply_draft_update_ops(self.model, ops)
         frontend_ops = [op.to_jmes_path_op().to_dict() for op in ops]
         return self.create_comp_event({
             "type": 0,
             "ops": frontend_ops,
         })
 
-    async def _update_with_jmes_ops(self, ops: list[JMESPathOpForBackend]):
+    async def _update_with_jmes_ops(self, ops: list[DraftUpdateOp]):
+        await self.flow_event_emitter.emit_async(self._backend_draft_update_event_key, Event(self._backend_draft_update_event_key, ops))
         return await self.send_and_wait(self._update_with_jmes_ops_event(ops))
+
+    async def _update_with_jmes_ops_event_for_internal(self, ops: list[DraftUpdateOp]):
+        # internal event handle system will call this function
+        await self.flow_event_emitter.emit_async(self._backend_draft_update_event_key, Event(self._backend_draft_update_event_key, ops))
+        return self._update_with_jmes_ops_event(ops)
 
     def bind_fields_unchecked(self, **kwargs: Union[str, tuple["Component", Union[str, DraftBase]], DraftBase]) -> Self:
         raise NotImplementedError("you can't bind fields on DataModel")
@@ -5978,6 +5988,41 @@ class DataModel(MUIContainerBase[DataModelProps, MUIComponentType], Generic[_T])
     @staticmethod 
     def get_draft_external(model: T) -> T:
         return cast(T, create_draft(model, userdata=None))
+
+    def connect_app_storage(self, path: str, type: StorageType = StorageType.JSON):
+        """Register event handler that store and send update info to app storage.
+        WARNING: this function must be called in layout function.
+        """
+        assert not self._app_storage_handler_registered, "only support connect once if you want to change path/type, create a new component."
+        assert dataclasses.is_dataclass(self.model), "only support dataclass model"
+        self.event_after_mount.on(partial(self._fetch_internal_data_from_app_storage, path=path, type=type))
+        self.event_draft_update.on(partial(self._handle_app_storage_update, path=path, type=type))
+        self._app_storage_handler_registered = True
+
+    async def _fetch_internal_data_from_app_storage(self, path: str, type: StorageType):
+        from tensorpc.flow import appctx 
+        assert dataclasses.is_dataclass(self.model), "only support dataclass model"
+        storage = appctx.get_app_storage()
+        data = await storage.read_data_storage(path, raise_if_not_found=False)
+        if data is None:
+            # not exist, create new
+            await storage.save_data_storage(path, as_dict_no_undefined(self.model), type=type)
+            return 
+        # validate dcls if it support
+        type(self.model)(**data) # type: ignore
+        # assign root attrs
+        for k, v in data.items():
+            setattr(self.model, k, v)
+        # finally sync the model.
+        await self.sync_model()
+
+    async def _handle_app_storage_update(self, ops: list[DraftUpdateOp], path: str, type: StorageType):
+        from tensorpc.flow import appctx 
+        storage = appctx.get_app_storage()
+        success = await storage.update_data_storage(path, ops)
+        if not success:
+            # path not exist.
+            await storage.save_data_storage(path, as_dict_no_undefined(self.model), type=type)
 
 @dataclasses.dataclass
 class DataPortalProps(ContainerBaseProps):

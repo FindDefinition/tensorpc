@@ -8,6 +8,7 @@ from tensorpc.autossh.core import Event, event_from_dict
 from tensorpc.core import dataclass_dispatch
 from tensorpc.core.moduleid import get_qualname_of_type
 from .jsonlike import JsonLikeNode, as_dict_no_undefined, Undefined, undefined
+import dataclasses
 
 
 def get_unique_node_id(graph_id: str, node_id: str):
@@ -17,9 +18,21 @@ def split_unique_node_id(node_uid: str):
     gid, nid = node_uid.split("@")
     return gid, nid
 
+@dataclasses.dataclass
+class StorageMeta:
+    path_fmt: str
+
+class StorageType(enum.IntEnum):
+    JSON = 0
+    RAW = 1
+    JSONARRAY = 2
+    # DEPRECATED
+    PICKLE_DEPRECATED = -1
+
+
 class StorageDataItem:
 
-    def __init__(self, data: bytes, meta: JsonLikeNode) -> None:
+    def __init__(self, data: Union[bytes, bytearray], meta: JsonLikeNode) -> None:
         self.data = data
         self.meta = meta
         assert not isinstance(self.meta.userdata, Undefined)
@@ -37,6 +50,16 @@ class StorageDataItem:
 
     def get_meta_dict(self):
         return as_dict_no_undefined(self.meta)
+
+    @property
+    def storage_type(self):
+        assert not isinstance(self.meta.userdata, Undefined)
+        return StorageType(self.meta.userdata.get("storage_type", StorageType.PICKLE_DEPRECATED.value))
+
+    @property
+    def version(self):
+        assert not isinstance(self.meta.userdata, Undefined)
+        return self.meta.userdata.get("version", 1)
 
     def shallow_copy(self):
         return StorageDataItem(self.data, self.meta)

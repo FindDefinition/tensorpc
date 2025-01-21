@@ -18,7 +18,7 @@ from pydantic import (
     GetCoreSchemaHandler, )
 
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
-
+from tensorpc.core.annolib import Undefined
 ValueType: TypeAlias = Union[int, float, str]
 NumberType: TypeAlias = Union[int, float]
 
@@ -37,40 +37,6 @@ def flatten_dict(d: MutableMapping,
         else:
             items.append((new_key, v))
     return dict(items)
-
-
-class Undefined:
-
-    def __repr__(self) -> str:
-        return "undefined"
-
-    @classmethod
-    def __get_pydantic_core_schema__(cls, _source_type: Any,
-                                     _handler: GetCoreSchemaHandler):
-        return core_schema.no_info_after_validator_function(
-            cls.validate,
-            core_schema.any_schema(),
-        )
-
-    @classmethod
-    def validate(cls, v):
-        if not isinstance(v, Undefined):
-            raise ValueError('undefined required, but get', type(v))
-        return v
-
-    def __eq__(self, o: object) -> bool:
-        return isinstance(o, Undefined)
-
-    def __ne__(self, o: object) -> bool:
-        return not isinstance(o, Undefined)
-
-    def __hash__(self) -> int:
-        # for python 3.11
-        return 0
-
-    def bool(self):
-        return False
-
 
 class BackendOnlyProp(Generic[T]):
     """when wrap a property with this class, it will be ignored when serializing to frontend

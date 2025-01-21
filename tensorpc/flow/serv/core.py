@@ -33,6 +33,7 @@ from typing import (Any, Awaitable, Callable, Coroutine, Dict, Iterable, List,
                     Optional, Set, Tuple, Type, Union)
 from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.core.asyncclient import AsyncRemoteManager, simple_remote_call_async
+from tensorpc.core.datamodel.draft import DraftUpdateOp, apply_draft_update_ops_to_dict
 from tensorpc.core.defs import File
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import ServiceEventType
@@ -47,7 +48,7 @@ from tensorpc.autossh.core import (CommandEvent, CommandEventType, EofEvent,
                                    Event, ExceptionEvent, LineEvent, RawEvent,
                                    SSHClient, SSHRequest, SSHRequestType)
 from tensorpc.constants import TENSORPC_SPLIT
-from tensorpc.core import get_grpc_url
+from tensorpc.core import core_io, get_grpc_url
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from tensorpc.flow import constants as flowconstants
@@ -61,7 +62,8 @@ from tensorpc.flow.coretypes import (Message, MessageEvent, MessageEventType,
                                      MessageLevel, ScheduleEvent,
                                      SessionStatus, StorageDataItem,
                                      UserContentEvent, UserDataUpdateEvent,
-                                     UserEvent, UserStatusEvent, get_unique_node_id)
+                                     UserEvent, UserStatusEvent, get_unique_node_id,
+                                     StorageType, StorageMeta)
 from tensorpc.flow.core.component import (AppEvent, AppEventType, ComponentEvent,
                                         FrontendEventType, NotifyEvent,
                                         NotifyType, ScheduleNextForApp,
@@ -84,11 +86,6 @@ JINJA2_VARIABLE_ENV = Environment(loader=BaseLoader(),
                                   variable_end_string="}}")
 
 ALL_NODES = HashableRegistry()
-
-class StorageType(enum.IntEnum):
-    JSON = 0
-    JSON_ARRAY = 1
-    BINARY = 2
 
 class HandleTypes(enum.Enum):
     Driver = "driver"
@@ -826,11 +823,12 @@ class DataStorageNodeBase(abc.ABC):
         if not root.exists():
             return res
         if glob_prefix is not None:
-            glob_prefix = f"{glob_prefix}.pkl"
+            glob_prefix = f"{glob_prefix}.json"
         else:
-            glob_prefix = "*.pkl"
+            glob_prefix = "*.json"
         for p in root.rglob(glob_prefix):
-            if (p.parent / f"{p.stem}.json").exists():
+            candidates = [p.with_suffix(".json"), p.with_suffix(".binary"), p.with_suffix(".jarr"), p.with_suffix(".pkl")]
+            if any([c.exists() for c in candidates]):
                 relative_path = p.relative_to(root)
                 relative_path_no_suffix = relative_path.with_suffix("")
                 res.append(str(relative_path_no_suffix))
@@ -845,26 +843,61 @@ class DataStorageNodeBase(abc.ABC):
             root.mkdir(mode=0o755, parents=True)
         return root, parts[-1]
 
-    def get_save_path(self, key: str):
+    def _get_suffix_by_type(self, type: StorageType):
+        if type == StorageType.RAW:
+            return ".binary"
+        elif type == StorageType.JSON:
+            return ".jsonc"
+        elif type == StorageType.JSONARRAY:
+            return ".jarr"
+        elif type == StorageType.PICKLE_DEPRECATED:
+            return ".pkl"
+        else:
+            raise ValueError(f"not supported {type}")
+
+    def get_save_path(self, key: str, type: StorageType):
         root, last = self._get_and_create_storage_root_path(key) 
-        return root / f"{last}.pkl"
+        return root / f"{last}{self._get_suffix_by_type(type)}"
 
     def get_meta_path(self, key: str):
         root, last = self._get_and_create_storage_root_path(key) 
         return root / f"{last}.json"
 
+    def update_storage_data(self, key: str, timestamp: int, ops: list[DraftUpdateOp]):
+        if not self.has_data_item(key):
+            return False # if client get this, it can create data instead of update.
+        item = self.read_data(key)
+        assert item.storage_type in [StorageType.JSONARRAY, StorageType.JSON], "only support json or jarr"
+        if item.storage_type == StorageType.JSON:
+            data_dec = json.loads(item.data)
+        else:
+            data_dec = core_io.loads(item.data)
+        apply_draft_update_ops_to_dict(data_dec, ops)
+        if item.storage_type == StorageType.JSON:
+            self.save_data(key, json.dumps(data_dec).encode("utf-8"), item.meta, timestamp)
+        else:
+            res = core_io.dumps(data_dec)
+            mem = memoryview(res)
+            self.save_data(key, mem, item.meta, timestamp)
+        return True 
+
     def save_data(self, key: str, data: bytes, meta: JsonLikeNode,
-                  timestamp: int, raise_if_exist: bool = False):
+                  timestamp: int, raise_if_exist: bool = False, 
+                  type: StorageType = StorageType.RAW):
         meta.userdata = {
             "timestamp": timestamp,
             "fileSize": len(data),
-            "version": 1,
+            "version": 2,
+            "type": int(type),
         }
         if self.has_data_item(key) and raise_if_exist:
             raise DataStorageKeyError(f"{key} already exists")
         item = StorageDataItem(data, meta)
-        with self.get_save_path(key).open("wb") as f:
-            pickle.dump(item.data, f)
+        path_deprecated = self.get_save_path(key,  StorageType.PICKLE_DEPRECATED)
+        if path_deprecated.exists():
+            path_deprecated.unlink()
+        with self.get_save_path(key, type).open("wb") as f:
+            f.write(item.data)
         with self.get_meta_path(key).open("w") as f:
             json.dump(item.get_meta_dict(), f)
         if len(data) <= self.get_in_memory_limit():
@@ -892,9 +925,14 @@ class DataStorageNodeBase(abc.ABC):
         if key in self.stored_data:
             self.stored_data.pop(key)
         meta_path = self.get_meta_path(key)
+        userdata = self.read_meta_dict(key)["userdata"]
         if meta_path.exists():
             meta_path.unlink()
-        path = self.get_save_path(key)
+        version = userdata.get("version", 1)
+        if version == 2:
+            path = self.get_save_path(key, StorageType(userdata["type"]))
+        else:
+            path = self.get_save_path(key, StorageType.PICKLE_DEPRECATED)
         if path.exists():
             path.unlink()
 
@@ -906,11 +944,18 @@ class DataStorageNodeBase(abc.ABC):
         if new_name in self.stored_data:
             return False
         item = self.stored_data[key]
+        version = item.version
         # rename data
-        path = self.get_save_path(key)
+        if version == 2:
+            path = self.get_save_path(key, StorageType(item.storage_type))
+        else:
+            # read data, then save them in new format
+            data_old = self.read_data(key)
+            self.remove_data(key)
+            self.save_data(new_name, data_old.data, data_old.meta, data_old.timestamp)
+            return 
         if path.exists():
-            path.rename(self.get_save_path(new_name))
-        # self.remove_data(key)
+            path.rename(self.get_save_path(new_name, StorageType(item.storage_type)))
         item.meta.name = new_name
         item.meta.id = UniqueTreeIdForTree.from_parts([new_name])
         meta_path = self.get_meta_path(key)
@@ -918,8 +963,6 @@ class DataStorageNodeBase(abc.ABC):
             meta_path.unlink()
         with self.get_meta_path(new_name).open("w") as f:
             json.dump(item.get_meta_dict(), f)
-        # print(item.meta)
-        # self.save_data(new_name, item.data, item.meta, item.timestamp)
         return True
 
     def read_data_by_glob_prefix(self, glob_prefix: str):
@@ -934,34 +977,37 @@ class DataStorageNodeBase(abc.ABC):
             data_item = self.stored_data[key]
             if len(data_item.data) > 0:
                 return data_item
-        path = self.get_save_path(key)
         meta_path = self.get_meta_path(key)
 
-        if path.exists() and meta_path.exists():
+        if meta_path.exists():
             with meta_path.open("r") as f:
                 meta_dict = json.load(f)
-
-            # TODO remove this (old style uid compat)
-            if "|" not in meta_dict["id"]:
-                meta_dict["id"] = UniqueTreeId.from_parts([meta_dict["id"]
-                                                           ]).uid_encoded
-                with meta_path.open("w") as f:
-                    json.dump(meta_dict, f)
             meta = JsonLikeNode(**meta_dict)
+            userdata = meta_dict["userdata"]
+            version = userdata.get("version", 1)
+            if version == 1:
+                path = self.get_save_path(key, StorageType.PICKLE_DEPRECATED)
+            else:
+                path = self.get_save_path(key, StorageType(userdata["type"]))
+            if not path.exists():
+                raise DataStorageKeyError(f"{key}({path}) not exists")
             with path.open("rb") as f:
-                data: bytes = pickle.load(f)
+                if version == 1:
+                    data: bytes = pickle.load(f)
+                else:
+                    data: bytes = f.read()
                 data_item = StorageDataItem(data, meta)
                 if len(data) <= self.get_in_memory_limit():
                     self.stored_data[key] = data_item
                 else:
                     self.stored_data[key] = StorageDataItem(bytes(), meta)
                 return data_item
-        raise DataStorageKeyError(f"{key}({path}) not exists")
+        raise DataStorageKeyError(f"{key}({meta_path}) not exists")
 
     def has_data_item(self, key: str):
         if key in self.stored_data:
             return True
-        path = self.get_save_path(key)
+        path = self.get_meta_path(key)
         return path.exists()
 
     def need_update(self, key: str, timestamp: int):
@@ -2763,9 +2809,20 @@ class Flow:
     async def save_data_to_storage(self, graph_id: str, node_id: Optional[str], key: str,
                                    data: bytes, meta: JsonLikeNode,
                                    timestamp: int,
-                                   raise_if_exist: bool = False):
+                                   raise_if_exist: bool = False,
+                                   storage_type: StorageType = StorageType.RAW):
         node = self._get_data_node(graph_id, node_id)
-        res = node.save_data(key, data, meta, timestamp, raise_if_exist)
+        res = node.save_data(key, data, meta, timestamp, raise_if_exist, type=storage_type)
+        if isinstance(node, DataStorageNode):
+            await self._user_ev_q.put(
+                (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
+        return res
+
+    async def update_data_in_storage(self, graph_id: str, node_id: Optional[str], key: str,
+                                   timestamp: int,
+                                   ops: list[DraftUpdateOp]):
+        node = self._get_data_node(graph_id, node_id)
+        res = node.update_storage_data(key, timestamp, ops)
         if isinstance(node, DataStorageNode):
             await self._user_ev_q.put(
                 (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))

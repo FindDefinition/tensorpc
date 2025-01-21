@@ -631,7 +631,7 @@ class FlowInternals:
                                         sourceHandle=merged_handle,
                                         targetHandle=edge.targetHandle)
                             node_id_handle_pair_set.add(edge_dup_key)
-                            new_edge_id_to_edges[new_edge.id] = edges
+                            new_edge_id_to_edges[new_edge.id] = [edge]
                             new_edges.append(new_edge)
                         else:
                             if edge.id not in non_merge_edge_id_set:

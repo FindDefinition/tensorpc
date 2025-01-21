@@ -861,6 +861,7 @@ class PytorchModuleViewer(mui.FlexBox):
                         data.raw)
                     await self._info_container.set_new_layout([
                         mui.Markdown(f"`{type_str}`"),
+                        mui.Markdown(f"`{edge_id}`"),
                         mui.Markdown(f"`{shape}`"),
                         mui.Divider(),
                         mui.Button(
