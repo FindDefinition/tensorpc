@@ -21,6 +21,24 @@ class Model:
     h: NestedModel
     i: list[NestedModel]
 
+    def set_i_b(self, idx: int, value: float):
+        self.i[idx].b = value
+
+def modify_func(mod: Model):
+    mod.a = 1
+    mod.b += 5
+    mod.h.a = 3
+    mod.i[0].a = 4
+    mod.f["a"] = 5
+    mod.i[mod.a].b = 7
+    mod.i[mod.a].a = 5
+    mod.e[mod.a] = 8
+    mod.e.extend([5, 6, 7])
+    mod.e[0] -= 3
+    mod.set_i_b(0, 7)
+    mod.e.pop()
+    mod.f.pop("b")
+
 
 def test_draft(type_only_draft: bool = True):
     model = Model(
@@ -36,27 +54,8 @@ def test_draft(type_only_draft: bool = True):
         draft = create_draft(model)
 
     with capture_draft_update() as ctx:
-        draft.a = 1
-        draft.b += 5
-        draft.h.a = 3
-        draft.i[0].a = 4
-        draft.f["a"] = 5
-        insert_assign_draft_op(draft.i[draft.a].b, 7)
-        draft.i[draft.a].a = 5
-        draft.e[draft.a] = 8
-        draft.e.extend([5, 6, 7])
-        draft.e[0] -= 3
-
-        model_ref.a = 1
-        model_ref.b += 5
-        model_ref.h.a = 3
-        model_ref.i[0].a = 4
-        model_ref.f["a"] = 5
-        model_ref.i[model_ref.a].b = 7
-        model_ref.i[model_ref.a].a = 5
-        model_ref.e[model_ref.a] = 8
-        model_ref.e.extend([5, 6, 7])
-        model_ref.e[0] -= 3
+        modify_func(model_ref)
+        modify_func(draft)
     print(get_draft_anno_type(draft.f))
     print(get_draft_ast_node(draft.e[draft.a]).get_jmes_path())
     model_for_jpath = copy.deepcopy(model)

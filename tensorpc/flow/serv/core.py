@@ -33,7 +33,7 @@ from typing import (Any, Awaitable, Callable, Coroutine, Dict, Iterable, List,
                     Optional, Set, Tuple, Type, Union)
 from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.core.asyncclient import AsyncRemoteManager, simple_remote_call_async
-from tensorpc.core.datamodel.draft import DraftUpdateOp, apply_draft_update_ops_to_dict
+from tensorpc.core.datamodel.draft import DraftUpdateOp, apply_draft_update_ops_to_json
 from tensorpc.core.defs import File
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import ServiceEventType
@@ -872,7 +872,7 @@ class DataStorageNodeBase(abc.ABC):
             data_dec = json.loads(item.data)
         else:
             data_dec = core_io.loads(item.data)
-        apply_draft_update_ops_to_dict(data_dec, ops)
+        apply_draft_update_ops_to_json(data_dec, ops)
         if item.storage_type == StorageType.JSON:
             self.save_data(key, json.dumps(data_dec).encode("utf-8"), item.meta, timestamp)
         else:

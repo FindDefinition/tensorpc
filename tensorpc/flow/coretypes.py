@@ -54,7 +54,7 @@ class StorageDataItem:
     @property
     def storage_type(self):
         assert not isinstance(self.meta.userdata, Undefined)
-        return StorageType(self.meta.userdata.get("storage_type", StorageType.PICKLE_DEPRECATED.value))
+        return StorageType(self.meta.userdata.get("type", StorageType.PICKLE_DEPRECATED.value))
 
     @property
     def version(self):

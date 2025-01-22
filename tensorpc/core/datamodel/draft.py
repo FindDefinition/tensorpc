@@ -33,11 +33,13 @@ draft.dic.clear()
 import contextlib
 import contextvars
 import enum
+import types
 from typing import Any, MutableSequence, Optional, Type, TypeVar, Union, cast
 from tensorpc.core.annolib import AnnotatedType, parse_type_may_optional_undefined
 import tensorpc.core.dataclass_dispatch as dataclasses
 from collections.abc import MutableMapping, Sequence, Mapping
 import tensorpc.core.datamodel.jmes as jmespath
+from tensorpc.flow.jsonlike import as_dict_no_undefined
 
 T = TypeVar("T")
 
@@ -143,6 +145,30 @@ def _evaluate_draft_ast(node: DraftASTNode, obj: Any, root_obj: Any) -> Any:
     else:
         raise NotImplementedError(f"node type {node.type} not implemented")
 
+def _evaluate_draft_ast_json(node: DraftASTNode, obj: Any, root_obj: Any) -> Any:
+    if node.type == DraftASTType.NAME:
+        if node.value == "" or node.value == "$":
+            return obj
+        return obj[node.value]
+    elif node.type == DraftASTType.GET_ITEM:
+        return _evaluate_draft_ast_json(node.children[0], root_obj, root_obj)[node.value]
+    elif node.type == DraftASTType.ARRAY_GET_ITEM or node.type == DraftASTType.DICT_GET_ITEM:
+        return _evaluate_draft_ast_json(node.children[0], root_obj,
+                                   root_obj)[node.value]
+    elif node.type == DraftASTType.FUNC_CALL:
+        if node.value == "getitem":
+            return _evaluate_draft_ast_json(node.children[0], root_obj,
+                                       root_obj)[_evaluate_draft_ast_json(
+                                           node.children[1], root_obj,
+                                           root_obj)]
+        elif node.value == "getattr":
+            src = _evaluate_draft_ast_json(node.children[0], root_obj, root_obj)
+            tgt = _evaluate_draft_ast_json(node.children[1], root_obj, root_obj)
+            return src[tgt]
+        else:
+            raise NotImplementedError
+    else:
+        raise NotImplementedError(f"node type {node.type} not implemented")
 
 @dataclasses.dataclass
 class TypeMeta:
@@ -179,7 +205,14 @@ class DraftUpdateOp:
         return f"JOp[{path_str}|{self.op.name}]:{self.opData}"
 
     def to_jmes_path_op(self) -> JMESPathOp:
+        # app internal will handle non-dict data in self.opData.
         return JMESPathOp(self.node.get_jmes_path(), self.op, self.opData)
+
+    def to_update_op_for_dict(self) -> "DraftUpdateOp":
+        return dataclasses.replace(self, opData=as_dict_no_undefined(self.opData))
+
+    def to_userdata_removed(self) -> "DraftUpdateOp":
+        return dataclasses.replace(self, userdata=None)
 
     def get_userdata_typed(self, t: Type[T]) -> T:
         assert self.userdata is not None and isinstance(
@@ -339,8 +372,14 @@ class DraftObject(DraftBase):
 
     def __getattr__(self, name: str):
         if name not in self._tensorpc_draft_attr_obj_fields_dict:
+            if self._tensorpc_draft_attr_anno_type is not None:
+                # only support get bound method through anno type
+                dcls_type = self._tensorpc_draft_attr_anno_type.origin_type
+                if hasattr(dcls_type, name):
+                    unbound_func = getattr(dcls_type, name)
+                    return types.MethodType(unbound_func, self)
             raise AttributeError(
-                f"{type(self._tensorpc_draft_attr_real_obj)} has no attribute {name}"
+                f"dataclass {type(self._tensorpc_draft_attr_real_obj)} has no attribute {name}"
             )
         new_ast_node = DraftASTNode(DraftASTType.GET_ITEM,
                                     [self._tensorpc_draft_attr_cur_node], name)
@@ -669,7 +708,11 @@ def apply_draft_update_ops(obj: Any, ops: list[DraftUpdateOp]):
             for idx, item in op.opData["items"]:
                 cur_obj[idx] = item
         elif op.op == JMESPathOpType.ArrayPop:
-            cur_obj.pop(op.opData.get("index", None))
+            idx = op.opData.get("index", None)
+            if idx is None:
+                cur_obj.pop()
+            else:
+                cur_obj.pop(idx)
         elif op.op == JMESPathOpType.ArrayInsert:
             cur_obj.insert(op.opData["index"], op.opData["item"])
         elif op.op == JMESPathOpType.ArrayRemove:
@@ -706,11 +749,11 @@ def apply_draft_update_ops(obj: Any, ops: list[DraftUpdateOp]):
         else:
             raise NotImplementedError(f"op {op.op} not implemented")
 
-def apply_draft_update_ops_to_dict(obj: Any, ops: list[DraftUpdateOp]):
+def apply_draft_update_ops_to_json(obj: Any, ops: list[DraftUpdateOp]):
     # we delay real operation on original object to make sure
     # all validation is performed before real operation
     for op in ops:
-        cur_obj = _evaluate_draft_ast(op.node, obj, obj)
+        cur_obj = _evaluate_draft_ast_json(op.node, obj, obj)
         # new cur_obj is target, apply op.
         if op.op == JMESPathOpType.Set:
             for k, v in op.opData["items"]:
@@ -724,7 +767,11 @@ def apply_draft_update_ops_to_dict(obj: Any, ops: list[DraftUpdateOp]):
             for idx, item in op.opData["items"]:
                 cur_obj[idx] = item
         elif op.op == JMESPathOpType.ArrayPop:
-            cur_obj.pop(op.opData.get("index", None))
+            idx = op.opData.get("index", None)
+            if idx is None:
+                cur_obj.pop()
+            else:
+                cur_obj.pop(idx)
         elif op.op == JMESPathOpType.ArrayInsert:
             cur_obj.insert(op.opData["index"], op.opData["item"])
         elif op.op == JMESPathOpType.ArrayRemove:
@@ -735,7 +782,7 @@ def apply_draft_update_ops_to_dict(obj: Any, ops: list[DraftUpdateOp]):
             for k, v in op.opData["items"].items():
                 cur_obj[k] = v
         elif op.op == JMESPathOpType.Assign:
-            key = _evaluate_draft_ast(op.additionalNodes[0], obj, obj)
+            key = _evaluate_draft_ast_json(op.additionalNodes[0], obj, obj)
             cur_obj[key] = op.opData["value"]
         elif op.op == JMESPathOpType.ScalarInplaceOp:
             key = op.opData["key"]
@@ -769,7 +816,11 @@ def apply_draft_jmes_ops(obj: dict, ops: list[JMESPathOp]):
             for idx, item in op.opData["items"]:
                 cur_obj[idx] = item
         elif op.op == JMESPathOpType.ArrayPop:
-            cur_obj.pop(op.opData.get("index", None))
+            idx = op.opData.get("index", None)
+            if idx is None:
+                cur_obj.pop()
+            else:
+                cur_obj.pop(idx)
         elif op.op == JMESPathOpType.ArrayInsert:
             cur_obj.insert(op.opData["index"], op.opData["item"])
         elif op.op == JMESPathOpType.ArrayRemove:

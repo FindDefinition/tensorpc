@@ -90,9 +90,9 @@ class AppStorage:
                                 graph_id: Optional[str] = None,
                                 in_memory_limit: int = 1000,
                                 raise_if_exist: bool = False,
-                                type: StorageType = StorageType.RAW):
+                                storage_type: StorageType = StorageType.RAW):
         Path(key)  # check key is valid path
-        data_enc = self._enc_data_to_bytes(data, type)
+        data_enc = self._enc_data_to_bytes(data, storage_type)
         if not self._is_remote_comp:
             assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
         if graph_id is None:
@@ -121,7 +121,8 @@ class AppStorage:
                                 data_enc,
                                 meta,
                                 item.timestamp,
-                                raise_if_exist=raise_if_exist)
+                                raise_if_exist=raise_if_exist,
+                                storage_type=storage_type)
 
     async def data_storage_has_item(self,
                                     key: str,
@@ -298,8 +299,17 @@ class AppStorage:
                                 ops: list[DraftUpdateOp],
                                 node_id: Optional[Union[str, Undefined]] = None,
                                 graph_id: Optional[str] = None) -> bool:
+        if not self._is_remote_comp:
+            assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
+        if graph_id is None:
+            graph_id = self.__flowapp_graph_id
+        if node_id is None:
+            node_id = self.__flowapp_node_id
+        elif isinstance(node_id, Undefined):
+            # graph storage
+            node_id = None
         # clear cache for next read
         if key in self.__flowapp_storage_cache:
             self.__flowapp_storage_cache.pop(key)
         return await self._remote_call(
-            serv_names.FLOW_DATA_UPDATE, graph_id, node_id, key, ops, time.time_ns())
+            serv_names.FLOW_DATA_UPDATE, graph_id, node_id, key, time.time_ns(), ops)

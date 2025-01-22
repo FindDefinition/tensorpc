@@ -77,6 +77,7 @@ async def _read_stream(stream, cb):
 
 
 SCRIPT_STORAGE_KEY_PREFIX = "__tensorpc_flow_plus_script_manager"
+SCRIPT_STORAGE_KEY_PREFIX_V2 = "__tensorpc_flow_plus_script_manager_v2"
 
 SCRIPT_TEMP_STORAGE_KEY = "STORAGE"
 
@@ -120,7 +121,8 @@ echo "Hello World"
 
 
 class ScriptManager(mui.FlexBox):
-
+    """Deprecated, removed in v0.15
+    """
     def __init__(self,
                  storage_node_rid: Optional[str] = None,
                  graph_id: Optional[str] = None,
@@ -480,30 +482,35 @@ class ScriptManager(mui.FlexBox):
         else:
             await self._on_run_script()
 
-def _create_states():
+def _create_init_script_states(lang_to_script: Optional[dict[str, str]] = None):
+    if lang_to_script is None:
+        lang_to_script = _INITIAL_SCRIPT_PER_LANG
     return {
-        "cpp": ScriptState(True, False),
-        "python": ScriptState(True, False),
-        "bash": ScriptState(True, False),
-        "app": ScriptState(True, True),
+        "cpp": ScriptState(lang_to_script["cpp"], True, False),
+        "python": ScriptState(lang_to_script["python"], True, False),
+        "bash": ScriptState(lang_to_script["bash"], True, False),
+        "app": ScriptState(lang_to_script["app"], True, True),
     }
 
 @dataclasses.dataclass
 class ScriptState:
+    code: str
     is_editor_visible: bool
     is_app_visible: bool
 
 @dataclasses.dataclass
 class ScriptModel:
     label: str 
-    storage_key: str
-    language: Literal["cpp", "python", "bash", "app"] = "python"
-    states: dict[str, ScriptState] = dataclasses.field(default_factory=_create_states)
+    language: str = "python"
+    states: dict[str, ScriptState] = dataclasses.field(default_factory=_create_init_script_states)
+
+    def get_cur_state(self):
+        return self.states[self.language]
 
 @dataclasses.dataclass
 class ScriptManagerModel:
     scripts: list[ScriptModel]
-    cur_script_idx: Optional[int] = None
+    cur_script_idx: int = -1
 
 
 class ScriptManagerV2(mui.FlexBox):
@@ -520,7 +527,7 @@ class ScriptManagerV2(mui.FlexBox):
         self._storage_node_rid = storage_node_rid
         self._graph_id = graph_id
 
-        init_model = ScriptManagerModel([], None)
+        init_model = ScriptManagerModel([], -1)
         self.code_editor = mui.MonacoEditor("", "python",
                                             "default").prop(flex=1,
                                                             minHeight=0,
@@ -544,7 +551,7 @@ class ScriptManagerV2(mui.FlexBox):
         ])).prop(flex=1, minHeight=0)
 
         self.code_editor_container.bind_fields(visibles="[getitem(states, language).is_editor_visible, getitem(states, language).is_app_visible]")
-        self.scripts = mui.Autocomplete(
+        self._scripts_select = mui.Autocomplete(
             "Scripts",
             [],
             self._on_script_select,
@@ -558,7 +565,7 @@ class ScriptManagerV2(mui.FlexBox):
             mui.GroupToggleButtonDef("bash", name="BASH"),
             mui.GroupToggleButtonDef("app", name="APP"),
         ], True, self._on_lang_select).prop(enforceValueSet=True)
-        self.langs.bind_fields(value="getitem(scripts, cur_script_idx).language")
+        # self.langs.bind_fields(value="getitem(scripts, cur_script_idx).language")
         self._save_and_run_btn = mui.IconButton(
             mui.IconType.PlayArrow,
             self._on_save_and_run).prop(progressColor="primary")
@@ -567,23 +574,29 @@ class ScriptManagerV2(mui.FlexBox):
                 progressColor="primary",
                 confirmTitle="Warning",
                 confirmMessage="Are you sure to delete this script?")
+        self._save_and_run_btn.bind_fields(disabled="cur_script_idx == `-1`")
+        self._delete_button.bind_fields(disabled="cur_script_idx == `-1`")
+        self.code_editor.bind_fields(readOnly="cur_script_idx == `-1`")
         self._show_editor_btn = mui.ToggleButton(icon=mui.IconType.Code, callback=self._handle_show_editor).prop(size="small")
         self._show_editor_btn.bind_fields(selected="getitem(states, language).is_editor_visible")
         self.model = mui.DataModel(init_model, [
             mui.HBox([
-                self.scripts.prop(flex=1).bind_fields(options="scripts", value="getitem(scripts, cur_script_idx)"),
+                self._scripts_select.prop(flex=1).bind_fields(options=r"scripts[*].{label: label}", value=r"getitem(scripts, cur_script_idx).{label: label}"),
+                self.langs.bind_fields(disabled="cur_script_idx == `-1`"),
+                self._save_and_run_btn,
+                # self._enable_save_watch,
+                self._delete_button,
                 mui.DataSubQuery("getitem(scripts, cur_script_idx)", [
-                    self._save_and_run_btn,
-                    # self._enable_save_watch,
-                    self.langs,
-                    self._delete_button,
                     self._show_editor_btn,
-                ]).bind_fields(enable="cur_script_idx != null"),
+                ]).bind_fields(enable="cur_script_idx != `-1`"),
             ]).prop(alignItems="center"),
             mui.DataSubQuery("getitem(scripts, cur_script_idx)", [
                 self.code_editor_container,
-            ]).bind_fields(enable="cur_script_idx != null"),
+            ]).bind_fields(enable="cur_script_idx != `-1`"),
         ])
+        self.model.connect_app_storage(f"{SCRIPT_STORAGE_KEY_PREFIX_V2}")
+        draft = self.model.get_draft_type_only()
+        self.langs.bind_draft_change(draft.scripts[draft.cur_script_idx].language)
 
         self.init_add_layout([
             self.model,
@@ -601,7 +614,7 @@ class ScriptManagerV2(mui.FlexBox):
                   overflow="hidden")
         self.code_editor.event_editor_save.on(self._on_editor_save)
         self.event_after_mount.on(self._on_editor_ready)
-        self.scripts.event_select_new_item.on(self._on_new_script)
+        self._scripts_select.event_select_new_item.on(self._on_new_script)
         # used for apps and python scripts
         self._manager_global_storage: Dict[str, Any] = {}
 
@@ -630,43 +643,18 @@ class ScriptManagerV2(mui.FlexBox):
 
     async def _handle_show_editor(self, selected: bool):
         draft = self.model.get_draft()
-        if self.model.model.cur_script_idx is not None:
-            cur_script_real = self.model.model.scripts[self.model.model.cur_script_idx]
+        if self.model.model.cur_script_idx != -1:
             cur_script = draft.scripts[self.model.model.cur_script_idx]
-            cur_script.states[cur_script_real.language].is_editor_visible = selected
+            cur_script.states[cur_script.language].is_editor_visible = selected
 
     async def _on_editor_ready(self):
-        items = await appctx.list_data_storage(
-            self._storage_node_rid, self._graph_id,
-            f"{SCRIPT_STORAGE_KEY_PREFIX}/*")
-        items.sort(key=lambda x: x.userdata["timestamp"]
-                   if not isinstance(x.userdata, mui.Undefined) else 0,
-                   reverse=True)
-        options: List[Dict[str, Any]] = []
-        options_v2: List[ScriptModel] = []
-        for item in items:
-            if item.typeStr == Script.__name__:
-                options.append({
-                    "label": Path(item.name).stem,
-                    "storage_key": item.name
-                })
-                options_v2.append(ScriptModel(label=Path(item.name).stem, storage_key=item.name))
-        if options_v2:
-            draft = self.model.get_draft()
-            draft.scripts = options_v2
-            draft.cur_script_idx = 0
-        else:
-            raise NotImplementedError
-        # if options:
-        #     await self.scripts.update_options(options, 0)
-        #     await self._on_script_select(options[0])
-        # else:
-        #     default_opt = {
-        #         "label": "example",
-        #         "storage_key": f"{SCRIPT_STORAGE_KEY_PREFIX}/example"
-        #     }
-        #     await self._on_new_script(default_opt,
-        #                               init_str=self._init_scripts["python"])
+        draft = self.model.get_draft()
+        model = self.model.model
+        if model.scripts:
+            if model.cur_script_idx == -1:
+                draft.cur_script_idx = 0
+            cur_script = model.scripts[model.cur_script_idx]
+            await self.code_editor.write(cur_script.states[cur_script.language].code)
 
     async def _on_save_and_run(self):
         # we attach userdata to tell save handler run script after save
@@ -679,22 +667,100 @@ class ScriptManagerV2(mui.FlexBox):
         if action == EditorActions.SaveAndRun.value:
             await self._on_save_and_run()
 
-    async def _on_run_script(self):
-        if self.scripts.value is not None:
-            label = self.scripts.value["label"]
-            storage_key = self.scripts.value["storage_key"]
+    async def _on_lang_select(self, value):
+        if value != "app":
+            await self.app_show_box.set_new_layout({})
+        if self.model.model.cur_script_idx != -1:
+            cur_script = self.model.model.scripts[self.model.model.cur_script_idx]
+            cur_code = cur_script.states[value].code
+            await self.send_and_wait(
+                self.code_editor.update_event(
+                    language=_LANG_TO_VSCODE_MAPPING[value],
+                    value=cur_code))
+            if value == "app":
+                # TODO add better option
+                await self._on_run_script(value)
+        else:
+            await self.send_and_wait(
+                self.code_editor.update_event(
+                    language=_LANG_TO_VSCODE_MAPPING[value]))
 
-            item = await appctx.read_data_storage(storage_key,
-                                                  self._storage_node_rid,
-                                                  self._graph_id)
-            assert isinstance(item, Script)
-            item_uid = f"{self._graph_id}@{self._storage_node_rid}@{item.label}"
-            fname = f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-{item_uid}>"
-            if isinstance(item.code, dict):
-                code = item.code.get(item.lang, "")
+    async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
+        value = ev.value
+        model = self.model.model
+        draft = self.model.get_draft()
+        if model.cur_script_idx != -1:
+            cur_script = model.scripts[model.cur_script_idx]
+            cur_script_draft = draft.scripts[model.cur_script_idx]
+            cur_script_draft.states[cur_script.language].code = value
+            is_save_and_run = ev.userdata is not None and "SaveAndRun" in ev.userdata
+            if cur_script.language == "app" or is_save_and_run:
+                await self._on_run_script()
+
+    async def _on_new_script(self, value):
+        new_item_name = value["label"]
+        new_script_model = ScriptModel(new_item_name)
+        draft = self.model.get_draft()
+        draft.scripts.append(new_script_model)
+        # draft update is delayed, so we use len(...) instead of len(...) - 1
+        draft.cur_script_idx = len(self.model.model.scripts)
+        await self.app_show_box.set_new_layout({})
+        await self.send_and_wait(
+            self.code_editor.update_event(
+                language=_LANG_TO_VSCODE_MAPPING[new_script_model.language],
+                value=new_script_model.states[new_script_model.language].code,
+                path=new_item_name))
+
+    async def _on_script_delete(self):
+        model = self.model.model
+        draft = self.model.get_draft()
+        if model.cur_script_idx != -1:
+            if len(model.scripts) == 1:
+                draft.scripts.pop()
+                draft.cur_script_idx = -1
+                await self.send_and_wait(
+                    self.code_editor.update_event(
+                        language="python",
+                        value="# let's add a new script",
+                        path=""))
             else:
-                code = item.code
-            if item.lang == "python":
+                draft.scripts.pop(model.cur_script_idx)
+                draft.cur_script_idx = 0
+
+    async def _on_script_select(self, value):
+        label = value["label"]
+        # find script model by label
+        model = self.model.model
+        idx = -1
+        for i, script in enumerate(model.scripts):
+            if script.label == label:
+                idx = i
+                break
+        if idx == -1:
+            raise ValueError("shouldn't happen")
+        draft = self.model.get_draft()
+        draft.cur_script_idx = idx
+        cur_script = model.scripts[idx]
+        await self.send_and_wait(
+            self.code_editor.update_event(
+                language=_LANG_TO_VSCODE_MAPPING[cur_script.language],
+                value=cur_script.get_cur_state().code,
+                path=cur_script.label))
+        if cur_script.language != "app":
+            await self.app_show_box.set_new_layout({})
+        else:
+            await self._on_run_script()
+
+    async def _on_run_script(self, cur_lang: Optional[str] = None):
+        if self.model.model.cur_script_idx != -1:
+            cur_script = self.model.model.scripts[self.model.model.cur_script_idx]
+            if cur_lang is None:
+                cur_lang = cur_script.language
+            item_uid = f"{self._graph_id}@{self._storage_node_rid}@{cur_script.label}"
+            fname = f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-{item_uid}>"
+            code = cur_script.states[cur_lang].code
+            label = cur_script.label
+            if cur_lang == "python":
                 __tensorpc_script_res: List[Optional[Coroutine]] = [None]
                 lines = code.splitlines()
                 lines = [" " * 4 + line for line in lines]
@@ -713,7 +779,7 @@ class ScriptManagerV2(mui.FlexBox):
                 res = __tensorpc_script_res[0]
                 assert res is not None
                 await res
-            elif item.lang == "bash":
+            elif cur_lang == "bash":
                 proc = await asyncio.create_subprocess_shell(
                     code,
                     stdout=asyncio.subprocess.PIPE,
@@ -722,7 +788,7 @@ class ScriptManagerV2(mui.FlexBox):
                                      _read_stream(proc.stderr, print))
                 await proc.wait()
                 print(f'[cmd exited with {proc.returncode}]')
-            elif item.lang == "cpp":
+            elif cur_lang == "cpp":
                 import ccimport # type: ignore
                 from ccimport.utils import tempdir # type: ignore
                 from pathlib import Path
@@ -744,7 +810,7 @@ class ScriptManagerV2(mui.FlexBox):
                                                load_library=False,
                                                verbose=False)
                     subprocess.check_call([str(source)])
-            elif item.lang == "app":
+            elif cur_lang == "app":
                 mod_dict = {}
                 code_comp = compile(code, fname, "exec")
                 exec(code_comp, mod_dict)
@@ -756,133 +822,3 @@ class ScriptManagerV2(mui.FlexBox):
                 layout = mui.flex_wrapper(app_cls())
                 await self.app_show_box.set_new_layout({"layout": layout})
 
-    async def _handle_pane_visible_status(self, lang: str):
-        await self.code_editor_container.update_panes_props({
-            0: {
-                "visible": self._show_editor_btn.value if lang == "app" else True
-            },
-            1: {
-                "visible": True if lang == "app" else False
-            },
-        })
-
-
-    async def _on_lang_select(self, value):
-        if value != "app":
-            await self.app_show_box.set_new_layout({})
-        # await self.send_and_wait(
-        #     self.app_show_box.update_event(
-        #         flex=1 if value == "app" else mui.undefined))
-        await self._handle_pane_visible_status(value)
-
-        if self.scripts.value is not None:
-            storage_key = self.scripts.value["storage_key"]
-
-            item = await appctx.read_data_storage(storage_key,
-                                                  self._storage_node_rid,
-                                                  self._graph_id)
-            assert isinstance(item, Script)
-            item.lang = value
-            await self.send_and_wait(
-                self.code_editor.update_event(
-                    language=_LANG_TO_VSCODE_MAPPING[value],
-                    value=item.get_code()))
-            await appctx.save_data_storage(storage_key, item,
-                                           self._storage_node_rid,
-                                           self._graph_id)
-            if value == "app":
-                # TODO add better option
-                await self._on_run_script()
-
-        else:
-            await self.send_and_wait(
-                self.code_editor.update_event(
-                    language=_LANG_TO_VSCODE_MAPPING[value]))
-
-    async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
-        value = ev.value
-        if self.scripts.value is not None:
-            label = self.scripts.value["label"]
-            storage_key = f"{SCRIPT_STORAGE_KEY_PREFIX}/{label}"
-            item = await appctx.read_data_storage(storage_key,
-                                                  self._storage_node_rid,
-                                                  self._graph_id)
-            assert isinstance(item, Script)
-            # compact new code dict
-            if not isinstance(item.code, dict):
-                item.code = self._init_scripts.copy()
-            item.code[item.lang] = value
-
-            await appctx.save_data_storage(storage_key, item,
-                                           self._storage_node_rid,
-                                           self._graph_id)
-            is_save_and_run = ev.userdata is not None and "SaveAndRun" in ev.userdata
-            if item.lang == "app" or is_save_and_run:
-                await self._on_run_script()
-
-    async def _on_new_script(self, value, init_str: Optional[str] = None):
-
-        new_item_name = value["label"]
-        storage_key = f"{SCRIPT_STORAGE_KEY_PREFIX}/{new_item_name}"
-
-        value["storage_key"] = storage_key
-        await self.scripts.update_options([*self.scripts.props.options, value],
-                                          -1)
-        lang = self.langs.props.value
-        assert isinstance(lang, str)
-        script = Script(new_item_name, self._init_scripts, lang)
-        await appctx.save_data_storage(storage_key, script,
-                                       self._storage_node_rid, self._graph_id)
-        if lang != "app":
-            await self.app_show_box.set_new_layout({})
-        await self._handle_pane_visible_status(lang)
-        # await self.send_and_wait(
-        #     self.app_show_box.update_event(
-        #         flex=1 if lang == "app" else mui.undefined))
-        await self.send_and_wait(
-            self.code_editor.update_event(
-                language=_LANG_TO_VSCODE_MAPPING[lang],
-                value=script.get_code(),
-                path=script.label))
-        # if value == "app":
-        #     # TODO add better option
-        #     await self._on_run_script()
-
-    async def _on_script_delete(self):
-        if self.scripts.value is not None:
-            label = self.scripts.value["label"]
-            storage_key = self.scripts.value["storage_key"]
-
-            await appctx.remove_data_storage(storage_key,
-                                             self._storage_node_rid,
-                                             self._graph_id)
-            new_options = [
-                x for x in self.scripts.props.options if x["label"] != label
-            ]
-            await self.scripts.update_options(new_options, 0)
-            if new_options:
-                await self._on_script_select(new_options[0])
-
-    async def _on_script_select(self, value):
-        label = value["label"]
-        storage_key = value["storage_key"]
-
-        item = await appctx.read_data_storage(storage_key,
-                                              self._storage_node_rid,
-                                              self._graph_id)
-        assert isinstance(item, Script)
-        # await self.send_and_wait(
-        #     self.app_show_box.update_event(
-        #         flex=1 if item.lang == "app" else mui.undefined))
-        await self._handle_pane_visible_status(item.lang)
-
-        await self.langs.set_value(item.lang)
-        await self.send_and_wait(
-            self.code_editor.update_event(
-                language=_LANG_TO_VSCODE_MAPPING[item.lang],
-                value=item.get_code(),
-                path=item.label))
-        if item.lang != "app":
-            await self.app_show_box.set_new_layout({})
-        else:
-            await self._on_run_script()
