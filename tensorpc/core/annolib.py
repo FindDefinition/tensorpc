@@ -160,7 +160,6 @@ def parse_type_may_optional_undefined(ann_type: Any, is_optional: Optional[bool]
     # check ann_type is Union
     ty_origin = get_origin(ann_type)
     if ty_origin is not None:
-        assert inspect.isclass(ty_origin), f"origin type must be a class, but get {ty_origin}"
         if origin_is_union(ty_origin):
             ty_args = get_args(ann_type)
             is_optional = is_optional or False
@@ -176,9 +175,11 @@ def parse_type_may_optional_undefined(ann_type: Any, is_optional: Optional[bool]
                 res.is_optional = is_optional
                 res.is_undefined = is_undefined
                 return res
+            assert inspect.isclass(ty_origin), f"origin type must be a class, but get {ty_origin}"
             return AnnotatedType(ty_origin, ty_args, ann_meta, is_optional, is_undefined)
         else:
             ty_args = get_args(ann_type)
+            assert inspect.isclass(ty_origin), f"origin type must be a class, but get {ty_origin}"
             return AnnotatedType(ty_origin, list(ty_args), ann_meta)
     return AnnotatedType(ann_type, [], ann_meta)
 

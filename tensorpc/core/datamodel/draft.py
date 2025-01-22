@@ -35,6 +35,7 @@ import contextvars
 import enum
 import types
 from typing import Any, MutableSequence, Optional, Type, TypeVar, Union, cast
+from tensorpc.core import inspecttools
 from tensorpc.core.annolib import AnnotatedType, parse_type_may_optional_undefined
 import tensorpc.core.dataclass_dispatch as dataclasses
 from collections.abc import MutableMapping, Sequence, Mapping
@@ -377,6 +378,8 @@ class DraftObject(DraftBase):
                 dcls_type = self._tensorpc_draft_attr_anno_type.origin_type
                 if hasattr(dcls_type, name):
                     unbound_func = getattr(dcls_type, name)
+                    if inspecttools.isstaticmethod(dcls_type, name):
+                        return unbound_func
                     return types.MethodType(unbound_func, self)
             raise AttributeError(
                 f"dataclass {type(self._tensorpc_draft_attr_real_obj)} has no attribute {name}"

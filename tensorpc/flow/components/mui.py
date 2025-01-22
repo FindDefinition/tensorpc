@@ -31,6 +31,7 @@ import json
 import time
 import uuid
 import tensorpc.core.datamodel.jmes as jmespath
+from mashumaro.codecs.basic import BasicDecoder, BasicEncoder
 
 from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterable,
                     Awaitable, Callable, Coroutine, Dict, Iterable, List,
@@ -58,7 +59,7 @@ from ..jsonlike import JsonLikeType, BackendOnlyProp, ContextMenuData, JsonLikeN
 from ..core import colors
 from ..core.component import (
     AppComponentCore, AppEvent, AppEventType, BasicProps, Component,
-    ContainerBase, ContainerBaseProps, EventHandler, EventSlot, EventSlotEmitter,
+    ContainerBase, ContainerBaseProps, EventHandler, EventSlot, EventSlotEmitter, EventSlotNoArgEmitter,
     SimpleEventType, FlowSpecialMethods, Fragment, FrontendEventType,
     NumberType, T_base_props, T_child, T_container_props, TaskLoopEvent,
     UIEvent, UIRunStatus, UIType, Undefined, ValueType, undefined,
@@ -1751,6 +1752,7 @@ class MonacoEditorAction:
     keybindingContext: Optional[str] = None
     contextMenuGroupId: Optional[str] = None
     contextMenuOrder: Optional[NumberType] = None
+    userdata: Optional[Any] = None
 
 
 @dataclasses.dataclass
@@ -1767,6 +1769,7 @@ class MonacoEditorProps(MUIComponentBaseProps):
 class _MonacoEditorControlType(enum.IntEnum):
     SetLineNumber = 0
     Save = 1
+    SetValue = 2
 
 
 @dataclasses.dataclass
@@ -1799,6 +1802,7 @@ class MonacoEditorSelectionEvent:
 class MonacoEditorActionEvent:
     action: str 
     selection: Optional[MonacoEditorSelectionEvent]
+    userdata: Optional[Any] = None
 
 class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
 
@@ -1895,8 +1899,27 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         ev = self.create_comp_event(data)
         await self.send_and_wait(ev)
 
-    async def write(self, content: str):
-        await self.send_and_wait(self.update_event(value=content))
+    async def write(self, content: str, path: Optional[str] = None, language: Optional[str] = None, use_comp_event: bool = True):
+        if not use_comp_event:
+            await self.send_and_wait(self.update_event(value=content, path=path or undefined, language=language or undefined))
+        else:
+            data = {
+                "type":
+                int(_MonacoEditorControlType.SetValue),
+                "value":
+                content,
+            }
+            self.prop(value=content)
+            if path is not None:
+                self.prop(path=path)
+            if language is not None:
+                self.prop(language=language)
+            if path is not None:
+                data["path"] = path
+            if language is not None:
+                data["language"] = language
+            ev = self.create_comp_event(data)
+            await self.send_and_wait(ev)
 
 
 @dataclasses.dataclass
@@ -5937,16 +5960,39 @@ class DataModelProps(ContainerBaseProps):
     dataObject: Any = dataclasses.field(default_factory=dict)
 
 class DataModel(MUIContainerBase[DataModelProps, MUIComponentType], Generic[_T]):
+    """DataModel is the model part of classic MVC pattern, child components can use `bind_fields` to query data from
+    this component.
+    
+    Pitfalls:
+        model may be replaced when you connect it to a storage, you should always access model instance via property instead of 
+            keep it by user.
+    """
     def __init__(self, model: _T, children: Optional[LayoutType] = None) -> None:
         if children is not None and isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.DataModel, DataModelProps, children, allowed_events=[])
         self.prop(dataObject=model)
-        self._model = model
+        self._model: _T = model
         self._backend_draft_update_event_key = "__backend_draft_update"
+        self._backend_storage_fetched_event_key = "__backend_storage_fetched"
+
         self.event_draft_update: EventSlotEmitter[list[DraftUpdateOp]] = self._create_emitter_event_slot(self._backend_draft_update_event_key)
+        self.event_storage_fetched: EventSlotNoArgEmitter = self._create_emitter_event_slot_noarg(self._backend_storage_fetched_event_key)
 
         self._app_storage_handler_registered: bool = False
+
+        self._is_model_dataclass = dataclasses.is_dataclass(type(model))
+        self._is_model_pydantic_dataclass = dataclasses.is_pydantic_dataclass(type(model))
+
+        self._mashumaro_decoder: Optional[BasicDecoder] = None
+        self._mashumaro_encoder: Optional[BasicEncoder] = None
+
+    def _lazy_get_mashumaro_coder(self):
+        if self._mashumaro_decoder is None:
+            self._mashumaro_decoder = BasicDecoder(type(self.model))
+        if self._mashumaro_encoder is None:
+            self._mashumaro_encoder = BasicEncoder(type(self.model))
+        return self._mashumaro_decoder, self._mashumaro_encoder
 
     @property 
     def model(self) -> _T:
@@ -5966,9 +6012,18 @@ class DataModel(MUIContainerBase[DataModelProps, MUIComponentType], Generic[_T])
         await self.send_and_wait(self.update_event(dataObject=self.model))
 
     def get_draft(self) -> _T:
+        """Create draft object, the generated draft AST is depend on real object.
+        All opeartion you appied to draft object must be valid for real object.
+        """
         return cast(_T, create_draft(self.model, userdata=self))
 
     def get_draft_type_only(self) -> _T:
+        """Create draft object, but the generated draft AST is depend on annotation type instead of real object.
+        useful when your draft ast contains optional/undefined path, this kind of path produce undefined in frontend,
+        but raise error if we use real object.
+
+        We also enable method support in this mode, which isn't allowed in object mode.
+        """
         return cast(_T, create_draft_type_only(type(self.model), userdata=self))
 
     def _update_with_jmes_ops_event(self, ops: list[DraftUpdateOp]):
@@ -5982,8 +6037,9 @@ class DataModel(MUIContainerBase[DataModelProps, MUIComponentType], Generic[_T])
         })
 
     async def _update_with_jmes_ops(self, ops: list[DraftUpdateOp]):
-        await self.flow_event_emitter.emit_async(self._backend_draft_update_event_key, Event(self._backend_draft_update_event_key, ops))
-        return await self.send_and_wait(self._update_with_jmes_ops_event(ops))
+        if ops:
+            await self.flow_event_emitter.emit_async(self._backend_draft_update_event_key, Event(self._backend_draft_update_event_key, ops))
+            return await self.send_and_wait(self._update_with_jmes_ops_event(ops))
 
     async def _update_with_jmes_ops_event_for_internal(self, ops: list[DraftUpdateOp]):
         # internal event handle system will call this function
@@ -5995,6 +6051,15 @@ class DataModel(MUIContainerBase[DataModelProps, MUIComponentType], Generic[_T])
 
     @contextlib.asynccontextmanager
     async def draft_update(self):
+        """Do draft update immediately after this context.
+        We won't perform real update during draft operation because we need to keep state same between
+        frontend and backend. if your update code raise error during draft operation, the real model in backend won't 
+        be updated, so the state is still same. if we do backend update in each draft update, the state
+        will be different between frontend and backend when exception happen.
+
+        If your code after draft depends on the updated model, you can use this ctx to perform
+        update immediately.
+        """
         draft = self.get_draft()
         with capture_draft_update() as ctx:
             yield draft
@@ -6008,6 +6073,7 @@ class DataModel(MUIContainerBase[DataModelProps, MUIComponentType], Generic[_T])
         """Register event handler that store and send update info to app storage.
         WARNING: this function must be called in layout function.
         """
+        assert self._is_model_dataclass, "only support dataclass model when use app storage"
         assert not self._app_storage_handler_registered, "only support connect once if you want to change path/type, create a new component."
         assert dataclasses.is_dataclass(self.model), "only support dataclass model"
         self.event_after_mount.on(partial(self._fetch_internal_data_from_app_storage, path=path, storage_type=storage_type))
@@ -6024,11 +6090,17 @@ class DataModel(MUIContainerBase[DataModelProps, MUIComponentType], Generic[_T])
             data = as_dict_no_undefined(self.model)
             await storage.save_data_storage(path, data, storage_type=storage_type)
             return 
-        # validate dcls if it support
-        type(self.model)(**data) # type: ignore
-        # assign root attrs
-        for k, v in data.items():
-            setattr(self.model, k, v)
+        if self._is_model_dataclass:
+            if dataclasses.is_pydantic_dataclass(type(self.model)):
+                self._model = type(self.model)(**data) # type: ignore
+            else:
+                # plain dataclass don't support create from dict, so we use `mashumaro` here.
+                dec, _ = self._lazy_get_mashumaro_coder()
+                self._model = dec.decode(data) # type: ignore
+        else:
+            self._model = data
+        self.props.dataObject = self._model
+        await self.flow_event_emitter.emit_async(self._backend_storage_fetched_event_key, Event(self._backend_storage_fetched_event_key, None))
         # finally sync the model.
         await self.sync_model()
 

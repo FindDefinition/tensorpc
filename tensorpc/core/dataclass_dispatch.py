@@ -1,5 +1,5 @@
 from typing import Any, Iterator
-from pydantic.dataclasses import dataclass
+from pydantic.dataclasses import dataclass, is_pydantic_dataclass
 from pydantic import Field as field
 
 from dataclasses import asdict, is_dataclass, fields, replace

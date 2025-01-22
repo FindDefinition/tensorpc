@@ -29,12 +29,14 @@ from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 from tensorpc.flow.constants import TENSORPC_FLOW_APP_LANG_SERVER_PORT
 from tensorpc.flow.components import mui
 from tensorpc.flow import appctx
+# from tensorpc.core import dataclass_dispatch as dataclasses
 
 from tensorpc.flow import marker
 from tensorpc.flow.components import three
 from tensorpc.flow.components.plus.tutorials import AppInMemory
 from tensorpc.flow.core.appcore import AppSpecialEventType, app_is_remote_comp
 from tensorpc.flow.core.component import FrontendEventType
+from tensorpc.utils.code_fmt import PythonCodeFormatter
 from .options import CommonOptions
 
 from tensorpc.flow.client import MasterMeta
@@ -526,18 +528,28 @@ class ScriptManagerV2(mui.FlexBox):
         self._init_graph_id = graph_id
         self._storage_node_rid = storage_node_rid
         self._graph_id = graph_id
-
+        self._editor_path_uid = "scriptmgr_v2"
         init_model = ScriptManagerModel([], -1)
         self.code_editor = mui.MonacoEditor("", "python",
                                             "default").prop(flex=1,
                                                             minHeight=0,
                                                             minWidth=0)
-        self.code_editor.prop(actions=[
+        self._code_fmt = PythonCodeFormatter()
+        editor_acts: list[mui.MonacoEditorAction] = [
             mui.MonacoEditorAction(id=EditorActions.SaveAndRun.value, 
                 label="Save And Run", contextMenuOrder=1.5,
                 contextMenuGroupId="tensorpc-flow-editor-action", 
                 keybindings=[([mui.MonacoKeyMod.Shift], 3)]),
-        ])
+        ]
+        for backend in self._code_fmt.get_all_supported_backends():
+            editor_acts.append(
+                mui.MonacoEditorAction(id=f"FormatCode-{backend}",
+                                       label=f"Format Code ({backend})",
+                                       contextMenuOrder=1.5,
+                                       contextMenuGroupId="tensorpc-flow-editor-action",
+                                       userdata={"backend": backend})
+            )
+        self.code_editor.prop(actions=editor_acts)
         self.code_editor.event_editor_action.on(self._handle_editor_action)
 
         self.app_editor = AppInMemory("scriptmgr", "").prop(flex=1,
@@ -564,8 +576,7 @@ class ScriptManagerV2(mui.FlexBox):
             mui.GroupToggleButtonDef("python", name="PY"),
             mui.GroupToggleButtonDef("bash", name="BASH"),
             mui.GroupToggleButtonDef("app", name="APP"),
-        ], True, self._on_lang_select).prop(enforceValueSet=True)
-        # self.langs.bind_fields(value="getitem(scripts, cur_script_idx).language")
+        ]).prop(enforceValueSet=True)
         self._save_and_run_btn = mui.IconButton(
             mui.IconType.PlayArrow,
             self._on_save_and_run).prop(progressColor="primary")
@@ -581,7 +592,9 @@ class ScriptManagerV2(mui.FlexBox):
         self._show_editor_btn.bind_fields(selected="getitem(states, language).is_editor_visible")
         self.model = mui.DataModel(init_model, [
             mui.HBox([
-                self._scripts_select.prop(flex=1).bind_fields(options=r"scripts[*].{label: label}", value=r"getitem(scripts, cur_script_idx).{label: label}"),
+                self._scripts_select.prop(flex=1).bind_fields(
+                    options=r"scripts[*].{label: label}", 
+                    value=r"getitem(scripts, cur_script_idx).{label: label}"),
                 self.langs.bind_fields(disabled="cur_script_idx == `-1`"),
                 self._save_and_run_btn,
                 # self._enable_save_watch,
@@ -597,6 +610,8 @@ class ScriptManagerV2(mui.FlexBox):
         self.model.connect_app_storage(f"{SCRIPT_STORAGE_KEY_PREFIX_V2}")
         draft = self.model.get_draft_type_only()
         self.langs.bind_draft_change(draft.scripts[draft.cur_script_idx].language)
+        # make sure lang change is handled before `_on_lang_select`
+        self.langs.event_change.on(self._on_lang_select)
 
         self.init_add_layout([
             self.model,
@@ -613,8 +628,10 @@ class ScriptManagerV2(mui.FlexBox):
                   minWidth=0,
                   overflow="hidden")
         self.code_editor.event_editor_save.on(self._on_editor_save)
-        self.event_after_mount.on(self._on_editor_ready)
         self._scripts_select.event_select_new_item.on(self._on_new_script)
+
+        self.model.event_storage_fetched.on(self._on_editor_ready)
+
         # used for apps and python scripts
         self._manager_global_storage: Dict[str, Any] = {}
 
@@ -647,6 +664,13 @@ class ScriptManagerV2(mui.FlexBox):
             cur_script = draft.scripts[self.model.model.cur_script_idx]
             cur_script.states[cur_script.language].is_editor_visible = selected
 
+    async def _set_code_editor(self, script: ScriptModel):
+        await self.send_and_wait(
+            self.code_editor.update_event(
+                language=_LANG_TO_VSCODE_MAPPING[script.language],
+                value=script.states[script.language].code,
+                path=self._get_path(script.label, script.language)))
+
     async def _on_editor_ready(self):
         draft = self.model.get_draft()
         model = self.model.model
@@ -654,7 +678,9 @@ class ScriptManagerV2(mui.FlexBox):
             if model.cur_script_idx == -1:
                 draft.cur_script_idx = 0
             cur_script = model.scripts[model.cur_script_idx]
-            await self.code_editor.write(cur_script.states[cur_script.language].code)
+            await self._set_code_editor(cur_script)
+            if cur_script.language == "app":
+                await self._on_run_script()
 
     async def _on_save_and_run(self):
         # we attach userdata to tell save handler run script after save
@@ -666,17 +692,22 @@ class ScriptManagerV2(mui.FlexBox):
         action = act_ev.action
         if action == EditorActions.SaveAndRun.value:
             await self._on_save_and_run()
+        elif action.startswith("FormatCode-"):
+            assert act_ev.userdata is not None 
+            backend = act_ev.userdata["backend"]
+            cur_idx = self.model.model.cur_script_idx
+            cur_script = self.model.model.scripts[cur_idx]
+            cur_state = cur_script.states[cur_script.language]
+            new_code = self._code_fmt.format_code(cur_state.code, backend)
+            async with self.model.draft_update() as draft:
+                draft.scripts[cur_idx].states[cur_script.language].code = new_code
+            await self._set_code_editor(cur_script)
 
     async def _on_lang_select(self, value):
         if value != "app":
             await self.app_show_box.set_new_layout({})
         if self.model.model.cur_script_idx != -1:
-            cur_script = self.model.model.scripts[self.model.model.cur_script_idx]
-            cur_code = cur_script.states[value].code
-            await self.send_and_wait(
-                self.code_editor.update_event(
-                    language=_LANG_TO_VSCODE_MAPPING[value],
-                    value=cur_code))
+            await self._set_code_editor(self.model.model.scripts[self.model.model.cur_script_idx])
             if value == "app":
                 # TODO add better option
                 await self._on_run_script(value)
@@ -695,7 +726,11 @@ class ScriptManagerV2(mui.FlexBox):
             cur_script_draft.states[cur_script.language].code = value
             is_save_and_run = ev.userdata is not None and "SaveAndRun" in ev.userdata
             if cur_script.language == "app" or is_save_and_run:
-                await self._on_run_script()
+                # when we use draft update, real update (include backend model) is delayed
+                await self._on_run_script(code=value)
+
+    def _get_path(self, name: str, lang: str):
+        return f"{self._editor_path_uid}/{name}.{lang}"
 
     async def _on_new_script(self, value):
         new_item_name = value["label"]
@@ -705,11 +740,7 @@ class ScriptManagerV2(mui.FlexBox):
         # draft update is delayed, so we use len(...) instead of len(...) - 1
         draft.cur_script_idx = len(self.model.model.scripts)
         await self.app_show_box.set_new_layout({})
-        await self.send_and_wait(
-            self.code_editor.update_event(
-                language=_LANG_TO_VSCODE_MAPPING[new_script_model.language],
-                value=new_script_model.states[new_script_model.language].code,
-                path=new_item_name))
+        await self._set_code_editor(new_script_model)
 
     async def _on_script_delete(self):
         model = self.model.model
@@ -738,27 +769,26 @@ class ScriptManagerV2(mui.FlexBox):
                 break
         if idx == -1:
             raise ValueError("shouldn't happen")
-        draft = self.model.get_draft()
-        draft.cur_script_idx = idx
+        # draft is delayed after all event handlers of each component event.
+        # so we use draft_update to do update immediately
+        async with self.model.draft_update() as draft:
+            draft.cur_script_idx = idx
         cur_script = model.scripts[idx]
-        await self.send_and_wait(
-            self.code_editor.update_event(
-                language=_LANG_TO_VSCODE_MAPPING[cur_script.language],
-                value=cur_script.get_cur_state().code,
-                path=cur_script.label))
+        await self._set_code_editor(cur_script)
         if cur_script.language != "app":
             await self.app_show_box.set_new_layout({})
         else:
             await self._on_run_script()
 
-    async def _on_run_script(self, cur_lang: Optional[str] = None):
+    async def _on_run_script(self, cur_lang: Optional[str] = None, code: Optional[str] = None):
         if self.model.model.cur_script_idx != -1:
             cur_script = self.model.model.scripts[self.model.model.cur_script_idx]
             if cur_lang is None:
                 cur_lang = cur_script.language
             item_uid = f"{self._graph_id}@{self._storage_node_rid}@{cur_script.label}"
             fname = f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-{item_uid}>"
-            code = cur_script.states[cur_lang].code
+            if code is None:
+                code = cur_script.states[cur_lang].code
             label = cur_script.label
             if cur_lang == "python":
                 __tensorpc_script_res: List[Optional[Coroutine]] = [None]

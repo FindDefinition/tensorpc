@@ -16,7 +16,7 @@ import abc
 import asyncio
 import builtins
 from contextlib import nullcontext
-from typing import Mapping, Sequence
+from typing import TYPE_CHECKING, Mapping, Sequence
 import copy
 import dataclasses
 import enum
@@ -75,6 +75,9 @@ from ..jsonlike import (BackendOnlyProp, DataClassWithUndefined, Undefined,
 from .appcore import RemoteCompEvent, SimpleEventType, NumberType, ValueType, enter_event_handling_conetxt, get_app, Event, EventDataType, get_event_handling_context
 from tensorpc.flow.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_FLOW_COMP_UID_STRUCTURE_SPLIT
 from tensorpc.utils.rich_logging import get_logger
+
+if TYPE_CHECKING:
+    from tensorpc.flow.components.mui import DataModel
 
 LOGGER = get_logger("tensorpc.ui")
 
@@ -1993,8 +1996,9 @@ class Component(Generic[T_base_props, T_child]):
         if capture_draft:
             datamodel_ctx = capture_draft_update()
         with enter_event_handling_conetxt(self._flow_uid) as evctx:
-            with datamodel_ctx as ctx:
-                try:
+            try:
+                with datamodel_ctx as ctx:
+
                     coro = cb()
                     if inspect.iscoroutine(coro):
                         res = await coro
@@ -2004,30 +2008,29 @@ class Component(Generic[T_base_props, T_child]):
                         res_coro = res_callback(res)
                         if inspect.iscoroutine(res_coro):
                             await res_coro
-
-                except Exception as e:
-                    traceback.print_exc()
-                    ss = io.StringIO()
-                    traceback.print_exc(file=ss)
-                    user_exc = UserMessage.create_error(
-                        self._flow_uid.uid_encoded
-                        if self._flow_uid is not None else "", repr(e),
-                        ss.getvalue())
-                    await self.put_app_event(self.create_user_msg_event(user_exc))
-                    app = get_app()
-                    if app._flowapp_enable_exception_inspect:
-                        await app._inspect_exception()
-                finally:
-                    if change_status:
-                        self._flow_comp_status = UIRunStatus.Stop.value
-                        await self.sync_status(sync_state)
-                    if evctx.delayed_callbacks:
-                        for cb in evctx.delayed_callbacks:
-                            coro = cb()
-                            if inspect.iscoroutine(coro):
-                                await coro
-            if ctx is not None:
-                await self._run_draft_update(ctx._ops)
+                if ctx is not None:
+                    await self._run_draft_update(ctx._ops)
+            except Exception as e:
+                traceback.print_exc()
+                ss = io.StringIO()
+                traceback.print_exc(file=ss)
+                user_exc = UserMessage.create_error(
+                    self._flow_uid.uid_encoded
+                    if self._flow_uid is not None else "", repr(e),
+                    ss.getvalue())
+                await self.put_app_event(self.create_user_msg_event(user_exc))
+                app = get_app()
+                if app._flowapp_enable_exception_inspect:
+                    await app._inspect_exception()
+            finally:
+                if change_status:
+                    self._flow_comp_status = UIRunStatus.Stop.value
+                    await self.sync_status(sync_state)
+                if evctx.delayed_callbacks:
+                    for cb in evctx.delayed_callbacks:
+                        coro = cb()
+                        if inspect.iscoroutine(coro):
+                            await coro
         return res
 
     async def run_callbacks(
@@ -2069,13 +2072,14 @@ class Component(Generic[T_base_props, T_child]):
             await ev.wait()
         res = None
         assert self._flow_uid is not None
-        datamodel_ctx = nullcontext()
-        if capture_draft:
-            datamodel_ctx = capture_draft_update()
         with enter_event_handling_conetxt(self._flow_uid) as evctx:
-            with datamodel_ctx as ctx:
-                for cb in cbs:
-                    try:
+            for cb in cbs:
+                datamodel_ctx = nullcontext()
+                if capture_draft:
+                    datamodel_ctx = capture_draft_update()
+                try:
+                    # we shouldn't batch draft update here.
+                    with datamodel_ctx as ctx:
                         coro = cb()
                         if inspect.iscoroutine(coro):
                             res = await coro
@@ -2085,32 +2089,32 @@ class Component(Generic[T_base_props, T_child]):
                             res_coro = res_callback(res)
                             if inspect.iscoroutine(res_coro):
                                 await res_coro
-                    except Exception as e:
-                        traceback.print_exc()
-                        ss = io.StringIO()
-                        traceback.print_exc(file=ss)
-                        assert self._flow_uid is not None
-                        user_exc = UserMessage.create_error(
-                            self._flow_uid.uid_encoded, repr(e), ss.getvalue())
-                        await self.put_app_event(
-                            self.create_user_msg_event(user_exc))
-                        # app = get_app()
-                        # if app._flowapp_enable_exception_inspect:
-                        #     await app._inspect_exception()
-                # finally:
-                if change_status:
-                    self._flow_comp_status = UIRunStatus.Stop.value
-                    await self.sync_status(sync_state)
-                else:
-                    if sync_state:
-                        await self.sync_state()
-                if evctx.delayed_callbacks:
-                    for cb in evctx.delayed_callbacks:
-                        coro = cb()
-                        if inspect.iscoroutine(coro):
-                            await coro
-            if ctx is not None:
-                await self._run_draft_update(ctx._ops)
+                    if ctx is not None:
+                        await self._run_draft_update(ctx._ops)
+                except Exception as e:
+                    traceback.print_exc()
+                    ss = io.StringIO()
+                    traceback.print_exc(file=ss)
+                    assert self._flow_uid is not None
+                    user_exc = UserMessage.create_error(
+                        self._flow_uid.uid_encoded, repr(e), ss.getvalue())
+                    await self.put_app_event(
+                        self.create_user_msg_event(user_exc))
+                    # app = get_app()
+                    # if app._flowapp_enable_exception_inspect:
+                    #     await app._inspect_exception()
+            # finally:
+            if change_status:
+                self._flow_comp_status = UIRunStatus.Stop.value
+                await self.sync_status(sync_state)
+            else:
+                if sync_state:
+                    await self.sync_state()
+            if evctx.delayed_callbacks:
+                for cb in evctx.delayed_callbacks:
+                    coro = cb()
+                    if inspect.iscoroutine(coro):
+                        await coro
         return res
 
     async def _run_draft_update(self, ops: list[DraftUpdateOp]):
@@ -2131,7 +2135,12 @@ class Component(Generic[T_base_props, T_child]):
         assert isinstance(draft, DraftBase)
         insert_assign_draft_op(draft, value)
 
-    def _bind_field_with_change_event(self, field_name: str, draft: Any):
+    async def __data_model_auto_event_handler_sync(self, value: Any, draft: Any, comp: Any):
+        assert isinstance(draft, DraftBase)
+        async with comp.draft_update():
+            insert_assign_draft_op(draft, value)
+
+    def _bind_field_with_change_event(self, field_name: str, draft: Any, sync_update: bool = True):
         """Bind a draft with change event. bind_fields is called automatically.
         Equal to following code:
 
@@ -2143,12 +2152,17 @@ class Component(Generic[T_base_props, T_child]):
         """
         assert isinstance(draft, DraftBase)
         assert isinstance(draft._tensorpc_draft_attr_userdata, Component), "you must use comp.get_draft_target() to get draft"
+        comp = draft._tensorpc_draft_attr_userdata
         if draft._tensorpc_draft_attr_cur_node.type == DraftASTType.FUNC_CALL:
             raise ValueError("can't bind field with getitem or getattr result")
         assert FrontendEventType.Change.value in self._flow_allowed_events
         self.bind_fields(**{field_name: draft})
-        self.register_event_handler(FrontendEventType.Change, 
-            partial(self.__data_model_auto_event_handler, draft=draft), simple_event=True)
+        if sync_update:
+            self.register_event_handler(FrontendEventType.Change, 
+                partial(self.__data_model_auto_event_handler_sync, draft=draft, comp=comp), simple_event=True)
+        else:
+            self.register_event_handler(FrontendEventType.Change, 
+                partial(self.__data_model_auto_event_handler, draft=draft), simple_event=True)
         return self 
 
     async def sync_status(self,
@@ -3091,7 +3105,7 @@ class MatchCaseProps(ContainerBaseProps):
 @dataclasses.dataclass
 class MatchCaseItem:
     # if value is undefined, it is default case
-    value: Union[ValueType, Undefined]
+    value: Union[ValueType, bool, Undefined]
     child: Component
     isExpr: Union[bool, Undefined] = undefined
 
@@ -3146,10 +3160,10 @@ class MatchCase(ContainerBase[MatchCaseProps, Component]):
     ChildDef = MatchCaseChildDef
 
     def __init__(self,
-                 children: List[Union[MatchCaseItem, ExprCaseItem]],
+                 children: Sequence[Union[MatchCaseItem, ExprCaseItem]],
                  init_value: Union[ValueType, Undefined] = undefined) -> None:
         super().__init__(UIType.MatchCase, MatchCaseProps,
-                         MatchCaseChildDef(items=children))
+                         MatchCaseChildDef(items=[*children]))
         self.props.condition = init_value
 
     @property
@@ -3161,6 +3175,18 @@ class MatchCase(ContainerBase[MatchCaseProps, Component]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
+
+    @staticmethod 
+    def binary_selection(success_val: Union[ValueType, bool], success: Component, fail: Optional[Component] = None):
+        """Create a simple `MatchCase` that show `success` component when condition is strictly equal to `success_val`, 
+        otherwise show `fail`.
+
+        strictly equal in javascript means `===`, so keep in mind that `1` is not equal to `True`. 
+        """
+        cases: list[MatchCase.Case] = [MatchCase.Case(success_val, success)]
+        if fail is not None:
+            cases.append(MatchCase.Case(undefined, fail))
+        return MatchCase(cases)
 
     async def set_condition(self, condition: Union[ValueType, Undefined]):
         assert isinstance(self._child_structure, MatchCaseChildDef)
