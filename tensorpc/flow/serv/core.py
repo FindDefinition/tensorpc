@@ -867,18 +867,18 @@ class DataStorageNodeBase(abc.ABC):
         if not self.has_data_item(key):
             return False # if client get this, it can create data instead of update.
         item = self.read_data(key)
-        assert item.storage_type in [StorageType.JSONARRAY, StorageType.JSON], "only support json or jarr"
+        assert item.storage_type in [StorageType.JSONARRAY, StorageType.JSON], f"only support json or jarr, not {item.storage_type}"
         if item.storage_type == StorageType.JSON:
             data_dec = json.loads(item.data)
         else:
             data_dec = core_io.loads(item.data)
         apply_draft_update_ops_to_json(data_dec, ops)
         if item.storage_type == StorageType.JSON:
-            self.save_data(key, json.dumps(data_dec).encode("utf-8"), item.meta, timestamp)
+            self.save_data(key, json.dumps(data_dec).encode("utf-8"), item.meta, timestamp, type=item.storage_type)
         else:
             res = core_io.dumps(data_dec)
             mem = memoryview(res)
-            self.save_data(key, mem, item.meta, timestamp)
+            self.save_data(key, mem, item.meta, timestamp, type=item.storage_type)
         return True 
 
     def save_data(self, key: str, data: bytes, meta: JsonLikeNode,
