@@ -313,7 +313,8 @@ class UIType(enum.IntEnum):
     LeafletTracklet = 0x2100
 
     MASK_FLOW_COMPONENTS = 0x8000
-    Flow = 0x18001
+    Flow = 0x8001
+    DataFlow = 0x18001
     FlowMiniMap = 0x8002
     FlowControls = 0x8003
     FlowNodeResizer = 0x8004

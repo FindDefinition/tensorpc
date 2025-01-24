@@ -2,6 +2,7 @@ import ast
 from collections import namedtuple
 import contextlib
 import dataclasses
+import inspect
 from operator import getitem
 import traceback
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
@@ -566,7 +567,14 @@ class FlowUIInterpreter(Interpreter):
         if isinstance(target, str):
             name = str(target)
         else:
-            qname = get_qualname_of_type(target)
+            try:
+                if inspect.isclass(target):
+                    qname = get_qualname_of_type(target)
+                else:
+                    qname = get_qualname_of_type(type(target))
+            except:
+                traceback.print_exc()
+                qname = type(target).__name__
             name = qname.split(".")[-1]
             if qname.startswith(self._torch_builtin_prefix):
                 if name in self._op_name_to_th_ret_types:
@@ -578,7 +586,7 @@ class FlowUIInterpreter(Interpreter):
         schema_returns = None
         if self._is_export:
             qname = get_qualname_of_type(type(target))
-            if qname.startswith("torch"):
+            if qname.startswith("torch") and hasattr(target, "_schema"):
                 for arg in args:
                     if isinstance(arg, torch.nn.Parameter):
                         op_has_param = True
