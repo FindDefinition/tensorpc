@@ -1,14 +1,14 @@
 import copy
 from typing import Annotated, cast
-from tensorpc.core.datamodel.draft import DraftObject, capture_draft_update, apply_draft_update_ops, apply_draft_jmes_ops, create_draft, create_draft_type_only, get_draft_anno_type, get_draft_ast_node, insert_assign_draft_op
+from tensorpc.core.datamodel.draft import DraftObject, capture_draft_update, apply_draft_update_ops, apply_draft_jmes_ops, create_draft, create_draft_type_only, get_draft_anno_path_metas, get_draft_anno_type, get_draft_ast_node, insert_assign_draft_op
 from tensorpc.core import dataclass_dispatch as dataclasses
 from deepdiff.diff import DeepDiff
 
 @dataclasses.dataclass
 class NestedModel:
     a: int 
-    b: float 
-    
+    b: float
+    c: Annotated[str, "AnnoNestedMeta1"] = ""
 @dataclasses.dataclass
 class Model:
     a: int 
@@ -16,10 +16,11 @@ class Model:
     c: bool 
     d: str 
     e: list[int]
-    f: Annotated[dict[str, int], "WTFWTF"]
+    f: Annotated[dict[str, int], "AnnoMeta1"]
     g: list[dict[str, int]]
     h: NestedModel
     i: list[NestedModel]
+    j: Annotated[dict[str, NestedModel], "AnnoMeta2"]
 
     def set_i_b(self, idx: int, value: float):
         self.i[idx].b = value
@@ -44,14 +45,17 @@ def test_draft(type_only_draft: bool = True):
     model = Model(
         a=0, b=2.0, c=True, d="test", e=[1, 2, 3], f={"a": 1, "b": 2}, 
         g=[{"a": 1, "b": 2}, {"a": 3, "b": 4}], h=NestedModel(a=1, b=2.0), 
-        i=[NestedModel(a=1, b=2.0), NestedModel(a=3, b=4.0)]
+        i=[NestedModel(a=1, b=2.0), NestedModel(a=3, b=4.0)],
+        j={"a": NestedModel(a=1, b=2.0), "b": NestedModel(a=3, b=4.0)}
     )
-
     model_ref = copy.deepcopy(model)
     if type_only_draft:
         draft = create_draft_type_only(type(model))
     else:
         draft = create_draft(model)
+    assert get_draft_anno_path_metas(draft.f) == [("AnnoMeta1",)]
+    assert get_draft_anno_path_metas(draft.j["a"].c) == [("AnnoMeta2",), ("AnnoNestedMeta1",)]
+    assert get_draft_anno_path_metas(draft.j["a"].a) == [("AnnoMeta2",)]
 
     with capture_draft_update() as ctx:
         modify_func(model_ref)
