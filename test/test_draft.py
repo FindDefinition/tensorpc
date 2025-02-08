@@ -1,21 +1,24 @@
+import asyncio
 import copy
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 from tensorpc.core.datamodel.draft import DraftObject, capture_draft_update, apply_draft_update_ops, apply_draft_jmes_ops, create_draft, create_draft_type_only, get_draft_anno_path_metas, get_draft_anno_type, get_draft_ast_node, insert_assign_draft_op
 from tensorpc.core import dataclass_dispatch as dataclasses
+from tensorpc.core.datamodel.draftstore import DraftFileStorage, DraftFileStoreBackendInMemory, get_splitted_update_model_ops, validate_splitted_model_type, DraftStoreMapMeta
 from deepdiff.diff import DeepDiff
-
+import base64
 @dataclasses.dataclass
 class NestedModel:
     a: int 
     b: float
     c: Annotated[str, "AnnoNestedMeta1"] = ""
+
 @dataclasses.dataclass
 class Model:
     a: int 
     b: float 
     c: bool 
     d: str 
-    e: list[int]
+    e: "list[int]"
     f: Annotated[dict[str, int], "AnnoMeta1"]
     g: list[dict[str, int]]
     h: NestedModel
@@ -39,6 +42,11 @@ def modify_func(mod: Model):
     mod.set_i_b(0, 7)
     mod.e.pop()
     mod.f.pop("b")
+    mod.f.update({
+        "c": 5
+    })
+    mod.f["d"] = 6
+    del mod.f["a"]
 
 
 def test_draft(type_only_draft: bool = True):
@@ -53,6 +61,7 @@ def test_draft(type_only_draft: bool = True):
         draft = create_draft_type_only(type(model))
     else:
         draft = create_draft(model)
+    # print(get_draft_anno_path_metas(draft.f))
     assert get_draft_anno_path_metas(draft.f) == [("AnnoMeta1",)]
     assert get_draft_anno_path_metas(draft.j["a"].c) == [("AnnoMeta2",), ("AnnoNestedMeta1",)]
     assert get_draft_anno_path_metas(draft.j["a"].a) == [("AnnoMeta2",)]
@@ -60,8 +69,8 @@ def test_draft(type_only_draft: bool = True):
     with capture_draft_update() as ctx:
         modify_func(model_ref)
         modify_func(draft)
-    print(get_draft_anno_type(draft.f))
-    print(get_draft_ast_node(draft.e[draft.a]).get_jmes_path())
+    # print(get_draft_anno_type(draft.f))
+    # print(get_draft_ast_node(draft.e[draft.a]).get_jmes_path())
     model_for_jpath = copy.deepcopy(model)
     model_for_jpath_dict = dataclasses.asdict(model_for_jpath)
     apply_draft_update_ops(model, ctx._ops)
@@ -74,6 +83,109 @@ def test_draft(type_only_draft: bool = True):
     assert not ddiff
 
 
+@dataclasses.dataclass
+class SplittedSubModel:
+    d: int
+    e_split: Annotated[dict[str, Any], DraftStoreMapMeta()] 
+    f: list[int]
+
+
+@dataclasses.dataclass
+class SplittedModel:
+    a: int 
+    b: float 
+    c_split: Annotated[dict[str, int], DraftStoreMapMeta("modified_name")] 
+    d_split: Annotated[dict[str, SplittedSubModel], DraftStoreMapMeta()] 
+
+
+def modify_func_splitted(mod: SplittedModel):
+    mod.a = 1
+    mod.b += 5
+    mod.c_split["a"] += 3
+    mod.c_split["c"] = 5
+    mod.c_split.update({
+        "b": 4
+    })
+    mod.c_split["b"] = 4
+    mod.d_split["a"].d = 5
+    mod.d_split["a"].e_split["b"] = 6
+    mod.d_split["a"].f[0] = 6
+    mod.c_split.pop("a")
+    mod.d_split["a"].e_split.pop("a")
+
+def _b64encode(key: str):
+    return base64.b64encode(key.encode()).decode()
+
+def test_splitted_draft(type_only_draft: bool = True):
+    validate_splitted_model_type(SplittedModel)
+    model = SplittedModel(a=0, b=2.0, c_split={"a": 1, "b": 2}, d_split={"a": SplittedSubModel(d=1, e_split={"a": 1, "b": 2}, f=[5])})
+    model_ref = copy.deepcopy(model)
+    if type_only_draft:
+        draft = create_draft_type_only(type(model))
+    else:
+        draft = create_draft(model)
+    with capture_draft_update() as ctx:
+        modify_func_splitted(model_ref)
+        modify_func_splitted(draft)
+
+    model_for_jpath = copy.deepcopy(model)
+    model_for_jpath_dict = dataclasses.asdict(model_for_jpath)
+    splitted_update_ops, _, _ = get_splitted_update_model_ops("root", ctx._ops, model_ref)
+    # print(splitted_update_ops)
+    assert f"root/modified_name/{_b64encode('a')}" in splitted_update_ops
+    assert f"root/modified_name/{_b64encode('b')}" in splitted_update_ops
+    assert f"root/d_split/{_b64encode('a')}" in splitted_update_ops
+    assert f"root/d_split/{_b64encode('a')}/e_split/{_b64encode('b')}" in splitted_update_ops
+
+    apply_draft_update_ops(model, ctx._ops)
+    apply_draft_jmes_ops(model_for_jpath_dict, [op.to_jmes_path_op() for op in ctx._ops])
+
+    ddiff = DeepDiff(dataclasses.asdict(model), dataclasses.asdict(model_ref), ignore_order=True)
+    assert not ddiff, str(ddiff)
+
+    ddiff = DeepDiff(model_for_jpath_dict, dataclasses.asdict(model_ref), ignore_order=True)
+    assert not ddiff
+
+async def test_splitted_draft_store(type_only_draft: bool = True):
+    store_backend = DraftFileStoreBackendInMemory()
+    validate_splitted_model_type(SplittedModel)
+    model = SplittedModel(a=0, b=2.0, c_split={"a": 1, "b": 2}, d_split={"a": SplittedSubModel(d=1, e_split={"a": 1, "b": 2}, f=[5])})
+    model_ref = copy.deepcopy(model)
+
+    store = DraftFileStorage("test", model, store_backend)
+    model_loaded = await store.fetch_model()
+    # import rich 
+    # rich.print(store_backend._data)
+    # rich.print(model_loaded)
+    ddiff = DeepDiff(dataclasses.asdict(model_loaded), dataclasses.asdict(model_ref), ignore_order=True)
+    assert not ddiff, str(ddiff)
+    if type_only_draft:
+        draft = create_draft_type_only(type(model))
+    else:
+        draft = create_draft(model)
+    with capture_draft_update() as ctx:
+        modify_func_splitted(model_ref)
+        modify_func_splitted(draft)
+    splitted_update_ops = get_splitted_update_model_ops("test", ctx._ops, store._model)
+    # rich.print(splitted_update_ops)
+    await store.update_model(ctx._ops)
+    store_my = DraftFileStorage("test", model, store_backend)
+    model_my = await store_my.fetch_model()
+    # import rich 
+    # rich.print(dataclasses.asdict(model_my),)
+    # rich.print(dataclasses.asdict(model_ref),)
+    # rich.print(store_backend._data)
+
+    ddiff = DeepDiff(dataclasses.asdict(model_my), dataclasses.asdict(model_ref), ignore_order=True)
+    assert not ddiff, str(ddiff)
+
+
 if __name__ == "__main__":
     test_draft(False)
     test_draft(True)
+
+    asyncio.run(test_splitted_draft_store())
+
+    test_splitted_draft(True)
+    test_splitted_draft(False)
+

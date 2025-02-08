@@ -18,7 +18,9 @@ from pydantic import (
     GetCoreSchemaHandler, )
 
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
-from tensorpc.core.annolib import Undefined
+from tensorpc.core.annolib import Undefined, BackendOnlyProp, as_dict_no_undefined
+
+
 ValueType: TypeAlias = Union[int, float, str]
 NumberType: TypeAlias = Union[int, float]
 
@@ -37,43 +39,6 @@ def flatten_dict(d: MutableMapping,
         else:
             items.append((new_key, v))
     return dict(items)
-
-class BackendOnlyProp(Generic[T]):
-    """when wrap a property with this class, it will be ignored when serializing to frontend
-    """
-
-    def __init__(self, data: T) -> None:
-        super().__init__()
-        self.data = data
-
-    def __repr__(self) -> str:
-        return "BackendOnlyProp"
-
-    @classmethod
-    def __get_pydantic_core_schema__(cls, _source_type: Any,
-                                     _handler: GetCoreSchemaHandler):
-        return core_schema.no_info_after_validator_function(
-            cls.validate,
-            core_schema.any_schema(),
-        )
-
-    @classmethod
-    def validate(cls, v):
-        if not isinstance(v, BackendOnlyProp):
-            raise ValueError('BackendOnlyProp required')
-        return cls(v.data)
-
-    def __eq__(self, o: object) -> bool:
-        if isinstance(o, BackendOnlyProp):
-            return o.data == self.data
-        else:
-            return o == self.data
-
-    def __ne__(self, o: object) -> bool:
-        if isinstance(o, BackendOnlyProp):
-            return o.data != self.data
-        else:
-            return o != self.data
 
 
 # DON'T MODIFY THIS VALUE!!!
@@ -115,17 +80,6 @@ def undefined_dict_factory(x: List[Tuple[str, Any]]):
         elif not isinstance(v, (Undefined, BackendOnlyProp)):
             res[k] = v
     return res
-
-
-@dataclasses.dataclass
-class _DataclassSer:
-    obj: Any
-
-
-def as_dict_no_undefined(obj: Any):
-    return dataclasses.asdict(_DataclassSer(obj),
-                              dict_factory=undefined_dict_factory)["obj"]
-
 
 def asdict_field_only(obj,
                       *,

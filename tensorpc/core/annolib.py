@@ -1,8 +1,9 @@
 
 from collections.abc import Mapping, Sequence
+import copy
 import dataclasses
-from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Set, Tuple, Type, TypeVar, TypedDict, Union, Generic
-from typing_extensions import Literal, Annotated, NotRequired, get_origin, get_args, get_type_hints
+from typing import Any, AsyncGenerator, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Type, TypeVar, TypedDict, Union, Generic
+from typing_extensions import Literal, Annotated, NotRequired, Protocol, get_origin, get_args, get_type_hints
 from dataclasses import dataclass
 from dataclasses import Field, make_dataclass, field
 import inspect
@@ -15,6 +16,12 @@ from pydantic import (
 
 
 from tensorpc import compat
+from tensorpc.core.tree_id import UniqueTreeId
+
+class DataclassType(Protocol):
+    # as already noted in comments, checking for this attribute is currently
+    # the most reliable way to ascertain that something is a dataclass
+    __dataclass_fields__: ClassVar[Dict[str, Any]]
 
 if sys.version_info < (3, 10):
 
@@ -49,6 +56,13 @@ def is_async_gen(ann_type: Any) -> bool:
     origin = get_origin(ann_type)
     return origin is not None and lenient_issubclass(origin, AsyncGenerator)
 
+_DCLS_GET_TYPE_HINTS_CACHE: dict[Any, dict[str, Any]] = {}
+
+def get_type_hints_with_cache(cls, include_extras: bool = False):
+    if cls not in _DCLS_GET_TYPE_HINTS_CACHE:
+        _DCLS_GET_TYPE_HINTS_CACHE[cls] = get_type_hints(cls, include_extras=include_extras)
+    return _DCLS_GET_TYPE_HINTS_CACHE[cls]
+
 class Undefined:
 
     def __repr__(self) -> str:
@@ -81,6 +95,61 @@ class Undefined:
     def bool(self):
         return False
 
+T = TypeVar("T")
+
+class BackendOnlyProp(Generic[T]):
+    """when wrap a property with this class, it will be ignored when serializing to frontend
+    """
+
+    def __init__(self, data: T) -> None:
+        super().__init__()
+        self.data = data
+
+    def __repr__(self) -> str:
+        return "BackendOnlyProp"
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, _source_type: Any,
+                                     _handler: GetCoreSchemaHandler):
+        return core_schema.no_info_after_validator_function(
+            cls.validate,
+            core_schema.any_schema(),
+        )
+
+    @classmethod
+    def validate(cls, v):
+        if not isinstance(v, BackendOnlyProp):
+            raise ValueError('BackendOnlyProp required')
+        return cls(v.data)
+
+    def __eq__(self, o: object) -> bool:
+        if isinstance(o, BackendOnlyProp):
+            return o.data == self.data
+        else:
+            return o == self.data
+
+    def __ne__(self, o: object) -> bool:
+        if isinstance(o, BackendOnlyProp):
+            return o.data != self.data
+        else:
+            return o != self.data
+
+def undefined_dict_factory(x: List[Tuple[str, Any]]):
+    res: Dict[str, Any] = {}
+    for k, v in x:
+        if isinstance(v, UniqueTreeId):
+            res[k] = v.uid_encoded
+        elif not isinstance(v, (Undefined, BackendOnlyProp)):
+            res[k] = v
+    return res
+
+@dataclasses.dataclass
+class _DataclassSer:
+    obj: Any
+
+def as_dict_no_undefined(obj: Any):
+    return dataclasses.asdict(_DataclassSer(obj),
+                              dict_factory=undefined_dict_factory)["obj"]
 
 @dataclass
 class AnnotatedArg:
@@ -148,6 +217,12 @@ class AnnotatedType:
     def get_child_annotated_type(self, index: int) -> "AnnotatedType":
         return parse_type_may_optional_undefined(self.child_types[index], is_optional=self.is_optional, is_undefined=self.is_undefined)
 
+    def get_dataclass_field_annotated_types(self) -> dict[str, "AnnotatedType"]:
+        assert self.is_dataclass_type()
+        type_hints = get_type_hints_with_cache(self.origin_type, include_extras=True)
+        return {field.name: parse_type_may_optional_undefined(type_hints[field.name], 
+            is_optional=self.is_optional, is_undefined=self.is_undefined) for field in dataclasses.fields(self.origin_type)}
+
     @staticmethod 
     def get_any_type():
         return AnnotatedType(Any, [])
@@ -182,6 +257,23 @@ def parse_type_may_optional_undefined(ann_type: Any, is_optional: Optional[bool]
             assert inspect.isclass(ty_origin), f"origin type must be a class, but get {ty_origin}"
             return AnnotatedType(ty_origin, list(ty_args), ann_meta)
     return AnnotatedType(ann_type, [], ann_meta)
+
+def child_type_generator(t: type):
+    yield t
+    args = get_args(t)
+    for arg in args:
+        yield from child_type_generator(arg)
+
+def child_type_generator_with_dataclass(t: type):
+    yield t
+    if dataclasses.is_dataclass(t):
+        type_hints = get_type_hints_with_cache(t, include_extras=True)
+        for field in dataclasses.fields(t):
+            yield from child_type_generator(type_hints[field.name])
+    else:
+        args = get_args(t)
+        for arg in args:
+            yield from child_type_generator(arg)
 
 def parse_annotated_function(func: Callable, is_dynamic_class: bool = False) -> Tuple[List[AnnotatedArg], Optional[AnnotatedReturn]]:
     if compat.Python3_10AndLater:

@@ -1,6 +1,10 @@
 # Changelog
 
-# [0.14.0] - 2025-01-xx
+# [0.15.0] - 2025-02-xx
+### Added 
+- add compute flow v2 with nested flow support, schedule node support and more.
+
+# [0.14.0] - 2025-01-24
 ### Added
 - add task wrapper based on asyncssh.
 - add data model based components for `MVC` design pattern.

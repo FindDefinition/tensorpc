@@ -67,6 +67,7 @@ class ObjectTreeParser:
             custom_type_expanders = {}
         self._custom_type_expanders = custom_type_expanders
         self.custom_tree_item_handler = custom_tree_item_handler
+        self._auto_expand_count_limit = 100
 
     def parseable(self, obj, check_obj: bool = True):
         if not self._check_is_valid(obj) and check_obj:
@@ -280,6 +281,8 @@ class ObjectTreeParser:
         elif isinstance(obj,
                         tuple(USER_OBJ_TREE_TYPES)) and obj.default_expand():
             should_expand = True
+        elif node.cnt > self._auto_expand_count_limit:
+            should_expand = False
         return should_expand
 
     def update_lazy_expand_uids(self, new_uid: UniqueTreeIdForTree):

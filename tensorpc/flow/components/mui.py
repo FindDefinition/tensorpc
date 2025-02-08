@@ -6094,7 +6094,7 @@ class DataModel(MUIContainerBase[DataModelProps, MUIComponentType], Generic[_T])
             if dataclasses.is_pydantic_dataclass(type(self.model)):
                 self._model = type(self.model)(**data) # type: ignore
             else:
-                # plain dataclass don't support create from dict, so we use `mashumaro` here.
+                # plain dataclass don't support create from dict, so we use `mashumaro` decoder here. it's fast.
                 dec, _ = self._lazy_get_mashumaro_coder()
                 self._model = dec.decode(data) # type: ignore
         else:
@@ -6104,15 +6104,10 @@ class DataModel(MUIContainerBase[DataModelProps, MUIComponentType], Generic[_T])
         # finally sync the model.
         await self.sync_model()
 
-    def __draft_op_to_update_op_for_json(self, op: DraftUpdateOp) -> "DraftUpdateOp":
-        # assume your data is strong-typed dataclass, then we can store 
-        # data as dict in database and restore it to dataclass via pydantic or mashumaro.
-        return dataclasses.replace(op, opData=as_dict_no_undefined(op.opData))
-
     async def _handle_app_storage_update(self, ops: list[DraftUpdateOp], path: str, storage_type: StorageType):
         from tensorpc.flow import appctx 
         storage = appctx.get_app_storage()
-        success = await storage.update_data_storage(path, [self.__draft_op_to_update_op_for_json(o).to_userdata_removed() for o in ops])
+        success = await storage.update_data_storage(path, [o.to_json_update_op().to_userdata_removed() for o in ops])
         if not success:
             # path not exist.
             data = as_dict_no_undefined(self.model)

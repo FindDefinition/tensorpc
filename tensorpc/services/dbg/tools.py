@@ -217,14 +217,6 @@ class BackgroundDebugTools:
             assert self._frame is None, "already in breakpoint, shouldn't happen"
             self._frame = frame
             self._debug_metric.total_skipped_bkpt = 0
-            LOGGER.warning(
-                f"Breakpoint({type.name}), "
-                f"port = {prim.get_server_meta().port}, "
-                f"pid = {pid}",
-                extra={
-                    TENSORPC_LOGGING_OVERRIDED_PATH_LINENO_KEY:
-                    (frame.f_code.co_filename, frame.f_lineno)
-                })
             obj, app = prim.get_service(
                 app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
                     TENSORPC_DBG_FRAME_INSPECTOR_KEY)
@@ -234,6 +226,14 @@ class BackgroundDebugTools:
                                                     self.leave_breakpoint,
                                                     is_record_stop)
             self._cur_status = DebugServerStatus.InsideBreakpoint
+            LOGGER.warning(
+                f"Breakpoint({type.name}), "
+                f"port = {prim.get_server_meta().port}, "
+                f"pid = {pid}",
+                extra={
+                    TENSORPC_LOGGING_OVERRIDED_PATH_LINENO_KEY:
+                    (frame.f_code.co_filename, frame.f_lineno)
+                })
             return res_tracer
 
     async def leave_breakpoint(self, trace_cfg: Optional[TracerConfig] = None):

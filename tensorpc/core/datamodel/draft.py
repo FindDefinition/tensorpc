@@ -34,9 +34,9 @@ import contextlib
 import contextvars
 import enum
 import types
-from typing import Any, MutableSequence, Optional, Type, TypeVar, Union, cast
+from typing import Any, Callable, MutableSequence, Optional, Type, TypeVar, Union, cast, get_type_hints
 from tensorpc.core import inspecttools
-from tensorpc.core.annolib import AnnotatedType, parse_type_may_optional_undefined
+from tensorpc.core.annolib import AnnotatedType, parse_type_may_optional_undefined, as_dict_no_undefined
 import tensorpc.core.dataclass_dispatch as dataclasses
 from collections.abc import MutableMapping, Sequence, Mapping
 import tensorpc.core.datamodel.jmes as jmespath
@@ -45,7 +45,7 @@ T = TypeVar("T")
 
 
 class JMESPathOpType(enum.IntEnum):
-    Set = 0
+    SetAttr = 0
     Delete = 1
     Extend = 2
     Slice = 3
@@ -70,7 +70,7 @@ class ScalarInplaceOpType(enum.IntEnum):
 
 
 class DraftASTType(enum.IntEnum):
-    GET_ITEM = 0
+    GET_ATTR = 0
     ARRAY_GET_ITEM = 1
     DICT_GET_ITEM = 2
     FUNC_CALL = 3
@@ -82,15 +82,25 @@ class DraftASTNode:
     type: DraftASTType
     children: list["DraftASTNode"]
     value: Any
+    userdata: Any = None
 
     def get_jmes_path(self) -> str:
         if self.type == DraftASTType.NAME:
             return self.value if self.value != "" else "$"
         return _draft_ast_to_jmes_path_recursive(self)
 
+    def iter_child_nodes(self):
+        for child in self.children:
+            yield child
+            yield from child.iter_child_nodes()
+
+    def walk(self):
+        yield self
+        for child in self.children:
+            yield from child.walk()
 
 _GET_ITEMS = set([
-    DraftASTType.GET_ITEM, DraftASTType.ARRAY_GET_ITEM,
+    DraftASTType.GET_ATTR, DraftASTType.ARRAY_GET_ITEM,
     DraftASTType.DICT_GET_ITEM
 ])
 
@@ -101,7 +111,7 @@ def _draft_ast_to_jmes_path_recursive(node: DraftASTNode) -> str:
     elif node.type in _GET_ITEMS:
         child_value = _draft_ast_to_jmes_path_recursive(node.children[0])
         is_root = child_value == ""
-        if node.type == DraftASTType.GET_ITEM:
+        if node.type == DraftASTType.GET_ATTR:
             if is_root:
                 return f"{node.value}"
             else:
@@ -123,7 +133,7 @@ def _evaluate_draft_ast(node: DraftASTNode, obj: Any, root_obj: Any) -> Any:
         if node.value == "" or node.value == "$":
             return obj
         return getattr(obj, node.value)
-    elif node.type == DraftASTType.GET_ITEM:
+    elif node.type == DraftASTType.GET_ATTR:
         return getattr(
             _evaluate_draft_ast(node.children[0], root_obj, root_obj),
             node.value)
@@ -150,7 +160,7 @@ def _evaluate_draft_ast_json(node: DraftASTNode, obj: Any, root_obj: Any) -> Any
         if node.value == "" or node.value == "$":
             return obj
         return obj[node.value]
-    elif node.type == DraftASTType.GET_ITEM:
+    elif node.type == DraftASTType.GET_ATTR:
         return _evaluate_draft_ast_json(node.children[0], root_obj, root_obj)[node.value]
     elif node.type == DraftASTType.ARRAY_GET_ITEM or node.type == DraftASTType.DICT_GET_ITEM:
         return _evaluate_draft_ast_json(node.children[0], root_obj,
@@ -217,6 +227,11 @@ class DraftUpdateOp:
         assert self.userdata is not None and isinstance(
             self.userdata, t), f"userdata is not {t}"
         return self.userdata
+
+    def to_json_update_op(self):
+        # assume your data is strong-typed dataclass, then we can store 
+        # data as dict in database and restore it to dataclass via pydantic or mashumaro.
+        return dataclasses.replace(self, opData=as_dict_no_undefined(self.opData))
 
 
 class DraftUpdateContext:
@@ -384,12 +399,16 @@ class DraftObject(DraftBase):
             # in anno mode, we don't modify or parse obj.
             assert anno_type.is_dataclass_type()
             fields = dataclasses.fields(anno_type.origin_type)
+            type_hints = get_type_hints(anno_type.origin_type, include_extras=True)
+
         else:
             assert dataclasses.is_dataclass(
                 obj), f"DraftObject only support dataclass, got {type(obj)}"
             fields = dataclasses.fields(self._tensorpc_draft_attr_real_obj)
+            type_hints = get_type_hints(type(self._tensorpc_draft_attr_real_obj), include_extras=True)
+
         self._tensorpc_draft_attr_obj_fields_dict = {
-            field.name: (field, parse_type_may_optional_undefined(field.type))
+            field.name: (field, parse_type_may_optional_undefined(type_hints[field.name]))
             for field in fields
         }
 
@@ -406,13 +425,13 @@ class DraftObject(DraftBase):
             raise AttributeError(
                 f"dataclass {type(self._tensorpc_draft_attr_real_obj)} has no attribute {name}"
             )
-        new_ast_node = DraftASTNode(DraftASTType.GET_ITEM,
-                                    [self._tensorpc_draft_attr_cur_node], name)
         anno_type = None
         if self._tensorpc_draft_attr_anno_state.anno_type is not None:
             field_type = self._tensorpc_draft_attr_obj_fields_dict[name][1]
             anno_type = field_type
-
+        new_ast_node = DraftASTNode(DraftASTType.GET_ATTR,
+                                    [self._tensorpc_draft_attr_cur_node], name, 
+                                    anno_type)
         if self._tensorpc_draft_attr_anno_state.is_type_only:
             assert anno_type is not None 
             return self._tensorpc_draft_dispatch(None, new_ast_node, anno_type)
@@ -441,7 +460,7 @@ class DraftObject(DraftBase):
         ), "you can't assign a Draft object to another Draft object, assign real value instead."
         # TODO do validate here
         ctx._ops.append(
-            self._tensorpc_draft_get_update_op(JMESPathOpType.Set,
+            self._tensorpc_draft_get_update_op(JMESPathOpType.SetAttr,
                                              {"items": [(name, value)]}))
 
 
@@ -481,7 +500,8 @@ class DraftSequence(DraftBase):
         if isinstance(index, slice):
             raise NotImplementedError("DraftSequence don't support slice")
         ast_node = DraftASTNode(DraftASTType.ARRAY_GET_ITEM,
-                                [self._tensorpc_draft_attr_cur_node], index)
+                                [self._tensorpc_draft_attr_cur_node], index,
+                                self._tensorpc_draft_attr_anno_state.anno_type)
         if self._tensorpc_draft_attr_anno_state.is_type_only:
             return self._tensorpc_draft_dispatch(
                 None, ast_node, anno_type)
@@ -585,7 +605,7 @@ class DraftDict(DraftBase):
             ast_node = DraftASTNode(DraftASTType.FUNC_CALL, [
                 self._tensorpc_draft_attr_cur_node,
                 key._tensorpc_draft_attr_cur_node
-            ], "getitem")
+            ], "getitem", self._tensorpc_draft_attr_anno_state.anno_type)
             if self._tensorpc_draft_attr_anno_state.is_type_only:
                 assert anno_type is not None 
                 return self._tensorpc_draft_dispatch(None, ast_node, anno_type)
@@ -594,7 +614,8 @@ class DraftDict(DraftBase):
                 self._tensorpc_draft_attr_real_obj[
                     key._tensorpc_draft_attr_real_obj], ast_node)
         ast_node = DraftASTNode(DraftASTType.DICT_GET_ITEM,
-                                [self._tensorpc_draft_attr_cur_node], key)
+                                [self._tensorpc_draft_attr_cur_node], key,
+                                self._tensorpc_draft_attr_anno_state.anno_type)
         if self._tensorpc_draft_attr_anno_state.is_type_only:
             return self._tensorpc_draft_dispatch(None, ast_node, anno_type)
         return self._tensorpc_draft_dispatch(
@@ -635,6 +656,9 @@ class DraftDict(DraftBase):
             self._tensorpc_draft_get_update_op(JMESPathOpType.Delete,
                                              {"keys": [key]}))
         return _DraftNotValid()
+
+    def __delitem__(self, key: str):
+        self.pop(key)
 
     def clear(self):
         ctx = get_draft_update_context()
@@ -729,7 +753,7 @@ def apply_draft_update_ops(obj: Any, ops: list[DraftUpdateOp]):
     for op in ops:
         cur_obj = _evaluate_draft_ast(op.node, obj, obj)
         # new cur_obj is target, apply op.
-        if op.op == JMESPathOpType.Set:
+        if op.op == JMESPathOpType.SetAttr:
             for k, v in op.opData["items"]:
                 setattr(cur_obj, k, v)
         elif op.op == JMESPathOpType.Delete:
@@ -788,7 +812,7 @@ def apply_draft_update_ops_to_json(obj: Any, ops: list[DraftUpdateOp]):
     for op in ops:
         cur_obj = _evaluate_draft_ast_json(op.node, obj, obj)
         # new cur_obj is target, apply op.
-        if op.op == JMESPathOpType.Set:
+        if op.op == JMESPathOpType.SetAttr:
             for k, v in op.opData["items"]:
                 cur_obj[k] = v
         elif op.op == JMESPathOpType.Delete:
@@ -837,7 +861,7 @@ def apply_draft_jmes_ops(obj: dict, ops: list[JMESPathOp]):
     for op in ops:
         cur_obj = jmespath.search(op.path, obj)
         # new cur_obj is target, apply op.
-        if op.op == JMESPathOpType.Set:
+        if op.op == JMESPathOpType.SetAttr:
             for k, v in op.opData["items"]:
                 cur_obj[k] = v
         elif op.op == JMESPathOpType.Delete:
@@ -919,9 +943,9 @@ def insert_assign_draft_op(draft: Any, value: Any):
     assert cur_node.type != DraftASTType.NAME and cur_node.type != DraftASTType.FUNC_CALL, "can't assign to root or getitem/getattr object"
     node_prev = cur_node.children[0]
 
-    if cur_node.type == DraftASTType.GET_ITEM:
+    if cur_node.type == DraftASTType.GET_ATTR:
         ctx._ops.append(
-            DraftUpdateOp(JMESPathOpType.Set,
+            DraftUpdateOp(JMESPathOpType.SetAttr,
                                  {"items": [(cur_node.value, value)]},
                                  node_prev,
                                  draft._tensorpc_draft_attr_userdata))

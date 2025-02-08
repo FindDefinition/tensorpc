@@ -29,11 +29,9 @@ import threading
 import traceback
 from pathlib import Path
 from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine, Dict, Generator,
-                    Generic, Iterable, List, Optional, Set, Tuple, Type, Union,
-                    ClassVar, Dict, Protocol)
+                    Generic, Iterable, List, Optional, Set, Tuple, Type, Union)
 
-from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec,
-                               Protocol, Self, TypeAlias, TypeVar)
+from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec, Self, TypeAlias, TypeVar)
 import tensorpc.core.datamodel.jmes as jmespath
 from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.client import RemoteManager, simple_chunk_call
@@ -65,6 +63,7 @@ from tensorpc.utils.registry import HashableRegistry
 from tensorpc.utils.uniquename import UniqueNamePool
 
 from tensorpc.core import dataclass_dispatch as dataclasses_strict, prim
+from tensorpc.core.annolib import DataclassType
 from tensorpc.utils.wait_tools import get_primary_ip
 
 from ..jsonlike import (BackendOnlyProp, DataClassWithUndefined, Undefined,
@@ -80,11 +79,6 @@ if TYPE_CHECKING:
     from tensorpc.flow.components.mui import DataModel
 
 LOGGER = get_logger("tensorpc.ui")
-
-class DataclassType(Protocol):
-    # as already noted in comments, checking for this attribute is currently
-    # the most reliable way to ascertain that something is a dataclass
-    __dataclass_fields__: ClassVar[Dict[str, Any]]
 
 
 ALL_APP_EVENTS = HashableRegistry()
