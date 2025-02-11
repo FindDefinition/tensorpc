@@ -2,11 +2,10 @@ import abc
 import copy
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
-from typing import (Any, Dict, Generic, List, Optional, Tuple, TypeVar, Union,
+from typing import (Any, Generic, Optional, TypeVar, Union,
                     get_type_hints)
 
 from mashumaro.codecs.basic import BasicDecoder, BasicEncoder
-from pydantic import field_validator
 import base64
 from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core.annolib import (AnnotatedType, BackendOnlyProp,
@@ -17,7 +16,7 @@ from tensorpc.core.annolib import (AnnotatedType, BackendOnlyProp,
                                    parse_type_may_optional_undefined)
 from tensorpc.core.tree_id import UniqueTreeId
 
-from .draft import (DraftASTNode, DraftASTType, DraftUpdateOp, JMESPathOpType, _evaluate_draft_ast,
+from .draft import (DraftASTNode, DraftASTType, DraftUpdateOp, JMESPathOpType, evaluate_draft_ast,
                     apply_draft_update_ops, apply_draft_update_ops_to_json)
 
 T = TypeVar("T", bound=DataclassType)
@@ -132,7 +131,7 @@ def _asdict_map_trace_inner(obj, field_types: list, dict_factory, obj_factory=No
             obj = obj_factory(obj)
         return copy.deepcopy(obj)
 
-def _default_asdict_map_trace_factory(obj: List[Tuple[str, Any, Any]]):
+def _default_asdict_map_trace_factory(obj: list[tuple[str, Any, Any]]):
     return {k: v for k, v, _ in obj}
 
 def asdict_map_trace(obj, dict_factory=_default_asdict_map_trace_factory):
@@ -173,7 +172,7 @@ class _StoreAsDict:
                     # break
         return parts
 
-    def _asdict_map_trace_factory(self, obj: List[Tuple[str, Any, Any]]):
+    def _asdict_map_trace_factory(self, obj: list[tuple[str, Any, Any]]):
         res = {}
         for k, v, types in obj:
             t = types[-1][0]
@@ -292,7 +291,7 @@ def get_splitted_update_model_ops(root_path: str, ops: list[DraftUpdateOp], mode
                 store_meta = _get_first_store_meta_by_annotype(relative_node.userdata)
                 if isinstance(store_meta, DraftStoreMapMeta):
                     # we need to query prev model to determine the existance of the key
-                    obj = _evaluate_draft_ast(op.node, model_before_update, model_before_update)
+                    obj = evaluate_draft_ast(op.node, model_before_update)
                     for k, v in op.opData["items"].items():
                         all_path = str(Path(root_path, *paths, store_meta.encode_key(k)))
                         if k not in obj:

@@ -9,8 +9,10 @@ from pydantic import BaseModel, ConfigDict, ValidationError, Field
 # from dataclasses import field
 
 
-class PyDanticConfigForAnyObject:
-    arbitrary_types_allowed = True
+# class PyDanticConfigForAnyObject:
+#     arbitrary_types_allowed = True
+
+PyDanticConfigForAnyObject = ConfigDict(arbitrary_types_allowed=True)
 
 
 def validate_selected_fields_from_model(model: Any, data_dict: dict):

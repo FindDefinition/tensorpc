@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Union
 import jmespath 
 from jmespath import functions
 from jmespath.parser import ParsedResult
@@ -12,6 +12,13 @@ class _JMESCustomFunctions(functions.Functions):
     def _func_getitem(self, obj, attr):
         return obj[attr]
 
+    @functions.signature({'types': ['string']}, {'types': ['string', 'number'], 'variadic': True})
+    def _func_cformat(self, obj, *attrs):
+        # we use https://github.com/stdlib-js/string-format to implement cformat in frontend
+        # so user can only use c-style (printf) format string, mapping type in python and 
+        # positional placeholders in js can't be used.
+        return obj % attrs
+
 # 4. Provide an instance of your subclass in a Options object.
 _JMES_EXTEND_OPTIONS = jmespath.Options(custom_functions=_JMESCustomFunctions())
 
@@ -19,5 +26,7 @@ _JMES_EXTEND_OPTIONS = jmespath.Options(custom_functions=_JMESCustomFunctions())
 def compile(expression: str) -> ParsedResult:
     return jmespath.compile(expression, options=_JMES_EXTEND_OPTIONS)
 
-def search(expression: str, data: dict) -> Any:
+def search(expression: Union[str, ParsedResult], data: dict) -> Any:
+    if isinstance(expression, ParsedResult):
+        return expression.search(data, options=_JMES_EXTEND_OPTIONS)
     return jmespath.search(expression, data, options=_JMES_EXTEND_OPTIONS)

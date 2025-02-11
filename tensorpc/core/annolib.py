@@ -178,6 +178,12 @@ class AnnotatedType:
     is_optional: bool = False
     is_undefined: bool = False
 
+    def is_any_type(self) -> bool:
+        return self.origin_type is Any
+
+    def is_union_type(self) -> bool:
+        return origin_is_union(self.origin_type)
+
     def is_dataclass_type(self) -> bool:
         return dataclasses.is_dataclass(self.origin_type)
 

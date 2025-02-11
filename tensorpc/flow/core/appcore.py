@@ -26,7 +26,7 @@ from tensorpc.flow.client import is_inside_app_session
 
 if TYPE_CHECKING:
     from ..flowapp.app import App, EditableApp
-    from .component import Component
+    from .component import Component, AppEvent
 
 CORO_NONE = Union[Coroutine[None, None, None], None]
 CORO_ANY: TypeAlias = Union[Coroutine[None, None, Any], Any]
@@ -176,6 +176,21 @@ def get_app_context() -> Optional[AppContext]:
 
 def get_event_handling_context() -> Optional[EventHandlingContext]:
     return EVENT_HANDLING_CONTEXT_VAR.get()
+
+_BATCH_EVENT_CONTEXT: contextvars.ContextVar[Optional["AppEvent"]] = contextvars.ContextVar("BatchEventContext", default=None)
+
+@contextlib.contextmanager
+def enter_batch_event_context(event: "AppEvent"):
+    token = _BATCH_EVENT_CONTEXT.set(event)
+    try:
+        yield
+    finally:
+        _BATCH_EVENT_CONTEXT.reset(token)
+
+def get_batch_app_event() -> "AppEvent":
+    res = _BATCH_EVENT_CONTEXT.get()
+    assert res is not None, "no batch event context, you must use this in event handler or draft event handler."
+    return res
 
 def is_inside_app():
     return is_inside_app_session() and get_app_context() is not None
