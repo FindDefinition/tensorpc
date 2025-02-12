@@ -400,6 +400,7 @@ class DraftFileStorage(Generic[T]):
         return self._model
 
     async def update_model(self, ops: list[DraftUpdateOp]):
+        ops = [o.to_json_update_op().to_userdata_removed() for o in ops]
         if not self._has_splitted_store:
             await self._store.update(self._root_path, ops)
             return
@@ -411,3 +412,4 @@ class DraftFileStorage(Generic[T]):
             await self._store.write(path, v)
         for path in remove_items:
             await self._store.remove(path)
+

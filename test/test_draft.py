@@ -10,7 +10,7 @@ from tensorpc.core.datamodel.draft import (
     DraftObject, apply_draft_jmes_ops, apply_draft_update_ops,
     apply_draft_update_ops_with_changed_obj_ids, capture_draft_update, cast_any_draft_to_dataclass,
     create_draft, create_draft_type_only, create_literal_draft, get_draft_anno_path_metas,
-    get_draft_anno_type, get_draft_ast_node, insert_assign_draft_op, materialize_any_draft_to_dataclass)
+    get_draft_anno_type, get_draft_ast_node, getitem_path_dynamic, insert_assign_draft_op, materialize_any_draft_to_dataclass, rebuild_draft_expr)
 from tensorpc.core.datamodel.draftast import evaluate_draft_ast, evaluate_draft_ast_json
 from tensorpc.core.datamodel.draftstore import (DraftFileStorage,
                                                 DraftFileStoreBackendInMemory,
@@ -250,14 +250,14 @@ def test_draft_event():
     with capture_draft_update() as ctx:
         modify_func_for_event(draft)
     ev_type_and_val = update_model_with_change_event(model, ctx._ops, [handler1, handler2, handler3, handler4])
-    ev_types = [ev_type for ev_type, _ in ev_type_and_val]
+    ev_types = [ev_type_dict[""] for ev_type_dict, _ in ev_type_and_val]
     assert ev_types == [
         DraftEventType.ValueChange, 
         DraftEventType.ChildObjectChange, 
         DraftEventType.NoChange, 
         DraftEventType.ObjectInplaceChange,
     ]
-    assert ev_type_and_val[0][1] == 1
+    assert ev_type_and_val[0][1] == {"": 1}
 
 @dataclasses.dataclass
 class ModelWithAny:
@@ -306,7 +306,41 @@ def test_draft_any_materialize():
     # draft_b_typed = cast_any_draft_to_dataclass(draft.b["a"], ModelWithAnyA)
     # print(get_draft_anno_type(draft_b_typed.c), get_draft_ast_node(draft_b_typed.c).get_jmes_path())
 
+@dataclasses.dataclass
+class NestedNode:
+    a: int
+    models: dict[str, "NestedModelX"]
 
+@dataclasses.dataclass
+class NestedModelX:
+    nodes: dict[str, NestedNode]
+
+@dataclasses.dataclass
+class NestedModelRoot:
+    path: list[str]
+    model: NestedModelX
+
+def test_nested_model():
+    model = NestedModelRoot(model=
+        NestedModelX(
+            nodes={
+                "a": NestedNode(a=1, models={"b": NestedModelX(nodes={"c": NestedNode(a=2, models={})})})
+            }
+        ),
+        path=["nodes", "a", "models", "b", "nodes", "c"]
+    )
+    draft = create_draft_type_only(type(model))
+    expr_getitempath = getitem_path_dynamic(draft.model, draft.path, NestedNode)
+
+    res1 = evaluate_draft_ast(get_draft_ast_node(expr_getitempath), model)
+
+    ddiff = DeepDiff(dataclasses.asdict(res1), dataclasses.asdict(model.model.nodes["a"].models["b"].nodes["c"]), ignore_order=True)
+    assert not ddiff, str(ddiff)
+
+    expr_getitempath_stable = rebuild_draft_expr(get_draft_ast_node(expr_getitempath), draft, model)
+    expr_getitempath_stable_node = get_draft_ast_node(expr_getitempath_stable)
+    print(expr_getitempath_stable_node.get_jmes_path())
+    
 if __name__ == "__main__":
     test_draft(False)
     test_draft(True)
@@ -321,4 +355,5 @@ if __name__ == "__main__":
     test_draft_any_materialize()
 
     test_draft_expr()
+    test_nested_model()
 

@@ -1,35 +1,4 @@
-"""Draft Proxy to record changes for dataclass.
-inspired by [immer](https://www.npmjs.com/package/immer).
-
-Only support standard scalar types and list/dict. don't support set, tuple, etc.
-
-Supported update:
-
-1. direct assignment
-
-```Python
-draft.a.b = 1
-draft.arr[1] = 2
-draft.dic['key'] = 3
-draft.a.b += 4
-```
-
-2. List/Dict methods (except sort)
-
-```Python
-draft.arr.append(1)
-draft.arr.extend([1, 2])
-draft.arr.pop()
-draft.arr.remove(1)
-draft.arr.clear()
-draft.arr.insert(1, 2)
-
-draft.dic.pop('key')
-draft.dic.clear()
-```
-
-"""
-
+from collections.abc import Mapping, Sequence
 import enum
 import types
 from typing import Any, Callable, MutableSequence, Optional, Type, TypeVar, Union, cast, get_type_hints
@@ -48,14 +17,16 @@ class DraftASTType(enum.IntEnum):
     NUMBER_LITERAL = 5
     STRING_LITERAL = 6
 
+
 class DraftASTFuncType(enum.Enum):
     GET_ITEM = "getitem"
     GET_ATTR = "getattr"
     CFORMAT = "cformat"
+    GET_ITEM_PATH = "getitem_path"
 
 _FRONTEND_SUPPORTED_FUNCS = {
     DraftASTFuncType.GET_ITEM.value, DraftASTFuncType.GET_ATTR.value,
-    DraftASTFuncType.CFORMAT.value
+    DraftASTFuncType.CFORMAT.value, DraftASTFuncType.GET_ITEM_PATH.value
 }
 
 @dataclasses.dataclass
@@ -139,6 +110,18 @@ def evaluate_draft_ast(node: DraftASTNode, obj: Any) -> Any:
                 evaluate_draft_ast(child, obj) for child in node.children[1:]
             ]
             return fmt % tuple(args)
+        elif node.value == "getitem_path":
+            target = evaluate_draft_ast(node.children[0], obj)
+            path_list = evaluate_draft_ast(node.children[1], obj)
+            assert isinstance(path_list, list)
+            cur_obj = target
+            for p in path_list:
+                if isinstance(cur_obj, (Sequence, Mapping)):
+                    cur_obj = cur_obj[p]
+                else:
+                    assert dataclasses.is_dataclass(cur_obj)
+                    cur_obj = getattr(cur_obj, p)
+            return cur_obj
         else:
             raise NotImplementedError
     else:
@@ -194,6 +177,20 @@ def evaluate_draft_ast_with_obj_id_trace(node: DraftASTNode,
                 evaluate_draft_ast(child, obj) for child in node.children[1:]
             ]
             return fmt % tuple(args), []
+        elif node.value == "getitem_path":
+            target = evaluate_draft_ast(node.children[0], obj)
+            path_list = evaluate_draft_ast(node.children[1], obj)
+            assert isinstance(path_list, list)
+            cur_obj = target
+            obj_id_trace = []
+            for p in path_list:
+                if isinstance(target, (Sequence, Mapping)):
+                    cur_obj = cur_obj[p]
+                else:
+                    assert dataclasses.is_dataclass(cur_obj)
+                    cur_obj = getattr(cur_obj, p)
+                obj_id_trace.append(id(cur_obj))
+            return cur_obj, obj_id_trace
         else:
             raise NotImplementedError
     else:
@@ -225,6 +222,18 @@ def evaluate_draft_ast_json(node: DraftASTNode, obj: Any) -> Any:
                 evaluate_draft_ast_json(child, obj) for child in node.children[1:]
             ]
             return fmt % tuple(args)
+        elif node.value == "getitem_path":
+            target = evaluate_draft_ast_json(node.children[0], obj)
+            path_list = evaluate_draft_ast_json(node.children[1], obj)
+            assert isinstance(path_list, list)
+            cur_obj = target
+            for p in path_list:
+                if isinstance(target, (Sequence, Mapping)):
+                    cur_obj = cur_obj[p]
+                else:
+                    assert dataclasses.is_dataclass(cur_obj)
+                    cur_obj = getattr(cur_obj, p)
+            return cur_obj
         else:
             raise NotImplementedError
     else:

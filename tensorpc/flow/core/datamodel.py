@@ -8,17 +8,19 @@ from mashumaro.codecs.basic import BasicDecoder, BasicEncoder
 from pydantic import field_validator
 from typing_extensions import Self, TypeAlias
 
+from tensorpc.core.datamodel.draftast import DraftASTNode
+from tensorpc.core.datamodel.draftstore import DraftFileStorage
 import tensorpc.core.datamodel.jmes as jmespath
 from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core.datamodel.draft import (
     DraftBase, DraftUpdateOp, apply_draft_update_ops, capture_draft_update,
     create_draft, create_draft_type_only, enter_op_process_ctx,
-    evaluate_draft_ast_noexcept, get_draft_ast_node, get_draft_jmespath,
-    insert_assign_draft_op)
+    evaluate_draft_ast_noexcept, get_draft_ast_node)
 from tensorpc.core.datamodel.events import (DraftChangeEvent,
                                             DraftChangeEventHandler,
                                             DraftEventType,
                                             update_model_with_change_event)
+from tensorpc.flow import appctx
 from tensorpc.flow.core.component import (Component, ContainerBase,
                                           ContainerBaseProps, DraftOpUserData,
                                           EventSlotEmitter,
@@ -78,36 +80,71 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         self._mashumaro_decoder: Optional[BasicDecoder] = None
         self._mashumaro_encoder: Optional[BasicEncoder] = None
 
-        self._draft_change_event_handlers: dict[str, dict[
+        self._draft_change_event_handlers: dict[tuple[str, ...], dict[
             Callable, DraftChangeEventHandler]] = {}
 
-    def _draft_change_handler_effect(self, path: str,
+        self.event_after_mount.on(self._init)
+
+        self._store: Optional[DraftFileStorage] = None
+
+    async def _run_all_draft_change_handlers_when_init(self):
+        all_handlers = []
+        for handlers in self._draft_change_event_handlers.values():
+            for h in handlers.values():
+                val_dict: dict[str, Any] = {}
+                type_dict: dict[str, DraftEventType] = {}
+                for k, expr in h.draft_expr_dict.items():
+                    obj = evaluate_draft_ast_noexcept(expr, self.model)
+                    val_dict[k] = obj
+                    type_dict[k] = DraftEventType.InitChange
+                # TODO if eval failed, should we call it during init?
+                all_handlers.append(partial(h.handler, DraftChangeEvent(type_dict, val_dict)))
+        await self.run_callbacks(
+            all_handlers,
+            change_status=False,
+            capture_draft=True)
+
+    async def _init(self):
+        # we should trigger all draft change event handler when init or model fetched from storage.
+        if not self._app_storage_handler_registered:
+            await self._run_all_draft_change_handlers_when_init()
+
+    def _draft_change_handler_effect(self, paths: tuple[str, ...],
                                      handler: DraftChangeEventHandler):
-        if path not in self._draft_change_event_handlers:
-            self._draft_change_event_handlers[path] = {}
-        self._draft_change_event_handlers[path][handler.handler] = handler
+        if paths not in self._draft_change_event_handlers:
+            self._draft_change_event_handlers[paths] = {}
+        self._draft_change_event_handlers[paths][handler.handler] = handler
 
         def unmount():
-            self._draft_change_event_handlers[path].pop(handler.handler)
+            self._draft_change_event_handlers[paths].pop(handler.handler)
 
         return unmount
 
     def install_draft_change_handler(
             self,
-            comp: Component,
-            draft: Any,
+            draft: Union[Any, dict[str, Any]],
             handler: Callable[[DraftChangeEvent], _CORO_NONE],
             equality_fn: Optional[Callable[[Any, Any], bool]] = None,
             handle_child_change: bool = False,
-            ):
-        assert isinstance(draft, DraftBase)
-        node = get_draft_ast_node(draft)
-        path = node.get_jmes_path()
-        handler_obj = DraftChangeEventHandler(node, handler, equality_fn,
+            installed_comp: Optional[Component] = None):
+        if not isinstance(draft, dict):
+            draft = {"": draft}
+        paths: list[str] = []
+        draft_expr_dict: dict[str, DraftASTNode] = {}
+        for k, v in draft.items():
+            assert isinstance(v, DraftBase)
+            node = get_draft_ast_node(v)
+            path = node.get_jmes_path()
+            paths.append(path)
+            draft_expr_dict[k] = node
+        handler_obj = DraftChangeEventHandler(draft_expr_dict, handler, equality_fn,
                                               handle_child_change)
-        effect_fn = partial(self._draft_change_handler_effect, path,
+        effect_fn = partial(self._draft_change_handler_effect, tuple(paths),
                             handler_obj)
-        comp.use_effect(effect_fn)
+        if installed_comp is not None:
+            installed_comp.use_effect(effect_fn)
+        else:
+            self.use_effect(effect_fn)
         # return effect_fn to let user remove the effect.
         return handler_obj, effect_fn
 
@@ -158,7 +195,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         if not self._draft_change_event_handlers:
             apply_draft_update_ops(self.model, ops)
         else:
-            all_disabled_ev_handlers: set[DraftChangeEventHandler] = set()
+            all_disabled_ev_handlers: set[Callable] = set()
             for op in ops:
                 userdata = op.get_userdata_typed(DraftOpUserData)
                 if userdata is not None:
@@ -166,14 +203,14 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             all_ev_handlers: list[DraftChangeEventHandler] = []
             for path, handlers in self._draft_change_event_handlers.items():
                 for handler in handlers.values():
-                    if handler not in all_disabled_ev_handlers:
+                    if handler.handler not in all_disabled_ev_handlers:
                         all_ev_handlers.append(handler)
             event_handler_changes = update_model_with_change_event(
                 self.model, ops, all_ev_handlers)
             cbs: list[Callable[[], _CORO_NONE]] = []
             for change, handler in zip(event_handler_changes, all_ev_handlers):
-                if change != DraftEventType.NoChange:
-                    draft_change_ev = DraftChangeEvent(change[0], change[1])
+                draft_change_ev = DraftChangeEvent(change[0], change[1])
+                if draft_change_ev.is_changed:
                     if handler.user_eval_vars:
                         # user can define custom evaluates to get new model value.
                         user_vars = {}
@@ -227,6 +264,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
 
         If your code after draft depends on the updated model, you can use this ctx to perform
         update immediately.
+
+        WARNING: draft change event handler will be called (if change) in each draft update.
         """
         draft = self.get_draft()
         with capture_draft_update() as ctx:
@@ -241,76 +280,63 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                             path: str,
                             storage_type: StorageType = StorageType.JSON):
         """Register event handler that store and send update info to app storage.
-        WARNING: this function must be called in layout function.
+        WARNING: this function must be called before mount.
         """
+        from tensorpc.flow.flowapp.appstorage import AppDraftFileStoreBackend
         assert self._is_model_dataclass, "only support dataclass model when use app storage"
-        assert not self._app_storage_handler_registered, "only support connect once if you want to change path/type, create a new component."
+        assert not self.is_mounted(), "you should call this function when unmounted."
+        assert not self._app_storage_handler_registered, "only support connect once. if you want to change path/type, create a new component."
+        model = self.model
         assert dataclasses.is_dataclass(
-            self.model), "only support dataclass model"
+            model), "only support dataclass model"
+        self._store = DraftFileStorage(path, model, AppDraftFileStoreBackend(storage_type)) # type: ignore
         self.event_after_mount.on(
             partial(self._fetch_internal_data_from_app_storage,
-                    path=path,
-                    storage_type=storage_type))
+                    store=self._store))
         self.event_draft_update.on(
             partial(self._handle_app_storage_update,
-                    path=path,
-                    storage_type=storage_type))
+                    store=self._store))
         self._app_storage_handler_registered = True
 
-    async def _fetch_internal_data_from_app_storage(self, path: str,
-                                                    storage_type: StorageType):
+    async def _fetch_internal_data_from_app_storage(self, store: DraftFileStorage):
         from tensorpc.flow import appctx
         assert dataclasses.is_dataclass(
             self.model), "only support dataclass model"
-        storage = appctx.get_app_storage()
-        data = await storage.read_data_storage(path, raise_if_not_found=False)
-        if data is None:
-            # not exist, create new
-            data = as_dict_no_undefined(self.model)
-            await storage.save_data_storage(path,
-                                            data,
-                                            storage_type=storage_type)
-            return
-        if self._is_model_dataclass:
-            if dataclasses.is_pydantic_dataclass(type(self.model)):
-                self._model = type(self.model)(**data)  # type: ignore
-            else:
-                # plain dataclass don't support create from dict, so we use `mashumaro` decoder here. it's fast.
-                dec, _ = self._lazy_get_mashumaro_coder()
-                self._model = dec.decode(data)  # type: ignore
-        else:
-            self._model = data
+        self._model = await store.fetch_model()
         self.props.dataObject = self._model
         await self.flow_event_emitter.emit_async(
             self._backend_storage_fetched_event_key,
             Event(self._backend_storage_fetched_event_key, None))
         # finally sync the model.
         await self.sync_model()
+        await self._run_all_draft_change_handlers_when_init()
 
     async def _handle_app_storage_update(self, ops: list[DraftUpdateOp],
-                                         path: str, storage_type: StorageType):
-        from tensorpc.flow import appctx
-        storage = appctx.get_app_storage()
-        success = await storage.update_data_storage(
-            path, [o.to_json_update_op().to_userdata_removed() for o in ops])
-        if not success:
-            # path not exist.
-            data = as_dict_no_undefined(self.model)
-            await storage.save_data_storage(path,
-                                            data,
-                                            storage_type=storage_type)
+                                         store: DraftFileStorage):
+        await store.update_model(ops)
 
     @staticmethod
     def _op_proc(op: DraftUpdateOp, handlers: list[DraftChangeEventHandler]):
         userdata = op.get_userdata_typed(DraftOpUserData)
         if userdata is None:
             return op
-        userdata.disabled_handlers.extend(handlers)
+        # disable specific handler in draft update op, we must use dataclasses.replace
+        # to make sure userdata in draft expr isn't changed.
+        op.userdata = dataclasses.replace(userdata, disabled_handlers=userdata.disabled_handlers + [h.handler for h in handlers])
         return op
 
     @staticmethod
     @contextlib.contextmanager
     def add_disabled_handler_ctx(handlers: list[DraftChangeEventHandler]):
+        """Disable specific draft change event handler for current draft update context.
+        Usually used when you use a uncontrolled component (e.g. Monaco Editor). When you
+        bind a data model draft change for editor, you will set editor value manually 
+        (unlike controlled bind) when some data model prop change. If you save the editor from
+        frontend, since we already modify the frontend editor value, we shouldn't trigger 
+        draft change handler to set editor value manually again.
+
+        don't need to use this with controlled component.
+        """
         with enter_op_process_ctx(
                 partial(DataModel._op_proc, handlers=handlers)):
             yield

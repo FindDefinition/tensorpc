@@ -474,7 +474,7 @@ class MasterDebugPanel(mui.FlexBox):
                         info.is_tracing = True
                         info.primaryColor = "success"
                     if frame_meta is not None:
-                        info.secondary_name = f"{prefix}|{frame_meta.name}:{frame_meta.lineno}"
+                        info.secondary_name = f"{prefix}|{frame_meta.lineno}:{frame_meta.name}"
                         info.primaryColor = "primary"
                     else:
                         info.secondary_name = f"{prefix}|{status_str}"
@@ -868,7 +868,7 @@ class MasterDebugPanel(mui.FlexBox):
                             data.selectedCode,
                             path,
                             code_range,
-                            rpc_timeout=1)
+                            rpc_timeout=5)
                     except TimeoutError:
                         traceback.print_exc()
 

@@ -3,50 +3,73 @@
 1. Basic Model Design for flow
 
 @dataclass
-class FlowModel:
-    nodes: ...
-    edges: ...
+class EdgeState:
+    # props like UI def
+    id: ...
+    width: ...
 
-    node_states: dict[str, Any]
-    custom_node_code: dict[str, Any]
+@dataclass
+class NodeState:
+    # props like UI def
+    id: ...
+    width: ...
+    # props for user
+    user: Any
+
+@dataclass
+class FlowModel:
+    nodes: dict[str, NodeState]
+    edges: dict[str, EdgeState]
+
+@dataclass
+class FlowModelRoot(FlowModel):
+    selected_node_id: str | None
 
 
 2. Nested flow
 
 @dataclass
 class NodeState:
-    nested_flow: Optional[FlowModel]
-    template_flow_key: Optional[str]
-    template_node_key: Optional[str]
+    # props like UI def
+    id: ...
+    width: ...
+    # props for user
     user: Any
-
-
-@dataclass
-class FlowModel:
-    nodes: ...
-    edges: ...
-
-    node_states: dict[str, NodeState]
+    # props for nested flow
+    nodes: Optional[dict[str, NodeState]]
+    edges: Optional[dict[str, EdgeState]]
 
 @dataclass
 class FlowModelRoot(FlowModel):
-    cur_flow_path: list[str]
-    custom_node_code: dict[str, Any]
+    cur_flow_path: list[str] # ["nodes", "node_id_1", "nodes", "node_id_2"]
     selected_node_id: str | None
 
-3. Flow template
+3. Node template
+
+@dataclass
+class NodeState:
+    ...
+    code_template_key: Optional[str]
 
 @dataclass
 class FlowModelRoot(FlowModel):
-    # major flow
-    cur_major_flow_state_path: list[str]
-
-    # subflow preview
-    cur_minor_flow_state_path: list[str] | None
-
-    custom_node_code: dict[str, Any]
-    custom_flow: dict[str, FlowModel]
-
+    cur_flow_path: list[str] # ["nodes", "node_id_1", "nodes", "node_id_2"]
     selected_node_id: str | None
+    custom_node_codes: dict[str, str]
+
+4. Flow Template
+
+@dataclass
+class NodeState:
+    ...
+    flow_template_key: Optional[str]
+
+@dataclass
+class FlowModelRoot(FlowModel):
+    ...
+    custom_flows: dict[str, FlowModel]
 
 """
+
+from tensorpc.core import dataclass_dispatch as dataclasses
+

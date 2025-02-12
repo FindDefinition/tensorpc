@@ -17,7 +17,7 @@ import time
 from tensorpc.flow.serv_names import serv_names
 from tensorpc import simple_chunk_call_async
 from tensorpc.core.datamodel.draftstore import DraftFileStoreBackendBase
-
+from tensorpc.flow.core.appcore import get_app_storage
 class AppStorage:
 
     def __init__(self, master_meta: MasterMeta, is_remote_comp: bool = False):
@@ -314,21 +314,21 @@ class AppStorage:
             serv_names.FLOW_DATA_UPDATE, graph_id, node_id, key, time.time_ns(), ops)
 
 class AppDraftFileStoreBackend(DraftFileStoreBackendBase):
-    def __init__(self, app_storage: AppStorage, storage_type: StorageType = StorageType.JSON):
-        self._app_storage = app_storage
+    def __init__(self, storage_type: StorageType = StorageType.JSON):
+        # self._app_storage = app_storage
         self._storage_type = storage_type
 
     async def read(self, path: str) -> Optional[Any]:
-        return await self._app_storage.read_data_storage(path, raise_if_not_found=False)
+        return await get_app_storage().read_data_storage(path, raise_if_not_found=False)
 
     async def write(self, path: str, data: Any) -> None:
-        return await self._app_storage.save_data_storage(path, data, storage_type=self._storage_type)
+        return await get_app_storage().save_data_storage(path, data, storage_type=self._storage_type)
 
     async def update(self, path: str, ops: list[DraftUpdateOp]) -> None:
-        await self._app_storage.update_data_storage(path, ops)
+        await get_app_storage().update_data_storage(path, ops)
 
     async def remove(self, path: str) -> None:
-        return await self._app_storage.remove_data_storage_item(path)
+        return await get_app_storage().remove_data_storage_item(path)
 
     async def glob_read(self, path_with_glob: str) -> dict[str, Any]:
-        return await self._app_storage.glob_read_data_storage(path_with_glob)
+        return await get_app_storage().glob_read_data_storage(path_with_glob)

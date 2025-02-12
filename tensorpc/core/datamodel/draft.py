@@ -28,6 +28,13 @@ draft.dic.pop('key')
 draft.dic.clear()
 ```
 
+
+* Main Path: for a draft ast expr, all nodes that can be assigned constructs a main path.
+
+e.g. when you use a dynamic `getitem`, the target of `getitem` is a main path node, the key isn't a main path node
+
+Our draft change detection only check main path nodes, other node will be treated as constant in a draft expr.
+
 """
 
 import contextlib
@@ -855,6 +862,9 @@ def apply_draft_update_ops(obj: Any,
 def apply_draft_update_ops_with_changed_obj_ids(obj: Any,
                                                 ops: list[DraftUpdateOp],
                                                 ignore_exc: bool = True):
+    """Apply draft update ops and return changed object ids in main path.
+    """
+    
     # we delay real operation on original object to make sure
     # all validation is performed before real operation
     changed_parent_obj_ids: set[int] = set()
@@ -1089,3 +1099,91 @@ def insert_assign_draft_op(draft: Any, value: Any):
                           }}, node_prev, draft._tensorpc_draft_attr_userdata))
     else:
         raise NotImplementedError(f"Draft type {type(draft)} not implemented")
+
+def _rebuild_draft_expr_ecursive(node: DraftASTNode, root_draft: DraftBase, model: Any) -> DraftBase:
+    if node.type == DraftASTType.NAME:
+        if node.value == "" or node.value == "$":
+            return root_draft
+        return getattr(root_draft, node.value)
+    elif node.type == DraftASTType.NUMBER_LITERAL or node.type == DraftASTType.STRING_LITERAL:
+        return node.value
+    elif node.type == DraftASTType.GET_ATTR:
+        return getattr(_rebuild_draft_expr_ecursive(node.children[0], root_draft, model), node.value)
+    elif node.type == DraftASTType.ARRAY_GET_ITEM or node.type == DraftASTType.DICT_GET_ITEM:
+        draft_target = _rebuild_draft_expr_ecursive(node.children[0], root_draft, model)
+        assert isinstance(draft_target, (DraftSequence, DraftDict))
+        return draft_target[node.value]
+    elif node.type == DraftASTType.FUNC_CALL:
+        if node.value == "getitem":
+            # for dynamic ops, we need real model value as key.
+            k = evaluate_draft_ast(node.children[1], model)
+            draft_target = _rebuild_draft_expr_ecursive(node.children[0], root_draft, model)
+            assert isinstance(draft_target, (DraftSequence, DraftDict))
+            return draft_target[k]
+        elif node.value == "getattr":
+            return getattr(_rebuild_draft_expr_ecursive(node.children[0], root_draft, model),
+                           evaluate_draft_ast(node.children[1], model))
+        elif node.value == "cformat":
+            fmt = _rebuild_draft_expr_ecursive(node.children[0], root_draft, model)
+            args = [
+                _rebuild_draft_expr_ecursive(child, root_draft, model) for child in node.children[1:]
+            ]
+            assert isinstance(fmt, DraftImmutableString)
+            return fmt % tuple(args)
+        elif node.value == "getitem_path":
+            target_node = node.children[0]
+            draft_expr = _rebuild_draft_expr_ecursive(target_node, root_draft, model)
+            path_items = evaluate_draft_ast(node.children[1], model)
+            for path_item in path_items:
+                if isinstance(draft_expr, DraftObject):
+                    assert isinstance(path_item, str)
+                    draft_expr = getattr(draft_expr, path_item)
+                elif isinstance(draft_expr, (DraftSequence, DraftDict)):
+                    draft_expr = draft_expr[path_item]
+                else:
+                    raise NotImplementedError(f"invalid draft expr {draft_expr}")
+            return draft_expr
+        else:
+            raise NotImplementedError
+    else:
+        raise NotImplementedError(f"node type {node.type} not implemented")
+
+
+def rebuild_draft_expr(node: DraftASTNode, root_model_draft: Any, model: Any):
+    assert isinstance(root_model_draft, DraftBase)
+    assert dataclasses.is_dataclass(model), "model must be real dataclasses, not draft"
+    return _rebuild_draft_expr_ecursive(node, root_model_draft, model)
+
+def stabilize_getitem_path_in_op_main_path(op: DraftUpdateOp, root_model_draft: Any, model: Any):
+    """Convert `getitem_path(tgt, [...])` to static draft expr.
+
+    `getitem_path` is usually used in nested data structure. If our draft
+    expr contains dynamic path, we can't do static analysis on it. So we need
+    to convert it to static draft expr from real model.
+
+    WARNING: to simplify the implementation, we only support one `getitem_path`.
+    WARNING: your path must be correct, but can be invalid (e.g. invalid dict key).
+    
+    TODO add `getattr` support
+    """
+    assert isinstance(root_model_draft, DraftBase)
+    assert dataclasses.is_dataclass(model), "model must be real dataclasses, not draft"
+    node = op.node 
+    new_draft_expr = rebuild_draft_expr(node, root_model_draft, model)
+    return dataclasses.replace(op, node=new_draft_expr._tensorpc_draft_attr_cur_node)
+
+def getitem_path_dynamic(target: Any, path: Any, result_type: type[T]) -> T:
+    assert isinstance(target, DraftBase), "target should be a Draft object"
+    assert isinstance(path, DraftSequence), "path should be a DraftSequence"
+    tgt_node = target._tensorpc_draft_attr_cur_node
+    path_node = path._tensorpc_draft_attr_cur_node
+    new_node = DraftASTNode(DraftASTType.FUNC_CALL, [tgt_node, path_node], DraftASTFuncType.GET_ITEM_PATH.value)
+    new_anno_type = parse_type_may_optional_undefined(
+                                     result_type)
+    new_node.userdata = new_anno_type
+    prev_anno_state = target._tensorpc_draft_attr_anno_state
+    return cast(T, _tensorpc_draft_dispatch(None,
+                                 new_node,
+                                 target._tensorpc_draft_attr_userdata,
+                                 prev_anno_state,
+                                 anno_type=new_anno_type))

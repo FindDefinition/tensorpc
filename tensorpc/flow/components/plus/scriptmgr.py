@@ -553,9 +553,6 @@ class ScriptManagerV2(mui.FlexBox):
         self.code_editor.prop(actions=editor_acts)
         self.code_editor.event_editor_action.on(self._handle_editor_action)
 
-        self.app_editor = AppInMemory("scriptmgr", "").prop(flex=1,
-                                                            minHeight=0,
-                                                            minWidth=0)
         self.app_show_box = mui.FlexBox()  # .prop(flex=1)
 
         self.code_editor_container = mui.Allotment(mui.Allotment.ChildDef([
@@ -591,7 +588,7 @@ class ScriptManagerV2(mui.FlexBox):
         self.code_editor.bind_fields(readOnly="cur_script_idx == `-1`")
         self._show_editor_btn = mui.ToggleButton(icon=mui.IconType.Code, callback=self._handle_show_editor).prop(size="small")
         self._show_editor_btn.bind_fields(selected="getitem(states, language).is_editor_visible")
-        self.model = mui.DataModel(init_model, [
+        self.dm = mui.DataModel(init_model, [
             mui.HBox([
                 self._scripts_select.prop(flex=1).bind_fields(
                     options=r"scripts[*].{label: label}", 
@@ -608,21 +605,22 @@ class ScriptManagerV2(mui.FlexBox):
                 self.code_editor_container,
             ]).bind_fields(enable="cur_script_idx != `-1`"),
         ])
-        draft = self.model.get_draft_type_only()
+        draft = self.dm.get_draft_type_only()
 
         cur_script_draft = draft.scripts[draft.cur_script_idx]
         cur_code_draft = cur_script_draft.states[cur_script_draft.language]
         code_path_draft = create_literal_draft(f"{self._editor_path_uid}/%s.%s") % (cur_script_draft.label, cur_script_draft.language)
-        self.code_editor.bind_draft_change_uncontrolled(self.model, 
+        self.code_editor.bind_draft_change_uncontrolled(self.dm, 
             cur_code_draft.code, 
-            code_path_draft, cur_script_draft.language)
+            code_path_draft, cur_script_draft.language,
+            lang_modifier=lambda x: _LANG_TO_VSCODE_MAPPING[x])
 
-        self.model.connect_app_storage(f"{SCRIPT_STORAGE_KEY_PREFIX_V2}_v3")
+        self.dm.connect_app_storage(f"{SCRIPT_STORAGE_KEY_PREFIX_V2}_v3")
         self.langs.bind_draft_change(draft.scripts[draft.cur_script_idx].language)
         # make sure lang change is handled before `_on_lang_select`
         self.langs.event_change.on(self._on_lang_select)
         self.init_add_layout([
-            self.model,
+            self.dm,
         ])
 
         self._init_scripts = _INITIAL_SCRIPT_PER_LANG.copy()
@@ -638,7 +636,7 @@ class ScriptManagerV2(mui.FlexBox):
         self.code_editor.event_editor_save.on(self._on_editor_save)
         self._scripts_select.event_select_new_item.on(self._on_new_script)
 
-        self.model.event_storage_fetched.on(self._on_editor_ready)
+        self.dm.event_storage_fetched.on(self._on_editor_ready)
 
         # used for apps and python scripts
         self._manager_global_storage: Dict[str, Any] = {}
@@ -667,26 +665,26 @@ class ScriptManagerV2(mui.FlexBox):
         await self._on_editor_ready()
 
     async def _handle_show_editor(self, selected: bool):
-        draft = self.model.get_draft()
-        if self.model.model.cur_script_idx != -1:
-            cur_script = draft.scripts[self.model.model.cur_script_idx]
+        draft = self.dm.get_draft()
+        if self.dm.model.cur_script_idx != -1:
+            cur_script = draft.scripts[self.dm.model.cur_script_idx]
             cur_script.states[cur_script.language].is_editor_visible = selected
 
-    # async def _set_code_editor(self, script: ScriptModel):
-    #     await self.send_and_wait(
-    #         self.code_editor.update_event(
-    #             language=_LANG_TO_VSCODE_MAPPING[script.language],
-    #             value=script.states[script.language].code,
-    #             path=self._get_path(script.label, script.language)))
+    async def _set_code_editor(self, script: ScriptModel):
+        await self.send_and_wait(
+            self.code_editor.update_event(
+                language=_LANG_TO_VSCODE_MAPPING[script.language],
+                value=script.states[script.language].code,
+                path=self._get_path(script.label, script.language)))
 
     async def _on_editor_ready(self):
-        draft = self.model.get_draft()
-        model = self.model.model
+        draft = self.dm.get_draft()
+        model = self.dm.model
         if model.scripts:
             if model.cur_script_idx == -1:
                 draft.cur_script_idx = 0
             cur_script = model.scripts[model.cur_script_idx]
-            # await self._set_code_editor(cur_script)
+            await self._set_code_editor(cur_script)
             if cur_script.language == "app":
                 await self._on_run_script()
 
@@ -703,31 +701,26 @@ class ScriptManagerV2(mui.FlexBox):
         elif action.startswith("FormatCode-"):
             assert act_ev.userdata is not None 
             backend = act_ev.userdata["backend"]
-            cur_idx = self.model.model.cur_script_idx
-            cur_script = self.model.model.scripts[cur_idx]
+            cur_idx = self.dm.model.cur_script_idx
+            cur_script = self.dm.model.scripts[cur_idx]
             cur_state = cur_script.states[cur_script.language]
             new_code = self._code_fmt.format_code(cur_state.code, backend)
-            async with self.model.draft_update() as draft:
+            async with self.dm.draft_update() as draft:
                 draft.scripts[cur_idx].states[cur_script.language].code = new_code
             # await self._set_code_editor(cur_script)
 
     async def _on_lang_select(self, value):
         if value != "app":
             await self.app_show_box.set_new_layout({})
-        if self.model.model.cur_script_idx != -1:
-            # await self._set_code_editor(self.model.model.scripts[self.model.model.cur_script_idx])
+        if self.dm.model.cur_script_idx != -1:
             if value == "app":
                 # TODO add better option
                 await self._on_run_script(value)
-        # else:
-        #     await self.send_and_wait(
-        #         self.code_editor.update_event(
-        #             language=_LANG_TO_VSCODE_MAPPING[value]))
 
     async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
         value = ev.value
-        model = self.model.model
-        draft = self.model.get_draft()
+        model = self.dm.model
+        draft = self.dm.get_draft()
         if model.cur_script_idx != -1:
             cur_script = model.scripts[model.cur_script_idx]
             cur_script_draft = draft.scripts[model.cur_script_idx]
@@ -743,25 +736,19 @@ class ScriptManagerV2(mui.FlexBox):
     async def _on_new_script(self, value):
         new_item_name = value["label"]
         new_script_model = ScriptModel(new_item_name)
-        draft = self.model.get_draft()
+        draft = self.dm.get_draft()
         draft.scripts.append(new_script_model)
         # draft update is delayed, so we use len(...) instead of len(...) - 1
-        draft.cur_script_idx = len(self.model.model.scripts)
+        draft.cur_script_idx = len(self.dm.model.scripts)
         await self.app_show_box.set_new_layout({})
-        # await self._set_code_editor(new_script_model)
 
     async def _on_script_delete(self):
-        model = self.model.model
-        draft = self.model.get_draft()
+        model = self.dm.model
+        draft = self.dm.get_draft()
         if model.cur_script_idx != -1:
             if len(model.scripts) == 1:
                 draft.scripts.pop()
                 draft.cur_script_idx = -1
-                await self.send_and_wait(
-                    self.code_editor.update_event(
-                        language="python",
-                        value="# let's add a new script",
-                        path=""))
             else:
                 draft.scripts.pop(model.cur_script_idx)
                 draft.cur_script_idx = 0
@@ -769,7 +756,7 @@ class ScriptManagerV2(mui.FlexBox):
     async def _on_script_select(self, value):
         label = value["label"]
         # find script model by label
-        model = self.model.model
+        model = self.dm.model
         idx = -1
         for i, script in enumerate(model.scripts):
             if script.label == label:
@@ -779,7 +766,7 @@ class ScriptManagerV2(mui.FlexBox):
             raise ValueError("shouldn't happen")
         # draft is delayed after all event handlers of each component event.
         # so we use draft_update to do update immediately
-        async with self.model.draft_update() as draft:
+        async with self.dm.draft_update() as draft:
             draft.cur_script_idx = idx
         cur_script = model.scripts[idx]
         # await self._set_code_editor(cur_script)
@@ -789,8 +776,8 @@ class ScriptManagerV2(mui.FlexBox):
             await self._on_run_script()
 
     async def _on_run_script(self, cur_lang: Optional[str] = None, code: Optional[str] = None):
-        if self.model.model.cur_script_idx != -1:
-            cur_script = self.model.model.scripts[self.model.model.cur_script_idx]
+        if self.dm.model.cur_script_idx != -1:
+            cur_script = self.dm.model.scripts[self.dm.model.cur_script_idx]
             if cur_lang is None:
                 cur_lang = cur_script.language
             item_uid = f"{self._graph_id}@{self._storage_node_rid}@{cur_script.label}"

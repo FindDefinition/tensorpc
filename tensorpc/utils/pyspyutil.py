@@ -81,4 +81,58 @@ async def get_all_subprocess_traceback_by_pyspy(pid: int):
             name_to_pid_to_tb[name] = {}
         name_to_pid_to_tb[name][child.pid] = tb_res
     return name_to_pid_to_tb
-        
+
+async def _get_torchrun_traceback_by_pyspy(main_thread_only: bool = True, is_data_worker: bool = False):
+    # 1. locate torchrun process named `pt_elastic``
+    main_pid: int = -1
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        proc_name = proc.info["name"]
+        if proc_name == "pt_elastic":
+            main_pid = proc.pid
+            break 
+    if main_pid == -1:
+        raise ValueError("pt_elastic process not found.")
+    # 2. get all subprocess except data worker named `pt_data_worker`
+    current_process = psutil.Process(main_pid)
+    children = current_process.children(recursive=True)
+    name_to_pid_to_tb: dict[str, dict[int, Any]] = {}
+    for child in children:
+        try:
+            if child.status() != psutil.STATUS_RUNNING:
+                continue
+            info = psutil.Process(child.pid).as_dict(attrs=["name", "cmdline"])
+            if is_data_worker:
+                if info["name"] != "pt_data_worker":
+                    continue 
+            else:
+                if info["name"] == "pt_data_worker":
+                    continue
+            tb_res = await get_process_traceback_by_pyspy(child.pid)
+        except psutil.NoSuchProcess:
+            continue
+        if main_thread_only:
+            single_res_to_filter = []
+            for item in tb_res:
+                if item["thread_name"] == "MainThread":
+                    single_res_to_filter.append(item)
+                    break 
+            tb_res = single_res_to_filter
+        name = _determine_proc_name(info)
+        if name not in name_to_pid_to_tb:
+            name_to_pid_to_tb[name] = {}
+        name_to_pid_to_tb[name][child.pid] = tb_res
+    return name_to_pid_to_tb
+
+async def get_torchrun_traceback_by_pyspy(main_thread_only: bool = True):
+    return await _get_torchrun_traceback_by_pyspy(main_thread_only, is_data_worker=False)
+
+async def get_torchrun_dataworker_traceback_by_pyspy(main_thread_only: bool = True):
+    return await _get_torchrun_traceback_by_pyspy(main_thread_only, is_data_worker=True)
+
+def _main():
+    import rich 
+    res = asyncio.run(get_torchrun_traceback_by_pyspy(main_thread_only=True))
+    rich.print(res)
+    
+if __name__ == "__main__":
+    _main()

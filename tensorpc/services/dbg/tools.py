@@ -434,14 +434,12 @@ class BackgroundDebugTools:
 
     async def handle_code_selection_msg(self, code_segment: str, path: str,
                                         code_range: Tuple[int, int, int, int]):
-        # print("WTF", code_segment, path, code_range)
         if self._frame is None:
             return
         obj, app = prim.get_service(
             app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
                 TENSORPC_DBG_FRAME_INSPECTOR_KEY)
         assert isinstance(obj, BreakpointDebugPanel)
-        # print(2)
         # parse path ast to get function location
         tree = self._ast_cache.getast(path)
         assert isinstance(tree, ast.Module)
@@ -465,7 +463,7 @@ class BackgroundDebugTools:
                                 local_vars = cur_frame.f_locals
                                 global_vars = cur_frame.f_globals
                                 res = eval(code_segment, global_vars,
-                                           local_vars)
+                                        local_vars)
                                 await obj.set_frame_object(
                                     res, code_segment, nodes[-1], cur_frame)
                             except grpc.aio.AioRpcError as e:

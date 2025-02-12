@@ -1098,7 +1098,7 @@ def _get_obj_def_path(obj):
 @dataclasses.dataclass
 class DraftOpUserData:
     component: "Component"
-    disabled_handlers: list[DraftChangeEventHandler] = dataclasses.field(
+    disabled_handlers: list[Callable] = dataclasses.field(
         default_factory=list)
 
 TEventData = TypeVar("TEventData")
@@ -2084,14 +2084,15 @@ class Component(Generic[T_base_props, T_child]):
         res_list :list[Any] = []
         assert self._flow_uid is not None
         with enter_event_handling_conetxt(self._flow_uid) as evctx:
-            for cb in cbs:
-                datamodel_ctx = nullcontext()
-                if capture_draft:
-                    datamodel_ctx = capture_draft_update()
-                try:
-                    # we shouldn't batch draft update here.
-                    batch_ev = AppEvent("", {})
-                    with enter_batch_event_context(batch_ev):
+            batch_ev = AppEvent("", {})
+            with enter_batch_event_context(batch_ev):
+
+                for cb in cbs:
+                    datamodel_ctx = nullcontext()
+                    if capture_draft:
+                        datamodel_ctx = capture_draft_update()
+                    try:
+                        # we shouldn't batch draft update here.
                         with datamodel_ctx as ctx:
                             coro = cb()
                             if inspect.iscoroutine(coro):
@@ -2105,21 +2106,22 @@ class Component(Generic[T_base_props, T_child]):
                                     await res_coro
                         if ctx is not None and ctx._ops:
                             await self._run_draft_update(ctx._ops)
-                    if not batch_ev.is_empty():
-                        await self.put_app_event(batch_ev)
-                except Exception as e:
-                    traceback.print_exc()
-                    ss = io.StringIO()
-                    traceback.print_exc(file=ss)
-                    assert self._flow_uid is not None
-                    user_exc = UserMessage.create_error(
-                        self._flow_uid.uid_encoded, repr(e), ss.getvalue())
-                    await self.put_app_event(
-                        self.create_user_msg_event(user_exc))
-                    # app = get_app()
-                    # if app._flowapp_enable_exception_inspect:
-                    #     await app._inspect_exception()
+                    except Exception as e:
+                        traceback.print_exc()
+                        ss = io.StringIO()
+                        traceback.print_exc(file=ss)
+                        assert self._flow_uid is not None
+                        user_exc = UserMessage.create_error(
+                            self._flow_uid.uid_encoded, repr(e), ss.getvalue())
+                        await self.put_app_event(
+                            self.create_user_msg_event(user_exc))
+                        # app = get_app()
+                        # if app._flowapp_enable_exception_inspect:
+                        #     await app._inspect_exception()
             # finally:
+            if not batch_ev.is_empty():
+                await self.put_app_event(batch_ev)
+
             if change_status:
                 self._flow_comp_status = UIRunStatus.Stop.value
                 await self.sync_status(sync_state)
@@ -2169,6 +2171,7 @@ class Component(Generic[T_base_props, T_child]):
             origin_draft.a.b = value
         ```
         """
+        assert not self.is_mounted(), "you can't bind field after component mounted"
         assert isinstance(draft, DraftBase)
         assert isinstance(draft._tensorpc_draft_attr_userdata, DraftOpUserData), "you must use comp.get_draft_target() to get draft"
         comp = draft._tensorpc_draft_attr_userdata.component

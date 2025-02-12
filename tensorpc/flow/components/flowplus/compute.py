@@ -1302,13 +1302,13 @@ class ComputeFlow(mui.FlexBox):
             return
         # always remove cache when cnode changed
         node_cfg = cnode.init_cfg
-        style = {}
+        new_props = {}
         if node_cfg is not None:
             if node_cfg.width is not None:
-                style["width"] = node_cfg.width
+                new_props["width"] = node_cfg.width
             if node_cfg.height is not None:
-                style["height"] = node_cfg.height
-        await self.graph.update_node_props(node_id, style)
+                new_props["height"] = node_cfg.height
+        await self.graph.update_node_props(node_id, new_props)
         # await self.graph.set_node_style(node_id, style)
         cur_inp_handles = wrapper.inp_handles
         cur_inp_handle_ids = [h.id for h in cur_inp_handles]
