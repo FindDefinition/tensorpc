@@ -432,8 +432,7 @@ class FrontendEventType(enum.IntEnum):
     FlowNodeLogicChange = 87
     FlowEdgeLogicChange = 88
     # visualization change such as position and size.
-    # FlowNodeVisChange = 89
-    # FlowEdgeVisChange = 90
+    FlowVisChange = 89
 
 
     PlotlyClickData = 100

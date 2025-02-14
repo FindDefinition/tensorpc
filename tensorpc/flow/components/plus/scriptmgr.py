@@ -615,7 +615,7 @@ class ScriptManagerV2(mui.FlexBox):
             code_path_draft, cur_script_draft.language,
             lang_modifier=lambda x: _LANG_TO_VSCODE_MAPPING[x])
 
-        self.dm.connect_app_storage(f"{SCRIPT_STORAGE_KEY_PREFIX_V2}_v3")
+        self.dm.connect_app_storage(f"{SCRIPT_STORAGE_KEY_PREFIX_V2}")
         self.langs.bind_draft_change(draft.scripts[draft.cur_script_idx].language)
         # make sure lang change is handled before `_on_lang_select`
         self.langs.event_change.on(self._on_lang_select)

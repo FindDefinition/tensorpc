@@ -19,12 +19,18 @@ class _JMESCustomFunctions(functions.Functions):
         # positional placeholders in js can't be used.
         return obj % attrs
 
+    @functions.signature({'types': ['object']}, {'types': ['array']})
+    def _func_getitem_path(self, obj, *attrs):
+        for attr in attrs:
+            obj = obj[attr]
+        return obj
+
 # 4. Provide an instance of your subclass in a Options object.
 _JMES_EXTEND_OPTIONS = jmespath.Options(custom_functions=_JMESCustomFunctions())
 
 
 def compile(expression: str) -> ParsedResult:
-    return jmespath.compile(expression, options=_JMES_EXTEND_OPTIONS)
+    return jmespath.compile(expression, options=_JMES_EXTEND_OPTIONS) # type: ignore
 
 def search(expression: Union[str, ParsedResult], data: dict) -> Any:
     if isinstance(expression, ParsedResult):

@@ -15,8 +15,8 @@
 import contextlib
 import contextvars
 import enum
-from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Dict, Generic,
-                    Iterable, List, Optional, Sequence, Set, Tuple, Type,
+from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Generic,
+                    Iterable, Optional, Sequence, Type,
                     TypeVar, Union, cast)
 
 from typing_extensions import Literal, TypeAlias
@@ -71,7 +71,7 @@ class FlowProps(ContainerBaseProps):
     panOnScrollMode: Union[Undefined, Literal["horizontal", "vertical",
                                               "free"]] = undefined
     snapToGrid: Union[Undefined, bool] = undefined
-    snapGrid: Union[Undefined, Tuple[int, int]] = undefined
+    snapGrid: Union[Undefined, tuple[int, int]] = undefined
     fitView: Union[Undefined, bool] = undefined
     fitViewOptions: Union[Undefined, FlowFitViewOptions] = undefined
     zoomOnScroll: Union[Undefined, bool] = undefined
@@ -91,38 +91,38 @@ class FlowProps(ContainerBaseProps):
     edgesUpdatable: Union[Undefined, bool] = undefined
 
     defaultEdgeOptions: Union[Undefined, Any] = undefined
-    deleteKeyCode: Union[Undefined, Union[str, List[str], None]] = undefined
-    selectionKeyCode: Union[Undefined, Union[str, List[str], None]] = undefined
-    multiSelectionKeyCode: Union[Undefined, Union[str, List[str],
+    deleteKeyCode: Union[Undefined, Union[str, list[str], None]] = undefined
+    selectionKeyCode: Union[Undefined, Union[str, list[str], None]] = undefined
+    multiSelectionKeyCode: Union[Undefined, Union[str, list[str],
                                                   None]] = undefined
-    zoomActivationKeyCode: Union[Undefined, Union[str, List[str],
+    zoomActivationKeyCode: Union[Undefined, Union[str, list[str],
                                                   None]] = undefined
-    panActivationKeyCode: Union[Undefined, Union[str, List[str],
+    panActivationKeyCode: Union[Undefined, Union[str, list[str],
                                                  None]] = undefined
     disableKeyboardA11y: Union[Undefined, bool] = undefined
     connectionLineType: Union[Undefined, Literal["default", "straight", "step",
                                                  "smoothstep",
                                                  "simplebezier"]] = undefined
-    selectedBoxSxProps: Union[Undefined, Dict[str, Any]] = undefined
+    selectedBoxSxProps: Union[Undefined, dict[str, Any]] = undefined
     debounce: Union[Undefined, NumberType] = undefined
 
     droppable: Union[bool, Undefined] = undefined
-    allowedDndTypes: Union[List[str], Undefined] = undefined
+    allowedDndTypes: Union[list[str], Undefined] = undefined
     allowFile: Union[bool, Undefined] = undefined
-    sourceValidConnectMap: Union[Dict[str, Dict[str, Any]],
+    sourceValidConnectMap: Union[dict[str, dict[str, Any]],
                                  Undefined] = undefined
-    targetValidConnectMap: Union[Dict[str, Dict[str, Any]],
+    targetValidConnectMap: Union[dict[str, dict[str, Any]],
                                  Undefined] = undefined
-    paneContextMenuItems: Union[Undefined, List[MenuItem]] = undefined
-    nodeContextMenuItems: Union[Undefined, List[MenuItem]] = undefined
+    paneContextMenuItems: Union[Undefined, list[MenuItem]] = undefined
+    nodeContextMenuItems: Union[Undefined, list[MenuItem]] = undefined
     nodeTypeMap: Union[Undefined,
-                       Dict[str, NodeTypeLiteral]] = undefined
+                       dict[str, NodeTypeLiteral]] = undefined
     preventCycle: Union[Undefined, bool] = undefined
 
     invisiblizeAllResizer: Union[Undefined, bool] = undefined
     invisiblizeAllToolbar: Union[Undefined, bool] = undefined
 
-    defaultLayoutSize: Union[Undefined, Tuple[NumberType,
+    defaultLayoutSize: Union[Undefined, tuple[NumberType,
                                               NumberType]] = undefined
 
 
@@ -136,14 +136,14 @@ class XYPosition:
 class NodeData:
     component: Union[Undefined, Component] = undefined
     selectedTheme: Union[Undefined, Theme] = undefined
-    selectedBoxSxProps: Union[Undefined, Dict[str, Any]] = undefined
+    selectedBoxSxProps: Union[Undefined, dict[str, Any]] = undefined
     userdata: Union[Undefined, Any] = undefined
     label: Union[Undefined, str] = undefined
-    sourceEdgeOverrides: Union[Undefined, Dict[str, Any]] = undefined
-    contextMenuItems: Union[Undefined, List[MenuItem]] = undefined
+    sourceEdgeOverrides: Union[Undefined, dict[str, Any]] = undefined
+    contextMenuItems: Union[Undefined, list[MenuItem]] = undefined
     # used by default nodes with multiple handles
-    targetHandleIds: Union[Undefined, List[Optional[str]]] = undefined
-    sourceHandleIds: Union[Undefined, List[Optional[str]]] = undefined
+    targetHandleIds: Union[Undefined, list[Optional[str]]] = undefined
+    sourceHandleIds: Union[Undefined, list[Optional[str]]] = undefined
     partition: Union[Undefined, int] = undefined
 
 @dataclasses.dataclass
@@ -170,8 +170,8 @@ class Node:
     parentId: Union[Undefined, str] = undefined
     focusable: Union[Undefined, bool] = undefined
     extent: Union[Undefined, Literal["parent"],
-                  Tuple[Tuple[NumberType, NumberType],
-                        Tuple[NumberType, NumberType]]] = undefined
+                  tuple[tuple[NumberType, NumberType],
+                        tuple[NumberType, NumberType]]] = undefined
     sourcePosition: Union[Undefined, Literal["left", "top", "right",
                                              "bottom"]] = undefined
     targetPosition: Union[Undefined, Literal["left", "top", "right",
@@ -248,12 +248,12 @@ class Edge:
 
 @dataclasses.dataclass
 class _NodesHelper:
-    nodes: List[Node]
+    nodes: list[Node]
 
 
 @dataclasses.dataclass
 class _EdgesHelper:
-    edges: List[Edge]
+    edges: list[Edge]
 
 class LayoutAlgoType(enum.IntEnum):
     Dagre = 0
@@ -274,6 +274,7 @@ class FlowControlType(enum.IntEnum):
     LocateNode = 11
     SetFlowAndElkLayout = 12
     ElkLayout = 13
+    AddNewEdges = 14
 
 
 @dataclasses.dataclass
@@ -354,28 +355,28 @@ class ElkLayoutOptions:
 
 @dataclasses.dataclass
 class EventSelection:
-    nodes: List[str]
-    edges: List[str]
+    nodes: list[str]
+    edges: list[str]
 
-_T_node_data_dict = TypeVar("_T_node_data_dict", bound=Optional[Dict[str, Any]])
-_T_edge_data_dict = TypeVar("_T_edge_data_dict", bound=Optional[Dict[str, Any]])
+_T_node_data_dict = TypeVar("_T_node_data_dict", bound=Optional[dict[str, Any]])
+_T_edge_data_dict = TypeVar("_T_edge_data_dict", bound=Optional[dict[str, Any]])
 
 @dataclasses_plain.dataclass
 class FlowInternals:
-    id_to_node: Dict[str, Node] = dataclasses_plain.field(default_factory=dict)
-    id_to_edge: Dict[str, Edge] = dataclasses_plain.field(default_factory=dict)
-    node_id_to_sources: Dict[str, List[Tuple[
+    id_to_node: dict[str, Node] = dataclasses_plain.field(default_factory=dict)
+    id_to_edge: dict[str, Edge] = dataclasses_plain.field(default_factory=dict)
+    node_id_to_sources: dict[str, list[tuple[
         str, Optional[str],
         Optional[str]]]] = dataclasses_plain.field(default_factory=dict)
-    node_id_to_targets: Dict[str, List[Tuple[
+    node_id_to_targets: dict[str, list[tuple[
         str, Optional[str],
         Optional[str]]]] = dataclasses_plain.field(default_factory=dict)
-    node_id_to_inp_handle_to_edges: Dict[
-        str, Dict[Optional[str],
-                  List[Edge]]] = dataclasses_plain.field(default_factory=dict)
-    node_id_to_out_handle_to_edges: Dict[
-        str, Dict[Optional[str],
-                  List[Edge]]] = dataclasses_plain.field(default_factory=dict)
+    node_id_to_inp_handle_to_edges: dict[
+        str, dict[Optional[str],
+                  list[Edge]]] = dataclasses_plain.field(default_factory=dict)
+    node_id_to_out_handle_to_edges: dict[
+        str, dict[Optional[str],
+                  list[Edge]]] = dataclasses_plain.field(default_factory=dict)
     unique_name_pool_node: UniqueNamePool = dataclasses_plain.field(
         default_factory=UniqueNamePool)
     unique_name_pool_edge: UniqueNamePool = dataclasses_plain.field(
@@ -389,7 +390,7 @@ class FlowInternals:
     def edges(self):
         return list(self.id_to_edge.values())
 
-    def set_from_nodes_edges(self, nodes: List[Node], edges: List[Edge]):
+    def set_from_nodes_edges(self, nodes: list[Node], edges: list[Edge]):
         # node id must unique
         self.id_to_node = {node.id: node for node in nodes}
         assert len(self.id_to_node) == len(nodes)
@@ -425,19 +426,19 @@ class FlowInternals:
 
     def _calculate_node_group_meta(
         self,
-        node_ids: List[str],
+        node_ids: list[str],
         group_id: Optional[str] = None,
-        merged_out_to_merged_id: Optional[Dict[Tuple[str, Optional[str]],
+        merged_out_to_merged_id: Optional[dict[tuple[str, Optional[str]],
                                                str]] = None):
-        inside_node_id_out_handle_to_edges: Dict[Tuple[str, Optional[str]],
-                                                  List[Edge]] = {}
-        outside_node_id_out_handle_to_edges: Dict[Tuple[str, Optional[str]],
-                                                  List[Edge]] = {}
+        inside_node_id_out_handle_to_edges: dict[tuple[str, Optional[str]],
+                                                  list[Edge]] = {}
+        outside_node_id_out_handle_to_edges: dict[tuple[str, Optional[str]],
+                                                  list[Edge]] = {}
         # used for input edges order correction
-        inside_node_id_inp_handle_to_edges: Dict[Tuple[str, Optional[str]],
-                                                  List[Edge]] = {}
-        outside_node_id_inp_handle_to_edges: Dict[Tuple[str, Optional[str]],
-                                                  List[Edge]] = {}
+        inside_node_id_inp_handle_to_edges: dict[tuple[str, Optional[str]],
+                                                  list[Edge]] = {}
+        outside_node_id_inp_handle_to_edges: dict[tuple[str, Optional[str]],
+                                                  list[Edge]] = {}
 
         node_id_to_inp_handle_to_edges = self.node_id_to_inp_handle_to_edges.copy(
         )
@@ -481,11 +482,11 @@ class FlowInternals:
         return (inside_node_id_out_handle_to_edges, outside_node_id_out_handle_to_edges,
             inside_node_id_inp_handle_to_edges, outside_node_id_inp_handle_to_edges)
 
-    def _get_order_corrected_outside_out(self, outside_out: Dict[Tuple[str, Optional[str]],
-                                                  List[Edge]], inside_in: Dict[Tuple[str, Optional[str]],
-                                                  List[Edge]]):
-        outside_out_visited: Set[Tuple[str, Optional[str]]] = set()
-        new_outside_out: Dict[Tuple[str, Optional[str]], List[Edge]] = {}
+    def _get_order_corrected_outside_out(self, outside_out: dict[tuple[str, Optional[str]],
+                                                  list[Edge]], inside_in: dict[tuple[str, Optional[str]],
+                                                  list[Edge]]):
+        outside_out_visited: set[tuple[str, Optional[str]]] = set()
+        new_outside_out: dict[tuple[str, Optional[str]], list[Edge]] = {}
         for _, edges in inside_in.items():
             for edge in edges:
                 key = (edge.source, edge.sourceHandle)
@@ -495,11 +496,11 @@ class FlowInternals:
                 new_outside_out[key] = outside_out[key]
         return new_outside_out 
 
-    def _get_order_corrected_inside_out(self, inside_out: Dict[Tuple[str, Optional[str]],
-                                                  List[Edge]], outside_in: Dict[Tuple[str, Optional[str]],
-                                                  List[Edge]]):
-        inside_out_visited: Set[Tuple[str, Optional[str]]] = set()
-        new_inside_out: Dict[Tuple[str, Optional[str]], List[Edge]] = {}
+    def _get_order_corrected_inside_out(self, inside_out: dict[tuple[str, Optional[str]],
+                                                  list[Edge]], outside_in: dict[tuple[str, Optional[str]],
+                                                  list[Edge]]):
+        inside_out_visited: set[tuple[str, Optional[str]]] = set()
+        new_inside_out: dict[tuple[str, Optional[str]], list[Edge]] = {}
         for _, edges in outside_in.items():
             for edge in edges:
                 key = (edge.source, edge.sourceHandle)
@@ -511,18 +512,18 @@ class FlowInternals:
 
     def merge_nodes_with_data(
         self,
-        merge_list: List[Tuple[Node, List[str]]],
-        merged_data: Optional[List[Any]] = None,
+        merge_list: list[tuple[Node, list[str]]],
+        merged_data: Optional[list[Any]] = None,
         node_id_to_data: _T_node_data_dict = None,
         edge_id_to_data: _T_edge_data_dict = None,
         correct_inp_edge_order: bool = True
-    ) -> Tuple["FlowInternals", Dict[str, List[Edge]], _T_node_data_dict, _T_edge_data_dict]:
+    ) -> tuple["FlowInternals", dict[str, list[Edge]], _T_node_data_dict, _T_edge_data_dict]:
         """merge nodes, then return a new `FlowInternals`, remain self unchanged.
 
         this API ensures that nodes in `merge_list` won't be changed except their id.
         """
         # check merged node id is valid and have no intersection
-        node_id_set_to_merge: Set[str] = set()
+        node_id_set_to_merge: set[str] = set()
         for _, merge_ids in merge_list:
             for merge_id in merge_ids:
                 assert merge_id in self.id_to_node
@@ -534,13 +535,13 @@ class FlowInternals:
         for merged_node, _ in merge_list:
             merged_node.id = not_to_merge_name_pool(merged_node.id)
         # append nodes and edges that not in merge list
-        new_nodes: List[Node] = [x[0] for x in merge_list]
-        new_edges: List[Edge] = []
-        node_id_to_merged_id: Dict[str, str] = {}
+        new_nodes: list[Node] = [x[0] for x in merge_list]
+        new_edges: list[Edge] = []
+        node_id_to_merged_id: dict[str, str] = {}
         for merged_node, merge_ids in merge_list:
             for merge_id in merge_ids:
                 node_id_to_merged_id[merge_id] = merged_node.id
-        prev_no_merge_nodes: List[Node] = []
+        prev_no_merge_nodes: list[Node] = []
         for node in self.id_to_node.values():
             if node.id not in node_id_set_to_merge:
                 new_nodes.append(node)
@@ -552,25 +553,25 @@ class FlowInternals:
                     new_edges.append(edge)
         edge_name_pool = UniqueNamePool(
             init_set=set([edge.id for edge in new_edges]))
-        merged_id_to_outside_out_to_edges: Dict[str, Dict[Tuple[str,
+        merged_id_to_outside_out_to_edges: dict[str, dict[tuple[str,
                                                                 Optional[str]],
-                                                          List[Edge]]] = {}
-        merged_id_to_inside_out_to_edges: Dict[str, Dict[Tuple[str,
+                                                          list[Edge]]] = {}
+        merged_id_to_inside_out_to_edges: dict[str, dict[tuple[str,
                                                                 Optional[str]],
-                                                          List[Edge]]] = {}
-        merged_id_to_outside_inp_to_edges: Dict[str, Dict[Tuple[str,
+                                                          list[Edge]]] = {}
+        merged_id_to_outside_inp_to_edges: dict[str, dict[tuple[str,
                                                                 Optional[str]],
-                                                          List[Edge]]] = {}
-        merged_id_to_inside_inp_to_edges: Dict[str, Dict[Tuple[str,
+                                                          list[Edge]]] = {}
+        merged_id_to_inside_inp_to_edges: dict[str, dict[tuple[str,
                                                                 Optional[str]],
-                                                          List[Edge]]] = {}
+                                                          list[Edge]]] = {}
 
         
-        merged_out_to_merged_id: Dict[Tuple[str, Optional[str]], str] = {}
+        merged_out_to_merged_id: dict[tuple[str, Optional[str]], str] = {}
 
-        outside_out_to_merged_handle: Dict[Tuple[str, Optional[str], str],
+        outside_out_to_merged_handle: dict[tuple[str, Optional[str], str],
                                            Optional[str]] = {}
-        inside_out_to_merged_handle: Dict[Tuple[str, Optional[str]],
+        inside_out_to_merged_handle: dict[tuple[str, Optional[str]],
                                            Optional[str]] = {}
         for merged_node, merged_node_ids in merge_list:
             inside_out_handle_to_edges, outside_out_handle_to_edges, in_i, out_i = self._calculate_node_group_meta(
@@ -602,15 +603,15 @@ class FlowInternals:
 
         # we get all merged handles, now we need to construct new edges
 
-        new_edge_id_to_edges: Dict[str, List[Edge]] = {}
-        node_id_handle_pair_set: Set[Tuple[str, str, Optional[str], Optional[str]]] = set()
+        new_edge_id_to_edges: dict[str, list[Edge]] = {}
+        node_id_handle_pair_set: set[tuple[str, str, Optional[str], Optional[str]]] = set()
 
         if correct_inp_edge_order:
             # iterate all non-merged nodes, add edges first to make sure the edge order 
             # of these nodes are correct
             node_id_to_inp = self.node_id_to_inp_handle_to_edges
             node_id_to_out = self.node_id_to_out_handle_to_edges
-            non_merge_edge_id_set: Set[str] = set()
+            non_merge_edge_id_set: set[str] = set()
             for node in prev_no_merge_nodes:
                 inp_handle_to_edges = node_id_to_inp[node.id]
                 for handle, edges in inp_handle_to_edges.items():
@@ -761,18 +762,18 @@ class FlowInternals:
         return res_internals, new_edge_id_to_edges, prev_node_id_to_data, prev_edge_id_to_data
 
     def merge_nodes(
-        self, merge_list: List[Tuple[Node, List[str]]]
-    ) -> Tuple["FlowInternals", Dict[str, List[Edge]]]:
+        self, merge_list: list[tuple[Node, list[str]]]
+    ) -> tuple["FlowInternals", dict[str, list[Edge]]]:
         res = self.merge_nodes_with_data(merge_list)
         return res[0], res[1]
 
     def create_sub_flow(
         self,
-        node_ids: List[str],
+        node_ids: list[str],
         input_type: str = "input",
         output_type: str = "output"
-    ) -> Tuple["FlowInternals", List[Tuple[Node, List[Edge]]], List[Tuple[
-            Node, List[Edge]]]]:
+    ) -> tuple["FlowInternals", list[tuple[Node, list[Edge]]], list[tuple[
+            Node, list[Edge]]]]:
         node_ids_set = set(node_ids)
         assert len(node_ids_set) == len(node_ids), "node ids must be unique"
 
@@ -782,15 +783,15 @@ class FlowInternals:
             node_ids)
         # outside_out_to_edges: node outputs (top nodes) to subflow
         # outside_inp_to_edges: node inputs (bottom nodes) to subflow
-        new_nodes: List[Node] = [self.id_to_node[n] for n in node_ids]
-        new_edges: List[Edge] = []
+        new_nodes: list[Node] = [self.id_to_node[n] for n in node_ids]
+        new_edges: list[Edge] = []
         for edge in self.id_to_edge.values():
             if edge.source in node_ids_set and edge.target in node_ids_set:
                 new_edges.append(edge)
                 # print(edge.id, edge.source, edge.target)
         node_uniq_pool = UniqueNamePool(init_set=node_ids_set)
-        input_node_edge_pairs: List[Tuple[Node, List[Edge]]] = []
-        output_node_edge_pairs: List[Tuple[Node, List[Edge]]] = []
+        input_node_edge_pairs: list[tuple[Node, list[Edge]]] = []
+        output_node_edge_pairs: list[tuple[Node, list[Edge]]] = []
         for (node_id,
              handle), edges in outside_out_to_edges.items():
             original_node = self.id_to_node[node_id]
@@ -801,7 +802,7 @@ class FlowInternals:
                 inp_node.data = dataclasses.replace(inp_node.data)
                 # we copy outside node as input node, so we need to correct handle ids
                 inp_node.data.targetHandleIds = undefined
-            node_new_edges: List[Edge] = []
+            node_new_edges: list[Edge] = []
             for edge in edges:
                 new_edge = dataclasses.replace(edge,
                                                source=inp_node.id,
@@ -821,7 +822,7 @@ class FlowInternals:
                 out_node.data.targetHandleIds = out_node.data.sourceHandleIds
                 out_node.data.sourceHandleIds = undefined
 
-            node_new_edges: List[Edge] = []
+            node_new_edges: list[Edge] = []
             for edge in edges:
                 new_edge = dataclasses.replace(edge,
                                                target=out_node.id,
@@ -837,7 +838,7 @@ class FlowInternals:
 
     def create_internals_with_none_handle(self):
         res_internals = FlowInternals()
-        new_edges: List[Edge] = []
+        new_edges: list[Edge] = []
         for edge in self.id_to_edge.values():
             new_edges.append(dataclasses.replace(edge, sourceHandle=None, targetHandle=None))
         res_internals.set_from_nodes_edges(list(self.id_to_node.values()), new_edges)
@@ -851,16 +852,16 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
     """
     @dataclasses.dataclass
     class ChildDef:
-        nodes: List[Node]
-        edges: List[Edge]
-        extraChilds: Union[Undefined, List[Component]] = undefined
+        nodes: list[Node]
+        edges: list[Edge]
+        extraChilds: Union[Undefined, list[Component]] = undefined
         componentTemplate: Union[Undefined, Component] = undefined
 
     def __init__(
             self,
-            nodes: List[Node],
-            edges: List[Edge],
-            extra_childs: Union[Undefined, List[Component]] = undefined,
+            nodes: list[Node],
+            edges: list[Edge],
+            extra_childs: Union[Undefined, list[Component]] = undefined,
             component_template: Union[Undefined,
                                       Component] = undefined) -> None:
         super().__init__(UIType.Flow,
@@ -869,6 +870,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                                        component_template),
                          allowed_events=[
                              FrontendEventType.FlowSelectionChange.value,
+                             FrontendEventType.FlowVisChange.value,
                              FrontendEventType.FlowNodesInitialized.value,
                              FrontendEventType.FlowEdgeConnection.value,
                              FrontendEventType.FlowEdgeDelete.value,
@@ -880,7 +882,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                              FrontendEventType.ComponentReady.value,
                          ])
 
-        self.event_change = self._create_event_slot(FrontendEventType.Change)
+        # self.event_change = self._create_event_slot(FrontendEventType.Change)
         self.event_selection_change = self._create_event_slot(
             FrontendEventType.FlowSelectionChange,
             lambda x: EventSelection(**x))
@@ -894,6 +896,9 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             FrontendEventType.FlowNodeDelete)
         self.event_node_logic_change = self._create_event_slot(
             FrontendEventType.FlowNodeLogicChange)
+        self.event_vis_change = self._create_event_slot(
+            FrontendEventType.FlowVisChange)
+
         # ready to receive component event.
         self.event_component_ready = self._create_event_slot_noarg(
             FrontendEventType.ComponentReady)
@@ -910,6 +915,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         self.event_edge_delete.on(self._handle_edge_delete)
         self.event_edge_connection.on(self._handle_new_edge)
         self.event_node_logic_change.on(self._handle_node_logic_change)
+        self.event_vis_change.on(self._handle_vis_change)
 
         self.set_flow_event_context_creator(
             lambda: enter_flow_ui_context(self))
@@ -941,7 +947,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
     def _find_comps_in_dataclass(self, child: DataclassType):
         assert isinstance(child, Flow.ChildDef)
         unique_name_pool = UniqueNamePool()
-        res: List[Tuple[Component, str]] = []
+        res: list[tuple[Component, str]] = []
         for node in child.nodes:
             if not isinstance(node.data, Undefined) and not isinstance(
                     node.data.component, Undefined):
@@ -963,7 +969,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             if not isinstance(n, Undefined):
                 assert n.id in self._internals.id_to_node
 
-    def set_nodes_edges_locally(self, nodes: List[Node], edges: List[Edge]):
+    def set_nodes_edges_locally(self, nodes: list[Node], edges: list[Edge]):
         self.childs_complex.nodes = nodes
         self.childs_complex.edges = edges
         self._update_graph_data()
@@ -1004,8 +1010,8 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             return out_content.get(handle_id, [])
 
     def get_all_parent_nodes(self, node_id: str):
-        res: List[Node] = []
-        accessed: Set[str] = set()
+        res: list[Node] = []
+        accessed: set[str] = set()
         cur_parents = self.get_source_nodes(node_id)
         while cur_parents:
             res.extend(cur_parents)
@@ -1019,9 +1025,9 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         return res
 
     def get_all_nodes_in_connected_graph(self, node: Node):
-        visited: Set[str] = set()
+        visited: set[str] = set()
         stack = [node]
-        res: List[Node] = []
+        res: list[Node] = []
         while stack:
             cur = stack.pop()
             if cur.id in visited:
@@ -1046,8 +1052,8 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                                            sync_state_after_change=False,
                                            change_status=False)
 
-    def _handle_node_logic_change(self, nodes: List[Any]):
-        cur_id_to_comp: Dict[str, Component] = {}
+    def _handle_node_logic_change(self, nodes: list[Any]):
+        cur_id_to_comp: dict[str, Component] = {}
         for n in self.nodes:
             if not isinstance(n.data, Undefined) and not isinstance(
                     n.data.component, Undefined):
@@ -1062,13 +1068,12 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                     data["component"] = cur_id_to_comp[data["component"]]
         self.childs_complex.nodes = _NodesHelper(nodes).nodes
 
-    def state_change_callback(
+    def _handle_vis_change(
             self,
-            value: dict,
-            type: ValueType = FrontendEventType.Change.value):
+            value: dict):
         if "nodes" in value:
             # print(value)
-            cur_id_to_comp: Dict[str, Component] = {}
+            cur_id_to_comp: dict[str, Component] = {}
             for n in self.nodes:
                 if not isinstance(n.data, Undefined) and not isinstance(
                         n.data.component, Undefined):
@@ -1086,22 +1091,22 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             self.childs_complex.edges = _EdgesHelper(value["edges"]).edges
         self._update_graph_data()
 
-    async def _handle_node_delete(self, nodes: List[Any]):
+    async def _handle_node_delete(self, nodes: list[Any]):
         """triggered when you use frontend api to delete nodes such as deleteKeyCode
         """
         return await self.delete_nodes_by_ids(
             [n["id"] for n in nodes], _internal_dont_send_comp_event=True)
 
-    async def _handle_new_edge(self, data: Dict[str, Any]):
+    async def _handle_new_edge(self, data: dict[str, Any]):
         new_edge = Edge(**data["newEdge"])
         self.childs_complex.edges.append(new_edge)
         self._update_graph_data()
 
-    def _validate_node_ids(self, node_ids: List[str]):
+    def _validate_node_ids(self, node_ids: list[str]):
         for node_id in node_ids:
             assert node_id in self._internals.id_to_node, f"node id {node_id} not exists"
 
-    async def update_node_internals(self, node_ids: List[str]):
+    async def update_node_internals(self, node_ids: list[str]):
         self._validate_node_ids(node_ids)
         res = {
             "type": FlowControlType.UpdateNodeInternals.value,
@@ -1109,7 +1114,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         }
         return await self.send_and_wait(self.create_comp_event(res))
 
-    async def update_node_props(self, node_id: str, props: Dict[str, Any]):
+    async def update_node_props(self, node_id: str, props: dict[str, Any]):
         self._validate_node_ids([node_id])
         assert "data" not in props, "you can't update data via this api, use update_node_data instead"
         res = {
@@ -1119,7 +1124,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         }
         return await self.send_and_wait(self.create_comp_event(res))
 
-    async def update_node_data(self, node_id: str, data: Dict[str, Any]):
+    async def update_node_data(self, node_id: str, data: dict[str, Any]):
         assert "component" not in data, "you can't update component via this api"
         self._validate_node_ids([node_id])
         res = {
@@ -1129,7 +1134,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         }
         return await self.send_and_wait(self.create_comp_event(res))
 
-    async def update_node_style(self, node_id: str, data: Dict[str, Any]):
+    async def update_node_style(self, node_id: str, data: dict[str, Any]):
         self._validate_node_ids([node_id])
         res = {
             "type": FlowControlType.UpdateNodeStyle.value,
@@ -1138,7 +1143,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         }
         return await self.send_and_wait(self.create_comp_event(res))
 
-    async def set_node_style(self, node_id: str, data: Dict[str, Any]):
+    async def set_node_style(self, node_id: str, data: dict[str, Any]):
         self._validate_node_ids([node_id])
         res = {
             "type": FlowControlType.UpdateNodeStyle.value,
@@ -1148,7 +1153,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         }
         return await self.send_and_wait(self.create_comp_event(res))
 
-    async def select_nodes(self, node_ids: List[str]):
+    async def select_nodes(self, node_ids: list[str]):
         # TODO support controlled select in frontend
         self._validate_node_ids(node_ids)
         node_ids_set = set(node_ids)
@@ -1171,9 +1176,9 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         await self.send_and_wait(self.create_comp_event(res))
         return await self.send_and_wait(self.create_comp_event(res_unselected))
 
-    def _handle_edge_delete(self, edges: List[Any]):
+    def _handle_edge_delete(self, edges: list[Any]):
         edge_ids_set = set([e["id"] for e in edges])
-        new_edges: List[Edge] = []
+        new_edges: list[Edge] = []
         for edge in self.edges:
             if edge.id in edge_ids_set:
                 continue
@@ -1207,15 +1212,15 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
     async def _set_flow_and_do_layout(
             self,
-            nodes: List[Node],
-            edges: List[Edge],
+            nodes: list[Node],
+            edges: list[Edge],
             algo_type: LayoutAlgoType,
             options: Optional[Any] = None,
             fit_view: bool = False,
             duration: Optional[NumberType] = None):
         """Inorder to handle init static flow layout, you should use this function to set flow and do dagre layout.
         """
-        new_layout: Dict[str, Component] = {}
+        new_layout: dict[str, Component] = {}
         for node in nodes:
             comp = node.get_component()
             if comp is not None:
@@ -1252,8 +1257,8 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
     async def set_flow_and_do_dagre_layout(
             self,
-            nodes: List[Node],
-            edges: List[Edge],
+            nodes: list[Node],
+            edges: list[Edge],
             options: Optional[DagreLayoutOptions] = None,
             fit_view: bool = False,
             duration: Optional[NumberType] = None):
@@ -1264,8 +1269,8 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
     async def set_flow_and_do_elk_layout(
             self,
-            nodes: List[Node],
-            edges: List[Edge],
+            nodes: list[Node],
+            edges: list[Edge],
             options: Optional[ElkLayoutOptions] = None,
             fit_view: bool = False,
             duration: Optional[NumberType] = None):
@@ -1281,7 +1286,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         return await self.locate_nodes([node_id], keep_zoom, duration)
 
     async def locate_nodes(self,
-                           node_ids: List[str],
+                           node_ids: list[str],
                            keep_zoom: Optional[bool] = False,
                            duration: Optional[NumberType] = None):
         res = {
@@ -1301,7 +1306,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         }
         return await self.send_and_wait(self.create_comp_event(res))
 
-    async def update_pane_context_menu_items(self, items: List[MenuItem]):
+    async def update_pane_context_menu_items(self, items: list[MenuItem]):
         """Update pane context menu items based on id.
         this function won't add or remove items, only update the existing items.
         """
@@ -1321,7 +1326,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             return await self.send_and_wait(self.create_comp_event(res))
 
     async def update_node_context_menu_items(self, node_id: str,
-                                             items: List[MenuItem]):
+                                             items: list[MenuItem]):
         """Update node context menu items based on id.
         this function won't add or remove items, only update the existing items.
         """
@@ -1341,7 +1346,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                 node_id, {"contextMenuItems": node.data.contextMenuItems})
 
     async def set_node_context_menu_items(self, node_id: str,
-                                          items: List[MenuItem]):
+                                          items: list[MenuItem]):
         """set node context menu items based on id.
         """
         await self.update_node_data(node_id, {
@@ -1349,7 +1354,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         })
 
     async def add_nodes(self,
-                        nodes: List[Node],
+                        nodes: list[Node],
                         screen_to_flow: Optional[bool] = None):
         """Add new nodes to the flow.
 
@@ -1359,7 +1364,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                 you should use this when you use position from pane context menu or drag-drop to add a node.
         """
 
-        new_layout: Dict[str, Component] = {}
+        new_layout: dict[str, Component] = {}
         for node in nodes:
             assert node.id not in self._internals.id_to_node, f"node id {node.id} already exists"
             comp = node.get_component()
@@ -1396,12 +1401,12 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
 
     async def delete_nodes_by_ids(
             self,
-            node_ids: List[str],
+            node_ids: list[str],
             *,
             _internal_dont_send_comp_event: bool = False):
         node_ids_set = set(node_ids)
-        new_nodes: List[Node] = []
-        del_node_id_with_comp: List[str] = []
+        new_nodes: list[Node] = []
+        del_node_id_with_comp: list[str] = []
         for node in self.nodes:
             if node.id not in node_ids_set:
                 new_nodes.append(node)
@@ -1411,7 +1416,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                         del_node_id_with_comp.append(node.id)
         self.childs_complex.nodes = new_nodes
         # remove edges
-        new_edges: List[Edge] = []
+        new_edges: list[Edge] = []
         for edge in self.edges:
             if edge.source in node_ids_set or edge.target in node_ids_set:
                 continue
@@ -1437,9 +1442,9 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                 return await self.send_and_wait(
                     self.create_comp_event(ev_del_node))
 
-    async def delete_edges_by_ids(self, edge_ids: List[str]):
+    async def delete_edges_by_ids(self, edge_ids: list[str]):
         edge_ids_set = set(edge_ids)
-        new_edges: List[Edge] = []
+        new_edges: list[Edge] = []
         for edge in self.edges:
             if edge.id not in edge_ids_set:
                 new_edges.append(edge)
@@ -1450,6 +1455,24 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
             "edgeIds": edge_ids,
         }
         return await self.send_and_wait(self.create_comp_event(ev_del_edge))
+
+    async def add_edges(self,
+                        edges: list[Edge]):
+        """Add new edges to the flow.
+
+        Args:
+            edges (Edge): edges to add.
+        """
+        prev_edges = self.edges
+        new_edges = prev_edges + edges
+        self.childs_complex.edges = new_edges
+        # TODO add validation for unique-ids
+        self._update_graph_data()
+        ev_new_edge = {
+            "type": FlowControlType.AddNewEdges.value,
+            "edges": new_edges,
+        }
+        return await self.send_and_wait(self.create_comp_event(ev_new_edge))
 
 
 class FlowUIContext:
@@ -1685,12 +1708,12 @@ class SymbolicImmediate:
 
 @dataclasses_plain.dataclass
 class SymbolicGraphOutput(Generic[T, T_edge]):
-    nodes: List[Node]
-    edges: List[Edge]
+    nodes: list[Node]
+    edges: list[Edge]
     node_type_map: Union[Undefined,
-                         Dict[str, NodeTypeLiteral]] = undefined
-    node_id_to_data: Dict[str, T] = dataclasses.field(default_factory=dict)
-    edge_id_to_data: Dict[str,
+                         dict[str, NodeTypeLiteral]] = undefined
+    node_id_to_data: dict[str, T] = dataclasses.field(default_factory=dict)
+    edge_id_to_data: dict[str,
                           T_edge] = dataclasses.field(default_factory=dict)
 
 
@@ -1698,17 +1721,17 @@ class SymbolicFlowBuilder(Generic[T, T_edge]):
     """A symbolic flow builder to help you build symbolic flow."""
 
     def __init__(self, use_multiple_handle_node: bool = False) -> None:
-        # self._internals.id_to_node: Dict[str, Node] = {}
-        self._id_to_node_data: Dict[str, T] = {}
+        # self._internals.id_to_node: dict[str, Node] = {}
+        self._id_to_node_data: dict[str, T] = {}
         # _id_to_edge_data use userdata in SymbolicImmediate, added when a new edge is created
-        self._id_to_edge_data: Dict[str, T_edge] = {}
+        self._id_to_edge_data: dict[str, T_edge] = {}
 
-        self._id_to_immedinate: Dict[str, SymbolicImmediate] = {}
+        self._id_to_immedinate: dict[str, SymbolicImmediate] = {}
         # (edge_id, source_handle, target_handle)
         # if handle is None, means default handle
         self._internals = FlowInternals()
 
-        self._node_id_to_immedinates: Dict[str, List[SymbolicImmediate]] = {}
+        self._node_id_to_immedinates: dict[str, list[SymbolicImmediate]] = {}
 
         self._unique_name_pool_imme = UniqueNamePool()
 
@@ -1748,8 +1771,8 @@ class SymbolicFlowBuilder(Generic[T, T_edge]):
 
     def create_op_node(self,
                        name: str,
-                       inp_handles: Optional[List[Optional[str]]],
-                       out_handles: List[Optional[str]],
+                       inp_handles: Optional[list[Optional[str]]],
+                       out_handles: list[Optional[str]],
                        type: Optional[str] = None,
                        node_id: Optional[str] = None,
                        node_data: Optional[T] = None):
@@ -1791,9 +1814,9 @@ class SymbolicFlowBuilder(Generic[T, T_edge]):
 
     def call_op_node(
         self, op_node: Node,
-        op_inp_handle_to_imme: Dict[Optional[str],
+        op_inp_handle_to_imme: dict[Optional[str],
                                     Union[SymbolicImmediate,
-                                          List[SymbolicImmediate]]]):
+                                          list[SymbolicImmediate]]]):
         assert op_node.id in self._internals.id_to_node
         inp_handle_to_edges = self._internals.node_id_to_inp_handle_to_edges[
             op_node.id]
@@ -1826,7 +1849,7 @@ class SymbolicFlowBuilder(Generic[T, T_edge]):
                 # add to source node metas
                 self._internals.node_id_to_targets[imme.source_id].append(
                     (edge_id, handle, imme.source_handle))
-        res_immes: List[SymbolicImmediate] = []
+        res_immes: list[SymbolicImmediate] = []
         # create output immedinate node
         op_node_output_handles = list(out_handle_to_edges.keys())
         for handle in op_node_output_handles:
@@ -1859,7 +1882,7 @@ class SymbolicFlowBuilder(Generic[T, T_edge]):
     def build_detached_flow(self,
                             out_immedinates: Sequence[SymbolicImmediate],
                             disable_handle: bool = True,
-                            out_node_datas: Optional[List[T]] = None,
+                            out_node_datas: Optional[list[T]] = None,
                             default_out_handle: Optional[str] = "out"):
         """Build flow with different config without modifying 
         the current symbolic flow states.
@@ -1907,7 +1930,7 @@ class SymbolicFlowBuilder(Generic[T, T_edge]):
             out_edges.append(edge)
         # get nodes and edges
         all_nodes = list(self._internals.id_to_node.values())
-        all_edges: List[Edge] = []
+        all_edges: list[Edge] = []
         for node_id, handle_to_edges in self._internals.node_id_to_inp_handle_to_edges.items(
         ):
             for edges in handle_to_edges.values():
@@ -1925,7 +1948,7 @@ class SymbolicFlowBuilder(Generic[T, T_edge]):
 
         default_node_types = set(
             ["app", "input", "default", "output", "group", "appTemplate"])
-        node_type_map: Dict[str, NodeTypeLiteral] = {}
+        node_type_map: dict[str, NodeTypeLiteral] = {}
         for node in all_nodes:
             if not isinstance(node.type, Undefined):
                 if node.type not in default_node_types:

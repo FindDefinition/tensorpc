@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 import psutil 
 import json 
 from typing import Any
@@ -83,6 +84,8 @@ async def get_all_subprocess_traceback_by_pyspy(pid: int):
     return name_to_pid_to_tb
 
 async def _get_torchrun_traceback_by_pyspy(main_thread_only: bool = True, is_data_worker: bool = False):
+    import torch 
+    torch_path = Path(torch.__file__).parent
     # 1. locate torchrun process named `pt_elastic``
     main_pid: int = -1
     for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
@@ -98,9 +101,17 @@ async def _get_torchrun_traceback_by_pyspy(main_thread_only: bool = True, is_dat
     name_to_pid_to_tb: dict[str, dict[int, Any]] = {}
     for child in children:
         try:
-            if child.status() != psutil.STATUS_RUNNING:
-                continue
             info = psutil.Process(child.pid).as_dict(attrs=["name", "cmdline"])
+            ignore_proc_found = False
+            for item in info["cmdline"]:
+                if "compile_worker" in item:
+                    # ignore torch inductor compile worker
+                    ignore_proc_found = True 
+                    break 
+            if ignore_proc_found:
+                continue
+            # if child.status() != psutil.STATUS_RUNNING:
+            #     continue
             if is_data_worker:
                 if info["name"] != "pt_data_worker":
                     continue 

@@ -331,4 +331,5 @@ class AppDraftFileStoreBackend(DraftFileStoreBackendBase):
         return await get_app_storage().remove_data_storage_item(path)
 
     async def glob_read(self, path_with_glob: str) -> dict[str, Any]:
-        return await get_app_storage().glob_read_data_storage(path_with_glob)
+        res = await get_app_storage().glob_read_data_storage(path_with_glob)
+        return {k: v.data for k, v in res.items()}

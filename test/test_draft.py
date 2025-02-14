@@ -10,7 +10,7 @@ from tensorpc.core.datamodel.draft import (
     DraftObject, apply_draft_jmes_ops, apply_draft_update_ops,
     apply_draft_update_ops_with_changed_obj_ids, capture_draft_update, cast_any_draft_to_dataclass,
     create_draft, create_draft_type_only, create_literal_draft, get_draft_anno_path_metas,
-    get_draft_anno_type, get_draft_ast_node, getitem_path_dynamic, insert_assign_draft_op, materialize_any_draft_to_dataclass, rebuild_draft_expr)
+    get_draft_anno_type, get_draft_ast_node, getitem_path_dynamic, insert_assign_draft_op, materialize_any_draft_to_dataclass, rebuild_and_stabilize_draft_expr)
 from tensorpc.core.datamodel.draftast import evaluate_draft_ast, evaluate_draft_ast_json
 from tensorpc.core.datamodel.draftstore import (DraftFileStorage,
                                                 DraftFileStoreBackendInMemory,
@@ -336,11 +336,14 @@ def test_nested_model():
 
     ddiff = DeepDiff(dataclasses.asdict(res1), dataclasses.asdict(model.model.nodes["a"].models["b"].nodes["c"]), ignore_order=True)
     assert not ddiff, str(ddiff)
-
-    expr_getitempath_stable = rebuild_draft_expr(get_draft_ast_node(expr_getitempath), draft, model)
+    assert get_draft_ast_node(expr_getitempath).get_jmes_path() == "getitem_path(model,path)"
+    expr_getitempath_stable = rebuild_and_stabilize_draft_expr(get_draft_ast_node(expr_getitempath), draft, model)
     expr_getitempath_stable_node = get_draft_ast_node(expr_getitempath_stable)
-    print(expr_getitempath_stable_node.get_jmes_path())
-    
+    assert expr_getitempath_stable_node.get_jmes_path() == "model.nodes.\"a\".models.\"b\".nodes.\"c\""
+    res2 = evaluate_draft_ast(expr_getitempath_stable_node, model)
+    ddiff = DeepDiff(dataclasses.asdict(res2), dataclasses.asdict(model.model.nodes["a"].models["b"].nodes["c"]), ignore_order=True)
+    assert not ddiff, str(ddiff)
+
 if __name__ == "__main__":
     test_draft(False)
     test_draft(True)
