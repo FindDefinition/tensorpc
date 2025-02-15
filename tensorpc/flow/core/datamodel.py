@@ -53,6 +53,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         self,
         model: _T,
         children: Union[Sequence[Component], Mapping[str, Component]],
+        model_type: Optional[type[_T]] = None
     ) -> None:
         if children is not None and isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
@@ -62,6 +63,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                          allowed_events=[])
         self.prop(dataObject=model)
         self._model: _T = model
+        self._model_type = model_type or type(model)
         self._backend_draft_update_event_key = "__backend_draft_update"
         self._backend_storage_fetched_event_key = "__backend_storage_fetched"
 
@@ -177,7 +179,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         All opeartion you appied to draft object must be valid for real object.
         """
         return cast(_T, create_draft(self.model,
-                                     userdata=DraftOpUserData(self)))
+                                     userdata=DraftOpUserData(self),
+                                     obj_type=self._model_type))
 
     def get_draft_type_only(self) -> _T:
         """Create draft object, but the generated draft AST is depend on annotation type instead of real object.
@@ -188,7 +191,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         """
         return cast(
             _T,
-            create_draft_type_only(type(self.model),
+            create_draft_type_only(obj_type=self._model_type,
                                    userdata=DraftOpUserData(self)))
 
     async def _update_with_jmes_ops_event(self, ops: list[DraftUpdateOp]):

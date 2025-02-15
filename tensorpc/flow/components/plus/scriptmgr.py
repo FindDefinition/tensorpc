@@ -19,6 +19,7 @@ import enum
 import inspect
 import os
 import time
+import traceback
 from typing import Any, Callable, Coroutine, Dict, Iterable, List, Mapping, Optional, Set, Tuple, TypeVar, Union
 from typing_extensions import Literal, overload
 
@@ -837,13 +838,16 @@ class ScriptManagerV2(mui.FlexBox):
                     subprocess.check_call([str(source)])
             elif cur_lang == "app":
                 mod_dict = {}
-                code_comp = compile(code, fname, "exec")
-                exec(code_comp, mod_dict)
-                if SCRIPT_TEMP_STORAGE_KEY in mod_dict:
-                    storage_var = mod_dict[SCRIPT_TEMP_STORAGE_KEY]
-                    if isinstance(storage_var, DictProxy):
-                        storage_var.set_internal(self._manager_global_storage)
-                app_cls = mod_dict["App"]
-                layout = mui.flex_wrapper(app_cls())
-                await self.app_show_box.set_new_layout({"layout": layout})
-
+                try:
+                    code_comp = compile(code, fname, "exec")
+                    exec(code_comp, mod_dict)
+                    if SCRIPT_TEMP_STORAGE_KEY in mod_dict:
+                        storage_var = mod_dict[SCRIPT_TEMP_STORAGE_KEY]
+                        if isinstance(storage_var, DictProxy):
+                            storage_var.set_internal(self._manager_global_storage)
+                    app_cls = mod_dict["App"]
+                    layout = mui.flex_wrapper(app_cls())
+                    await self.app_show_box.set_new_layout({"layout": layout})
+                except Exception as e:
+                    traceback.print_exc()
+                    await self.app_show_box.set_new_layout({"layout": mui.Markdown(f"Error: {e}")})

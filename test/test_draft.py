@@ -1,7 +1,7 @@
 import asyncio
 import base64
 import copy
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Generic, TypeVar, cast, get_origin
 
 from deepdiff.diff import DeepDiff
 
@@ -344,6 +344,22 @@ def test_nested_model():
     ddiff = DeepDiff(dataclasses.asdict(res2), dataclasses.asdict(model.model.nodes["a"].models["b"].nodes["c"]), ignore_order=True)
     assert not ddiff, str(ddiff)
 
+T = TypeVar("T")
+@dataclasses.dataclass
+class GenericModel(Generic[T]):
+    a: T
+
+@dataclasses.dataclass
+class GenericModelWithT(GenericModel[int]):
+    pass
+
+def test_generic_model():
+    for tp in [int, float]:
+        draft = create_draft_type_only(GenericModel[tp])
+        anno_type = get_draft_anno_type(draft.a)
+        assert anno_type is not None and anno_type.origin_type == tp
+
+
 if __name__ == "__main__":
     test_draft(False)
     test_draft(True)
@@ -359,4 +375,6 @@ if __name__ == "__main__":
 
     test_draft_expr()
     test_nested_model()
+
+    test_generic_model()
 

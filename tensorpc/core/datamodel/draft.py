@@ -43,7 +43,7 @@ import enum
 import types
 from typing import Any, Callable, MutableSequence, Optional, Type, TypeVar, Union, cast, get_type_hints
 from tensorpc.core import inspecttools
-from tensorpc.core.annolib import AnnotatedType, parse_type_may_optional_undefined, as_dict_no_undefined
+from tensorpc.core.annolib import AnnotatedType, Undefined, parse_type_may_optional_undefined, as_dict_no_undefined, resolve_type_hints
 import tensorpc.core.dataclass_dispatch as dataclasses
 from collections.abc import MutableMapping, Sequence, Mapping
 import tensorpc.core.datamodel.jmes as jmespath
@@ -239,7 +239,7 @@ def _tensorpc_draft_anno_dispatch(
         return DraftSequence(new_obj, userdata, node, new_anno_state)
     elif anno_type.is_mapping_type():
         return DraftDict(new_obj, userdata, node, new_anno_state)
-    elif issubclass(anno_type.origin_type, (int, float)):
+    elif anno_type.is_number_type():
         # bool is subclass of int
         return DraftMutableScalar(new_obj, userdata, node, new_anno_state)
     elif anno_type.is_union_type():
@@ -343,16 +343,18 @@ class DraftObject(DraftBase):
             # in anno mode, we don't modify or parse obj.
             assert anno_type.is_dataclass_type()
             fields = dataclasses.fields(anno_type.origin_type)
-            type_hints = get_type_hints(anno_type.origin_type,
-                                        include_extras=True)
+            if anno_type.child_types:
+                # generic dataclass
+                type_hints = resolve_type_hints(anno_type.origin_type[tuple(anno_type.child_types)])
+            else:
+                type_hints = resolve_type_hints(anno_type.origin_type)
 
         else:
             assert dataclasses.is_dataclass(
                 obj), f"DraftObject only support dataclass, got {type(obj)}"
             fields = dataclasses.fields(self._tensorpc_draft_attr_real_obj)
-            type_hints = get_type_hints(type(
-                self._tensorpc_draft_attr_real_obj),
-                                        include_extras=True)
+            type_hints = resolve_type_hints(type(
+                self._tensorpc_draft_attr_real_obj))
 
         self._tensorpc_draft_attr_obj_fields_dict = {
             field.name:
@@ -408,6 +410,7 @@ class DraftObject(DraftBase):
             value, DraftBase
         ), "you can't assign a Draft object to another Draft object, assign real value instead."
         # TODO do validate here
+        assert not isinstance(value, Undefined), "currently we don't support assign Undefined to dataclass field."
         ctx.add_op(
             self._tensorpc_draft_get_update_op(JMESPathOpType.SetAttr,
                                                {"items": [(name, value)]}))
@@ -952,7 +955,9 @@ def get_draft_jmespath(draft: DraftBase) -> str:
     return draft._tensorpc_draft_attr_cur_node.get_jmes_path()
 
 
-def create_draft(obj: T, userdata: Any = None) -> T:
+def create_draft(obj: T, userdata: Any = None, obj_type: Optional[type[T]] = None) -> T:
+    if obj_type is None:
+        obj_type = type(obj)
     new_node = DraftASTNode(DraftASTType.NAME, [], "")
     prev_anno_state = _DraftAnnoState(False, None)
     return cast(
@@ -962,7 +967,7 @@ def create_draft(obj: T, userdata: Any = None) -> T:
                                  userdata,
                                  prev_anno_state,
                                  anno_type=parse_type_may_optional_undefined(
-                                     type(obj))))
+                                     obj_type)))
 
 def create_literal_draft(obj: T, userdata: Any = None) -> T:
     assert isinstance(obj, (int, float, str)), "only support scalar type (int/float/str), don't support bool."
@@ -980,10 +985,11 @@ def create_literal_draft(obj: T, userdata: Any = None) -> T:
 def create_draft_type_only(obj_type: type[T], userdata: Any = None) -> T:
     new_node = DraftASTNode(DraftASTType.NAME, [], "")
     prev_anno_state = _DraftAnnoState(True, None)
-    assert dataclasses.is_dataclass(obj_type)
-    return _tensorpc_draft_anno_dispatch(
-        parse_type_may_optional_undefined(obj_type), new_node, userdata,
-        prev_anno_state)
+    anno_type = parse_type_may_optional_undefined(obj_type)        
+    assert dataclasses.is_dataclass(anno_type.origin_type)
+    return cast(T, _tensorpc_draft_anno_dispatch(
+        anno_type, new_node, userdata,
+        prev_anno_state))
 
 
 def get_draft_ast_node(draft: Any) -> DraftASTNode:
