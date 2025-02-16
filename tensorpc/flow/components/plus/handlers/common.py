@@ -406,8 +406,8 @@ class PytorchGraphHandler(DefaultHandler):
             mui.Button("Open Graph", self._open_graph),
         ], tail_dialogs=[self._flow_dialog])
 
-    async def _on_pane_contextmenu(self, data):
-        item_id = data["itemId"]
+    async def _on_pane_contextmenu(self, data: flowui.PaneContextMenuEvent):
+        item_id = data.itemId
         dagre = flowui.DagreLayoutOptions(
             ranksep=20,
         )
@@ -423,7 +423,7 @@ class PytorchGraphHandler(DefaultHandler):
         from tensorpc.flow.components.flowplus.network.pthfx import FlowUIInterpreter, PytorchExportBuilder
         gm = self.obj
         builder = PytorchExportBuilder()
-        interpreter = FlowUIInterpreter(gm, builder, True)
+        interpreter = FlowUIInterpreter(gm, builder, verbose=True)
         outputs = interpreter.run_on_graph_placeholders()
         arrs, _ = extract_object_from_data(outputs, (flowui.SymbolicImmediate,))
         graph_res = builder.build_detached_flow(arrs)
@@ -485,8 +485,8 @@ class PytorchModuleHandler(DefaultHandler):
             self._model_size,
         ])
 
-    async def _on_pane_contextmenu(self, data):
-        item_id = data["itemId"]
+    async def _on_pane_contextmenu(self, data: flowui.PaneContextMenuEvent):
+        item_id = data.itemId
         dagre = flowui.DagreLayoutOptions(
             ranksep=20,
         )

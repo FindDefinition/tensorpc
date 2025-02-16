@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 from collections.abc import Mapping, Sequence
 from functools import partial
@@ -55,6 +56,17 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         children: Union[Sequence[Component], Mapping[str, Component]],
         model_type: Optional[type[_T]] = None
     ) -> None:
+        """
+        Args:
+            model: the model object
+            children: child components
+            model_type: the type of model, if not provided, we will use type(model) as model type.
+                this is required when you use a generic model because we can't get type info
+                in real object. 
+                ```
+                gdm = DataModel(GenericModel(), ..., model_type=GenericModel[int])
+                ```
+        """
         if children is not None and isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(UIType.DataModel,
@@ -74,6 +86,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             self._backend_storage_fetched_event_key)
 
         self._app_storage_handler_registered: bool = False
+        self._app_storage_data_fetched = False
 
         self._is_model_dataclass = dataclasses.is_dataclass(type(model))
         self._is_model_pydantic_dataclass = dataclasses.is_pydantic_dataclass(
@@ -85,38 +98,57 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         self._draft_change_event_handlers: dict[tuple[str, ...], dict[
             Callable, DraftChangeEventHandler]] = {}
 
-        self.event_after_mount.on(self._init)
+        # self.event_after_mount.on(self._init)
 
         self._store: Optional[DraftFileStorage] = None
 
+        self._lock = asyncio.Lock()
+
     async def _run_all_draft_change_handlers_when_init(self):
-        all_handlers = []
-        for handlers in self._draft_change_event_handlers.values():
-            for h in handlers.values():
-                val_dict: dict[str, Any] = {}
-                type_dict: dict[str, DraftEventType] = {}
-                for k, expr in h.draft_expr_dict.items():
-                    obj = evaluate_draft_ast_noexcept(expr, self.model)
-                    val_dict[k] = obj
-                    type_dict[k] = DraftEventType.InitChange
-                # TODO if eval failed, should we call it during init?
-                all_handlers.append(partial(h.handler, DraftChangeEvent(type_dict, val_dict)))
-        await self.run_callbacks(
-            all_handlers,
-            change_status=False,
-            capture_draft=True)
+        async with self._lock:
+            all_handlers = []
+            for handlers in self._draft_change_event_handlers.values():
+                for h in handlers.values():
+                    val_dict: dict[str, Any] = {}
+                    type_dict: dict[str, DraftEventType] = {}
+                    for k, expr in h.draft_expr_dict.items():
+                        obj = evaluate_draft_ast_noexcept(expr, self.model)
+                        val_dict[k] = obj
+                        type_dict[k] = DraftEventType.InitChange
+                    # TODO if eval failed, should we call it during init?
+                    all_handlers.append(partial(h.handler, DraftChangeEvent(type_dict, val_dict)))
+            await self.run_callbacks(
+                all_handlers,
+                change_status=False,
+                capture_draft=True)
 
-    async def _init(self):
-        # we should trigger all draft change event handler when init or model fetched from storage.
-        if not self._app_storage_handler_registered:
-            await self._run_all_draft_change_handlers_when_init()
+    # async def _init(self):
+    #     # we should trigger all draft change event handler when init or model fetched from storage.
+    #     if not self._app_storage_handler_registered:
+    #         await self._run_all_draft_change_handlers_when_init()
 
-    def _draft_change_handler_effect(self, paths: tuple[str, ...],
+    async def _draft_change_handler_effect(self, paths: tuple[str, ...],
                                      handler: DraftChangeEventHandler):
+        should_run_handler = False
+        if not self._app_storage_handler_registered:
+            should_run_handler = True
+        else:
+            should_run_handler = self._app_storage_data_fetched
         if paths not in self._draft_change_event_handlers:
             self._draft_change_event_handlers[paths] = {}
         self._draft_change_event_handlers[paths][handler.handler] = handler
-
+        if should_run_handler:
+            val_dict: dict[str, Any] = {}
+            type_dict: dict[str, DraftEventType] = {}
+            for k, expr in handler.draft_expr_dict.items():
+                obj = evaluate_draft_ast_noexcept(expr, self.model)
+                val_dict[k] = obj
+                type_dict[k] = DraftEventType.InitChange
+            # TODO if eval failed, should we call it during init?
+            ev = DraftChangeEvent(type_dict, val_dict)
+            await self.run_callback(partial(handler.handler, ev),
+                                    change_status=False,
+                                    capture_draft=True)
         def unmount():
             self._draft_change_event_handlers[paths].pop(handler.handler)
 
@@ -161,6 +193,12 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
     def model(self) -> _T:
         return self._model
 
+    def get_model(self):
+        """this func is used as a getter function for model, model instance
+        may changed, so user shouldn't keep model instance.
+        """
+        return self._model
+
     @property
     def prop(self):
         propcls = self.propcls
@@ -174,21 +212,26 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
     async def sync_model(self):
         await self.send_and_wait(self.update_event(dataObject=self.model))
 
-    def get_draft(self) -> _T:
+    def get_draft_from_object(self) -> _T:
         """Create draft object, the generated draft AST is depend on real object.
         All opeartion you appied to draft object must be valid for real object.
+
+        This mode should only be used on data without type.
         """
         return cast(_T, create_draft(self.model,
                                      userdata=DraftOpUserData(self),
                                      obj_type=self._model_type))
 
-    def get_draft_type_only(self) -> _T:
+    def get_draft(self):
         """Create draft object, but the generated draft AST is depend on annotation type instead of real object.
         useful when your draft ast contains optional/undefined path, this kind of path produce undefined in frontend,
         but raise error if we use real object.
 
         We also enable method support in this mode, which isn't allowed in object mode.
         """
+        return self.get_draft_type_only()
+
+    def get_draft_type_only(self) -> _T:
         return cast(
             _T,
             create_draft_type_only(obj_type=self._model_type,
@@ -299,7 +342,13 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         self.event_draft_update.on(
             partial(self._handle_app_storage_update,
                     store=self._store))
+        self.event_after_unmount.on(
+            partial(self._clear_app_storage_status))
+
         self._app_storage_handler_registered = True
+
+    def _clear_app_storage_status(self):
+        self._app_storage_data_fetched = False
 
     async def _fetch_internal_data_from_app_storage(self, store: DraftFileStorage):
         from tensorpc.flow import appctx
@@ -313,6 +362,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         # finally sync the model.
         await self.sync_model()
         await self._run_all_draft_change_handlers_when_init()
+        self._app_storage_data_fetched = True
 
     async def _handle_app_storage_update(self, ops: list[DraftUpdateOp],
                                          store: DraftFileStorage):

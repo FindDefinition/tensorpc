@@ -218,6 +218,8 @@ def resolve_type_hints(obj: Any) -> Dict[str, Any]:
     """Wrap get_type_hints to resolve type vars in case of generic inheritance.
 
     `obj` can also be a parametrized generic class.
+
+    Copied from https://github.com/wyfo/apischema/blob/master/apischema/typing.py
     """
     origin_or_obj = get_origin(obj) or obj
     if isinstance(origin_or_obj, type):
@@ -284,7 +286,7 @@ class AnnotatedType:
         return origin_is_union(self.origin_type)
 
     def is_number_type(self) -> bool:
-        if issubclass(self.origin_type, (int, float)):
+        if inspect.isclass(self.origin_type) and issubclass(self.origin_type, (int, float)):
             return True
         if not self.is_union_type():
             return False
@@ -297,12 +299,18 @@ class AnnotatedType:
         return dataclasses.is_dataclass(self.origin_type)
 
     def is_dict_type(self) -> bool:
+        if self.is_union_type():
+            return False
         return issubclass(self.origin_type, dict)
 
     def is_list_type(self) -> bool:
+        if self.is_union_type():
+            return False
         return issubclass(self.origin_type, list)
 
     def is_sequence_type(self) -> bool:
+        if self.is_union_type():
+            return False
         assert inspect.isclass(
             self.origin_type
         ), f"origin type must be a class, but get {self.origin_type} {type(self.origin_type)}"
@@ -310,6 +318,8 @@ class AnnotatedType:
                           Sequence) and not issubclass(self.origin_type, str)
 
     def is_mapping_type(self) -> bool:
+        if self.is_union_type():
+            return False
         assert inspect.isclass(
             self.origin_type
         ), f"origin type must be a class, but get {self.origin_type}"

@@ -1149,6 +1149,16 @@ def _rebuild_draft_expr_recursive(node: DraftASTNode, root_draft: DraftBase, mod
                 else:
                     raise NotImplementedError(f"invalid draft expr {draft_expr}")
             return draft_expr
+        elif node.value == "not_null":
+            draft_exprs: list[DraftBase] = []
+            for child in node.children:
+                draft_expr = _rebuild_draft_expr_recursive(child, root_draft, model)
+                draft_exprs.append(draft_expr)
+            new_node = DraftASTNode(DraftASTType.FUNC_CALL, [d._tensorpc_draft_attr_cur_node for d in draft_exprs], "not_null")
+            new_ann_type = AnnotatedType(Any, [])
+            new_state = dataclasses.replace(draft_exprs[0]._tensorpc_draft_attr_anno_state, anno_type=new_ann_type)
+            res = DraftImmutableScalar(None, draft_exprs[0]._tensorpc_draft_attr_userdata, new_node, new_state)
+            return res
         else:
             raise NotImplementedError
     else:
@@ -1180,20 +1190,3 @@ def stabilize_getitem_path_in_op_main_path(op: DraftUpdateOp, root_model_draft: 
     node = op.node 
     new_draft_expr = rebuild_and_stabilize_draft_expr(node, root_model_draft, model)
     return dataclasses.replace(op, node=new_draft_expr._tensorpc_draft_attr_cur_node)
-
-
-def getitem_path_dynamic(target: Any, path: Any, result_type: type[T]) -> T:
-    assert isinstance(target, DraftBase), "target should be a Draft object"
-    assert isinstance(path, DraftSequence), "path should be a DraftSequence"
-    tgt_node = target._tensorpc_draft_attr_cur_node
-    path_node = path._tensorpc_draft_attr_cur_node
-    new_node = DraftASTNode(DraftASTType.FUNC_CALL, [tgt_node, path_node], DraftASTFuncType.GET_ITEM_PATH.value)
-    new_anno_type = parse_type_may_optional_undefined(
-                                     result_type)
-    new_node.userdata = new_anno_type
-    prev_anno_state = target._tensorpc_draft_attr_anno_state
-    return cast(T, _tensorpc_draft_dispatch(None,
-                                 new_node,
-                                 target._tensorpc_draft_attr_userdata,
-                                 prev_anno_state,
-                                 anno_type=new_anno_type))

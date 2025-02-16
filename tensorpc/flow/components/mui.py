@@ -1847,6 +1847,9 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         self.props.language = language
         self.props.path = path
         self.props.value = value
+        self._init_value = value
+        self._init_language = language
+        self._init_path = path
         self._view_state = None
         self._save_version_id: Optional[int] = None
         self.register_event_handler(FrontendEventType.EditorSaveState.value,
@@ -1966,7 +1969,7 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
             language = draft_ev.new_value_dict["language"]
             if language is None:
                 # evaluate failed, use a default value
-                language = "python"
+                language = self._init_language
             else:
                 if lang_modifier is not None:
                     language = lang_modifier(language)
@@ -1975,7 +1978,7 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
             path = draft_ev.new_value_dict["path"]
             if path is None:
                 # evaluate failed, use a default value
-                path = "default"
+                path = self._init_path
             else:
                 if path_modifier is not None:
                     path = path_modifier(path)
@@ -1984,7 +1987,7 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
             value = draft_ev.new_value_dict["value"]
             if value is None:
                 # evaluate failed, use a default value
-                value = "# let's write some broken code"
+                value = self._init_value
             modified_props["value"] = value
         batch_ev += (self.update_event(**modified_props))
 

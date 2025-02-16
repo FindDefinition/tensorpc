@@ -1359,9 +1359,10 @@ class ComputeFlow(mui.FlexBox):
                     "Node Context Error",
                     "you must use run cached node when inputs are cached.")
 
-    async def _on_node_contextmenu(self, data):
-        item_id = data["itemId"]
-        node_id = data["nodeId"]
+    async def _on_node_contextmenu(self, data: flowui.NodeContextMenuEvent):
+        item_id = data.itemId
+        node_id = data.nodeId
+
         if item_id == NodeContextMenuItemNames.Run:
             # if node is cached, only run it from cached input
             await self._schedule_roots_by_node_id_or_run_cache(node_id)
@@ -1397,10 +1398,10 @@ class ComputeFlow(mui.FlexBox):
             # TODO better option
             await save_data_storage(self.storage_key, self.state_dict())
 
-    async def _on_pane_contextmenu(self, data):
-        item_id = data["itemId"]
-        mouse_x = data["clientOffset"]["x"]
-        mouse_y = data["clientOffset"]["y"]
+    async def _on_pane_contextmenu(self, data: flowui.PaneContextMenuEvent):
+        item_id = data.itemId
+        mouse_x = data.clientOffset.x
+        mouse_y = data.clientOffset.y
         if item_id == PaneContextMenuItemNames.SideLayout:
             if self.flow_options.enable_side_layout_view:
                 # disable side layout view

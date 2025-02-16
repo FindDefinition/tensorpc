@@ -23,10 +23,12 @@ class DraftASTFuncType(enum.Enum):
     GET_ATTR = "getattr"
     CFORMAT = "cformat"
     GET_ITEM_PATH = "getitem_path"
+    NOT_NULL = "not_null"
 
 _FRONTEND_SUPPORTED_FUNCS = {
     DraftASTFuncType.GET_ITEM.value, DraftASTFuncType.GET_ATTR.value,
-    DraftASTFuncType.CFORMAT.value, DraftASTFuncType.GET_ITEM_PATH.value
+    DraftASTFuncType.CFORMAT.value, DraftASTFuncType.GET_ITEM_PATH.value,
+    DraftASTFuncType.NOT_NULL.value
 }
 
 @dataclasses.dataclass
@@ -62,7 +64,7 @@ def _draft_ast_to_jmes_path_recursive(node: DraftASTNode) -> str:
     if node.type == DraftASTType.NAME:
         return node.value
     elif node.type == DraftASTType.NUMBER_LITERAL:
-        return str(node.value)
+        return f"`{node.value}`"
     elif node.type == DraftASTType.STRING_LITERAL:
         return f"\'{node.value}\'"
     elif node.type in _GET_ITEMS:
@@ -122,6 +124,12 @@ def evaluate_draft_ast(node: DraftASTNode, obj: Any) -> Any:
                     assert dataclasses.is_dataclass(cur_obj)
                     cur_obj = getattr(cur_obj, p)
             return cur_obj
+        elif node.value == "not_null":
+            for child in node.children:
+                res = evaluate_draft_ast(child, obj)
+                if res is not None:
+                    return res
+            return None
         else:
             raise NotImplementedError
     else:
@@ -191,6 +199,13 @@ def evaluate_draft_ast_with_obj_id_trace(node: DraftASTNode,
                     cur_obj = getattr(cur_obj, p)
                 obj_id_trace.append(id(cur_obj))
             return cur_obj, obj_id_trace
+        elif node.value == "not_null":
+            for child in node.children:
+                res, obj_id_trace = evaluate_draft_ast_with_obj_id_trace(
+                    child, obj)
+                if res is not None:
+                    return res, obj_id_trace
+            return None, []
         else:
             raise NotImplementedError
     else:
@@ -234,6 +249,12 @@ def evaluate_draft_ast_json(node: DraftASTNode, obj: Any) -> Any:
                     assert dataclasses.is_dataclass(cur_obj)
                     cur_obj = getattr(cur_obj, p)
             return cur_obj
+        elif node.value == "not_null":
+            for child in node.children:
+                res = evaluate_draft_ast_json(child, obj)
+                if res is not None:
+                    return res
+            return None
         else:
             raise NotImplementedError
     else:

@@ -485,8 +485,8 @@ class PytorchModuleViewer(mui.FlexBox):
             await self._module_tree_select(module_id)
             await self._info_container.set_new_layout([])
 
-    async def _on_pane_contextmenu(self, data):
-        item_id = data["itemId"]
+    async def _on_pane_contextmenu(self, data: flowui.PaneContextMenuEvent):
+        item_id = data.itemId
         if item_id == "dagre":
             await self.graph.do_dagre_layout(self._dagre_cfg_dialog.config)
         if item_id == "elk":

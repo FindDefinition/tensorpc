@@ -46,7 +46,7 @@ class DraftChangeEvent:
     user_eval_vars: Optional[dict[str, Optional[DraftASTNode]]] = None
 
     def is_item_changed(self, key: str):
-        return self.type_dict[key] != DraftEventType.NoChange
+        return key in self.type_dict and self.type_dict[key] != DraftEventType.NoChange
 
     @property 
     def is_changed(self):
