@@ -40,8 +40,11 @@ Our draft change detection only check main path nodes, other node will be treate
 import contextlib
 import contextvars
 import enum
+import json
+import traceback
 import types
 from typing import Any, Callable, MutableSequence, Optional, Type, TypeVar, Union, cast, get_type_hints
+from typing_extensions import Literal
 from tensorpc.core import inspecttools
 from tensorpc.core.annolib import AnnotatedType, Undefined, parse_type_may_optional_undefined, as_dict_no_undefined, resolve_type_hints
 import tensorpc.core.dataclass_dispatch as dataclasses
@@ -189,6 +192,7 @@ class _DraftAnnoState:
     is_type_only: bool
     anno_type: Optional[AnnotatedType] = None
     path_metas: list[tuple[Any, ...]] = dataclasses.field(default_factory=list)
+    can_assign: bool = True
 
 
 def _tensorpc_draft_dispatch(
@@ -196,7 +200,8 @@ def _tensorpc_draft_dispatch(
         node: DraftASTNode,
         userdata: Any,
         prev_anno_state: _DraftAnnoState,
-        anno_type: Optional[AnnotatedType] = None) -> "DraftBase":
+        anno_type: Optional[AnnotatedType] = None,
+        can_assign: bool = True) -> "DraftBase":
     # TODO add annotation validate
     path_metas = prev_anno_state.path_metas.copy()
     if anno_type is not None and anno_type.annometa is not None:
@@ -204,6 +209,10 @@ def _tensorpc_draft_dispatch(
     new_anno_state = dataclasses.replace(prev_anno_state,
                                          anno_type=anno_type,
                                          path_metas=path_metas)
+    if not prev_anno_state.can_assign:
+        new_anno_state.can_assign = False
+    else:
+        new_anno_state.can_assign = can_assign
     if dataclasses.is_dataclass(new_obj):
         return DraftObject(new_obj, userdata, node, new_anno_state)
     elif isinstance(new_obj, Sequence) and not isinstance(new_obj, str):
@@ -220,7 +229,8 @@ def _tensorpc_draft_dispatch(
 
 def _tensorpc_draft_anno_dispatch(
         anno_type: AnnotatedType, node: DraftASTNode, userdata: Any,
-        prev_anno_state: _DraftAnnoState) -> "DraftBase":
+        prev_anno_state: _DraftAnnoState,
+        can_assign: bool = True) -> "DraftBase":
     """For anno dispatch, we only support List, Dict and primitive scalar types.
     """
     new_obj = None
@@ -230,7 +240,10 @@ def _tensorpc_draft_anno_dispatch(
     new_anno_state = dataclasses.replace(prev_anno_state,
                                          anno_type=anno_type,
                                          path_metas=path_metas)
-
+    if not prev_anno_state.can_assign:
+        new_anno_state.can_assign = False
+    else:
+        new_anno_state.can_assign = can_assign
     if anno_type.annometa is not None:
         path_metas = path_metas + [anno_type.annometa]
     if dataclasses.is_dataclass(anno_type.origin_type):
@@ -266,6 +279,9 @@ class DraftBase:
         "_tensorpc_draft_attr_userdata",
         "_tensorpc_draft_attr_cur_node",
         "_tensorpc_draft_attr_anno_state",
+        "_tensorpc_draft_dispatch",
+        "_tensorpc_draft_logic_op",
+        "_tensorpc_draft_binary_op",
     }
 
     def __init__(self,
@@ -323,6 +339,44 @@ class DraftBase:
                                         self._tensorpc_draft_attr_anno_state,
                                         anno_type)
 
+    def _tensorpc_draft_logic_op(self, other: Any, op: Literal["&&", "||"]):
+        assert isinstance(other, DraftBase)
+        new_node = other._tensorpc_draft_attr_cur_node
+        this_node = self._tensorpc_draft_attr_cur_node
+        ast_node = DraftASTNode(DraftASTType.BINARY_OP,
+                                [this_node, new_node], op)
+        if self._tensorpc_draft_attr_anno_state.is_type_only:
+            return self._tensorpc_draft_dispatch(None, ast_node, AnnotatedType(bool, []))
+        return self._tensorpc_draft_dispatch(
+            self._tensorpc_draft_attr_real_obj, ast_node, AnnotatedType(bool, []))
+
+    def _tensorpc_draft_binary_op(self, other: Any, op: Literal["==", "!=", ">", "<", ">=", "<="]):
+        if not isinstance(other, DraftComparableScalar):
+            if isinstance(other, str):
+                ast_type = DraftASTType.STRING_LITERAL
+            else:
+                # obj must be json serializable
+                json.dumps(other)
+                ast_type = DraftASTType.JSON_LITERAL
+            new_node = DraftASTNode(ast_type, [], other)
+        else:
+            new_node = other._tensorpc_draft_attr_cur_node
+        this_node = self._tensorpc_draft_attr_cur_node
+        ast_node = DraftASTNode(DraftASTType.BINARY_OP,
+                                [this_node, new_node], op)
+        
+        if self._tensorpc_draft_attr_anno_state.is_type_only:
+            return self._tensorpc_draft_dispatch(None, ast_node, AnnotatedType(bool, []))
+        return self._tensorpc_draft_dispatch(
+            self._tensorpc_draft_attr_real_obj, ast_node, AnnotatedType(bool, []))
+
+    def __eq__(self, other: Any): # type: ignore
+        assert other is None, "only allow compare with None for all draft object"
+        return self._tensorpc_draft_binary_op(other, "==")
+    
+    def __ne__(self, other: Any): # type: ignore
+        assert other is None, "only allow compare with None for all draft object"
+        return self._tensorpc_draft_binary_op(other, "!=")
 
 class DraftObject(DraftBase):
     __known_attrs__ = {
@@ -537,6 +591,31 @@ class DraftSequence(DraftBase):
                 "item": item
             }))
 
+    def __add__(self, other: Any):
+        return _draft_seq_add(self, other, False)
+
+    def __radd__(self, other: Any):
+        return _draft_seq_add(self, other, True)
+
+def _draft_seq_add(x: Any, other: Any, is_reverse: bool):
+    assert isinstance(x, DraftSequence)
+    if not isinstance(other, DraftSequence):
+        assert isinstance(other, list), f"DraftSequence only support list, got {type(other)}"
+        json.dumps(other)
+        ast_type = DraftASTType.JSON_LITERAL
+        new_node = DraftASTNode(ast_type, [], other)
+    else:
+        new_node = other._tensorpc_draft_attr_cur_node
+    this_node = x._tensorpc_draft_attr_cur_node
+    args = [this_node, new_node] if not is_reverse else [new_node, this_node]
+    ast_node = DraftASTNode(DraftASTType.FUNC_CALL,
+                            args, "concat")
+    
+    if x._tensorpc_draft_attr_anno_state.is_type_only:
+        return x._tensorpc_draft_dispatch(None, ast_node, x._tensorpc_draft_attr_anno_state.anno_type)
+    return x._tensorpc_draft_dispatch(
+        x._tensorpc_draft_attr_real_obj, ast_node, x._tensorpc_draft_attr_anno_state.anno_type)
+
 
 class DraftDict(DraftBase):
 
@@ -633,7 +712,55 @@ class DraftImmutableScalar(DraftBase):
     """Leaf draft object, user can't do any operation on it."""
     pass
 
-class DraftImmutableString(DraftImmutableScalar):
+
+class DraftAny(DraftBase):
+    """Leaf draft object, user can't do any operation on it."""
+    pass
+
+class DraftUnion(DraftBase):
+    """Leaf draft object, user can't do any operation on it."""
+    pass
+
+class DraftComparableScalar(DraftBase):
+    def _tensorpc_draft_compare(self, other: Any, op: Literal["==", "!=", ">", "<", ">=", "<="]):
+        if not isinstance(other, DraftComparableScalar):
+            if isinstance(other, str):
+                ast_type = DraftASTType.STRING_LITERAL
+            else:
+                # obj must be json serializable
+                json.dumps(other)
+                ast_type = DraftASTType.JSON_LITERAL
+            new_node = DraftASTNode(ast_type, [], other)
+        else:
+            new_node = other._tensorpc_draft_attr_cur_node
+        this_node = self._tensorpc_draft_attr_cur_node
+        ast_node = DraftASTNode(DraftASTType.BINARY_OP,
+                                [this_node, new_node], op)
+        
+        if self._tensorpc_draft_attr_anno_state.is_type_only:
+            return self._tensorpc_draft_dispatch(None, ast_node, AnnotatedType(bool, []))
+        return self._tensorpc_draft_dispatch(
+            self._tensorpc_draft_attr_real_obj, ast_node, AnnotatedType(bool, []))
+
+    def __eq__(self, other: Any): # type: ignore
+        return self._tensorpc_draft_compare(other, "==")
+    
+    def __ne__(self, other: Any): # type: ignore
+        return self._tensorpc_draft_compare(other, "!=")
+
+    def __gt__(self, other: Any):
+        return self._tensorpc_draft_compare(other, ">")
+
+    def __lt__(self, other: Any):
+        return self._tensorpc_draft_compare(other, "<")
+    
+    def __ge__(self, other: Any):
+        return self._tensorpc_draft_compare(other, ">=")
+
+    def __le__(self, other: Any):
+        return self._tensorpc_draft_compare(other, "<=")
+    
+class DraftImmutableString(DraftComparableScalar):
     """string object, only support c-style format.
     When you use c-style format, keep in mind that we don't support mapping key in format string.
     """
@@ -651,7 +778,7 @@ class DraftImmutableString(DraftImmutableScalar):
                 if isinstance(item, str):
                     ast_type = DraftASTType.STRING_LITERAL
                 else:
-                    ast_type = DraftASTType.NUMBER_LITERAL
+                    ast_type = DraftASTType.JSON_LITERAL
                 node = DraftASTNode(ast_type, [], item)
                 res_nodes.append(node)
         ast_node = DraftASTNode(DraftASTType.FUNC_CALL,
@@ -663,15 +790,8 @@ class DraftImmutableString(DraftImmutableScalar):
             self._tensorpc_draft_attr_real_obj, ast_node, AnnotatedType(str, []))
 
 
-class DraftAny(DraftBase):
-    """Leaf draft object, user can't do any operation on it."""
-    pass
 
-class DraftUnion(DraftBase):
-    """Leaf draft object, user can't do any operation on it."""
-    pass
-
-class DraftMutableScalar(DraftBase):
+class DraftMutableScalar(DraftComparableScalar):
 
     def __iadd__(self, other: Union[int, float]):
         _assert_not_draft(other)
@@ -877,6 +997,7 @@ def apply_draft_update_ops_with_changed_obj_ids(obj: Any,
             cur_obj, obj_id_trace = evaluate_draft_ast_with_obj_id_trace(
                 op.node, obj)
         except:
+            traceback.print_exc()
             if ignore_exc:
                 continue
             raise
@@ -970,9 +1091,14 @@ def create_draft(obj: T, userdata: Any = None, obj_type: Optional[type[T]] = Non
                                      obj_type)))
 
 def create_literal_draft(obj: T, userdata: Any = None) -> T:
-    assert isinstance(obj, (int, float, str)), "only support scalar type (int/float/str), don't support bool."
-    new_node = DraftASTNode(DraftASTType.NUMBER_LITERAL if isinstance(obj, (int, float)) else DraftASTType.STRING_LITERAL, [], obj)
-    prev_anno_state = _DraftAnnoState(False, None)
+    if isinstance(obj, str):
+        ast_type = DraftASTType.STRING_LITERAL
+    else:
+        # obj must be json serializable
+        json.dumps(obj)
+        ast_type = DraftASTType.JSON_LITERAL
+    new_node = DraftASTNode(ast_type, [], obj)
+    prev_anno_state = _DraftAnnoState(False, None, can_assign=False)
     return cast(
         T,
         _tensorpc_draft_dispatch(obj,
@@ -1001,6 +1127,11 @@ def get_draft_anno_type(draft: Any) -> Optional[AnnotatedType]:
     assert isinstance(draft, DraftBase), "draft should be a Draft object"
     return draft._tensorpc_draft_attr_anno_state.anno_type
 
+def get_draft_anno_type_checked(draft: Any) -> AnnotatedType:
+    assert isinstance(draft, DraftBase), "draft should be a Draft object"
+    res = draft._tensorpc_draft_attr_anno_state.anno_type
+    assert res is not None, "draft should have anno type"
+    return res
 
 def get_draft_anno_path_metas(draft: Any) -> list[tuple[Any, ...]]:
     assert isinstance(draft, DraftBase), "draft should be a Draft object"
@@ -1111,7 +1242,7 @@ def _rebuild_draft_expr_recursive(node: DraftASTNode, root_draft: DraftBase, mod
         if node.value == "" or node.value == "$":
             return root_draft
         return getattr(root_draft, node.value)
-    elif node.type == DraftASTType.NUMBER_LITERAL or node.type == DraftASTType.STRING_LITERAL:
+    elif node.type == DraftASTType.JSON_LITERAL or node.type == DraftASTType.STRING_LITERAL:
         return node.value
     elif node.type == DraftASTType.GET_ATTR:
         return getattr(_rebuild_draft_expr_recursive(node.children[0], root_draft, model), node.value)
@@ -1119,6 +1250,28 @@ def _rebuild_draft_expr_recursive(node: DraftASTNode, root_draft: DraftBase, mod
         draft_target = _rebuild_draft_expr_recursive(node.children[0], root_draft, model)
         assert isinstance(draft_target, (DraftSequence, DraftDict))
         return draft_target[node.value]
+
+    elif node.type == DraftASTType.BINARY_OP:
+        op = node.value
+        x = _rebuild_draft_expr_recursive(
+            node.children[0], root_draft, model)
+        y = _rebuild_draft_expr_recursive(
+            node.children[1], root_draft, model)
+        assert isinstance(x, DraftComparableScalar) and isinstance(y, DraftComparableScalar)
+        if op == "==":
+            return cast(DraftBase, x == y)
+        elif op == "!=":
+            return cast(DraftBase, x != y)
+        elif op == ">":
+            return cast(DraftBase, x > y)
+        elif op == "<":
+            return cast(DraftBase, x < y)
+        elif op == ">=":
+            return cast(DraftBase, x >= y)
+        elif op == "<=":
+            return cast(DraftBase, x <= y)
+        else:
+            raise NotImplementedError(f"op {op} not implemented")
     elif node.type == DraftASTType.FUNC_CALL:
         if node.value == "getitem":
             # for dynamic ops, we need real model value as key.
@@ -1160,7 +1313,7 @@ def _rebuild_draft_expr_recursive(node: DraftASTNode, root_draft: DraftBase, mod
             res = DraftImmutableScalar(None, draft_exprs[0]._tensorpc_draft_attr_userdata, new_node, new_state)
             return res
         else:
-            raise NotImplementedError
+            raise NotImplementedError(f"{node.value} not supported in rebuild")
     else:
         raise NotImplementedError(f"node type {node.type} not implemented")
 

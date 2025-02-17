@@ -118,6 +118,9 @@ class FlowProps(ContainerBaseProps):
                                  Undefined] = undefined
     paneContextMenuItems: Union[Undefined, list[MenuItem]] = undefined
     nodeContextMenuItems: Union[Undefined, list[MenuItem]] = undefined
+    # map a type to node implementation (input, app, etc), usually used when you
+    # want to override default node stype, you can use `.react-flow__node-YOUR_TYPE`
+    # to override style for node with this type.
     nodeTypeMap: Union[Undefined,
                        dict[str, NodeTypeLiteral]] = undefined
     preventCycle: Union[Undefined, bool] = undefined
@@ -127,7 +130,9 @@ class FlowProps(ContainerBaseProps):
 
     defaultLayoutSize: Union[Undefined, tuple[NumberType,
                                               NumberType]] = undefined
-
+    # used for multiple-flow-data one UI, all events except drop
+    # will contains this uid.
+    flowUserUid: Union[Undefined, str] = undefined
 
 @dataclasses.dataclass
 class XYPosition:
@@ -360,6 +365,7 @@ class ElkLayoutOptions:
 class EventSelection:
     nodes: list[str]
     edges: list[str]
+    flowUserUid: Optional[str] = None
 
 _T_node_data_dict = TypeVar("_T_node_data_dict", bound=Optional[dict[str, Any]])
 _T_edge_data_dict = TypeVar("_T_edge_data_dict", bound=Optional[dict[str, Any]])
@@ -854,6 +860,7 @@ class PaneContextMenuEvent:
     mouseY: NumberType
     clientOffset: XYPosition
     flowPosition: Optional[XYPosition] = None
+    flowUserUid: Optional[str] = None
 
 @dataclasses.dataclass(kw_only=True)
 class NodeContextMenuEvent(PaneContextMenuEvent):
@@ -1067,7 +1074,8 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                                            sync_state_after_change=False,
                                            change_status=False)
 
-    def _handle_node_logic_change(self, nodes: list[Any]):
+    def _handle_node_logic_change(self, data: dict):
+        nodes: list[Any] = data["nodes"]
         cur_id_to_comp: dict[str, Component] = {}
         for n in self.nodes:
             if not isinstance(n.data, Undefined) and not isinstance(
@@ -1099,16 +1107,20 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                 if "data" in node_raw:
                     data = node_raw["data"]
                     if "component" in data:
-                        assert data["component"] in cur_id_to_comp
+                        msg = (f"flow {self._flow_uid_encoded} component "
+                            f"{data['component']} not exists. ev: {value} "
+                            f"nodeIds: {[n.id for n in self.nodes]}")
+                        assert data["component"] in cur_id_to_comp, msg
                         data["component"] = cur_id_to_comp[data["component"]]
             self.childs_complex.nodes = _NodesHelper(value["nodes"]).nodes
         if "edges" in value:
             self.childs_complex.edges = _EdgesHelper(value["edges"]).edges
         self._update_graph_data()
 
-    async def _handle_node_delete(self, nodes: list[Any]):
+    async def _handle_node_delete(self, data: dict):
         """triggered when you use frontend api to delete nodes such as deleteKeyCode
         """
+        nodes = data["nodesToDel"]
         return await self.delete_nodes_by_ids(
             [n["id"] for n in nodes], _internal_dont_send_comp_event=True)
 
@@ -1191,7 +1203,8 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         await self.send_and_wait(self.create_comp_event(res))
         return await self.send_and_wait(self.create_comp_event(res_unselected))
 
-    def _handle_edge_delete(self, edges: list[Any]):
+    def _handle_edge_delete(self, data: dict):
+        edges = data["edgesToDel"]
         edge_ids_set = set([e["id"] for e in edges])
         new_edges: list[Edge] = []
         for edge in self.edges:
@@ -1489,6 +1502,10 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
         }
         return await self.send_and_wait(self.create_comp_event(ev_new_edge))
 
+    async def clear(self):
+        await self.delete_nodes_by_ids([n.id for n in self.nodes])
+        await self.delete_edges_by_ids([e.id for e in self.edges])
+        self._internals = FlowInternals()
 
 class FlowUIContext:
 

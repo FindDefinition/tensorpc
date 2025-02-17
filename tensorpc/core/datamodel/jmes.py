@@ -25,6 +25,15 @@ class _JMESCustomFunctions(functions.Functions):
             obj = obj[attr]
         return obj
 
+    @functions.signature({'types': ['array'], 'variadic': True})
+    def _func_concat(self, *arrs):
+        return sum(arrs, [])
+
+    @functions.signature({'types': ['boolean']}, {'types': []}, {'types': []})
+    def _func_where(self, cond, x, y):
+        return x if cond else y
+
+
 # 4. Provide an instance of your subclass in a Options object.
 _JMES_EXTEND_OPTIONS = jmespath.Options(custom_functions=_JMESCustomFunctions())
 

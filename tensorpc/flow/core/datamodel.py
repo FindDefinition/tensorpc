@@ -351,7 +351,6 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         self._app_storage_data_fetched = False
 
     async def _fetch_internal_data_from_app_storage(self, store: DraftFileStorage):
-        from tensorpc.flow import appctx
         assert dataclasses.is_dataclass(
             self.model), "only support dataclass model"
         self._model = await store.fetch_model()

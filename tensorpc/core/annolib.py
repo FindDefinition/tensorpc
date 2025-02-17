@@ -295,6 +295,11 @@ class AnnotatedType:
                 return False
         return True
 
+    def is_bool_type(self) -> bool:
+        if inspect.isclass(self.origin_type) and issubclass(self.origin_type, bool):
+            return True
+        return False
+
     def is_dataclass_type(self) -> bool:
         return dataclasses.is_dataclass(self.origin_type)
 

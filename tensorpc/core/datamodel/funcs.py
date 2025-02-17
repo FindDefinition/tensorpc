@@ -1,30 +1,38 @@
 
-from typing import TypeVar, Any, cast
+from typing import Optional, TypeVar, Any, Union, cast
+from typing_extensions import Literal
 from tensorpc.core import dataclass_dispatch as dataclasses
-from tensorpc.core.annolib import AnnotatedType, parse_type_may_optional_undefined 
-from .draft import DraftBase, DraftImmutableScalar, DraftSequence, DraftASTNode, DraftASTType, DraftASTFuncType, _tensorpc_draft_dispatch, create_literal_draft
+from tensorpc.core.annolib import AnnotatedType, parse_type_may_optional_undefined
+from tensorpc.core.datamodel.draftast import evaluate_draft_ast_noexcept
+from .draft import DraftBase, DraftImmutableScalar, DraftSequence, DraftASTNode, DraftASTType, DraftASTFuncType, _tensorpc_draft_anno_dispatch, create_literal_draft, get_draft_anno_type, get_draft_anno_type_checked
 
 
 T = TypeVar('T')
 
-def getitem_path_dynamic(target: Any, path: Any, result_type: type[T]) -> T:
+def evaluate_draft(draft: T, model: Any) -> Optional[T]:
+    assert isinstance(draft, DraftBase)
+    return evaluate_draft_ast_noexcept(draft._tensorpc_draft_attr_cur_node, model)
+
+def literal_val(obj: T) -> T:
+    return create_literal_draft(obj)
+
+def getitem_path_dynamic(target: Any, path: Any, result_type: Any) -> Any:
     assert isinstance(target, DraftBase), "target should be a Draft object"
     assert isinstance(path, DraftSequence), "path should be a DraftSequence"
     tgt_node = target._tensorpc_draft_attr_cur_node
     path_node = path._tensorpc_draft_attr_cur_node
+    assert target._tensorpc_draft_attr_anno_state.is_type_only, "getitem_path_dynamic should be used in type only mode"
     new_node = DraftASTNode(DraftASTType.FUNC_CALL, [tgt_node, path_node], DraftASTFuncType.GET_ITEM_PATH.value)
     new_anno_type = parse_type_may_optional_undefined(
                                      result_type)
     new_node.userdata = new_anno_type
     prev_anno_state = target._tensorpc_draft_attr_anno_state
-    return cast(T, _tensorpc_draft_dispatch(None,
+    return cast(Any, _tensorpc_draft_anno_dispatch(new_anno_type,
                                  new_node,
                                  target._tensorpc_draft_attr_userdata,
-                                 prev_anno_state,
-                                 anno_type=new_anno_type))
+                                 prev_anno_state))
 
-def not_null(*args: Any):
-    """resolve first not null value"""
+def _simple_expr_func_with_any_res(func_name: str, *args: Any, return_type: Optional[Any] = None) -> Any:
     nodes: list[DraftASTNode] = []
     draft_exprs: list[DraftBase] = []
     for a in args:
@@ -35,8 +43,31 @@ def not_null(*args: Any):
             expr = create_literal_draft(a)
             nodes.append(expr._tensorpc_draft_attr_cur_node)
             draft_exprs.append(expr)
-    new_node = DraftASTNode(DraftASTType.FUNC_CALL, [d._tensorpc_draft_attr_cur_node for d in draft_exprs], "not_null")
-    new_ann_type = AnnotatedType(Any, [])
-    new_state = dataclasses.replace(draft_exprs[0]._tensorpc_draft_attr_anno_state, anno_type=new_ann_type)
-    res = DraftImmutableScalar(None, draft_exprs[0]._tensorpc_draft_attr_userdata, new_node, new_state)
+    new_node = DraftASTNode(DraftASTType.FUNC_CALL, [d._tensorpc_draft_attr_cur_node for d in draft_exprs], func_name)
+    new_ann_type = parse_type_may_optional_undefined(Any if return_type is None else return_type)
+    res = _tensorpc_draft_anno_dispatch(new_ann_type,
+                                 new_node,
+                                 None,
+                                 draft_exprs[0]._tensorpc_draft_attr_anno_state)
     return cast(Any, res)
+
+def not_null(*args: Any):
+    """resolve first not null value"""
+    return _simple_expr_func_with_any_res("not_null", *args)
+
+def where(cond: Any, x: Any, y: Any, return_type: Optional[Any] = None):
+    return _simple_expr_func_with_any_res("where", cond, x, y, return_type=return_type)
+
+def create_array(*args: Any):
+    return cast(list[Any], _simple_expr_func_with_any_res("create_array", *args, return_type=list[Any]))
+
+def _logical_op(a: Any, b: Any, op: Literal["&&", "||"]) -> bool:
+    assert isinstance(a, DraftBase) and isinstance(b, DraftBase), "logical_and should be used with Draft objects"
+    assert get_draft_anno_type_checked(a).is_bool_type() and get_draft_anno_type_checked(b).is_bool_type(), "logical_and should be used with bool type Draft objects"
+    return cast(bool, a._tensorpc_draft_logic_op(b, "&&"))
+    
+def logical_and(a: Any, b: Any) -> bool:
+    return _logical_op(a, b, "&&")
+
+def logical_or(a: Any, b: Any) -> bool:
+    return _logical_op(a, b, "||")

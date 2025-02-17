@@ -333,15 +333,14 @@ def test_nested_model():
     )
     draft = create_draft_type_only(type(model))
     expr_getitempath = D.getitem_path_dynamic(draft.model, draft.path, NestedNode)
-
     res1 = evaluate_draft_ast(get_draft_ast_node(expr_getitempath), model)
 
     ddiff = DeepDiff(dataclasses.asdict(res1), dataclasses.asdict(model.model.nodes["a"].models["b"].nodes["c"]), ignore_order=True)
     assert not ddiff, str(ddiff)
-    assert get_draft_ast_node(expr_getitempath).get_jmes_path() == "getitem_path(model,path)"
+    assert get_draft_ast_node(expr_getitempath).get_jmes_path() == "getitem_path($.model,$.path)"
     expr_getitempath_stable = rebuild_and_stabilize_draft_expr(get_draft_ast_node(expr_getitempath), draft, model)
     expr_getitempath_stable_node = get_draft_ast_node(expr_getitempath_stable)
-    assert expr_getitempath_stable_node.get_jmes_path() == "model.nodes.\"a\".models.\"b\".nodes.\"c\""
+    assert expr_getitempath_stable_node.get_jmes_path() == "$.model.nodes.\"a\".models.\"b\".nodes.\"c\""
     res2 = evaluate_draft_ast(expr_getitempath_stable_node, model)
     ddiff = DeepDiff(dataclasses.asdict(res2), dataclasses.asdict(model.model.nodes["a"].models["b"].nodes["c"]), ignore_order=True)
     assert not ddiff, str(ddiff)

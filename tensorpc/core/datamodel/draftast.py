@@ -1,5 +1,6 @@
 from collections.abc import Mapping, Sequence
 import enum
+import json
 import types
 from typing import Any, Callable, MutableSequence, Optional, Type, TypeVar, Union, cast, get_type_hints
 import tensorpc.core.dataclass_dispatch as dataclasses
@@ -14,8 +15,10 @@ class DraftASTType(enum.IntEnum):
     DICT_GET_ITEM = 2
     FUNC_CALL = 3
     NAME = 4
-    NUMBER_LITERAL = 5
+    JSON_LITERAL = 5
     STRING_LITERAL = 6
+    BINARY_OP = 7
+    UNARY_OP = 8
 
 
 class DraftASTFuncType(enum.Enum):
@@ -24,11 +27,15 @@ class DraftASTFuncType(enum.Enum):
     CFORMAT = "cformat"
     GET_ITEM_PATH = "getitem_path"
     NOT_NULL = "not_null"
+    WHERE = "where"
+    CREATE_ARRAY = "create_array"
+    CONCAT = "concat"
 
 _FRONTEND_SUPPORTED_FUNCS = {
     DraftASTFuncType.GET_ITEM.value, DraftASTFuncType.GET_ATTR.value,
     DraftASTFuncType.CFORMAT.value, DraftASTFuncType.GET_ITEM_PATH.value,
-    DraftASTFuncType.NOT_NULL.value
+    DraftASTFuncType.NOT_NULL.value, DraftASTFuncType.WHERE.value,
+    DraftASTFuncType.CREATE_ARRAY.value, DraftASTFuncType.CONCAT.value
 }
 
 @dataclasses.dataclass
@@ -54,6 +61,9 @@ class DraftASTNode:
             yield from child.walk()
 
 
+    def __repr__(self):
+        return self.get_jmes_path()
+
 _GET_ITEMS = set([
     DraftASTType.GET_ATTR, DraftASTType.ARRAY_GET_ITEM,
     DraftASTType.DICT_GET_ITEM
@@ -62,9 +72,14 @@ _GET_ITEMS = set([
 
 def _draft_ast_to_jmes_path_recursive(node: DraftASTNode) -> str:
     if node.type == DraftASTType.NAME:
-        return node.value
-    elif node.type == DraftASTType.NUMBER_LITERAL:
-        return f"`{node.value}`"
+        return "$" if node.value == "" else node.value
+    elif node.type == DraftASTType.JSON_LITERAL:
+        if isinstance(node.value, (int, float)):
+            if isinstance(node.value, bool):
+                return f"`{str(node.value).lower()}`"                
+            return f"`{node.value}`"
+        else:
+            return f"`{json.dumps(node.value)}`"
     elif node.type == DraftASTType.STRING_LITERAL:
         return f"\'{node.value}\'"
     elif node.type in _GET_ITEMS:
@@ -84,6 +99,14 @@ def _draft_ast_to_jmes_path_recursive(node: DraftASTNode) -> str:
         return f"{node.value}(" + ",".join([
             _draft_ast_to_jmes_path_recursive(child) for child in node.children
         ]) + ")"
+    
+    elif node.type == DraftASTType.BINARY_OP:
+        op = node.value
+        return f"{_draft_ast_to_jmes_path_recursive(node.children[0])}{op}{_draft_ast_to_jmes_path_recursive(node.children[1])}"
+    elif node.type == DraftASTType.UNARY_OP:
+        op = node.value
+        return f"{op}{_draft_ast_to_jmes_path_recursive(node.children[0])}"
+    
     else:
         raise NotImplementedError(f"node type {node.type} not implemented")
 
@@ -93,12 +116,41 @@ def evaluate_draft_ast(node: DraftASTNode, obj: Any) -> Any:
         if node.value == "" or node.value == "$":
             return obj
         return getattr(obj, node.value)
-    elif node.type == DraftASTType.NUMBER_LITERAL or node.type == DraftASTType.STRING_LITERAL:
+    elif node.type == DraftASTType.JSON_LITERAL or node.type == DraftASTType.STRING_LITERAL:
         return node.value
     elif node.type == DraftASTType.GET_ATTR:
         return getattr(evaluate_draft_ast(node.children[0], obj), node.value)
     elif node.type == DraftASTType.ARRAY_GET_ITEM or node.type == DraftASTType.DICT_GET_ITEM:
         return evaluate_draft_ast(node.children[0], obj)[node.value]
+    elif node.type == DraftASTType.BINARY_OP:
+        op = node.value
+        x = evaluate_draft_ast(node.children[0], obj)
+        y = evaluate_draft_ast(node.children[1], obj)
+        if op == "==":
+            return x == y
+        elif op == "!=":
+            return x != y
+        elif op == ">":
+            return x > y
+        elif op == "<":
+            return x < y
+        elif op == ">=":
+            return x >= y
+        elif op == "<=":
+            return x <= y
+        elif op == "&&":
+            return x and y
+        elif op == "||":
+            return x or y
+        else:
+            raise NotImplementedError
+    elif node.type == DraftASTType.UNARY_OP:
+        op = node.value
+        x = evaluate_draft_ast(node.children[0], obj)
+        if op == "!":
+            return not x
+        else:
+            raise NotImplementedError
     elif node.type == DraftASTType.FUNC_CALL:
         if node.value == "getitem":
             k = evaluate_draft_ast(node.children[1], obj)
@@ -130,8 +182,20 @@ def evaluate_draft_ast(node: DraftASTNode, obj: Any) -> Any:
                 if res is not None:
                     return res
             return None
+        elif node.value == "where":
+            cond = evaluate_draft_ast(
+                node.children[0], obj)
+            x = evaluate_draft_ast(
+                node.children[1], obj)
+            y = evaluate_draft_ast(
+                node.children[2], obj)
+            return x if cond else y
+        elif node.value == "create_array":
+            return [evaluate_draft_ast(child, obj) for child in node.children]
+        elif node.value == "concat":
+            return sum([evaluate_draft_ast(child, obj) for child in node.children], [])
         else:
-            raise NotImplementedError
+            raise NotImplementedError(f"func {node.value} not implemented")
     else:
         raise NotImplementedError(f"node type {node.type} not implemented")
 
@@ -154,7 +218,7 @@ def evaluate_draft_ast_with_obj_id_trace(node: DraftASTNode,
         if node.value == "" or node.value == "$":
             return (obj, [id(obj)])
         return getattr(obj, node.value), [id(obj)]
-    elif node.type == DraftASTType.NUMBER_LITERAL or node.type == DraftASTType.STRING_LITERAL:
+    elif node.type == DraftASTType.JSON_LITERAL or node.type == DraftASTType.STRING_LITERAL:
         return node.value, []
     elif node.type == DraftASTType.GET_ATTR:
         target, obj_id_trace = evaluate_draft_ast_with_obj_id_trace(
@@ -166,6 +230,37 @@ def evaluate_draft_ast_with_obj_id_trace(node: DraftASTNode,
             node.children[0], obj)
         res = target[node.value]
         return res, obj_id_trace + [id(res)]
+    elif node.type == DraftASTType.BINARY_OP:
+        op = node.value
+        x = evaluate_draft_ast(
+            node.children[0], obj)
+        y = evaluate_draft_ast(
+            node.children[1], obj)
+        if op == "==":
+            return x == y, []
+        elif op == "!=":
+            return x != y, []
+        elif op == ">":
+            return x > y, []
+        elif op == "<":
+            return x < y, []
+        elif op == ">=":
+            return x >= y, []
+        elif op == "<=":
+            return x <= y, []
+        elif op == "&&":
+            return x and y, []
+        elif op == "||":
+            return x or y, []
+        else:
+            raise NotImplementedError
+    elif node.type == DraftASTType.UNARY_OP:
+        op = node.value
+        x = evaluate_draft_ast(node.children[0], obj)
+        if op == "!":
+            return not x, []
+        else:
+            raise NotImplementedError
     elif node.type == DraftASTType.FUNC_CALL:
         if node.value == "getitem":
             target, obj_id_trace = evaluate_draft_ast_with_obj_id_trace(
@@ -192,10 +287,10 @@ def evaluate_draft_ast_with_obj_id_trace(node: DraftASTNode,
             cur_obj = target
             obj_id_trace = []
             for p in path_list:
-                if isinstance(target, (Sequence, Mapping)):
+                if isinstance(cur_obj, (Sequence, Mapping)):
                     cur_obj = cur_obj[p]
                 else:
-                    assert dataclasses.is_dataclass(cur_obj)
+                    assert dataclasses.is_dataclass(cur_obj), f"{type(cur_obj)} is not a dataclass"
                     cur_obj = getattr(cur_obj, p)
                 obj_id_trace.append(id(cur_obj))
             return cur_obj, obj_id_trace
@@ -206,8 +301,20 @@ def evaluate_draft_ast_with_obj_id_trace(node: DraftASTNode,
                 if res is not None:
                     return res, obj_id_trace
             return None, []
+        elif node.value == "where":
+            cond = evaluate_draft_ast(
+                node.children[0], obj)
+            x = evaluate_draft_ast(
+                node.children[1], obj)
+            y = evaluate_draft_ast(
+                node.children[2], obj)
+            return x if cond else y, []
+        elif node.value == "create_array":
+            return [evaluate_draft_ast(child, obj) for child in node.children], []
+        elif node.value == "concat":
+            return sum([evaluate_draft_ast(child, obj) for child in node.children], []), []
         else:
-            raise NotImplementedError
+            raise NotImplementedError(f"func {node.value} not implemented")
     else:
         raise NotImplementedError(f"node type {node.type} not implemented")
 
@@ -217,12 +324,41 @@ def evaluate_draft_ast_json(node: DraftASTNode, obj: Any) -> Any:
         if node.value == "" or node.value == "$":
             return obj
         return obj[node.value]
-    elif node.type == DraftASTType.NUMBER_LITERAL or node.type == DraftASTType.STRING_LITERAL:
+    elif node.type == DraftASTType.JSON_LITERAL or node.type == DraftASTType.STRING_LITERAL:
         return node.value
     elif node.type == DraftASTType.GET_ATTR:
         return evaluate_draft_ast_json(node.children[0], obj)[node.value]
     elif node.type == DraftASTType.ARRAY_GET_ITEM or node.type == DraftASTType.DICT_GET_ITEM:
         return evaluate_draft_ast_json(node.children[0], obj)[node.value]
+    elif node.type == DraftASTType.BINARY_OP:
+        op = node.value
+        x = evaluate_draft_ast_json(node.children[0], obj)
+        y = evaluate_draft_ast_json(node.children[1], obj)
+        if op == "==":
+            return x == y
+        elif op == "!=":
+            return x != y
+        elif op == ">":
+            return x > y
+        elif op == "<":
+            return x < y
+        elif op == ">=":
+            return x >= y
+        elif op == "<=":
+            return x <= y
+        elif op == "&&":
+            return x and y, []
+        elif op == "||":
+            return x or y, []
+        else:
+            raise NotImplementedError
+    elif node.type == DraftASTType.UNARY_OP:
+        op = node.value
+        x = evaluate_draft_ast_json(node.children[0], obj)
+        if op == "!":
+            return not x, []
+        else:
+            raise NotImplementedError
     elif node.type == DraftASTType.FUNC_CALL:
         if node.value == "getitem":
             k = evaluate_draft_ast_json(node.children[1], obj)
@@ -243,7 +379,7 @@ def evaluate_draft_ast_json(node: DraftASTNode, obj: Any) -> Any:
             assert isinstance(path_list, list)
             cur_obj = target
             for p in path_list:
-                if isinstance(target, (Sequence, Mapping)):
+                if isinstance(cur_obj, (Sequence, Mapping)):
                     cur_obj = cur_obj[p]
                 else:
                     assert dataclasses.is_dataclass(cur_obj)
@@ -255,8 +391,20 @@ def evaluate_draft_ast_json(node: DraftASTNode, obj: Any) -> Any:
                 if res is not None:
                     return res
             return None
+        elif node.value == "where":
+            cond = evaluate_draft_ast_json(
+                node.children[0], obj)
+            x = evaluate_draft_ast_json(
+                node.children[1], obj)
+            y = evaluate_draft_ast_json(
+                node.children[2], obj)
+            return x if cond else y
+        elif node.value == "create_array":
+            return [evaluate_draft_ast(child, obj) for child in node.children]
+        elif node.value == "concat":
+            return sum([evaluate_draft_ast_json(child, obj) for child in node.children], [])
         else:
-            raise NotImplementedError
+            raise NotImplementedError(f"func {node.value} not implemented")
     else:
         raise NotImplementedError(f"node type {node.type} not implemented")
 
