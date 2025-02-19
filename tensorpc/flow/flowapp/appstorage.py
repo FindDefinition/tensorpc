@@ -314,22 +314,23 @@ class AppStorage:
             serv_names.FLOW_DATA_UPDATE, graph_id, node_id, key, time.time_ns(), ops)
 
 class AppDraftFileStoreBackend(DraftFileStoreBackendBase):
-    def __init__(self, storage_type: StorageType = StorageType.JSON):
+    def __init__(self, storage_type: StorageType = StorageType.JSON, is_flow_storage: bool = False):
         # self._app_storage = app_storage
         self._storage_type = storage_type
+        self._node_id = Undefined() if is_flow_storage else None
 
     async def read(self, path: str) -> Optional[Any]:
-        return await get_app_storage().read_data_storage(path, raise_if_not_found=False)
+        return await get_app_storage().read_data_storage(path, raise_if_not_found=False, node_id=self._node_id)
 
     async def write(self, path: str, data: Any) -> None:
-        return await get_app_storage().save_data_storage(path, data, storage_type=self._storage_type)
+        return await get_app_storage().save_data_storage(path, data, storage_type=self._storage_type, node_id=self._node_id)
 
     async def update(self, path: str, ops: list[DraftUpdateOp]) -> None:
-        await get_app_storage().update_data_storage(path, ops)
+        await get_app_storage().update_data_storage(path, ops, node_id=self._node_id)
 
     async def remove(self, path: str) -> None:
-        return await get_app_storage().remove_data_storage_item(path)
+        return await get_app_storage().remove_data_storage_item(path, node_id=self._node_id)
 
     async def glob_read(self, path_with_glob: str) -> dict[str, Any]:
-        res = await get_app_storage().glob_read_data_storage(path_with_glob)
+        res = await get_app_storage().glob_read_data_storage(path_with_glob, node_id=self._node_id)
         return {k: v.data for k, v in res.items()}

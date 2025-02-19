@@ -55,6 +55,14 @@ class DraftASTNode:
             yield child
             yield from child.iter_child_nodes()
 
+    def get_child_nodes_in_main_path(self):
+        res: list[DraftASTNode] = [self]
+        cur_node = self
+        while cur_node.children:
+            res.append(cur_node.children[0])
+            cur_node = cur_node.children[0]
+        return res
+
     def walk(self):
         yield self
         for child in self.children:

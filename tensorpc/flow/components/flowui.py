@@ -149,7 +149,7 @@ class NodeData:
     label: Union[Undefined, str] = undefined
     sourceEdgeOverrides: Union[Undefined, dict[str, Any]] = undefined
     contextMenuItems: Union[Undefined, list[MenuItem]] = undefined
-    # used by default nodes with multiple handles
+    # FIXME used by default nodes with multiple handles
     targetHandleIds: Union[Undefined, list[Optional[str]]] = undefined
     sourceHandleIds: Union[Undefined, list[Optional[str]]] = undefined
     partition: Union[Undefined, int] = undefined
@@ -1075,6 +1075,13 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                                            change_status=False)
 
     def _handle_node_logic_change(self, data: dict):
+        flow_user_id = self.props.flowUserUid
+        if not isinstance(flow_user_id, Undefined) and "flowUserUid" in data:
+            if flow_user_id != data["flowUserUid"]:
+                # when we repeatly switch different flow, the debounced change event
+                # may come from other flow, so user can set a unique `flowUserUid`
+                # for each flow to identify the flow.
+                return 
         nodes: list[Any] = data["nodes"]
         cur_id_to_comp: dict[str, Component] = {}
         for n in self.nodes:
@@ -1094,6 +1101,13 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
     def _handle_vis_change(
             self,
             value: dict):
+        flow_user_id = self.props.flowUserUid
+        if not isinstance(flow_user_id, Undefined) and "flowUserUid" in value:
+            if flow_user_id != value["flowUserUid"]:
+                # when we repeatly switch different flow, the debounced change event
+                # may come from other flow, so user can set a unique `flowUserUid`
+                # for each flow to identify the flow.
+                return 
         if "nodes" in value:
             # print(value)
             cur_id_to_comp: dict[str, Component] = {}
@@ -1109,7 +1123,8 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                     if "component" in data:
                         msg = (f"flow {self._flow_uid_encoded} component "
                             f"{data['component']} not exists. ev: {value} "
-                            f"nodeIds: {[n.id for n in self.nodes]}")
+                            f"nodeIds: {[n.id for n in self.nodes]}|{[n['id'] for n in value['nodes']]} "
+                            f"{value.get('flowUserUid')} {flow_user_id}")
                         assert data["component"] in cur_id_to_comp, msg
                         data["component"] = cur_id_to_comp[data["component"]]
             self.childs_complex.nodes = _NodesHelper(value["nodes"]).nodes

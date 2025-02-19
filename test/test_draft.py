@@ -141,7 +141,7 @@ def test_draft_expr():
 @dataclasses.dataclass
 class SplittedSubModel:
     d: int
-    e_split: Annotated[dict[str, Any], DraftStoreMapMeta()] 
+    e_split: Annotated[dict[str, Any], DraftStoreMapMeta(store_id="another_store")] 
     f: list[int]
 
 
@@ -149,7 +149,7 @@ class SplittedSubModel:
 class SplittedModel:
     a: int 
     b: float 
-    c_split: Annotated[dict[str, int], DraftStoreMapMeta("modified_name")] 
+    c_split: Annotated[dict[str, int], DraftStoreMapMeta(attr_key="modified_name")] 
     d_split: Annotated[dict[str, SplittedSubModel], DraftStoreMapMeta()] 
 
 
@@ -185,7 +185,7 @@ def test_splitted_draft(type_only_draft: bool = True):
 
     model_for_jpath = copy.deepcopy(model)
     model_for_jpath_dict = dataclasses.asdict(model_for_jpath)
-    splitted_update_ops, _, _ = get_splitted_update_model_ops("root", ctx._ops, model_ref)
+    splitted_update_ops = get_splitted_update_model_ops("root", ctx._ops, model_ref, "")
     # print(splitted_update_ops)
     assert f"root/modified_name/{_b64encode('a')}" in splitted_update_ops
     assert f"root/modified_name/{_b64encode('b')}" in splitted_update_ops
@@ -203,11 +203,15 @@ def test_splitted_draft(type_only_draft: bool = True):
 
 async def test_splitted_draft_store(type_only_draft: bool = True):
     store_backend = DraftFileStoreBackendInMemory()
+    another_store_backend = DraftFileStoreBackendInMemory()
     validate_splitted_model_type(SplittedModel)
     model = SplittedModel(a=0, b=2.0, c_split={"a": 1, "b": 2}, d_split={"a": SplittedSubModel(d=1, e_split={"a": 1, "b": 2}, f=[5])})
     model_ref = copy.deepcopy(model)
-
-    store = DraftFileStorage("test", model, store_backend)
+    backend_dict = {
+        "": store_backend,
+        "another_store": another_store_backend
+    }
+    store = DraftFileStorage("test", model, backend_dict)
     model_loaded = await store.fetch_model()
     # import rich 
     # rich.print(store_backend._data)
@@ -221,16 +225,16 @@ async def test_splitted_draft_store(type_only_draft: bool = True):
     with capture_draft_update() as ctx:
         modify_func_splitted(model_ref)
         modify_func_splitted(draft)
-    splitted_update_ops = get_splitted_update_model_ops("test", ctx._ops, store._model)
+    splitted_update_ops = get_splitted_update_model_ops("test", ctx._ops, store._model, "")
     # rich.print(splitted_update_ops)
-    await store.update_model(ctx._ops)
-    store_my = DraftFileStorage("test", model, store_backend)
+    await store.update_model(draft, ctx._ops)
+    store_my = DraftFileStorage("test", model, backend_dict)
     model_my = await store_my.fetch_model()
     # import rich 
     # rich.print(dataclasses.asdict(model_my),)
     # rich.print(dataclasses.asdict(model_ref),)
     # rich.print(store_backend._data)
-
+    # rich.print(another_store_backend._data)
     ddiff = DeepDiff(dataclasses.asdict(model_my), dataclasses.asdict(model_ref), ignore_order=True)
     assert not ddiff, str(ddiff)
 
@@ -315,14 +319,14 @@ class NestedNode:
 
 @dataclasses.dataclass
 class NestedModelX:
-    nodes: dict[str, NestedNode]
+    nodes: Annotated[dict[str, NestedNode], DraftStoreMapMeta()]
 
 @dataclasses.dataclass
 class NestedModelRoot:
     path: list[str]
     model: NestedModelX
 
-def test_nested_model():
+async def test_nested_model():
     model = NestedModelRoot(model=
         NestedModelX(
             nodes={
@@ -331,6 +335,10 @@ def test_nested_model():
         ),
         path=["nodes", "a", "models", "b", "nodes", "c"]
     )
+    model_ref = copy.deepcopy(model)
+    store_backend = DraftFileStoreBackendInMemory()
+    store = DraftFileStorage("test", model, store_backend)
+    await store.fetch_model()
     draft = create_draft_type_only(type(model))
     expr_getitempath = D.getitem_path_dynamic(draft.model, draft.path, NestedNode)
     res1 = evaluate_draft_ast(get_draft_ast_node(expr_getitempath), model)
@@ -344,6 +352,18 @@ def test_nested_model():
     res2 = evaluate_draft_ast(expr_getitempath_stable_node, model)
     ddiff = DeepDiff(dataclasses.asdict(res2), dataclasses.asdict(model.model.nodes["a"].models["b"].nodes["c"]), ignore_order=True)
     assert not ddiff, str(ddiff)
+
+    with capture_draft_update() as ctx:
+        expr_getitempath.a = 5
+    model_ref.model.nodes["a"].models["b"].nodes["c"].a = 5
+    apply_draft_update_ops(model, ctx._ops)
+    diff = DeepDiff(dataclasses.asdict(model), dataclasses.asdict(model_ref), ignore_order=True)
+    assert not diff, str(diff)
+
+    with capture_draft_update() as ctx:
+        expr_getitempath.a = 7
+
+    await store.update_model(draft, ctx._ops)
 
 T = TypeVar("T")
 @dataclasses.dataclass
@@ -375,7 +395,7 @@ if __name__ == "__main__":
     test_draft_any_materialize()
 
     test_draft_expr()
-    test_nested_model()
+    asyncio.run(test_nested_model())
 
     test_generic_model()
 

@@ -1,10 +1,9 @@
 from functools import partial
-from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Generic,
+from typing import (TYPE_CHECKING, Annotated, Any, Callable, Coroutine, Generic,
                     Iterable, Optional, Sequence, Type,
                     TypeVar, Union, cast)
 
 import tensorpc.core.dataclass_dispatch as dataclasses
-from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.datamodel.draft import DraftBase, DraftObject, get_draft_anno_type, get_draft_ast_node, insert_assign_draft_op
 from tensorpc.core.datamodel.draftast import evaluate_draft_ast, evaluate_draft_ast_noexcept
 from tensorpc.core.datamodel.events import DraftChangeEvent, DraftEventType
@@ -168,7 +167,6 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
 
     async def _handle_vis_change(self, change: dict):
         if not self._is_flow_user_uid_same(change.get("flowUserUid")):
-            print("IGNORE VIS CHANGE", change.get("flowUserUid"))
             # if not same, the flow is changed, return
             return
         # update width/height/position from debounced frontend event
@@ -197,7 +195,6 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
         if not self._is_flow_user_uid_same(selection.flowUserUid):
             # if not same, the flow is changed, return
             return
-        # frontend never trigger add node event, so we only need to handle like node delete
         draft_type = get_draft_anno_type(draft)
         assert draft_type is not None
         if issubclass(draft_type.origin_type, str):
@@ -219,7 +216,6 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
     async def _handle_draft_change(self, ev: DraftChangeEvent):
         node_change_type = ev.type_dict["nodes"]
         edge_change_type = ev.type_dict["edges"]
-        # print(node_change_type.name, edge_change_type.name)
         if node_change_type == DraftEventType.ObjectIdChange or edge_change_type == DraftEventType.ObjectIdChange:
             await self._flow_comp.clear()
             if self._flow_uid_getter is not None:

@@ -6103,6 +6103,8 @@ class BreadcrumbsProps(MUIComponentBaseProps):
     variant: Union[Undefined, _TypographyVarient] = undefined
     muiColor: Union[Undefined, _StdColorNoDefault] = undefined
     muiLastColor: Union[Undefined, _StdColorNoDefault] = undefined
+    # if keepHistoryPath is true, we will keep history path if current path is subpath of last path.
+    keepHistoryPath: Union[Undefined, bool] = undefined
 
 
 class Breadcrumbs(MUIComponentBase[BreadcrumbsProps]):

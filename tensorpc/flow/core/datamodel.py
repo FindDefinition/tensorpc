@@ -10,7 +10,7 @@ from pydantic import field_validator
 from typing_extensions import Self, TypeAlias
 
 from tensorpc.core.datamodel.draftast import DraftASTNode
-from tensorpc.core.datamodel.draftstore import DraftFileStorage
+from tensorpc.core.datamodel.draftstore import DraftFileStorage, DraftStoreBackendBase
 import tensorpc.core.datamodel.jmes as jmespath
 from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core.datamodel.draft import (
@@ -85,8 +85,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         self.event_storage_fetched: EventSlotNoArgEmitter = self._create_emitter_event_slot_noarg(
             self._backend_storage_fetched_event_key)
 
-        self._app_storage_handler_registered: bool = False
-        self._app_storage_data_fetched = False
+        self._draft_store_handler_registered: bool = False
+        self._draft_store_data_fetched = False
 
         self._is_model_dataclass = dataclasses.is_dataclass(type(model))
         self._is_model_pydantic_dataclass = dataclasses.is_pydantic_dataclass(
@@ -124,16 +124,16 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
 
     # async def _init(self):
     #     # we should trigger all draft change event handler when init or model fetched from storage.
-    #     if not self._app_storage_handler_registered:
+    #     if not self._draft_store_handler_registered:
     #         await self._run_all_draft_change_handlers_when_init()
 
     async def _draft_change_handler_effect(self, paths: tuple[str, ...],
                                      handler: DraftChangeEventHandler):
         should_run_handler = False
-        if not self._app_storage_handler_registered:
+        if not self._draft_store_handler_registered:
             should_run_handler = True
         else:
-            should_run_handler = self._app_storage_data_fetched
+            should_run_handler = self._draft_store_data_fetched
         if paths not in self._draft_change_event_handlers:
             self._draft_change_event_handlers[paths] = {}
         self._draft_change_event_handlers[paths][handler.handler] = handler
@@ -322,35 +322,34 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
     def get_draft_external(model: T) -> T:
         return cast(T, create_draft(model, userdata=None))
 
-    def connect_app_storage(self,
+    def connect_draft_store(self,
                             path: str,
-                            storage_type: StorageType = StorageType.JSON):
-        """Register event handler that store and send update info to app storage.
+                            backend_map: Union[DraftStoreBackendBase, Mapping[str, DraftStoreBackendBase]]):
+        """Register event handler that store and send update info to your backend.
         WARNING: this function must be called before mount.
         """
-        from tensorpc.flow.flowapp.appstorage import AppDraftFileStoreBackend
-        assert self._is_model_dataclass, "only support dataclass model when use app storage"
+        assert self._is_model_dataclass, "only support dataclass model when use storage"
         assert not self.is_mounted(), "you should call this function when unmounted."
-        assert not self._app_storage_handler_registered, "only support connect once. if you want to change path/type, create a new component."
+        assert not self._draft_store_handler_registered, "only support connect once. if you want to change path/type, create a new component."
         model = self.model
         assert dataclasses.is_dataclass(
             model), "only support dataclass model"
-        self._store = DraftFileStorage(path, model, AppDraftFileStoreBackend(storage_type)) # type: ignore
+        self._store = DraftFileStorage(path, model, backend_map) # type: ignore
         self.event_after_mount.on(
-            partial(self._fetch_internal_data_from_app_storage,
+            partial(self._fetch_internal_data_from_draft_store,
                     store=self._store))
         self.event_draft_update.on(
-            partial(self._handle_app_storage_update,
+            partial(self._handle_draft_store_update,
                     store=self._store))
         self.event_after_unmount.on(
-            partial(self._clear_app_storage_status))
+            partial(self._clear_draft_store_status))
 
-        self._app_storage_handler_registered = True
+        self._draft_store_handler_registered = True
 
-    def _clear_app_storage_status(self):
-        self._app_storage_data_fetched = False
+    def _clear_draft_store_status(self):
+        self._draft_store_data_fetched = False
 
-    async def _fetch_internal_data_from_app_storage(self, store: DraftFileStorage):
+    async def _fetch_internal_data_from_draft_store(self, store: DraftFileStorage):
         assert dataclasses.is_dataclass(
             self.model), "only support dataclass model"
         self._model = await store.fetch_model()
@@ -361,11 +360,11 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         # finally sync the model.
         await self.sync_model()
         await self._run_all_draft_change_handlers_when_init()
-        self._app_storage_data_fetched = True
+        self._draft_store_data_fetched = True
 
-    async def _handle_app_storage_update(self, ops: list[DraftUpdateOp],
+    async def _handle_draft_store_update(self, ops: list[DraftUpdateOp],
                                          store: DraftFileStorage):
-        await store.update_model(ops)
+        await store.update_model(self.get_draft(), ops)
 
     @staticmethod
     def _op_proc(op: DraftUpdateOp, handlers: list[DraftChangeEventHandler]):

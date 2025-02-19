@@ -133,6 +133,13 @@ class DraftUpdateOp:
         return dataclasses.replace(self,
                                    opData=as_dict_no_undefined(self.opData))
 
+    def has_dynamic_node_in_main_path(self):
+        # has `getattr` or `getitem_path` func call node
+        for node in self.node.get_child_nodes_in_main_path():
+            if node.type == DraftASTType.FUNC_CALL:
+                if node.value == DraftASTFuncType.GET_ATTR.value or node.value == DraftASTFuncType.GET_ITEM_PATH.value:
+                    return True
+        return False 
 
 class DraftUpdateProcessContext:
     def __init__(self, proc: Callable[[DraftUpdateOp], DraftUpdateOp]):

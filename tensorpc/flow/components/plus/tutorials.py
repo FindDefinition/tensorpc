@@ -104,9 +104,9 @@ class AppInMemory(mui.FlexBox):
         self.divider = mui.Divider(
             "horizontal" if is_horizontal else "vertical")
         super().__init__([
-            self.editor.prop(flex=1),
-            self.divider,
             self.show_box.prop(flex=1),
+            self.divider,
+            self.editor.prop(flex=1),
         ])
         self._layout_for_reload: Optional[mui.FlexBox] = None
         self.prop(flexFlow="row" if is_horizontal else "column")
