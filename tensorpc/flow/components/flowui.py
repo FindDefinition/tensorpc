@@ -19,7 +19,7 @@ from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Generic,
                     Iterable, Optional, Sequence, Type,
                     TypeVar, Union, cast)
 
-from typing_extensions import Literal, TypeAlias
+from typing_extensions import Literal, TypeAlias, override
 import dataclasses as dataclasses_plain
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.core.asynctools import cancel_task
@@ -966,6 +966,7 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
     def create_unique_edge_id(self, id: str):
         return self._internals.unique_name_pool_edge(id)
 
+    @override
     def _find_comps_in_dataclass(self, child: DataclassType):
         assert isinstance(child, Flow.ChildDef)
         unique_name_pool = UniqueNamePool()
@@ -1427,8 +1428,20 @@ class Flow(MUIContainerBase[FlowProps, MUIComponentType]):
                 update_child_complex=False,
                 post_ev_creator=lambda: self.create_comp_event(ev_new_node))
         else:
-            return await self.send_and_wait(self.create_comp_event(ev_new_node)
-                                            )
+            return await self.send_and_wait(self.create_comp_event(ev_new_node))
+    
+    async def change_node_layout(self,
+                        node_id: str, new_comp: Component):
+        """Change node's layout.
+        """
+        assert node_id in self._internals.id_to_node, f"node id {node_id} must exist"
+        node = self._internals.id_to_node[node_id]
+        assert not isinstance(node.data, Undefined), "node data is undefined"
+        assert not isinstance(node.data.component, Undefined), "node data component is undefined"
+        node.data.component = new_comp
+        return await self.update_childs(
+            {node_id: new_comp},
+            update_child_complex=False)
 
     async def add_node(self,
                        node: Node,

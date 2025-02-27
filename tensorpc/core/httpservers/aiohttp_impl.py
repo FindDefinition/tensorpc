@@ -20,7 +20,6 @@ from tensorpc.protos_export import remote_object_pb2
 from tensorpc.protos_export import remote_object_pb2 as remote_object_pb2
 from tensorpc.protos_export import rpc_message_pb2
 from contextlib import suppress
-from aiohttp import streamer
 from tensorpc.core.serviceunit import ServiceEventType
 from .aiohttp_file import FileProxy, FileProxyResponse
 
@@ -45,31 +44,6 @@ class GrpcFileProxy(FileProxy):
 
     def get_file_metadata(self) -> defs.FileResource:
         return self._metadata
-
-@streamer
-async def file_sender(writer, file_bytes: bytes, chunk_size=2**16):
-    """
-    This function will read large file chunk by chunk and send it through HTTP
-    without reading them into memory
-    """
-    bio = io.BytesIO(file_bytes)
-    chunk = bio.read(2**16)
-    while chunk:
-        await writer.write(chunk)
-        chunk = bio.read(2**16)
-
-
-@streamer
-async def grpc_iter_file_sender(writer, reader):
-    """
-    This function will read large file chunk by chunk and send it through HTTP
-    without reading them into memory
-    """
-    async for chunk, is_exc in reader:
-        if is_exc:
-            raise ValueError(chunk)
-        await writer.write(chunk)
-
 
 from .core import WebsocketClientBase, WebsocketMsg, WebsocketMsgType, WebsocketHandler
 

@@ -44,6 +44,7 @@ class DraftASTNode:
     children: list["DraftASTNode"]
     value: Any
     userdata: Any = None
+    field_id: Optional[int] = None
 
     def get_jmes_path(self) -> str:
         if self.type == DraftASTType.NAME:
@@ -71,6 +72,17 @@ class DraftASTNode:
 
     def __repr__(self):
         return self.get_jmes_path()
+
+    def to_userdata_removed(self):
+        child_removed = [child.to_userdata_removed() for child in self.children]
+        return DraftASTNode(self.type, child_removed, self.value)
+
+    def clone_tree_only(self):
+        # only clone tree structure, not include userdata and value
+        child_cloned = [child.clone_tree_only() for child in self.children]
+        return DraftASTNode(self.type, child_cloned, self.value, self.userdata, self.field_id)
+
+ROOT_NODE = DraftASTNode(DraftASTType.NAME, [], "")
 
 _GET_ITEMS = set([
     DraftASTType.GET_ATTR, DraftASTType.ARRAY_GET_ITEM,

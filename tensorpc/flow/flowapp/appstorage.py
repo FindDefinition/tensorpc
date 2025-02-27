@@ -331,6 +331,12 @@ class AppDraftFileStoreBackend(DraftFileStoreBackendBase):
     async def remove(self, path: str) -> None:
         return await get_app_storage().remove_data_storage_item(path, node_id=self._node_id)
 
-    async def glob_read(self, path_with_glob: str) -> dict[str, Any]:
-        res = await get_app_storage().glob_read_data_storage(path_with_glob, node_id=self._node_id)
+    async def read_all_childs(self, path: str) -> dict[str, Any]:
+        res = await get_app_storage().glob_read_data_storage(f"{path}/*", node_id=self._node_id)
         return {k: v.data for k, v in res.items()}
+        
+    async def remove_folder(self, path: str) -> Any: 
+        """remove all item (recursive) in path. usually used when you use real file system 
+        as backend.
+        """
+        raise NotImplementedError

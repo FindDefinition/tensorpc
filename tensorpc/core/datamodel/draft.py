@@ -57,6 +57,10 @@ T = TypeVar("T")
 
 
 class JMESPathOpType(enum.IntEnum):
+    # only used for backend, frontend don't support this.
+    RootAssign = -1
+    RootInplaceOp = -2
+
     SetAttr = 0
     Delete = 1
     Extend = 2
@@ -77,6 +81,16 @@ class ScalarInplaceOpType(enum.IntEnum):
     Mul = 2
     Div = 3
 
+def _scalar_inplace_op_to_str(op: ScalarInplaceOpType) -> str:
+    if op == ScalarInplaceOpType.Add:
+        return "+="
+    if op == ScalarInplaceOpType.Sub:
+        return "-="
+    if op == ScalarInplaceOpType.Mul:
+        return "*="
+    if op == ScalarInplaceOpType.Div:
+        return "/="
+    raise ValueError(f"Unknown ScalarInplaceOpType {op}")
 
 @dataclasses.dataclass
 class TypeMeta:
@@ -109,9 +123,23 @@ class DraftUpdateOp:
     # provide path-like meta trace
     anno_type_metas_trace: Optional[list[tuple[Any, ...]]] = None
 
+    # when you setattr on draft object, this store the field id of that field.
+    field_id: Optional[int] = None
+
     def __repr__(self) -> str:
         path_str = self.node.get_jmes_path()
         # jpath_str = _get_jmes_path(self.path)
+        if self.op == JMESPathOpType.SetAttr:
+            key, value = self.opData["items"][0]
+            return f"JOp[{path_str}|{self.op.name}]:{key}={value}"
+        elif self.op == JMESPathOpType.RootInplaceOp or self.op == JMESPathOpType.ScalarInplaceOp:
+            op = self.opData["op"]
+            value = self.opData["value"]
+            if self.op == JMESPathOpType.RootInplaceOp:
+                key = "$"
+            else:
+                key = self.opData["key"]
+            return f"JOp[{path_str}|{self.op.name}]:{key}{_scalar_inplace_op_to_str(op)}{value}"
         return f"JOp[{path_str}|{self.op.name}]:{self.opData}"
 
     def to_jmes_path_op(self) -> JMESPathOp:
@@ -119,7 +147,7 @@ class DraftUpdateOp:
         return JMESPathOp(self.node.get_jmes_path(), self.op, self.opData)
 
     def to_userdata_removed(self) -> "DraftUpdateOp":
-        return dataclasses.replace(self, userdata=None)
+        return dataclasses.replace(self, userdata=None, node=self.node.to_userdata_removed())
 
     def get_userdata_typed(self, t: Type[T]) -> Optional[T]:
         if self.userdata is not None and isinstance(
@@ -131,7 +159,8 @@ class DraftUpdateOp:
         # assume your data is strong-typed dataclass, then we can store
         # data as dict in database and restore it to dataclass via pydantic or mashumaro.
         return dataclasses.replace(self,
-                                   opData=as_dict_no_undefined(self.opData))
+                                   opData=as_dict_no_undefined(self.opData),
+                                   field_id=None)
 
     def has_dynamic_node_in_main_path(self):
         # has `getattr` or `getitem_path` func call node
@@ -318,7 +347,8 @@ class DraftBase:
             op_type: JMESPathOpType,
             opdata: Any,
             drop_last: bool = False,
-            addi_nodes: Optional[list[DraftASTNode]] = None) -> DraftUpdateOp:
+            addi_nodes: Optional[list[DraftASTNode]] = None,
+            field_id: Optional[int] = None) -> DraftUpdateOp:
         node = self._tensorpc_draft_attr_cur_node
         if drop_last:
             node = node.children[0]
@@ -328,7 +358,7 @@ class DraftBase:
         return DraftUpdateOp(op_type, opdata, node,
                              self._tensorpc_draft_attr_userdata,
                              addi_nodes if addi_nodes is not None else [],
-                             annometa)
+                             annometa, field_id=field_id)
 
     def _tensorpc_draft_dispatch(
             self,
@@ -437,12 +467,14 @@ class DraftObject(DraftBase):
                 f"dataclass {type(self._tensorpc_draft_attr_real_obj)} has no attribute {name}"
             )
         anno_type = None
+        field_id = None
         if self._tensorpc_draft_attr_anno_state.anno_type is not None:
             field_type = self._tensorpc_draft_attr_obj_fields_dict[name][1]
             anno_type = field_type
+            field_id = id(self._tensorpc_draft_attr_obj_fields_dict[name][0])
         new_ast_node = DraftASTNode(DraftASTType.GET_ATTR,
                                     [self._tensorpc_draft_attr_cur_node], name,
-                                    anno_type)
+                                    anno_type, field_id=field_id)
         if self._tensorpc_draft_attr_anno_state.is_type_only:
             assert anno_type is not None
             return self._tensorpc_draft_dispatch(None, new_ast_node, anno_type)
@@ -472,9 +504,13 @@ class DraftObject(DraftBase):
         ), "you can't assign a Draft object to another Draft object, assign real value instead."
         # TODO do validate here
         assert not isinstance(value, Undefined), "currently we don't support assign Undefined to dataclass field."
+        field_id = None
+        if self._tensorpc_draft_attr_anno_state.anno_type is not None:
+            field_id = id(self._tensorpc_draft_attr_obj_fields_dict[name][0])
         ctx.add_op(
             self._tensorpc_draft_get_update_op(JMESPathOpType.SetAttr,
-                                               {"items": [(name, value)]}))
+                                               {"items": [(name, value)]},
+                                               field_id=field_id))
 
 
 def _assert_not_draft(*value: Any):
@@ -803,6 +839,7 @@ class DraftMutableScalar(DraftComparableScalar):
     def __iadd__(self, other: Union[int, float]):
         _assert_not_draft(other)
         ctx = get_draft_update_context()
+        field_id = self._tensorpc_draft_attr_cur_node.field_id
         ctx.add_op(
             self._tensorpc_draft_get_update_op(
                 JMESPathOpType.ScalarInplaceOp, {
@@ -810,12 +847,13 @@ class DraftMutableScalar(DraftComparableScalar):
                     "key": self._tensorpc_draft_attr_cur_node.value,
                     "value": other
                 },
-                drop_last=True))
+                drop_last=True, field_id=field_id))
         return self
 
     def __isub__(self, other: Union[int, float]):
         _assert_not_draft(other)
         ctx = get_draft_update_context()
+        field_id = self._tensorpc_draft_attr_cur_node.field_id
         ctx.add_op(
             self._tensorpc_draft_get_update_op(
                 JMESPathOpType.ScalarInplaceOp, {
@@ -823,12 +861,13 @@ class DraftMutableScalar(DraftComparableScalar):
                     "key": self._tensorpc_draft_attr_cur_node.value,
                     "value": other
                 },
-                drop_last=True))
+                drop_last=True, field_id=field_id))
         return self
 
     def __imul__(self, other: Union[int, float]):
         _assert_not_draft(other)
         ctx = get_draft_update_context()
+        field_id = self._tensorpc_draft_attr_cur_node.field_id
         ctx.add_op(
             self._tensorpc_draft_get_update_op(
                 JMESPathOpType.ScalarInplaceOp, {
@@ -836,12 +875,13 @@ class DraftMutableScalar(DraftComparableScalar):
                     "key": self._tensorpc_draft_attr_cur_node.value,
                     "value": other
                 },
-                drop_last=True))
+                drop_last=True, field_id=field_id))
         return self
 
     def __itruediv__(self, other: Union[int, float]):
         _assert_not_draft(other)
         ctx = get_draft_update_context()
+        field_id = self._tensorpc_draft_attr_cur_node.field_id
         ctx.add_op(
             self._tensorpc_draft_get_update_op(
                 JMESPathOpType.ScalarInplaceOp, {
@@ -849,12 +889,13 @@ class DraftMutableScalar(DraftComparableScalar):
                     "key": self._tensorpc_draft_attr_cur_node.value,
                     "value": other
                 },
-                drop_last=True))
+                drop_last=True, field_id=field_id))
         return self
 
     def __ifloordiv__(self, other: Union[int, float]):
         _assert_not_draft(other)
         ctx = get_draft_update_context()
+        field_id = self._tensorpc_draft_attr_cur_node.field_id
         ctx.add_op(
             self._tensorpc_draft_get_update_op(
                 JMESPathOpType.ScalarInplaceOp, {
@@ -862,7 +903,7 @@ class DraftMutableScalar(DraftComparableScalar):
                     "key": self._tensorpc_draft_attr_cur_node.value,
                     "value": other
                 },
-                drop_last=True))
+                drop_last=True, field_id=field_id))
         return self
 
 
@@ -977,6 +1018,8 @@ def apply_draft_update_ops(obj: Any,
     # we delay real operation on original object to make sure
     # all validation is performed before real operation
     for op in ops:
+        assert op.op >= 0, "only apply_draft_update_ops_to_json_with_root support root ops"
+    for op in ops:
         try:
             cur_obj = evaluate_draft_ast(op.node, obj)
         except:
@@ -988,13 +1031,13 @@ def apply_draft_update_ops(obj: Any,
             dynamic_key = evaluate_draft_ast(op.additionalNodes[0], obj)
         _apply_draft_update_op(cur_obj, op, dynamic_key)
 
-
 def apply_draft_update_ops_with_changed_obj_ids(obj: Any,
                                                 ops: list[DraftUpdateOp],
                                                 ignore_exc: bool = True):
     """Apply draft update ops and return changed object ids in main path.
     """
-    
+    for op in ops:
+        assert op.op >= 0, "only apply_draft_update_ops_to_json_with_root support root ops"
     # we delay real operation on original object to make sure
     # all validation is performed before real operation
     changed_parent_obj_ids: set[int] = set()
@@ -1017,10 +1060,11 @@ def apply_draft_update_ops_with_changed_obj_ids(obj: Any,
         _apply_draft_update_op(cur_obj, op, dynamic_key)
     return changed_parent_obj_ids, changed_obj_ids
 
-
 def apply_draft_update_ops_to_json(obj: Any, ops: list[DraftUpdateOp]):
     # we delay real operation on original object to make sure
     # all validation is performed before real operation
+    for op in ops:
+        assert op.op >= 0, "only apply_draft_update_ops_to_json_with_root support root ops"
     for op in ops:
         cur_obj = evaluate_draft_ast_json(op.node, obj)
         dynamic_key = None
@@ -1028,6 +1072,36 @@ def apply_draft_update_ops_to_json(obj: Any, ops: list[DraftUpdateOp]):
             dynamic_key = evaluate_draft_ast_json(op.additionalNodes[0], obj)
         _apply_draft_update_op_to_json(cur_obj, op, dynamic_key)
 
+def apply_draft_update_ops_to_json_with_root(obj: Any, ops: list[DraftUpdateOp]):
+    # we delay real operation on original object to make sure
+    # all validation is performed before real operation
+    is_root_changed = False 
+    if obj is None:
+        assert ops[0].op == JMESPathOpType.RootAssign, "root object is None, first op must be root assign"
+    for op in ops:
+        # only used for backend store.
+        if op.op == JMESPathOpType.RootAssign:
+            is_root_changed = True 
+            obj = op.opData
+            continue
+        elif op.op == JMESPathOpType.RootInplaceOp:
+            is_root_changed = True 
+            value = op.opData["value"]
+            if op.opData["op"] == ScalarInplaceOpType.Add:
+                obj += value
+            elif op.opData["op"] == ScalarInplaceOpType.Sub:
+                obj -= value
+            elif op.opData["op"] == ScalarInplaceOpType.Mul:
+                obj *= value
+            elif op.opData["op"] == ScalarInplaceOpType.Div:
+                obj /= value
+            continue 
+        cur_obj = evaluate_draft_ast_json(op.node, obj)
+        dynamic_key = None
+        if op.op == JMESPathOpType.Assign:
+            dynamic_key = evaluate_draft_ast_json(op.additionalNodes[0], obj)
+        _apply_draft_update_op_to_json(cur_obj, op, dynamic_key)
+    return is_root_changed, obj
 
 def apply_draft_jmes_ops(obj: dict, ops: list[JMESPathOp]):
     # we delay real operation on original object to make sure
@@ -1319,6 +1393,14 @@ def _rebuild_draft_expr_recursive(node: DraftASTNode, root_draft: DraftBase, mod
             new_state = dataclasses.replace(draft_exprs[0]._tensorpc_draft_attr_anno_state, anno_type=new_ann_type)
             res = DraftImmutableScalar(None, draft_exprs[0]._tensorpc_draft_attr_userdata, new_node, new_state)
             return res
+        elif node.value == "where":
+            # for where, we must evaluate condition to determine use which branch.
+            cond = evaluate_draft_ast(
+                node.children[0], model)
+            if cond:
+                return _rebuild_draft_expr_recursive(node.children[1], root_draft, model)
+            else:
+                return _rebuild_draft_expr_recursive(node.children[2], root_draft, model)
         else:
             raise NotImplementedError(f"{node.value} not supported in rebuild")
     else:
@@ -1326,7 +1408,7 @@ def _rebuild_draft_expr_recursive(node: DraftASTNode, root_draft: DraftBase, mod
 
 
 def rebuild_and_stabilize_draft_expr(node: DraftASTNode, root_model_draft: Any, model: Any):
-    """Rebuild draft expr from node, all dynamic op (getattr, getitem_path) will be converted to static.
+    """Rebuild draft expr from node, all dynamic op (getattr, getitem_path, where) will be converted to static.
     """
     assert isinstance(node, DraftASTNode)
     assert isinstance(root_model_draft, DraftBase)

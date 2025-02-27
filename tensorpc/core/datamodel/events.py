@@ -33,17 +33,11 @@ class DraftEventType(enum.IntEnum):
     InitChange = 6
 
 @dataclasses.dataclass
-class DraftChangeItem:
-    type: DraftEventType
-    new_value_dict: dict[str, Any]
-    user_eval_vars: Optional[dict[str, Optional[DraftASTNode]]] = None
-
-
-@dataclasses.dataclass
 class DraftChangeEvent:
     type_dict: dict[str, DraftEventType]
+    old_value_dict: dict[str, Any]
     new_value_dict: dict[str, Any]
-    user_eval_vars: Optional[dict[str, Optional[DraftASTNode]]] = None
+    user_eval_vars: Optional[dict[str, Any]] = None
 
     def is_item_changed(self, key: str):
         return key in self.type_dict and self.type_dict[key] != DraftEventType.NoChange
@@ -61,6 +55,11 @@ class DraftChangeEvent:
     def new_value(self):
         assert len(self.new_value_dict) == 1, "you provide more than one draft expr"
         return list(self.new_value_dict.values())[0]
+
+    @property
+    def old_value(self):
+        assert len(self.old_value_dict) == 1, "you provide more than one draft expr"
+        return list(self.old_value_dict.values())[0]
 
 @dataclasses.dataclass
 class DraftChangeEventHandler:
@@ -89,7 +88,7 @@ def update_model_with_change_event(
         model: Any, ops: list[DraftUpdateOp],
         event_handlers: list[DraftChangeEventHandler]):
     # 1. eval all draft expressions and record old value (or id)
-    handler_change_type_and_new_val: list[tuple[dict[str, DraftEventType], dict[str, Any]]] = []
+    change_events: list[DraftChangeEvent] = []
     handler_old_values: list[dict[str, tuple[Any, bool]]] = []
     for handler in event_handlers:
         old_val_dict = {}
@@ -134,6 +133,6 @@ def update_model_with_change_event(
                     ev_type = DraftEventType.ValueChange
             type_dict[k] = ev_type
             new_val_dict[k] = new_value
-        handler_change_type_and_new_val.append((type_dict, new_val_dict))
-    return handler_change_type_and_new_val
+        change_events.append(DraftChangeEvent(type_dict, old_val_dict, new_val_dict))
+    return change_events
 

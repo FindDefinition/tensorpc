@@ -278,6 +278,7 @@ class AnnotatedType:
     annometa: Optional[Tuple[Any, ...]] = None
     is_optional: bool = False
     is_undefined: bool = False
+    raw_type: Optional[Any] = None
 
     def is_any_type(self) -> bool:
         return self.origin_type is Any
@@ -397,7 +398,10 @@ def parse_type_may_optional_undefined(
         typevar_map: Optional[dict[TypeVar, type]] = None) -> AnnotatedType:
     """Parse a type. If is union, return its non-optional and non-undefined type list.
     else return the type itself.
+
+    WARNING: use Annotated[Optional], don't use Optional[Annotated]
     """
+    raw_type = ann_type
     ann_type, ann_meta = extract_annotated_type_and_meta(ann_type)
     if isinstance(ann_type, TypeVar):
         assert typevar_map is not None and ann_type in typevar_map, f"TypeVar is not supported, but get {ann_type}"
@@ -422,17 +426,19 @@ def parse_type_may_optional_undefined(
                 res = parse_type_may_optional_undefined(ty_args[0])
                 res.is_optional = is_optional
                 res.is_undefined = is_undefined
+                # use Annotated[Optional], Optional[Annotated] won't work
+                res.annometa = ann_meta
                 return res
             # assert inspect.isclass(
             #     ty_origin), f"origin type must be a class, but get {ty_origin}"
             return AnnotatedType(ty_origin, ty_args, ann_meta, is_optional,
-                                 is_undefined)
+                                 is_undefined, raw_type)
         else:
             ty_args = get_args(ann_type)
             # assert inspect.isclass(
             #     ty_origin), f"origin type must be a class, but get {ty_origin}"
-            return AnnotatedType(ty_origin, list(ty_args), ann_meta)
-    return AnnotatedType(ann_type, [], ann_meta)
+            return AnnotatedType(ty_origin, list(ty_args), ann_meta, raw_type=raw_type)
+    return AnnotatedType(ann_type, [], ann_meta, raw_type=raw_type)
 
 
 def child_type_generator(t: type):

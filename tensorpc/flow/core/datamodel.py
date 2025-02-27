@@ -116,7 +116,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                         val_dict[k] = obj
                         type_dict[k] = DraftEventType.InitChange
                     # TODO if eval failed, should we call it during init?
-                    all_handlers.append(partial(h.handler, DraftChangeEvent(type_dict, val_dict)))
+                    all_handlers.append(partial(h.handler, DraftChangeEvent(type_dict, {}, val_dict)))
             await self.run_callbacks(
                 all_handlers,
                 change_status=False,
@@ -145,7 +145,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                 val_dict[k] = obj
                 type_dict[k] = DraftEventType.InitChange
             # TODO if eval failed, should we call it during init?
-            ev = DraftChangeEvent(type_dict, val_dict)
+            ev = DraftChangeEvent(type_dict, {}, val_dict)
             await self.run_callback(partial(handler.handler, ev),
                                     change_status=False,
                                     capture_draft=True)
@@ -254,8 +254,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             event_handler_changes = update_model_with_change_event(
                 self.model, ops, all_ev_handlers)
             cbs: list[Callable[[], _CORO_NONE]] = []
-            for change, handler in zip(event_handler_changes, all_ev_handlers):
-                draft_change_ev = DraftChangeEvent(change[0], change[1])
+            for draft_change_ev, handler in zip(event_handler_changes, all_ev_handlers):
                 if draft_change_ev.is_changed:
                     if handler.user_eval_vars:
                         # user can define custom evaluates to get new model value.

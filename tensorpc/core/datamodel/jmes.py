@@ -33,6 +33,16 @@ class _JMESCustomFunctions(functions.Functions):
     def _func_where(self, cond, x, y):
         return x if cond else y
 
+    @functions.signature({'types': []}, {'types': ["array"]})
+    def _func_matchcase(self, cond, items):
+        if not isinstance(items, list):
+            return None
+        for pair in items:
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                return None
+            if pair[0] == cond:
+                return pair[1]
+        return None 
 
 # 4. Provide an instance of your subclass in a Options object.
 _JMES_EXTEND_OPTIONS = jmespath.Options(custom_functions=_JMESCustomFunctions())
