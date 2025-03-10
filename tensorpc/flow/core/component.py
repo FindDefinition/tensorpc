@@ -1599,7 +1599,8 @@ class Component(Generic[T_base_props, T_child]):
         if you reimplement to_dict, you need to use 
         camel name, no conversion provided.
         """
-        props = self.get_props()
+        props = self.get_props_dict()
+        props["status"] = self._flow_comp_status
         props, und = split_props_to_undefined(props)
         props.update(as_dict_no_undefined(self.__raw_props))
         res = {
@@ -1659,11 +1660,10 @@ class Component(Generic[T_base_props, T_child]):
     async def set_persist_props_async(self, state: dict[str, Any]) -> None:
         return
 
-    def get_props(self) -> dict[str, Any]:
+    def get_props_dict(self) -> dict[str, Any]:
         res = self.__props.get_dict(
             dict_factory=_undefined_comp_dict_factory,
             obj_factory=_undefined_comp_obj_factory)  # type: ignore
-        res["status"] = self._flow_comp_status
         return res
 
     def validate_props(self, props: dict[str, Any]) -> bool:
@@ -2619,8 +2619,8 @@ class ContainerBase(Component[T_container_props, T_child]):
             raise ValueError("you must init layout in app_create_layout")
         self._child_comps.update(layout)
 
-    def get_props(self):
-        state = super().get_props()
+    def get_props_dict(self):
+        state = super().get_props_dict()
         state["childs"] = [self[n]._flow_uid for n in self._child_comps]
         if self._child_structure is not None:
             state["childsComplex"] = asdict_no_deepcopy(

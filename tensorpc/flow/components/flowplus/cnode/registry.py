@@ -22,6 +22,8 @@ class ComputeNodeConfig:
     is_dynamic_cls: bool = False
     # static layout
     layout: Optional[mui.FlexBox] = None
+    # state def
+    state_dcls: Optional[type] = None
 
     def get_resizer(self):
         if self.resizer_props is not None:
@@ -78,7 +80,8 @@ class ComputeNodeRegistry:
             box_props: Optional[mui.FlexBoxProps] = None,
             resizer_props: Optional[flowui.NodeResizerProps] = None,
             layout_overflow: Optional[mui._OverflowType] = None,
-            layout: Optional[mui.FlexBox] = None) -> Union[T, Callable[[T], T]]:
+            layout: Optional[mui.FlexBox] = None,
+            state_dcls: Optional[type] = None) -> Union[T, Callable[[T], T]]:
 
         def wrapper(func: T) -> T:
             assert inspect.isclass(func) or inspect.isfunction(
@@ -91,6 +94,13 @@ class ComputeNodeRegistry:
             name_ = name
             if name_ is None:
                 name_ = func.__name__
+            if state_dcls is not None:
+                assert inspect.isclass(state_dcls), "state_dcls should be a class"
+                assert dataclasses.is_dataclass(state_dcls), "state_dcls should be a dataclass"
+                try:
+                    state_dcls()
+                except:
+                    raise ValueError("all field of state_dcls should have default value")
             resizer_props_ = resizer_props
             if resizer_props_ is None:
                 if resize_minmax_size is not None:
@@ -107,7 +117,9 @@ class ComputeNodeRegistry:
                                          module_id=module_id,
                                          box_props=box_props,
                                          resizer_props=resizer_props_,
-                                         layout_overflow=layout_overflow)
+                                         layout_overflow=layout_overflow,
+                                         layout=layout,
+                                         state_dcls=state_dcls)
             editor_ctx = get_node_editor_context()
             if editor_ctx is not None:
                 # when this function is used in custom editor, no need to register it.
@@ -148,7 +160,8 @@ def register_compute_node(
         box_props: Optional[mui.FlexBoxProps] = None,
         resizer_props: Optional[flowui.NodeResizerProps] = None,
         layout_overflow: Optional[mui._OverflowType] = None,
-        layout: Optional[mui.FlexBox] = None):
+        layout: Optional[mui.FlexBox] = None,
+        state_dcls: Optional[type] = None):
     return NODE_REGISTRY.register(func,
                                   key=key,
                                   name=name,
@@ -157,4 +170,5 @@ def register_compute_node(
                                   box_props=box_props,
                                   resizer_props=resizer_props,
                                   layout_overflow=layout_overflow,
-                                  layout=layout)
+                                  layout=layout,
+                                  state_dcls=state_dcls)

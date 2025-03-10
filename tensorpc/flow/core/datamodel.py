@@ -268,10 +268,9 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             await self.run_callbacks(cbs,
                                      change_status=False,
                                      capture_draft=True)
-        # apply_draft_update_ops(self.model, ops)
-        # import rich
-        # rich.print(as_dict_no_undefined(self.model))
-        frontend_ops = [op.to_jmes_path_op().to_dict() for op in ops]
+        # any modify on external field won't be included in frontend.
+        frontend_ops = list(filter(lambda op: not op.is_external, ops))
+        frontend_ops = [op.to_jmes_path_op().to_dict() for op in frontend_ops]
         return self.create_comp_event({
             "type": 0,
             "ops": frontend_ops,
@@ -363,6 +362,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
 
     async def _handle_draft_store_update(self, ops: list[DraftUpdateOp],
                                          store: DraftFileStorage):
+        # external fields won't be included in backend store.
+        ops = list(filter(lambda op: not op.is_external, ops))
         await store.update_model(self.get_draft(), ops)
 
     @staticmethod

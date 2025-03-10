@@ -108,6 +108,11 @@ class JMESPathOp:
         return {"path": self.path, "op": int(self.op), "opData": self.opData}
 
 
+@dataclasses.dataclass(kw_only=True)
+class DraftFieldMeta:
+    # external field won't be sent to frontend or store.
+    is_external: bool = False
+
 @dataclasses.dataclass
 class DraftUpdateOp:
     op: JMESPathOpType
@@ -125,6 +130,8 @@ class DraftUpdateOp:
 
     # when you setattr on draft object, this store the field id of that field.
     field_id: Optional[int] = None
+    # when assign/modify target is external, this field will be True.
+    is_external: bool = False
 
     def __repr__(self) -> str:
         path_str = self.node.get_jmes_path()
@@ -229,6 +236,7 @@ class _DraftAnnoState:
     anno_type: Optional[AnnotatedType] = None
     path_metas: list[tuple[Any, ...]] = dataclasses.field(default_factory=list)
     can_assign: bool = True
+    is_external: bool = False
 
 
 def _tensorpc_draft_dispatch(
@@ -273,9 +281,16 @@ def _tensorpc_draft_anno_dispatch(
     path_metas = prev_anno_state.path_metas.copy()
     if anno_type is not None and anno_type.annometa is not None:
         path_metas = path_metas + [anno_type.annometa]
+    is_external = prev_anno_state.is_external
+    if not is_external and anno_type.annometa is not None:
+        for annmeta in anno_type.annometa:
+            if isinstance(annmeta, DraftFieldMeta):
+                is_external = annmeta.is_external
+                break
     new_anno_state = dataclasses.replace(prev_anno_state,
                                          anno_type=anno_type,
-                                         path_metas=path_metas)
+                                         path_metas=path_metas,
+                                         is_external=is_external)
     if not prev_anno_state.can_assign:
         new_anno_state.can_assign = False
     else:
@@ -358,7 +373,8 @@ class DraftBase:
         return DraftUpdateOp(op_type, opdata, node,
                              self._tensorpc_draft_attr_userdata,
                              addi_nodes if addi_nodes is not None else [],
-                             annometa, field_id=field_id)
+                             annometa, field_id=field_id,
+                             is_external=self._tensorpc_draft_attr_anno_state.is_external)
 
     def _tensorpc_draft_dispatch(
             self,

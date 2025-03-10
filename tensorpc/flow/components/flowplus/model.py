@@ -1,11 +1,11 @@
-from typing import Annotated, Any, Optional, cast
-from tensorpc.flow.components.models.flow import BaseNodeModel, BaseEdgeModel, BaseFlowModel
+from typing import Annotated, Any, Callable, Optional, cast
+from tensorpc.flow.components.models.flow import BaseNodeModel, BaseEdgeModel, BaseFlowModel, BaseFlowModelBinder
 import tensorpc.core.dataclass_dispatch as dataclasses
 import enum 
 import tensorpc.core.datamodel as D
 import dataclasses as dataclasses_relaxed
 from tensorpc.core.datamodel.draftstore import (DraftStoreMapMeta)
-
+from tensorpc.flow.components.flowui import Node, Edge, Flow
 class ComputeNodeType(enum.IntEnum):
     # compute node
     COMPUTE = 0
@@ -42,6 +42,9 @@ class ComputeFlowNodeModel(BaseNodeModel):
     # compute/markdown props
     code: str = ""
     code_key: Optional[str] = None
+    # if true and code_key isn't None, the code impl file is watched.
+    is_watched: bool = False
+    read_only: bool = False
     flow_key: Optional[str] = None
     # schedule props
     run_in_proc: bool = False # only valid when no vrc props set.
@@ -54,13 +57,14 @@ class ComputeFlowNodeModel(BaseNodeModel):
     vGPU: int = -1
     vGPUMem: int = -1
 
-@dataclasses.dataclass
+@dataclasses.dataclass(kw_only=True)
 class ComputeFlowModel(BaseFlowModel[ComputeFlowNodeModel, BaseEdgeModel]):
+    nodes: Annotated[dict[str, ComputeFlowNodeModel], DraftStoreMapMeta(attr_key="n")] = dataclasses.field(default_factory=dict)
     selected_node: Optional[str] = None
     # we only store user node states in splitted store.
     node_states: Annotated[dict[str, Any], DraftStoreMapMeta(attr_key="ns")] = dataclasses.field(default_factory=dict)
 
-@dataclasses.dataclass
+@dataclasses.dataclass(kw_only=True)
 class ComputeFlowModelRoot(ComputeFlowModel):
     # example: ['nodes', 'node_id_0', flow, 'nodes', 'node_id_1', 'flow']
     cur_path: list[str] = dataclasses.field(default_factory=list)
@@ -91,3 +95,8 @@ def get_compute_flow_drafts(root_draft: ComputeFlowModelRoot):
     code_draft = D.where(cur_selected_node.code_key != None, root_draft.shared_node_code[cur_selected_node.code_key], cur_selected_node.code, return_type=str) # type: ignore
     return ComputeFlowDrafts(cur_model_draft, prev_path_draft, preview_model_draft, cur_selected_node, code_draft)
 
+class ComputeFlowBinder:
+    def __init__(self, flow_comp: Flow, drafts: ComputeFlowDrafts, model_getter: Callable[[], ComputeFlowModel]):
+        self.flow_comp = flow_comp
+        self.drafts = drafts
+        self.model_getter = model_getter

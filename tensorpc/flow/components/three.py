@@ -862,8 +862,8 @@ class Boxes2D(Object3dWithEventBase[Boxes2DProps]):
             upd["attrs"] = attrs
         await self.send_and_wait(self.create_update_event(upd))
 
-    def get_props(self):
-        state = super().get_props()
+    def get_props_dict(self):
+        state = super().get_props_dict()
         dims = self.props.dimensions
         centers = self.props.centers
         if not isinstance(dims, Undefined) and not isinstance(

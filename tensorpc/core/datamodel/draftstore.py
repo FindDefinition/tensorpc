@@ -29,7 +29,7 @@ from tensorpc.core.annolib import (AnnotatedType, BackendOnlyProp,
 from tensorpc.core.datamodel.draftast import ROOT_NODE
 from tensorpc.core.tree_id import UniqueTreeId
 import json 
-from .draft import (DraftASTNode, DraftASTType, DraftBase, DraftUpdateOp, JMESPathOpType, apply_draft_update_ops_to_json_with_root, evaluate_draft_ast,
+from .draft import (DraftASTNode, DraftASTType, DraftBase, DraftFieldMeta, DraftUpdateOp, JMESPathOpType, apply_draft_update_ops_to_json_with_root, evaluate_draft_ast,
                     apply_draft_update_ops, apply_draft_update_ops_to_json, stabilize_getitem_path_in_op_main_path)
 
 T = TypeVar("T", bound=DataclassType)
@@ -196,7 +196,7 @@ def _is_none_or_undefined(obj: Any):
     return obj is None or isinstance(obj, Undefined)
 
 @dataclasses.dataclass(kw_only=True)
-class DraftStoreMetaBase:
+class DraftStoreMetaBase(DraftFieldMeta):
     # you can specific multiple store backend by this id.
     store_id: Optional[str] = None
     attr_key: str = ""

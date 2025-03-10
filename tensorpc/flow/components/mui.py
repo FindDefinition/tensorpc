@@ -4168,8 +4168,8 @@ class FlexLayout(MUIContainerBase[FlexLayoutProps, MUIComponentType]):
     def _on_save_model(self, model):
         self.props.modelJson = model
 
-    def get_props(self):
-        res = super().get_props()
+    def get_props_dict(self):
+        res = super().get_props_dict()
         # we delay init model here because we need
         # to wait for all components to be initialized
         # to get uid of child components.
@@ -4666,12 +4666,12 @@ class RawJsonLikeTreeBase(MUIComponentBase[T_raw_tview_base_props]):
             FrontendEventType.TreeItemRename)
 
     @override
-    def get_props(self) -> Dict[str, Any]:
+    def get_props_dict(self) -> Dict[str, Any]:
         # we assume the dict is valid and json serializable
         # so we override standard as_dict to avoid expensive nested asdict
         tree_data = self.props.tree
         self.props.tree = {}
-        res = super().get_props()
+        res = super().get_props_dict()
         self.props.tree = tree_data
         res["tree"] = tree_data
         return res

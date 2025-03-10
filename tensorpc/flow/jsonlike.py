@@ -20,7 +20,6 @@ from pydantic import (
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
 from tensorpc.core.annolib import Undefined, BackendOnlyProp, as_dict_no_undefined
 
-
 ValueType: TypeAlias = Union[int, float, str]
 NumberType: TypeAlias = Union[int, float]
 
