@@ -9,7 +9,7 @@ from deepdiff.diff import DeepDiff
 
 from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core.datamodel.draft import (
-    DraftObject, apply_draft_jmes_ops, apply_draft_update_ops,
+    DraftFieldMeta, DraftObject, apply_draft_jmes_ops, apply_draft_update_ops,
     apply_draft_update_ops_with_changed_obj_ids, capture_draft_update, cast_any_draft_to_dataclass,
     create_draft, create_draft_type_only, create_literal_draft, get_draft_anno_path_metas,
     get_draft_anno_type, get_draft_ast_node, insert_assign_draft_op, materialize_any_draft_to_dataclass, rebuild_and_stabilize_draft_expr)
@@ -42,7 +42,7 @@ class SplittedModel:
     b: float 
     c_split: Annotated[dict[str, int], DraftStoreMapMeta(attr_key="modified_name")] 
     d_split: Annotated[dict[str, SplittedSubModel], DraftStoreMapMeta()] 
-
+    e: Annotated[dict[str, int], DraftFieldMeta(is_external=True)] = dataclasses.field(default_factory=dict)
 
 def modify_func_splitted(mod: SplittedModel):
     mod.a = 1
@@ -58,13 +58,14 @@ def modify_func_splitted(mod: SplittedModel):
     mod.d_split["a"].f[0] = 6
     mod.c_split.pop("a")
     mod.d_split["a"].e_split.pop("a")
+    mod.e["a"] = 9
 
 def _b64encode(key: str):
     return base64.b64encode(key.encode()).decode()
 
 def test_splitted_draft(type_only_draft: bool = True):
     _, field_meta_dict = analysis_model_store_meta(SplittedModel)
-    model = SplittedModel(a=0, b=2.0, c_split={"a": 1, "b": 2}, d_split={"a": SplittedSubModel(d=1, e_split={"a": 1, "b": 2}, f=[5])})
+    model = SplittedModel(a=0, b=2.0, c_split={"a": 1, "b": 2}, d_split={"a": SplittedSubModel(d=1, e_split={"a": 1, "b": 2}, f=[5])}, e={})
     model_ref = copy.deepcopy(model)
     if type_only_draft:
         draft = create_draft_type_only(type(model))
@@ -99,7 +100,7 @@ async def test_splitted_draft_store(type_only_draft: bool = True):
     store_backend = DraftFileStoreBackendInMemory()
     another_store_backend = DraftFileStoreBackendInMemory()
     _, field_store_metas = analysis_model_store_meta(SplittedModel)
-    model = SplittedModel(a=0, b=2.0, c_split={"a": 1, "b": 2}, d_split={"a": SplittedSubModel(d=1, e_split={"a": 1, "b": 2}, f=[5])})
+    model = SplittedModel(a=0, b=2.0, c_split={"a": 1, "b": 2}, d_split={"a": SplittedSubModel(d=1, e_split={"a": 1, "b": 2}, f=[5])}, e={})
     model_ref = copy.deepcopy(model)
     backend_dict = {
         "": store_backend,
@@ -107,6 +108,8 @@ async def test_splitted_draft_store(type_only_draft: bool = True):
     }
     store = DraftFileStorage("test", model, backend_dict)
     model_loaded = await store.fetch_model()
+    # pprint(store_backend._data, expand_all=True)
+    assert "e" not in store_backend._data["test"]
     # pprint(store_backend._data, expand_all=True)
     # pprint(another_store_backend._data, expand_all=True)
 
@@ -135,7 +138,9 @@ async def test_splitted_draft_store(type_only_draft: bool = True):
     # rich.print(dataclasses.asdict(model_ref),)
     # rich.print(store_backend._data)
     # rich.print(another_store_backend._data)
-    ddiff = DeepDiff(dataclasses.asdict(model_my), dataclasses.asdict(model_ref), ignore_order=True)
+    model_my_dict = dataclasses.asdict(model_my)
+    model_my_dict["e"] = {"a": 9} # e don't exists on store, so we add it for test.
+    ddiff = DeepDiff(model_my_dict, dataclasses.asdict(model_ref), ignore_order=True)
     assert not ddiff, str(ddiff)
 
 @dataclasses.dataclass
@@ -360,13 +365,13 @@ async def test_scalar_meta():
 
 if __name__ == "__main__":
 
-    # asyncio.run(test_splitted_draft_store())
+    asyncio.run(test_splitted_draft_store())
 
-    # test_splitted_draft(True)
-    # test_splitted_draft(False)
+    test_splitted_draft(True)
+    test_splitted_draft(False)
 
-    # asyncio.run(test_nested_model())
-    # asyncio.run(test_nested_model_store())
-    # asyncio.run(test_nested_model_store_set_attr())
+    asyncio.run(test_nested_model())
+    asyncio.run(test_nested_model_store())
+    asyncio.run(test_nested_model_store_set_attr())
 
     asyncio.run(test_scalar_meta())

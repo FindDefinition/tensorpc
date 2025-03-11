@@ -13,7 +13,7 @@ from tensorpc.core.datamodel.draft import (
     get_draft_anno_type, get_draft_ast_node, insert_assign_draft_op, materialize_any_draft_to_dataclass, rebuild_and_stabilize_draft_expr)
 
 import tensorpc.core.datamodel.funcs as D
-from tensorpc.core.datamodel.draftast import evaluate_draft_ast, evaluate_draft_ast_json
+from tensorpc.core.datamodel.draftast import DraftASTCompiler, evaluate_draft_ast, evaluate_draft_ast_json
 from tensorpc.core.datamodel.draftstore import (DraftFileStorage,
                                                 DraftFileStoreBackendInMemory,
                                                 DraftStoreMapMeta,
@@ -228,16 +228,54 @@ def test_generic_model():
         anno_type = get_draft_anno_type(draft.a)
         assert anno_type is not None and anno_type.origin_type == tp
 
+@dataclasses.dataclass
+class NestedNode:
+    a: int
+    b: int
+    models: dict[str, "NestedModelX"]
+
+@dataclasses.dataclass
+class NestedModelX:
+    nodes: Annotated[dict[str, NestedNode], DraftStoreMapMeta()]
+
+@dataclasses.dataclass
+class NestedModelRoot:
+    path: list[str]
+    model: NestedModelX
+
+def test_python_code():
+    model = _get_test_model()
+    draft = create_draft_type_only(type(model))
+
+    node = get_draft_ast_node(draft.e[draft.a])
+    code = DraftASTCompiler(node).compile_draft_ast_to_py_lines()
+    print(code)
+    model = NestedModelRoot(model=
+        NestedModelX(
+            nodes={
+                "a": NestedNode(a=1, b=5, models={"b": NestedModelX(nodes={"c": NestedNode(a=2, b=3, models={})})})
+            }
+        ),
+        path=["nodes", "a", "models", "b", "nodes", "c"]
+    )
+    draft = create_draft_type_only(type(model))
+    expr_getitempath = D.getitem_path_dynamic(draft.model, draft.path, NestedNode)
+    node = get_draft_ast_node(draft.path[expr_getitempath.a])
+    code = DraftASTCompiler(node).compile_draft_ast_to_py_lines()
+    print("\n".join(code))
+
 
 if __name__ == "__main__":
-    test_draft(False)
-    test_draft(True)
+    # test_draft(False)
+    # test_draft(True)
 
-    test_draft_event()
+    # test_draft_event()
 
-    test_draft_any_materialize()
+    # test_draft_any_materialize()
 
-    test_draft_expr()
+    # test_draft_expr()
 
-    test_generic_model()
+    # test_generic_model()
+
+    test_python_code()
 

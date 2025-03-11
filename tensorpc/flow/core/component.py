@@ -61,9 +61,9 @@ from tensorpc.utils.uniquename import UniqueNamePool
 from tensorpc.core import dataclass_dispatch as dataclasses_strict, prim
 from tensorpc.core.annolib import DataclassType
 from tensorpc.utils.wait_tools import get_primary_ip
-
-from ..jsonlike import (BackendOnlyProp, DataClassWithUndefined, Undefined,
-                        as_dict_no_undefined, asdict_no_deepcopy,
+from tensorpc.core.datamodel.asdict import DataClassWithUndefined, asdict_no_deepcopy, as_dict_no_undefined_with_exclude, asdict_no_deepcopy_with_field, undefined_dict_factory_with_field
+from ..jsonlike import (BackendOnlyProp, Undefined,
+                        as_dict_no_undefined,
                         camel_to_snake, snake_to_camel,
                         split_props_to_undefined, undefined,
                         undefined_dict_factory)
@@ -1033,7 +1033,7 @@ class _DataclassHelper:
 @dataclasses_strict.dataclass
 class BasicProps(DataClassWithUndefined):
     # status: int = UIRunStatus.Stop.value
-    tensorpc_dynamic_eval: Union[Undefined, dict[str, Any]] = undefined
+    pass
 
 
 @dataclasses_strict.dataclass
@@ -1335,6 +1335,8 @@ class Component(Generic[T_base_props, T_child]):
         self._flow_reference_count = 0
 
         self._flow_data_model_paths: dict[str, Union[str, tuple[Component, str]]] = {}
+        self._flow_exclude_field_ids: set[int] = set()
+
         # tensorpc will scan your prop dict to find
         # np.ndarray and bytes by default.
         # this will cost time in deep and large json, if you use
@@ -1520,7 +1522,8 @@ class Component(Generic[T_base_props, T_child]):
     def _update_props_base(self,
                            prop: Callable[P, Any],
                            json_only: bool = False,
-                           ensure_json_keys: Optional[list[str]] = None):
+                           ensure_json_keys: Optional[list[str]] = None,
+                           exclude_field_ids: set[int] | None = None):
         """create prop update event by keyword arguments
         this function is used to provide intellisense result for all props.
         """
@@ -1533,7 +1536,7 @@ class Component(Generic[T_base_props, T_child]):
                 setattr(self.__props, k, v)
             # do validation for all props (call model validator)
             self._prop_validator.validate_python(self.__props)
-            return self.create_update_event(kwargs, json_only, ensure_json_keys=ensure_json_keys)
+            return self.create_update_event(kwargs, json_only, ensure_json_keys=ensure_json_keys, exclude_field_ids=self._flow_exclude_field_ids)
 
         return wrapper
 
@@ -1661,9 +1664,14 @@ class Component(Generic[T_base_props, T_child]):
         return
 
     def get_props_dict(self) -> dict[str, Any]:
-        res = self.__props.get_dict(
-            dict_factory=_undefined_comp_dict_factory,
-            obj_factory=_undefined_comp_obj_factory)  # type: ignore
+        if self._flow_exclude_field_ids:
+            res = self.props.get_dict_with_fields(
+                dict_factory=partial(undefined_comp_dict_factory_with_exclude, exclude_field_ids=self._flow_exclude_field_ids),
+                obj_factory=undefined_comp_obj_factory)  # type: ignore
+        else:
+            res = self.__props.get_dict(
+                dict_factory=undefined_comp_dict_factory,
+                obj_factory=undefined_comp_obj_factory)  # type: ignore
         return res
 
     def validate_props(self, props: dict[str, Any]) -> bool:
@@ -1709,7 +1717,7 @@ class Component(Generic[T_base_props, T_child]):
                 v = v_may_draft
             if isinstance(v, str):
                 jmespath.compile(v)
-                new_kwargs[snake_to_camel(k)] = v
+                new_kwargs[k] = v
             else:
                 assert isinstance(v, tuple) and len(v) == 2
                 assert isinstance(v[0], Component)
@@ -1717,10 +1725,10 @@ class Component(Generic[T_base_props, T_child]):
                 if isinstance(vv, DraftBase):
                     vp = get_draft_jmespath(vv)
                     jmespath.compile(vp)
-                    new_kwargs[snake_to_camel(k)] =  (v[0], vp)
+                    new_kwargs[k] =  (v[0], vp)
                 else:
                     jmespath.compile(vv)
-                    new_kwargs[snake_to_camel(k)] = (v[0], vv)
+                    new_kwargs[k] = (v[0], vv)
         self._flow_data_model_paths.update(new_kwargs)
         return self
 
@@ -1831,7 +1839,8 @@ class Component(Generic[T_base_props, T_child]):
                             data: dict[str, Union[Any, Undefined]],
                             json_only: bool = False,
                             validate: bool = False,
-                            ensure_json_keys: Optional[list[str]] = None):
+                            ensure_json_keys: Optional[list[str]] = None,
+                            exclude_field_ids: Optional[set[int]] = None):
         if validate:
             self.__prop_cls(**data)  # type: ignore
         data_no_und = {}
@@ -1845,7 +1854,10 @@ class Component(Generic[T_base_props, T_child]):
                 if k in ensure_json_keys_set:
                     data_no_und[k] = v
                 else:
-                    data_no_und[k] = as_dict_no_undefined(v)
+                    if exclude_field_ids is not None:
+                        data_no_und[k] = as_dict_no_undefined_with_exclude(v, exclude_field_ids)
+                    else:
+                        data_no_und[k] = as_dict_no_undefined(v)
         assert self._flow_uid is not None
         ev = UIUpdateEvent(
             {self._flow_uid.uid_encoded: (data_no_und, data_unds)}, json_only)
@@ -2308,7 +2320,7 @@ def _find_comps_in_dc_inner(obj, res_comp_localids: list[tuple[Component,
                                      k)
 
 
-def _undefined_comp_dict_factory(x: list[tuple[str, Any]]):
+def undefined_comp_dict_factory(x: list[tuple[str, Any]]):
     res: dict[str, Any] = {}
     for k, v in x:
         if isinstance(v, Component):
@@ -2325,8 +2337,26 @@ def _undefined_comp_dict_factory(x: list[tuple[str, Any]]):
             res[k] = v
     return res
 
+def undefined_comp_dict_factory_with_exclude(x: list[tuple[str, Any, Any]], exclude_field_ids: set[int]):
+    res: dict[str, Any] = {}
+    for k, v, f in x:
+        if id(f) in exclude_field_ids:
+            continue
+        if isinstance(v, Component):
+            assert v.is_mounted(
+            ), f"you must ensure component is inside comp tree if you add it to props, {k}, {type(v)}"
+            # res[k] = v._flow_uid_encoded
+            res[k] = v._flow_uid
+        elif isinstance(v, UniqueTreeIdForComp):
+            # delay convert to string for remote component uid patch
+            res[k] = v
+        elif isinstance(v, UniqueTreeIdForTree):
+            res[k] = v.uid_encoded
+        elif not isinstance(v, (Undefined, BackendOnlyProp)):
+            res[k] = v
+    return res
 
-def _undefined_comp_obj_factory(x: Any):
+def undefined_comp_obj_factory(x: Any):
     if isinstance(x, Component):
         assert x.is_mounted(
         ), f"you must ensure component is inside comp tree if you add it to props, {type(x)}"
@@ -2623,10 +2653,16 @@ class ContainerBase(Component[T_container_props, T_child]):
         state = super().get_props_dict()
         state["childs"] = [self[n]._flow_uid for n in self._child_comps]
         if self._child_structure is not None:
-            state["childsComplex"] = asdict_no_deepcopy(
-                self._child_structure,
-                dict_factory=_undefined_comp_dict_factory,
-                obj_factory=_undefined_comp_obj_factory)
+            if self._flow_exclude_field_ids:
+                state["childsComplex"] = asdict_no_deepcopy_with_field(
+                    self._child_structure,
+                    dict_factory_with_field=partial(undefined_comp_dict_factory_with_exclude, exclude_field_ids=self._flow_exclude_field_ids),
+                    obj_factory=undefined_comp_obj_factory)
+            else:
+                state["childsComplex"] = asdict_no_deepcopy(
+                    self._child_structure,
+                    dict_factory=undefined_comp_dict_factory,
+                    obj_factory=undefined_comp_obj_factory)
         return state
 
     async def _run_special_methods(
@@ -2696,8 +2732,8 @@ class ContainerBase(Component[T_container_props, T_child]):
         if self._child_structure is not None:
             update_msg["childsComplex"] = asdict_no_deepcopy(
                 self._child_structure,
-                dict_factory=_undefined_comp_dict_factory,
-                obj_factory=_undefined_comp_obj_factory)
+                dict_factory=undefined_comp_dict_factory,
+                obj_factory=undefined_comp_obj_factory)
         update_ev = self.create_update_event(update_msg)
         deleted = [x.uid_encoded for x in detached_uid_to_comp.keys()]
         return update_ev + self.create_update_comp_event(
@@ -2803,8 +2839,8 @@ class ContainerBase(Component[T_container_props, T_child]):
         update_msg: dict[str, Any] = {}
         update_msg["childsComplex"] = asdict_no_deepcopy(
             self._child_structure,
-            dict_factory=_undefined_comp_dict_factory,
-            obj_factory=_undefined_comp_obj_factory)
+            dict_factory=undefined_comp_dict_factory,
+            obj_factory=undefined_comp_obj_factory)
         update_ev = self.create_update_event(update_msg)
         return update_ev
 
@@ -2840,8 +2876,8 @@ class ContainerBase(Component[T_container_props, T_child]):
         if update_child_complex and self._child_structure is not None:
             update_msg["childsComplex"] = asdict_no_deepcopy(
                 self._child_structure,
-                dict_factory=_undefined_comp_dict_factory,
-                obj_factory=_undefined_comp_obj_factory)
+                dict_factory=undefined_comp_dict_factory,
+                obj_factory=undefined_comp_obj_factory)
         update_ev = self.create_update_event(update_msg)
         deleted = [x.uid_encoded for x in detached.keys()]
         deleted: list[str] = []
@@ -2913,8 +2949,8 @@ class ContainerBase(Component[T_container_props, T_child]):
         if self._child_structure is not None:
             ev_data = asdict_no_deepcopy(
                 _DataclassHelper(data),
-                dict_factory=_undefined_comp_dict_factory,
-                obj_factory=_undefined_comp_obj_factory)
+                dict_factory=undefined_comp_dict_factory,
+                obj_factory=undefined_comp_obj_factory)
             assert isinstance(ev_data, dict)
             ev = ComponentEvent({self._flow_uid.uid_encoded: ev_data["obj"]})
         else:

@@ -7,16 +7,17 @@ from typing import (Any, Callable, Coroutine, Generic, Optional, TypeVar,
 
 from mashumaro.codecs.basic import BasicDecoder, BasicEncoder
 from pydantic import field_validator
-from typing_extensions import Self, TypeAlias
+from typing_extensions import Self, TypeAlias, override
 
+from tensorpc.core.annolib import AnnotatedFieldMeta, get_dataclass_field_meta_dict
 from tensorpc.core.datamodel.draftast import DraftASTNode
 from tensorpc.core.datamodel.draftstore import DraftFileStorage, DraftStoreBackendBase
 import tensorpc.core.datamodel.jmes as jmespath
 from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core.datamodel.draft import (
-    DraftBase, DraftUpdateOp, apply_draft_update_ops, capture_draft_update,
+    DraftBase, DraftFieldMeta, DraftUpdateOp, apply_draft_update_ops, capture_draft_update,
     create_draft, create_draft_type_only, enter_op_process_ctx,
-    evaluate_draft_ast_noexcept, get_draft_ast_node)
+    evaluate_draft_ast_noexcept, get_draft_ast_node, stabilize_getitem_path_in_op_main_path)
 from tensorpc.core.datamodel.events import (DraftChangeEvent,
                                             DraftChangeEventHandler,
                                             DraftEventType,
@@ -25,7 +26,9 @@ from tensorpc.flow import appctx
 from tensorpc.flow.core.component import (Component, ContainerBase,
                                           ContainerBaseProps, DraftOpUserData,
                                           EventSlotEmitter,
-                                          EventSlotNoArgEmitter, UIType)
+                                          EventSlotNoArgEmitter, UIType,
+                                          undefined_comp_dict_factory_with_exclude,
+                                          undefined_comp_obj_factory)
 from tensorpc.flow.coretypes import StorageType
 
 from ..jsonlike import Undefined, as_dict_no_undefined, undefined
@@ -35,11 +38,9 @@ T = TypeVar("T")
 _T = TypeVar("_T")
 _CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
 
-
 @dataclasses.dataclass
 class DataModelProps(ContainerBaseProps):
     dataObject: Any = dataclasses.field(default_factory=dict)
-
 
 class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
     """DataModel is the model part of classic MVC pattern, child components can use `bind_fields` to query data from
@@ -87,10 +88,24 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
 
         self._draft_store_handler_registered: bool = False
         self._draft_store_data_fetched = False
+        model_type_real = type(model)
 
-        self._is_model_dataclass = dataclasses.is_dataclass(type(model))
+        self._is_model_dataclass = dataclasses.is_dataclass(model_type_real)
         self._is_model_pydantic_dataclass = dataclasses.is_pydantic_dataclass(
-            type(model))
+            model_type_real)
+        self._flow_exclude_field_ids: set[int] = set()
+        if dataclasses.is_dataclass(model_type_real):
+            field_meta_dict = get_dataclass_field_meta_dict(model_type_real)
+            for k, v in field_meta_dict.items():
+                if v.annotype.annometa is not None:
+                    for tt in v.annotype.annometa:
+                        if isinstance(tt, DraftFieldMeta):
+                            if tt.is_external:
+                                if v.field.default is dataclasses.MISSING and v.field.default_factory is dataclasses.MISSING:
+                                    raise ValueError(f"external field {v.field.name} must have default value or factory"
+                                        " because this field is managed by user, it won't be stored to draft storage.")
+                                self._flow_exclude_field_ids.add(v.field_id)
+                            break
 
         self._mashumaro_decoder: Optional[BasicDecoder] = None
         self._mashumaro_encoder: Optional[BasicEncoder] = None
@@ -120,7 +135,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             await self.run_callbacks(
                 all_handlers,
                 change_status=False,
-                capture_draft=True)
+                capture_draft=False)
 
     # async def _init(self):
     #     # we should trigger all draft change event handler when init or model fetched from storage.
@@ -207,7 +222,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
     @property
     def update_event(self):
         propcls = self.propcls
-        return self._update_props_base(propcls)
+        return self._update_props_base(propcls, exclude_field_ids=self._flow_exclude_field_ids)
 
     async def sync_model(self):
         await self.send_and_wait(self.update_event(dataObject=self.model))
@@ -237,7 +252,14 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             create_draft_type_only(obj_type=self._model_type,
                                    userdata=DraftOpUserData(self)))
 
-    async def _update_with_jmes_ops_event(self, ops: list[DraftUpdateOp]):
+    async def _update_with_jmes_ops_backend(self, ops: list[DraftUpdateOp]):
+        # convert dynamic node to static in op to avoid where op.
+        ops = ops.copy()
+        for i in range(len(ops)):
+            op = ops[i]
+            if op.has_dynamic_node_in_main_path():
+                ops[i] = stabilize_getitem_path_in_op_main_path(
+                    op, self.get_draft_type_only(), self._model)
         if not self._draft_change_event_handlers:
             apply_draft_update_ops(self.model, ops)
         else:
@@ -259,15 +281,20 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                     if handler.user_eval_vars:
                         # user can define custom evaluates to get new model value.
                         user_vars = {}
-                        for k, expr in handler.user_eval_vars.items():
-                            obj = evaluate_draft_ast_noexcept(expr, self.model)
+                        for k in handler.user_eval_vars.keys():
+                            obj = handler.evaluate_user_eval_var_noexcept(k, self.model)
                             user_vars[k] = obj
                         draft_change_ev.user_eval_vars = user_vars
                     cbs.append(partial(handler.handler, draft_change_ev))
             # TODO should we allow user change draft inside draft change handler (may cause infinite loop)?
             await self.run_callbacks(cbs,
                                      change_status=False,
-                                     capture_draft=True)
+                                     capture_draft=False)
+        return ops
+
+    async def _update_with_jmes_ops_event(self, ops: list[DraftUpdateOp]):
+        # convert dynamic node to static in op to avoid where op.
+        ops = await self._update_with_jmes_ops_backend(ops)
         # any modify on external field won't be included in frontend.
         frontend_ops = list(filter(lambda op: not op.is_external, ops))
         frontend_ops = [op.to_jmes_path_op().to_dict() for op in frontend_ops]
@@ -352,6 +379,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             self.model), "only support dataclass model"
         self._model = await store.fetch_model()
         self.props.dataObject = self._model
+        # user should init their external fields in this event.
+        # TODO should we capture draft here?
         await self.flow_event_emitter.emit_async(
             self._backend_storage_fetched_event_key,
             Event(self._backend_storage_fetched_event_key, None))

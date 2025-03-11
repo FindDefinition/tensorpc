@@ -2,46 +2,21 @@
 # from functools import partial
 # dataclass = partial(_dataclass_need_patch, eq=False)
 
-import tensorpc.core.dataclass_dispatch as dataclasses
+from typing import List
 
-from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterable,
-                    Awaitable, Callable, Coroutine, Dict, Iterable, List,
-                    Optional, Set, Tuple, Type, TypeVar, Union)
-from tensorpc.flow import mui 
-from pydantic import BaseModel
-# @dataclass(eq=False)
-class A:
-    pass 
+from typing_extensions import Annotated
+from pydantic.json_schema import SkipJsonSchema
+from pydantic_core import PydanticUndefined, core_schema
 
-# @dataclass(eq=False)
-# class B(A):
-#     b: int
+from pydantic import BaseModel, PlainSerializer, PydanticUndefinedAnnotation
 
-# A(1)
+CustomStr = Annotated[
+    List, PlainSerializer(lambda x: ' '.join(x), return_type=PydanticUndefined)
+]
 
-class GridLayoutProps(BaseModel):
-    width: Union[mui.Undefined, int] = mui.undefined
-    autoSize: Union[bool, mui.Undefined] = mui.undefined
-    cols: Union[int, mui.Undefined] = mui.undefined
-    draggableHandle: Union[mui.Undefined, str] = mui.undefined
-    rowHeight: Union[mui.Undefined, int] = mui.undefined
+class StudentModel(BaseModel):
+    courses: CustomStr
+    name: SkipJsonSchema[str]
 
-wtf2 = GridLayoutProps.model_validate(dict(cols=16,
-                draggableHandle=".grid-layout-drag-handle",
-                rowHeight=50))
-# wtf = mui.GridLayout([]).prop(flex=1,
-#                 cols=16,
-#                 draggableHandle=".grid-layout-drag-handle",
-#                 rowHeight=50)
-# tab_theme = mui.Theme(
-#     components={
-#         "MuiTab": {
-#             "styleOverrides": {
-#                 "root": {
-#                     "padding": "0",
-#                     "minWidth": "28px",
-#                     "minHeight": "28px",
-#                 }
-#             }
-#         }
-#     })
+student = StudentModel(courses=['Math', 'Chemistry', 'English'], name="wtf")
+print(student.model_dump_json())

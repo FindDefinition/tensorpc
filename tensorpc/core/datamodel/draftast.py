@@ -4,6 +4,7 @@ import json
 import types
 from typing import Any, Callable, MutableSequence, Optional, Type, TypeVar, Union, cast, get_type_hints
 import tensorpc.core.dataclass_dispatch as dataclasses
+from tensorpc.utils.uniquename import UniqueNamePool
 
 T = TypeVar("T")
 
@@ -82,6 +83,9 @@ class DraftASTNode:
         child_cloned = [child.clone_tree_only() for child in self.children]
         return DraftASTNode(self.type, child_cloned, self.value, self.userdata, self.field_id)
 
+    def compile(self):
+        return compile_draft_ast_to_python_func(self)
+
 ROOT_NODE = DraftASTNode(DraftASTType.NAME, [], "")
 
 _GET_ITEMS = set([
@@ -130,6 +134,23 @@ def _draft_ast_to_jmes_path_recursive(node: DraftASTNode) -> str:
     else:
         raise NotImplementedError(f"node type {node.type} not implemented")
 
+
+def _impl_get_itempath(target, path_list):
+    assert isinstance(path_list, list)
+    cur_obj = target
+    for p in path_list:
+        if isinstance(cur_obj, (Sequence, Mapping)):
+            cur_obj = cur_obj[p]
+        else:
+            assert dataclasses.is_dataclass(cur_obj)
+            cur_obj = getattr(cur_obj, p)
+    return cur_obj
+
+def _impl_not_null(*args):
+    for arg in args:
+        if arg is not None:
+            return arg
+    return None
 
 def evaluate_draft_ast(node: DraftASTNode, obj: Any) -> Any:
     if node.type == DraftASTType.NAME:
@@ -219,6 +240,127 @@ def evaluate_draft_ast(node: DraftASTNode, obj: Any) -> Any:
     else:
         raise NotImplementedError(f"node type {node.type} not implemented")
 
+class DraftASTCompiler:
+    def __init__(self, node: DraftASTNode):
+        self.node = node
+        self.node_id_to_expr: dict[int, str] = {}
+        self.expr_to_ref_cnt: dict[str, int] = {}
+
+        self.expr_to_imme_var_cache: dict[str, str] = {}
+        self._imme_decls: list[str] = []
+        self._decl_uniq_name = UniqueNamePool()
+
+    def compile_draft_ast_to_py_lines(self) -> list[str]:
+        self.node_id_to_info = {}
+        self.expr_to_imme_var_cache = {}
+        self.expr_to_ref_cnt = {}
+        self._imme_decls = []
+        self._compile_draft_ast_to_py_expr(self.node, True)
+        final_expr = self._compile_draft_ast_to_py_expr(self.node, False)
+        final_lines = self._imme_decls + [f"return {final_expr}"]
+        return final_lines
+
+    def _inc_expr_data(self, node: DraftASTNode, expr: str):
+        if id(node) not in self.node_id_to_info:
+            self.node_id_to_expr[id(node)] = expr
+        else:
+            assert self.node_id_to_info[id(node)] == expr
+
+        if expr not in self.expr_to_ref_cnt:
+            self.expr_to_ref_cnt[expr] = 1
+        else:
+            self.expr_to_ref_cnt[expr] += 1
+
+    def _compile_draft_ast_to_py_expr(self, node: DraftASTNode, first_pass: bool) -> str:
+        if not first_pass:
+            expr = self.node_id_to_expr[id(node)]
+            if expr in self.expr_to_imme_var_cache:
+                return self.expr_to_imme_var_cache[expr]
+        if node.type == DraftASTType.NAME:
+            if node.value == "" or node.value == "$":
+                res = "obj"
+            else:
+                res = f"obj.{node.value}"
+        elif node.type == DraftASTType.JSON_LITERAL or node.type == DraftASTType.STRING_LITERAL:
+            res =  repr(node.value)
+        elif node.type == DraftASTType.GET_ATTR:
+            res = f"({self._compile_draft_ast_to_py_expr(node.children[0], first_pass)}).{node.value}"
+        elif node.type == DraftASTType.ARRAY_GET_ITEM or node.type == DraftASTType.DICT_GET_ITEM:
+            res = f"({self._compile_draft_ast_to_py_expr(node.children[0], first_pass)})[{repr(node.value)}]"
+        elif node.type == DraftASTType.BINARY_OP:
+            op = node.value
+            x = self._compile_draft_ast_to_py_expr(node.children[0], first_pass)
+            y = self._compile_draft_ast_to_py_expr(node.children[1], first_pass)
+            res = f"({x} {op} {y})"
+        elif node.type == DraftASTType.UNARY_OP:
+            op = node.value
+            x = self._compile_draft_ast_to_py_expr(node.children[0], first_pass)
+            res = f"({op}({x}))"
+        elif node.type == DraftASTType.FUNC_CALL:
+            if node.value == "getitem":
+                res = f"{self._compile_draft_ast_to_py_expr(node.children[0], first_pass)}[{self._compile_draft_ast_to_py_expr(node.children[1], first_pass)}]"
+            elif node.value == "getattr":
+                res =  f"{self._compile_draft_ast_to_py_expr(node.children[0], first_pass)}.{self._compile_draft_ast_to_py_expr(node.children[1], first_pass)}"
+            elif node.value == "cformat":
+                fmt = self._compile_draft_ast_to_py_expr(node.children[0], first_pass)
+                args = [
+                    self._compile_draft_ast_to_py_expr(child, first_pass) for child in node.children[1:]
+                ]
+                res =  f"({fmt} % ({','.join(args)}))"
+            elif node.value == "getitem_path":
+                target = self._compile_draft_ast_to_py_expr(node.children[0], first_pass)
+                path_list = self._compile_draft_ast_to_py_expr(node.children[1], first_pass)
+                res =  f"getitem_path({target}, {path_list})"
+            elif node.value == "not_null":
+                res =  f"not_null({','.join([self._compile_draft_ast_to_py_expr(child, first_pass) for child in node.children])})"
+            elif node.value == "where":
+                cond = self._compile_draft_ast_to_py_expr(node.children[0], first_pass)
+                x = self._compile_draft_ast_to_py_expr(node.children[1], first_pass)
+                y = self._compile_draft_ast_to_py_expr(node.children[2], first_pass)
+                res =  f"({x} if {cond} else {y})"
+            elif node.value == "create_array":
+                res =  f"[{','.join([self._compile_draft_ast_to_py_expr(child, first_pass) for child in node.children])}]"
+            elif node.value == "concat":
+                res =  f"sum({','.join([self._compile_draft_ast_to_py_expr(child, first_pass) for child in node.children])}, [])"
+            else:
+                raise NotImplementedError(f"func {node.value} not implemented")
+        else:
+            raise NotImplementedError(f"node type {node.type} not implemented")
+        if first_pass:
+            self._inc_expr_data(node, res)
+        else:
+            expr = self.node_id_to_expr[id(node)]
+            ref_cnt = self.expr_to_ref_cnt[expr]
+            if ref_cnt > 1 and node.type != DraftASTType.NAME:
+                if node.type == DraftASTType.FUNC_CALL:
+                    imme_var_name = node.value.upper()
+                else:
+                    imme_var_name = node.type.name
+                imme_var_name = self._decl_uniq_name(imme_var_name)
+                self._imme_decls.append(f"{imme_var_name} = {res}")
+                self.expr_to_imme_var_cache[expr] = imme_var_name
+                res = imme_var_name
+        return res 
+
+def compile_draft_ast_to_python_func(node: DraftASTNode) -> Callable[[Any], Any]:
+    code = DraftASTCompiler(node).compile_draft_ast_to_py_lines()
+    code = ["    " + line for line in code]
+    code_str = '\n'.join(code)
+    code_func = f"""
+def _draft_ast_func(obj):
+{code_str}
+"""
+    try:
+        func_code_obj = compile(code_func, "<string>", "exec")
+    except:
+        print(code_func)
+        raise
+    globals_container = {
+        "getitem_path": _impl_get_itempath,
+        "not_null": _impl_not_null
+    }
+    exec(func_code_obj, globals_container)
+    return globals_container["_draft_ast_func"]
 
 def evaluate_draft_ast_noexcept(node: DraftASTNode, obj: Any) -> Optional[Any]:
     try:

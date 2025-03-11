@@ -69,6 +69,26 @@ class DraftChangeEventHandler:
     handle_child_change: bool = False
     user_eval_vars: Optional[dict[str, DraftASTNode]] = None
 
+    _draft_expr_compiled_cache: dict[str, Callable[[Any], Any]] = dataclasses.field(default_factory=dict)
+    _user_eval_vars_compiled_cache: dict[str, Callable[[Any], Any]] = dataclasses.field(default_factory=dict)
+
+    def evaluate_draft_expr_noexcept(self, key: str, model: Any):
+        if key not in self._draft_expr_compiled_cache:
+            self._draft_expr_compiled_cache[key] = self.draft_expr_dict[key].compile()
+        try:
+            return self._draft_expr_compiled_cache[key](model)
+        except Exception as e:
+            return None
+
+    def evaluate_user_eval_var_noexcept(self, key: str, model: Any):
+        assert self.user_eval_vars is not None 
+        if key not in self._user_eval_vars_compiled_cache:
+            self._user_eval_vars_compiled_cache[key] = self.user_eval_vars[key].compile()
+        try:
+            return self._user_eval_vars_compiled_cache[key](model)
+        except Exception as e:
+            return None
+
 
 def create_draft_change_event_handler(
         draft_obj: Union[Any, dict[str, Any]],
@@ -92,8 +112,8 @@ def update_model_with_change_event(
     handler_old_values: list[dict[str, tuple[Any, bool]]] = []
     for handler in event_handlers:
         old_val_dict = {}
-        for k, draft_expr in handler.draft_expr_dict.items():
-            obj = evaluate_draft_ast_noexcept(draft_expr, model)
+        for k in handler.draft_expr_dict.keys():
+            obj = handler.evaluate_draft_expr_noexcept(k, model)
             if isinstance(obj, (bool, int, float, str, type(None))):
                 old_val_dict[k] = (obj, False)
             else:
@@ -108,9 +128,9 @@ def update_model_with_change_event(
         
         new_val_dict: dict[str, Any] = {}
         type_dict: dict[str, DraftEventType] = {}
-        for k, draft_expr in handler.draft_expr_dict.items():
+        for k in handler.draft_expr_dict.keys():
             old_value, is_obj = old_val_dict[k]
-            new_value = evaluate_draft_ast_noexcept(draft_expr, model)
+            new_value = handler.evaluate_draft_expr_noexcept(k, model)
             ev_type = DraftEventType.NoChange
             if handler.equality_fn is not None:
                 if not handler.equality_fn(old_value, new_value):

@@ -27,7 +27,7 @@ from tensorpc import compat
 from tensorpc.core.httpservers.core import JS_MAX_SAFE_INT
 from tensorpc.flow.core.appcore import Event, EventDataType
 from tensorpc.flow.components.threecore import TextureFormat, TextureMappingType, TextureType, TextureWrappingMode
-from tensorpc.flow.jsonlike import DataClassWithUndefined
+from tensorpc.core.datamodel.asdict import DataClassWithUndefined
 from typing_extensions import Literal
 from tensorpc.flow.core import colors
 import tensorpc.core.dataclass_dispatch as dataclasses

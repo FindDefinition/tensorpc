@@ -1,4 +1,5 @@
 from typing import Annotated, Any, Callable, Optional, cast
+from tensorpc.core.datamodel.draft import DraftFieldMeta
 from tensorpc.flow.components.models.flow import BaseNodeModel, BaseEdgeModel, BaseFlowModel, BaseFlowModelBinder
 import tensorpc.core.dataclass_dispatch as dataclasses
 import enum 
@@ -58,6 +59,15 @@ class ComputeFlowNodeModel(BaseNodeModel):
     vGPUMem: int = -1
 
 @dataclasses.dataclass(kw_only=True)
+class InlineCodeInfo:
+    path: str 
+    lineno: int
+
+@dataclasses.dataclass(kw_only=True)
+class InlineCode:
+    code: str
+
+@dataclasses.dataclass(kw_only=True)
 class ComputeFlowModel(BaseFlowModel[ComputeFlowNodeModel, BaseEdgeModel]):
     nodes: Annotated[dict[str, ComputeFlowNodeModel], DraftStoreMapMeta(attr_key="n")] = dataclasses.field(default_factory=dict)
     selected_node: Optional[str] = None
@@ -70,6 +80,11 @@ class ComputeFlowModelRoot(ComputeFlowModel):
     cur_path: list[str] = dataclasses.field(default_factory=list)
     shared_node_code: Annotated[dict[str, str], DraftStoreMapMeta(attr_key="snc")] = dataclasses.field(default_factory=dict)
     shared_node_flow: Annotated[dict[str, "ComputeFlowModel"], DraftStoreMapMeta(attr_key="snf")] = dataclasses.field(default_factory=dict)
+    # backend only field, used for events.
+    # e.g. use watchdog to watch file change. if file change, it will set content in this field.
+    # then draft event observer will update the code editor.
+    module_id_to_code_info: Annotated[dict[str, InlineCodeInfo], DraftFieldMeta(is_external=True)] = dataclasses.field(default_factory=dict)
+    path_to_code: Annotated[dict[str, InlineCode], DraftFieldMeta(is_external=True)] = dataclasses.field(default_factory=dict)
 
 @dataclasses_relaxed.dataclass 
 class ComputeFlowDrafts:
@@ -92,6 +107,7 @@ def get_compute_flow_drafts(root_draft: ComputeFlowModelRoot):
     is_not_subflow_node_selected = D.logical_or(cur_model_draft.selected_node == None, cur_selected_node.type != ComputeNodeType.SUBFLOW.value)
     prev_path_draft = D.where(is_not_subflow_node_selected, [], prev_path_draft_if_exist, return_type=list[str]) # type: ignore
     preview_model_draft = cast(Optional[ComputeFlowModel], D.getitem_path_dynamic(root_draft, prev_path_draft, Optional[ComputeFlowModel]))
+    code_draft_may_module_id = D.where(cur_selected_node.module_id != "", root_draft.path_to_code[root_draft.module_id_to_code_info[cur_selected_node.module_id].path].code, cur_selected_node.code, return_type=str) # type: ignore
     code_draft = D.where(cur_selected_node.code_key != None, root_draft.shared_node_code[cur_selected_node.code_key], cur_selected_node.code, return_type=str) # type: ignore
     return ComputeFlowDrafts(cur_model_draft, prev_path_draft, preview_model_draft, cur_selected_node, code_draft)
 

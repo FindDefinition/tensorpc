@@ -6,8 +6,9 @@ https://github.com/pydantic/pydantic/blob/main/pydantic/_internal/_typing_extra.
 from collections.abc import Mapping, Sequence
 import copy
 import dataclasses
-from typing import Any, AsyncGenerator, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Type, TypeVar, TypedDict, Union, Generic
-from typing_extensions import Literal, Annotated, NotRequired, Protocol, get_origin, get_args, get_type_hints
+from functools import partial
+from typing import Any, AsyncGenerator, Callable, ClassVar, Dict, Generator, List, Optional, Set, Tuple, Type, TypeVar, TypedDict, Union, Generic
+from typing_extensions import Literal, Annotated, NotRequired, Protocol, get_origin, get_args, get_type_hints, TypeGuard
 from dataclasses import dataclass
 from dataclasses import Field, make_dataclass, field
 import inspect
@@ -27,6 +28,7 @@ class DataclassType(Protocol):
     # the most reliable way to ascertain that something is a dataclass
     __dataclass_fields__: ClassVar[Dict[str, Any]]
 
+T_dataclass = TypeVar("T_dataclass", bound=DataclassType)
 
 if sys.version_info < (3, 10):
 
@@ -44,7 +46,7 @@ def lenient_issubclass(cls: Any,
     return isinstance(cls, type) and issubclass(cls, class_or_tuple)
 
 
-def is_annotated(ann_type: Any) -> bool:
+def is_annotated(ann_type: Any) -> TypeGuard[Annotated]:
     # https://github.com/pydantic/pydantic/blob/35144d05c22e2e38fe093c533ff3a05ce9a30116/pydantic/_internal/_typing_extra.py#L99C1-L104C1
     origin = get_origin(ann_type)
     return origin is not None and lenient_issubclass(origin, Annotated)
@@ -110,6 +112,9 @@ class Undefined:
     def bool(self):
         return False
 
+# DON'T MODIFY THIS VALUE!!!
+undefined = Undefined()
+
 
 T = TypeVar("T")
 
@@ -150,28 +155,6 @@ class BackendOnlyProp(Generic[T]):
             return o.data != self.data
         else:
             return o != self.data
-
-
-def undefined_dict_factory(x: List[Tuple[str, Any]]):
-    res: Dict[str, Any] = {}
-    for k, v in x:
-        if isinstance(v, UniqueTreeId):
-            res[k] = v.uid_encoded
-        elif not isinstance(v, (Undefined, BackendOnlyProp)):
-            res[k] = v
-    return res
-
-
-@dataclasses.dataclass
-class _DataclassSer:
-    obj: Any
-
-
-def as_dict_no_undefined(obj: Any):
-    return dataclasses.asdict(_DataclassSer(obj),
-                              dict_factory=undefined_dict_factory)["obj"]
-
-
 
 if sys.version_info >= (3, 13):
     from typing import _collect_type_parameters
@@ -444,8 +427,12 @@ def parse_type_may_optional_undefined(
 def child_type_generator(t: type):
     yield t
     args = get_args(t)
-    for arg in args:
-        yield from child_type_generator(arg)
+    if is_annotated(t):
+        # avoid yield meta object in annotated
+        yield from child_dataclass_type_generator(args[0])
+    else:
+        for arg in args:
+            yield from child_dataclass_type_generator(arg)
 
 
 def child_type_generator_with_dataclass(t: type):
@@ -456,9 +443,22 @@ def child_type_generator_with_dataclass(t: type):
             yield from child_type_generator(type_hints[field.name])
     else:
         args = get_args(t)
-        for arg in args:
-            yield from child_type_generator(arg)
+        if is_annotated(t):
+            yield from child_dataclass_type_generator(args[0])
+        else:
+            for arg in args:
+                yield from child_dataclass_type_generator(arg)
 
+def child_dataclass_type_generator(t: type) -> Generator[type[DataclassType], None, None]:
+    if dataclasses.is_dataclass(t):
+        yield t
+    else:
+        args = get_args(t)
+        if is_annotated(t):
+            yield from child_dataclass_type_generator(args[0])
+        else:
+            for arg in args:
+                yield from child_dataclass_type_generator(arg)
 
 def parse_annotated_function(
     func: Callable,
@@ -510,6 +510,38 @@ def annotated_function_to_dataclass(func: Callable,
         fields.append((name, anno, field(default=param.default)))
     return make_dataclass(func.__name__, fields)
 
+
+@dataclasses.dataclass
+class AnnotatedFieldMeta:
+    name: str
+    annotype: AnnotatedType
+    field_id: int
+    field: dataclasses.Field
+
+
+def _recursive_get_field_meta_dict(model_type: type[T_dataclass], field_meta_dict: dict[int, AnnotatedFieldMeta]):
+    type_hints = get_type_hints(model_type, include_extras=True)
+    for field in dataclasses.fields(model_type):
+        field_type = type_hints[field.name]
+        annotype = parse_type_may_optional_undefined(field_type)
+        field_meta = AnnotatedFieldMeta(field.name, annotype, id(field), field)
+        if id(field) not in field_meta_dict:
+            field_meta_dict[id(field)] = field_meta
+        else:
+            # avoid nested check
+            continue
+        if annotype.is_dataclass_type():
+            _recursive_get_field_meta_dict(annotype.origin_type, field_meta_dict)
+        else:
+            for t in child_dataclass_type_generator(field_type):
+                _recursive_get_field_meta_dict(t, field_meta_dict)
+    return 
+
+def get_dataclass_field_meta_dict(model_type: type[T_dataclass]) -> dict[int, AnnotatedFieldMeta]:
+    field_meta_dict: dict[int, AnnotatedFieldMeta] = {}
+    _recursive_get_field_meta_dict(model_type, field_meta_dict)
+    new_field_meta_dict: dict[int, AnnotatedFieldMeta] = {**field_meta_dict}
+    return new_field_meta_dict
 
 def _main():
 

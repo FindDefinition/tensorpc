@@ -1,8 +1,8 @@
 import dataclasses
 from typing import Any, Dict, List, Union
 from typing_extensions import Literal
-from tensorpc.flow.jsonlike import DataClassWithUndefined, Undefined, undefined
-
+from tensorpc.flow.jsonlike import Undefined, undefined
+from tensorpc.core.datamodel.asdict import DataClassWithUndefined
 
 @dataclasses.dataclass
 class PyrightConfig:

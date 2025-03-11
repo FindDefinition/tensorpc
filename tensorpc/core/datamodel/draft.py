@@ -46,7 +46,8 @@ import types
 from typing import Any, Callable, MutableSequence, Optional, Type, TypeVar, Union, cast, get_type_hints
 from typing_extensions import Literal
 from tensorpc.core import inspecttools
-from tensorpc.core.annolib import AnnotatedType, Undefined, parse_type_may_optional_undefined, as_dict_no_undefined, resolve_type_hints
+from tensorpc.core.annolib import AnnotatedType, Undefined, parse_type_may_optional_undefined, resolve_type_hints
+from tensorpc.core.datamodel.asdict import as_dict_no_undefined
 import tensorpc.core.dataclass_dispatch as dataclasses
 from collections.abc import MutableMapping, Sequence, Mapping
 import tensorpc.core.datamodel.jmes as jmespath
@@ -80,6 +81,8 @@ class ScalarInplaceOpType(enum.IntEnum):
     Sub = 1
     Mul = 2
     Div = 3
+
+_DYNAMIC_FUNC_TYPES = {DraftASTFuncType.GET_ATTR.value, DraftASTFuncType.GET_ITEM_PATH.value, DraftASTFuncType.WHERE.value}
 
 def _scalar_inplace_op_to_str(op: ScalarInplaceOpType) -> str:
     if op == ScalarInplaceOpType.Add:
@@ -170,10 +173,10 @@ class DraftUpdateOp:
                                    field_id=None)
 
     def has_dynamic_node_in_main_path(self):
-        # has `getattr` or `getitem_path` func call node
+        # has `getattr` or `getitem_path` or `where` func call node
         for node in self.node.get_child_nodes_in_main_path():
             if node.type == DraftASTType.FUNC_CALL:
-                if node.value == DraftASTFuncType.GET_ATTR.value or node.value == DraftASTFuncType.GET_ITEM_PATH.value:
+                if node.value in _DYNAMIC_FUNC_TYPES:
                     return True
         return False 
 
@@ -507,6 +510,7 @@ class DraftObject(DraftBase):
             raise AttributeError(
                 f"{type(self._tensorpc_draft_attr_real_obj)} has no attribute {name}"
             )
+        assert self._tensorpc_draft_attr_anno_state.can_assign, "your expr isn't assignable, maybe where, you may need to stabilize it first."
         ctx = get_draft_update_context()
         if isinstance(value, DraftBase):
             if ctx._ops and ctx._ops[-1].op == JMESPathOpType.ScalarInplaceOp:
@@ -1425,6 +1429,7 @@ def _rebuild_draft_expr_recursive(node: DraftASTNode, root_draft: DraftBase, mod
 
 def rebuild_and_stabilize_draft_expr(node: DraftASTNode, root_model_draft: Any, model: Any):
     """Rebuild draft expr from node, all dynamic op (getattr, getitem_path, where) will be converted to static.
+    Note: this function must be called in runtime because it depends on real model value.
     """
     assert isinstance(node, DraftASTNode)
     assert isinstance(root_model_draft, DraftBase)
