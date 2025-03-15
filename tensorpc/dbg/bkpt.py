@@ -163,66 +163,73 @@ def _get_viztracer(cfg: Optional[TracerConfig], name: Optional[str] = None):
                                     max_num_variable=tcfg.max_num_variable)
             return tracer, TracerType.TARGET_TRACER
         return None, TracerType.VIZTRACER
-    try:
-        from viztracer import VizTracer
-
-        # file_info=False to reduce the size of trace data
-        # TODO let user customize this
-        if cfg is not None:
-            inc_files, exc_files = _parse_record_filter(cfg.record_filter)
-            if not inc_files:
-                inc_files = None
-            if not exc_files:
-                exc_files = None
-            tracer_type = cfg.tracer
-            LOGGER.warning("%s %s", inc_files, exc_files)
-            if tracer_type == TracerType.VIZTRACER:
-                tracer = VizTracer(process_name=name,
-                                   file_info=False,
-                                   max_stack_depth=cfg.max_stack_depth,
-                                   include_files=inc_files,
-                                   exclude_files=exc_files,
-                                   min_duration=cfg.min_duration,
-                                   ignore_c_function=cfg.ignore_c_function)
-                return tracer, TracerType.VIZTRACER
-            elif tracer_type == TracerType.PYTORCH:
-                import torch.profiler as profiler
-                # pytorch tracer can't control ignored files and max_stack_depth, so
-                # never use with_stack.
-                tracer = profiler.profile(activities=[
+    # file_info=False to reduce the size of trace data
+    # TODO let user customize this
+    if cfg is not None:
+        inc_files, exc_files = _parse_record_filter(cfg.record_filter)
+        if not inc_files:
+            inc_files = None
+        if not exc_files:
+            exc_files = None
+        tracer_type = cfg.tracer
+        LOGGER.warning("%s %s", inc_files, exc_files)
+        if tracer_type == TracerType.VIZTRACER:
+            try:
+                from viztracer import VizTracer
+            except ImportError:
+                return None, TracerType.VIZTRACER
+            tracer = VizTracer(process_name=name,
+                                file_info=False,
+                                max_stack_depth=cfg.max_stack_depth,
+                                include_files=inc_files,
+                                exclude_files=exc_files,
+                                min_duration=cfg.min_duration,
+                                ignore_c_function=cfg.ignore_c_function)
+            return tracer, TracerType.VIZTRACER
+        elif tracer_type == TracerType.PYTORCH:
+            import torch.profiler as profiler
+            # pytorch tracer can't control ignored files and max_stack_depth, so
+            # never use with_stack.
+            tracer = profiler.profile(activities=[
+                profiler.ProfilerActivity.CPU,
+                profiler.ProfilerActivity.CUDA
+            ],
+                                        with_stack=cfg.pytorch_with_stask,
+                                        profile_memory=cfg.profile_memory)
+            return tracer, TracerType.PYTORCH
+        elif tracer_type == TracerType.VIZTRACER_PYTORCH:
+            try:
+                from viztracer import VizTracer
+            except ImportError:
+                return None, TracerType.VIZTRACER
+            import torch.profiler as profiler
+            viz_tracer = VizTracer(process_name=name,
+                                    file_info=False,
+                                    max_stack_depth=cfg.max_stack_depth,
+                                    include_files=inc_files,
+                                    exclude_files=exc_files,
+                                    min_duration=cfg.min_duration,
+                                    ignore_c_function=cfg.ignore_c_function)
+            pytorch_tracer = profiler.profile(
+                activities=[
                     profiler.ProfilerActivity.CPU,
                     profiler.ProfilerActivity.CUDA
                 ],
-                                          with_stack=cfg.pytorch_with_stask,
-                                          profile_memory=cfg.profile_memory)
-                return tracer, TracerType.PYTORCH
-            elif tracer_type == TracerType.VIZTRACER_PYTORCH:
-                import torch.profiler as profiler
-                viz_tracer = VizTracer(process_name=name,
-                                       file_info=False,
-                                       max_stack_depth=cfg.max_stack_depth,
-                                       include_files=inc_files,
-                                       exclude_files=exc_files,
-                                       min_duration=cfg.min_duration,
-                                       ignore_c_function=cfg.ignore_c_function)
-                pytorch_tracer = profiler.profile(
-                    activities=[
-                        profiler.ProfilerActivity.CPU,
-                        profiler.ProfilerActivity.CUDA
-                    ],
-                    with_stack=False,
-                    profile_memory=cfg.profile_memory)
-                return VizTracerAndPytorchTracer(
-                    viz_tracer, pytorch_tracer), TracerType.VIZTRACER_PYTORCH
-            else:
-                # TODO raise here? may break user code
-                return None, TracerType.VIZTRACER
+                with_stack=False,
+                profile_memory=cfg.profile_memory)
+            return VizTracerAndPytorchTracer(
+                viz_tracer, pytorch_tracer), TracerType.VIZTRACER_PYTORCH
         else:
-            return VizTracer(process_name=name,
-                             file_info=False,
-                             max_stack_depth=8), TracerType.VIZTRACER
-    except ImportError:
-        return None, TracerType.VIZTRACER
+            # TODO raise here? may break user code
+            return None, TracerType.VIZTRACER
+    else:
+        try:
+            from viztracer import VizTracer
+        except ImportError:
+            return None, TracerType.VIZTRACER
+        return VizTracer(process_name=name,
+                            file_info=False,
+                            max_stack_depth=8), TracerType.VIZTRACER
 
 
 def should_enable_debug() -> bool:

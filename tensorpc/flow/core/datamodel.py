@@ -17,7 +17,7 @@ from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core.datamodel.draft import (
     DraftBase, DraftFieldMeta, DraftUpdateOp, apply_draft_update_ops, capture_draft_update,
     create_draft, create_draft_type_only, enter_op_process_ctx,
-    evaluate_draft_ast_noexcept, get_draft_ast_node, stabilize_getitem_path_in_op_main_path)
+    evaluate_draft_ast_noexcept, get_draft_ast_node, prevent_draft_update, stabilize_getitem_path_in_op_main_path)
 from tensorpc.core.datamodel.events import (DraftChangeEvent,
                                             DraftChangeEventHandler,
                                             DraftEventType,
@@ -120,18 +120,18 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         self._lock = asyncio.Lock()
 
     async def _run_all_draft_change_handlers_when_init(self):
-        async with self._lock:
-            all_handlers = []
-            for handlers in self._draft_change_event_handlers.values():
-                for h in handlers.values():
-                    val_dict: dict[str, Any] = {}
-                    type_dict: dict[str, DraftEventType] = {}
-                    for k, expr in h.draft_expr_dict.items():
-                        obj = evaluate_draft_ast_noexcept(expr, self.model)
-                        val_dict[k] = obj
-                        type_dict[k] = DraftEventType.InitChange
-                    # TODO if eval failed, should we call it during init?
-                    all_handlers.append(partial(h.handler, DraftChangeEvent(type_dict, {}, val_dict)))
+        all_handlers = []
+        for handlers in self._draft_change_event_handlers.values():
+            for h in handlers.values():
+                val_dict: dict[str, Any] = {}
+                type_dict: dict[str, DraftEventType] = {}
+                for k, expr in h.draft_expr_dict.items():
+                    obj = evaluate_draft_ast_noexcept(expr, self.model)
+                    val_dict[k] = obj
+                    type_dict[k] = DraftEventType.InitChange
+                # TODO if eval failed, should we call it during init?
+                all_handlers.append(partial(h.handler, DraftChangeEvent(type_dict, {}, val_dict)))
+        with prevent_draft_update():
             await self.run_callbacks(
                 all_handlers,
                 change_status=False,
@@ -155,15 +155,16 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         if should_run_handler:
             val_dict: dict[str, Any] = {}
             type_dict: dict[str, DraftEventType] = {}
-            for k, expr in handler.draft_expr_dict.items():
-                obj = evaluate_draft_ast_noexcept(expr, self.model)
+            for k in handler.draft_expr_dict.keys():
+                obj = handler.evaluate_draft_expr_noexcept(k, self.model)
                 val_dict[k] = obj
                 type_dict[k] = DraftEventType.InitChange
             # TODO if eval failed, should we call it during init?
             ev = DraftChangeEvent(type_dict, {}, val_dict)
-            await self.run_callback(partial(handler.handler, ev),
-                                    change_status=False,
-                                    capture_draft=True)
+            with prevent_draft_update():
+                await self.run_callback(partial(handler.handler, ev),
+                                        change_status=False,
+                                        capture_draft=False)
         def unmount():
             self._draft_change_event_handlers[paths].pop(handler.handler)
 
@@ -286,10 +287,11 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                             user_vars[k] = obj
                         draft_change_ev.user_eval_vars = user_vars
                     cbs.append(partial(handler.handler, draft_change_ev))
-            # TODO should we allow user change draft inside draft change handler (may cause infinite loop)?
-            await self.run_callbacks(cbs,
-                                     change_status=False,
-                                     capture_draft=False)
+            # draft ops isn't allowed in draft event handler.
+            with prevent_draft_update():
+                await self.run_callbacks(cbs,
+                                        change_status=False,
+                                        capture_draft=False)
         return ops
 
     async def _update_with_jmes_ops_event(self, ops: list[DraftUpdateOp]):
@@ -298,27 +300,36 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         # any modify on external field won't be included in frontend.
         frontend_ops = list(filter(lambda op: not op.is_external, ops))
         frontend_ops = [op.to_jmes_path_op().to_dict() for op in frontend_ops]
-        return self.create_comp_event({
-            "type": 0,
-            "ops": frontend_ops,
-        })
+        if frontend_ops:
+            return self.create_comp_event({
+                "type": 0,
+                "ops": frontend_ops,
+            })
+        else:
+            return None 
 
     async def _update_with_jmes_ops(self, ops: list[DraftUpdateOp]):
         if ops:
-            await self.flow_event_emitter.emit_async(
-                self._backend_draft_update_event_key,
-                Event(self._backend_draft_update_event_key, ops))
-            return await self.send_and_wait(
-                await self._update_with_jmes_ops_event(ops))
+            async with self._lock:
+                await self.flow_event_emitter.emit_async(
+                    self._backend_draft_update_event_key,
+                    Event(self._backend_draft_update_event_key, ops))
+                ev_or_none = await self._update_with_jmes_ops_event(ops)
+                if ev_or_none is not None:
+                    return await self.send_and_wait(ev_or_none)
 
-    async def _update_with_jmes_ops_event_for_internal(
+    async def _internal_update_with_jmes_ops_event(
             self, ops: list[DraftUpdateOp]):
         # internal event handle system will call this function
-        await self.flow_event_emitter.emit_async(
-            self._backend_draft_update_event_key,
-            Event(self._backend_draft_update_event_key, ops))
-        return await self._update_with_jmes_ops_event(ops)
+        if ops:
+            async with self._lock:
+                await self.flow_event_emitter.emit_async(
+                    self._backend_draft_update_event_key,
+                    Event(self._backend_draft_update_event_key, ops))
+                return await self._update_with_jmes_ops_event(ops)
+        return None 
 
+    @override
     def bind_fields_unchecked(
         self, **kwargs: Union[str, tuple["Component", Union[str, DraftBase]],
                               DraftBase]
@@ -338,6 +349,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
 
         WARNING: draft change event handler will be called (if change) in each draft update.
         """
+        assert not self._lock.locked(), "you can't use draft_update when another update process is running."
         draft = self.get_draft()
         with capture_draft_update() as ctx:
             yield draft

@@ -99,8 +99,8 @@ class ReservedNodeTypes:
     JsonInput = "tensorpc.cflow.JsonInputNode"
     ObjectTreeViewer = "tensorpc.cflow.ObjectTreeViewerNode"
     Expr = "tensorpc.cflow.ExprNode"
-    TensorViewer = "TensorViewer"
-    ImageViewer = "ImageViewer"
+    TensorViewer = "tensorpc.cflow.TensorViewer"
+    ImageViewer = "tensorpc.cflow.ImageViewer"
 
 
 def _default_compute_flow_css():

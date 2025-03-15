@@ -58,6 +58,8 @@ class DebugTracerWrapper:
         self._trace_tid = None
         self._trace_lock = None
 
+        self._tracer_viz_has_basetime = False
+
     def set_tracer(self, cfg: Optional[TracerConfig], tracer: Any,
                    tracer_type: TracerType, proc_name: str,
                    meta: DebugDistributedInfo) -> None:
@@ -68,6 +70,13 @@ class DebugTracerWrapper:
         self._trace_dist_meta = meta
         self._trace_lock = threading.Lock()
         self._trace_tid = threading.get_ident()
+
+        self._tracer_viz_has_basetime = False 
+        if self._tracer_type == TracerType.VIZTRACER_PYTORCH:
+            if hasattr(self._tracer._tracer_viz, "get_base_time"):
+                self._tracer_viz_has_basetime = True
+        elif self._tracer_type == TracerType.VIZTRACER:
+            self._tracer_viz_has_basetime = hasattr(self._tracer, "get_base_time")
 
     def reset_tracer(self) -> None:
         # TODO if fork during tracing...
@@ -112,7 +121,10 @@ class DebugTracerWrapper:
                 pid = os.getpid()
                 # pid == tid in pytorch profiler
                 if self._tracer_type == TracerType.VIZTRACER:
-                    ts = time.monotonic_ns() // 1000  # us
+                    if self._tracer_viz_has_basetime:
+                        ts = time.time_ns() - self._tracer.get_base_time()
+                    else:
+                        ts = time.monotonic_ns() / 1000  # us
                 else:
                     ts = time.time_ns() // 1000  # us
                 with self._trace_lock:
@@ -140,12 +152,18 @@ class DebugTracerWrapper:
             pid = os.getpid()
             # pid == tid in pytorch profiler
             if self._tracer_type == TracerType.VIZTRACER:
-                ts = time.monotonic_ns() / 1000  # us
+                if self._tracer_viz_has_basetime:
+                    ts = time.time_ns() - self._tracer.get_base_time()
+                else:
+                    ts = time.monotonic_ns() / 1000  # us
             else:
                 ts = time.time_ns() / 1000  # us
             yield 
             if self._tracer_type == TracerType.VIZTRACER:
-                ts_end = time.monotonic_ns() / 1000  # us
+                if self._tracer_viz_has_basetime:
+                    ts_end = time.time_ns() - self._tracer.get_base_time()
+                else:
+                    ts_end = time.monotonic_ns() / 1000  # us
             else:
                 ts_end = time.time_ns() / 1000  # us
             res = {
@@ -203,7 +221,7 @@ class DebugTracerWrapper:
         # for large json file (> 50MB), load and dump is very slow even with orjson
         # so we use a ugly but fast way to modify events and extract baseTimeNanoseconds
         # pytorch may modify json format so we currently need to check for each pytorch version.
-        # checked: pytorch 2.1 and 2.5
+        # checked: pytorch 2.1, 2.5 and 2.6
         if proc_name_for_pth is not None and self._tracer_proc_name is not None:
             data = data.replace(proc_name_for_pth.encode(),
                                 f"{self._tracer_proc_name}".encode())
@@ -383,6 +401,10 @@ class DebugTracerWrapper:
 
             elif self._tracer_type == TracerType.VIZTRACER_PYTORCH:
                 # handle pytorch
+                base_ts_viztracer = time.time_ns() - time.monotonic_ns()
+                if hasattr(self._tracer._tracer_viz, "get_base_time"):
+                    # viztracer >= 1.0.0 change their base time from mono to custom.
+                    base_ts_viztracer = self._tracer._tracer_viz.get_base_time()
                 data, base_ts = self._save_pth(self._tracer._tracer_pth,
                                                ext_events,
                                                proc_name_for_pth,
@@ -396,10 +418,9 @@ class DebugTracerWrapper:
                 # align viztracer timestamp from monotonic time to epoch time (or pytorch base time if exists)
                 # TODO better align
                 if base_ts is not None:
-                    mono_pth_diff = time.time_ns() - time.monotonic_ns(
-                    ) - base_ts
+                    mono_pth_diff = base_ts_viztracer - base_ts
                 else:
-                    mono_pth_diff = time.time_ns() - time.monotonic_ns()
+                    mono_pth_diff = base_ts_viztracer
                 if ext_events and base_ts is not None:
                     # if use PYTORCH or VIZTRACER_PYTORCH, we need to align viztracer timestamp
                     for ev in ext_events:

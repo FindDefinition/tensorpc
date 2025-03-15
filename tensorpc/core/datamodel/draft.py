@@ -191,10 +191,12 @@ _DRAGT_UPDATE_PROC_CONTEXT: contextvars.ContextVar[
 
 class DraftUpdateContext:
 
-    def __init__(self):
+    def __init__(self, prevent_inner_draft: bool = False):
         self._ops: list[DraftUpdateOp] = []
+        self._prevent_inner_draft = prevent_inner_draft
 
     def add_op(self, op: DraftUpdateOp):
+        assert not self._prevent_inner_draft, "Draft operation is disabled by a prevent_draft_update context, usually exists in draft event handler."
         update_proc_ctx = _DRAGT_UPDATE_PROC_CONTEXT.get()
         if update_proc_ctx is not None:
             op = update_proc_ctx._op_process(op)
@@ -206,7 +208,19 @@ _DRAGT_UPDATE_CONTEXT: contextvars.ContextVar[
         "DraftUpdateContext", default=None)
 
 @contextlib.contextmanager
-def capture_draft_update():
+def prevent_draft_update():
+    ctx = DraftUpdateContext(prevent_inner_draft=True)
+    token = _DRAGT_UPDATE_CONTEXT.set(ctx)
+    try:
+        yield ctx
+    finally:
+        _DRAGT_UPDATE_CONTEXT.reset(token)
+
+@contextlib.contextmanager
+def capture_draft_update(allow_nested: bool = True):
+    cur_ctx = _DRAGT_UPDATE_CONTEXT.get()
+    if cur_ctx is not None and not allow_nested:
+        raise RuntimeError("Nested DraftUpdateContext is not allowed")
     ctx = DraftUpdateContext()
     token = _DRAGT_UPDATE_CONTEXT.set(ctx)
     try:

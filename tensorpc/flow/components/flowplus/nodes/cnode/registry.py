@@ -5,6 +5,7 @@ import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.flow.components import flowui, mui
 from tensorpc.core.moduleid import get_module_id_of_type
 import contextvars
+from tensorpc.flow.components.flowplus.nodes.cnode.handle import parse_function_to_handles
 from tensorpc.flow.jsonlike import (as_dict_no_undefined,
                                     as_dict_no_undefined_no_deepcopy,
                                     merge_props_not_undefined)
@@ -121,6 +122,10 @@ class ComputeNodeRegistry:
                                          layout=layout,
                                          state_dcls=state_dcls)
             editor_ctx = get_node_editor_context()
+            # parse function annotation to validate it.
+            # TODO add class support
+            parse_function_to_handles(func, is_dynamic_cls=editor_ctx is not None)
+
             if editor_ctx is not None:
                 # when this function is used in custom editor, no need to register it.
                 node_cfg.is_dynamic_cls = True
@@ -162,6 +167,7 @@ def register_compute_node(
         layout_overflow: Optional[mui._OverflowType] = None,
         layout: Optional[mui.FlexBox] = None,
         state_dcls: Optional[type] = None):
+    assert key is not None, "you must provide a GLOBAL unique key for the node to make sure code of node can be moved."
     return NODE_REGISTRY.register(func,
                                   key=key,
                                   name=name,
@@ -172,3 +178,10 @@ def register_compute_node(
                                   layout_overflow=layout_overflow,
                                   layout=layout,
                                   state_dcls=state_dcls)
+
+def parse_code_to_compute_cfg(code: str):
+    with enter_node_editor_context_object() as ctx:
+        exec(code, {}, {})
+        cfg = ctx.cfg
+        assert cfg is not None, "no compute node registered, you must define a standard compute node and register it"
+        return cfg

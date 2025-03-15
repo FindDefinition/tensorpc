@@ -2155,8 +2155,9 @@ class Component(Generic[T_base_props, T_child]):
                     comp_uid_to_ops[comp._flow_uid][1].append(op)
         for uid, (comp, ops) in comp_uid_to_ops.items():
             if ops:
-                ev_comp = await comp._update_with_jmes_ops_event_for_internal(ops)
-                await self.put_app_event(ev_comp)
+                ev_or_none = await comp._internal_update_with_jmes_ops_event(ops)
+                if ev_or_none is not None:
+                    await self.put_app_event(ev_or_none)
 
     def __data_model_auto_event_handler(self, value: Any, draft: Any):
         assert isinstance(draft, DraftBase)

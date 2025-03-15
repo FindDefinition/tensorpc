@@ -64,11 +64,11 @@ def parse_function_to_handles(func: Callable, is_dynamic_cls: bool):
                                 handle_meta)
         inp_iohandles.append(iohandle)
     ranno_obj = annos[1]
-    assert ranno_obj is not None
+    assert ranno_obj is not None, "your compute node function must contains a return annotation (None or typeddict or dataclass)"
     ranno = ranno_obj.type
     if ranno is NoneType:
         return inp_iohandles, out_iohandles
-    assert is_typeddict_or_typeddict_async_gen(ranno)
+    assert is_typeddict_or_typeddict_async_gen(ranno), "return anno of your compute node function must be (typeddict or dataclass)"
     global_ns = None
     if not compat.Python3_10AndLater:
         global_ns = {}

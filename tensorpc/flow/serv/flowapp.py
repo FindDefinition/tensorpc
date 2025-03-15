@@ -563,35 +563,38 @@ class FlowApp:
         send_task = asyncio.create_task(self._send_loop_queue.get())
         wait_tasks: List[asyncio.Task] = [shut_task, send_task]
         previous_event = AppEvent(self._uid, {})
-        while True:
-            # if send fail, MERGE incoming app events, and send again after some time.
-            # all app event is "replace" in frontend.
-            (done, pending) = await asyncio.wait(
-                wait_tasks, return_when=asyncio.FIRST_COMPLETED)
-            if shut_task in done:
-                break
-            ev: AppEvent = send_task.result()
-            if ev.is_loopback:
-                for k, v in ev.type_to_event.items():
-                    if k == AppEventType.UIEvent:
-                        assert isinstance(v, UIEvent)
-                        await self.app._handle_event_with_ctx(v)
-                send_task = asyncio.create_task(
-                    self._send_loop_queue.get())
+        try:
+            while True:
+                # if send fail, MERGE incoming app events, and send again after some time.
+                # all app event is "replace" in frontend.
+                (done, pending) = await asyncio.wait(
+                    wait_tasks, return_when=asyncio.FIRST_COMPLETED)
+                if shut_task in done:
+                    break
+                ev: AppEvent = send_task.result()
+                if ev.is_loopback:
+                    for k, v in ev.type_to_event.items():
+                        if k == AppEventType.UIEvent:
+                            assert isinstance(v, UIEvent)
+                            await self.app._handle_event_with_ctx(v)
+                    send_task = asyncio.create_task(
+                        self._send_loop_queue.get())
+                    wait_tasks: List[asyncio.Task] = [shut_task, send_task]
+                    continue
+                ts = time.time()
+                # assign uid here.
+                ev.uid = self._uid
+                send_task = asyncio.create_task(self._send_loop_queue.get())
                 wait_tasks: List[asyncio.Task] = [shut_task, send_task]
-                continue
-            ts = time.time()
-            # assign uid here.
-            ev.uid = self._uid
-            send_task = asyncio.create_task(self._send_loop_queue.get())
-            wait_tasks: List[asyncio.Task] = [shut_task, send_task]
-            # this is stream remote call, will use stream data to call a remote function, 
-            # so we must yield (args, kwargs) instead of data.
-            yield [ev.to_dict()], {}
-            # trigger sent event here.
-            if ev.sent_event is not None:
-                ev.sent_event.set()
-
+                # this is stream remote call, will use stream data to call a remote function, 
+                # so we must yield (args, kwargs) instead of data.
+                yield [ev.to_dict()], {}
+                # trigger sent event here.
+                if ev.sent_event is not None:
+                    ev.sent_event.set()
+        except:
+            traceback.print_exc()
+            raise
         self._send_loop_task = None
 
     async def _send_loop_v2(self):
