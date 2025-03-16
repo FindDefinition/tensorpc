@@ -3816,7 +3816,7 @@ class Tabs(MUIContainerBase[TabsProps, MUIComponentType]):
 
 
 @dataclasses.dataclass
-class AllotmentProps(MUIFlexBoxProps):
+class AllotmentProps(ContainerBaseProps):
     defaultSizes: Union[List[NumberType], Undefined] = undefined
     maxSize: Union[NumberType, Undefined] = undefined
     minSize: Union[NumberType, Undefined] = undefined

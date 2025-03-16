@@ -289,6 +289,10 @@ class DraftASTCompiler:
             res = f"({self._compile_draft_ast_to_py_expr(node.children[0], first_pass)})[{repr(node.value)}]"
         elif node.type == DraftASTType.BINARY_OP:
             op = node.value
+            if op == "&&":
+                op = "and"
+            elif op == "||":
+                op = "or"
             x = self._compile_draft_ast_to_py_expr(node.children[0], first_pass)
             y = self._compile_draft_ast_to_py_expr(node.children[1], first_pass)
             res = f"({x} {op} {y})"

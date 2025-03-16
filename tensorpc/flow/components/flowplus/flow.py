@@ -7,7 +7,8 @@ from tensorpc.core.tree_id import UniqueTreeIdForTree
 
 from typing import Optional, Any
 
-from tensorpc.flow.components.flowplus.model import ComputeFlowModelRoot, DetailType, get_compute_flow_drafts
+from tensorpc.flow.components.flowplus.binder import ComputeFlowBinder
+from tensorpc.flow.components.flowplus.model import ComputeFlowModelRoot, ComputeFlowNodeModel, DetailType, get_compute_flow_drafts
 from tensorpc.utils.code_fmt import PythonCodeFormatter
 
 
@@ -15,8 +16,7 @@ class ComputeFlow(mui.FlexBox):
 
     def __init__(self):
         items = [
-            mui.MenuItem(id="plain", label="Add Plain Node"),
-            mui.MenuItem(id="nested", label="Add Nested Flow Node"),
+            mui.MenuItem(id="markdown", label="Add Markdown"),
         ]
 
         self.graph = flowui.Flow([], [], [
@@ -69,14 +69,11 @@ class ComputeFlow(mui.FlexBox):
                 detail_ct
             ]).prop(height="100%", width="100%", overflow="hidden")),
             mui.Allotment.Pane(self.code_editor.prop(height="100%")),
-        ])).prop(flex=1, minHeight=0, vertical=False)
-
-
+        ])).prop(vertical=False)
         global_container = mui.Allotment(mui.Allotment.ChildDef([
             mui.Allotment.Pane(self.graph),
             mui.Allotment.Pane(detail_ct_with_editor),
-        ])).prop(flex=1, minHeight=0)
-
+        ])).prop(vertical=True)
         self.dm = mui.DataModel(ComputeFlowModelRoot(edges={}, nodes={}), [
             mui.VBox([
                 mui.HBox([
@@ -88,31 +85,20 @@ class ComputeFlow(mui.FlexBox):
         ])
         draft = self.dm.get_draft()
         flow_draft = get_compute_flow_drafts(draft)
-        detail_ct_with_editor.bind_fields(visibles=f"[`true`, {flow_draft.show_detail}]")
-
+        detail_ct_with_editor.bind_fields(visibles=f"[`true`, {flow_draft.show_editor}]")
+        global_container.bind_fields(visibles=f"[`true`, {flow_draft.show_detail}]")
         detail_ct.bind_fields(condition=flow_draft.selected_node_detail_type)
-        self.graph.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=flow_draft.cur_model))
-        self.graph_preview.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=flow_draft.preview_model))
+        # self.graph.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=flow_draft.cur_model))
+        # self.graph_preview.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=flow_draft.preview_model))
         path_breadcrumb.bind_fields(value=f"concat(`[\"root\"]`, {draft.cur_path}[1::3])")
         path_breadcrumb.event_change.on(self.handle_breadcrumb_click)
         # since we may switch preview flow repeatedly, we need to set a unique flow id to avoid handle wrong frontend event
         # e.g. the size/position change event is debounced
-        binder = models.flow.BaseFlowModelBinder(
-            self.graph, self.dm.get_model, 
-            cur_model_draft, 
-            self.model_to_ui_node,
-            flow_uid_getter=lambda: self.dm.get_model().get_uid_from_path())
-        binder.bind_flow_comp_with_base_model(self.dm, cur_model_draft.selected_node)
-        preview_binder = models.flow.BaseFlowModelBinder(
-            self.graph_preview, self.dm.get_model, 
-            preview_model_draft, 
-            self.model_to_ui_node,
-            flow_uid_getter=partial(self._get_preview_flow_uid, prev_path_draft))
-        preview_binder.bind_flow_comp_with_base_model(self.dm, preview_model_draft.selected_node)
+        binder = ComputeFlowBinder(self.graph, self.graph_preview, flow_draft)
+        binder.bind_flow_comp_with_datamodel(self.dm)
+        super().__init__([self.dm])
 
-        return mui.HBox([
-            self.dm,
-        ]).prop(width="100%", height="100%", overflow="hidden")
+        self.prop(width="100%", height="100%", overflow="hidden")
 
     def handle_breadcrumb_click(self, data: list[str]):
         logic_path = data[1:] # remove root
@@ -121,3 +107,15 @@ class ComputeFlow(mui.FlexBox):
             res_path.extend(['nodes', item, 'flow'])
         draft = self.dm.get_draft()
         draft.cur_path = res_path
+
+    def add_node(self, data: flowui.PaneContextMenuEvent, target_flow_draft: Any):
+        item_id = data.itemId
+        node_type = item_id
+        pos = data.flowPosition
+        print(f"Add Node: {node_type} at {pos}")
+        if pos is None:
+            return 
+        node_id = self.graph.create_unique_node_id(node_type)
+        draft = self.dm.get_draft()
+        new_node = ComputeFlowNodeModel(type="app", id=node_id, position=pos)
+        target_flow_draft.nodes[node_id] = new_node

@@ -559,7 +559,7 @@ class ScriptManagerV2(mui.FlexBox):
         self.code_editor_container = mui.Allotment(mui.Allotment.ChildDef([
             mui.Allotment.Pane(self.code_editor.prop(height="100%")),
             mui.Allotment.Pane(self.app_show_box.prop(height="100%"), visible=False),
-        ])).prop(flex=1, minHeight=0)
+        ]))
 
         self.code_editor_container.bind_fields(visibles="[getitem(states, language).is_editor_visible, getitem(states, language).is_app_visible]")
         self._scripts_select = mui.Autocomplete(
