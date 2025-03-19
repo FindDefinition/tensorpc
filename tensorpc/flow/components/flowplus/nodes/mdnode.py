@@ -14,5 +14,6 @@ class MarkdownNodeWrapper(BaseNodeWrapper):
 
         self.prop(
             className=
-            f"{ComputeFlowClasses.NodeWrapper} {ComputeFlowClasses.NodeWrappedSelected}"
+            f"{ComputeFlowClasses.NodeWrapper} {ComputeFlowClasses.NodeWrappedSelected}",
+            padding="3px"
         )

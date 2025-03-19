@@ -1803,6 +1803,9 @@ class MonacoEditorSaveEvent:
     saveVersionId: int
     viewState: Any
     userdata: Optional[Any] = None
+    # let user know which path/lang is saved
+    lang: Optional[str] = None 
+    path: Optional[str] = None 
 
 
 @dataclasses.dataclass
@@ -1993,9 +1996,12 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
 
     def _handle_editor_save_for_draft(self, ev: MonacoEditorSaveEvent,
                                       draft: Any,
-                                      handler: DraftChangeEventHandler):
+                                      handler: DraftChangeEventHandler,
+                                      save_event_prep: Optional[Callable[[MonacoEditorSaveEvent], None]] = None):
         # we shouldn't trigger draft change handler when we save value directly from editor.
         with DataModel.add_disabled_handler_ctx([handler]):
+            if save_event_prep is not None:
+                save_event_prep(ev)
             insert_assign_draft_op(draft, ev.value)
 
     def bind_draft_change_uncontrolled(
@@ -2005,7 +2011,8 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
             path_draft: Optional[Any] = None,
             lang_draft: Optional[Any] = None,
             path_modifier: Optional[Callable[[str], str]] = None,
-            lang_modifier: Optional[Callable[[str], str]] = None):
+            lang_modifier: Optional[Callable[[str], str]] = None,
+            save_event_prep: Optional[Callable[[MonacoEditorSaveEvent], None]] = None):
         assert not self.is_mounted(), "must be called when unmount"
         assert isinstance(draft, DraftBase)
         draft_dict: Dict[str, Any] = {"value": draft}
@@ -2024,7 +2031,8 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
         self.event_editor_save.on(
             partial(self._handle_editor_save_for_draft,
                     draft=draft,
-                    handler=handler))
+                    handler=handler,
+                    save_event_prep=save_event_prep))
 
 
 @dataclasses.dataclass
@@ -2085,6 +2093,10 @@ class SimpleCodeEditor(MUIComponentBase[SimpleCodeEditorProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
+    def bind_draft_change(self, draft: Any):
+        # TODO validate type
+        assert isinstance(draft, DraftBase)
+        return self._bind_field_with_change_event("value", draft)
 
 @dataclasses.dataclass
 class SwitchProps(MUIComponentBaseProps):

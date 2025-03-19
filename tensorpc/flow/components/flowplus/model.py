@@ -1,6 +1,7 @@
 from typing import Annotated, Any, Callable, Mapping, Optional, cast
 from tensorpc.core.datamodel.draft import DraftFieldMeta
 from tensorpc.core.tree_id import UniqueTreeIdForTree
+from tensorpc.flow.components.flowplus.nodes.cnode.registry import ComputeNodeBase, ComputeNodeRuntime, get_compute_node_runtime, parse_code_to_compute_cfg
 from tensorpc.flow.components.models.flow import BaseNodeModel, BaseEdgeModel, BaseFlowModel, BaseFlowModelBinder
 import tensorpc.core.dataclass_dispatch as dataclasses
 import enum
@@ -8,6 +9,8 @@ import tensorpc.core.datamodel as D
 import dataclasses as dataclasses_relaxed
 from tensorpc.core.datamodel.draftstore import (DraftStoreMapMeta)
 from tensorpc.utils.uniquename import UniqueNamePool
+import uuid
+from tensorpc.flow.components.flowplus.nodes.cnode.registry import NODE_REGISTRY
 
 
 class ComputeNodeType(enum.IntEnum):
@@ -20,7 +23,8 @@ class ComputeNodeType(enum.IntEnum):
     # nested flow
     SUBFLOW = 3
     # handle in subflow
-    SUBFLOW_HANDLE = 4
+    SUBFLOW_INP_HANDLE = 4
+    SUBFLOW_OUT_HANDLE = 5
 
 
 class ComputeNodeStatus(enum.IntEnum):
@@ -41,6 +45,14 @@ class FlowSettings:
     isPreviewVisible: bool = True
     isEditorVisible: bool = True
 
+@dataclasses.dataclass(kw_only=True)
+class InlineCodeInfo:
+    path: str
+    lineno: int
+
+@dataclasses.dataclass(kw_only=True)
+class InlineCode:
+    code: str = ""
 
 @dataclasses.dataclass
 class ComputeFlowNodeModel(BaseNodeModel):
@@ -59,16 +71,15 @@ class ComputeFlowNodeModel(BaseNodeModel):
     # msg show on bottom of node.
     msg: str = "ready"
     # compute/markdown props
-    code: str = ""
+    impl: InlineCode = dataclasses.field(default_factory=InlineCode)
     code_key: Optional[str] = None
     # if true and code_key isn't None, the code impl file is watched.
     is_watched: bool = False
     read_only: bool = False
     flow_key: Optional[str] = None
+    has_detail: bool = False
     # schedule props
     run_in_proc: bool = False  # only valid when no vrc props set.
-    has_detail: bool = False
-
     # vrc props
     # for compute node, this indicate the resource it require
     # for virtual resource (vrc) node, this indicate the resource it provide
@@ -76,17 +87,22 @@ class ComputeFlowNodeModel(BaseNodeModel):
     vMem: int = -1
     vGPU: int = -1
     vGPUMem: int = -1
+    # backend only fields
+    runtime: Annotated[Optional[ComputeNodeRuntime], DraftFieldMeta(is_external=True)] = None
 
+    def get_node_runtime(self, root_model: "ComputeFlowModelRoot") -> ComputeNodeRuntime:
+        if self.code_key is not None:
+            code = root_model.shared_node_code[self.code_key].code
+        
+            cfg = parse_code_to_compute_cfg(code)
+        elif self.key != "":
+            cfg = NODE_REGISTRY.global_dict[self.key]
+        else:
+            code = self.impl.code
+            cfg = parse_code_to_compute_cfg(code)
 
-@dataclasses.dataclass(kw_only=True)
-class InlineCodeInfo:
-    path: str
-    lineno: int
-
-
-@dataclasses.dataclass(kw_only=True)
-class InlineCode:
-    code: str
+        rt = get_compute_node_runtime(cfg)
+        return rt
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -119,11 +135,12 @@ class ComputeFlowModel(BaseFlowModel[ComputeFlowNodeModel, BaseEdgeModel]):
                 return new_name
         raise ValueError("max count reached")
 
-
     def make_unique_node_name(self, name, max_count=10000) -> str:
+        name = uuid.uuid4().hex + "N-" + name
         return self._make_unique_name(self.nodes, name, max_count)
 
     def make_unique_edge_name(self, name, max_count=10000) -> str:
+        name = uuid.uuid4().hex + "E-" + name
         return self._make_unique_name(self.edges, name, max_count)
 
 @dataclasses.dataclass(kw_only=True)
@@ -132,7 +149,7 @@ class ComputeFlowModelRoot(ComputeFlowModel):
     cur_path: list[str] = dataclasses.field(default_factory=list)
     settings: FlowSettings = dataclasses.field(default_factory=FlowSettings)
 
-    shared_node_code: Annotated[dict[str, str],
+    shared_node_code: Annotated[dict[str, InlineCode],
                                 DraftStoreMapMeta(
                                     attr_key="snc")] = dataclasses.field(
                                         default_factory=dict)
@@ -151,12 +168,6 @@ class ComputeFlowModelRoot(ComputeFlowModel):
                             DraftFieldMeta(
                                 is_external=True)] = dataclasses.field(
                                     default_factory=dict)
-    unique_name_pool_node: Annotated[UniqueNamePool, DraftFieldMeta(
-                                is_external=True)] = dataclasses.field(
-        default_factory=UniqueNamePool)
-    unique_name_pool_edge: Annotated[UniqueNamePool, DraftFieldMeta(
-                                is_external=True)] = dataclasses.field(
-        default_factory=UniqueNamePool)
     def get_uid_from_path(self):
         return UniqueTreeIdForTree.from_parts(self.cur_path).uid_encoded
 
@@ -169,6 +180,8 @@ class ComputeFlowDrafts:
     selected_node: ComputeFlowNodeModel
     selected_node_code: str
     selected_node_code_path: str
+    selected_node_code_language: str
+
     selected_node_detail_type: int
     show_editor: bool
     show_detail: bool
@@ -176,10 +189,7 @@ class ComputeFlowDrafts:
     def get_node_drafts(self, node_id: str):
         node_state_draft = self.cur_model.node_states[node_id]
         selected_node = self.cur_model.nodes[node_id]
-        code_draft, code_path_draft = get_code_drafts(self.root, selected_node)
-        code_language = D.where(
-            selected_node.node_type == ComputeNodeType.COMPUTE, "python",
-            "markdown")
+        code_draft, code_path_draft, code_language = get_code_drafts(self.root, selected_node)
         return ComputeFlowNodeDrafts(selected_node, node_state_draft,
                                      code_draft, code_path_draft,
                                      code_language)
@@ -199,13 +209,13 @@ def get_code_drafts(root_draft: ComputeFlowModelRoot,
     code_draft_may_module_id = D.where(
         node_draft.module_id != "",
         root_draft.path_to_code[root_draft.module_id_to_code_info[
-            node_draft.module_id].path].code,
-        node_draft.code,
-        return_type=str)  # type: ignore
+            node_draft.module_id].path],
+        node_draft.impl,
+        return_type=InlineCode)  # type: ignore
     code_draft = D.where(node_draft.code_key != None,
                          root_draft.shared_node_code[node_draft.code_key],
                          code_draft_may_module_id,
-                         return_type=str)  # type: ignore
+                         return_type=InlineCode)  # type: ignore
 
     code_path_draft = D.where(
         node_draft.code_key != None,
@@ -215,7 +225,10 @@ def get_code_drafts(root_draft: ComputeFlowModelRoot,
                 D.literal_val("tensorpc://flow/dynamic/%s") % node_draft.id,
                 return_type=str),
         return_type=str)  # type: ignore
-    return code_draft, code_path_draft
+    code_language = D.where(
+        node_draft.node_type == ComputeNodeType.COMPUTE.value, "python",
+        "markdown")
+    return code_draft.code, code_path_draft, code_language
 
 
 def get_compute_flow_drafts(root_draft: ComputeFlowModelRoot):
@@ -238,18 +251,18 @@ def get_compute_flow_drafts(root_draft: ComputeFlowModelRoot):
         Optional[ComputeFlowModel],
         D.getitem_path_dynamic(root_draft, prev_path_draft,
                                Optional[ComputeFlowModel]))
-    code_draft, code_path_draft = get_code_drafts(root_draft, selected_node)
+    code_draft, code_path_draft, code_language = get_code_drafts(root_draft, selected_node)
     selected_node_detail_type = D.where(
         selected_node == None,
         DetailType.NONE.value,
-        D.where(selected_node.type == ComputeNodeType.SUBFLOW.value,
+        D.where(selected_node.node_type == ComputeNodeType.SUBFLOW.value,
                 DetailType.SUBFLOW.value, DetailType.USER_LAYOUT.value),
         return_type=int)  # type: ignore
 
     show_editor = D.logical_and(
         root_draft.settings.isEditorVisible,
-        D.logical_or(selected_node.type == ComputeNodeType.MARKDOWN.value,
-                     selected_node.type == ComputeNodeType.COMPUTE.value))
+        D.logical_or(selected_node.node_type == ComputeNodeType.MARKDOWN.value,
+                     D.logical_and(selected_node.node_type == ComputeNodeType.COMPUTE.value, selected_node.key == "")))
     node_has_detail = D.logical_or(
         D.logical_and(selected_node_detail_type != DetailType.SUBFLOW.value,
                       selected_node.has_detail),
@@ -260,5 +273,5 @@ def get_compute_flow_drafts(root_draft: ComputeFlowModelRoot):
                       node_has_detail))
     return ComputeFlowDrafts(root_draft, cur_model_draft, prev_path_draft,
                              preview_model_draft, selected_node, code_draft,
-                             code_path_draft, selected_node_detail_type,
+                             code_path_draft, code_language, selected_node_detail_type,
                              show_editor, show_detail)

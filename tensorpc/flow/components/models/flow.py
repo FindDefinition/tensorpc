@@ -37,7 +37,7 @@ def _default_to_model_edge(edge: Edge):
 
 class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
     def __init__(self, flow_comp: Flow, model_getter: Callable[[], T_flow_model], draft: Any, 
-            to_ui_node: Callable[[T_node_model], Node], to_ui_edge: Optional[Callable[[T_edge_model], Edge]] = None,
+            to_ui_node: Callable[[T_flow_model, str], Node], to_ui_edge: Optional[Callable[[T_edge_model], Edge]] = None,
             to_model_edge: Optional[Callable[[Edge], T_edge_model]] = None,
             flow_uid_getter: Optional[Callable[[], str]] = None) -> None:
         """
@@ -117,7 +117,7 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
 
             for n in cur_model_node_ids:
                 if n not in cur_ui_node_ids:
-                    ui_new_nodes.append(self._to_ui_node(cast(T_node_model, cur_model.nodes[n])))
+                    ui_new_nodes.append(self._to_ui_node(cur_model, n))
             if ui_node_id_to_del:
                 await self._flow_comp.delete_nodes_by_ids(list(ui_node_id_to_del))
             if ui_new_nodes:

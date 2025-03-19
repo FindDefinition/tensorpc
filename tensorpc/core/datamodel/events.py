@@ -12,6 +12,7 @@ model_component.register_draft_change_event(model_draft.a[model_draft.cur_key].c
 """
 
 import enum
+import time
 from typing import Any, Callable, Coroutine, Optional, TypeVar, Union
 
 from tensorpc.core import dataclass_dispatch as dataclasses

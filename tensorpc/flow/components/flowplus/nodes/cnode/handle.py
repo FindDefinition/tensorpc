@@ -1,4 +1,4 @@
-from typing import Callable, Optional
+from typing import Callable, Optional, TypeVar
 import tensorpc.core.dataclass_dispatch as dataclasses
 from typing_extensions import Literal, get_type_hints, is_typeddict, Annotated, TypeAlias
 from tensorpc.core.annolib import (AnnotatedArg, AnnotatedReturn,
@@ -30,6 +30,10 @@ class AnnoHandle:
     is_optional: bool
     anno: AnnotatedArg
     meta: Optional[HandleMeta] = None
+
+T_handle = TypeVar("T_handle")
+
+SpecialHandleDict: TypeAlias = Annotated[dict[str, T_handle], HandleMeta(True)]
 
 def is_typeddict_or_typeddict_async_gen(type):
     is_tdict = is_typeddict(type)

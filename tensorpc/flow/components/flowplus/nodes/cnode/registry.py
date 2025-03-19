@@ -1,18 +1,74 @@
+import abc
 import contextlib
 import inspect
-from typing import Callable, Optional, TypeVar, Union
+from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator,
+                    Awaitable, Callable, Coroutine, Deque, Dict, List, Literal, Mapping,
+                    Optional, Tuple, Type, TypedDict, TypeVar, Union, cast,
+                    get_origin)
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.flow.components import flowui, mui
 from tensorpc.core.moduleid import get_module_id_of_type
 import contextvars
-from tensorpc.flow.components.flowplus.nodes.cnode.handle import parse_function_to_handles
+from tensorpc.flow.components.flowplus.nodes.cnode.handle import AnnoHandle, parse_function_to_handles
 from tensorpc.flow.jsonlike import (as_dict_no_undefined,
                                     as_dict_no_undefined_no_deepcopy,
                                     merge_props_not_undefined)
+import dataclasses as dataclasses_plain
+from pydantic_core import core_schema
+from pydantic import GetCoreSchemaHandler
+
+class ComputeNodeBase(abc.ABC):
+    @abc.abstractmethod
+    def compute(
+        self, *args, **kwargs
+    ) -> Union[Coroutine[None, None, Optional[Mapping[str, Any]]],
+               AsyncGenerator[Mapping[str, Any], None]]:
+        raise NotImplementedError
+
+    def get_compute_func(self) -> Callable:
+        return self.compute
+
+    def get_node_layout(self, drafts: Any) -> Optional[mui.FlexBox]:
+        return None
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, _source_type: Any,
+                                     _handler: GetCoreSchemaHandler):
+        return core_schema.no_info_after_validator_function(
+            cls.validate,
+            core_schema.any_schema(),
+        )
+
+    @classmethod
+    def validate(cls, v):
+        if not isinstance(v, ComputeNodeBase):
+            raise ValueError('ComputeNodeBase required')
+        return v
+
+class ComputeNodeFuncWrapper(ComputeNodeBase):
+    def __init__(self, desp: "ComputeNodeDesp") -> None:
+        self._desp = desp
+        assert inspect.isfunction(desp.func), "func should be a function"
+        self._compute_func = desp.func 
+
+    def compute(
+        self, *args, **kwargs
+    ) -> Union[Coroutine[None, None, Optional[Mapping[str, Any]]],
+               AsyncGenerator[Mapping[str, Any], None]]:
+        raise NotImplementedError
+
+    def get_compute_func(self):
+        return self._compute_func
+
+    def get_node_layout(self, drafts: Any) -> Optional[mui.FlexBox]:
+        if self._desp.layout_creator is not None:
+            return self._desp.layout_creator(drafts)
+        return None
+
 
 @dataclasses.dataclass
-class ComputeNodeConfig:
-    func: Callable
+class ComputeNodeDesp:
+    func: Union[Callable, type[ComputeNodeBase]]
     key: str
     name: str
     module_id: str
@@ -22,7 +78,7 @@ class ComputeNodeConfig:
     layout_overflow: Optional[mui._OverflowType] = None
     is_dynamic_cls: bool = False
     # static layout
-    layout: Optional[mui.FlexBox] = None
+    layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None
     # state def
     state_dcls: Optional[type] = None
 
@@ -36,7 +92,7 @@ class ComputeNodeConfig:
 
 class CustomNodeEditorContext:
 
-    def __init__(self, cfg: Optional[ComputeNodeConfig] = None) -> None:
+    def __init__(self, cfg: Optional[ComputeNodeDesp] = None) -> None:
         self.cfg = cfg
 
 
@@ -65,7 +121,7 @@ T = TypeVar("T")
 class ComputeNodeRegistry:
 
     def __init__(self, allow_duplicate: bool = True):
-        self.global_dict: dict[str, ComputeNodeConfig] = {}
+        self.global_dict: dict[str, ComputeNodeDesp] = {}
         self.allow_duplicate = allow_duplicate
 
     def register(
@@ -81,17 +137,25 @@ class ComputeNodeRegistry:
             box_props: Optional[mui.FlexBoxProps] = None,
             resizer_props: Optional[flowui.NodeResizerProps] = None,
             layout_overflow: Optional[mui._OverflowType] = None,
-            layout: Optional[mui.FlexBox] = None,
+            layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None,
             state_dcls: Optional[type] = None) -> Union[T, Callable[[T], T]]:
 
         def wrapper(func: T) -> T:
             assert inspect.isclass(func) or inspect.isfunction(
                 func
             ), "register_compute_node should be used on class or function"
+            if inspect.isclass(func):
+                assert issubclass(func, ComputeNodeBase), "class should be subclass of ComputeNodeBase"
+                assert layout_creator is None, "you should override `get_node_layout` method instead of use layout_creator when using class"
             key_ = key
-            module_id = get_module_id_of_type(func)
-            if key_ is None:
-                key_ = module_id
+            editor_ctx = get_node_editor_context()
+            if editor_ctx is not None:
+                module_id = ""
+                key_ = ""
+            else:
+                module_id = get_module_id_of_type(func)
+                if key_ is None:
+                    key_ = module_id
             name_ = name
             if name_ is None:
                 name_ = func.__name__
@@ -101,7 +165,7 @@ class ComputeNodeRegistry:
                 try:
                     state_dcls()
                 except:
-                    raise ValueError("all field of state_dcls should have default value")
+                    raise ValueError("state_dcls must be default constructable")
             resizer_props_ = resizer_props
             if resizer_props_ is None:
                 if resize_minmax_size is not None:
@@ -111,7 +175,7 @@ class ComputeNodeRegistry:
                     if max_size is not None:
                         resizer_props_.maxWidth = max_size[0]
                         resizer_props_.maxHeight = max_size[1]
-            node_cfg = ComputeNodeConfig(func=func, 
+            node_cfg = ComputeNodeDesp(func=func, 
                                          key=key_,
                                          name=name_,
                                          icon_cfg=icon_cfg,
@@ -119,12 +183,16 @@ class ComputeNodeRegistry:
                                          box_props=box_props,
                                          resizer_props=resizer_props_,
                                          layout_overflow=layout_overflow,
-                                         layout=layout,
+                                         layout_creator=layout_creator,
                                          state_dcls=state_dcls)
-            editor_ctx = get_node_editor_context()
             # parse function annotation to validate it.
             # TODO add class support
-            parse_function_to_handles(func, is_dynamic_cls=editor_ctx is not None)
+            if inspect.isclass(func):
+                node_obj = func()
+                assert isinstance(node_obj, ComputeNodeBase)
+                parse_function_to_handles(node_obj.compute, is_dynamic_cls=editor_ctx is not None)
+            else:
+                parse_function_to_handles(func, is_dynamic_cls=editor_ctx is not None)
 
             if editor_ctx is not None:
                 # when this function is used in custom editor, no need to register it.
@@ -134,7 +202,7 @@ class ComputeNodeRegistry:
                 if not self.allow_duplicate and key_ in self.global_dict:
                     raise KeyError("key {} already exists".format(key_))
                 self.global_dict[key_] = node_cfg
-            return func
+            return cast(T, func)
 
         if func is None:
             return wrapper
@@ -165,9 +233,11 @@ def register_compute_node(
         box_props: Optional[mui.FlexBoxProps] = None,
         resizer_props: Optional[flowui.NodeResizerProps] = None,
         layout_overflow: Optional[mui._OverflowType] = None,
-        layout: Optional[mui.FlexBox] = None,
+        layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None,
         state_dcls: Optional[type] = None):
-    assert key is not None, "you must provide a GLOBAL unique key for the node to make sure code of node can be moved."
+    editor_ctx = get_node_editor_context()
+    if editor_ctx is None:
+        assert key is not None, "you must provide a GLOBAL unique key for the node to make sure code of node can be moved."
     return NODE_REGISTRY.register(func,
                                   key=key,
                                   name=name,
@@ -176,12 +246,29 @@ def register_compute_node(
                                   box_props=box_props,
                                   resizer_props=resizer_props,
                                   layout_overflow=layout_overflow,
-                                  layout=layout,
+                                  layout_creator=layout_creator,
                                   state_dcls=state_dcls)
 
 def parse_code_to_compute_cfg(code: str):
     with enter_node_editor_context_object() as ctx:
-        exec(code, {}, {})
+        exec(code, {})
         cfg = ctx.cfg
         assert cfg is not None, "no compute node registered, you must define a standard compute node and register it"
         return cfg
+
+@dataclasses_plain.dataclass
+class ComputeNodeRuntime:
+    cfg: ComputeNodeDesp
+    cnode: ComputeNodeBase
+    # required by scheduler
+    inp_handles: list[AnnoHandle]
+    out_handles: list[AnnoHandle]
+    executor_id: Optional[str] = None
+
+def get_compute_node_runtime(cfg: ComputeNodeDesp) -> ComputeNodeRuntime:
+    if inspect.isclass(cfg.func):
+        cnode = cfg.func()
+        inp_handles, out_handles = parse_function_to_handles(cnode.compute, cfg.is_dynamic_cls)
+        return ComputeNodeRuntime(cfg, cnode, inp_handles, out_handles)
+    inp_handles, out_handles = parse_function_to_handles(cfg.func, cfg.is_dynamic_cls)
+    return ComputeNodeRuntime(cfg, ComputeNodeFuncWrapper(cfg), inp_handles, out_handles)

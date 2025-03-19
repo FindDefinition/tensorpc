@@ -2168,7 +2168,7 @@ class Component(Generic[T_base_props, T_child]):
         async with comp.draft_update():
             insert_assign_draft_op(draft, value)
 
-    def _bind_field_with_change_event(self, field_name: str, draft: Any, sync_update: bool = True):
+    def _bind_field_with_change_event(self, field_name: str, draft: Any, sync_update: bool = False):
         """Bind a draft with change event. bind_fields is called automatically.
         Equal to following code:
 
@@ -2468,7 +2468,7 @@ class ContainerBase(Component[T_container_props, T_child]):
             return child_comp._get_comp_by_uid_resursive(parts[1:])
 
     def _get_comps_by_uid(self, uid: str):
-        parts = uid.split(".")
+        parts = UniqueTreeIdForComp(uid).parts
         if isinstance(self, RemoteComponentBase) and self.is_remote_mounted:
             return [self]
         # uid contains root, remove it at first.
@@ -2476,7 +2476,11 @@ class ContainerBase(Component[T_container_props, T_child]):
 
     def _get_comps_by_uid_resursive(self, parts: list[str]) -> list[Component]:
         key = parts[0]
-        child_comp = self._child_comps[key]
+        try:
+            child_comp = self._child_comps[key]
+        except KeyError:
+            LOGGER.error("can't find child comp %s by uid %s, ava: %s", str(type(self)), key, str(list(self._child_comps.keys())))
+            raise
         if isinstance(child_comp,
                       RemoteComponentBase) and child_comp.is_remote_mounted:
             return [child_comp]

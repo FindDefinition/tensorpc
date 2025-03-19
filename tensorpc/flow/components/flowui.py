@@ -412,6 +412,9 @@ class FlowInternals:
         self.node_id_to_inp_handle_to_edges = {node.id: {} for node in nodes}
         self.node_id_to_out_handle_to_edges = {node.id: {} for node in nodes}
         for edge in edges:
+            if edge.source not in self.node_id_to_targets:
+                for n in self.node_id_to_targets.keys():
+                    print(n)
             self.node_id_to_targets[edge.source].append(
                 (edge.target, edge.sourceHandle, edge.targetHandle))
             self.node_id_to_sources[edge.target].append(

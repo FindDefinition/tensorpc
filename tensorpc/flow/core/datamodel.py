@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 from collections.abc import Mapping, Sequence
 from functools import partial
+import time
 from typing import (Any, Callable, Coroutine, Generic, Optional, TypeVar,
                     Union, cast)
 
@@ -9,7 +10,8 @@ from mashumaro.codecs.basic import BasicDecoder, BasicEncoder
 from pydantic import field_validator
 from typing_extensions import Self, TypeAlias, override
 
-from tensorpc.core.annolib import AnnotatedFieldMeta, get_dataclass_field_meta_dict
+from tensorpc.core.annolib import AnnotatedFieldMeta, BackendOnlyProp, get_dataclass_field_meta_dict
+from tensorpc.core.datamodel.asdict import asdict_no_deepcopy_with_field
 from tensorpc.core.datamodel.draftast import DraftASTNode
 from tensorpc.core.datamodel.draftstore import DraftFileStorage, DraftStoreBackendBase
 import tensorpc.core.datamodel.jmes as jmespath
@@ -41,6 +43,28 @@ _CORO_NONE: TypeAlias = Union[Coroutine[None, None, None], None]
 @dataclasses.dataclass
 class DataModelProps(ContainerBaseProps):
     dataObject: Any = dataclasses.field(default_factory=dict)
+
+def _print_draft_change_event(ev: DraftChangeEvent, draft_expr_str_dict):
+    print("DraftChangeEvent:")
+    for k, v in ev.type_dict.items():
+        k_expr = draft_expr_str_dict[k]
+        if not ev.old_value_dict:
+            print(f"{k_expr}|{v}: New: {ev.new_value_dict[k]}")
+        else:
+            print(f"{k_expr}|{v}: {ev.old_value_dict[k][0]} -> {ev.new_value_dict[k]}")
+
+@dataclasses.dataclass
+class _DataclassSer:
+    obj: Any
+
+def _dict_facto_with_exclude(x: list[tuple[str, Any, Any]], exclude_field_ids: set[int]):
+    res: dict[str, Any] = {}
+    for k, v, f in x:
+        if id(f) in exclude_field_ids:
+            continue
+        if not isinstance(v, (Undefined, BackendOnlyProp)):
+            res[k] = v
+    return res
 
 class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
     """DataModel is the model part of classic MVC pattern, child components can use `bind_fields` to query data from
@@ -198,6 +222,12 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         # return effect_fn to let user remove the effect.
         return handler_obj, effect_fn
 
+    def debug_print_draft_change(self, draft: Union[Any, dict[str, Any]]):
+        if not isinstance(draft, dict):
+            draft = {"": draft}
+        draft_expr_str_dict = {k: get_draft_ast_node(v).get_jmes_path() for k, v in draft.items()}
+        return self.install_draft_change_handler(draft, partial(_print_draft_change_event, draft_expr_str_dict=draft_expr_str_dict))
+
     def _lazy_get_mashumaro_coder(self):
         if self._mashumaro_decoder is None:
             self._mashumaro_decoder = BasicDecoder(type(self.model))
@@ -299,6 +329,15 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         ops = await self._update_with_jmes_ops_backend(ops)
         # any modify on external field won't be included in frontend.
         frontend_ops = list(filter(lambda op: not op.is_external, ops))
+        # any external field data will be omitted in opData.
+        if self._flow_exclude_field_ids:
+            facto_fn = partial(_dict_facto_with_exclude, 
+                            exclude_field_ids=self._flow_exclude_field_ids)
+            for op in frontend_ops:
+                opData = asdict_no_deepcopy_with_field(
+                            _DataclassSer(obj=op.opData),
+                            dict_factory_with_field=facto_fn)
+                op.opData = opData["obj"]
         frontend_ops = [op.to_jmes_path_op().to_dict() for op in frontend_ops]
         if frontend_ops:
             return self.create_comp_event({
