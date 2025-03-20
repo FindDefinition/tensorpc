@@ -8,14 +8,14 @@ from tensorpc.core.tree_id import UniqueTreeIdForTree
 
 from typing import Optional, Any
 
-from tensorpc.flow.components.flowplus.binder import ComputeFlowBinder
-from tensorpc.flow.components.flowplus.model import ComputeFlowDrafts, ComputeFlowModelRoot, ComputeFlowNodeModel, ComputeNodeType, DetailType, InlineCode, get_compute_flow_drafts
-from tensorpc.flow.components.flowplus.nodes.cnode.default_code import get_default_custom_node_code
-from tensorpc.flow.components.flowplus.nodes.cnode.handle import HandleTypePrefix
+from tensorpc.apps.cflow.binder import ComputeFlowBinder
+from tensorpc.apps.cflow.model import ComputeFlowDrafts, ComputeFlowModelRoot, ComputeFlowNodeModel, ComputeNodeType, DetailType, InlineCode, get_compute_flow_drafts
+from tensorpc.apps.cflow.nodes.cnode.default_code import get_default_custom_node_code
+from tensorpc.apps.cflow.nodes.cnode.handle import HandleTypePrefix
 from tensorpc.flow.components.flowplus.style import default_compute_flow_css
 from tensorpc.utils.code_fmt import PythonCodeFormatter
-from tensorpc.flow.components.flowplus.nodes.cnode.registry import NODE_REGISTRY, parse_code_to_compute_cfg
-import tensorpc.flow.components.flowplus.nodes.defaultnodes
+from tensorpc.apps.cflow.nodes.cnode.registry import NODE_REGISTRY, parse_code_to_compute_cfg
+import tensorpc.apps.cflow.nodes.defaultnodes
 
 _SYS_NODE_PREFIX = "sys-"
 _USER_NODE_PREFIX = "user-"
@@ -145,7 +145,7 @@ class ComputeFlow(mui.FlexBox):
                 cur_flow_draft.node_states[cur_selected_node_draft] = state
             sel_node.name = cfg.name
             sel_node.key = cfg.key
-            sel_node.module_id = cfg.module_id
+            sel_node.moduleId = cfg.module_id
 
     def handle_breadcrumb_click(self, data: list[str]):
         logic_path = data[1:] # remove root
@@ -169,12 +169,12 @@ class ComputeFlow(mui.FlexBox):
         if item_id.startswith(_SYS_NODE_PREFIX):
             node_type = item_id[len(_SYS_NODE_PREFIX):]
             if node_type == "markdown":
-                new_node = ComputeFlowNodeModel(node_type=ComputeNodeType.MARKDOWN, type="app", id=node_id, position=pos, impl=InlineCode(code="## MarkdownNode"))
+                new_node = ComputeFlowNodeModel(nType=ComputeNodeType.MARKDOWN, type="app", id=node_id, position=pos, impl=InlineCode(code="## MarkdownNode"))
             elif node_type == "compute":
                 code = get_default_custom_node_code()
                 parsed_cfg = parse_code_to_compute_cfg(code)
-                new_node = ComputeFlowNodeModel(node_type=ComputeNodeType.COMPUTE, type="app", id=node_id, position=pos, impl=InlineCode(code=code),
-                    name=parsed_cfg.name, key=parsed_cfg.key, module_id=parsed_cfg.module_id)
+                new_node = ComputeFlowNodeModel(nType=ComputeNodeType.COMPUTE, type="app", id=node_id, position=pos, impl=InlineCode(code=code),
+                    name=parsed_cfg.name, key=parsed_cfg.key, moduleId=parsed_cfg.module_id)
                 target_flow_draft.node_states[node_id] = {}
             else:
                 raise NotImplementedError
@@ -182,7 +182,7 @@ class ComputeFlow(mui.FlexBox):
             node_type = item_id[len(_USER_NODE_PREFIX):]
             cfg = NODE_REGISTRY.global_dict[node_type]
             new_node = ComputeFlowNodeModel(
-                node_type=ComputeNodeType.COMPUTE, type="app", id=node_id, position=pos, module_id=cfg.module_id, key=cfg.key,
+                nType=ComputeNodeType.COMPUTE, type="app", id=node_id, position=pos, moduleId=cfg.module_id, key=cfg.key,
                     name=cfg.name)
             if cfg.state_dcls is not None:
                 target_flow_draft.node_states[node_id] = cfg.state_dcls()

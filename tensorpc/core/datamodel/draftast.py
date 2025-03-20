@@ -139,6 +139,8 @@ def _impl_get_itempath(target, path_list):
     assert isinstance(path_list, list)
     cur_obj = target
     for p in path_list:
+        if cur_obj is None:
+            return None 
         if isinstance(cur_obj, (Sequence, Mapping)):
             cur_obj = cur_obj[p]
         else:
@@ -284,9 +286,11 @@ class DraftASTCompiler:
         elif node.type == DraftASTType.JSON_LITERAL or node.type == DraftASTType.STRING_LITERAL:
             res =  repr(node.value)
         elif node.type == DraftASTType.GET_ATTR:
-            res = f"({self._compile_draft_ast_to_py_expr(node.children[0], first_pass)}).{node.value}"
+            expr = self._compile_draft_ast_to_py_expr(node.children[0], first_pass)
+            res = f"(({expr}).{node.value} if ({expr}) is not None else None)"
         elif node.type == DraftASTType.ARRAY_GET_ITEM or node.type == DraftASTType.DICT_GET_ITEM:
-            res = f"({self._compile_draft_ast_to_py_expr(node.children[0], first_pass)})[{repr(node.value)}]"
+            expr = self._compile_draft_ast_to_py_expr(node.children[0], first_pass)
+            res = f"(({expr})[{repr(node.value)}] if ({expr}) is not None else None)"
         elif node.type == DraftASTType.BINARY_OP:
             op = node.value
             if op == "&&":

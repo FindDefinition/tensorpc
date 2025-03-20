@@ -1,6 +1,6 @@
 import torch 
 import torch.export 
-from tensorpc.flow.components.flowplus.network.pthfx import FlowUIInterpreter, PytorchExportBuilder
+from tensorpc.apps.pthviewer.pthfx import FlowUIInterpreter, PytorchExportBuilder
 
 def _main():
     from torchvision.models import resnet18

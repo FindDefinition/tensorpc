@@ -420,7 +420,7 @@ class PytorchGraphHandler(DefaultHandler):
             ranksep=20,
         )
         import torch.fx
-        from tensorpc.flow.components.flowplus.network.pthfx import FlowUIInterpreter, PytorchExportBuilder
+        from tensorpc.apps.pthviewer.pthfx import FlowUIInterpreter, PytorchExportBuilder
         gm = self.obj
         builder = PytorchExportBuilder()
         interpreter = FlowUIInterpreter(gm, builder, verbose=True)
@@ -526,7 +526,7 @@ class PytorchModuleHandler(DefaultHandler):
         )
         import torch.fx
         import torch.export
-        from tensorpc.flow.components.flowplus.network.pthfx import FlowUIInterpreter, PytorchExportBuilder
+        from tensorpc.apps.pthviewer.pthfx import FlowUIInterpreter, PytorchExportBuilder
         if provider_fn is None or provider_kw_fn is None:
             gm = torch.fx.symbolic_trace(self.obj)
         else:

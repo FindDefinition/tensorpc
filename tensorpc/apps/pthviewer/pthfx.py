@@ -20,7 +20,7 @@ from torch.export.graph_signature import (
     OutputSpec,
     TensorArgument,
 )
-from tensorpc.flow.components.flowplus.network.defs import PytorchNodeMeta, EdgeTensorMeta
+from tensorpc.apps.pthviewer.defs import PytorchNodeMeta, EdgeTensorMeta
 import contextvars
 from tensorpc.utils.rich_logging import get_logger
 

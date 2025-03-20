@@ -2,8 +2,8 @@ from functools import partial
 from tensorpc.core.datamodel.events import DraftChangeEvent
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.flow.components import flowui
-from tensorpc.flow.components.flowplus.nodes.cnode.registry import NODE_REGISTRY, get_compute_node_runtime, parse_code_to_compute_cfg
-from tensorpc.flow.components.flowplus.nodes.mdnode import MarkdownNodeWrapper
+from tensorpc.apps.cflow.nodes.cnode.registry import NODE_REGISTRY, get_compute_node_runtime, parse_code_to_compute_cfg
+from tensorpc.apps.cflow.nodes.mdnode import MarkdownNodeWrapper
 from tensorpc.flow.components.flowplus.style import ComputeFlowClasses
 from tensorpc.flow.components.flowui import Node, Edge, Flow
 from tensorpc.flow import mui
@@ -34,16 +34,16 @@ class ComputeFlowBinder:
     def to_ui_node(self, flow: ComputeFlowModel, node_id: str,
                    dm_comp: mui.DataModel[ComputeFlowModelRoot]) -> Node:
         node_model = flow.nodes[node_id]
-        if node_model.node_type == ComputeNodeType.COMPUTE:
+        if node_model.nType == ComputeNodeType.COMPUTE:
             root_model = dm_comp.get_model()
             draft = self.drafts.get_node_drafts(node_model.id)
-            if node_model.instance is None:
-                instance = node_model.get_node_runtime(root_model)
-                node_model.instance = instance
-            wrapper = ComputeNodeWrapper(node_model.id, node_model.instance.cfg, node_model.instance.cnode, draft,
+            if node_model.runtime is None:
+                runtime = node_model.get_node_runtime(root_model)
+                node_model.runtime = runtime
+            wrapper = ComputeNodeWrapper(node_model.id, node_model.runtime.cfg, node_model.runtime.cnode, draft,
                                             dm_comp.get_model)
 
-            if node_model.code_key is not None or node_model.key == "":
+            if node_model.codeKey is not None or node_model.key == "":
                 dm_comp.install_draft_change_handler(
                     draft.code,
                     partial(self._handle_node_code_draft_change,
@@ -59,7 +59,7 @@ class ComputeFlowBinder:
                            deletable=False,
                            position=node_model.position)
             ui_node.dragHandle = f".{ComputeFlowClasses.Header}"
-        elif node_model.node_type == ComputeNodeType.MARKDOWN:
+        elif node_model.nType == ComputeNodeType.MARKDOWN:
             # markdown node won't be stored in registry, it's fully controlled.
             draft = self.drafts.get_node_drafts(node_model.id)
             wrapper = MarkdownNodeWrapper(node_model.id, draft)
@@ -77,9 +77,9 @@ class ComputeFlowBinder:
                                              draft: ComputeFlowNodeDrafts,
                                              node_model: ComputeFlowNodeModel):
         cfg = parse_code_to_compute_cfg(ev.new_value)
-        instance = get_compute_node_runtime(cfg)
-        node_model.instance = instance
-        await wrapper.set_node_from_code(cfg, instance.cnode, draft)
+        runtime = get_compute_node_runtime(cfg)
+        node_model.runtime = runtime
+        await wrapper.set_node_from_code(cfg, runtime.cnode, draft)
 
     def bind_flow_comp_with_datamodel(self, dm_comp: mui.DataModel):
         binder = models.flow.BaseFlowModelBinder(

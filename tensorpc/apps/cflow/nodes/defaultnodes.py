@@ -1,5 +1,5 @@
 import dataclasses
-from tensorpc.flow.components.flowplus.nodes import register_compute_node, get_node_state_draft, ComputeNodeBase, SpecialHandleDict
+from tensorpc.apps.cflow.nodes import register_compute_node, get_node_state_draft, ComputeNodeBase, SpecialHandleDict
 import json 
 from tensorpc.flow.components import mui, flowui
 from typing import TypedDict, Any

@@ -10,7 +10,7 @@ import time
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.flow import mui, flowui, three, plus, appctx, mark_did_mount, mark_create_layout
-from tensorpc.flow.components.flowplus.network.pthfx import (
+from tensorpc.apps.pthviewer.pthfx import (
     FlowUIInterpreter, PytorchExportBuilder, PytorchFlowOutput,
     PytorchFlowOutputPartial, PytorchFlowOutputPartial, PytorchNodeMeta)
 import torch

@@ -3,7 +3,7 @@ import inspect
 import traceback
 from typing import Any, Callable, Optional, TypedDict, Union
 from tensorpc.flow.components import flowui, mui
-from tensorpc.flow.components.flowplus.nodes.cnode.handle import parse_func_to_handle_components, IOHandle, HandleTypePrefix
+from tensorpc.apps.cflow.nodes.cnode.handle import parse_func_to_handle_components, IOHandle, HandleTypePrefix
 from tensorpc.flow.components.flowplus.style import ComputeFlowClasses
 from tensorpc.flow.components.flowplus.model import ComputeFlowNodeDrafts, ComputeFlowNodeModel, ComputeNodeType, ComputeFlowModel, ComputeNodeStatus
 from .registry import ComputeNodeBase, ComputeNodeDesp, parse_code_to_compute_cfg
@@ -122,8 +122,12 @@ class ComputeNodeWrapper(BaseNodeWrapper):
                                                 icon=icon_cfg.icon,
                                                 muiColor=icon_cfg.muiColor)
             ])
+        cached_icon = mui.Icon(mui.IconType.Cached).prop(iconSize="small")
+        cached_icon.bind_fields(muiColor=f"where({node_model_draft.node.isCached}, 'success', 'disabled')")
         header_icons = mui.HBox(
-            []).prop(className=ComputeFlowClasses.HeaderIcons)
+            [
+                cached_icon,
+            ]).prop(className=ComputeFlowClasses.HeaderIcons)
         header_container = mui.HBox([
             icon_container,
             header,

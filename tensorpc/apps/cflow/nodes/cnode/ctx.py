@@ -5,7 +5,7 @@ from typing import Any, Callable, Optional, TypeVar, Union
 from tensorpc.core.annolib import DataclassType
 from tensorpc.core.datamodel.draft import get_draft_ast_node
 from tensorpc.core.datamodel.draftast import evaluate_draft_ast_noexcept
-from tensorpc.flow.components.flowplus.model import ComputeFlowNodeDrafts
+from tensorpc.apps.cflow.model import ComputeFlowNodeDrafts
 
 T = TypeVar("T", bound=DataclassType)
 

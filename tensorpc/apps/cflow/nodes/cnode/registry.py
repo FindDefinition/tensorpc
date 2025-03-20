@@ -9,7 +9,7 @@ import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.flow.components import flowui, mui
 from tensorpc.core.moduleid import get_module_id_of_type
 import contextvars
-from tensorpc.flow.components.flowplus.nodes.cnode.handle import AnnoHandle, parse_function_to_handles
+from tensorpc.apps.cflow.nodes.cnode.handle import AnnoHandle, parse_function_to_handles
 from tensorpc.flow.jsonlike import (as_dict_no_undefined,
                                     as_dict_no_undefined_no_deepcopy,
                                     merge_props_not_undefined)
