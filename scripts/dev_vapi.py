@@ -1,5 +1,5 @@
-from tensorpc.flow.components.plus.vis import vapi_core as V
-from tensorpc.flow.components.plus.vis.canvas import ComplexCanvas
+from tensorpc.dock.components.plus.vis import vapi_core as V
+from tensorpc.dock.components.plus.vis.canvas import ComplexCanvas
 
 def main():
     canvas = ComplexCanvas()

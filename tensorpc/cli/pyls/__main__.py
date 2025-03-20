@@ -1,5 +1,5 @@
 import fire
-from tensorpc.flow.langserv.pyls import serve_ls
+from tensorpc.dock.langserv.pyls import serve_ls
 
 import asyncio
 

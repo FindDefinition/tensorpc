@@ -1,7 +1,7 @@
 
 from tensorpc.core.bgserver import BACKGROUND_SERVER
-from tensorpc.flow.serv_names import serv_names
-from tensorpc.flow import mui
+from tensorpc.dock.serv_names import serv_names
+from tensorpc.dock import mui
 from tensorpc.examples.tutorials import MarkdownTutorialsTree
 import asyncio 
 import time 

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Sequence,
 
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.tree_id import UniqueTreeIdForTree
-from tensorpc.flow.components import flowui, mui
+from tensorpc.dock.components import flowui, mui
 from typing_extensions import override
 from torch.fx import GraphModule, Interpreter, Tracer
 from torch.export import ExportedProgram

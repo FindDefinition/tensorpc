@@ -1,9 +1,9 @@
 import dataclasses
 from tensorpc.apps.cflow.nodes import register_compute_node, get_node_state_draft, ComputeNodeBase, SpecialHandleDict
 import json 
-from tensorpc.flow.components import mui, flowui
+from tensorpc.dock.components import mui, flowui
 from typing import TypedDict, Any
-from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
+from tensorpc.dock.components.plus.objinspect.tree import BasicObjectTree
 
 class ReservedNodeTypes:
     JsonInput = "tensorpc.cflow.Json"

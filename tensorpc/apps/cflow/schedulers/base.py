@@ -1,6 +1,6 @@
 import abc
 from typing import Any 
-from tensorpc.flow.components.flowplus.model import ComputeFlowModel, ComputeFlowNodeModel
+from tensorpc.dock.components.flowplus.model import ComputeFlowModel, ComputeFlowNodeModel
 
 class SchedulerBase(abc.ABC):
     @abc.abstractmethod

@@ -1,13 +1,13 @@
 import pickle
 from typing import Any, Dict, List, Union
 from typing_extensions import TypeAlias
-from tensorpc.flow.components import mui, three
-from tensorpc.flow import appctx
-from tensorpc.flow.components import plus
-from tensorpc.flow import mark_create_layout
+from tensorpc.dock.components import mui, three
+from tensorpc.dock import appctx
+from tensorpc.dock.components import plus
+from tensorpc.dock import mark_create_layout
 import sys
 from tensorpc import PACKAGE_ROOT
-from tensorpc.flow.marker import mark_did_mount
+from tensorpc.dock.marker import mark_did_mount
 
 import numpy as np 
 class MarkdownTutorialsTree:

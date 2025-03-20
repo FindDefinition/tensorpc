@@ -1,17 +1,17 @@
 from functools import partial
 from tensorpc.core.datamodel.events import DraftChangeEvent
 from tensorpc.core.tree_id import UniqueTreeIdForTree
-from tensorpc.flow.components import flowui
+from tensorpc.dock.components import flowui
 from tensorpc.apps.cflow.nodes.cnode.registry import NODE_REGISTRY, get_compute_node_runtime, parse_code_to_compute_cfg
 from tensorpc.apps.cflow.nodes.mdnode import MarkdownNodeWrapper
-from tensorpc.flow.components.flowplus.style import ComputeFlowClasses
-from tensorpc.flow.components.flowui import Node, Edge, Flow
-from tensorpc.flow import mui
+from tensorpc.dock.components.flowplus.style import ComputeFlowClasses
+from tensorpc.dock.components.flowui import Node, Edge, Flow
+from tensorpc.dock import mui
 from typing import Annotated, Any, Callable, Optional, cast
-from tensorpc.flow import models
+from tensorpc.dock import models
 import tensorpc.core.datamodel as D
 
-from tensorpc.flow.core.datamodel import DataModel
+from tensorpc.dock.core.datamodel import DataModel
 from .model import ComputeFlowDrafts, ComputeFlowNodeDrafts, ComputeFlowModelRoot, ComputeFlowNodeModel, ComputeNodeType, ComputeFlowModel
 from .nodes.cnode.wrapper import ComputeNodeWrapper
 

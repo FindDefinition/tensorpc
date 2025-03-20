@@ -2,13 +2,13 @@ import dataclasses as dataclasses_plain
 import inspect
 import traceback
 from typing import Any, Callable, Optional, TypedDict, Union
-from tensorpc.flow.components import flowui, mui
+from tensorpc.dock.components import flowui, mui
 from tensorpc.apps.cflow.nodes.cnode.handle import parse_func_to_handle_components, IOHandle, HandleTypePrefix
-from tensorpc.flow.components.flowplus.style import ComputeFlowClasses
-from tensorpc.flow.components.flowplus.model import ComputeFlowNodeDrafts, ComputeFlowNodeModel, ComputeNodeType, ComputeFlowModel, ComputeNodeStatus
+from tensorpc.dock.components.flowplus.style import ComputeFlowClasses
+from tensorpc.dock.components.flowplus.model import ComputeFlowNodeDrafts, ComputeFlowNodeModel, ComputeNodeType, ComputeFlowModel, ComputeNodeStatus
 from .registry import ComputeNodeBase, ComputeNodeDesp, parse_code_to_compute_cfg
 from .ctx import ComputeFlowNodeContext, enter_flow_ui_node_context_object
-from tensorpc.flow.jsonlike import (as_dict_no_undefined,
+from tensorpc.dock.jsonlike import (as_dict_no_undefined,
                                     as_dict_no_undefined_no_deepcopy,
                                     merge_props_not_undefined)
 import tensorpc.core.datamodel as D

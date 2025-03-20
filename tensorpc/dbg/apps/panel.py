@@ -1,4 +1,4 @@
-from tensorpc.flow import (marker, mui,
+from tensorpc.dock import (marker, mui,
                            chart, plus, three, appctx)
 
 

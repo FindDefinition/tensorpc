@@ -1,5 +1,5 @@
 from tensorpc.core.datamodel.draftast import evaluate_draft_ast
-from tensorpc.flow import mui, three, plus, appctx, mark_create_layout, flowui, models
+from tensorpc.dock import mui, three, plus, appctx, mark_create_layout, flowui, models
 from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core.datamodel.draft import create_literal_draft
 import tensorpc.core.datamodel.funcs as D
@@ -12,7 +12,7 @@ from tensorpc.apps.cflow.binder import ComputeFlowBinder
 from tensorpc.apps.cflow.model import ComputeFlowDrafts, ComputeFlowModelRoot, ComputeFlowNodeModel, ComputeNodeType, DetailType, InlineCode, get_compute_flow_drafts
 from tensorpc.apps.cflow.nodes.cnode.default_code import get_default_custom_node_code
 from tensorpc.apps.cflow.nodes.cnode.handle import HandleTypePrefix
-from tensorpc.flow.components.flowplus.style import default_compute_flow_css
+from tensorpc.dock.components.flowplus.style import default_compute_flow_css
 from tensorpc.utils.code_fmt import PythonCodeFormatter
 from tensorpc.apps.cflow.nodes.cnode.registry import NODE_REGISTRY, parse_code_to_compute_cfg
 import tensorpc.apps.cflow.nodes.defaultnodes

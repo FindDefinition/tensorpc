@@ -5,7 +5,7 @@ from tensorpc.apps.pthviewer.pthfx import FlowUIInterpreter, PytorchExportBuilde
 def _main():
     from torchvision.models import resnet18
     from torch.nn import functional as F
-    from tensorpc.flow import observe_function
+    from tensorpc.dock import observe_function
 
     class TestMod(torch.nn.Module):
 

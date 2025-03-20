@@ -1,9 +1,9 @@
 from .base import BaseNodeWrapper
 
 
-from tensorpc.flow.components import mui
+from tensorpc.dock.components import mui
 from tensorpc.apps.cflow.model import ComputeFlowNodeDrafts, ComputeNodeType
-from tensorpc.flow.components.flowplus.style import ComputeFlowClasses
+from tensorpc.dock.components.flowplus.style import ComputeFlowClasses
 
 class MarkdownNodeWrapper(BaseNodeWrapper):
     def __init__(self, node_id: str, node_model_draft: ComputeFlowNodeDrafts):

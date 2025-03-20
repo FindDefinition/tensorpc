@@ -234,7 +234,7 @@ def _get_viztracer(cfg: Optional[TracerConfig], name: Optional[str] = None):
 
 def should_enable_debug() -> bool:
     """Check if the debug environment is enabled"""
-    from tensorpc.flow.client import is_inside_app_session
+    from tensorpc.dock.client import is_inside_app_session
     enable = is_inside_app_session()
     enable |= TENSORPC_ENV_DBG_ENABLE
     return enable
@@ -249,8 +249,8 @@ def init(proc_name: Optional[str] = None, port: int = -1):
         return False
     if not BACKGROUND_SERVER.is_started:
         # put app import here to reduce import time
-        from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
-        from tensorpc.flow.components.plus.dbg.traceview import TraceView
+        from tensorpc.dock.components.plus.dbg.bkptpanel import BreakpointDebugPanel
+        from tensorpc.dock.components.plus.dbg.traceview import TraceView
         assert not InWindows, "init is not supported in Windows due to setproctitle."
         cur_pid = os.getpid()
         if proc_name is None:
@@ -466,7 +466,7 @@ def vscode_breakpoint_dist_pth(name: Optional[str] = None,
 def set_background_layout(key: str, layout: Any):
     if not should_enable_debug():
         return
-    from tensorpc.flow.serv_names import serv_names as app_serv_names
+    from tensorpc.dock.serv_names import serv_names as app_serv_names
     BACKGROUND_SERVER.execute_service(
         app_serv_names.REMOTE_COMP_SET_LAYOUT_OBJECT, key, layout)
 

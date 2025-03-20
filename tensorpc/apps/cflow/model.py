@@ -2,7 +2,7 @@ from typing import Annotated, Any, Callable, Mapping, Optional, cast
 from tensorpc.core.datamodel.draft import DraftFieldMeta
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.apps.cflow.nodes.cnode.registry import ComputeNodeBase, ComputeNodeRuntime, get_compute_node_runtime, parse_code_to_compute_cfg
-from tensorpc.flow.components.models.flow import BaseNodeModel, BaseEdgeModel, BaseFlowModel, BaseFlowModelBinder
+from tensorpc.dock.components.models.flow import BaseNodeModel, BaseEdgeModel, BaseFlowModel, BaseFlowModelBinder
 import tensorpc.core.dataclass_dispatch as dataclasses
 import enum
 import tensorpc.core.datamodel as D

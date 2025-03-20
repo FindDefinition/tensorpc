@@ -9,7 +9,7 @@ import time
 
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.tree_id import UniqueTreeIdForTree
-from tensorpc.flow import mui, flowui, three, plus, appctx, mark_did_mount, mark_create_layout
+from tensorpc.dock import mui, flowui, three, plus, appctx, mark_did_mount, mark_create_layout
 from tensorpc.apps.pthviewer.pthfx import (
     FlowUIInterpreter, PytorchExportBuilder, PytorchFlowOutput,
     PytorchFlowOutputPartial, PytorchFlowOutputPartial, PytorchNodeMeta)
@@ -19,14 +19,14 @@ import torch.fx
 import torch.export
 import dataclasses
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple, Union
-from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
-from tensorpc.flow.components.plus.pthcommon import PytorchModuleTreeItem
-from tensorpc.flow.components.plus.styles import get_tight_icon_tab_theme, get_tight_icon_tab_theme_horizontal
-from tensorpc.flow.jsonlike import IconButtonData, as_dict_no_undefined
+from tensorpc.dock.components.plus.objinspect.tree import BasicObjectTree
+from tensorpc.dock.components.plus.pthcommon import PytorchModuleTreeItem
+from tensorpc.dock.components.plus.styles import get_tight_icon_tab_theme, get_tight_icon_tab_theme_horizontal
+from tensorpc.dock.jsonlike import IconButtonData, as_dict_no_undefined
 from tensorpc.utils.rich_logging import get_logger
 from tensorpc import compat
 import torch.utils
-from tensorpc.flow.components.plus.config import ConfigDialogEvent, ConfigPanelDialog, ConfigPanelDialogPersist
+from tensorpc.dock.components.plus.config import ConfigDialogEvent, ConfigPanelDialog, ConfigPanelDialogPersist
 
 from tensorpc.utils.tb_parser import parse_python_traceback
 LOGGER = get_logger("tensorpc.flowui.pytorch")

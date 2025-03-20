@@ -28,13 +28,13 @@ from tensorpc.dbg.constants import (
     TracerType)
 from tensorpc.dbg.core.sourcecache import LineCache, PythonSourceASTCache, SourceChangeDiffCache
 from tensorpc.dbg.serv_names import serv_names
-from tensorpc.flow.client import list_all_app_in_machine
-from tensorpc.flow.components.plus.dbg.bkptpanel import BreakpointDebugPanel
-from tensorpc.flow.components.plus.dbg.traceview import TraceView
-from tensorpc.flow.components.plus.objinspect.tree import BasicObjectTree
-from tensorpc.flow.core.appcore import enter_app_context, get_app_context
-from tensorpc.flow.serv_names import serv_names as app_serv_names
-from tensorpc.flow.vscode.coretypes import VscodeBreakpoint
+from tensorpc.dock.client import list_all_app_in_machine
+from tensorpc.dock.components.plus.dbg.bkptpanel import BreakpointDebugPanel
+from tensorpc.dock.components.plus.dbg.traceview import TraceView
+from tensorpc.dock.components.plus.objinspect.tree import BasicObjectTree
+from tensorpc.dock.core.appcore import enter_app_context, get_app_context
+from tensorpc.dock.serv_names import serv_names as app_serv_names
+from tensorpc.dock.vscode.coretypes import VscodeBreakpoint
 from tensorpc.utils.rich_logging import (
     TENSORPC_LOGGING_OVERRIDED_PATH_LINENO_KEY, get_logger)
 

@@ -6,8 +6,8 @@ from tensorpc.core.annolib import (AnnotatedArg, AnnotatedReturn,
                                     is_async_gen, is_not_required, 
                                     parse_annotated_function)
 from tensorpc import compat
-from tensorpc.flow.components.flowplus.style import ComputeFlowClasses
-from tensorpc.flow.components import flowui, mui
+from tensorpc.dock.components.flowplus.style import ComputeFlowClasses
+from tensorpc.dock.components import flowui, mui
 
 NoneType = type(None)
 

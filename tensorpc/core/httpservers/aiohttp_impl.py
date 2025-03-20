@@ -37,7 +37,7 @@ class GrpcFileProxy(FileProxy):
 
     async def get_file(self, offset: int, count: int) -> AsyncGenerator[Tuple[Union[bytes, str], bool], None]:
         async for x, is_exc in  self._sc.execute_async_generator_service(
-            "tensorpc.flow.serv.core::Flow.app_get_file",
+            "tensorpc.dock.serv.core::Flow.app_get_file",
             [self._node_uid, self._resource_key, offset, count, self._comp_id], {},
             json_call=False):
             yield x, is_exc
@@ -215,7 +215,7 @@ class HttpService:
         }
         if node_uid is not None and resource_key is not None:
             metadata, is_exc = await self.service_core.execute_async_service(
-                "tensorpc.flow.serv.core::Flow.app_get_file_metadata",
+                "tensorpc.dock.serv.core::Flow.app_get_file_metadata",
                 [node_uid, resource_key, comp_id], {},
             )
             if is_exc:

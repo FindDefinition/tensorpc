@@ -4,7 +4,7 @@ setproctitle.getproctitle()
 import multiprocessing
 import os
 import tensorpc 
-from tensorpc.flow import mui
+from tensorpc.dock import mui
 import time 
 import numpy as np
 import concurrent.futures

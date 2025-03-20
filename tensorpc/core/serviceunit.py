@@ -94,7 +94,7 @@ class ServiceEventType(Enum):
 
 class AppFuncType(Enum):
     CreateLayout = "CreateLayout"
-    # TODO support preview layout in tensorpc.flow
+    # TODO support preview layout in tensorpc.dock
     CreatePreviewLayout = "CreatePreviewLayout"  # currently only used in treeview
 
     AutoRun = "AutoRun"

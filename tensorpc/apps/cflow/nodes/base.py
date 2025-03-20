@@ -1,5 +1,5 @@
-from tensorpc.flow.components import flowui, mui
-from tensorpc.flow.components.flowplus.model import ComputeNodeType
+from tensorpc.dock.components import flowui, mui
+from tensorpc.dock.components.flowplus.model import ComputeNodeType
 from typing import Any, Optional, TypedDict, Union
 
 class BaseNodeWrapper(mui.FlexBox):
