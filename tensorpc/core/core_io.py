@@ -378,6 +378,7 @@ def _extract_arrays_from_data(arrays,
                               object_classes=(np.ndarray, bytes, JSArrayBuffer),
                               json_index=False):
     # can't use abc.Sequence because string is sequence too.
+    # TODO use pytorch optree if available
     data_skeleton: Optional[Union[List[Any], Dict[str, Any], Placeholder]]
     if isinstance(data, (list, tuple)):
         data_skeleton = [None] * len(data)

@@ -123,6 +123,11 @@ class AsyncRemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
                 request_iterator):
             yield res
 
+    async def RelayStream(self, request_iterator, context):
+        async for res in self.server_core.chunked_relay_stream_async(
+                request_iterator):
+            yield res
+
     def ServerShutdown(self, request, context):
         print("Shutdown message received")
         self.server_core._reset_timeout()

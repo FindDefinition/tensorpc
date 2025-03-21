@@ -11,7 +11,6 @@ from typing import Annotated, Any, Callable, Optional, cast
 from tensorpc.dock import models
 import tensorpc.core.datamodel as D
 
-from tensorpc.dock.core.datamodel import DataModel
 from .model import ComputeFlowDrafts, ComputeFlowNodeDrafts, ComputeFlowModelRoot, ComputeFlowNodeModel, ComputeNodeType, ComputeFlowModel
 from .nodes.cnode.wrapper import ComputeNodeWrapper
 

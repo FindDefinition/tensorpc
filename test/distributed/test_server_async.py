@@ -27,6 +27,8 @@ from tensorpc import PACKAGE_ROOT
 from tensorpc.services.for_test import Service2
 import pytest_asyncio
 
+from tensorpc.core.bgserver import BACKGROUND_SERVER
+
 
 @pytest_asyncio.fixture
 async def server_client():
@@ -50,14 +52,19 @@ async def server_client():
 
 
 @contextlib.asynccontextmanager
-async def server_client_local():
+async def server_client_local(with_serv_def=True):
     with get_free_loopback_tcp_port() as port:
         # request a free port
         pass
     serv_def = PACKAGE_ROOT / "services/serv_def.yaml"
-    proc = subprocess.Popen(
-        f"python -m tensorpc.serve --port {port} --serv_def_file {serv_def}",
-        shell=True)
+    if with_serv_def:
+        proc = subprocess.Popen(
+            f"python -m tensorpc.serve --port {port} --serv_def_file {serv_def}",
+            shell=True)
+    else:
+        proc = subprocess.Popen(
+            f"python -m tensorpc.serve --port {port}",
+            shell=True)
     try:
         async with asyncclient.AsyncRemoteManager(
                 "localhost:{}".format(port)) as robj:
@@ -72,14 +79,6 @@ async def server_client_local():
 
 def local_func(a, b):
     return a + b
-
-
-def func_np(a, b, e=False):
-    if e:
-        raise ValueError("error")
-    from codeai.distributed import prim
-    assert prim.get_server_context() is not None
-    return np.add(a, 2 * b)
 
 
 def gen_func(a):
@@ -198,14 +197,48 @@ async def test_stream(server_client: asyncclient.AsyncRemoteManager):
     expected = list(serv.bi_stream(gen_2_large(), np.full([2000000], 4.0), 6))
     assert np.allclose(res, expected)
 
+@pytest.mark.asyncio
+async def test_relay_stream(server_client: asyncclient.AsyncRemoteManager):
+    robj = server_client
+    serv_url = server_client.url
+
+    async with server_client_local(with_serv_def=False) as relay_robj:
+        await relay_robj.health_check()
+        serv = Service2(1)
+        res = await robj.client_stream("Test3Async.client_stream",
+                                    gen_2(),
+                                    a=4,
+                                    b=6)
+        res2 = await relay_robj.chunked_client_stream("Test3Async.client_stream",
+                                    async_gen_2(),
+                                    a=4,
+                                    b=6,
+                                    rpc_relay_urls=[serv_url])
+
+        expected = serv.client_stream(gen_2(), 4, 6)
+        assert np.allclose(res, expected)
+        assert np.allclose(res2, expected)
+
+        res = []
+        async for x in robj.bi_stream("Test3Async.bi_stream", gen_2(), a=4, b=6):
+            res.append(x)
+        expected = list(serv.bi_stream(gen_2(), 4, 6))
+        assert np.allclose(res, expected)
+
+        res = []
+        async for x in relay_robj.chunked_bi_stream("Test3Async.bi_stream", gen_2_large(), a=np.full([2000000], 4.0), b=6, rpc_relay_urls=[serv_url]):
+            res.append(x)
+        expected = list(serv.bi_stream(gen_2_large(), np.full([2000000], 4.0), 6))
+        assert np.allclose(res, expected)
 
 async def main_async():
     async with server_client_local() as robj:
         await robj.health_check()
-        await test_query_meta(robj)
-        await test_remote_call(robj)
-        await test_remote_generator(robj)
-        await test_stream(robj)
+        # await test_query_meta(robj)
+        # await test_remote_call(robj)
+        # await test_remote_generator(robj)
+        # await test_stream(robj)
+        await test_relay_stream(robj)
 
 
 if __name__ == "__main__":

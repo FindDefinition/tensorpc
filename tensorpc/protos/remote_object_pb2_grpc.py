@@ -109,6 +109,11 @@ class RemoteObjectStub(object):
                 request_serializer=rpc__message__pb2.RemoteCallStream.SerializeToString,
                 response_deserializer=rpc__message__pb2.RemoteCallStream.FromString,
                 _registered_method=True)
+        self.RelayStream = channel.stream_stream(
+                '/tensorpc.protos.RemoteObject/RelayStream',
+                request_serializer=rpc__message__pb2.RemoteCallStream.SerializeToString,
+                response_deserializer=rpc__message__pb2.RemoteCallStream.FromString,
+                _registered_method=True)
         self.SayHello = channel.unary_unary(
                 '/tensorpc.protos.RemoteObject/SayHello',
                 request_serializer=rpc__message__pb2.HelloRequest.SerializeToString,
@@ -210,6 +215,13 @@ class RemoteObjectServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RelayStream(self, request_iterator, context):
+        """used to relay remote call in any tensorpc servers.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def SayHello(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -291,6 +303,11 @@ def add_RemoteObjectServicer_to_server(servicer, server):
             ),
             'ChunkedClientStreamRemoteCall': grpc.stream_stream_rpc_method_handler(
                     servicer.ChunkedClientStreamRemoteCall,
+                    request_deserializer=rpc__message__pb2.RemoteCallStream.FromString,
+                    response_serializer=rpc__message__pb2.RemoteCallStream.SerializeToString,
+            ),
+            'RelayStream': grpc.stream_stream_rpc_method_handler(
+                    servicer.RelayStream,
                     request_deserializer=rpc__message__pb2.RemoteCallStream.FromString,
                     response_serializer=rpc__message__pb2.RemoteCallStream.SerializeToString,
             ),
@@ -703,6 +720,33 @@ class RemoteObject(object):
             request_iterator,
             target,
             '/tensorpc.protos.RemoteObject/ChunkedClientStreamRemoteCall',
+            rpc__message__pb2.RemoteCallStream.SerializeToString,
+            rpc__message__pb2.RemoteCallStream.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RelayStream(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(
+            request_iterator,
+            target,
+            '/tensorpc.protos.RemoteObject/RelayStream',
             rpc__message__pb2.RemoteCallStream.SerializeToString,
             rpc__message__pb2.RemoteCallStream.FromString,
             options,

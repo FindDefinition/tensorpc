@@ -159,7 +159,7 @@ class ScriptManager(mui.FlexBox):
         self.code_editor_container = mui.Allotment(mui.Allotment.ChildDef([
             mui.Allotment.Pane(self.code_editor.prop(height="100%")),
             mui.Allotment.Pane(self.app_show_box.prop(height="100%"), visible=False),
-        ])).prop(flex=1, minHeight=0)
+        ])) # .prop(flex=1, minHeight=0)
         self.scripts = mui.Autocomplete(
             "Scripts",
             [],
@@ -251,11 +251,10 @@ class ScriptManager(mui.FlexBox):
                    reverse=True)
         options: List[Dict[str, Any]] = []
         for item in items:
-            if item.typeStr == Script.__name__:
-                options.append({
-                    "label": Path(item.name).stem,
-                    "storage_key": item.name
-                })
+            options.append({
+                "label": Path(item.name).stem,
+                "storage_key": item.name
+            })
         if options:
             await self.scripts.update_options(options, 0)
             await self._on_script_select(options[0])
@@ -283,9 +282,10 @@ class ScriptManager(mui.FlexBox):
             label = self.scripts.value["label"]
             storage_key = self.scripts.value["storage_key"]
 
-            item = await appctx.read_data_storage(storage_key,
+            item_dict = await appctx.read_data_storage(storage_key,
                                                   self._storage_node_rid,
                                                   self._graph_id)
+            item = Script(**item_dict)
             assert isinstance(item, Script)
             item_uid = f"{self._graph_id}@{self._storage_node_rid}@{item.label}"
             fname = f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-{item_uid}>"
@@ -377,16 +377,18 @@ class ScriptManager(mui.FlexBox):
         if self.scripts.value is not None:
             storage_key = self.scripts.value["storage_key"]
 
-            item = await appctx.read_data_storage(storage_key,
+            item_dict = await appctx.read_data_storage(storage_key,
                                                   self._storage_node_rid,
                                                   self._graph_id)
+            item = Script(**item_dict)
+
             assert isinstance(item, Script)
             item.lang = value
             await self.send_and_wait(
                 self.code_editor.update_event(
                     language=_LANG_TO_VSCODE_MAPPING[value],
                     value=item.get_code()))
-            await appctx.save_data_storage(storage_key, item,
+            await appctx.save_data_storage(storage_key, dataclasses.asdict(item),
                                            self._storage_node_rid,
                                            self._graph_id)
             if value == "app":
@@ -403,16 +405,18 @@ class ScriptManager(mui.FlexBox):
         if self.scripts.value is not None:
             label = self.scripts.value["label"]
             storage_key = f"{SCRIPT_STORAGE_KEY_PREFIX}/{label}"
-            item = await appctx.read_data_storage(storage_key,
+            item_dict = await appctx.read_data_storage(storage_key,
                                                   self._storage_node_rid,
                                                   self._graph_id)
+            item = Script(**item_dict)
+
             assert isinstance(item, Script)
             # compact new code dict
             if not isinstance(item.code, dict):
                 item.code = self._init_scripts.copy()
             item.code[item.lang] = value
 
-            await appctx.save_data_storage(storage_key, item,
+            await appctx.save_data_storage(storage_key, dataclasses.asdict(item),
                                            self._storage_node_rid,
                                            self._graph_id)
             is_save_and_run = ev.userdata is not None and "SaveAndRun" in ev.userdata
@@ -430,7 +434,7 @@ class ScriptManager(mui.FlexBox):
         lang = self.langs.props.value
         assert isinstance(lang, str)
         script = Script(new_item_name, self._init_scripts, lang)
-        await appctx.save_data_storage(storage_key, script,
+        await appctx.save_data_storage(storage_key, dataclasses.asdict(script),
                                        self._storage_node_rid, self._graph_id)
         if lang != "app":
             await self.app_show_box.set_new_layout({})
@@ -466,9 +470,11 @@ class ScriptManager(mui.FlexBox):
         label = value["label"]
         storage_key = value["storage_key"]
 
-        item = await appctx.read_data_storage(storage_key,
+        item_dict = await appctx.read_data_storage(storage_key,
                                               self._storage_node_rid,
                                               self._graph_id)
+        item = Script(**item_dict)
+
         assert isinstance(item, Script)
         # await self.send_and_wait(
         #     self.app_show_box.update_event(

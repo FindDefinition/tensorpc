@@ -33,7 +33,7 @@ from tensorpc.core import core_io as core_io
 from tensorpc.core.client import RemoteException, format_stdout
 from tensorpc.protos_export import remote_object_pb2 as rpc_pb2
 from tensorpc.protos_export import rpc_message_pb2
-
+from tensorpc.core.defs import RelayCallType
 from tensorpc.protos_export import \
     remote_object_pb2_grpc as remote_object_pb2_grpc
 from tensorpc.utils.wait_tools import wait_blocking_async, wait_until, wait_until_async
@@ -125,7 +125,8 @@ class AsyncRemoteObject(object):
                                                     arrays=data_to_be_send,
                                                     callback=rpc_callback,
                                                     flags=rpc_flags)
-        return self.parse_remote_response(await self.stub.RemoteCall(request, timeout=rpc_timeout))
+        return self.parse_remote_response(await self.stub.RemoteCall(
+            request, timeout=rpc_timeout))
 
     async def remote_json_call(self,
                                key: str,
@@ -141,8 +142,8 @@ class AsyncRemoteObject(object):
                                                         callback=rpc_callback,
                                                         flags=rpc_flags)
 
-        return self.parse_remote_json_response(
-            await self.stub.RemoteJsonCall(request, timeout=rpc_timeout))
+        return self.parse_remote_json_response(await self.stub.RemoteJsonCall(
+            request, timeout=rpc_timeout))
 
     def parse_remote_json_response(self, response):
         self._check_remote_exception(response.exception)
@@ -176,7 +177,8 @@ class AsyncRemoteObject(object):
                                                     arrays=data_to_be_send,
                                                     callback=rpc_callback,
                                                     flags=rpc_flags)
-        async for response in self.stub.RemoteGenerator(request, timeout=rpc_timeout):
+        async for response in self.stub.RemoteGenerator(request,
+                                                        timeout=rpc_timeout):
             yield self.parse_remote_response(response)
 
     async def client_stream(self,
@@ -188,30 +190,32 @@ class AsyncRemoteObject(object):
                             **kwargs) -> Any:
         flags = rpc_flags
         if inspect.isasyncgen(stream_iter):
+
             async def wrapped_generator_async():
                 data_to_be_send = core_io.data_to_pb((args, kwargs), flags)
-                request = rpc_message_pb2.RemoteCallRequest(service_key=key,
-                                                            arrays=data_to_be_send,
-                                                            flags=flags)
+                request = rpc_message_pb2.RemoteCallRequest(
+                    service_key=key, arrays=data_to_be_send, flags=flags)
                 yield request
                 async for data in stream_iter:
                     data_to_be_send = core_io.data_to_pb(((data, ), {}), flags)
                     request = rpc_message_pb2.RemoteCallRequest(
                         service_key=key, arrays=data_to_be_send, flags=flags)
                     yield request
+
             wrapped_func = wrapped_generator_async
         else:
+
             def wrapped_generator():
                 data_to_be_send = core_io.data_to_pb((args, kwargs), flags)
-                request = rpc_message_pb2.RemoteCallRequest(service_key=key,
-                                                            arrays=data_to_be_send,
-                                                            flags=flags)
+                request = rpc_message_pb2.RemoteCallRequest(
+                    service_key=key, arrays=data_to_be_send, flags=flags)
                 yield request
                 for data in stream_iter:
                     data_to_be_send = core_io.data_to_pb(((data, ), {}), flags)
                     request = rpc_message_pb2.RemoteCallRequest(
                         service_key=key, arrays=data_to_be_send, flags=flags)
                     yield request
+
             wrapped_func = wrapped_generator
 
         response = await self.stub.ClientStreamRemoteCall(wrapped_func())
@@ -226,33 +230,34 @@ class AsyncRemoteObject(object):
                         **kwargs) -> AsyncGenerator[Any, None]:
         flags = rpc_flags
         if inspect.isasyncgen(stream_iter):
+
             async def wrapped_generator_async():
                 data_to_be_send = core_io.data_to_pb((args, kwargs), flags)
-                request = rpc_message_pb2.RemoteCallRequest(service_key=key,
-                                                            arrays=data_to_be_send,
-                                                            flags=flags)
+                request = rpc_message_pb2.RemoteCallRequest(
+                    service_key=key, arrays=data_to_be_send, flags=flags)
                 yield request
                 async for data in stream_iter:
                     data_to_be_send = core_io.data_to_pb(((data, ), {}), flags)
                     request = rpc_message_pb2.RemoteCallRequest(
                         service_key=key, arrays=data_to_be_send, flags=flags)
                     yield request
+
             wrapped_func = wrapped_generator_async
         else:
+
             def wrapped_generator():
                 data_to_be_send = core_io.data_to_pb((args, kwargs), flags)
-                request = rpc_message_pb2.RemoteCallRequest(service_key=key,
-                                                            arrays=data_to_be_send,
-                                                            flags=flags)
+                request = rpc_message_pb2.RemoteCallRequest(
+                    service_key=key, arrays=data_to_be_send, flags=flags)
                 yield request
                 for data in stream_iter:
                     data_to_be_send = core_io.data_to_pb(((data, ), {}), flags)
                     request = rpc_message_pb2.RemoteCallRequest(
                         service_key=key, arrays=data_to_be_send, flags=flags)
                     yield request
+
             wrapped_func = wrapped_generator
-        async for response in self.stub.BiStreamRemoteCall(
-                wrapped_func()):
+        async for response in self.stub.BiStreamRemoteCall(wrapped_func()):
             yield self.parse_remote_response(response)
 
     async def stream_remote_call(
@@ -270,6 +275,7 @@ class AsyncRemoteObject(object):
         (4MB by default).
         """
         flags = rpc_flags
+
         def stream_generator():
             for data in stream_iter:
                 # data must be (args, kwargs)
@@ -277,6 +283,7 @@ class AsyncRemoteObject(object):
                 yield rpc_message_pb2.RemoteCallRequest(service_key=key,
                                                         arrays=data_to_be_send,
                                                         flags=flags)
+
         async for response in self.stub.RemoteStreamCall(stream_generator()):
             yield self.parse_remote_response(response)
 
@@ -300,12 +307,13 @@ class AsyncRemoteObject(object):
         }
 
     async def chunked_stream_remote_call(
-            self,
-            key: str,
-            stream_iter,
-            rpc_flags: int = rpc_message_pb2.PickleArray,
-            rpc_timeout: Optional[int] = None,
-            rpc_chunk_size: int = 64 * 1024,
+        self,
+        key: str,
+        stream_iter,
+        rpc_flags: int = rpc_message_pb2.PickleArray,
+        rpc_timeout: Optional[int] = None,
+        rpc_chunk_size: int = 64 * 1024,
+        rpc_relay_urls: Optional[list[str]] = None,
     ) -> AsyncIterator[Any]:
         """Call a remote function (not generator) with stream data:
         ```Python
@@ -316,39 +324,62 @@ class AsyncRemoteObject(object):
         """
         flags = rpc_flags
         if inspect.isasyncgen(stream_iter):
+
             async def stream_generator_async():
+                if rpc_relay_urls is not None:
+                    relay_reqs = self._prepare_relay_reqs(
+                        rpc_relay_urls, RelayCallType.BiStream, rpc_timeout,
+                        rpc_flags)
+                    for chunk in relay_reqs:
+                        yield chunk
                 async for data in stream_iter:
                     try:
-                        arrays, data_skeleton = core_io.extract_arrays_from_data(data)
+                        arrays, data_skeleton = core_io.extract_arrays_from_data(
+                            data)
                         data_to_be_send = arrays + [
                             core_io.dumps_method(data_skeleton, flags)
                         ]
-                        stream = core_io.to_protobuf_stream(data_to_be_send, key,
-                                                            flags, rpc_chunk_size)
+                        stream = core_io.to_protobuf_stream(
+                            data_to_be_send, key, flags, rpc_chunk_size)
                     except:
                         traceback.print_exc()
                         continue
                     for s in stream:
                         yield s
+
             stream_generator_func = stream_generator_async
         else:
+
             def stream_generator():
+                if rpc_relay_urls is not None:
+                    relay_reqs = self._prepare_relay_reqs(
+                        rpc_relay_urls, RelayCallType.BiStream, rpc_timeout,
+                        rpc_flags)
+                    for chunk in relay_reqs:
+                        yield chunk
                 for data in stream_iter:
                     try:
-                        arrays, data_skeleton = core_io.extract_arrays_from_data(data)
+                        arrays, data_skeleton = core_io.extract_arrays_from_data(
+                            data)
                         data_to_be_send = arrays + [
                             core_io.dumps_method(data_skeleton, flags)
                         ]
-                        stream = core_io.to_protobuf_stream(data_to_be_send, key,
-                                                            flags, rpc_chunk_size)
+                        stream = core_io.to_protobuf_stream(
+                            data_to_be_send, key, flags, rpc_chunk_size)
                     except:
                         traceback.print_exc()
                         continue
                     for s in stream:
                         yield s
+
             stream_generator_func = stream_generator
         from_stream = core_io.FromBufferStream()
-        async for response in self.stub.ChunkedRemoteCall(stream_generator_func(), timeout=rpc_timeout):
+        if rpc_relay_urls is not None:
+            serv_fn = self.stub.RelayStream
+        else:
+            serv_fn = self.stub.ChunkedRemoteCall
+        async for response in serv_fn(stream_generator_func(),
+                                      timeout=rpc_timeout):
             self._check_remote_exception(response.exception)
             res = from_stream(response)
             if res is not None:
@@ -369,6 +400,7 @@ class AsyncRemoteObject(object):
                                   rpc_flags: int = rpc_message_pb2.PickleArray,
                                   rpc_timeout: Optional[int] = None,
                                   rpc_chunk_size: int = 64 * 1024,
+                                  rpc_relay_urls: Optional[list[str]] = None,
                                   **kwargs) -> Any:
 
         def stream_generator():
@@ -376,17 +408,23 @@ class AsyncRemoteObject(object):
 
         count = 0
         res: Optional[_PlaceHolder] = _PlaceHolder()
-        async for res in self.chunked_stream_remote_call(key,
-                                                         stream_generator(),
-                                                         rpc_flags=rpc_flags,
-                                                         rpc_timeout=rpc_timeout,
-                                                         rpc_chunk_size=rpc_chunk_size):
+        async for res in self.chunked_stream_remote_call(
+                key,
+                stream_generator(),
+                rpc_flags=rpc_flags,
+                rpc_timeout=rpc_timeout,
+                rpc_chunk_size=rpc_chunk_size,
+                rpc_relay_urls=rpc_relay_urls):
             count += 1
         assert count == 1
         assert not isinstance(res, _PlaceHolder)
         return res
 
-    def _arg_chunked_sender(self, key: str, data, rpc_chunk_size: int, rpc_flags: int = rpc_message_pb2.PickleArray):
+    def _arg_chunked_sender(self,
+                            key: str,
+                            data,
+                            rpc_chunk_size: int,
+                            rpc_flags: int = rpc_message_pb2.PickleArray):
         try:
             arrays, data_skeleton = core_io.extract_arrays_from_data(data)
             data_to_be_send = arrays + [
@@ -401,71 +439,161 @@ class AsyncRemoteObject(object):
             yield s
 
     async def chunked_bi_stream(self,
-                        key: str,
-                        stream_iter,
-                        *args,
-                        rpc_timeout: Optional[int] = None,
-                        rpc_flags: int = rpc_message_pb2.PickleArray,
-                        rpc_chunk_size: int = 64 * 1024,
-                        **kwargs) -> AsyncGenerator[Any, None]:
+                                key: str,
+                                stream_iter,
+                                *args,
+                                rpc_timeout: Optional[int] = None,
+                                rpc_flags: int = rpc_message_pb2.PickleArray,
+                                rpc_chunk_size: int = 64 * 1024,
+                                rpc_relay_urls: Optional[list[str]] = None,
+                                **kwargs) -> AsyncGenerator[Any, None]:
         if inspect.isasyncgen(stream_iter):
+
             async def wrapped_generator_async():
-                for chunk in self._arg_chunked_sender(key, (args, kwargs), rpc_chunk_size, rpc_flags):
+                if rpc_relay_urls is not None:
+                    relay_reqs = self._prepare_relay_reqs(
+                        rpc_relay_urls, RelayCallType.BiStream, rpc_timeout,
+                        rpc_flags)
+                    for chunk in relay_reqs:
+                        yield chunk
+                for chunk in self._arg_chunked_sender(key, (args, kwargs),
+                                                      rpc_chunk_size,
+                                                      rpc_flags):
                     yield chunk
                 async for data in stream_iter:
-                    for chunk in self._arg_chunked_sender(key, [data], rpc_chunk_size, rpc_flags):
+                    for chunk in self._arg_chunked_sender(
+                            key, [data], rpc_chunk_size, rpc_flags):
                         yield chunk
+
             wrapped_func = wrapped_generator_async
         else:
+
             def wrapped_generator():
-                for chunk in self._arg_chunked_sender(key, (args, kwargs), rpc_chunk_size, rpc_flags):
+                if rpc_relay_urls is not None:
+                    relay_reqs = self._prepare_relay_reqs(
+                        rpc_relay_urls, RelayCallType.BiStream, rpc_timeout,
+                        rpc_flags)
+                    for chunk in relay_reqs:
+                        yield chunk
+                for chunk in self._arg_chunked_sender(key, (args, kwargs),
+                                                      rpc_chunk_size,
+                                                      rpc_flags):
                     yield chunk
                 for data in stream_iter:
-                    for chunk in self._arg_chunked_sender(key, [data], rpc_chunk_size, rpc_flags):
+                    for chunk in self._arg_chunked_sender(
+                            key, [data], rpc_chunk_size, rpc_flags):
                         yield chunk
+
             wrapped_func = wrapped_generator
         from_stream = core_io.FromBufferStream()
-        async for req, data in from_stream.generator_async(self.stub.ChunkedBiStreamRemoteCall(
-                wrapped_func())):
+        if rpc_relay_urls is not None:
+            serv_fn = self.stub.RelayStream
+        else:
+            serv_fn = self.stub.ChunkedClientStreamRemoteCall
+        async for req, data in from_stream.generator_async(
+                serv_fn(wrapped_func())):
             yield data[0]
 
-    async def chunked_client_stream(self,
-                        key: str,
-                        stream_iter,
-                        *args,
-                        rpc_timeout: Optional[int] = None,
-                        rpc_flags: int = rpc_message_pb2.PickleArray,
-                        rpc_chunk_size: int = 64 * 1024,
-                        **kwargs) -> Any:
+    async def chunked_client_stream(
+            self,
+            key: str,
+            stream_iter,
+            *args,
+            rpc_timeout: Optional[int] = None,
+            rpc_flags: int = rpc_message_pb2.PickleArray,
+            rpc_chunk_size: int = 64 * 1024,
+            rpc_relay_urls: Optional[list[str]] = None,
+            **kwargs) -> Any:
         if inspect.isasyncgen(stream_iter):
+
             async def wrapped_generator_async():
-                for chunk in self._arg_chunked_sender(key, (args, kwargs), rpc_chunk_size, rpc_flags):
+                if rpc_relay_urls is not None:
+                    relay_reqs = self._prepare_relay_reqs(
+                        rpc_relay_urls, RelayCallType.ClientStream,
+                        rpc_timeout, rpc_flags)
+                    for chunk in relay_reqs:
+                        yield chunk
+                for chunk in self._arg_chunked_sender(key, (args, kwargs),
+                                                      rpc_chunk_size,
+                                                      rpc_flags):
                     yield chunk
                 async for data in stream_iter:
-                    for chunk in self._arg_chunked_sender(key, [data], rpc_chunk_size, rpc_flags):
+                    for chunk in self._arg_chunked_sender(
+                            key, [data], rpc_chunk_size, rpc_flags):
                         yield chunk
+
             wrapped_func = wrapped_generator_async
         else:
+
             def wrapped_generator():
-                for chunk in self._arg_chunked_sender(key, (args, kwargs), rpc_chunk_size, rpc_flags):
+                if rpc_relay_urls is not None:
+                    relay_reqs = self._prepare_relay_reqs(
+                        rpc_relay_urls, RelayCallType.ClientStream,
+                        rpc_timeout, rpc_flags)
+                    for chunk in relay_reqs:
+                        yield chunk
+                for chunk in self._arg_chunked_sender(key, (args, kwargs),
+                                                      rpc_chunk_size,
+                                                      rpc_flags):
                     yield chunk
                 for data in stream_iter:
-                    for chunk in self._arg_chunked_sender(key, [data], rpc_chunk_size, rpc_flags):
+                    for chunk in self._arg_chunked_sender(
+                            key, [data], rpc_chunk_size, rpc_flags):
                         yield chunk
+
             wrapped_func = wrapped_generator
         from_stream = core_io.FromBufferStream()
-        async for req, data in from_stream.generator_async(self.stub.ChunkedClientStreamRemoteCall(
-                wrapped_func())):
+        if rpc_relay_urls is not None:
+            serv_fn = self.stub.RelayStream
+        else:
+            serv_fn = self.stub.ChunkedClientStreamRemoteCall
+        async for req, data in from_stream.generator_async(
+                serv_fn(wrapped_func())):
             return data[0]
 
-    async def chunked_remote_generator(self, key: str, *args, rpc_flags: int = rpc_message_pb2.PickleArray, rpc_timeout: Optional[int] = None, rpc_chunk_size: int = 64 * 1024, **kwargs) -> AsyncGenerator[Any, None]:
+    async def chunked_remote_generator(
+            self,
+            key: str,
+            *args,
+            rpc_flags: int = rpc_message_pb2.PickleArray,
+            rpc_timeout: Optional[int] = None,
+            rpc_chunk_size: int = 64 * 1024,
+            rpc_relay_urls: Optional[list[str]] = None,
+            **kwargs) -> AsyncGenerator[Any, None]:
+
         def wrapped_generator():
-            for chunk in self._arg_chunked_sender(key, (args, kwargs), rpc_chunk_size, rpc_flags):
+            if rpc_relay_urls is not None:
+                relay_reqs = self._prepare_relay_reqs(
+                    rpc_relay_urls, RelayCallType.RemoteGenerator, rpc_timeout,
+                    rpc_flags)
+                for chunk in relay_reqs:
+                    yield chunk
+            for chunk in self._arg_chunked_sender(key, (args, kwargs),
+                                                  rpc_chunk_size, rpc_flags):
                 yield chunk
+
         from_stream = core_io.FromBufferStream()
-        async for req, data in from_stream.generator_async(self.stub.ChunkedRemoteGenerator(
-                wrapped_generator())):
+        if rpc_relay_urls is not None:
+            serv_fn = self.stub.RelayStream
+        else:
+            serv_fn = self.stub.ChunkedRemoteGenerator
+        async for req, data in from_stream.generator_async(
+                serv_fn(wrapped_generator())):
             yield data[0]
+
+    def _prepare_relay_reqs(self,
+                            urls: list[str],
+                            type: RelayCallType,
+                            rpc_timeout: Optional[int] = None,
+                            rpc_flags: int = rpc_message_pb2.PickleArray):
+        relay_data = {
+            "urls": urls,
+            "type": int(type),
+            "rpc_timeout": rpc_timeout
+        }
+        relay_bin = core_io.dumps_method(relay_data, rpc_flags)
+        res = core_io.to_protobuf_stream([relay_bin], "", rpc_flags)
+        return res 
 
     async def _wait_func(self):
         try:
@@ -576,15 +704,29 @@ class AsyncRemoteManager(AsyncRemoteObject):
         return await self.close()
 
 
-async def simple_remote_call_async(addr, key, *args, rpc_timeout=None, **kwargs):
+async def simple_remote_call_async(addr,
+                                   key,
+                                   *args,
+                                   rpc_timeout=None,
+                                   **kwargs):
     async with AsyncRemoteManager(addr) as robj:
-        return await robj.remote_call(key, *args, rpc_timeout=rpc_timeout, **kwargs)
+        return await robj.remote_call(key,
+                                      *args,
+                                      rpc_timeout=rpc_timeout,
+                                      **kwargs)
 
 
-async def simple_chunk_call_async(addr, key, *args, rpc_timeout=None, **kwargs):
+async def simple_chunk_call_async(addr,
+                                  key,
+                                  *args,
+                                  rpc_timeout=None,
+                                  **kwargs):
     async with AsyncRemoteManager(addr) as robj:
         # await robj.wait_for_channel_ready()
-        return await robj.chunked_remote_call(key, *args, rpc_timeout=rpc_timeout, **kwargs)
+        return await robj.chunked_remote_call(key,
+                                              *args,
+                                              rpc_timeout=rpc_timeout,
+                                              **kwargs)
 
 
 async def shutdown_server_async(addr):

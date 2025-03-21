@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 # from tensorpc.constants import PACKAGE_ROOT
 # import codeai
+from tensorpc.constants import PROTOBUF_VERSION
 
 
 def compile_proto(cwd,
@@ -116,4 +117,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if PROTOBUF_VERSION <= (3, 20):
+        main_legacy()
+    else:
+        main()

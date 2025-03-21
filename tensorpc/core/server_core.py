@@ -2,6 +2,7 @@ import asyncio
 from concurrent.futures import Executor
 import contextlib
 import ctypes
+import enum
 import io
 import json
 import os
@@ -16,7 +17,9 @@ from typing import (TYPE_CHECKING, Any, AsyncIterator, Callable, Dict,
 import dataclasses
 
 import aiohttp
-from tensorpc.core.defs import Service, ServiceDef
+from tensorpc.core.asyncclient import AsyncRemoteManager
+from tensorpc.core.client import RemoteManager
+from tensorpc.core.defs import Service, ServiceDef, RelayCallType
 from tensorpc import compat
 from tensorpc.core import core_io, serviceunit
 from tensorpc.protos_export import remote_object_pb2 as remote_object_pb2
@@ -116,7 +119,6 @@ def get_global_context() -> ServerGlobalContext:
         raise ValueError(
             "you can't call primitives outside server global context.")
     return ctx
-
 
 class ServiceCore(object):
 
@@ -372,7 +374,6 @@ class ProtobufServiceCore(ServiceCore):
         async for call_request, call_data in from_stream.generator_async(request_iter):
             key = call_request.func_key
             break
-
         assert call_request is not None and key is not None and call_data is not None
         return key, call_request, call_data
 
@@ -911,3 +912,107 @@ class ProtobufServiceCore(ServiceCore):
                     break
                 for chunk in self._return_chunked_sender(key, call_request, res):
                     yield chunk
+
+    async def chunked_relay_stream_async(
+            self, request_iter: AsyncIterator[rpc_msg_pb2.RemoteCallStream]):
+        self._reset_timeout()
+        try:
+            key, call_request, call_data = await self._extract_chunked_data_async(request_iter)
+            relay_meta = call_data
+            relay_urls = relay_meta["urls"]
+            relay_type = RelayCallType(relay_meta["type"])
+            rpc_timeout = relay_meta["rpc_timeout"]
+            if len(relay_urls) == 0:
+                # do real call
+                if relay_type == RelayCallType.ClientStream:
+                    async for res in self.chunked_client_stream_async(request_iter):
+                        yield res
+                elif relay_type == RelayCallType.RemoteGenerator:
+                    async for res in self.chunked_remote_generator_async(request_iter):
+                        yield res
+                elif relay_type == RelayCallType.RemoteCall:
+                    async for res in self.chunked_remote_call_async(request_iter):
+                        yield res
+                elif relay_type == RelayCallType.BiStream:
+                    async for res in self.chunked_bi_stream_async(request_iter):
+                        yield res
+                else:
+                    raise ValueError("unknown relay type")
+            else:
+                url = relay_urls.pop(0)
+                new_relay_data = {
+                    "urls": relay_urls,
+                    "type": relay_type,
+                    "rpc_timeout": rpc_timeout
+                }
+                new_relay_bin = core_io.dumps_method(new_relay_data, call_request.flags)
+                buf_stream = core_io.to_protobuf_stream([new_relay_bin], key, call_request.flags)
+                async with AsyncRemoteManager(url) as robj:
+                    async for response in robj.stub.RelayStream(_merge_sync_async_gen(buf_stream, request_iter), timeout=rpc_timeout):
+                        yield response
+        except BaseException as e:
+            # traceback.print_exc()
+            res = self._remote_exception_json(e)
+            yield rpc_msg_pb2.RemoteCallStream(
+                exception=res,
+                chunked_data=b'',
+            )
+
+    def chunked_relay_stream(
+            self, request_iter: Iterator[rpc_msg_pb2.RemoteCallStream]):
+        self._reset_timeout()
+        try:
+            key, call_request, call_data = self._extract_chunked_data(request_iter)
+            relay_meta = call_data
+            relay_urls = relay_meta["urls"]
+            relay_type = RelayCallType(relay_meta["type"])
+            rpc_timeout = relay_meta["rpc_timeout"]
+            if len(relay_urls) == 0:
+                # do real call
+                if relay_type == RelayCallType.ClientStream:
+                    for res in self.chunked_client_stream(request_iter):
+                        yield res
+                elif relay_type == RelayCallType.RemoteGenerator:
+                    for res in self.chunked_remote_generator(request_iter):
+                        yield res
+                elif relay_type == RelayCallType.RemoteCall:
+                    for res in self.chunked_remote_call(request_iter):
+                        yield res
+                elif relay_type == RelayCallType.BiStream:
+                    for res in self.chunked_bi_stream(request_iter):
+                        yield res
+                else:
+                    raise ValueError("unknown relay type")
+            else:
+                url = relay_urls.pop(0)
+                new_relay_data = {
+                    "urls": relay_urls,
+                    "type": relay_type,
+                    "rpc_timeout": rpc_timeout
+                }
+                new_relay_bin = core_io.dumps_method(new_relay_data, call_request.flags)
+                buf_stream = core_io.to_protobuf_stream([new_relay_bin], key, call_request.flags)
+                with RemoteManager(url) as robj:
+                    for response in robj.stub.RelayStream(_merge_sync_sync_gen(buf_stream, request_iter), timeout=rpc_timeout):
+                        yield response
+        except BaseException as e:
+            # traceback.print_exc()
+            res = self._remote_exception_json(e)
+            yield rpc_msg_pb2.RemoteCallStream(
+                exception=res,
+                chunked_data=b'',
+            )
+
+def _merge_sync_sync_gen(a_iter, b_iter):
+    for a in a_iter:
+        yield a
+    for b in b_iter:
+        yield b
+
+
+async def _merge_sync_async_gen(a_iter, b_iter):
+    for a in a_iter:
+        yield a
+    async for b in b_iter:
+        yield b
+

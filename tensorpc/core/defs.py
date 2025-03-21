@@ -1,4 +1,5 @@
 import dataclasses
+import enum
 from os import stat_result
 
 from mashumaro.mixins.yaml import DataClassYAMLMixin
@@ -97,3 +98,9 @@ def decode_config_b64_and_update(cfg_b64: str, servs: List[Service]):
     serv_config_str = base64.b64decode(cfg_b64).decode("utf-8")
     serv_config = json.loads(serv_config_str)
     return update_service_def_config(serv_config, servs)
+
+class RelayCallType(enum.IntEnum):
+    RemoteCall = 0
+    ClientStream = 1
+    RemoteGenerator = 2
+    BiStream = 3

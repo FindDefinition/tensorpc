@@ -117,6 +117,11 @@ class RemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
     def ChunkedClientStreamRemoteCall(self, request_iterator, context):
         yield from self.server_core.chunked_client_stream(request_iterator)
 
+    def RelayStream(self, request_iterator, context):
+        for res in self.server_core.chunked_relay_stream(
+                request_iterator):
+            yield res
+
     def ServerShutdown(self, request, context):
         print("Shutdown message received")
         self.server_core._reset_timeout()
