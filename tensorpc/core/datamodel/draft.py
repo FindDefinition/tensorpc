@@ -253,6 +253,8 @@ class _DraftAnnoState:
     anno_type: Optional[AnnotatedType] = None
     path_metas: list[tuple[Any, ...]] = dataclasses.field(default_factory=list)
     can_assign: bool = True
+    # prevent assign by `insert_draft_assign_op` if False.
+    can_direct_assign: bool = True
     is_external: bool = False
 
 
@@ -1321,6 +1323,12 @@ def cast_any_draft_to_dataclass(draft: Any, target_type: type[T]) -> T:
                             draft._tensorpc_draft_attr_cur_node, new_state)
     return cast(T, new_draft)
 
+def draft_from_node_and_type(node: DraftASTNode, target_type: type[T]) -> T:
+    new_anno_type = parse_type_may_optional_undefined(target_type)
+    prev_anno_state = _DraftAnnoState(True, new_anno_type)
+    return cast(T, _tensorpc_draft_anno_dispatch(
+        new_anno_type, node, None,
+        prev_anno_state))
 
 def insert_assign_draft_op(draft: Any, value: Any):
     """used to insert a assign op to ctx without explicit assignment.
@@ -1331,6 +1339,8 @@ def insert_assign_draft_op(draft: Any, value: Any):
     ctx = get_draft_update_context()
     cur_node = draft._tensorpc_draft_attr_cur_node
     assert cur_node.type != DraftASTType.NAME and cur_node.type != DraftASTType.FUNC_CALL, "can't assign to root or getitem/getattr object"
+    anno_state = draft._tensorpc_draft_attr_anno_state
+    assert anno_state.can_assign and anno_state.can_direct_assign, "assign to this draft is disabled."
     node_prev = cur_node.children[0]
 
     if cur_node.type == DraftASTType.GET_ATTR:
@@ -1351,6 +1361,20 @@ def insert_assign_draft_op(draft: Any, value: Any):
                           }}, node_prev, draft._tensorpc_draft_attr_userdata))
     else:
         raise NotImplementedError(f"Draft type {type(draft)} not implemented")
+
+def copy_draft(draft: T) -> T:
+    assert isinstance(draft, DraftBase), "draft should be a Draft object"
+    new_node = draft._tensorpc_draft_attr_cur_node.clone_tree_only()
+    new_state = dataclasses.replace(draft._tensorpc_draft_attr_anno_state)
+    return draft.__class__(draft._tensorpc_draft_attr_real_obj,
+                           draft._tensorpc_draft_attr_userdata, new_node, new_state)
+
+def get_assign_disabled_draft(draft: Any):
+    # disable direct assign
+    assert isinstance(draft, DraftBase), "draft should be a Draft object"
+    new_draft = copy_draft(draft)
+    new_draft._tensorpc_draft_attr_anno_state.can_direct_assign = False
+    return new_draft 
 
 def _rebuild_draft_expr_recursive(node: DraftASTNode, root_draft: DraftBase, model: Any) -> DraftBase:
     if node.type == DraftASTType.NAME:

@@ -161,7 +161,7 @@ class ComputeNodeRegistry:
                 name_ = func.__name__
             if state_dcls is not None:
                 assert inspect.isclass(state_dcls), "state_dcls should be a class"
-                assert dataclasses.is_dataclass(state_dcls), "state_dcls should be a dataclass"
+                assert dataclasses.is_pydantic_dataclass(state_dcls), "state_dcls must be a pydantic dataclass (support from-dict)"
                 try:
                     state_dcls()
                 except:

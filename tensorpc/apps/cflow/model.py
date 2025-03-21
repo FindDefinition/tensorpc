@@ -55,6 +55,18 @@ class InlineCode:
     code: str = ""
 
 @dataclasses.dataclass
+class ResourceDesp:
+    # -1 means use all
+    CPU: int = -1
+    Mem: int = -1
+    # number of GPU can't be -1 because it shouldn't be shared.
+    GPU: int = 0
+    GPUMem: int = -1
+
+    def validate(self):
+        assert self.GPU >= 0
+
+@dataclasses.dataclass
 class ComputeFlowNodeModel(BaseNodeModel):
     # core type
     nType: ComputeNodeType = ComputeNodeType.COMPUTE
@@ -104,6 +116,20 @@ class ComputeFlowNodeModel(BaseNodeModel):
 
         rt = get_compute_node_runtime(cfg)
         return rt
+
+    def get_node_runtime_from_remote(self) -> ComputeNodeRuntime:
+        assert self.codeKey is None, "codekey should be detached from remote"
+        if self.key != "":
+            cfg = NODE_REGISTRY.global_dict[self.key]
+        else:
+            code = self.impl.code
+            cfg = parse_code_to_compute_cfg(code)
+        rt = get_compute_node_runtime(cfg)
+        return rt
+
+    def get_node_without_runtime(self):
+        # used to send node model to remote
+        return dataclasses.replace(self, runtime=None)
 
 
 @dataclasses.dataclass(kw_only=True)

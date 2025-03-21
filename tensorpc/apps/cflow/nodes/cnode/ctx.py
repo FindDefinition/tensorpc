@@ -3,18 +3,18 @@ import contextlib
 
 from typing import Any, Callable, Optional, TypeVar, Union
 from tensorpc.core.annolib import DataclassType
-from tensorpc.core.datamodel.draft import get_draft_ast_node
+from tensorpc.core.datamodel.draft import cast_any_draft_to_dataclass, get_draft_ast_node
 from tensorpc.core.datamodel.draftast import evaluate_draft_ast_noexcept
 from tensorpc.apps.cflow.model import ComputeFlowNodeDrafts
 
 T = TypeVar("T", bound=DataclassType)
 
 class ComputeFlowNodeContext:
-    def __init__(self, node_id: str, drafts: ComputeFlowNodeDrafts, root_model_getter: Any) -> None:
+    def __init__(self, node_id: str, state: Any, state_draft: Any) -> None:
         self.node_id = node_id
 
-        self.drafts = drafts
-        self.root_model_getter = root_model_getter
+        self.state = state
+        self.state_draft = state_draft
 
 
 COMPUTE_FLOW_NODE_CONTEXT_VAR: contextvars.ContextVar[
@@ -37,9 +37,6 @@ def enter_flow_ui_node_context_object(ctx: ComputeFlowNodeContext):
 def get_node_state_draft(state_ty: type[T]) -> tuple[T, T]:
     ctx = get_compute_flow_node_context()
     assert ctx is not None, "No context found for node state draft"
-    state = evaluate_draft_ast_noexcept(get_draft_ast_node(ctx.drafts.node_state), ctx.root_model_getter())
-    assert state is not None, "you must register a state dataclass if use this function"
-    if isinstance(state, dict):
-        pass 
-    assert isinstance(state, state_ty), f"Invalid state type {type(state)}, expected {state_ty}"
-    return state, ctx.drafts.node_state
+    state = ctx.state 
+    assert isinstance(state, state_ty), f"Node state is not of type {state_ty}"
+    return state, cast_any_draft_to_dataclass(ctx.state_draft, state_ty)

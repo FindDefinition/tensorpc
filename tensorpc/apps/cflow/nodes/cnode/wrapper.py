@@ -5,7 +5,7 @@ from typing import Any, Callable, Optional, TypedDict, Union
 from tensorpc.dock.components import flowui, mui
 from tensorpc.apps.cflow.nodes.cnode.handle import parse_func_to_handle_components, IOHandle, HandleTypePrefix
 from tensorpc.dock.components.flowplus.style import ComputeFlowClasses
-from tensorpc.dock.components.flowplus.model import ComputeFlowNodeDrafts, ComputeFlowNodeModel, ComputeNodeType, ComputeFlowModel, ComputeNodeStatus
+from tensorpc.apps.cflow.model import ComputeFlowNodeDrafts, ComputeFlowNodeModel, ComputeNodeType, ComputeFlowModel, ComputeNodeStatus
 from .registry import ComputeNodeBase, ComputeNodeDesp, parse_code_to_compute_cfg
 from .ctx import ComputeFlowNodeContext, enter_flow_ui_node_context_object
 from tensorpc.dock.jsonlike import (as_dict_no_undefined,
@@ -49,8 +49,8 @@ def _error_layout_creator(draft):
 
 class ComputeNodeWrapper(BaseNodeWrapper):
 
-    def __init__(self, node_id: str, cnode_cfg: ComputeNodeDesp, cnode: ComputeNodeBase,
-                 node_model_draft: ComputeFlowNodeDrafts, root_model_getter: Callable[[], ComputeFlowModel]):
+    def __init__(self, node_id: str, cnode_cfg: ComputeNodeDesp, node_state: Any, cnode: ComputeNodeBase,
+                 node_model_draft: ComputeFlowNodeDrafts):
         parsed_cfg, comps = self.create_node_child_layout(cnode_cfg, cnode, node_model_draft)
         self.io_handles = comps.io_handles
         super().__init__(
@@ -82,7 +82,7 @@ class ComputeNodeWrapper(BaseNodeWrapper):
             boxShadow=
             f"matchcase({node_model_draft.node.status}, {D.literal_val(status_to_border_shadow)})",
         )
-        self._ctx = ComputeFlowNodeContext(node_id, node_model_draft, root_model_getter)
+        self._ctx = ComputeFlowNodeContext(node_id, node_state, node_model_draft.node_state)
         self.set_flow_event_context_creator(
             lambda: enter_flow_ui_node_context_object(self._ctx))
 
@@ -96,8 +96,10 @@ class ComputeNodeWrapper(BaseNodeWrapper):
         await self.update_childs(comps.get_ui_dict()) # type: ignore
         return comps.io_handles
 
-    async def set_node_from_code(self, cfg: ComputeNodeDesp, cnode: ComputeNodeBase, node_model_draft: ComputeFlowNodeDrafts):
+    async def set_node_from_code(self, cfg: ComputeNodeDesp, new_state: Any, cnode: ComputeNodeBase, node_model_draft: ComputeFlowNodeDrafts):
         # raise error instead of set to error node, we only use error node in init.
+        if new_state is not None:
+            self._ctx.state = new_state
         return await self.set_new_cnode(cfg, cnode, node_model_draft)
 
     def create_node_child_layout(self, cnode_cfg: Union[ComputeNodeDesp, str],

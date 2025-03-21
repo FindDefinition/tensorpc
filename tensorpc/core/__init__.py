@@ -28,6 +28,8 @@ class BuiltinServiceKeys(enum.Enum):
     Scheduler = f"tensorpc.autossh.services.scheduler{TENSORPC_SPLIT}Scheduler"
     TaskWrapper = f"tensorpc.autossh.services.taskwrapper{TENSORPC_SPLIT}TaskWrapper"
     TaskManager = f"tensorpc.autossh.services.taskwrapper{TENSORPC_SPLIT}TaskManager"
+    ComputeFlowSingleProcExec = f"tensorpc.apps.cflow.services.executors{TENSORPC_SPLIT}SingleProcNodeExecutor"
+    ComputeFlowTorchDistExec = f"tensorpc.apps.cflow.services.executors{TENSORPC_SPLIT}TorchDistNodeExecutor"
 
 BUILTIN_SERVICES = [
     Service(BuiltinServiceKeys.FileOps.value, {}),
@@ -41,6 +43,8 @@ BUILTIN_SERVICES = [
     Service(BuiltinServiceKeys.Scheduler.value, {}),
     Service(BuiltinServiceKeys.TaskWrapper.value, {}),
     Service(BuiltinServiceKeys.TaskManager.value, {}),
+    Service(BuiltinServiceKeys.ComputeFlowSingleProcExec.value, {}),
+    Service(BuiltinServiceKeys.ComputeFlowTorchDistExec.value, {}),
 ]
 
 
