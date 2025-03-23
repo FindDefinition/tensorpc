@@ -4,19 +4,22 @@ from typing import (TYPE_CHECKING, Annotated, Any, Callable, Coroutine, Generic,
                     TypeVar, Union, cast)
 
 import tensorpc.core.dataclass_dispatch as dataclasses
-from tensorpc.core.datamodel.draft import DraftBase, DraftObject, get_draft_anno_type, get_draft_ast_node, insert_assign_draft_op
+from tensorpc.core.datamodel.draft import DraftBase, DraftFieldMeta, DraftObject, get_draft_anno_type, get_draft_ast_node, insert_assign_draft_op
 from tensorpc.core.datamodel.draftast import evaluate_draft_ast, evaluate_draft_ast_noexcept
 from tensorpc.core.datamodel.events import DraftChangeEvent, DraftEventType
 from tensorpc.dock.core.datamodel import DataModel
 from tensorpc.dock.jsonlike import Undefined
-from tensorpc.dock.components.flowui import Node, Edge, Flow, EventSelection
+from tensorpc.dock.components.flowui import FlowInternals, XYPosition, NodeBase, EdgeBase, Node, Edge, Flow, EventSelection
+from tensorpc.core.annolib import undefined
+@dataclasses.dataclass
+class BaseNodeModel(NodeBase):
+    width: Union[Undefined, Union[int, float]] = undefined
+    height: Union[Undefined, Union[int, float]] = undefined
+    position: XYPosition = dataclasses.field(
+        default_factory=lambda: XYPosition(0, 0))
 
 @dataclasses.dataclass
-class BaseNodeModel(Node):
-    pass
-
-@dataclasses.dataclass
-class BaseEdgeModel(Edge):
+class BaseEdgeModel(EdgeBase):
     pass
 
 T_node_model = TypeVar("T_node_model", bound=BaseNodeModel)
@@ -26,14 +29,19 @@ T_edge_model = TypeVar("T_edge_model", bound=BaseEdgeModel)
 class BaseFlowModel(Generic[T_node_model, T_edge_model]):
     nodes: dict[str, T_node_model]
     edges: dict[str, T_edge_model]
-    
+    runtime: Annotated[FlowInternals[T_node_model, T_edge_model], DraftFieldMeta(is_external=True)] = dataclasses.field(default_factory=FlowInternals)
+
+    def __post_init__(self):
+        self.runtime.set_from_nodes_edges(list(self.nodes.values()), list(self.edges.values()))
+
 T_flow_model = TypeVar("T_flow_model", bound=BaseFlowModel)
 
 def _default_to_ui_edge(edge: BaseEdgeModel):
     return Edge(**dataclasses.asdict(edge))
 
-def _default_to_model_edge(edge: Edge):
-    return BaseEdgeModel(**dataclasses.asdict(edge))
+def _default_to_model_edge(edge: EdgeBase):
+    return BaseEdgeModel(edge.id, edge.source, edge.target,
+        edge.sourceHandle, edge.targetHandle)
 
 class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
     def __init__(self, flow_comp: Flow, model_getter: Callable[[], T_flow_model], draft: Any, 
@@ -152,6 +160,7 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
             for n_id in cur_model.edges.keys():
                 if n_id not in cur_ui_node_ids:
                     self._draft.edges.pop(n_id)
+                    cur_model.runtime.remove_edge(n_id)
 
     def _handle_edge_connection(self, data: dict[str, Any]):
         if not self._is_flow_user_uid_same(data.get("flowUserUid")):
@@ -164,6 +173,7 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
                 e_id = ui_edge.id
                 if e_id not in cur_model.edges:
                     self._draft.edges[e_id] = self._to_model_edge(ui_edge)
+                    cur_model.runtime.add_edge(ui_edge)
 
     async def _handle_vis_change(self, change: dict):
         if not self._is_flow_user_uid_same(change.get("flowUserUid")):

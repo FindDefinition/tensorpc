@@ -304,7 +304,7 @@ class PytorchFlowOutput(flowui.SymbolicGraphOutput[PytorchNodeMeta,
         # merge nodes
         nodes = self.nodes
         edges = self.edges
-        internals = flowui.FlowInternals()
+        internals: flowui.FlowInternals[flowui.Node, flowui.Edge] = flowui.FlowInternals()
         internals.set_from_nodes_edges(nodes, edges)
         internals, _, prev_node_id_to_data, prev_edge_id_to_data = internals.merge_nodes_with_data(
             merge_list, merged_node_data, self.node_id_to_data, self.edge_id_to_data)

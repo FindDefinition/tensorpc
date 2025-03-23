@@ -200,7 +200,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             handler: Callable[[DraftChangeEvent], _CORO_NONE],
             equality_fn: Optional[Callable[[Any, Any], bool]] = None,
             handle_child_change: bool = False,
-            installed_comp: Optional[Component] = None):
+            installed_comp: Optional[Component] = None,
+            user_eval_vars: Optional[dict[str, Any]] = None):
         if not isinstance(draft, dict):
             draft = {"": draft}
         paths: list[str] = []
@@ -211,8 +212,15 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
             path = node.get_jmes_path()
             paths.append(path)
             draft_expr_dict[k] = node
+        user_eval_vars_dict: Optional[dict[str, DraftASTNode]] = None
+        if user_eval_vars is not None:
+            user_eval_vars_dict = {}
+            for k, v in user_eval_vars.items():
+                assert isinstance(v, DraftBase)
+                user_eval_vars_dict[k] = get_draft_ast_node(v)
         handler_obj = DraftChangeEventHandler(draft_expr_dict, handler, equality_fn,
-                                              handle_child_change)
+                                              handle_child_change,
+                                              user_eval_vars=user_eval_vars_dict)
         effect_fn = partial(self._draft_change_handler_effect, tuple(paths),
                             handler_obj)
         if installed_comp is not None:
@@ -337,7 +345,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                 opData = asdict_no_deepcopy_with_field(
                             _DataclassSer(obj=op.opData),
                             dict_factory_with_field=facto_fn)
-                op.opData = opData["obj"]
+                op.opData = cast(dict, opData)["obj"]
         frontend_ops = [op.to_jmes_path_op().to_dict() for op in frontend_ops]
         if frontend_ops:
             return self.create_comp_event({

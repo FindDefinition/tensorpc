@@ -54,6 +54,10 @@ class UniqueNamePool:
     def pop(self, key: str):
         self.unique_set.remove(key)
 
+    def pop_if_exists(self, key: str):
+        if key in self.unique_set:
+            self.unique_set.remove(key)
+
     def clear(self):
         self.unique_set.clear()
 

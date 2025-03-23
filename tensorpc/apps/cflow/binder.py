@@ -67,9 +67,11 @@ class ComputeFlowBinder:
                     partial(self._handle_node_code_draft_change,
                             wrapper=wrapper,
                             draft=draft,
-                            node_model=node_model,
-                            root_model_getter=dm_comp.get_model),
-                    installed_comp=wrapper)
+                            node_model=node_model),
+                    installed_comp=wrapper,
+                    user_eval_vars={
+                        "state": draft.node_state
+                    })
             # dm_comp.debug_print_draft_change(draft.node.name)
             # deletable: we use custom delete instead of delete in flowui.
             ui_node = Node(node_model.id,
@@ -94,16 +96,16 @@ class ComputeFlowBinder:
     async def _handle_node_code_draft_change(self, ev: DraftChangeEvent,
                                              wrapper: ComputeNodeWrapper,
                                              draft: ComputeFlowNodeDrafts,
-                                             node_model: ComputeFlowNodeModel,
-                                             root_model_getter: Callable[[], ComputeFlowModelRoot]):
+                                             node_model: ComputeFlowNodeModel):
         # evaluate new state
-        new_state = evaluate_draft_ast_noexcept(get_draft_ast_node(draft.node_state), root_model_getter())
+        assert ev.user_eval_vars is not None 
+        new_state = ev.user_eval_vars["state"]
         cfg = parse_code_to_compute_cfg(ev.new_value)
         runtime = get_compute_node_runtime(cfg)
         node_model.runtime = runtime
         await wrapper.set_node_from_code(cfg, new_state, runtime.cnode, draft)
 
-    def bind_flow_comp_with_datamodel(self, dm_comp: mui.DataModel):
+    def bind_flow_comp_with_datamodel(self, dm_comp: mui.DataModel[ComputeFlowModelRoot]):
         binder = models.flow.BaseFlowModelBinder(
             self.flow_comp,
             dm_comp.get_model,

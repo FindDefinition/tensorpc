@@ -14,7 +14,7 @@ from tensorpc.apps.cflow.nodes.cnode.default_code import get_default_custom_node
 from tensorpc.apps.cflow.nodes.cnode.handle import HandleTypePrefix
 from tensorpc.dock.components.flowplus.style import default_compute_flow_css
 from tensorpc.utils.code_fmt import PythonCodeFormatter
-from tensorpc.apps.cflow.nodes.cnode.registry import NODE_REGISTRY, parse_code_to_compute_cfg
+from tensorpc.apps.cflow.nodes.cnode.registry import NODE_REGISTRY, get_compute_node_runtime, parse_code_to_compute_cfg
 import tensorpc.apps.cflow.nodes.defaultnodes
 
 _SYS_NODE_PREFIX = "sys-"
@@ -136,10 +136,21 @@ class ComputeFlow(mui.FlexBox):
         cur_flow_draft = drafts.cur_model
         sel_node = drafts.selected_node
         cur_selected_node_draft = cur_flow_draft.selected_node
+        cur_flow = D.evaluate_draft(cur_flow_draft, self.dm.get_model())
         if ev.lang == "python":
             # compute node code, parse and get new state
             # TODO if old and new state are same, don't update
             cfg = parse_code_to_compute_cfg(ev.value)
+            rt = get_compute_node_runtime(cfg)
+            sel_node_value = D.evaluate_draft(drafts.root.selected_node, self.dm.get_model())
+            new_inp_handles = [a.name for a in rt.inp_handles]
+            new_out_handles = [a.name for a in rt.out_handles]
+            # when node impl code changed, we need to remove invalid edges.
+            assert cur_flow is not None 
+            assert sel_node_value is not None 
+            removed_edge_ids = cur_flow.runtime.change_node_handles(sel_node_value, new_inp_handles, new_out_handles)
+            for edge_id in removed_edge_ids:
+                cur_flow_draft.edges.pop(edge_id)
             if cfg.state_dcls is not None:
                 state = cfg.state_dcls()
                 cur_flow_draft.node_states[cur_selected_node_draft] = state
