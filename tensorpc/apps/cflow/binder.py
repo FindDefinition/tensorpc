@@ -42,25 +42,8 @@ class ComputeFlowBinder:
             if node_model.runtime is None:
                 runtime = node_model.get_node_runtime(root_model)
                 node_model.runtime = runtime
-            state_dcls = node_model.runtime.cfg.state_dcls
-            state_d = None 
-            if state_dcls is not None:
-                state = evaluate_draft_ast_noexcept(get_draft_ast_node(draft.node_state), dm_comp.get_model())
-                if isinstance(state, dict):
-                    # convert it to dcls
-                    try:
-                        state_d = state_dcls(**state)
-                    except:
-                        traceback.print_exc()
-                        state_d = state_dcls()
-                    node_state_storage = evaluate_draft_ast_noexcept(get_draft_ast_node(self.drafts.cur_model.node_states), dm_comp.get_model())
-                    assert node_state_storage is not None 
-                    node_state_storage[node_model.id] = state_d
-                else:
-                    state_d = state
-
+            state_d = flow.create_or_convert_node_state(node_model.id)
             wrapper = ComputeNodeWrapper(node_model.id, node_model.runtime.cfg, state_d, node_model.runtime.cnode, draft)
-
             if node_model.codeKey is not None or node_model.key == "":
                 dm_comp.install_draft_change_handler(
                     draft.code,

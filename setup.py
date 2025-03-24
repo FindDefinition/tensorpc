@@ -51,6 +51,7 @@ REQUIRED = [
     "setproctitle",
     "rich",
     "jmespath-community",
+    "hsluv",
 ]
 
 # What packages are optional?

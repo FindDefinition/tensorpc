@@ -312,7 +312,7 @@ class AsyncRemoteObject(object):
         stream_iter,
         rpc_flags: int = rpc_message_pb2.PickleArray,
         rpc_timeout: Optional[int] = None,
-        rpc_chunk_size: int = 64 * 1024,
+        rpc_chunk_size: int = 256 * 1024,
         rpc_relay_urls: Optional[list[str]] = None,
     ) -> AsyncIterator[Any]:
         """Call a remote function (not generator) with stream data:
@@ -339,7 +339,7 @@ class AsyncRemoteObject(object):
                         data_to_be_send = arrays + [
                             core_io.dumps_method(data_skeleton, flags)
                         ]
-                        stream = core_io.to_protobuf_stream(
+                        stream = core_io.to_protobuf_stream_gen(
                             data_to_be_send, key, flags, rpc_chunk_size)
                     except:
                         traceback.print_exc()
@@ -364,7 +364,7 @@ class AsyncRemoteObject(object):
                         data_to_be_send = arrays + [
                             core_io.dumps_method(data_skeleton, flags)
                         ]
-                        stream = core_io.to_protobuf_stream(
+                        stream = core_io.to_protobuf_stream_gen(
                             data_to_be_send, key, flags, rpc_chunk_size)
                     except:
                         traceback.print_exc()
@@ -399,7 +399,7 @@ class AsyncRemoteObject(object):
                                   *args,
                                   rpc_flags: int = rpc_message_pb2.PickleArray,
                                   rpc_timeout: Optional[int] = None,
-                                  rpc_chunk_size: int = 64 * 1024,
+                                  rpc_chunk_size: int = 256 * 1024,
                                   rpc_relay_urls: Optional[list[str]] = None,
                                   **kwargs) -> Any:
 
@@ -430,7 +430,7 @@ class AsyncRemoteObject(object):
             data_to_be_send = arrays + [
                 core_io.dumps_method(data_skeleton, rpc_flags)
             ]
-            stream = core_io.to_protobuf_stream(data_to_be_send, key,
+            stream = core_io.to_protobuf_stream_gen(data_to_be_send, key,
                                                 rpc_flags, rpc_chunk_size)
         except:
             traceback.print_exc()
@@ -444,7 +444,7 @@ class AsyncRemoteObject(object):
                                 *args,
                                 rpc_timeout: Optional[int] = None,
                                 rpc_flags: int = rpc_message_pb2.PickleArray,
-                                rpc_chunk_size: int = 64 * 1024,
+                                rpc_chunk_size: int = 256 * 1024,
                                 rpc_relay_urls: Optional[list[str]] = None,
                                 **kwargs) -> AsyncGenerator[Any, None]:
         if inspect.isasyncgen(stream_iter):
@@ -489,7 +489,7 @@ class AsyncRemoteObject(object):
         if rpc_relay_urls is not None:
             serv_fn = self.stub.RelayStream
         else:
-            serv_fn = self.stub.ChunkedClientStreamRemoteCall
+            serv_fn = self.stub.ChunkedBiStreamRemoteCall
         async for req, data in from_stream.generator_async(
                 serv_fn(wrapped_func())):
             yield data[0]
@@ -501,7 +501,7 @@ class AsyncRemoteObject(object):
             *args,
             rpc_timeout: Optional[int] = None,
             rpc_flags: int = rpc_message_pb2.PickleArray,
-            rpc_chunk_size: int = 64 * 1024,
+            rpc_chunk_size: int = 256 * 1024,
             rpc_relay_urls: Optional[list[str]] = None,
             **kwargs) -> Any:
         if inspect.isasyncgen(stream_iter):
@@ -557,7 +557,7 @@ class AsyncRemoteObject(object):
             *args,
             rpc_flags: int = rpc_message_pb2.PickleArray,
             rpc_timeout: Optional[int] = None,
-            rpc_chunk_size: int = 64 * 1024,
+            rpc_chunk_size: int = 256 * 1024,
             rpc_relay_urls: Optional[list[str]] = None,
             **kwargs) -> AsyncGenerator[Any, None]:
 

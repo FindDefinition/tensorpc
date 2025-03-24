@@ -237,8 +237,8 @@ async def main_async():
         # await test_query_meta(robj)
         # await test_remote_call(robj)
         # await test_remote_generator(robj)
-        # await test_stream(robj)
-        await test_relay_stream(robj)
+        await test_stream(robj)
+        # await test_relay_stream(robj)
 
 
 if __name__ == "__main__":

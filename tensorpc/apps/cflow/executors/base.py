@@ -54,6 +54,10 @@ class DataHandle:
         raise NotImplementedError("you need to inherit and provide rpc call to get data from remote.")
 
 class NodeExecutorBase(abc.ABC):
+    @abc.abstractmethod
+    def get_resource_desp(self) -> ResourceDesp:
+        ...
+
     def get_bottom_layout(self) -> Optional[mui.FlexBox]:
         return None 
 

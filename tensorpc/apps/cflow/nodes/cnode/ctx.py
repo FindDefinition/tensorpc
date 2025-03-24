@@ -34,6 +34,15 @@ def enter_flow_ui_node_context_object(ctx: ComputeFlowNodeContext):
     finally:
         COMPUTE_FLOW_NODE_CONTEXT_VAR.reset(token)
 
+@contextlib.contextmanager
+def enter_flow_ui_node_context(node_id: str, state: Any, state_draft: Any):
+    ctx = ComputeFlowNodeContext(node_id, state, state_draft)
+    token = COMPUTE_FLOW_NODE_CONTEXT_VAR.set(ctx)
+    try:
+        yield ctx
+    finally:
+        COMPUTE_FLOW_NODE_CONTEXT_VAR.reset(token)
+
 def get_node_state_draft(state_ty: type[T]) -> tuple[T, T]:
     ctx = get_compute_flow_node_context()
     assert ctx is not None, "No context found for node state draft"

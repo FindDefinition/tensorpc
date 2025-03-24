@@ -200,8 +200,11 @@ class FromBufferStream(object):
         self.current_buf_idx = -1
         self.num_args = -1
         self.current_buf_length = -1
+        self.accum_buf_length = -1
+
         self.current_buf_shape = None
         self.current_dtype = None
+        self.current_is_np_arr = False
         self.func_key = None
         self.current_datas = []
         self.args = []
@@ -214,23 +217,24 @@ class FromBufferStream(object):
             self.current_buf_length = buf.num_chunk
             self.current_dtype = buf.dtype
             self.func_key = buf.func_key
+            self.current_is_np_arr = buf.dtype.type != arraybuf_pb2.dtype.CustomBytes and buf.dtype.type != arraybuf_pb2.dtype.Base64
             self.current_datas = []
-        self.current_datas.append(buf.chunked_data)
-        if buf.chunk_id == buf.num_chunk - 1:
-            # single arg end, get array
-            if self.current_dtype is not None and self.current_dtype.type != arraybuf_pb2.dtype.CustomBytes and self.current_dtype.type != arraybuf_pb2.dtype.Base64:
-                # is array
-                assert self.current_buf_shape is not None 
+            self.accum_buf_length = 0
+        if self.current_is_np_arr:
+            if buf.chunk_id == 0:
+                assert self.current_dtype is not None 
                 byte_order = INV_NPBYTEORDER_TO_PB_MAP[self.current_dtype.byte_order]
                 dtype = INV_NPDTYPE_TO_PB_MAP[self.current_dtype.type].newbyteorder(byte_order)
+                assert self.current_buf_shape is not None 
                 res = np.empty(self.current_buf_shape, dtype=dtype)
-                res_u8_view = memoryview(res.view(np.uint8))
-                start = 0
-                for data in self.current_datas:
-                    res_u8_view[start:start + len(data)] = data
-                    start += len(data)
                 self.args.append(res)
-            else:
+            res_u8_view = memoryview(self.args[-1].view(np.uint8))
+            res_u8_view[self.accum_buf_length:self.accum_buf_length + len(buf.chunked_data)] = buf.chunked_data
+        else:
+            self.current_datas.append(buf.chunked_data)
+        if buf.chunk_id == buf.num_chunk - 1:
+            # single arg end, get array
+            if not self.current_is_np_arr:
                 data = b"".join(self.current_datas)
                 assert len(self.current_datas) > 0
                 single_buf = arraybuf_pb2.ndarray(
@@ -240,12 +244,15 @@ class FromBufferStream(object):
                 )
                 self.args.append(pb2data(single_buf))
             self.current_datas = []
+            self.accum_buf_length = 0
+            self.current_is_np_arr = False
             if buf.arg_id == buf.num_args - 1:
                 # end. return args
                 assert len(self.args) > 0
                 res = self.args
                 self.args = []
                 return res, self.func_key
+        self.accum_buf_length += len(buf.chunked_data)
         return None
 
     def _check_remote_exception(self, exception_bytes: Union[bytes, str]):
@@ -291,10 +298,15 @@ def _div_up(a, b):
 def to_protobuf_stream(data_list: List[Any],
                        func_key,
                        flags: int,
-                       chunk_size=64 * 1024):
+                       chunk_size=256 * 1024):
+    return list(to_protobuf_stream_gen(data_list, func_key, flags, chunk_size))
+
+def to_protobuf_stream_gen(data_list: List[Any],
+                       func_key,
+                       flags: int,
+                       chunk_size=256 * 1024):
     if not isinstance(data_list, list):
         raise ValueError("input must be a list")
-    streams: list[rpc_message_pb2.RemoteCallStream] = []
     arg_ids = list(range(len(data_list)))
     arg_ids[-1] = -1
     num_args = len(data_list)
@@ -331,11 +343,9 @@ def to_protobuf_stream(data_list: List[Any],
         num_chunk = _div_up(length, chunk_size)
         if num_chunk == 0:
             num_chunk = 1  # avoid empty string raise error
-
-        bufs = []
-        for i in range(num_chunk):
-            if isinstance(arg, np.ndarray) and data_bytes is None:
-                arg_view = arg.view(np.uint8).reshape(-1)
+        if isinstance(arg, np.ndarray):
+            arg_view = arg.view(np.uint8).reshape(-1)
+            for i in range(num_chunk):
                 buf = rpc_message_pb2.RemoteCallStream(
                     num_chunk=num_chunk,
                     chunk_id=i,
@@ -348,8 +358,12 @@ def to_protobuf_stream(data_list: List[Any],
                     shape=[],
                     flags=flags,
                 )
-            else:
-                assert data_bytes is not None
+                if i == 0:
+                    buf.shape[:] = shape
+                yield buf
+        else:
+            assert data_bytes is not None
+            for i in range(num_chunk):
                 buf = rpc_message_pb2.RemoteCallStream(
                     num_chunk=num_chunk,
                     chunk_id=i,
@@ -362,12 +376,9 @@ def to_protobuf_stream(data_list: List[Any],
                     shape=[],
                     flags=flags,
                 )
-            bufs.append(buf)
-        assert len(bufs) > 0
-        bufs[0].shape[:] = shape
-        streams += bufs
-    return streams
-
+                if i == 0:
+                    buf.shape[:] = shape
+                yield buf
 
 def is_json_index(data):
     return isinstance(data, dict) and JSON_INDEX_KEY in data

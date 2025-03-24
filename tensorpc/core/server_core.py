@@ -248,7 +248,7 @@ class ServiceCore(object):
                 # so we need to put get_service in try block
                 func, meta = self.service_units.get_service_and_meta(
                     service_key)
-                assert service_type == meta.type
+                assert service_type == meta.type, f"{service_key}, {service_type}, {meta.type}"
                 # client code can call primitives to get server contents.
                 assert not meta.is_gen
                 if meta.is_async:
@@ -350,7 +350,7 @@ class ProtobufServiceCore(ServiceCore):
         data_skeleton_bytes = core_io.dumps_method(
             data_skeleton, req.flags)
         res = arrays + [data_skeleton_bytes]
-        res_streams = core_io.to_protobuf_stream(
+        res_streams = core_io.to_protobuf_stream_gen(
             res, key, req.flags)
         for chunk in res_streams:
             yield chunk
@@ -506,8 +506,8 @@ class ProtobufServiceCore(ServiceCore):
                 data_skeleton_bytes = core_io.dumps_method(
                     data_skeleton, request.flags)
                 res = arrays + [data_skeleton_bytes]
-                res_streams = core_io.to_protobuf_stream(
-                    res, func_key, request.flags)
+                res_streams = core_io.to_protobuf_stream_gen(
+                    res, func_key, request.flags, chunk_size=256 * 1024)
                 for chunk in res_streams:
                     yield chunk
         del from_stream

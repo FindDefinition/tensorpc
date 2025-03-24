@@ -42,12 +42,11 @@ class Simple:
 
 
 class SpeedTestServer:
-
     def recv_data(self, x):
         return
 
     def send_data(self, size_mb: int):
-        return np.zeros([size_mb * 1024 * 1024], dtype=np.uint8)
+        return np.empty([size_mb * 1024 * 1024], dtype=np.uint8)
 
 
 class FileOps:

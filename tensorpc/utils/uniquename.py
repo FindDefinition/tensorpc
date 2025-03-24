@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Set, Optional
+from typing import Any, Set, Optional
+from pydantic_core import core_schema
+from pydantic import GetCoreSchemaHandler
 
 
 def _make_unique_name(unique_set, name, max_count=10000) -> str:
@@ -63,3 +65,17 @@ class UniqueNamePool:
 
     def copy(self):
         return UniqueNamePool(self.max_count, self.unique_set.copy())
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, _source_type: Any,
+                                     _handler: GetCoreSchemaHandler):
+        return core_schema.no_info_after_validator_function(
+            cls.validate,
+            core_schema.any_schema(),
+        )
+
+    @classmethod
+    def validate(cls, v):
+        if not isinstance(v, UniqueNamePool):
+            raise ValueError('UniqueNamePool required')
+        return v

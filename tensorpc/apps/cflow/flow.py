@@ -137,12 +137,12 @@ class ComputeFlow(mui.FlexBox):
         sel_node = drafts.selected_node
         cur_selected_node_draft = cur_flow_draft.selected_node
         cur_flow = D.evaluate_draft(cur_flow_draft, self.dm.get_model())
-        if ev.lang == "python":
+        if ev.lang == "python" and cur_flow is not None:
             # compute node code, parse and get new state
             # TODO if old and new state are same, don't update
             cfg = parse_code_to_compute_cfg(ev.value)
             rt = get_compute_node_runtime(cfg)
-            sel_node_value = D.evaluate_draft(drafts.root.selected_node, self.dm.get_model())
+            sel_node_value = cur_flow.selected_node
             new_inp_handles = [a.name for a in rt.inp_handles]
             new_out_handles = [a.name for a in rt.out_handles]
             # when node impl code changed, we need to remove invalid edges.
@@ -180,11 +180,11 @@ class ComputeFlow(mui.FlexBox):
         if item_id.startswith(_SYS_NODE_PREFIX):
             node_type = item_id[len(_SYS_NODE_PREFIX):]
             if node_type == "markdown":
-                new_node = ComputeFlowNodeModel(nType=ComputeNodeType.MARKDOWN, type="app", id=node_id, position=pos, impl=InlineCode(code="## MarkdownNode"))
+                new_node = ComputeFlowNodeModel(nType=ComputeNodeType.MARKDOWN, id=node_id, position=pos, impl=InlineCode(code="## MarkdownNode"))
             elif node_type == "compute":
                 code = get_default_custom_node_code()
                 parsed_cfg = parse_code_to_compute_cfg(code)
-                new_node = ComputeFlowNodeModel(nType=ComputeNodeType.COMPUTE, type="app", id=node_id, position=pos, impl=InlineCode(code=code),
+                new_node = ComputeFlowNodeModel(nType=ComputeNodeType.COMPUTE, id=node_id, position=pos, impl=InlineCode(code=code),
                     name=parsed_cfg.name, key=parsed_cfg.key, moduleId=parsed_cfg.module_id)
                 target_flow_draft.node_states[node_id] = {}
             else:
@@ -193,7 +193,7 @@ class ComputeFlow(mui.FlexBox):
             node_type = item_id[len(_USER_NODE_PREFIX):]
             cfg = NODE_REGISTRY.global_dict[node_type]
             new_node = ComputeFlowNodeModel(
-                nType=ComputeNodeType.COMPUTE, type="app", id=node_id, position=pos, moduleId=cfg.module_id, key=cfg.key,
+                nType=ComputeNodeType.COMPUTE, id=node_id, position=pos, moduleId=cfg.module_id, key=cfg.key,
                     name=cfg.name)
             if cfg.state_dcls is not None:
                 target_flow_draft.node_states[node_id] = cfg.state_dcls()

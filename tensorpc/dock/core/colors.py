@@ -12,9 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import dataclasses
 import re
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple, Union
 import numpy as np
+
+from typing_extensions import TypeAlias
 # https://developer.mozilla.org/en-US/docs/Web/CSS/color_value
 
 CSS_COLORS_TO_HEX = {
@@ -223,3 +226,4 @@ def colors_for_label_array(label_array: np.ndarray):
     color_for_each_unique_label = color_rgbs[unique_labels % len(color_rgbs)]
     label_color = color_for_each_unique_label[inverse]
     return label_color
+

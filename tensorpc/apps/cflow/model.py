@@ -1,3 +1,4 @@
+import traceback
 from typing import Annotated, Any, Callable, Mapping, Optional, cast
 from tensorpc.core.datamodel.draft import DraftFieldMeta
 from tensorpc.core.tree_id import UniqueTreeIdForTree
@@ -66,6 +67,23 @@ class ResourceDesp:
     def validate(self):
         assert self.GPU >= 0
 
+    def is_request_sufficient(self, req_rc: "ResourceDesp"):
+        if self.CPU != -1 and self.CPU < req_rc.CPU:
+            return False
+        if self.Mem != -1 and self.Mem < req_rc.Mem:
+            return False
+        if self.GPU != -1 and self.GPU < req_rc.GPU:
+            return False
+        if self.GPUMem != -1 and self.GPUMem < req_rc.GPUMem:
+            return False
+        return True
+
+    def get_request_remain_rc(self, req_rc: "ResourceDesp"):
+        return ResourceDesp(CPU=self.CPU - req_rc.CPU if self.CPU != -1 else -1,
+                            Mem=self.Mem - req_rc.Mem if self.Mem != -1 else -1,
+                            GPU=self.GPU - req_rc.GPU if self.GPU != -1 else -1,
+                            GPUMem=self.GPUMem - req_rc.GPUMem if self.GPUMem != -1 else -1)
+
 @dataclasses.dataclass
 class ComputeFlowNodeModel(BaseNodeModel):
     # core type
@@ -100,8 +118,13 @@ class ComputeFlowNodeModel(BaseNodeModel):
     vMem: int = -1
     vGPU: int = -1
     vGPUMem: int = -1
+    # nodes with same exec id will always be scheduled in same executor.
+    vExecId: str = ""
     # backend only fields
     runtime: Annotated[Optional[ComputeNodeRuntime], DraftFieldMeta(is_external=True)] = None
+
+    def get_request_resource_desp(self):
+        return ResourceDesp(CPU=self.vCPU, Mem=self.vMem, GPU=self.vGPU, GPUMem=self.vGPUMem)
 
     def get_node_runtime(self, root_model: "ComputeFlowModelRoot") -> ComputeNodeRuntime:
         if self.codeKey is not None:
@@ -143,6 +166,26 @@ class ComputeFlowModel(BaseFlowModel[ComputeFlowNodeModel, BaseEdgeModel]):
                            DraftStoreMapMeta(
                                attr_key="ns")] = dataclasses.field(
                                    default_factory=dict)
+
+    def create_or_convert_node_state(self, node_id: str):
+        node_model = self.nodes[node_id]
+        assert node_model.runtime is not None
+        state_dcls = node_model.runtime.cfg.state_dcls
+        state_d = None 
+        if state_dcls is not None:
+            state = self.node_states.get(node_id)
+            assert state is not None 
+            if isinstance(state, dict) and len(state) > 0:
+                # convert it to dcls
+                try:
+                    state_d = state_dcls(**state)
+                except:
+                    traceback.print_exc()
+                    state_d = state_dcls()
+                self.node_states[node_model.id] = state_d
+            else:
+                state_d = state
+        return state_d
 
     def _make_unique_name(self, target: Mapping[str, Any], name, max_count=10000) -> str:
         if name not in target:
@@ -212,6 +255,9 @@ class ComputeFlowDrafts:
     selected_node_detail_type: int
     show_editor: bool
     show_detail: bool
+
+    def get_node_state_draft(self, node_id: str):
+        return self.cur_model.node_states[node_id]
 
     def get_node_drafts(self, node_id: str):
         node_state_draft = self.cur_model.node_states[node_id]

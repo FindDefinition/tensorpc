@@ -97,6 +97,7 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
         if cur_model is None:
             # eval failed, use empty flow
             await self._flow_comp.clear()
+            
         else:
             cur_model_edges_ids = set(cur_model.edges.keys())
             ui_node_id_to_del = cur_model_edges_ids - cur_ui_edge_ids
@@ -108,6 +109,7 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
                 await self._flow_comp.delete_edges_by_ids(list(ui_node_id_to_del))
             if ui_new_edges:
                 await self._flow_comp.add_edges(ui_new_edges)
+
 
     async def _sync_ui_nodes_to_model(self):
         """Do basic sync between model and flow ui state. ui data is sync to data model.
@@ -160,7 +162,6 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
             for n_id in cur_model.edges.keys():
                 if n_id not in cur_ui_node_ids:
                     self._draft.edges.pop(n_id)
-                    cur_model.runtime.remove_edge(n_id)
 
     def _handle_edge_connection(self, data: dict[str, Any]):
         if not self._is_flow_user_uid_same(data.get("flowUserUid")):
@@ -173,7 +174,6 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
                 e_id = ui_edge.id
                 if e_id not in cur_model.edges:
                     self._draft.edges[e_id] = self._to_model_edge(ui_edge)
-                    cur_model.runtime.add_edge(ui_edge)
 
     async def _handle_vis_change(self, change: dict):
         if not self._is_flow_user_uid_same(change.get("flowUserUid")):
@@ -231,10 +231,21 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
             if self._flow_uid_getter is not None:
                 flow_user_uid = self._flow_uid_getter()
                 await self._flow_comp.send_and_wait(self._flow_comp.update_event(flowUserUid=flow_user_uid))
+        is_changed = False
         if node_change_type != DraftEventType.NoChange:
             await self._sync_ui_nodes_to_model()
+            is_changed = True
         if edge_change_type != DraftEventType.NoChange:
             await self._sync_ui_edges_to_model()
+            is_changed = True
+        if is_changed:
+            cur_model = self._get_cur_model_may_nested()
+            if cur_model is None:
+                # eval failed, use empty flow
+                await self._flow_comp.clear()
+            else:
+                cur_model.runtime.set_from_nodes_edges(list(cur_model.nodes.values()), list(cur_model.edges.values()))
+
 
     def bind_flow_comp_with_base_model(self, dm_comp: DataModel, selected_node_draft: Optional[Any] = None):
         if self._is_binded:
