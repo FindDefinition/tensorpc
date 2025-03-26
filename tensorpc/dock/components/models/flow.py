@@ -29,7 +29,7 @@ T_edge_model = TypeVar("T_edge_model", bound=BaseEdgeModel)
 class BaseFlowModel(Generic[T_node_model, T_edge_model]):
     nodes: dict[str, T_node_model]
     edges: dict[str, T_edge_model]
-    runtime: Annotated[FlowInternals[T_node_model, T_edge_model], DraftFieldMeta(is_external=True)] = dataclasses.field(default_factory=FlowInternals)
+    runtime: Annotated[FlowInternals[T_node_model, T_edge_model], DraftFieldMeta(is_external=True)] = dataclasses.field(default_factory=FlowInternals[T_node_model, T_edge_model])
 
     def __post_init__(self):
         self.runtime.set_from_nodes_edges(list(self.nodes.values()), list(self.edges.values()))

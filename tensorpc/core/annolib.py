@@ -519,27 +519,33 @@ class AnnotatedFieldMeta:
     field: dataclasses.Field
 
 
-def _recursive_get_field_meta_dict(model_type: type[T_dataclass], field_meta_dict: dict[int, AnnotatedFieldMeta]):
-    type_hints = get_type_hints(model_type, include_extras=True)
-    for field in dataclasses.fields(model_type):
+def _recursive_get_field_meta_dict(annotype: AnnotatedType, field_meta_dict: dict[int, AnnotatedFieldMeta]):
+    if annotype.child_types:
+        # generic dataclass
+        type_hints = resolve_type_hints(annotype.origin_type[tuple(annotype.child_types)])
+    else:
+        type_hints = resolve_type_hints(annotype.origin_type)
+
+    for field in dataclasses.fields(annotype.origin_type):
         field_type = type_hints[field.name]
-        annotype = parse_type_may_optional_undefined(field_type)
-        field_meta = AnnotatedFieldMeta(field.name, annotype, id(field), field)
+        field_annotype = parse_type_may_optional_undefined(field_type)
+        field_meta = AnnotatedFieldMeta(field.name, field_annotype, id(field), field)
         if id(field) not in field_meta_dict:
             field_meta_dict[id(field)] = field_meta
         else:
             # avoid nested check
             continue
-        if annotype.is_dataclass_type():
-            _recursive_get_field_meta_dict(annotype.origin_type, field_meta_dict)
+        if field_annotype.is_dataclass_type():
+            _recursive_get_field_meta_dict(field_annotype, field_meta_dict)
         else:
             for t in child_dataclass_type_generator(field_type):
-                _recursive_get_field_meta_dict(t, field_meta_dict)
+                _recursive_get_field_meta_dict(parse_type_may_optional_undefined(t), field_meta_dict)
     return 
 
 def get_dataclass_field_meta_dict(model_type: type[T_dataclass]) -> dict[int, AnnotatedFieldMeta]:
+    # TODO: currently model_type must not be generic, you must remove all generic args via inherit.
     field_meta_dict: dict[int, AnnotatedFieldMeta] = {}
-    _recursive_get_field_meta_dict(model_type, field_meta_dict)
+    _recursive_get_field_meta_dict(parse_type_may_optional_undefined(model_type), field_meta_dict)
     new_field_meta_dict: dict[int, AnnotatedFieldMeta] = {**field_meta_dict}
     return new_field_meta_dict
 

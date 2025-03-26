@@ -23,7 +23,7 @@ from tensorpc.core.annolib import (
     AnnotatedType, BackendOnlyProp, DataclassType, Undefined,
     child_type_generator, child_type_generator_with_dataclass,
     get_dataclass_field_meta_dict, get_type_hints_with_cache, is_annotated,
-    parse_type_may_optional_undefined)
+    parse_type_may_optional_undefined, resolve_type_hints)
 from tensorpc.core.datamodel.asdict import as_dict_no_undefined
 
 from tensorpc.core.datamodel.draftast import ROOT_NODE
@@ -399,16 +399,21 @@ class FieldMeta:
     contain_nested_store: bool = False
 
 
-def _analysis_model_store_meta(model_type: type[T],
+def _analysis_model_store_meta(root_annotype: AnnotatedType,
                                field_meta_dict: dict[int, FieldMeta],
                                parent_metas: list[FieldMeta],
                                all_store_ids: Optional[set[str]] = None):
     """Check a model have splitted KV store.
     All dict type of a nested path must be splitted, don't support splitted store inside a plain container.
     """
-    type_hints = get_type_hints(model_type, include_extras=True)
+    # use resolve_type_hints to resolve generic dataclass
+    if root_annotype.child_types:
+        # generic dataclass
+        type_hints = resolve_type_hints(root_annotype.origin_type[tuple(root_annotype.child_types)])
+    else:
+        type_hints = resolve_type_hints(root_annotype.origin_type)
     has_splitted_store = False
-    for field in dataclasses.fields(model_type):
+    for field in dataclasses.fields(root_annotype.origin_type):
         field_type = type_hints[field.name]
         annotype, store_meta = _get_first_store_meta(field_type)
         field_meta = FieldMeta(field.name, annotype)
@@ -437,7 +442,7 @@ def _analysis_model_store_meta(model_type: type[T],
                 ) and annotype.get_dict_key_anno_type().origin_type is str
                 value_type = annotype.get_dict_value_anno_type()
                 if value_type.is_dataclass_type():
-                    _analysis_model_store_meta(value_type.origin_type,
+                    _analysis_model_store_meta(value_type,
                                                field_meta_dict,
                                                parent_metas + [field_meta],
                                                all_store_ids)
@@ -468,7 +473,7 @@ def _analysis_model_store_meta(model_type: type[T],
             continue
         if annotype.is_dataclass_type():
             has_splitted_store |= _analysis_model_store_meta(
-                annotype.origin_type, field_meta_dict,
+                annotype, field_meta_dict,
                 parent_metas + [field_meta], all_store_ids)
         else:
             # all non-dataclass field type shouldn't contain any store meta
@@ -486,7 +491,7 @@ def _analysis_model_store_meta(model_type: type[T],
 def analysis_model_store_meta(model_type: type[T],
                               all_store_ids: Optional[set[str]] = None):
     field_meta_dict: dict[int, FieldMeta] = {}
-    res = _analysis_model_store_meta(model_type, field_meta_dict, [],
+    res = _analysis_model_store_meta(parse_type_may_optional_undefined(model_type), field_meta_dict, [],
                                      all_store_ids)
     new_field_meta_dict: dict[Optional[int], FieldMeta] = {**field_meta_dict}
     return res, new_field_meta_dict

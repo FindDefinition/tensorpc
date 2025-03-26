@@ -2968,7 +2968,9 @@ class ContainerBase(Component[T_container_props, T_child]):
 class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
 
     def __init__(self, url: str, port: int, key: str, base_type: UIType,
-                 prop_cls: Type[T_container_props]):
+                 prop_cls: Type[T_container_props],
+                 fail_callback: Optional[Callable[[], Coroutine[None, None, Any]]] = None,
+                 enable_fallback_layout: bool = True):
         super().__init__(base_type, prop_cls)
         self._url = url
         self._port = port
@@ -2978,10 +2980,19 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         self._is_remote_mounted: bool = False
 
         self._mount_lock = asyncio.Lock()
+        self._enable_fallback_layout = enable_fallback_layout
+
+        self._fail_callback = fail_callback
 
     @property
     def is_remote_mounted(self):
         return self._is_remote_mounted
+
+    def set_fall_callback(self, fail_callback: Optional[Callable[[], Coroutine[None, None, Any]]]):
+        self._fail_callback = fail_callback
+
+    def set_enable_fallback_layout(self, enable_fallback_layout: bool):
+        self._enable_fallback_layout = enable_fallback_layout
 
     @abc.abstractmethod
     async def setup_remote_object(self):
@@ -3062,7 +3073,10 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
     async def disconnect(self):
         await self.shutdown_remote_object()
         self._is_remote_mounted = False 
-        await self.set_fallback_layout()
+        if self._fail_callback is not None:
+            await self._fail_callback()
+        if self._enable_fallback_layout:
+            await self.set_fallback_layout()
 
     def get_layout_dict_sync(self) -> tuple[dict[str, Any], str]:
         assert self._flow_uid is not None, "shouldn't happen"

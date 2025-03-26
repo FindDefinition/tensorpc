@@ -8,22 +8,54 @@ import inspect
 import uuid
 
 from tensorpc.core.datamodel.draft import capture_draft_update, draft_from_node_and_type
-from tensorpc.core.datamodel.draftast import DraftASTNode 
+from tensorpc.core.datamodel.draftast import DraftASTNode
+from tensorpc.dock.components import mui 
+
+class _NodeStateManager:
+    def __init__(self):
+        self._node_id_to_node_rt: dict[str, ComputeNodeRuntime] = {}
+        self._node_id_to_impl_key: dict[str, str] = {}
+        self._node_id_to_preview_layout: dict[str, Optional[mui.FlexBox]] = {}
+        self._node_id_to_detail_layout: dict[str, Optional[mui.FlexBox]] = {}
+
+    def process_node(self, node: ComputeFlowNodeModel, 
+                node_impl_code: str):
+        node_id = node.id 
+        cur_impl_key = node.impl.code if node.key == "" else node.key
+        if node_id in self._node_id_to_impl_key:
+            prev_impl_key = self._node_id_to_impl_key[node_id]
+            if prev_impl_key != cur_impl_key:
+                self._node_id_to_node_rt.pop(node_id, None)
+        if node_id not in self._node_id_to_node_rt:
+            self._node_id_to_node_rt[node_id] = node.get_node_runtime_from_remote(node_impl_code)
+            self._node_id_to_impl_key[node_id] = cur_impl_key
+            runtime = self._node_id_to_node_rt[node_id]
+            detail_layout = runtime.cnode.get_node_detail_layout(None)
+            preview_layout = runtime.cnode.get_node_preview_layout(None)
+            self._node_id_to_preview_layout[node_id] = preview_layout
+            self._node_id_to_detail_layout[node_id] = detail_layout
+        runtime = self._node_id_to_node_rt[node_id] 
+        return runtime
+
+    def clear(self):
+        self._node_id_to_node_rt.clear()
+        self._node_id_to_impl_key.clear()
+        self._node_id_to_preview_layout.clear()
+        self._node_id_to_detail_layout.clear()
 
 class SingleProcNodeExecutor:
     def __init__(self):
         self._cached_data: dict[str, Any] = {}
         self._id_to_robjs: dict[str, AsyncRemoteManager] = {}
-        self._node_id_to_node_rt: dict[str, ComputeNodeRuntime] = {}
-        self._node_id_to_code: dict[str, str] = {}
+
+        self._node_state_mgr = _NodeStateManager()
 
         self._desp = ExecutorRemoteDesp.get_empty()
 
     def clear(self):
         self._cached_data.clear()
         self._id_to_robjs.clear()
-        self._node_id_to_node_rt.clear()
-        self._node_id_to_code.clear()
+        self._node_state_mgr.clear()
         self._desp = ExecutorRemoteDesp.get_empty()
 
     async def init_set_desp_and_remote_clients(self, desp: ExecutorRemoteDesp, id_to_desps: dict[str, ExecutorRemoteDesp]):
@@ -40,22 +72,15 @@ class SingleProcNodeExecutor:
             self._cached_data.pop(data_id, None)
 
     async def run_node(self, node: ComputeFlowNodeModel, 
+                node_impl_code: str,
                 node_state_dict: dict[str, Any],
                 node_state_ast: DraftASTNode, 
                 inputs: dict[str, DataHandle], 
-                removed_data_ids: Optional[set[str]] = None) -> DataHandle:
+                removed_data_ids: Optional[set[str]] = None) -> Optional[dict[str, DataHandle]]:
         if removed_data_ids is not None:
             self.remove_cached_datas(removed_data_ids)
         node_id = node.id 
-        if node_id in self._node_id_to_code:
-            prev_code = self._node_id_to_code[node_id]
-            cur_code = node.impl.code
-            if prev_code != cur_code:
-                self._node_id_to_node_rt.pop(node_id, None)
-        if node_id not in self._node_id_to_node_rt:
-            self._node_id_to_node_rt[node_id] = node.get_node_runtime_from_remote()
-            self._node_id_to_code[node_id] = node.impl.code
-        runtime = self._node_id_to_node_rt[node_id] 
+        runtime = self._node_state_mgr.process_node(node, node_impl_code)
         cnode = runtime.cnode
         compute_func = cnode.get_compute_func()
         inputs_val = {}
@@ -86,9 +111,18 @@ class SingleProcNodeExecutor:
                 data = compute_func(**inputs_val)
                 if inspect.iscoroutine(data):
                     data = await data
-        data_uid = str(uuid.uuid4())
-        self._cached_data[data_uid] = data
-        return DataHandle(id=data_uid, executor_desp=self._desp, update_ops=ctx._ops)
+
+        if isinstance(data, dict):
+            data_handle_dict: dict[str, DataHandle] = {}
+            for k, v in data.items():
+                uuid_str = uuid.uuid4().hex
+                uid = f"{self._desp.id}-{uuid_str}-{k}"
+                self._cached_data[uid] = v
+                data_handle_dict[k] = DataHandle(id=uid, executor_desp=self._desp)
+            return data_handle_dict
+        else:
+            assert data is None, f"compute_func {compute_func} should return None or dict."
+        return data
 
 class TorchDistNodeExecutor:
     # TODO

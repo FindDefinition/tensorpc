@@ -84,6 +84,12 @@ class ResourceDesp:
                             GPU=self.GPU - req_rc.GPU if self.GPU != -1 else -1,
                             GPUMem=self.GPUMem - req_rc.GPUMem if self.GPUMem != -1 else -1)
 
+    def add_request_rc(self, req_rc: "ResourceDesp"):
+        return ResourceDesp(CPU=self.CPU + req_rc.CPU if self.CPU != -1 else -1,
+                            Mem=self.Mem + req_rc.Mem if self.Mem != -1 else -1,
+                            GPU=self.GPU + req_rc.GPU if self.GPU != -1 else -1,
+                            GPUMem=self.GPUMem + req_rc.GPUMem if self.GPUMem != -1 else -1)
+
 @dataclasses.dataclass
 class ComputeFlowNodeModel(BaseNodeModel):
     # core type
@@ -132,20 +138,21 @@ class ComputeFlowNodeModel(BaseNodeModel):
         
             cfg = parse_code_to_compute_cfg(code)
         elif self.key != "":
+            code = ""
             cfg = NODE_REGISTRY.global_dict[self.key]
         else:
             code = self.impl.code
             cfg = parse_code_to_compute_cfg(code)
 
-        rt = get_compute_node_runtime(cfg)
+        rt = get_compute_node_runtime(cfg, code)
         return rt
 
-    def get_node_runtime_from_remote(self) -> ComputeNodeRuntime:
+    def get_node_runtime_from_remote(self, impl_code: str) -> ComputeNodeRuntime:
         assert self.codeKey is None, "codekey should be detached from remote"
         if self.key != "":
             cfg = NODE_REGISTRY.global_dict[self.key]
         else:
-            code = self.impl.code
+            code = impl_code
             cfg = parse_code_to_compute_cfg(code)
         rt = get_compute_node_runtime(cfg)
         return rt
@@ -241,6 +248,11 @@ class ComputeFlowModelRoot(ComputeFlowModel):
     def get_uid_from_path(self):
         return UniqueTreeIdForTree.from_parts(self.cur_path).uid_encoded
 
+    def get_or_create_node_runtime(self, node: ComputeFlowNodeModel) -> ComputeNodeRuntime:
+        if node.runtime is None:
+            node.runtime = node.get_node_runtime(self)
+        return node.runtime
+
 @dataclasses_relaxed.dataclass
 class ComputeFlowDrafts:
     root: ComputeFlowModelRoot
@@ -315,7 +327,7 @@ def get_compute_flow_drafts(root_draft: ComputeFlowModelRoot):
                                                          ]  # type: ignore
     selected_node = cur_model_draft.nodes[cur_model_draft.selected_node]
     is_not_subflow_node_selected = D.logical_or(
-        cur_model_draft.selected_node == None, selected_node.type
+        cur_model_draft.selected_node == None, selected_node.nType
         != ComputeNodeType.SUBFLOW.value)
     prev_path_draft = D.where(is_not_subflow_node_selected, [],
                               prev_path_draft_if_exist,

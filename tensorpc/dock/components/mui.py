@@ -1385,8 +1385,8 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
 
 class RemoteBoxGrpc(RemoteComponentBase[MUIFlexBoxProps, MUIComponentType]):
 
-    def __init__(self, url: str, port: int, key: str) -> None:
-        super().__init__(url, port, key, UIType.FlexBox, MUIFlexBoxProps)
+    def __init__(self, url: str, port: int, key: str, fail_callback: Optional[Callable[[], Coroutine[None, None, Any]]] = None, enable_fallback_layout: bool = True) -> None:
+        super().__init__(url, port, key, UIType.FlexBox, MUIFlexBoxProps, fail_callback, enable_fallback_layout)
         self._robj: Optional[AsyncRemoteManager] = None
 
     def _get_addr(self):
@@ -1430,8 +1430,7 @@ class RemoteBoxGrpc(RemoteComponentBase[MUIFlexBoxProps, MUIComponentType]):
     async def set_fallback_layout(self):
         await self.set_new_layout([
             VBox([
-                Markdown("disconnected"),
-                Button("Connect", self._reconnect_to_remote_comp)
+                IconButton(IconType.LinkOff, self._reconnect_to_remote_comp).prop(size="small", muiColor="error", tooltip="Reconnect to remote component"),
             ]).prop(padding="5px"),
         ])
 

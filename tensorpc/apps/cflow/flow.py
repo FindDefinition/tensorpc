@@ -1,3 +1,5 @@
+import asyncio
+from tensorpc.apps.cflow.executors.base import NodeExecutorBase
 from tensorpc.core.datamodel.draftast import evaluate_draft_ast
 from tensorpc.dock import mui, three, plus, appctx, mark_create_layout, flowui, models
 from tensorpc.core import dataclass_dispatch as dataclasses
@@ -8,18 +10,39 @@ from tensorpc.core.tree_id import UniqueTreeIdForTree
 
 from typing import Optional, Any
 
-from tensorpc.apps.cflow.binder import ComputeFlowBinder
-from tensorpc.apps.cflow.model import ComputeFlowDrafts, ComputeFlowModelRoot, ComputeFlowNodeModel, ComputeNodeType, DetailType, InlineCode, get_compute_flow_drafts
+from tensorpc.apps.cflow.binder import ComputeFlowBinder, FlowPanelComps
+from tensorpc.apps.cflow.model import ComputeFlowDrafts, ComputeFlowModelRoot, ComputeFlowNodeModel, ComputeNodeType, DetailType, InlineCode, ResourceDesp, get_compute_flow_drafts
 from tensorpc.apps.cflow.nodes.cnode.default_code import get_default_custom_node_code
 from tensorpc.apps.cflow.nodes.cnode.handle import HandleTypePrefix
 from tensorpc.dock.components.flowplus.style import default_compute_flow_css
 from tensorpc.utils.code_fmt import PythonCodeFormatter
 from tensorpc.apps.cflow.nodes.cnode.registry import NODE_REGISTRY, get_compute_node_runtime, parse_code_to_compute_cfg
 import tensorpc.apps.cflow.nodes.defaultnodes
+from tensorpc.utils.gpuusage import get_nvidia_gpu_measures
+
+from .schedulers import SimpleScheduler
+from .executors import LocalNodeExecutor
 
 _SYS_NODE_PREFIX = "sys-"
 _USER_NODE_PREFIX = "user-"
 
+
+def _get_local_resource_desp():
+    gpus = get_nvidia_gpu_measures()
+    # TODO add memory schedule
+    desp = ResourceDesp(-1, -1, len(gpus), sum([a.memtotal for a in gpus]))
+    return desp
+
+class NodeContextMenuItemNames:
+    Run = "Run Sub Graph"
+    RunThisNode = "Run Cached Node"
+    StopGraphRun = "Stop Graph Run"
+
+    CopyNode = "Copy Node"
+    DeleteNode = "Delete Node"
+    RenameNode = "Rename Node"
+    ToggleCached = "Toggle Cached Inputs"
+    DebugUpdateNodeInternals = "Debug Update Internals"
 
 
 class ComputeFlow(mui.FlexBox):
@@ -42,6 +65,14 @@ class ComputeFlow(mui.FlexBox):
                                         disableKeyboardA11y=True,
                                         zoomOnScroll=False,
                                         preventCycle=True)
+        self._node_menu_items = [
+            mui.MenuItem(NodeContextMenuItemNames.Run,
+                         NodeContextMenuItemNames.Run,
+                         icon=mui.IconType.PlayArrow),
+        ]
+
+        self.graph.prop(nodeContextMenuItems=self._node_menu_items)
+
         target_conn_valid_map = {
             HandleTypePrefix.Input: {
                 # each input (target) can only connect one output (source)
@@ -65,6 +96,7 @@ class ComputeFlow(mui.FlexBox):
                                         disableKeyboardA11y=True,
                                         zoomOnScroll=False,
                                         preventCycle=True)
+        self.graph_preview.prop(nodeContextMenuItems=self._node_menu_items)
 
         path_breadcrumb = mui.Breadcrumbs([]).prop(keepHistoryPath=True)
         self.user_detail = mui.VBox([]).prop(flex=1, overflow="hidden")
@@ -120,17 +152,30 @@ class ComputeFlow(mui.FlexBox):
         detail_ct.bind_fields(condition=flow_draft.selected_node_detail_type)
         self.graph.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=flow_draft.cur_model))
         self.graph_preview.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=flow_draft.preview_model))
+
+        self.graph.event_node_context_menu.on(self._on_node_contextmenu)
+        self.graph_preview.event_node_context_menu.on(self._on_node_contextmenu)
+
         path_breadcrumb.bind_fields(value=f"concat(`[\"root\"]`, {draft.cur_path}[1::3])")
         path_breadcrumb.event_change.on(self.handle_breadcrumb_click)
         self.code_editor.bind_draft_change_uncontrolled(self.dm, flow_draft.selected_node_code, 
             path_draft=flow_draft.selected_node_code_path, 
             lang_draft=flow_draft.selected_node_code_language,
             save_event_prep=partial(self._process_save_ev_before_save, drafts=flow_draft))
-        binder = ComputeFlowBinder(self.graph, self.graph_preview, flow_draft)
+        binder = ComputeFlowBinder(self.graph, self.graph_preview, flow_draft, FlowPanelComps())
         binder.bind_flow_comp_with_datamodel(self.dm)
-        super().__init__([self.dm])
+        self._shutdown_ev = asyncio.Event()
+        self.scheduler = SimpleScheduler(self.dm, self._shutdown_ev)
 
+        self.executors: list[NodeExecutorBase] = [
+            LocalNodeExecutor("local", _get_local_resource_desp())
+        ]
+        super().__init__([self.dm])
+        self.event_after_unmount.on(self._on_flow_unmount)
         self.prop(width="100%", height="100%", overflow="hidden")
+
+    async def _on_flow_unmount(self):
+        self._shutdown_ev.set()
 
     def _process_save_ev_before_save(self, ev: mui.MonacoEditorSaveEvent, drafts: ComputeFlowDrafts):
         cur_flow_draft = drafts.cur_model
@@ -199,3 +244,35 @@ class ComputeFlow(mui.FlexBox):
                 target_flow_draft.node_states[node_id] = cfg.state_dcls()
 
         target_flow_draft.nodes[node_id] = new_node
+
+    async def _on_node_contextmenu(self, data: flowui.NodeContextMenuEvent):
+        item_id = data.itemId
+        node_id = data.nodeId
+
+        if item_id == NodeContextMenuItemNames.Run:
+            # if node is cached, only run it from cached input
+            await self.scheduler.run_sub_graph(self.dm.model, node_id, self.executors)
+        # elif item_id == NodeContextMenuItemNames.RunThisNode:
+        #     await self.run_cached_node(node_id)
+        # elif item_id == NodeContextMenuItemNames.StopGraphRun:
+        #     self._shutdown_ev.set()
+        # elif item_id == NodeContextMenuItemNames.DeleteNode:
+        #     await self.graph.delete_nodes_by_ids([node_id])
+        #     await self.save_graph()
+        # elif item_id == NodeContextMenuItemNames.RenameNode:
+        #     node = self.graph.get_node_by_id(node_id)
+        #     wrapper = node.get_component_checked(ComputeNodeWrapper)
+        #     await self._node_setting_name.send_and_wait(
+        #         self._node_setting_name.update_event(value=wrapper.cnode.name))
+        #     await self._node_setting_dialog.set_open(True,
+        #                                              {"node_id": node_id})
+        #     await self.save_graph()
+        # elif item_id == NodeContextMenuItemNames.ToggleCached:
+        #     node = self.graph.get_node_by_id(node_id)
+        #     wrapper = node.get_component_checked(ComputeNodeWrapper)
+        #     await wrapper.set_cached(not wrapper.is_cached_node)
+        #     await self.graph.set_node_context_menu_items(
+        #         node_id, wrapper.get_context_menus())
+        #     await self.save_graph()
+        # elif item_id == NodeContextMenuItemNames.DebugUpdateNodeInternals:
+        #     await self.graph.update_node_internals([node_id])

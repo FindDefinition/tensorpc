@@ -19,8 +19,10 @@ class SchedulerBase(abc.ABC):
         ...
 
     @abc.abstractmethod
-    async def schedule(self, flow: ComputeFlowModel, node_ids: list[str],
+    async def schedule(self, flow: ComputeFlowModel, 
                         node_inputs: dict[str, dict[str, Any]], executors: list[NodeExecutorBase],
-                        shutdown_ev: asyncio.Event) -> None:
+                        shutdown_ev: asyncio.Event) -> Optional[asyncio.Task]:
         ...
 
+    @abc.abstractmethod
+    async def close(self): ...

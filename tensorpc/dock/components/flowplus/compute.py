@@ -21,7 +21,6 @@ from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator,
 from typing_extensions import get_type_hints, is_typeddict, Annotated, TypeAlias
 from tensorpc.dock.components.plus.styles import CodeStyles
 from tensorpc.dock.core.appcore import run_coro_sync
-
 from tensorpc import compat
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 import tensorpc.core.dataclass_dispatch as dataclasses
@@ -709,6 +708,7 @@ class ComputeNodeWrapper(BaseNodeWrapper):
             className=
             f"{ComputeFlowClasses.NodeWrapper} {ComputeFlowClasses.NodeWrappedSelected}"
         )
+        self.prop(minWidth="150px")
         # self.prop(borderWidth="1px", borderStyle="solid", borderColor="black")
         if cnode.init_wrapper_config is not None:
             if  cnode.init_wrapper_config.boxProps is not None:

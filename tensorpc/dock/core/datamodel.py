@@ -19,7 +19,7 @@ from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core.datamodel.draft import (
     DraftBase, DraftFieldMeta, DraftUpdateOp, apply_draft_update_ops, capture_draft_update,
     create_draft, create_draft_type_only, enter_op_process_ctx,
-    evaluate_draft_ast_noexcept, get_draft_ast_node, prevent_draft_update, stabilize_getitem_path_in_op_main_path)
+    evaluate_draft_ast_noexcept, get_draft_ast_node, get_draft_update_context, prevent_draft_update, stabilize_getitem_path_in_op_main_path)
 from tensorpc.core.datamodel.events import (DraftChangeEvent,
                                             DraftChangeEventHandler,
                                             DraftEventType,
@@ -396,8 +396,10 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
 
         WARNING: draft change event handler will be called (if change) in each draft update.
         """
-        assert not self._lock.locked(), "you can't use draft_update when another update process is running."
         draft = self.get_draft()
+        cur_ctx = get_draft_update_context()
+        if cur_ctx is not None and cur_ctx._prevent_inner_draft:
+            raise RuntimeError("Draft operation is disabled by a prevent_draft_update context, usually exists in draft event handler.")
         with capture_draft_update() as ctx:
             yield draft
         await self._update_with_jmes_ops(ctx._ops)

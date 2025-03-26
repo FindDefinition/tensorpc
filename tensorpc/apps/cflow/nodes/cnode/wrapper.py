@@ -55,6 +55,7 @@ class ComputeNodeWrapper(BaseNodeWrapper):
         self.io_handles = comps.io_handles
         super().__init__(
             node_id, ComputeNodeType.COMPUTE, comps.get_ui_dict())
+        self.prop(minWidth="150px")
         if parsed_cfg.box_props is not None:
             merge_props_not_undefined(self.props, parsed_cfg.box_props)
         self.node_cfg = parsed_cfg
@@ -125,7 +126,8 @@ class ComputeNodeWrapper(BaseNodeWrapper):
                                                 muiColor=icon_cfg.muiColor)
             ])
         cached_icon = mui.Icon(mui.IconType.Cached).prop(iconSize="small")
-        cached_icon.bind_fields(muiColor=f"where({node_model_draft.node.isCached}, 'success', 'disabled')")
+        # print(str(node_model_draft.node.isCached))
+        cached_icon.bind_fields(muiColor=f"where(not_null({node_model_draft.node.isCached}, `true`), 'success', 'disabled')")
         header_icons = mui.HBox(
             [
                 cached_icon,
@@ -146,7 +148,7 @@ class ComputeNodeWrapper(BaseNodeWrapper):
         output_args = mui.Fragment([*out_handles])
         middle_node_layout: Optional[mui.FlexBox] = None
         node_layout_creator = cnode_cfg.layout_creator
-        node_layout_creator = node_obj.get_node_layout
+        node_layout_creator = node_obj.get_node_preview_layout
         if cnode_cfg.state_dcls is not None:
             middle_node_layout = node_layout_creator(D.cast_any_draft_to_dataclass(node_model_draft.node_state, cnode_cfg.state_dcls))
         else:
@@ -161,7 +163,6 @@ class ComputeNodeWrapper(BaseNodeWrapper):
         moddle_node_overflow = mui.undefined
         if cnode_cfg.layout_overflow is not None:
             moddle_node_overflow = cnode_cfg.layout_overflow
-
         middle_node_container = mui.Fragment(([
             mui.VBox([middle_node_layout]).prop(
                 className=ComputeFlowClasses.NodeItem,

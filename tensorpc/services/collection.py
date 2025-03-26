@@ -42,11 +42,20 @@ class Simple:
 
 
 class SpeedTestServer:
+    def __init__(self):
+        self._cached_data = None
+        self._cached_size = 0
+
     def recv_data(self, x):
         return
 
     def send_data(self, size_mb: int):
-        return np.empty([size_mb * 1024 * 1024], dtype=np.uint8)
+        if size_mb == self._cached_size:
+            return self._cached_data
+        self._cached_size = size_mb
+        np.random.seed(5)
+        self._cached_data = np.random.uniform(size=[size_mb * 1024 * 1024 // 4]).astype(np.float32)
+        return self._cached_data
 
 
 class FileOps:

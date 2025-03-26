@@ -38,7 +38,7 @@ def default_compute_flow_css():
             "flexDirection": "column",
             "borderRadius": "7px",
             "alignItems": "stretch",
-            "minWidth": "150px",
+            # "minWidth": "150px",
             "background": "white",
         },
         f".{ComputeFlowClasses.IOHandleContainer}": {

@@ -1,5 +1,7 @@
-from typing import Any
+from typing import Any, Optional
+import uuid
 from tensorpc.apps.cflow.model import ComputeFlowNodeModel
+from tensorpc.core.annolib import Undefined
 from .base import NodeExecutorBase, DataHandle, ExecutorRemoteDesp
 import inspect
 
@@ -8,18 +10,44 @@ from typing_extensions import override
 class LocalNodeExecutor(NodeExecutorBase):
     # each scheduler should only have one local executor.
     @override
-    async def run_node(self, node: ComputeFlowNodeModel, inputs: dict[str, DataHandle]) -> DataHandle:
+    async def run_node(self, node: ComputeFlowNodeModel, inputs: dict[str, DataHandle]) -> Optional[dict[str, DataHandle]]:
         assert node.runtime is not None 
+        node_inp_handles = node.runtime.inp_handles
+        node_inp_handles_dict = {h.name: h for h in node_inp_handles}
         cnode = node.runtime.cnode
         compute_func = cnode.get_compute_func()
         inputs_val = {}
         for k, inp in inputs.items():
-            if inp.has_data():
-                inputs_val[k] = inp.data
+            handle = node_inp_handles_dict[k]
+            if handle.type == "handledictsource":
+                assert not isinstance(inp.data, Undefined)
+                inp_special_dict = {}
+                for k2, v2 in inp.data.items():
+                    assert isinstance(v2, DataHandle)
+                    if v2.has_data():
+                        inp_special_dict[k2] = v2.data
+                    else:
+                        inp_special_dict[k2] = await v2.get_data_from_remote()
+                inputs_val[k] = inp_special_dict
             else:
-                inputs_val[k] = await inp.get_data_from_remote()
+                if inp.has_data():
+                    inputs_val[k] = inp.data
+                else:
+                    inputs_val[k] = await inp.get_data_from_remote()
         data = compute_func(**inputs_val)
         if inspect.iscoroutine(data):
             data = await data
-        # local data handle will be sent to remote executors directly instead of sending remote handle.
-        return DataHandle(id="", executor_desp=ExecutorRemoteDesp.get_empty(), data=data)
+        # TODO currently local data handle will be sent to remote executors directly instead of sending remote handle.
+        if isinstance(data, dict):
+            data_handle_dict: dict[str, DataHandle] = {}
+            for k, v in data.items():
+                uuid_str = uuid.uuid4().hex
+                uid = f"{self.get_id()}-{uuid_str}-{k}"
+                data_handle_dict[k] = DataHandle(id=uid, executor_desp=ExecutorRemoteDesp.get_empty(), data=v)
+            return data_handle_dict
+        else:
+            assert data is None, f"compute_func {compute_func} should return None or dict."
+        return data
+
+    async def close(self):
+        return None

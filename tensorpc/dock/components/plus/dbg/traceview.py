@@ -63,9 +63,21 @@ def parse_viztracer_trace_events_to_raw_tree(
     viz_pattern = re.compile(r"(.*)\((.*):([0-9]*)\)")
     duration_events: List[Dict[str, Any]] = []
     cnt = 0
+    tid_cnt_map = {}
+    for event in trace_events:
+        if event["tid"] not in tid_cnt_map:
+            tid_cnt_map[event["tid"]] = 0
+        tid_cnt_map[event["tid"]] += 1
+    max_tid = -1
+    max_tid_cnt = 0
+    for tid, cnt in tid_cnt_map.items():
+        if cnt > max_tid_cnt:
+            max_tid = tid
+            max_tid_cnt = cnt
+    assert max_tid_cnt != -1
     for event in trace_events:
         ph = event["ph"]
-        if event["pid"] == event["tid"]:
+        if max_tid == event["tid"]:
             if ph == "X":
                 # only care about main thread and duration events
                 try:
@@ -105,7 +117,7 @@ def parse_viztracer_trace_events_to_raw_tree(
                         duration_events.append(data)
                         cnt += 1
 
-    assert len(duration_events) > 0, "No duration events found"
+    assert len(duration_events) > 0, f"No duration events found, {len(trace_events)}, center event: {trace_events[len(trace_events) // 2]}"
     duration_events.sort(key=lambda x: x["ts"])
     if modify_events_func is not None:
         modify_events_func(duration_events)

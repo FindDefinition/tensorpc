@@ -1,4 +1,4 @@
-import dataclasses
+from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.apps.cflow.nodes import register_compute_node, get_node_state_draft, ComputeNodeBase, SpecialHandleDict
 import json 
 from tensorpc.dock.components import mui, flowui
@@ -43,7 +43,7 @@ def json_input_node() -> _JsonOutputDict:
                        resizer_props=flowui.NodeResizerProps(minWidth=250, minHeight=200),
                        box_props=mui.FlexBoxProps(width="100%",
                                       height="100%",
-                                      minWidth=f"{250} !important",
+                                      minWidth=250,
                                       minHeight=200))
 class ObjViewer(ComputeNodeBase):
     def __init__(self):
@@ -52,14 +52,14 @@ class ObjViewer(ComputeNodeBase):
                                             use_fast_tree=False)
 
 
-    def get_node_layout(self, drafts):
+    def get_node_preview_layout(self, drafts):
         res = mui.VBox(
             [self.item_tree.prop(flex=1, overflow="auto")]
         )
         return res.prop(width="100%", height="100%", overflow="hidden")
 
     async def compute(self, obj: SpecialHandleDict[Any]) -> None:
-        # keep in mind that for uncontrolled component, 
+        # keep in mind that for component controlled by code (not draft), 
         # ui may be unmounted.
         if self.item_tree.is_mounted():
             await self.item_tree.update_root_object_dict(obj,

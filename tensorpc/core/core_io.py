@@ -13,6 +13,12 @@ from tensorpc.protos_export import arraybuf_pb2, rpc_message_pb2, wsdef_pb2
 import traceback
 import numpy.typing as npt
 
+try:
+    import optree 
+    HAS_OPTREE = True
+except ImportError:
+    HAS_OPTREE = False
+
 JSON_INDEX_KEY = "__jsonarray_index"
 
 
@@ -452,6 +458,26 @@ def extract_arrays_from_data(data,
                              object_classes=(np.ndarray, bytes, JSArrayBuffer),
                              json_index=False):
     arrays: List[Union[np.ndarray, bytes, JSArrayBuffer]] = []
+    if HAS_OPTREE:
+        variables, structure = optree.tree_flatten(data)
+        new_vars = []
+        for v in variables:
+            if isinstance(v, object_classes):
+                if json_index:
+                    new_vars.append({JSON_INDEX_KEY: len(arrays)})
+                else:
+                    new_vars.append(Placeholder(len(arrays), byte_size(v)))
+                arrays.append(v)
+            elif isinstance(v, JsonOnlyData):
+                new_vars.append(v.data)
+            elif isinstance(v, UniqueTreeIdForComp):
+                # we delay UniqueTreeIdForComp conversion here to allow modify uid
+                new_vars.append(v.uid_encoded)
+            else:
+                new_vars.append(v)
+        # currently no way to convert structure to json, so we have to build json skeleton manually
+        data_skeleton = optree.tree_unflatten(structure, new_vars)
+        return arrays, data_skeleton
     data_skeleton = _extract_arrays_from_data(arrays,
                                               data,
                                               object_classes=object_classes,

@@ -1,5 +1,6 @@
 from functools import partial
 import traceback
+from tensorpc.apps.cflow.executors.base import NodeExecutorBase
 from tensorpc.core.datamodel.draft import get_draft_ast_node
 from tensorpc.core.datamodel.draftast import evaluate_draft_ast_noexcept
 from tensorpc.core.datamodel.events import DraftChangeEvent
@@ -16,15 +17,20 @@ import tensorpc.core.datamodel as D
 
 from .model import ComputeFlowDrafts, ComputeFlowNodeDrafts, ComputeFlowModelRoot, ComputeFlowNodeModel, ComputeNodeType, ComputeFlowModel
 from .nodes.cnode.wrapper import ComputeNodeWrapper
+import dataclasses as dataclasses_plain
 
+@dataclasses_plain.dataclass
+class FlowPanelComps:
+    pass 
 
 class ComputeFlowBinder:
 
     def __init__(self, flow_comp: Flow, flow_comp_preview: Flow,
-                 drafts: ComputeFlowDrafts):
+                 drafts: ComputeFlowDrafts, panel_comps: FlowPanelComps):
         self.flow_comp = flow_comp
         self.flow_comp_preview = flow_comp_preview
         self.drafts = drafts
+        self.panel_comps = FlowPanelComps
 
     def _get_preview_flow_uid(self, path_draft,
                               dm_comp: mui.DataModel[ComputeFlowModelRoot]):
@@ -87,6 +93,22 @@ class ComputeFlowBinder:
         runtime = get_compute_node_runtime(cfg)
         node_model.runtime = runtime
         await wrapper.set_node_from_code(cfg, new_state, runtime.cnode, draft)
+
+    async def _handle_node_executor_change(self, ev: DraftChangeEvent,
+                                             wrapper: ComputeNodeWrapper,
+                                             draft: ComputeFlowNodeDrafts,
+                                             node_model: ComputeFlowNodeModel):
+        # evaluate new state
+        executor = ev.new_value
+        if executor is None:
+            # TODO reset preview layout and detail layout
+            # reset executor debug panel
+            pass 
+            
+        else:
+            # TODO set remote preview layout to wrapper
+            assert isinstance(executor, NodeExecutorBase)
+
 
     def bind_flow_comp_with_datamodel(self, dm_comp: mui.DataModel[ComputeFlowModelRoot]):
         binder = models.flow.BaseFlowModelBinder(

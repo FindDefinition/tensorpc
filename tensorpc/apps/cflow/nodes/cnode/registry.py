@@ -5,6 +5,8 @@ from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator,
                     Awaitable, Callable, Coroutine, Deque, Dict, List, Literal, Mapping,
                     Optional, Tuple, Type, TypedDict, TypeVar, Union, cast,
                     get_origin)
+from tensorpc.apps.cflow.executors.base import NodeExecutorBase
+from tensorpc.apps.cflow.model import ResourceDesp
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.dock.components import flowui, mui
 from tensorpc.core.moduleid import get_module_id_of_type
@@ -28,7 +30,10 @@ class ComputeNodeBase(abc.ABC):
     def get_compute_func(self) -> Callable:
         return self.compute
 
-    def get_node_layout(self, drafts: Any) -> Optional[mui.FlexBox]:
+    def get_node_preview_layout(self, drafts: Any) -> Optional[mui.FlexBox]:
+        return None
+
+    def get_node_detail_layout(self, drafts: Any) -> Optional[mui.FlexBox]:
         return None
 
     @classmethod
@@ -77,8 +82,10 @@ class ComputeNodeDesp:
     resizer_props: Optional[flowui.NodeResizerProps] = None
     layout_overflow: Optional[mui._OverflowType] = None
     is_dynamic_cls: bool = False
+    resource_desp: ResourceDesp = dataclasses.field(default_factory=ResourceDesp)
     # static layout
     layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None
+    detail_layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None
     # state def
     state_dcls: Optional[type] = None
 
@@ -88,6 +95,13 @@ class ComputeNodeDesp:
             merge_props_not_undefined(
                 resizer.props, self.resizer_props)
             return resizer
+        return None
+
+    def get_node_init_width_height(self) -> Optional[tuple[int, int]]:
+        if self.resizer_props is not None:
+            if not isinstance(self.resizer_props.minWidth, int) or not isinstance(self.resizer_props.minHeight, int):
+                return None
+            return (self.resizer_props.minWidth, self.resizer_props.minHeight)
         return None
 
 class CustomNodeEditorContext:
@@ -138,6 +152,8 @@ class ComputeNodeRegistry:
             resizer_props: Optional[flowui.NodeResizerProps] = None,
             layout_overflow: Optional[mui._OverflowType] = None,
             layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None,
+            detail_layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None,
+            resource_desp: Optional[ResourceDesp] = None,
             state_dcls: Optional[type] = None) -> Union[T, Callable[[T], T]]:
 
         def wrapper(func: T) -> T:
@@ -175,6 +191,9 @@ class ComputeNodeRegistry:
                     if max_size is not None:
                         resizer_props_.maxWidth = max_size[0]
                         resizer_props_.maxHeight = max_size[1]
+            resource_desp_ = resource_desp
+            if resource_desp_ is None:
+                resource_desp_ = ResourceDesp()
             node_cfg = ComputeNodeDesp(func=func, 
                                          key=key_,
                                          name=name_,
@@ -184,6 +203,8 @@ class ComputeNodeRegistry:
                                          resizer_props=resizer_props_,
                                          layout_overflow=layout_overflow,
                                          layout_creator=layout_creator,
+                                         detail_layout_creator=detail_layout_creator,
+                                         resource_desp=resource_desp_,
                                          state_dcls=state_dcls)
             # parse function annotation to validate it.
             # TODO add class support
@@ -234,6 +255,8 @@ def register_compute_node(
         resizer_props: Optional[flowui.NodeResizerProps] = None,
         layout_overflow: Optional[mui._OverflowType] = None,
         layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None,
+        detail_layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None,
+        resource_desp: Optional[ResourceDesp] = None,
         state_dcls: Optional[type] = None):
     editor_ctx = get_node_editor_context()
     if editor_ctx is None:
@@ -247,6 +270,8 @@ def register_compute_node(
                                   resizer_props=resizer_props,
                                   layout_overflow=layout_overflow,
                                   layout_creator=layout_creator,
+                                  detail_layout_creator=detail_layout_creator,
+                                  resource_desp=resource_desp,
                                   state_dcls=state_dcls)
 
 def parse_code_to_compute_cfg(code: str):
@@ -263,12 +288,13 @@ class ComputeNodeRuntime:
     # required by scheduler
     inp_handles: list[AnnoHandle]
     out_handles: list[AnnoHandle]
-    executor_id: Optional[str] = None
+    executor: Optional[NodeExecutorBase] = None
+    impl_code: str = ""
 
-def get_compute_node_runtime(cfg: ComputeNodeDesp) -> ComputeNodeRuntime:
+def get_compute_node_runtime(cfg: ComputeNodeDesp, code: str = "") -> ComputeNodeRuntime:
     if inspect.isclass(cfg.func):
         cnode = cfg.func()
         inp_handles, out_handles = parse_function_to_handles(cnode.compute, cfg.is_dynamic_cls)
         return ComputeNodeRuntime(cfg, cnode, inp_handles, out_handles)
     inp_handles, out_handles = parse_function_to_handles(cfg.func, cfg.is_dynamic_cls)
-    return ComputeNodeRuntime(cfg, ComputeNodeFuncWrapper(cfg), inp_handles, out_handles)
+    return ComputeNodeRuntime(cfg, ComputeNodeFuncWrapper(cfg), inp_handles, out_handles, impl_code=code)

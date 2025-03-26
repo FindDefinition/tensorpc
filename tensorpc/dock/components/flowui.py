@@ -161,7 +161,7 @@ class NodeBase:
 
 @dataclasses.dataclass
 class NodeWithDataBase(NodeBase):
-    data: Union[Undefined, NodeData] = undefined
+    data: NodeData = dataclasses.field(default_factory=NodeData)
 
 
 @dataclasses.dataclass
@@ -549,6 +549,14 @@ class FlowInternals(Generic[T_node, T_edge]):
         self.unique_name_pool_node = UniqueNamePool(init_set=all_node_ids)
         all_edge_ids = set(self.id_to_node.keys())
         self.unique_name_pool_edge = UniqueNamePool(init_set=all_edge_ids)
+
+    def get_source_node_and_handles(self, node_id: str):
+        return [(self.id_to_node[idh[0]], idh[1], idh[2])
+                for idh in self.node_id_to_sources[node_id]]
+
+    def get_target_node_and_handles(self, node_id: str):
+        return [(self.id_to_node[idh[0]], idh[1], idh[2])
+                for idh in self.node_id_to_targets[node_id]]
 
     def _calculate_node_group_meta(
         self,

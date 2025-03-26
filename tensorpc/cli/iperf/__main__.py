@@ -9,20 +9,27 @@ import time
 
 async def main_async(addr: str, size: int, is_send: bool):
     try:
-        start = time.time()
+        np.random.seed(5)
+        data = np.random.uniform(size=[size * 1024 * 1024 // 4]).astype(np.float32)
         if is_send:
-            data = np.empty([size * 1024 * 1024], dtype=np.uint8)
+            start = time.time()
             await simple_chunk_call_async(
                 addr,
                 "tensorpc.services.collection::SpeedTestServer.recv_data",
                 data)
         else:
+            # cache data to avoid measure the time of data generation
+            await simple_chunk_call_async(
+                addr,
+                "tensorpc.services.collection::SpeedTestServer.send_data",
+                size)
+            start = time.time()
             await simple_chunk_call_async(
                 addr,
                 "tensorpc.services.collection::SpeedTestServer.send_data",
                 size)
         end_time = time.time()
-        speed = size / (end_time - start)
+        speed = (size) / (end_time - start)
         print("usetime: {}, speed: {:.2f} MB/s".format(end_time - start,
                                                        speed))
     except:

@@ -834,7 +834,6 @@ class App:
         for uid, data in ev.uid_to_data.items():
             keys: Union[Undefined, List[str]] = undefined
             uid_original = uid
-
             if TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT in uid:
                 parts = uid.split(TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT)
                 uid = parts[0]
