@@ -1327,6 +1327,8 @@ class SSHClient:
                         await callback(EofEvent(time.time_ns(), uid=self.uid))
                         break
                     if loop_task in done:
+                        for task in pending:
+                            await _cancel(task)
                         break
                     text = wait_tasks[0].result()
                     if isinstance(text, SSHRequest):

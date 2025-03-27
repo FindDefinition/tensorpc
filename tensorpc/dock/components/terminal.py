@@ -213,9 +213,11 @@ class AsyncSSHTerminal(Terminal):
                                          self._client.password, event_callback)
 
     async def _on_exit(self):
-        if self._ssh_task is not None:
+        if self._ssh_state is not None:
             # we can't await task here because it will cause deadlock
-            self._ssh_task = None
+            self._ssh_state = None
+        SSH_LOGGER.warning("SSH Exit.")
+
         await self.flow_event_emitter.emit_async(
             self._backend_ssh_conn_close_event_key,
             Event(self._backend_ssh_conn_close_event_key, None))
@@ -314,7 +316,7 @@ class AsyncSSHTerminal(Terminal):
                                 user_callback: Optional[Callable[[SSHEvent],
                                                                  Any]] = None):
         assert self._ssh_state is not None
-        if not isinstance(event, RawEvent) and user_callback is not None:
+        if not isinstance(event, RawEvent):
             if isinstance(event, LineEvent):
                 if not self._ssh_state.inited:
                     text = event.line.decode("utf-8").strip()
@@ -332,22 +334,23 @@ class AsyncSSHTerminal(Terminal):
                         parts = event.arg.decode("utf-8").split(";")
                         self._ssh_state.current_cmd = ";".join(parts[:-1])
                 elif event.type == CommandEventType.COMMAND_COMPLETE:
-                    return_code = None
+                    return_code = 0
                     if event.arg is not None:
                         return_code = int(event.arg)
                     if self._ssh_state.inited and TENSORPC_ASYNCSSH_INIT_SUCCESS not in self._ssh_state.current_cmd:
                         ev = TerminalCmdCompleteEvent(self._ssh_state.current_cmd, return_code)
-                        SSH_LOGGER.warning("Command %s succeed, retcode: %d", self._ssh_state.current_cmd, return_code)
+                        SSH_LOGGER.warning("Command \"%s\" succeed, retcode: %d", self._ssh_state.current_cmd, return_code)
 
                         await self.flow_event_emitter.emit_async(
                             self._backend_ssh_cmd_complete_event_key,
                             Event(self._backend_ssh_cmd_complete_event_key, ev))
-            try:
-                res = user_callback(event)
-                if inspect.iscoroutine(res):
-                    await res
-            except:
-                traceback.print_exc()
+            if user_callback is not None:
+                try:
+                    res = user_callback(event)
+                    if inspect.iscoroutine(res):
+                        await res
+                except:
+                    traceback.print_exc()
         if isinstance(event, RawEvent):
             if self.is_mounted():
                 await self.send_raw(event.raw)
