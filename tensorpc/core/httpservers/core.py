@@ -346,7 +346,7 @@ class WebsocketHandler:
         self.shutdown_ev = service_core.async_shutdown_event
         self._shutdown_task: Optional[asyncio.Task] = None
         with service_core.enter_exec_context():
-            service_core.service_units.init_service()
+            service_core.service_units.init_service(init_service_has_websocket_only=True)
         self.all_ev_providers = service_core.service_units.get_all_event_providers(
         )
         self.event_to_clients: Dict[str, Set[WebsocketClientBase]] = {}

@@ -5,7 +5,7 @@ from typing import Any, Callable, Optional, TypedDict, Union
 from tensorpc.dock.components import flowui, mui
 from tensorpc.apps.cflow.nodes.cnode.handle import parse_func_to_handle_components, IOHandle, HandleTypePrefix
 from tensorpc.dock.components.flowplus.style import ComputeFlowClasses
-from tensorpc.apps.cflow.model import ComputeFlowNodeDrafts, ComputeFlowNodeModel, ComputeNodeType, ComputeFlowModel, ComputeNodeStatus
+from tensorpc.apps.cflow.model import ComputeFlowNodeDrafts, ComputeNodeModel, ComputeNodeType, ComputeFlowModel, ComputeNodeStatus
 from .registry import ComputeNodeBase, ComputeNodeDesp, parse_code_to_compute_cfg
 from .ctx import ComputeFlowNodeContext, enter_flow_ui_node_context_object
 from tensorpc.dock.jsonlike import (as_dict_no_undefined,

@@ -1,7 +1,7 @@
 import abc
 import asyncio
 from typing import Any, Callable, Optional 
-from tensorpc.apps.cflow.model import ComputeFlowDrafts, ComputeFlowModel, ComputeFlowModelRoot, ComputeFlowNodeModel
+from tensorpc.apps.cflow.model import ComputeFlowDrafts, ComputeFlowModel, ComputeFlowModelRoot, ComputeNodeModel
 from tensorpc.apps.cflow.executors.base import NodeExecutorBase
 from tensorpc.dock.components import mui
 
@@ -15,7 +15,7 @@ class SchedulerBase(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def assign_node_executor(self, nodes: list[ComputeFlowNodeModel], executors: list[NodeExecutorBase]) -> dict[str, NodeExecutorBase]:
+    def assign_node_executor(self, nodes: list[ComputeNodeModel], executors: list[NodeExecutorBase]) -> dict[str, NodeExecutorBase]:
         ...
 
     @abc.abstractmethod

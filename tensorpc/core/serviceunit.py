@@ -1317,7 +1317,15 @@ class ServiceUnit(DynamicClass):
 
     def init_service(self,
                      external_obj: Optional[Any] = None,
-                     rebind: bool = False):
+                     rebind: bool = False,
+                     init_service_has_websocket_only: bool = False):
+        if init_service_has_websocket_only:
+            has_ws_handler: bool = False
+            for k, meta in self.services.items():
+                if meta.type == ServiceType.WebSocketEventProvider or meta.type == ServiceType.WebSocketOnConnect or meta.type == ServiceType.WebSocketOnDisConnect:
+                    has_ws_handler = True
+            if not has_ws_handler:
+                return 
         # lazy init
         if self.obj is None or rebind:
             if not rebind:
@@ -1386,6 +1394,9 @@ class ServiceUnit(DynamicClass):
 
     async def run_event_async(self, event: ServiceEventType, *args: Any):
         if event in self._event_to_handlers:
+            if not self.is_inited() and event == ServiceEventType.Exit:
+                # if service not inited, its event won't be called.
+                return
             if not self.is_inited():
                 self.init_service()
             for h in self._event_to_handlers[event]:
@@ -1412,9 +1423,9 @@ class ServiceUnits:
                 self._service_id_to_key[cnt] = sid
                 cnt += 1
 
-    def init_service(self):
+    def init_service(self, init_service_has_websocket_only: bool = False):
         for s in self.sus:
-            s.init_service()
+            s.init_service(init_service_has_websocket_only=init_service_has_websocket_only)
 
     def has_service_unit(self, module_name: str):
         return module_name in self.module_name_to_su

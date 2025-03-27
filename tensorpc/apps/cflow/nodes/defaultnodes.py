@@ -1,3 +1,4 @@
+from tensorpc.apps.cflow.nodes.cnode.registry import ComputeNodeFlags
 from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.apps.cflow.nodes import register_compute_node, get_node_state_draft, ComputeNodeBase, SpecialHandleDict
 import json 
@@ -31,7 +32,8 @@ class _JsonOutputDict(TypedDict):
                        name="Json Input",
                        icon_cfg=mui.IconProps(icon=mui.IconType.DataObject),
                        layout_creator=_json_input_layout,
-                       state_dcls=JsonInputState)
+                       state_dcls=JsonInputState,
+                       flags=ComputeNodeFlags.EXEC_ALWAYS_LOCAL)
 def json_input_node() -> _JsonOutputDict:
     state, draft = get_node_state_draft(JsonInputState)
     data = json.loads(state.value)

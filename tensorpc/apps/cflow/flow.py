@@ -11,10 +11,11 @@ from tensorpc.core.tree_id import UniqueTreeIdForTree
 from typing import Optional, Any
 
 from tensorpc.apps.cflow.binder import ComputeFlowBinder, FlowPanelComps
-from tensorpc.apps.cflow.model import ComputeFlowDrafts, ComputeFlowModelRoot, ComputeFlowNodeModel, ComputeNodeType, DetailType, InlineCode, ResourceDesp, get_compute_flow_drafts
+from tensorpc.apps.cflow.model import ComputeFlowDrafts, ComputeFlowModelRoot, ComputeNodeModel, ComputeNodeType, DetailType, InlineCode, ResourceDesp, get_compute_flow_drafts
 from tensorpc.apps.cflow.nodes.cnode.default_code import get_default_custom_node_code
 from tensorpc.apps.cflow.nodes.cnode.handle import HandleTypePrefix
 from tensorpc.dock.components.flowplus.style import default_compute_flow_css
+from tensorpc.dock.components.plus.styles import get_tight_icon_tab_theme
 from tensorpc.utils.code_fmt import PythonCodeFormatter
 from tensorpc.apps.cflow.nodes.cnode.registry import NODE_REGISTRY, get_compute_node_runtime, parse_code_to_compute_cfg
 import tensorpc.apps.cflow.nodes.defaultnodes
@@ -99,7 +100,40 @@ class ComputeFlow(mui.FlexBox):
         self.graph_preview.prop(nodeContextMenuItems=self._node_menu_items)
 
         path_breadcrumb = mui.Breadcrumbs([]).prop(keepHistoryPath=True)
-        self.user_detail = mui.VBox([]).prop(flex=1, overflow="hidden")
+        tab_theme = get_tight_icon_tab_theme()
+        detail_box = mui.HBox([mui.Markdown(" ## Detail")]).prop(overflow="hidden",
+                                    padding="3px",
+                                    flex=1,
+                                    width="100%",
+                                    height="100%")
+        debug_box = mui.HBox([mui.Markdown(" ## Debug")]).prop(overflow="hidden",
+                                    padding="3px",
+                                    flex=1,
+                                    width="100%",
+                                    height="100%")
+        panel_comps = FlowPanelComps(detail=detail_box, debug=debug_box)
+        tabdefs: list[mui.TabDef] = [
+            mui.TabDef("",
+                       "0",
+                       detail_box,
+                       icon=mui.IconType.Dashboard,
+                       tooltip="node detail layout"),
+            mui.TabDef("",
+                       "1",
+                       debug_box,
+                       icon=mui.IconType.BugReport,
+                       tooltip="compute node debug panel"),
+        ]
+        self.user_detail = mui.HBox([
+            mui.ThemeProvider([
+                mui.Tabs(tabdefs, init_value="0").prop(
+                    panelProps=mui.FlexBoxProps(width="100%", padding=0),
+                    orientation="vertical",
+                    borderRight=1,
+                    borderColor='divider',
+                    tooltipPlacement="right")
+            ], tab_theme)
+        ]).prop(height="100%", width="100%", overflow="hidden")
         detail_ct = mui.MatchCase(
             [
                 mui.MatchCase.Case(DetailType.NONE.value, mui.VBox([])),
@@ -136,17 +170,31 @@ class ComputeFlow(mui.FlexBox):
         global_container = mui.Allotment(mui.Allotment.ChildDef([
             mui.Allotment.Pane(flow_with_editor),
             mui.Allotment.Pane(detail_ct),
-        ])).prop(vertical=True)
+        ])).prop(vertical=True, defaultSizes=[300, 200])
+
+        self._header_search_bar = mui.Input("Search").prop(muiMargin="dense", flex=1)
+        show_bottom_panel_btn = mui.ToggleButton(name="BOTTOM").prop(size="small", height="28px")
+        show_right_panel_btn = mui.ToggleButton(name="RIGHT").prop(size="small", height="28px")
+        control_bar = mui.HBox([
+            mui.HBox([]).prop(flex=1),
+            show_bottom_panel_btn,
+            show_right_panel_btn,
+        ]).prop(flex=1)
         self.dm = mui.DataModel(ComputeFlowModelRoot(edges={}, nodes={}), [
             mui.VBox([
                 mui.HBox([
-                    path_breadcrumb
+                    path_breadcrumb.prop(flex=1),
+                    mui.Divider(orientation="vertical"),
+                    self._header_search_bar,
+                    mui.Divider(orientation="vertical"),
+                    control_bar,
                 ]).prop(minHeight="24px"),
                 global_container,
             ]).prop(flex=1),
         ])
         draft = self.dm.get_draft()
         flow_draft = get_compute_flow_drafts(draft)
+
         flow_with_editor.bind_fields(visibles=f"[`true`, {flow_draft.show_editor}]")
         global_container.bind_fields(visibles=f"[`true`, {flow_draft.show_detail}]")
         detail_ct.bind_fields(condition=flow_draft.selected_node_detail_type)
@@ -158,11 +206,13 @@ class ComputeFlow(mui.FlexBox):
 
         path_breadcrumb.bind_fields(value=f"concat(`[\"root\"]`, {draft.cur_path}[1::3])")
         path_breadcrumb.event_change.on(self.handle_breadcrumb_click)
+        show_bottom_panel_btn.bind_draft_change(draft.settings.isBottomPanelVisible)
+        show_right_panel_btn.bind_draft_change(draft.settings.isRightPanelVisible)
         self.code_editor.bind_draft_change_uncontrolled(self.dm, flow_draft.selected_node_code, 
             path_draft=flow_draft.selected_node_code_path, 
             lang_draft=flow_draft.selected_node_code_language,
             save_event_prep=partial(self._process_save_ev_before_save, drafts=flow_draft))
-        binder = ComputeFlowBinder(self.graph, self.graph_preview, flow_draft, FlowPanelComps())
+        binder = ComputeFlowBinder(self.graph, self.graph_preview, flow_draft, panel_comps)
         binder.bind_flow_comp_with_datamodel(self.dm)
         self._shutdown_ev = asyncio.Event()
         self.scheduler = SimpleScheduler(self.dm, self._shutdown_ev)
@@ -225,11 +275,11 @@ class ComputeFlow(mui.FlexBox):
         if item_id.startswith(_SYS_NODE_PREFIX):
             node_type = item_id[len(_SYS_NODE_PREFIX):]
             if node_type == "markdown":
-                new_node = ComputeFlowNodeModel(nType=ComputeNodeType.MARKDOWN, id=node_id, position=pos, impl=InlineCode(code="## MarkdownNode"))
+                new_node = ComputeNodeModel(nType=ComputeNodeType.MARKDOWN, id=node_id, position=pos, impl=InlineCode(code="## MarkdownNode"))
             elif node_type == "compute":
                 code = get_default_custom_node_code()
                 parsed_cfg = parse_code_to_compute_cfg(code)
-                new_node = ComputeFlowNodeModel(nType=ComputeNodeType.COMPUTE, id=node_id, position=pos, impl=InlineCode(code=code),
+                new_node = ComputeNodeModel(nType=ComputeNodeType.COMPUTE, id=node_id, position=pos, impl=InlineCode(code=code),
                     name=parsed_cfg.name, key=parsed_cfg.key, moduleId=parsed_cfg.module_id)
                 target_flow_draft.node_states[node_id] = {}
             else:
@@ -237,7 +287,7 @@ class ComputeFlow(mui.FlexBox):
         else:
             node_type = item_id[len(_USER_NODE_PREFIX):]
             cfg = NODE_REGISTRY.global_dict[node_type]
-            new_node = ComputeFlowNodeModel(
+            new_node = ComputeNodeModel(
                 nType=ComputeNodeType.COMPUTE, id=node_id, position=pos, moduleId=cfg.module_id, key=cfg.key,
                     name=cfg.name)
             if cfg.state_dcls is not None:

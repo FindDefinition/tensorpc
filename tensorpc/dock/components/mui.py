@@ -56,6 +56,8 @@ from tensorpc.dock.client import MasterMeta
 from tensorpc.dock.core.appcore import Event, EventDataType, RemoteCompEvent, get_batch_app_event
 from tensorpc.dock.core.common import (handle_standard_event)
 from tensorpc.dock.core.reload import AppReloadManager
+from tensorpc.core import datamodel as D
+
 from ..jsonlike import JsonLikeType, BackendOnlyProp, ContextMenuData, JsonLikeNode, as_dict_no_undefined
 from ..core import colors
 from ..core.component import (
@@ -1139,14 +1141,18 @@ class ToggleButtonGroup(MUIComponentBase[ToggleButtonGroupProps]):
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
-    def bind_draft_change(self, draft: Any):
-        # TODO validate type
-        assert self.props.exclusive == True
-        assert isinstance(draft, DraftBase)
-        assert not isinstance(self.value,
-                              Undefined), "must be controlled component"
-        return self._bind_field_with_change_event("value", draft)
-
+    def bind_draft_change(self, draft: Union[Any, list[Any]]):
+        if self.props.exclusive == True:
+            assert isinstance(draft, DraftBase)
+            assert not isinstance(self.value,
+                                Undefined), "must be controlled component"
+            return self._bind_field_with_change_event("value", draft)
+        else:
+            raise NotImplementedError
+            # assert isinstance(draft, list)
+            # assert len(draft) == len(
+            #     self.props.buttons), "draft must have same length as buttons"
+            # return self._bind_field_with_change_event("value", D.create_array(*draft))
 
 @dataclasses.dataclass
 class AccordionDetailsProps(MUIFlexBoxProps):

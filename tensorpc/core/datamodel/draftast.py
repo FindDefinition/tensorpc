@@ -126,7 +126,7 @@ def _draft_ast_to_jmes_path_recursive(node: DraftASTNode) -> str:
     
     elif node.type == DraftASTType.BINARY_OP:
         op = node.value
-        return f"{_draft_ast_to_jmes_path_recursive(node.children[0])}{op}{_draft_ast_to_jmes_path_recursive(node.children[1])}"
+        return f"({_draft_ast_to_jmes_path_recursive(node.children[0])}{op}{_draft_ast_to_jmes_path_recursive(node.children[1])})"
     elif node.type == DraftASTType.UNARY_OP:
         op = node.value
         return f"{op}{_draft_ast_to_jmes_path_recursive(node.children[0])}"

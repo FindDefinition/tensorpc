@@ -146,6 +146,15 @@ class CommandParseSpecialCharactors:
 
     End = b"\007"
 
+class LineEventType(enum.Enum):
+    EOF = 0
+    VSCODE_EVENT_END = 1
+    VSCODE_EVENT_INCOMPLETE_END = 2
+    UNKNOWN_INCOMPLETE_END = 3
+    LINE_END = 4
+    RBUF_OVERFLOW = 5
+    EXCEPTION = 6
+    INCOMPLETE_START = 7
 
 _DEFAULT_SEPARATORS = rb"(?:\r\n)|(?:\n)|(?:\r)|(?:\033\]784;[ABPCEFGD](?:;(.*?))?\007)"
 # _DEFAULT_SEPARATORS = "\n"
@@ -418,19 +427,27 @@ async def _cancel(task):
         await task
 
 
-class ReadResult:
+class LineRawEvent:
 
     def __init__(self,
                  data: Any,
                  is_eof: bool,
                  is_exc: bool,
                  traceback_str: str = "",
-                 should_exit: bool = True) -> None:
+                 should_exit: bool = True,
+                 line_ev_type: LineEventType = LineEventType.EOF) -> None:
         self.data = data
         self.is_eof = is_eof
         self.is_exc = is_exc
         self.traceback_str = traceback_str
         self.should_exit = should_exit
+        self.line_ev_type = line_ev_type
+
+        self.is_stderr = False
+
+    def shallow_copy(self):
+        return LineRawEvent(self.data, self.is_eof, self.is_exc,
+                            self.traceback_str, self.should_exit, self.line_ev_type)
 
 
 def _warp_exception_to_event(exc: Exception, uid: str):
@@ -446,8 +463,8 @@ _ENCODE = "utf-8"
 class PeerSSHClient:
     def __init__(self,
                  stdin: asyncssh.stream.SSHWriter,
-                 stdout: asyncssh.stream.SSHReader,
-                 stderr: asyncssh.stream.SSHReader,
+                 stdout: "VscodeSSHReader",
+                 stderr: "VscodeSSHReader",
                  separators: bytes = _DEFAULT_SEPARATORS,
                  uid: str = "",
                  encoding: Optional[str] = None):
@@ -467,32 +484,33 @@ class PeerSSHClient:
         # https://github.com/ronf/asyncssh/issues/112#issuecomment-343318916
         return await self.send('\x03')
 
-    async def _readuntil(self, reader: asyncssh.stream.SSHReader):
+    async def _readuntil(self, reader: "VscodeSSHReader"):
         try:
-            res = await reader.readuntil(self._vsc_re)
+            res, ty = await reader.readuntil_ex(self._vsc_re)
             is_eof = reader.at_eof()
-            return ReadResult(res, is_eof, False)
+            return LineRawEvent(res, is_eof, False, line_ev_type=ty)
         except asyncio.IncompleteReadError as exc:
             tb_str = io.StringIO()
             traceback.print_exc(file=tb_str)
             is_eof = reader.at_eof()
             print("IncompleteReadError")
             if is_eof:
-                return ReadResult(exc.partial, True, False, should_exit=True)
+                return LineRawEvent(exc.partial, True, False, should_exit=True, line_ev_type=LineEventType.EOF)
             else:
                 print(tb_str.getvalue())
-                return ReadResult(exc.partial,
+                return LineRawEvent(exc.partial,
                                   False,
                                   False,
                                   tb_str.getvalue(),
-                                  should_exit=False)
-            # return ReadResult(exc.partial, True, False)
+                                  should_exit=False,
+                                  line_ev_type=LineEventType.INCOMPLETE_START)
+            # return LineRawEvent(exc.partial, True, False)
         except Exception as exc:
             tb_str = io.StringIO()
             traceback.print_exc(file=tb_str)
-            return ReadResult(exc, False, True, tb_str.getvalue())
+            return LineRawEvent(exc, False, True, tb_str.getvalue(), line_ev_type=LineEventType.EXCEPTION)
 
-    async def _handle_result(self, res: ReadResult,
+    async def _handle_result(self, res: LineRawEvent,
                              reader: asyncssh.stream.SSHReader, ts: int,
                              callback: Callable[[Event], Awaitable[None]],
                              is_stderr: bool):
@@ -546,7 +564,9 @@ class PeerSSHClient:
 
     async def wait_loop_queue(self, callback: Callable[[Event],
                                                        Awaitable[None]],
-                              shutdown_task: asyncio.Task):
+                              shutdown_task: asyncio.Task,
+                              line_raw_callback: Optional[Callable[[LineRawEvent],
+                                                       Awaitable[None]]] = None):
         """events: stdout/err line, eof, error
         """
         shut_task = shutdown_task
@@ -567,6 +587,8 @@ class PeerSSHClient:
             # if read_line_task in done or read_err_line_task in done:
             if read_line_task in done:
                 res = read_line_task.result()
+                if line_raw_callback is not None:
+                    await line_raw_callback(res)
                 try:
                     if await self._handle_result(res, self.stdout, ts, callback,
                                                 False):
@@ -578,6 +600,9 @@ class PeerSSHClient:
                     self._readuntil(self.stdout))
             if read_err_line_task in done:
                 res = read_err_line_task.result()
+                if line_raw_callback is not None:
+                    res.is_stderr = True
+                    await line_raw_callback(res)
                 try:
                     if await self._handle_result(res, self.stderr, ts, callback,
                                                 True):
@@ -626,6 +651,14 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
                         separator: object,
                         datatype: asyncssh.DataType,
                         max_separator_len: int = 0) -> AnyStr:
+        res = await self.readuntil_ex(separator, datatype, max_separator_len)
+        return res[0]
+
+    async def readuntil_ex(self,
+                        separator: object,
+                        datatype: asyncssh.DataType,
+                        max_separator_len: int = 0) -> tuple[AnyStr, LineEventType]:
+
         """Read data from the channel until a separator is seen"""
 
         if not separator:
@@ -667,7 +700,7 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
                             exc = recv_buf.pop(0)
 
                             if isinstance(exc, SoftEOFReceived):
-                                return buf
+                                return buf, LineEventType.EOF
                             else:
                                 raise cast(Exception, exc)
 
@@ -701,7 +734,7 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
                                 if not recv_buf[0]:
                                     recv_buf.pop(0)
                                 self._maybe_resume_reading()
-                                return buf
+                                return buf, LineEventType.VSCODE_EVENT_END
                         else:
                             idx = idx_start_all
                             recv_buf[:curbuf] = []
@@ -711,7 +744,7 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
                             if not recv_buf[0]:
                                 recv_buf.pop(0)
                             self._maybe_resume_reading()
-                            return buf
+                            return buf, LineEventType.VSCODE_EVENT_INCOMPLETE_END
                     elif idx_start_all == -1 and idx_end != -1:
                         idx = idx_end + 1
                         recv_buf[:curbuf] = []
@@ -721,7 +754,7 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
                         if not recv_buf[0]:
                             recv_buf.pop(0)
                         self._maybe_resume_reading()
-                        return buf
+                        return buf, LineEventType.VSCODE_EVENT_INCOMPLETE_END
                     elif idx_start_all != -1 and idx_end == -1:
                         if idx_start_all != 0:
                             idx = idx_start_all
@@ -732,7 +765,7 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
                             if not recv_buf[0]:
                                 recv_buf.pop(0)
                             self._maybe_resume_reading()
-                            return buf
+                            return buf, LineEventType.UNKNOWN_INCOMPLETE_END
                     else:
                         idx = buf.find(b"\n")
                         idx_r_buf = buf.rfind(b"\r")
@@ -745,7 +778,7 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
                             if not recv_buf[0]:
                                 recv_buf.pop(0)
                             self._maybe_resume_reading()
-                            return buf
+                            return buf, LineEventType.LINE_END
                         if idx_r_buf >= self._rbuf_max_length:
                             idx = idx_r_buf + 1
                             recv_buf[:curbuf] = []
@@ -755,7 +788,7 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
                             if not recv_buf[0]:
                                 recv_buf.pop(0)
                             self._maybe_resume_reading()
-                            return buf
+                            return buf, LineEventType.RBUF_OVERFLOW
 
                     buflen += len(newbuf)
                     curbuf += 1
@@ -893,6 +926,21 @@ class SSHRpcClient(SubprocessRpcClient):
             print("proc status", proc_res.exit_status, proc_res.stdout, proc_res.stderr)
             return None
         return None
+
+class VscodeSSHReader(asyncssh.SSHReader[AnyStr]):
+    """SSH read stream handler"""
+
+    def __init__(self, session: asyncssh.stream.SSHStreamSession[AnyStr],
+                 chan: asyncssh.channel.SSHChannel[AnyStr], datatype: asyncssh.DataType = None):
+        self._session = session
+        self._chan: asyncssh.channel.SSHChannel[AnyStr] = chan
+        self._datatype = datatype
+
+    async def readuntil_ex(self, separator: object,
+                        max_separator_len = 0) -> tuple[AnyStr, LineEventType]:
+        assert isinstance(self._session, VscodeStyleSSHClientStreamSession)
+        return await self._session.readuntil_ex(separator, self._datatype, max_separator_len)
+
 
 class SSHClient:
 
@@ -1143,8 +1191,8 @@ class SSHClient:
         session._rbuf_max_length = rbuf_max_length
         stdin, stdout, stderr = (
             asyncssh.stream.SSHWriter(session, chan),
-            asyncssh.stream.SSHReader(session, chan),
-            asyncssh.stream.SSHReader(
+            VscodeSSHReader(session, chan),
+            VscodeSSHReader(
                 session, chan,
                 asyncssh.constants.EXTENDED_DATA_STDERR))
         if init_cmd_2:
@@ -1180,7 +1228,9 @@ class SSHClient:
             term_type: Optional[str] = "xterm-256color",
             request_pty: Union[Literal["force", "auto"], bool] = "force",
             rbuf_max_length: int = 4000,
-            enable_raw_event: bool = True):
+            enable_raw_event: bool = True,
+            line_raw_callback: Optional[Callable[[LineRawEvent],
+                                                       Awaitable[None]]] = None):
         if env is None:
             env = {}
         # TODO better keepalive
@@ -1229,7 +1279,7 @@ class SSHClient:
                                             stderr,
                                             uid=self.uid)
                 loop_task = asyncio.create_task(
-                    peer_client.wait_loop_queue(callback, shutdown_task))
+                    peer_client.wait_loop_queue(callback, shutdown_task, line_raw_callback))
                 wait_tasks = [
                     asyncio.create_task(inp_queue.get()), shutdown_task,
                     loop_task
@@ -1353,3 +1403,14 @@ def run_ssh_rpc_call(arg_event_id: str, ret_event_id: str, rf_port: int, need_re
             exc_msg = exc_msg_ss.getvalue()
             robj.remote_call(f"{_SSH_ARGSERVER_SERV_NAME}.call_event", ret_event_id, None, exc_msg)
 
+def remove_trivial_r_lines(buffer: bytes):
+    # buf content: ...unknown...\r...rline0...\r...rline1...\r[...]\r...lastrline...\r...unknown...
+    # we need to remove duplicate (invalid) r lines:
+    # valid buf content: ...lastrline...\r...unknown...
+    r_bytes = buffer 
+    first_r_idx = r_bytes.rfind(b"\r")
+    if first_r_idx != -1:
+        second_r_idx = r_bytes.rfind(b"\r", 0, first_r_idx)
+        if second_r_idx != -1:
+            r_bytes = r_bytes[second_r_idx + 1:]
+    return r_bytes

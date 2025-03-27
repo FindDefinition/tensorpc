@@ -15,13 +15,14 @@ from typing import Annotated, Any, Callable, Optional, cast
 from tensorpc.dock import models
 import tensorpc.core.datamodel as D
 
-from .model import ComputeFlowDrafts, ComputeFlowNodeDrafts, ComputeFlowModelRoot, ComputeFlowNodeModel, ComputeNodeType, ComputeFlowModel
+from .model import ComputeFlowDrafts, ComputeFlowNodeDrafts, ComputeFlowModelRoot, ComputeNodeModel, ComputeNodeType, ComputeFlowModel
 from .nodes.cnode.wrapper import ComputeNodeWrapper
 import dataclasses as dataclasses_plain
 
 @dataclasses_plain.dataclass
 class FlowPanelComps:
-    pass 
+    detail: mui.FlexBox 
+    debug: mui.FlexBox
 
 class ComputeFlowBinder:
 
@@ -85,7 +86,7 @@ class ComputeFlowBinder:
     async def _handle_node_code_draft_change(self, ev: DraftChangeEvent,
                                              wrapper: ComputeNodeWrapper,
                                              draft: ComputeFlowNodeDrafts,
-                                             node_model: ComputeFlowNodeModel):
+                                             node_model: ComputeNodeModel):
         # evaluate new state
         assert ev.user_eval_vars is not None 
         new_state = ev.user_eval_vars["state"]
@@ -94,10 +95,11 @@ class ComputeFlowBinder:
         node_model.runtime = runtime
         await wrapper.set_node_from_code(cfg, new_state, runtime.cnode, draft)
 
+
     async def _handle_node_executor_change(self, ev: DraftChangeEvent,
                                              wrapper: ComputeNodeWrapper,
                                              draft: ComputeFlowNodeDrafts,
-                                             node_model: ComputeFlowNodeModel):
+                                             node_model: ComputeNodeModel):
         # evaluate new state
         executor = ev.new_value
         if executor is None:
@@ -125,7 +127,9 @@ class ComputeFlowBinder:
             flow_uid_getter=partial(self._get_preview_flow_uid,
                                     path_draft=self.drafts.preview_path,
                                     dm_comp=dm_comp))
-        # dm_comp.debug_print_draft_change(self.drafts.show_editor)
+        # dm_comp.debug_print_draft_change(self.drafts.root.settings.isBottomPanelVisible)
+        # dm_comp.debug_print_draft_change(self.drafts.root.settings.isRightPanelVisible)
+
         # dm_comp.debug_print_draft_change(self.drafts.selected_node_code)
 
         binder.bind_flow_comp_with_base_model(

@@ -1,6 +1,6 @@
 from typing import Any, Optional
 import uuid
-from tensorpc.apps.cflow.model import ComputeFlowNodeModel
+from tensorpc.apps.cflow.model import ComputeNodeModel
 from tensorpc.core.annolib import Undefined
 from .base import NodeExecutorBase, DataHandle, ExecutorRemoteDesp
 import inspect
@@ -10,7 +10,7 @@ from typing_extensions import override
 class LocalNodeExecutor(NodeExecutorBase):
     # each scheduler should only have one local executor.
     @override
-    async def run_node(self, node: ComputeFlowNodeModel, inputs: dict[str, DataHandle]) -> Optional[dict[str, DataHandle]]:
+    async def run_node(self, node: ComputeNodeModel, inputs: dict[str, DataHandle]) -> Optional[dict[str, DataHandle]]:
         assert node.runtime is not None 
         node_inp_handles = node.runtime.inp_handles
         node_inp_handles_dict = {h.name: h for h in node_inp_handles}
@@ -51,3 +51,6 @@ class LocalNodeExecutor(NodeExecutorBase):
 
     async def close(self):
         return None
+
+    def is_local(self) -> bool: 
+        return True

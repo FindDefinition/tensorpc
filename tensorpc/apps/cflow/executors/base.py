@@ -1,13 +1,18 @@
 import contextlib
 import enum
-from typing import Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 from tensorpc.core.annolib import Undefined, undefined
+from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.datamodel.draft import DraftUpdateOp
 from tensorpc.dock import mui
 import abc 
-from tensorpc.apps.cflow.model import ComputeFlowNodeModel, ResourceDesp
+from tensorpc.apps.cflow.coremodel import ResourceDesp
 from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core import BuiltinServiceKeys
+
+if TYPE_CHECKING:
+    from tensorpc.apps.cflow.model import ComputeNodeModel
+
 
 class ExecutorType(enum.IntEnum):
     SINGLE_PROC = 0
@@ -15,13 +20,14 @@ class ExecutorType(enum.IntEnum):
     # if handle data come from local executor, we send data directly (saved on data field) instead of remote handle.
     LOCAL = 2
 
-def get_serv_key_from_exec_type(type: ExecutorType) -> str:
-    if type == ExecutorType.SINGLE_PROC:
-        return str(BuiltinServiceKeys.ComputeFlowSingleProcExec)
-    elif type == ExecutorType.TORCH_DIST:
-        return str(BuiltinServiceKeys.ComputeFlowTorchDistExec)
-    else:
-        raise NotImplementedError(f"ExecutorType {type} not supported.")
+_NODE_EXEC_SERVICE = f"tensorpc.apps.cflow.services.executors::NodeExecutorService"
+
+
+class RemoteExecutorServiceKeys(enum.Enum):
+    GET_DATA = f"{_NODE_EXEC_SERVICE}.get_data"
+    RELEASE_DATA = f"{_NODE_EXEC_SERVICE}.release_data"
+    GET_DESP = f"{_NODE_EXEC_SERVICE}.get_desp"
+    RUN_NODE = f"{_NODE_EXEC_SERVICE}.run_node"
 
 @dataclasses.dataclass
 class ExecutorRemoteDesp:
@@ -60,20 +66,21 @@ class DataHandle:
 
     def __hash__(self):
         return hash(self.id)
-        
-# @dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
-# class RemoteDataHandle(DataHandle):
-#     # for distributed task, we won't send node run result back to scheduler, instead we send back the data handle.
-#     # other executors can use this handle to get the data directly.
-#     remote_obj: Optional[]
 
-#     def has_data(self):
-#         return not isinstance(self.data, Undefined)
+@dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
+class RemoteGrpcDataHandle(DataHandle):
+    remote_obj: Optional[AsyncRemoteManager] = None
+    async def get_data_from_remote(self):
+        if self.has_data():
+            return self.data
+        assert self.remote_obj is not None
+        return await self.remote_obj.chunked_remote_call(RemoteExecutorServiceKeys.GET_DATA, self.id)
 
-#     async def get_data_from_remote(self):
-#         if self.has_data():
-#             return self.data
-#         raise NotImplementedError("you need to inherit and provide rpc call to get data from remote.")
+    async def release(self):
+        if self.has_data():
+            self.data = undefined
+        assert self.remote_obj is not None
+        await self.remote_obj.chunked_remote_call(RemoteExecutorServiceKeys.RELEASE_DATA, self.id)
 
 class NodeExecutorBase(abc.ABC):
     def __init__(self, id: str, desp: ResourceDesp):
@@ -115,8 +122,11 @@ class NodeExecutorBase(abc.ABC):
         return None
 
     @abc.abstractmethod
-    async def run_node(self, node: ComputeFlowNodeModel, inputs: dict[str, DataHandle]) -> Optional[dict[str, DataHandle]]: ...
+    async def run_node(self, node: "ComputeNodeModel", inputs: dict[str, DataHandle]) -> Optional[dict[str, DataHandle]]: ...
 
     @abc.abstractmethod
     async def close(self):
         return None
+
+    def is_local(self) -> bool: 
+        return False

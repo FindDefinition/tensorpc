@@ -5,15 +5,17 @@ import traceback
 import uuid
 
 from tensorpc.apps.cflow.executors.handlemgr import DataHandleManager
+from tensorpc.apps.cflow.executors.local import LocalNodeExecutor
 from tensorpc.apps.cflow.logger import CFLOW_LOGGER
 from tensorpc.apps.cflow.nodes.cnode.ctx import enter_flow_ui_node_context
+from tensorpc.apps.cflow.nodes.cnode.registry import ComputeNodeFlags
 from tensorpc.dock.components.flowui import FlowInternals
 from tensorpc.dock.components.models.flow import BaseEdgeModel
 from .base import SchedulerBase
 
 import abc
 from typing import Any, Callable, Optional
-from tensorpc.apps.cflow.model import ComputeFlowDrafts, ComputeFlowModel, ComputeFlowModelRoot, ComputeFlowNodeDrafts, ComputeFlowNodeModel, ComputeNodeStatus, ComputeNodeType, get_compute_flow_drafts
+from tensorpc.apps.cflow.model import ComputeFlowDrafts, ComputeFlowModel, ComputeFlowModelRoot, ComputeFlowNodeDrafts, ComputeNodeModel, ComputeNodeStatus, ComputeNodeType, ResourceDesp, get_compute_flow_drafts
 from tensorpc.apps.cflow.executors.base import DataHandle, ExecutorRemoteDesp, NodeExecutorBase
 from typing_extensions import override
 from tensorpc.dock.components import mui
@@ -37,10 +39,10 @@ class SimpleSchedulerState:
         self.wait_node_inputs.update(node_inputs)
 
 
-def filter_node_cant_schedule(nodes: list[ComputeFlowNodeModel],
+def filter_node_cant_schedule(nodes: list[ComputeNodeModel],
                               node_inputs: dict[str, dict[str, Any]]):
-    new_nodes: list[ComputeFlowNodeModel] = []
-    nodes_dont_have_enough_inp: list[ComputeFlowNodeModel] = []
+    new_nodes: list[ComputeNodeModel] = []
+    nodes_dont_have_enough_inp: list[ComputeNodeModel] = []
 
     for n in nodes:
         assert n.runtime is not None
@@ -61,9 +63,9 @@ def filter_node_cant_schedule(nodes: list[ComputeFlowNodeModel],
 
 
 def get_node_inputs_sched_in_future(
-        flow_runtime: FlowInternals[ComputeFlowNodeModel,
+        flow_runtime: FlowInternals[ComputeNodeModel,
                                     BaseEdgeModel], next_node_ids: list[str],
-        node_wont_schedule: list[ComputeFlowNodeModel],
+        node_wont_schedule: list[ComputeNodeModel],
         node_inputs: dict[str, dict[str, Any]]):
     next_node_ids_set = set(n for n in next_node_ids)
 
@@ -81,7 +83,7 @@ def get_node_inputs_sched_in_future(
 
 
 def _get_next_node_inputs(root: ComputeFlowModelRoot,
-                          flow_runtime: FlowInternals[ComputeFlowNodeModel,
+                          flow_runtime: FlowInternals[ComputeNodeModel,
                                                       BaseEdgeModel],
                           node_id_to_outputs: dict[str, dict[str, Any]]):
     new_node_inputs: dict[str, dict[str, Any]] = {}
@@ -132,39 +134,71 @@ class SimpleScheduler(SchedulerBase):
         return self._drafts
 
     def assign_node_executor(
-            self, nodes: list[ComputeFlowNodeModel],
+            self, nodes: list[ComputeNodeModel],
             executors: list[NodeExecutorBase]) -> dict[str, NodeExecutorBase]:
         res: dict[str, NodeExecutorBase] = {}
         if not nodes:
             return res
+        local_ex: Optional[NodeExecutorBase] = None
         # 1. group nodes by executor id
-        ex_id_to_nodes_sortkey: dict[str, list[tuple[ComputeFlowNodeModel,
+        ex_id_to_nodes_sortkey: dict[str, list[tuple[ComputeNodeModel,
+                                                    ResourceDesp,
                                                      tuple[int, ...]]]] = {}
         for n in nodes:
             ex_id = n.vExecId
             if ex_id not in ex_id_to_nodes_sortkey:
                 ex_id_to_nodes_sortkey[ex_id] = []
-            ex_id_to_nodes_sortkey[ex_id].append(
-                (n, (n.vGPU, n.vGPUMem, n.vCPU, n.vMem)))
+            assert n.runtime is not None 
+            if n.runtime.cfg.flags | ComputeNodeFlags.EXEC_ALWAYS_LOCAL:
+                if local_ex is None:
+                    for ex in executors:
+                        if ex.is_local():
+                            local_ex = ex
+                            break 
+                    assert local_ex is not None, "Local executor is required for observer nodes"
+                res[n.id] = local_ex
+            else:
+                nrc = n.vResource
+                if n.runtime.cfg.resource_desp is not None:
+                    nrc = n.runtime.cfg.resource_desp 
+                ex_id_to_nodes_sortkey[ex_id].append(
+                    (n, nrc, (nrc.GPU, nrc.GPUMem, nrc.CPU, nrc.Mem)))
         # 2. assign executor to nodes
         for ex_id, node_group in ex_id_to_nodes_sortkey.items():
-            node_group.sort(key=lambda x: x[1], reverse=True)
+            node_group.sort(key=lambda x: x[2], reverse=True)
+            # 1. if user exec id is same as executor id, try to assign to this executor
+            exactly_match = False
+            for ex in executors:
+                if ex.get_id() == ex_id:
+                    ex_rc = ex.get_current_resource_desp()
+                    max_node_rc_req = node_group[0][1]
+                    if ex_rc.is_request_sufficient(max_node_rc_req):
+                        exactly_match = True
+                        # try to assign all node to this executor
+                        for n, nrc, _ in node_group:
+                            if ex_rc.is_request_sufficient(max_node_rc_req):
+                                res[n.id] = ex
+                                ex_rc = ex_rc.get_request_remain_rc(nrc)
+                    else:
+                        CFLOW_LOGGER.warning("Executor %s(%s) can't handle node %s(%s)", ex.get_id(), str(ex_rc), node_group[0][0].id, str(max_node_rc_req))
+                    break
+            if exactly_match:
+                continue
             # find first executor that can handle node with largest resource
             for ex in executors:
                 ex_rc = ex.get_current_resource_desp()
-                max_node_rc_req = node_group[0][0].get_request_resource_desp()
+                max_node_rc_req = node_group[0][1]
                 if ex_rc.is_request_sufficient(max_node_rc_req):
                     # try to assign all node to this executor
-                    for n, _ in node_group:
-                        node_rc_req = n.get_request_resource_desp()
+                    for n, nrc, _ in node_group:
                         if ex_rc.is_request_sufficient(max_node_rc_req):
                             res[n.id] = ex
-                            ex_rc = ex_rc.get_request_remain_rc(node_rc_req)
+                            ex_rc = ex_rc.get_request_remain_rc(nrc)
                     break
         assert res, "no executor can handle nodes"
         return res
 
-    async def _schedule_node(self, node: ComputeFlowNodeModel, node_inp,
+    async def _schedule_node(self, node: ComputeNodeModel, node_inp,
                              node_ex: NodeExecutorBase,
                              node_drafts: ComputeFlowNodeDrafts,
                              dm_comp: mui.DataModel[ComputeFlowModelRoot]):
@@ -194,13 +228,13 @@ class SimpleScheduler(SchedulerBase):
             await dm_comp.send_exception(exc)
             return None, False
 
-    def _get_nodes_can_schedule(self, nodes: list[ComputeFlowNodeModel],
+    def _get_nodes_can_schedule(self, nodes: list[ComputeNodeModel],
                                 node_inputs: dict[str, dict[str, Any]],
                                 executors: list[NodeExecutorBase]):
         valid_nodes, inp_not_enough_nodes = filter_node_cant_schedule(
             nodes, node_inputs)
         assigned_execs = self.assign_node_executor(valid_nodes, executors)
-        valid_nodes_dict: dict[str, ComputeFlowNodeModel] = {}
+        valid_nodes_dict: dict[str, ComputeNodeModel] = {}
         for n in valid_nodes:
             if n.id not in assigned_execs:
                 inp_not_enough_nodes.append(n)
@@ -209,7 +243,7 @@ class SimpleScheduler(SchedulerBase):
         return valid_nodes_dict, assigned_execs
 
     def _get_node_scheduled_task(self, flow: ComputeFlowModel,
-                                 node: ComputeFlowNodeModel,
+                                 node: ComputeNodeModel,
                                  assigned_execs: dict[str, NodeExecutorBase],
                                  node_inputs_state: DataHandleManager):
         node_ex = assigned_execs[node.id]
@@ -276,7 +310,7 @@ class SimpleScheduler(SchedulerBase):
                         executors: list[NodeExecutorBase],
                         shutdown_ev: asyncio.Event) -> None:
         nodes = [flow.nodes[node_id] for node_id in node_inputs.keys()]
-        nodes_to_schedule: list[ComputeFlowNodeModel] = nodes
+        nodes_to_schedule: list[ComputeNodeModel] = nodes
         # cur_anode_iters: dict[str, AsyncIterator] = {}
         assert self._state is not None
         shutdown_task = asyncio.create_task(shutdown_ev.wait())
@@ -286,6 +320,11 @@ class SimpleScheduler(SchedulerBase):
             node_inputs.copy())
         shutdown_task = asyncio.create_task(shutdown_ev.wait())
         dm_comp = self.get_datamodel_component()
+
+        for node in nodes_to_schedule:
+            if node.runtime is None:
+                node.runtime = node.get_node_runtime(dm_comp.get_model())
+
         nodes_can_schedule, assigned_execs = self._get_nodes_can_schedule(
             nodes_to_schedule, node_inputs, executors)
         if not nodes_can_schedule:
@@ -352,12 +391,15 @@ class SimpleScheduler(SchedulerBase):
                             n)
                         wait_inputs.pop(n)
                 node_inputs_state.force_add_new_inputs(wait_inputs)
-                nodes_to_schedule: list[ComputeFlowNodeModel] = [
+                nodes_to_schedule: list[ComputeNodeModel] = [
                     flow.nodes[nid]
                     for nid in node_inputs_state.get_current_node_ids()
                     if nid not in pending_node_ids
                 ]
                 # print(done_node_ids, [n.id for n in nodes_to_schedule])
+                for node in nodes_to_schedule:
+                    if node.runtime is None:
+                        node.runtime = node.get_node_runtime(dm_comp.get_model())
                 nodes_can_schedule, assigned_execs = self._get_nodes_can_schedule(
                     nodes_to_schedule,
                     node_inputs_state.get_current_node_inputs(), executors)

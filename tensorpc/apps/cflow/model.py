@@ -12,7 +12,7 @@ from tensorpc.core.datamodel.draftstore import (DraftStoreMapMeta)
 from tensorpc.utils.uniquename import UniqueNamePool
 import uuid
 from tensorpc.apps.cflow.nodes.cnode.registry import NODE_REGISTRY
-
+from .coremodel import ResourceDesp
 
 class ComputeNodeType(enum.IntEnum):
     # compute node
@@ -43,8 +43,8 @@ class DetailType(enum.IntEnum):
 
 @dataclasses.dataclass
 class FlowSettings:
-    isPreviewVisible: bool = True
-    isEditorVisible: bool = True
+    isRightPanelVisible: bool = True
+    isBottomPanelVisible: bool = True
 
 @dataclasses.dataclass(kw_only=True)
 class InlineCodeInfo:
@@ -56,42 +56,7 @@ class InlineCode:
     code: str = ""
 
 @dataclasses.dataclass
-class ResourceDesp:
-    # -1 means use all
-    CPU: int = -1
-    Mem: int = -1
-    # number of GPU can't be -1 because it shouldn't be shared.
-    GPU: int = 0
-    GPUMem: int = -1
-
-    def validate(self):
-        assert self.GPU >= 0
-
-    def is_request_sufficient(self, req_rc: "ResourceDesp"):
-        if self.CPU != -1 and self.CPU < req_rc.CPU:
-            return False
-        if self.Mem != -1 and self.Mem < req_rc.Mem:
-            return False
-        if self.GPU != -1 and self.GPU < req_rc.GPU:
-            return False
-        if self.GPUMem != -1 and self.GPUMem < req_rc.GPUMem:
-            return False
-        return True
-
-    def get_request_remain_rc(self, req_rc: "ResourceDesp"):
-        return ResourceDesp(CPU=self.CPU - req_rc.CPU if self.CPU != -1 else -1,
-                            Mem=self.Mem - req_rc.Mem if self.Mem != -1 else -1,
-                            GPU=self.GPU - req_rc.GPU if self.GPU != -1 else -1,
-                            GPUMem=self.GPUMem - req_rc.GPUMem if self.GPUMem != -1 else -1)
-
-    def add_request_rc(self, req_rc: "ResourceDesp"):
-        return ResourceDesp(CPU=self.CPU + req_rc.CPU if self.CPU != -1 else -1,
-                            Mem=self.Mem + req_rc.Mem if self.Mem != -1 else -1,
-                            GPU=self.GPU + req_rc.GPU if self.GPU != -1 else -1,
-                            GPUMem=self.GPUMem + req_rc.GPUMem if self.GPUMem != -1 else -1)
-
-@dataclasses.dataclass
-class ComputeFlowNodeModel(BaseNodeModel):
+class ComputeNodeModel(BaseNodeModel):
     # core type
     nType: ComputeNodeType = ComputeNodeType.COMPUTE
     # subflow props
@@ -114,23 +79,20 @@ class ComputeFlowNodeModel(BaseNodeModel):
     isCached: bool = False
     readOnly: bool = False
     flowKey: Optional[str] = None
-    hasDetail: bool = False
+    hasDetail: bool = True
     # schedule props
     run_in_proc: bool = False  # only valid when no vrc props set.
     # vrc props
     # for compute node, this indicate the resource it require
     # for virtual resource (vrc) node, this indicate the resource it provide
-    vCPU: int = -1
-    vMem: int = -1
-    vGPU: int = -1
-    vGPUMem: int = -1
+    vResource: ResourceDesp = dataclasses.field(default_factory=ResourceDesp)
     # nodes with same exec id will always be scheduled in same executor.
     vExecId: str = ""
     # backend only fields
     runtime: Annotated[Optional[ComputeNodeRuntime], DraftFieldMeta(is_external=True)] = None
 
     def get_request_resource_desp(self):
-        return ResourceDesp(CPU=self.vCPU, Mem=self.vMem, GPU=self.vGPU, GPUMem=self.vGPUMem)
+        return self.vResource
 
     def get_node_runtime(self, root_model: "ComputeFlowModelRoot") -> ComputeNodeRuntime:
         if self.codeKey is not None:
@@ -163,8 +125,8 @@ class ComputeFlowNodeModel(BaseNodeModel):
 
 
 @dataclasses.dataclass(kw_only=True)
-class ComputeFlowModel(BaseFlowModel[ComputeFlowNodeModel, BaseEdgeModel]):
-    nodes: Annotated[dict[str, ComputeFlowNodeModel],
+class ComputeFlowModel(BaseFlowModel[ComputeNodeModel, BaseEdgeModel]):
+    nodes: Annotated[dict[str, ComputeNodeModel],
                      DraftStoreMapMeta(attr_key="n")] = dataclasses.field(
                          default_factory=dict)
     selected_node: Optional[str] = None
@@ -248,7 +210,7 @@ class ComputeFlowModelRoot(ComputeFlowModel):
     def get_uid_from_path(self):
         return UniqueTreeIdForTree.from_parts(self.cur_path).uid_encoded
 
-    def get_or_create_node_runtime(self, node: ComputeFlowNodeModel) -> ComputeNodeRuntime:
+    def get_or_create_node_runtime(self, node: ComputeNodeModel) -> ComputeNodeRuntime:
         if node.runtime is None:
             node.runtime = node.get_node_runtime(self)
         return node.runtime
@@ -259,7 +221,7 @@ class ComputeFlowDrafts:
     cur_model: ComputeFlowModel
     preview_path: list[str]
     preview_model: ComputeFlowModel
-    selected_node: ComputeFlowNodeModel
+    selected_node: ComputeNodeModel
     selected_node_code: str
     selected_node_code_path: str
     selected_node_code_language: str
@@ -282,7 +244,7 @@ class ComputeFlowDrafts:
 
 @dataclasses_relaxed.dataclass
 class ComputeFlowNodeDrafts:
-    node: ComputeFlowNodeModel
+    node: ComputeNodeModel
     node_state: Any
     code: str
     code_path: str
@@ -290,7 +252,7 @@ class ComputeFlowNodeDrafts:
 
 
 def get_code_drafts(root_draft: ComputeFlowModelRoot,
-                    node_draft: ComputeFlowNodeModel):
+                    node_draft: ComputeNodeModel):
     code_draft_may_module_id = D.where(
         node_draft.moduleId != "",
         root_draft.path_to_code[root_draft.module_id_to_code_info[
@@ -345,7 +307,7 @@ def get_compute_flow_drafts(root_draft: ComputeFlowModelRoot):
         return_type=int)  # type: ignore
 
     show_editor = D.logical_and(
-        root_draft.settings.isEditorVisible,
+        root_draft.settings.isRightPanelVisible,
         D.logical_or(selected_node.nType == ComputeNodeType.MARKDOWN.value,
                      D.logical_and(selected_node.nType == ComputeNodeType.COMPUTE.value, selected_node.key == "")))
     node_has_detail = D.logical_or(
@@ -353,9 +315,10 @@ def get_compute_flow_drafts(root_draft: ComputeFlowModelRoot):
                       selected_node.hasDetail),
         selected_node_detail_type == DetailType.SUBFLOW.value)
     show_detail = D.logical_and(
-        root_draft.settings.isPreviewVisible,
+        root_draft.settings.isBottomPanelVisible,
         D.logical_and(selected_node_detail_type != DetailType.NONE.value,
                       node_has_detail))
+    
     return ComputeFlowDrafts(root_draft, cur_model_draft, prev_path_draft,
                              preview_model_draft, selected_node, code_draft,
                              code_path_draft, code_language, selected_node_detail_type,

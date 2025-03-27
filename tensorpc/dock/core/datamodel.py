@@ -185,6 +185,14 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                 type_dict[k] = DraftEventType.InitChange
             # TODO if eval failed, should we call it during init?
             ev = DraftChangeEvent(type_dict, {}, val_dict)
+            if handler.user_eval_vars:
+                # user can define custom evaluates to get new model value.
+                user_vars = {}
+                for k in handler.user_eval_vars.keys():
+                    obj = handler.evaluate_user_eval_var_noexcept(k, self.model)
+                    user_vars[k] = obj
+                ev.user_eval_vars = user_vars
+
             with prevent_draft_update():
                 await self.run_callback(partial(handler.handler, ev),
                                         change_status=False,

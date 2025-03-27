@@ -2,14 +2,19 @@ import traceback
 from typing import Any, Optional
 from tensorpc.apps.cflow.nodes.cnode.ctx import ComputeFlowNodeContext, enter_flow_ui_node_context_object
 from tensorpc.core.asyncclient import AsyncRemoteManager
-from tensorpc.apps.cflow.model import ComputeFlowNodeModel, ComputeNodeRuntime
-from tensorpc.apps.cflow.executors.base import NodeExecutorBase, DataHandle, ExecutorRemoteDesp, get_serv_key_from_exec_type
+from tensorpc.apps.cflow.model import ComputeNodeModel, ComputeNodeRuntime
+from tensorpc.apps.cflow.executors.base import ExecutorType, NodeExecutorBase, DataHandle, ExecutorRemoteDesp, RemoteExecutorServiceKeys
 import inspect 
 import uuid
+from tensorpc import prim
+from tensorpc.core import inspecttools, marker
 
 from tensorpc.core.datamodel.draft import capture_draft_update, draft_from_node_and_type
 from tensorpc.core.datamodel.draftast import DraftASTNode
+from tensorpc.core.serviceunit import ServiceEventType
+from tensorpc.core.tree_id import UniqueTreeId
 from tensorpc.dock.components import mui 
+from tensorpc.dock.serv_names import serv_names as app_serv_names
 
 class _NodeStateManager:
     def __init__(self):
@@ -18,7 +23,7 @@ class _NodeStateManager:
         self._node_id_to_preview_layout: dict[str, Optional[mui.FlexBox]] = {}
         self._node_id_to_detail_layout: dict[str, Optional[mui.FlexBox]] = {}
 
-    def process_node(self, node: ComputeFlowNodeModel, 
+    async def process_node(self, node: ComputeNodeModel, 
                 node_impl_code: str):
         node_id = node.id 
         cur_impl_key = node.impl.code if node.key == "" else node.key
@@ -34,6 +39,10 @@ class _NodeStateManager:
             preview_layout = runtime.cnode.get_node_preview_layout(None)
             self._node_id_to_preview_layout[node_id] = preview_layout
             self._node_id_to_detail_layout[node_id] = detail_layout
+            if preview_layout is not None:
+                await prim.get_service(app_serv_names.REMOTE_COMP_SET_LAYOUT_OBJECT)(UniqueTreeId.from_parts([node_id, "preview"]), preview_layout)
+            if detail_layout is not None:
+                await prim.get_service(app_serv_names.REMOTE_COMP_SET_LAYOUT_OBJECT)(UniqueTreeId.from_parts([node_id, "detail"]), detail_layout)
         runtime = self._node_id_to_node_rt[node_id] 
         return runtime
 
@@ -43,35 +52,61 @@ class _NodeStateManager:
         self._node_id_to_preview_layout.clear()
         self._node_id_to_detail_layout.clear()
 
-class SingleProcNodeExecutor:
+class _RemoteObjectStateManager:
     def __init__(self):
+        self._exec_id_to_robj: dict[str, AsyncRemoteManager] = {}
+
+    async def clear(self):
+        for robj in self._exec_id_to_robj.values():
+            try:
+                await robj.close()
+            except:
+                traceback.print_exc()
+        self._exec_id_to_robj.clear()
+
+    async def get_or_create_remote_obj(self, exec_desp: ExecutorRemoteDesp) -> AsyncRemoteManager:
+        if exec_desp.id not in self._exec_id_to_robj:
+            self._exec_id_to_robj[exec_desp.id] = AsyncRemoteManager(exec_desp.url)
+        else:
+            prev_robj = self._exec_id_to_robj[exec_desp.id]
+            if prev_robj.url != exec_desp.url:
+                try:
+                    await prev_robj.close()
+                except:
+                    traceback.print_exc()
+                self._exec_id_to_robj[exec_desp.id] = AsyncRemoteManager(exec_desp.url)
+        return self._exec_id_to_robj[exec_desp.id]
+
+# 0023350448
+
+
+class SingleProcNodeExecutor:
+    def __init__(self, desp: ExecutorRemoteDesp):
         self._cached_data: dict[str, Any] = {}
-        self._id_to_robjs: dict[str, AsyncRemoteManager] = {}
-
         self._node_state_mgr = _NodeStateManager()
+        self._remote_state_mgr = _RemoteObjectStateManager()
+        self._desp = desp
 
-        self._desp = ExecutorRemoteDesp.get_empty()
+    def get_executor_remote_desp(self) -> ExecutorRemoteDesp: 
+        return self._desp
 
-    def clear(self):
+    async def clear(self):
         self._cached_data.clear()
-        self._id_to_robjs.clear()
         self._node_state_mgr.clear()
         self._desp = ExecutorRemoteDesp.get_empty()
-
-    async def init_set_desp_and_remote_clients(self, desp: ExecutorRemoteDesp, id_to_desps: dict[str, ExecutorRemoteDesp]):
-        self.clear()
-        self._desp = desp
-        for id, desp in id_to_desps.items():
-            self._id_to_robjs[id] = AsyncRemoteManager(desp.url)
+        await self._remote_state_mgr.clear()
 
     def get_cached_data(self, data_id: str) -> Any:
         return self._cached_data[data_id]
+
+    def remove_cached_data(self, data_id: str):
+        return self.remove_cached_datas({data_id})
 
     def remove_cached_datas(self, data_ids: set[str]):
         for data_id in data_ids:
             self._cached_data.pop(data_id, None)
 
-    async def run_node(self, node: ComputeFlowNodeModel, 
+    async def run_node(self, node: ComputeNodeModel, 
                 node_impl_code: str,
                 node_state_dict: dict[str, Any],
                 node_state_ast: DraftASTNode, 
@@ -80,7 +115,7 @@ class SingleProcNodeExecutor:
         if removed_data_ids is not None:
             self.remove_cached_datas(removed_data_ids)
         node_id = node.id 
-        runtime = self._node_state_mgr.process_node(node, node_impl_code)
+        runtime = await self._node_state_mgr.process_node(node, node_impl_code)
         cnode = runtime.cnode
         compute_func = cnode.get_compute_func()
         inputs_val = {}
@@ -92,9 +127,8 @@ class SingleProcNodeExecutor:
                 if inp.executor_desp.id == self._desp.id:
                     inputs_val[k] = self.get_cached_data(inp.id)
                 else:
-                    key = get_serv_key_from_exec_type(inp.executor_desp.type)
-                    robj = self._id_to_robjs[inp.executor_desp.id]
-                    inputs_val[k] = await robj.chunked_remote_call(f"{key}.get_cached_data", inp.id)
+                    robj = await self._remote_state_mgr.get_or_create_remote_obj(inp.executor_desp)
+                    inputs_val[k] = await robj.chunked_remote_call(RemoteExecutorServiceKeys.GET_DATA, inp.id)
         with capture_draft_update() as ctx:
             if runtime.cfg.state_dcls is not None:
                 try:
@@ -126,7 +160,64 @@ class SingleProcNodeExecutor:
 
 class TorchDistNodeExecutor:
     # TODO
-    def __init__(self):
+    def __init__(self, desp: ExecutorRemoteDesp):
         pass 
-    def clear(self):
+
+    async def clear(self):
         pass
+
+    def get_cached_data(self, data_id: str) -> Any:
+        raise NotImplementedError 
+
+    def remove_cached_data(self, data_id: str):
+        raise NotImplementedError 
+
+    def remove_cached_datas(self, data_ids: set[str]):
+        raise NotImplementedError 
+
+    async def run_node(self, node: ComputeNodeModel, 
+                node_impl_code: str,
+                node_state_dict: dict[str, Any],
+                node_state_ast: DraftASTNode, 
+                inputs: dict[str, DataHandle], 
+                removed_data_ids: Optional[set[str]] = None) -> Optional[dict[str, DataHandle]]:
+        raise NotImplementedError 
+
+
+class NodeExecutorService:
+    def __init__(self, desp: dict[str, Any]):
+        desp_obj = ExecutorRemoteDesp(**desp)
+        self._desp = desp_obj
+        if desp_obj.type == ExecutorType.SINGLE_PROC:
+            self._executor = SingleProcNodeExecutor(desp_obj)
+        elif desp_obj.type == ExecutorType.TORCH_DIST:
+            self._executor = TorchDistNodeExecutor(desp_obj)
+        else:
+            raise ValueError(f"unsupported executor type {desp_obj.type}")
+
+    def get_executor_remote_desp(self) -> ExecutorRemoteDesp: 
+        return self._desp
+
+    @marker.mark_server_event(event_type=ServiceEventType.Exit)
+    async def close(self):
+        await self.clear()
+
+    async def clear(self):
+        return await self._executor.clear()
+
+    def get_cached_data(self, data_id: str) -> Any:
+        return self._executor.get_cached_data(data_id)
+
+    def remove_cached_data(self, data_id: str):
+        return self._executor.remove_cached_data(data_id)
+
+    def remove_cached_datas(self, data_ids: set[str]):
+        return self._executor.remove_cached_datas(data_ids)
+
+    async def run_node(self, node: ComputeNodeModel, 
+                node_impl_code: str,
+                node_state_dict: dict[str, Any],
+                node_state_ast: DraftASTNode, 
+                inputs: dict[str, DataHandle], 
+                removed_data_ids: Optional[set[str]] = None) -> Optional[dict[str, DataHandle]]:
+        return await self._executor.run_node(node, node_impl_code, node_state_dict, node_state_ast, inputs, removed_data_ids)
