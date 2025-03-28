@@ -1,9 +1,14 @@
 from functools import partial
+import traceback
 from typing import (TYPE_CHECKING, Annotated, Any, Callable, Coroutine, Generic,
                     Iterable, Optional, Sequence, Type,
                     TypeVar, Union, cast)
 
+import rich
+
+from tensorpc.apps.cflow.logger import CFLOW_LOGGER
 import tensorpc.core.dataclass_dispatch as dataclasses
+from tensorpc.core.datamodel.asdict import as_dict_no_undefined
 from tensorpc.core.datamodel.draft import DraftBase, DraftFieldMeta, DraftObject, get_draft_anno_type, get_draft_ast_node, insert_assign_draft_op
 from tensorpc.core.datamodel.draftast import evaluate_draft_ast, evaluate_draft_ast_noexcept
 from tensorpc.core.datamodel.events import DraftChangeEvent, DraftEventType
@@ -47,7 +52,8 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
     def __init__(self, flow_comp: Flow, model_getter: Callable[[], T_flow_model], draft: Any, 
             to_ui_node: Callable[[T_flow_model, str], Node], to_ui_edge: Optional[Callable[[T_edge_model], Edge]] = None,
             to_model_edge: Optional[Callable[[Edge], T_edge_model]] = None,
-            flow_uid_getter: Optional[Callable[[], str]] = None) -> None:
+            flow_uid_getter: Optional[Callable[[], str]] = None,
+            debug_id: str = "flow") -> None:
         """
         Args:
             flow_comp (Flow): flow component instance.
@@ -60,7 +66,7 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
                 if not provided, your edge model must be BaseEdgeModel, no subclass.
         """
         
-        assert isinstance(draft, DraftObject)
+        assert isinstance(draft, DraftObject), f"draft must be DraftObject, but got {type(draft)}"
         draft_type = get_draft_anno_type(draft)
         assert draft_type is not None and draft_type.is_dataclass_type()
         assert issubclass(draft_type.origin_type, BaseFlowModel)
@@ -83,6 +89,8 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
 
         self._is_binded = False
 
+        self._debug_id = debug_id
+
     def _get_cur_model_may_nested(self):
         root_model = self._model_getter()
         cur_model = evaluate_draft_ast_noexcept(get_draft_ast_node(self._draft), root_model)
@@ -95,20 +103,26 @@ class BaseFlowModelBinder(Generic[T_flow_model, T_node_model, T_edge_model]):
         cur_ui_edge_ids = set([n.id for n in self._flow_comp.edges])
         cur_model = self._get_cur_model_may_nested()
         if cur_model is None:
+            CFLOW_LOGGER.warning("Flow %s clear triggered.", self._debug_id)
             # eval failed, use empty flow
             await self._flow_comp.clear()
             
         else:
-            cur_model_edges_ids = set(cur_model.edges.keys())
-            ui_node_id_to_del = cur_model_edges_ids - cur_ui_edge_ids
-            ui_new_edges: list[Edge] = []
-            for n in cur_model_edges_ids:
-                if n not in cur_ui_edge_ids:
-                    ui_new_edges.append(self._to_ui_edge(cast(T_edge_model, cur_model.edges[n])))
-            if ui_node_id_to_del:
-                await self._flow_comp.delete_edges_by_ids(list(ui_node_id_to_del))
-            if ui_new_edges:
-                await self._flow_comp.add_edges(ui_new_edges)
+            try:
+                cur_model_edges_ids = set(cur_model.edges.keys())
+                ui_node_id_to_del = cur_model_edges_ids - cur_ui_edge_ids
+                ui_new_edges: list[Edge] = []
+                for n in cur_model_edges_ids:
+                    if n not in cur_ui_edge_ids:
+                        ui_new_edges.append(self._to_ui_edge(cast(T_edge_model, cur_model.edges[n])))
+                if ui_node_id_to_del:
+                    await self._flow_comp.delete_edges_by_ids(list(ui_node_id_to_del))
+                if ui_new_edges:
+                    await self._flow_comp.add_edges(ui_new_edges)
+            except:
+                # rich.print(as_dict_no_undefined(cur_model))
+                CFLOW_LOGGER.error("Flow %s set failed.", self._debug_id)
+                raise 
 
 
     async def _sync_ui_nodes_to_model(self):

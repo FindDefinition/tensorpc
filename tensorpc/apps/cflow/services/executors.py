@@ -1,5 +1,6 @@
+import importlib
 import traceback
-from typing import Any, Optional
+from typing import Any, Optional, Union
 from tensorpc.apps.cflow.nodes.cnode.ctx import ComputeFlowNodeContext, enter_flow_ui_node_context_object
 from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.apps.cflow.model import ComputeNodeModel, ComputeNodeRuntime
@@ -9,7 +10,7 @@ import uuid
 from tensorpc import prim
 from tensorpc.core import inspecttools, marker
 
-from tensorpc.core.datamodel.draft import capture_draft_update, draft_from_node_and_type
+from tensorpc.core.datamodel.draft import DraftUpdateOp, capture_draft_update, draft_from_node_and_type
 from tensorpc.core.datamodel.draftast import DraftASTNode
 from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.core.tree_id import UniqueTreeId
@@ -40,9 +41,9 @@ class _NodeStateManager:
             self._node_id_to_preview_layout[node_id] = preview_layout
             self._node_id_to_detail_layout[node_id] = detail_layout
             if preview_layout is not None:
-                await prim.get_service(app_serv_names.REMOTE_COMP_SET_LAYOUT_OBJECT)(UniqueTreeId.from_parts([node_id, "preview"]), preview_layout)
+                await prim.get_service(app_serv_names.REMOTE_COMP_SET_LAYOUT_OBJECT)(UniqueTreeId.from_parts([node_id, "preview"]).uid_encoded, preview_layout)
             if detail_layout is not None:
-                await prim.get_service(app_serv_names.REMOTE_COMP_SET_LAYOUT_OBJECT)(UniqueTreeId.from_parts([node_id, "detail"]), detail_layout)
+                await prim.get_service(app_serv_names.REMOTE_COMP_SET_LAYOUT_OBJECT)(UniqueTreeId.from_parts([node_id, "detail"]).uid_encoded, detail_layout)
         runtime = self._node_id_to_node_rt[node_id] 
         return runtime
 
@@ -111,7 +112,7 @@ class SingleProcNodeExecutor:
                 node_state_dict: dict[str, Any],
                 node_state_ast: DraftASTNode, 
                 inputs: dict[str, DataHandle], 
-                removed_data_ids: Optional[set[str]] = None) -> Optional[dict[str, DataHandle]]:
+                removed_data_ids: Optional[set[str]] = None) -> tuple[Optional[dict[str, DataHandle]], list[DraftUpdateOp]]:
         if removed_data_ids is not None:
             self.remove_cached_datas(removed_data_ids)
         node_id = node.id 
@@ -136,7 +137,9 @@ class SingleProcNodeExecutor:
                 except Exception as e:
                     traceback.print_exc()
                     state_obj = runtime.cfg.state_dcls()
-                draft = draft_from_node_and_type(node_state_ast, runtime.cfg.state_dcls)
+                draft = draft_from_node_and_type(node_state_ast, Any)
+                # print(runtime.cfg.state_dcls, draft, type(draft))
+
                 with enter_flow_ui_node_context_object(ComputeFlowNodeContext(node_id, state_obj, draft)):
                     data = compute_func(**inputs_val)
                     if inspect.iscoroutine(data):
@@ -153,10 +156,10 @@ class SingleProcNodeExecutor:
                 uid = f"{self._desp.id}-{uuid_str}-{k}"
                 self._cached_data[uid] = v
                 data_handle_dict[k] = DataHandle(id=uid, executor_desp=self._desp)
-            return data_handle_dict
+            return data_handle_dict, ctx._ops
         else:
             assert data is None, f"compute_func {compute_func} should return None or dict."
-        return data
+        return data, ctx._ops
 
 class TorchDistNodeExecutor:
     # TODO
@@ -180,7 +183,7 @@ class TorchDistNodeExecutor:
                 node_state_dict: dict[str, Any],
                 node_state_ast: DraftASTNode, 
                 inputs: dict[str, DataHandle], 
-                removed_data_ids: Optional[set[str]] = None) -> Optional[dict[str, DataHandle]]:
+                removed_data_ids: Optional[set[str]] = None) -> tuple[Optional[dict[str, DataHandle]], list[DraftUpdateOp]]:
         raise NotImplementedError 
 
 
@@ -194,6 +197,12 @@ class NodeExecutorService:
             self._executor = TorchDistNodeExecutor(desp_obj)
         else:
             raise ValueError(f"unsupported executor type {desp_obj.type}")
+
+    def import_registry_modules(self, registry_module_ids: list[str]):
+        # import all modules in registry_module_ids
+        for module_id in registry_module_ids:
+            module_key = module_id.split("::")[0]
+            importlib.import_module(module_key)
 
     def get_executor_remote_desp(self) -> ExecutorRemoteDesp: 
         return self._desp
@@ -219,5 +228,5 @@ class NodeExecutorService:
                 node_state_dict: dict[str, Any],
                 node_state_ast: DraftASTNode, 
                 inputs: dict[str, DataHandle], 
-                removed_data_ids: Optional[set[str]] = None) -> Optional[dict[str, DataHandle]]:
+                removed_data_ids: Optional[set[str]] = None) -> tuple[Optional[dict[str, DataHandle]], list[DraftUpdateOp]]:
         return await self._executor.run_node(node, node_impl_code, node_state_dict, node_state_ast, inputs, removed_data_ids)

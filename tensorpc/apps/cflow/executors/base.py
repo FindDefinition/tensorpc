@@ -20,14 +20,15 @@ class ExecutorType(enum.IntEnum):
     # if handle data come from local executor, we send data directly (saved on data field) instead of remote handle.
     LOCAL = 2
 
-_NODE_EXEC_SERVICE = f"tensorpc.apps.cflow.services.executors::NodeExecutorService"
+NODE_EXEC_SERVICE = f"tensorpc.apps.cflow.services.executors::NodeExecutorService"
 
 
 class RemoteExecutorServiceKeys(enum.Enum):
-    GET_DATA = f"{_NODE_EXEC_SERVICE}.get_data"
-    RELEASE_DATA = f"{_NODE_EXEC_SERVICE}.release_data"
-    GET_DESP = f"{_NODE_EXEC_SERVICE}.get_desp"
-    RUN_NODE = f"{_NODE_EXEC_SERVICE}.run_node"
+    GET_DATA = f"{NODE_EXEC_SERVICE}.get_cached_data"
+    RELEASE_DATA = f"{NODE_EXEC_SERVICE}.remove_cached_data"
+    GET_DESP = f"{NODE_EXEC_SERVICE}.get_desp"
+    RUN_NODE = f"{NODE_EXEC_SERVICE}.run_node"
+    IMPORT_REGISTRY_MODULES = f"{NODE_EXEC_SERVICE}.import_registry_modules"
 
 @dataclasses.dataclass
 class ExecutorRemoteDesp:
@@ -74,13 +75,14 @@ class RemoteGrpcDataHandle(DataHandle):
         if self.has_data():
             return self.data
         assert self.remote_obj is not None
-        return await self.remote_obj.chunked_remote_call(RemoteExecutorServiceKeys.GET_DATA, self.id)
+        return await self.remote_obj.chunked_remote_call(RemoteExecutorServiceKeys.GET_DATA.value, self.id)
 
     async def release(self):
         if self.has_data():
             self.data = undefined
+            return
         assert self.remote_obj is not None
-        await self.remote_obj.chunked_remote_call(RemoteExecutorServiceKeys.RELEASE_DATA, self.id)
+        await self.remote_obj.chunked_remote_call(RemoteExecutorServiceKeys.RELEASE_DATA.value, self.id)
 
 class NodeExecutorBase(abc.ABC):
     def __init__(self, id: str, desp: ResourceDesp):

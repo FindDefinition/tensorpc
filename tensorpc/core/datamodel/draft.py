@@ -1323,12 +1323,12 @@ def cast_any_draft_to_dataclass(draft: Any, target_type: type[T]) -> T:
                             draft._tensorpc_draft_attr_cur_node, new_state)
     return cast(T, new_draft)
 
-def draft_from_node_and_type(node: DraftASTNode, target_type: type[T]) -> T:
+def draft_from_node_and_type(node: DraftASTNode, target_type: Any) -> Any:
     new_anno_type = parse_type_may_optional_undefined(target_type)
     prev_anno_state = _DraftAnnoState(True, new_anno_type)
-    return cast(T, _tensorpc_draft_anno_dispatch(
+    return _tensorpc_draft_anno_dispatch(
         new_anno_type, node, None,
-        prev_anno_state))
+        prev_anno_state)
 
 def insert_assign_draft_op(draft: Any, value: Any):
     """used to insert a assign op to ctx without explicit assignment.

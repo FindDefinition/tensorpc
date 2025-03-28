@@ -31,7 +31,7 @@ class ComputeFlowBinder:
         self.flow_comp = flow_comp
         self.flow_comp_preview = flow_comp_preview
         self.drafts = drafts
-        self.panel_comps = FlowPanelComps
+        self.panel_comps = panel_comps
 
     def _get_preview_flow_uid(self, path_draft,
                               dm_comp: mui.DataModel[ComputeFlowModelRoot]):
@@ -96,21 +96,28 @@ class ComputeFlowBinder:
         await wrapper.set_node_from_code(cfg, new_state, runtime.cnode, draft)
 
 
-    async def _handle_node_executor_change(self, ev: DraftChangeEvent,
-                                             wrapper: ComputeNodeWrapper,
-                                             draft: ComputeFlowNodeDrafts,
-                                             node_model: ComputeNodeModel):
+    async def _handle_node_executor_change(self, ev: DraftChangeEvent):
         # evaluate new state
         executor = ev.new_value
         if executor is None:
             # TODO reset preview layout and detail layout
             # reset executor debug panel
-            pass 
-            
+            if ev.old_value_dict and ev.old_value.is_local():
+                await self.panel_comps.debug.set_new_layout([
+                    mui.Markdown("## Debug")
+                ])
         else:
+            # print("EXECUTOR!!!", ev.old_value, ev.new_value)
+            if ev.old_value is ev.new_value:
+                # no change
+                return
             # TODO set remote preview layout to wrapper
             assert isinstance(executor, NodeExecutorBase)
-
+            bottom_layout = executor.get_bottom_layout()
+            if bottom_layout is not None:
+                await self.panel_comps.debug.set_new_layout([
+                    bottom_layout
+                ])
 
     def bind_flow_comp_with_datamodel(self, dm_comp: mui.DataModel[ComputeFlowModelRoot]):
         binder = models.flow.BaseFlowModelBinder(
@@ -118,7 +125,8 @@ class ComputeFlowBinder:
             dm_comp.get_model,
             self.drafts.cur_model,
             partial(self.to_ui_node, dm_comp=dm_comp),
-            flow_uid_getter=lambda: dm_comp.get_model().get_uid_from_path())
+            flow_uid_getter=lambda: dm_comp.get_model().get_uid_from_path(),
+            debug_id="flow")
         preview_binder = models.flow.BaseFlowModelBinder(
             self.flow_comp_preview,
             dm_comp.get_model,
@@ -126,8 +134,10 @@ class ComputeFlowBinder:
             partial(self.to_ui_node, dm_comp=dm_comp),
             flow_uid_getter=partial(self._get_preview_flow_uid,
                                     path_draft=self.drafts.preview_path,
-                                    dm_comp=dm_comp))
-        # dm_comp.debug_print_draft_change(self.drafts.root.settings.isBottomPanelVisible)
+                                    dm_comp=dm_comp),
+            debug_id="flow_preview")
+        # dm_comp.debug_print_draft_change(self.drafts.preview_path)
+        
         # dm_comp.debug_print_draft_change(self.drafts.root.settings.isRightPanelVisible)
 
         # dm_comp.debug_print_draft_change(self.drafts.selected_node_code)
@@ -136,3 +146,8 @@ class ComputeFlowBinder:
             dm_comp, self.drafts.cur_model.selected_node)
         preview_binder.bind_flow_comp_with_base_model(
             dm_comp, self.drafts.preview_model.selected_node)
+
+        dm_comp.install_draft_change_handler(
+            self.drafts.selected_node.runtime.executor,
+            self._handle_node_executor_change,
+            installed_comp=self.flow_comp)

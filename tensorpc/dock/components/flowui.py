@@ -19,6 +19,7 @@ from typing import (TYPE_CHECKING, Any, Callable, Coroutine, Generic,
                     Iterable, Optional, Sequence, Type,
                     TypeVar, Union, cast)
 
+import rich
 from typing_extensions import Literal, TypeAlias, override
 import dataclasses as dataclasses_plain
 import tensorpc.core.dataclass_dispatch as dataclasses
@@ -528,23 +529,29 @@ class FlowInternals(Generic[T_node, T_edge]):
         self.node_id_to_targets = {node.id: [] for node in nodes}
         self.node_id_to_inp_handle_to_edges = {node.id: {} for node in nodes}
         self.node_id_to_out_handle_to_edges = {node.id: {} for node in nodes}
-        for edge in edges:
-            self.node_id_to_targets[edge.source].append(
-                (edge.target, edge.sourceHandle, edge.targetHandle))
-            self.node_id_to_sources[edge.target].append(
-                (edge.source, edge.sourceHandle, edge.targetHandle))
-            if edge.sourceHandle not in self.node_id_to_out_handle_to_edges[
-                    edge.source]:
+        try:
+            for edge in edges:
+                self.node_id_to_targets[edge.source].append(
+                    (edge.target, edge.sourceHandle, edge.targetHandle))
+                self.node_id_to_sources[edge.target].append(
+                    (edge.source, edge.sourceHandle, edge.targetHandle))
+                if edge.sourceHandle not in self.node_id_to_out_handle_to_edges[
+                        edge.source]:
+                    self.node_id_to_out_handle_to_edges[edge.source][
+                        edge.sourceHandle] = []
                 self.node_id_to_out_handle_to_edges[edge.source][
-                    edge.sourceHandle] = []
-            self.node_id_to_out_handle_to_edges[edge.source][
-                edge.sourceHandle].append(edge)
-            if edge.targetHandle not in self.node_id_to_inp_handle_to_edges[
-                    edge.target]:
+                    edge.sourceHandle].append(edge)
+                if edge.targetHandle not in self.node_id_to_inp_handle_to_edges[
+                        edge.target]:
+                    self.node_id_to_inp_handle_to_edges[edge.target][
+                        edge.targetHandle] = []
                 self.node_id_to_inp_handle_to_edges[edge.target][
-                    edge.targetHandle] = []
-            self.node_id_to_inp_handle_to_edges[edge.target][
-                edge.targetHandle].append(edge)
+                    edge.targetHandle].append(edge)
+        except:
+            rich.print("nodes", nodes)
+
+            rich.print("edges", edges)
+            raise
         all_node_ids = set(self.id_to_node.keys())
         self.unique_name_pool_node = UniqueNamePool(init_set=all_node_ids)
         all_edge_ids = set(self.id_to_node.keys())

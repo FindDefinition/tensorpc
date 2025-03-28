@@ -69,11 +69,15 @@ class ComputeNodeFuncWrapper(ComputeNodeBase):
     def get_compute_func(self):
         return self._compute_func
 
-    def get_node_layout(self, drafts: Any) -> Optional[mui.FlexBox]:
+    def get_node_preview_layout(self, drafts: Any) -> Optional[mui.FlexBox]:
         if self._desp.layout_creator is not None:
             return self._desp.layout_creator(drafts)
         return None
 
+    def get_node_detail_layout(self, drafts: Any) -> Optional[mui.FlexBox]:
+        if self._desp.detail_layout_creator is not None:
+            return self._desp.detail_layout_creator(drafts)
+        return None
 
 @dataclasses.dataclass
 class ComputeNodeDesp:
@@ -305,3 +309,13 @@ def get_compute_node_runtime(cfg: ComputeNodeDesp, code: str = "") -> ComputeNod
         return ComputeNodeRuntime(cfg, cnode, inp_handles, out_handles)
     inp_handles, out_handles = parse_function_to_handles(cfg.func, cfg.is_dynamic_cls)
     return ComputeNodeRuntime(cfg, ComputeNodeFuncWrapper(cfg), inp_handles, out_handles, impl_code=code)
+
+
+def get_registry_func_modules_for_remote():
+    # get all modules of registered nodes for remote executor to import
+    module_ids: set[str] = set()
+    for key, cfg in NODE_REGISTRY.items():
+        obj = cfg.func
+        module_id = get_module_id_of_type(obj)
+        module_ids.add(module_id)
+    return list(module_ids)

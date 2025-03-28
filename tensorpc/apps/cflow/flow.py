@@ -1,5 +1,7 @@
 import asyncio
+from collections.abc import Sequence
 from tensorpc.apps.cflow.executors.base import NodeExecutorBase
+from tensorpc.apps.cflow.schedulers.base import SchedulerBase
 from tensorpc.core.datamodel.draftast import evaluate_draft_ast
 from tensorpc.dock import mui, three, plus, appctx, mark_create_layout, flowui, models
 from tensorpc.core import dataclass_dispatch as dataclasses
@@ -11,7 +13,7 @@ from tensorpc.core.tree_id import UniqueTreeIdForTree
 from typing import Optional, Any
 
 from tensorpc.apps.cflow.binder import ComputeFlowBinder, FlowPanelComps
-from tensorpc.apps.cflow.model import ComputeFlowDrafts, ComputeFlowModelRoot, ComputeNodeModel, ComputeNodeType, DetailType, InlineCode, ResourceDesp, get_compute_flow_drafts
+from tensorpc.apps.cflow.model import DEFAULT_EXECUTOR_ID, ComputeFlowDrafts, ComputeFlowModelRoot, ComputeNodeModel, ComputeNodeType, DetailType, InlineCode, ResourceDesp, get_compute_flow_drafts
 from tensorpc.apps.cflow.nodes.cnode.default_code import get_default_custom_node_code
 from tensorpc.apps.cflow.nodes.cnode.handle import HandleTypePrefix
 from tensorpc.dock.components.flowplus.style import default_compute_flow_css
@@ -47,8 +49,9 @@ class NodeContextMenuItemNames:
 
 
 class ComputeFlow(mui.FlexBox):
-
-    def __init__(self):
+    executors: Sequence[NodeExecutorBase]
+    scheduler: SchedulerBase
+    def __init__(self, scheduler: Optional[SchedulerBase] = None, executors: Optional[Sequence[NodeExecutorBase]] = None):
         items = [
             mui.MenuItem(id=f"{_SYS_NODE_PREFIX}markdown", label="Add Markdown"),
             mui.MenuItem(id=f"{_SYS_NODE_PREFIX}compute", label="Add Compute"),
@@ -112,6 +115,17 @@ class ComputeFlow(mui.FlexBox):
                                     width="100%",
                                     height="100%")
         panel_comps = FlowPanelComps(detail=detail_box, debug=debug_box)
+        self.code_editor = mui.MonacoEditor("", "python",
+                                            "default").prop(flex=1,
+                                                            minHeight=0,
+                                                            minWidth=0)
+        code_box = mui.HBox([
+            self.code_editor
+        ]).prop(height="100%", width="100%", overflow="hidden")
+        node_settings = mui.Input("executor id")
+        setting_box = mui.VBox([
+            node_settings
+        ]).prop(height="100%", width="100%", overflow="hidden")
         tabdefs: list[mui.TabDef] = [
             mui.TabDef("",
                        "0",
@@ -123,6 +137,12 @@ class ComputeFlow(mui.FlexBox):
                        debug_box,
                        icon=mui.IconType.BugReport,
                        tooltip="compute node debug panel"),
+            mui.TabDef("",
+                       "2",
+                       setting_box,
+                       icon=mui.IconType.Code,
+                       tooltip="custom node editor"),
+
         ]
         self.user_detail = mui.HBox([
             mui.ThemeProvider([
@@ -143,10 +163,6 @@ class ComputeFlow(mui.FlexBox):
                 mui.MatchCase.Case(DetailType.USER_LAYOUT.value, self.user_detail),
             ]
         )
-        self.code_editor = mui.MonacoEditor("", "python",
-                                            "default").prop(flex=1,
-                                                            minHeight=0,
-                                                            minWidth=0)
         self._code_fmt = PythonCodeFormatter()
         editor_acts: list[mui.MonacoEditorAction] = []
         for backend in self._code_fmt.get_all_supported_backends():
@@ -163,9 +179,7 @@ class ComputeFlow(mui.FlexBox):
             mui.Allotment.Pane(mui.HBox([
                 self.graph
             ]).prop(height="100%", width="100%", overflow="hidden").update_raw_props(default_compute_flow_css())),
-            mui.Allotment.Pane(mui.HBox([
-                self.code_editor
-            ]).prop(height="100%", width="100%", overflow="hidden"), visible=False),
+            mui.Allotment.Pane(code_box, visible=False),
         ])).prop(vertical=False, defaultSizes=[200, 100])
         global_container = mui.Allotment(mui.Allotment.ChildDef([
             mui.Allotment.Pane(flow_with_editor),
@@ -198,6 +212,7 @@ class ComputeFlow(mui.FlexBox):
         flow_with_editor.bind_fields(visibles=f"[`true`, {flow_draft.show_editor}]")
         global_container.bind_fields(visibles=f"[`true`, {flow_draft.show_detail}]")
         detail_ct.bind_fields(condition=flow_draft.selected_node_detail_type)
+        node_settings.bind_draft_change(flow_draft.selected_node.vExecId)
         self.graph.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=flow_draft.cur_model))
         self.graph_preview.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=flow_draft.preview_model))
 
@@ -215,11 +230,25 @@ class ComputeFlow(mui.FlexBox):
         binder = ComputeFlowBinder(self.graph, self.graph_preview, flow_draft, panel_comps)
         binder.bind_flow_comp_with_datamodel(self.dm)
         self._shutdown_ev = asyncio.Event()
-        self.scheduler = SimpleScheduler(self.dm, self._shutdown_ev)
-
-        self.executors: list[NodeExecutorBase] = [
-            LocalNodeExecutor("local", _get_local_resource_desp())
-        ]
+        if scheduler is not None:
+            self.scheduler = scheduler
+        else:
+            self.scheduler = SimpleScheduler(self.dm, self._shutdown_ev)
+        if executors is not None:
+            self.executors = list(executors)
+            has_local_executor = False
+            for executor in executors:
+                if executor.is_local():
+                    has_local_executor = True
+                    break
+            if not has_local_executor:
+                # add local executor if not exist
+                # insert it to the first, currently all built-in schedulers will check executors in order.
+                self.executors.insert(0, LocalNodeExecutor(DEFAULT_EXECUTOR_ID, _get_local_resource_desp()))
+        else:
+            self.executors = [
+                LocalNodeExecutor(DEFAULT_EXECUTOR_ID, _get_local_resource_desp())
+            ]
         super().__init__([self.dm])
         self.event_after_unmount.on(self._on_flow_unmount)
         self.prop(width="100%", height="100%", overflow="hidden")

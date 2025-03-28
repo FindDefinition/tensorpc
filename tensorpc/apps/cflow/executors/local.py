@@ -2,12 +2,16 @@ from typing import Any, Optional
 import uuid
 from tensorpc.apps.cflow.model import ComputeNodeModel
 from tensorpc.core.annolib import Undefined
+from tensorpc.dock.components import mui
 from .base import NodeExecutorBase, DataHandle, ExecutorRemoteDesp
 import inspect
 
 from typing_extensions import override
 
 class LocalNodeExecutor(NodeExecutorBase):
+    def get_executor_remote_desp(self) -> ExecutorRemoteDesp: 
+        return ExecutorRemoteDesp.get_empty()
+
     # each scheduler should only have one local executor.
     @override
     async def run_node(self, node: ComputeNodeModel, inputs: dict[str, DataHandle]) -> Optional[dict[str, DataHandle]]:
@@ -54,3 +58,8 @@ class LocalNodeExecutor(NodeExecutorBase):
 
     def is_local(self) -> bool: 
         return True
+
+    def get_bottom_layout(self) -> Optional[mui.FlexBox]:
+        return mui.VBox([
+            mui.Markdown("## Hello Local Executor!")
+        ]).prop(width="100%", height="100%", overflow="auto")

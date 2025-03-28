@@ -85,6 +85,7 @@ class Terminal(MUIComponentBase[TerminalProps]):
                              FrontendEventType.TerminalInput.value,
                              FrontendEventType.TerminalResize.value,
                              FrontendEventType.TerminalSaveState.value,
+                             FrontendEventType.TerminalTriggerLoadState.value,
                          ])
         if init_data is not None:
             self.prop(initData=init_data)
@@ -94,13 +95,21 @@ class Terminal(MUIComponentBase[TerminalProps]):
             FrontendEventType.TerminalResize, lambda x: TerminalResizeEvent(**x))
         self.event_terminal_save_state = self._create_event_slot(
             FrontendEventType.TerminalSaveState)
+        self.event_terminal_trigger_load_state = self._create_event_slot(
+            FrontendEventType.TerminalTriggerLoadState)
+
         self.event_terminal_save_state.on(self._default_on_save_state)
+        self.event_terminal_trigger_load_state.on(self._send_state_to_frontend)
 
         if callback is not None:
             self.event_terminal_input.on(callback)
 
     def _default_on_save_state(self, state):
         self.props.initData = state
+
+    async def _send_state_to_frontend(self, ev):
+        if not isinstance(self.props.initData, Undefined):
+            await self.send_raw(self.props.initData)
 
     @property
     def prop(self):
@@ -129,7 +138,7 @@ class Terminal(MUIComponentBase[TerminalProps]):
                 "data": content
             }))
 
-    async def send_raw(self, data: bytes):
+    async def send_raw(self, data: Union[bytes, str]):
         await self.put_app_event(
             self.create_comp_event({
                 "type": TerminalEventType.Raw.value,
@@ -149,6 +158,13 @@ class Terminal(MUIComponentBase[TerminalProps]):
             }))
 
 
+
+@dataclasses_plain.dataclass
+class TerminalCmdCompleteEvent:
+    cmd: str 
+    outputs: list[bytes]
+    return_code: Optional[int] = None
+
 @dataclasses_plain.dataclass
 class _AsyncSSHTerminalState:
     inp_queue: asyncio.Queue
@@ -157,28 +173,25 @@ class _AsyncSSHTerminalState:
     pid: int
     size: TerminalResizeEvent
     current_cmd: str = ""
-
-@dataclasses_plain.dataclass
-class TerminalCmdCompleteEvent:
-    cmd: str 
-    return_code: Optional[int] = None
+    current_cmd_buffer: Optional[deque[bytes]] = None
+    current_cmd_rpc_future: Optional[asyncio.Future[TerminalCmdCompleteEvent]] = None
 
 class AsyncSSHTerminal(Terminal):
 
     def __init__(self,
-                 url: str = "",
+                 url_with_port: str = "",
                  username: str = "",
                  password: str = "",
                  init_data: Optional[Union[bytes, str]] = None,
                  manual_connect: bool = True,
                  manual_disconnect: bool = False,
                  line_raw_ev_max_length: int = 10000,
-                 init_size: Optional[tuple[int, int]] = None) -> None:
+                 init_size: Optional[tuple[int, int]] = (80, 24)) -> None:
         super().__init__(init_data)
-        if not url or not username or not password:
-            assert manual_connect, "Cannot auto connect/disconnect when mount without url, username, and password."
+        if not url_with_port or not username or not password:
+            assert manual_connect, "Cannot auto connect/disconnect when mount without url_with_port(ip:port), username, and password."
         self._shutdown_ev = asyncio.Event()
-        self._client = SSHClient(url, username, password)
+        self._client = SSHClient(url_with_port, username, password)
         self.event_after_mount.on(self._on_mount)
         self.event_after_unmount.on(self._on_unmount)
         self._manual_connect = manual_connect
@@ -198,10 +211,12 @@ class AsyncSSHTerminal(Terminal):
             self._backend_ssh_cmd_complete_event_key)
 
         self._ssh_state: Optional[_AsyncSSHTerminalState] = None
+        self._init_event = asyncio.Event()
         self._init_size: Optional[TerminalResizeEvent] = None
         if init_size is not None:
             self._init_size = TerminalResizeEvent(init_size[0], init_size[1])
         self._raw_data_buffer: Optional[bytes] = None
+        self._line_raw_ev_max_length = line_raw_ev_max_length
         self._line_raw_event_buffer: deque[bytes] = deque(maxlen=line_raw_ev_max_length)
 
     async def connect(self,
@@ -214,6 +229,10 @@ class AsyncSSHTerminal(Terminal):
 
     async def _on_exit(self):
         if self._ssh_state is not None:
+            if self._ssh_state.current_cmd_rpc_future is not None:
+                self._ssh_state.current_cmd_rpc_future.set_exception(
+                    Exception("SSH Unknown error."))
+                self._ssh_state.current_cmd_rpc_future = None
             # we can't await task here because it will cause deadlock
             self._ssh_state = None
         SSH_LOGGER.warning("SSH Exit.")
@@ -224,15 +243,20 @@ class AsyncSSHTerminal(Terminal):
 
     async def connect_with_new_info(
             self,
-            url: str,
+            url_with_port: str,
             username: str,
             password: str,
             event_callback: Optional[Callable[[SSHEvent], None]] = None,
             init_cmds: Optional[list[str]] = None):
+        if init_cmds:
+            for cmd in init_cmds:
+                assert cmd.endswith("\n"), "All command must end with \\n"
         assert self._ssh_state is None, "Cannot connect with new info while the current connection is still active."
-        self._client = SSHClient(url, username, password)
-        await self.clear()
+        self._client = SSHClient(url_with_port, username, password)
+        if self.is_mounted():
+            await self.clear()
         self._shutdown_ev.clear()
+        self._init_event.clear()
         sd_task = asyncio.create_task(self._shutdown_ev.wait())
         cur_inp_queue = asyncio.Queue()
         size_state = TerminalResizeEvent(-1, -1)
@@ -257,8 +281,10 @@ class AsyncSSHTerminal(Terminal):
                                        request_pty=True,
                                        exit_callback=self._on_exit,
                                        term_type="xterm-256color",
-                                       enable_raw_event=True))
+                                       enable_raw_event=True,
+                                       line_raw_callback=self._handle_line_raw_event))
         self._ssh_state = _AsyncSSHTerminalState(cur_inp_queue, ssh_task, False, -1, size_state)
+        await self._init_event.wait()
         return self._ssh_state.inp_queue
 
     async def disconnect(self):
@@ -307,60 +333,142 @@ class AsyncSSHTerminal(Terminal):
             else:
                 if self._raw_data_buffer is not None:
                     self._line_raw_event_buffer.append(self._raw_data_buffer)
+                    if self._ssh_state is not None:
+                        if self._ssh_state.current_cmd_buffer is not None:
+                            self._ssh_state.current_cmd_buffer.append(self._raw_data_buffer)
                     self._raw_data_buffer = None
                 data = event.data
                 self._line_raw_event_buffer.append(data)
+                if self._ssh_state is not None:
+                    if self._ssh_state.current_cmd_buffer is not None:
+                        self._ssh_state.current_cmd_buffer.append(data)
+
 
     async def _handle_ssh_queue(self,
                                 event: SSHEvent,
                                 user_callback: Optional[Callable[[SSHEvent],
                                                                  Any]] = None):
         assert self._ssh_state is not None
-        if not isinstance(event, RawEvent):
-            if isinstance(event, LineEvent):
-                if not self._ssh_state.inited:
-                    text = event.line.decode("utf-8").strip()
-                    if text.startswith(f"{TENSORPC_ASYNCSSH_INIT_SUCCESS}|PID="):
-                        self._ssh_state.inited = True
-                        pid = int(text.split("=")[1])
-                        self._ssh_state.pid = pid
-                        SSH_LOGGER.warning("SSH init success, pid: %d", pid)
-                        await self.flow_event_emitter.emit_async(
-                            self._backend_ssh_conn_inited_event_key,
-                            Event(self._backend_ssh_conn_inited_event_key, None))
-            elif isinstance(event, (CommandEvent)):
-                if event.type == CommandEventType.CURRENT_COMMAND:
-                    if event.arg is not None:
-                        parts = event.arg.decode("utf-8").split(";")
-                        self._ssh_state.current_cmd = ";".join(parts[:-1])
-                elif event.type == CommandEventType.COMMAND_COMPLETE:
-                    return_code = 0
-                    if event.arg is not None:
-                        return_code = int(event.arg)
-                    if self._ssh_state.inited and TENSORPC_ASYNCSSH_INIT_SUCCESS not in self._ssh_state.current_cmd:
-                        ev = TerminalCmdCompleteEvent(self._ssh_state.current_cmd, return_code)
-                        SSH_LOGGER.warning("Command \"%s\" succeed, retcode: %d", self._ssh_state.current_cmd, return_code)
+        try:
+            if not isinstance(event, RawEvent):
+                if isinstance(event, LineEvent):
+                    if not self._ssh_state.inited:
+                        text = event.line.decode("utf-8").strip()
+                        if text.startswith(f"{TENSORPC_ASYNCSSH_INIT_SUCCESS}|PID="):
+                            pid = int(text.split("=")[1])
+                            self._ssh_state.pid = pid
+                            # self._ssh_state.inited = True
+                            # self._init_event.set()
+                            # self._ssh_state.current_cmd_buffer = None
+                            # # self._ssh_state.current_cmd = ""
+                            # self._ssh_state.current_cmd_rpc_future = None
+                            # SSH_LOGGER.warning("SSH init success, pid: %d", pid)
+                            # await self.flow_event_emitter.emit_async(
+                            #     self._backend_ssh_conn_inited_event_key,
+                            #     Event(self._backend_ssh_conn_inited_event_key, None))
+                elif isinstance(event, (CommandEvent)):
+                    if event.type == CommandEventType.CURRENT_COMMAND:
+                        if event.arg is not None:
+                            parts = event.arg.decode("utf-8").split(";")
+                            self._ssh_state.current_cmd = ";".join(parts[:-1])
+                    elif event.type == CommandEventType.COMMAND_OUTPUT_START:
+                        self._ssh_state.current_cmd_buffer = deque(maxlen=self._line_raw_ev_max_length)
+                    elif event.type == CommandEventType.COMMAND_COMPLETE:
+                        return_code = 0
+                        if event.arg is not None:
+                            return_code = int(event.arg)
+                        msg_buf = self._ssh_state.current_cmd_buffer
+                        cur_cmd = self._ssh_state.current_cmd
+                        future = self._ssh_state.current_cmd_rpc_future
+                        self._ssh_state.current_cmd_buffer = None
+                        self._ssh_state.current_cmd = ""
+                        self._ssh_state.current_cmd_rpc_future = None
+                        cmd_outputs: list[bytes] = []
+                        if msg_buf is not None:
+                            # line raw callback is called before event handler, so we remove last line.
+                            cmd_outputs = list(msg_buf)[:-1]
+                            # remove last lines starts with \x1b
+                            last_idx = len(cmd_outputs)
+                            while last_idx > 0:
+                                if cmd_outputs[last_idx - 1].startswith(b"\x1b"):
+                                    last_idx -= 1
+                                else:
+                                    break
+                            cmd_outputs = cmd_outputs[:last_idx]
+                        # print(cur_cmd, TENSORPC_ASYNCSSH_INIT_SUCCESS in cur_cmd, self._ssh_state.inited)
+                        if TENSORPC_ASYNCSSH_INIT_SUCCESS in cur_cmd and not self._ssh_state.inited:
+                            self._ssh_state.inited = True
+                            self._init_event.set()
+                            SSH_LOGGER.warning("SSH init success, pid: %d", self._ssh_state.pid)
+                            await self.flow_event_emitter.emit_async(
+                                self._backend_ssh_conn_inited_event_key,
+                                Event(self._backend_ssh_conn_inited_event_key, None))
 
-                        await self.flow_event_emitter.emit_async(
-                            self._backend_ssh_cmd_complete_event_key,
-                            Event(self._backend_ssh_cmd_complete_event_key, ev))
-            if user_callback is not None:
-                try:
-                    res = user_callback(event)
-                    if inspect.iscoroutine(res):
-                        await res
-                except:
-                    traceback.print_exc()
-        if isinstance(event, RawEvent):
-            if self.is_mounted():
-                await self.send_raw(event.raw)
-        elif isinstance(event, (EofEvent, ExceptionEvent)):
-            if isinstance(event, ExceptionEvent):
-                LOGGER.error(event.traceback_str)
-            else:
-                LOGGER.warning(event)
-            if self.is_mounted():
-                await self.send_eof()
+                        if self._ssh_state.inited and TENSORPC_ASYNCSSH_INIT_SUCCESS not in cur_cmd:
+                            ev = TerminalCmdCompleteEvent(cur_cmd, cmd_outputs, return_code)
+                            SSH_LOGGER.warning("Command \"%s\" succeed, retcode: %d", cur_cmd, return_code)
+                            if future is not None:
+                                future.set_result(ev)
+                            await self.flow_event_emitter.emit_async(
+                                self._backend_ssh_cmd_complete_event_key,
+                                Event(self._backend_ssh_cmd_complete_event_key, ev))
+
+                if user_callback is not None:
+                    try:
+                        res = user_callback(event)
+                        if inspect.iscoroutine(res):
+                            await res
+                    except:
+                        traceback.print_exc()
+            if isinstance(event, RawEvent):
+                # print(event.raw)
+                if self.is_mounted():
+                    await self.send_raw(event.raw)
+            elif isinstance(event, (EofEvent, ExceptionEvent)):
+                if self._ssh_state.current_cmd_rpc_future is not None:
+                    self._ssh_state.current_cmd_rpc_future.set_exception(
+                        Exception("SSH connection closed."))
+                    self._ssh_state.current_cmd_rpc_future = None
+                if isinstance(event, ExceptionEvent):
+                    LOGGER.error(event.traceback_str)
+                else:
+                    LOGGER.warning(event)
+                if self.is_mounted():
+                    await self.send_eof()
+        except:
+            if self._ssh_state.current_cmd_rpc_future is not None:
+                self._ssh_state.current_cmd_rpc_future.set_exception(
+                    Exception("SSH Unknown error."))
+                self._ssh_state.current_cmd_rpc_future = None
+
+            traceback.print_exc()
+            raise
 
     def get_current_state(self):
         return self._ssh_state
+
+    async def ssh_command_rpc_future(self, cmd: str) -> asyncio.Future[TerminalCmdCompleteEvent]:
+        """Run a bash command in ssh target, return a event with return code and stdout/stderr data.
+        
+        WARNING: this function can't be called parallelly, e.g. asyncio.gather
+        """
+        assert cmd.endswith("\n")
+        assert self._ssh_state is not None and self._ssh_state.current_cmd == "", f"current command is not empty: {self._ssh_state}."
+        assert self._ssh_state.current_cmd_rpc_future is None, "previous command is not finished yet."
+        future: asyncio.Future[TerminalCmdCompleteEvent] = asyncio.get_running_loop().create_future()
+        self._ssh_state.current_cmd_rpc_future = future
+        await self._ssh_state.inp_queue.put(cmd)
+        return future
+
+    async def ssh_command_rpc(self, cmd: str) -> TerminalCmdCompleteEvent:
+
+        """Run a bash command in ssh target, return a event with return code and stdout/stderr data.
+        
+        WARNING: this function can't be called parallelly, e.g. asyncio.gather
+        """
+        future = await self.ssh_command_rpc_future(cmd)
+        await future
+        return future.result()
+
+    def is_connected(self):
+        return self._ssh_state is not None and self._ssh_state.inited

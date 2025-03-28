@@ -437,6 +437,7 @@ class FrontendEventType(enum.IntEnum):
     TerminalInput = 110
     TerminalResize = 111
     TerminalSaveState = 112
+    TerminalTriggerLoadState = 113
 
     # data box events
     DataBoxSecondaryActionClick = 120

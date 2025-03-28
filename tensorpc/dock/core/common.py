@@ -81,6 +81,7 @@ _ONEARG_TERMINAL_EVENTS = set([
     FrontendEventType.TerminalInput.value,
     FrontendEventType.TerminalResize.value,
     FrontendEventType.TerminalSaveState.value,
+    FrontendEventType.TerminalTriggerLoadState.value,
 ])
 
 _ONEARG_EVENTS = set(

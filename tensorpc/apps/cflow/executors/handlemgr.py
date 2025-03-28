@@ -55,9 +55,16 @@ class DataHandleManager:
             for v in node_inp_dict.values():
                 handle_id_to_add.add(v.id)
             self._node_id_to_input_handles[node_id] = node_inp_dict
+        await self._release_handles(handle_to_release)
+
+    async def _release_handles(self, handle_to_release: list[DataHandle]):
+        all_handle_ids = set()
+        for node_id, node_inp_dict in self._node_id_to_input_handles.items():
+            for v in node_inp_dict.values():
+                all_handle_ids.add(v.id)
         handle_released: set[str] = set()
         for h in handle_to_release:
-            if h.id not in handle_id_to_add and h.id not in handle_released:
+            if h.id not in all_handle_ids and h.id not in handle_released:
                 await h.release()
 
     async def set_new_inputs(self, node_inputs: dict[str, dict[str, Any]]):
@@ -71,10 +78,8 @@ class DataHandleManager:
         for node_id, node_inp_dict in self._node_id_to_input_handles.items():
             for v in node_inp_dict.values():
                 handle_to_release.append(v)
-        handle_released: set[str] = set()
-        for h in handle_to_release:
-            if h.id not in handle_id_to_add and h.id not in handle_released:
-                await h.release()
+        self._node_id_to_input_handles = node_handles
+        await self._release_handles(handle_to_release)
 
     async def merge_new_inputs(self, node_inputs: dict[str, dict[str, Any]], handle_to_release: Optional[list[DataHandle]] = None):
         node_handles = self._node_inputs_to_handle(node_inputs)
@@ -91,14 +96,12 @@ class DataHandleManager:
                 prev_inputs = prev_inputs.copy()
                 prev_inputs.update(node_inp_dict)
                 self._node_id_to_input_handles[node_id] = prev_inputs
-            for v in node_inp_dict.values():
-                handle_id_to_add.add(v.id)
-            self._node_id_to_input_handles[node_id] = node_inp_dict
-        handle_released: set[str] = set()
-        for h in handle_to_release:
-            if h.id not in handle_id_to_add and h.id not in handle_released:
-                await h.release()
-                
+            else:
+                for v in node_inp_dict.values():
+                    handle_id_to_add.add(v.id)
+                self._node_id_to_input_handles[node_id] = node_inp_dict
+        await self._release_handles(handle_to_release)
+              
 
     async def remove_and_merge(self, node_id_to_remove: list[str], node_inputs: dict[str, dict[str, Any]]):
         # remove finished node inputs first, then merge new inputs.
@@ -116,3 +119,11 @@ class DataHandleManager:
         for node_id, node_inp_dict in node_handles.items():
             assert node_id not in self._node_id_to_input_handles, f"node_id {node_id} already exists."
             self._node_id_to_input_handles[node_id] = node_inp_dict
+
+    async def release_all_handles(self):
+        handle_to_release: list[DataHandle] = []
+        for node_id, node_inp_dict in self._node_id_to_input_handles.items():
+            for v in node_inp_dict.values():
+                handle_to_release.append(v)
+        await self._release_handles(handle_to_release)
+        self._node_id_to_input_handles = {}

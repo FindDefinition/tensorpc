@@ -147,7 +147,7 @@ class ComputeNodeWrapper(BaseNodeWrapper):
         input_args = mui.Fragment([*inp_handles])
         output_args = mui.Fragment([*out_handles])
         middle_node_layout: Optional[mui.FlexBox] = None
-        node_layout_creator = cnode_cfg.layout_creator
+        # node_layout_creator = cnode_cfg.layout_creator
         node_layout_creator = node_obj.get_node_preview_layout
         if cnode_cfg.state_dcls is not None:
             middle_node_layout = node_layout_creator(D.cast_any_draft_to_dataclass(node_model_draft.node_state, cnode_cfg.state_dcls))

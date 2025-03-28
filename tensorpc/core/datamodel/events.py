@@ -59,7 +59,7 @@ class DraftChangeEvent:
 
     @property
     def old_value(self):
-        assert len(self.old_value_dict) == 1, "you provide more than one draft expr"
+        assert len(self.old_value_dict) == 1, f"you provide more than one draft expr"
         return list(self.old_value_dict.values())[0]
 
 @dataclasses.dataclass
@@ -154,6 +154,6 @@ def update_model_with_change_event(
                     ev_type = DraftEventType.ValueChange
             type_dict[k] = ev_type
             new_val_dict[k] = new_value
-        change_events.append(DraftChangeEvent(type_dict, old_val_dict, new_val_dict))
+        change_events.append(DraftChangeEvent(type_dict, {k: v[0] for k, v in old_val_dict.items()}, new_val_dict))
     return change_events
 

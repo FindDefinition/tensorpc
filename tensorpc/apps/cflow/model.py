@@ -55,6 +55,8 @@ class InlineCodeInfo:
 class InlineCode:
     code: str = ""
 
+DEFAULT_EXECUTOR_ID = "local"
+
 @dataclasses.dataclass
 class ComputeNodeModel(BaseNodeModel):
     # core type
@@ -87,7 +89,7 @@ class ComputeNodeModel(BaseNodeModel):
     # for virtual resource (vrc) node, this indicate the resource it provide
     vResource: ResourceDesp = dataclasses.field(default_factory=ResourceDesp)
     # nodes with same exec id will always be scheduled in same executor.
-    vExecId: str = ""
+    vExecId: str = DEFAULT_EXECUTOR_ID
     # backend only fields
     runtime: Annotated[Optional[ComputeNodeRuntime], DraftFieldMeta(is_external=True)] = None
 
@@ -296,8 +298,8 @@ def get_compute_flow_drafts(root_draft: ComputeFlowModelRoot):
                               return_type=list[str])  # type: ignore
     preview_model_draft = cast(
         Optional[ComputeFlowModel],
-        D.getitem_path_dynamic(root_draft, prev_path_draft,
-                               Optional[ComputeFlowModel]))
+        D.where(is_not_subflow_node_selected, D.literal_val(None), D.getitem_path_dynamic(root_draft, prev_path_draft,
+                               Optional[ComputeFlowModel]), Optional[ComputeFlowModel]))
     code_draft, code_path_draft, code_language = get_code_drafts(root_draft, selected_node)
     selected_node_detail_type = D.where(
         selected_node == None,

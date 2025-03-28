@@ -450,7 +450,7 @@ class LineRawEvent:
                             self.traceback_str, self.should_exit, self.line_ev_type)
 
 
-def _warp_exception_to_event(exc: Exception, uid: str):
+def _warp_exception_to_event(exc: BaseException, uid: str):
     tb_str = io.StringIO()
     traceback.print_exc(file=tb_str)
     ts = time.time_ns()
@@ -1350,7 +1350,7 @@ class SSHClient:
                         asyncio.create_task(inp_queue.get()), shutdown_task, loop_task
                     ]
                 await loop_task
-        except Exception as exc:
+        except BaseException as exc:
             await callback(_warp_exception_to_event(exc, self.uid))
         finally:
             if init_event:

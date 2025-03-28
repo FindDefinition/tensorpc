@@ -26,3 +26,8 @@ class SchedulerBase(abc.ABC):
 
     @abc.abstractmethod
     async def close(self): ...
+
+    @abc.abstractmethod
+    async def run_sub_graph(self, flow: ComputeFlowModel, node_id: str,
+                            executors: list[NodeExecutorBase]) -> Any:
+        ...

@@ -4,6 +4,8 @@ import time
 import traceback
 import uuid
 
+import rich
+
 from tensorpc.apps.cflow.executors.handlemgr import DataHandleManager
 from tensorpc.apps.cflow.executors.local import LocalNodeExecutor
 from tensorpc.apps.cflow.logger import CFLOW_LOGGER
@@ -146,10 +148,8 @@ class SimpleScheduler(SchedulerBase):
                                                      tuple[int, ...]]]] = {}
         for n in nodes:
             ex_id = n.vExecId
-            if ex_id not in ex_id_to_nodes_sortkey:
-                ex_id_to_nodes_sortkey[ex_id] = []
             assert n.runtime is not None 
-            if n.runtime.cfg.flags | ComputeNodeFlags.EXEC_ALWAYS_LOCAL:
+            if n.runtime.cfg.flags & ComputeNodeFlags.EXEC_ALWAYS_LOCAL:
                 if local_ex is None:
                     for ex in executors:
                         if ex.is_local():
@@ -158,6 +158,8 @@ class SimpleScheduler(SchedulerBase):
                     assert local_ex is not None, "Local executor is required for observer nodes"
                 res[n.id] = local_ex
             else:
+                if ex_id not in ex_id_to_nodes_sortkey:
+                    ex_id_to_nodes_sortkey[ex_id] = []
                 nrc = n.vResource
                 if n.runtime.cfg.resource_desp is not None:
                     nrc = n.runtime.cfg.resource_desp 
@@ -213,6 +215,8 @@ class SimpleScheduler(SchedulerBase):
                 res = await node_ex.run_node(node, node_inp)
                 assert res is None or isinstance(res, dict)
                 async with dm_comp.draft_update():
+                    # TODO should we clear executor here?
+                    # this will cause executor layout to be unmount-remount.
                     node_drafts.node.runtime.executor = None # type: ignore
                     node_drafts.node.status = ComputeNodeStatus.Ready
                     dt = datetime.timedelta(seconds=time.time() - t)
@@ -309,33 +313,40 @@ class SimpleScheduler(SchedulerBase):
                         node_inputs: dict[str, dict[str, Any]],
                         executors: list[NodeExecutorBase],
                         shutdown_ev: asyncio.Event) -> None:
-        nodes = [flow.nodes[node_id] for node_id in node_inputs.keys()]
-        nodes_to_schedule: list[ComputeNodeModel] = nodes
-        # cur_anode_iters: dict[str, AsyncIterator] = {}
-        assert self._state is not None
-        shutdown_task = asyncio.create_task(shutdown_ev.wait())
-        state = self._state
-        # cur_node_inputs = node_inputs.copy()
-        node_inputs_state: DataHandleManager = DataHandleManager(
-            node_inputs.copy())
-        shutdown_task = asyncio.create_task(shutdown_ev.wait())
-        dm_comp = self.get_datamodel_component()
+        try:
+            nodes = [flow.nodes[node_id] for node_id in node_inputs.keys()]
+            nodes_to_schedule: list[ComputeNodeModel] = nodes
+            # cur_anode_iters: dict[str, AsyncIterator] = {}
+            assert self._state is not None
+            shutdown_task = asyncio.create_task(shutdown_ev.wait())
+            state = self._state
+            # cur_node_inputs = node_inputs.copy()
+            node_inputs_state: DataHandleManager = DataHandleManager(
+                node_inputs.copy())
+            shutdown_task = asyncio.create_task(shutdown_ev.wait())
+            dm_comp = self.get_datamodel_component()
 
-        for node in nodes_to_schedule:
-            if node.runtime is None:
-                node.runtime = node.get_node_runtime(dm_comp.get_model())
+            for node in nodes_to_schedule:
+                if node.runtime is None:
+                    node.runtime = node.get_node_runtime(dm_comp.get_model())
 
-        nodes_can_schedule, assigned_execs = self._get_nodes_can_schedule(
-            nodes_to_schedule, node_inputs, executors)
-        if not nodes_can_schedule:
-            CFLOW_LOGGER.warning("No node can be scheduled")
-            return
-        node_tasks: list[asyncio.Task] = []
-        for node in nodes_can_schedule.values():
-            task = self._get_node_scheduled_task(flow, node, assigned_execs,
-                                                 node_inputs_state)
-            node_tasks.append(task)
-        wait_tasks = node_tasks + [shutdown_task]
+            nodes_can_schedule, assigned_execs = self._get_nodes_can_schedule(
+                nodes_to_schedule, node_inputs, executors)
+            if not nodes_can_schedule:
+                CFLOW_LOGGER.warning("No node can be scheduled")
+                return
+            node_tasks: list[asyncio.Task] = []
+            for node in nodes_can_schedule.values():
+                task = self._get_node_scheduled_task(flow, node, assigned_execs,
+                                                    node_inputs_state)
+                node_tasks.append(task)
+            wait_tasks = node_tasks + [shutdown_task]
+        except:
+            traceback.print_exc()
+            raise 
+        finally:
+            self._state = None
+
         try:
             while wait_tasks:
                 (done, pending) = await asyncio.wait(
@@ -374,8 +385,12 @@ class SimpleScheduler(SchedulerBase):
                 done_node_ids = list(task.get_name() for task in done)
                 new_node_inputs = _get_next_node_inputs(
                     dm_comp.get_model(), flow.runtime, node_outputs)
+                # rich.print("NODE OUTPUTS", node_outputs, )
+                # rich.print("NEXT NODE INPUTS", new_node_inputs)
+
                 await node_inputs_state.remove_and_merge(
                     done_node_ids, new_node_inputs)
+                # rich.print("MERGED", node_inputs_state.get_current_node_inputs())
 
                 pending_node_tasks = set(task for task in pending
                                          if task is not shutdown_task)
@@ -396,7 +411,7 @@ class SimpleScheduler(SchedulerBase):
                     for nid in node_inputs_state.get_current_node_ids()
                     if nid not in pending_node_ids
                 ]
-                # print(done_node_ids, [n.id for n in nodes_to_schedule])
+                # print(done_node_ids, new_node_inputs, [n.id for n in nodes_to_schedule])
                 for node in nodes_to_schedule:
                     if node.runtime is None:
                         node.runtime = node.get_node_runtime(dm_comp.get_model())
@@ -415,13 +430,15 @@ class SimpleScheduler(SchedulerBase):
                     CFLOW_LOGGER.warning("No node can be scheduled")
                     break
                 wait_tasks = node_tasks + [shutdown_task]
+            print("Done")
+            await node_inputs_state.release_all_handles()
+
         except Exception as exc:
             # await self.send_exception(exc)
             traceback.print_exc()
             raise exc
-
-        print("Done")
-        self._state = None
+        finally:
+            self._state = None
 
     @override
     async def schedule(self, flow: ComputeFlowModel,

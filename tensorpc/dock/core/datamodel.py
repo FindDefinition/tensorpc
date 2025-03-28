@@ -154,7 +154,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                     val_dict[k] = obj
                     type_dict[k] = DraftEventType.InitChange
                 # TODO if eval failed, should we call it during init?
-                all_handlers.append(partial(h.handler, DraftChangeEvent(type_dict, {}, val_dict)))
+                all_handlers.append(partial(h.handler, DraftChangeEvent(type_dict, {k: None for k in val_dict}, val_dict)))
         with prevent_draft_update():
             await self.run_callbacks(
                 all_handlers,
