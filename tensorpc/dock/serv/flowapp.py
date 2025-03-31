@@ -69,10 +69,15 @@ class FlowApp:
                  module_name: str,
                  config: Dict[str, Any],
                  headless: bool = False,
-                 external_argv: Optional[List[str]] = None) -> None:
+                 external_argv: Optional[List[str]] = None,
+                 init_code: str = "") -> None:
         # print(module_name, config)
         if external_argv is not None:
             print("external_argv", external_argv)
+        if init_code:
+            # run dynamic import code here
+            # used to register user data
+            exec(init_code, {})
         self.module_name = module_name
         self.config = config
         self.shutdown_ev = asyncio.Event()

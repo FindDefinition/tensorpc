@@ -1242,6 +1242,12 @@ class AppNode(CommandNode, DataStorageNodeBase):
         return self.node_data["module"]
 
     @property
+    def init_code(self):
+        if "initCode" not in self.node_data:
+            return ""
+        return self.node_data["initCode"]
+
+    @property
     def init_config(self):
         if self.node_data["initConfig"] == "":
             return {}
@@ -1389,6 +1395,7 @@ class AppNode(CommandNode, DataStorageNodeBase):
             serv_name: {
                 "module_name": self.module_name,
                 "config": self.init_config,
+                "init_code": self.init_code,
             }
         }
         cfg_encoded = base64.b64encode(
