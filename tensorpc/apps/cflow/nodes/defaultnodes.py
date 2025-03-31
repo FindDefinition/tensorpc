@@ -1,4 +1,7 @@
-from tensorpc.apps.cflow.nodes.cnode.registry import ComputeNodeFlags
+from tensorpc.apps.cflow.executors.simple import SSHTempExecutorBase
+from tensorpc.apps.cflow.model import ComputeNodeModel
+from tensorpc.apps.cflow.nodes.cnode.registry import ComputeNodeFlags, ComputeNodeRuntime
+from tensorpc.autossh.core import SSHConnDesc
 from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.apps.cflow.nodes import register_compute_node, get_node_state_draft, ComputeNodeBase, SpecialHandleDict
 import json 
@@ -12,6 +15,8 @@ class ReservedNodeTypes:
     Expr = "tensorpc.cflow.Expr"
     TensorViewer = "tensorpc.cflow.TensorViewer"
     ImageViewer = "tensorpc.cflow.ImageViewer"
+
+    SSHRunner = "tensorpc.cflow.SSHRunner"
 
 @dataclasses.dataclass
 class JsonInputState:
@@ -75,3 +80,47 @@ class ObjViewer(ComputeNodeBase):
         if isinstance(node, (list, tuple, set)):
             return len(node) < 10
         return False
+
+@dataclasses.dataclass
+class _SSHRunnerState:
+    url_with_port: str = "localhost:22"
+    username: str = "root"
+    password: str = ""
+
+def _ssh_config_layout(drafts):
+    url_with_port_ui = mui.Input("url:port")
+    url_with_port_ui.bind_draft_change(drafts.url_with_port)
+    username_ui = mui.Input("username")
+    username_ui.bind_draft_change(drafts.username)
+    password_ui = mui.Input("password").prop(type="password")
+    password_ui.bind_draft_change(drafts.password)
+    return mui.VBox([
+        url_with_port_ui,
+        username_ui,
+        password_ui,
+    ]).prop(width="200px",
+            maxHeight="300px",
+            overflow="auto",
+            padding="5px")
+
+class _SSHTempExecutor(SSHTempExecutorBase):
+    def get_ssh_info_from_node_state(self, node_state: Any) -> SSHConnDesc:
+        return SSHConnDesc(
+            node_state.url_with_port,
+            node_state.username,
+            node_state.password
+        )
+
+def _create_temp_exec(node: ComputeNodeModel) -> SSHTempExecutorBase:
+    # we need a unique id to store terminal state.
+    return _SSHTempExecutor(node.id)
+
+@register_compute_node(key=ReservedNodeTypes.SSHRunner,
+                       name="SSH Runner",
+                       icon_cfg=mui.IconProps(icon=mui.IconType.Terminal),
+                       layout_creator=_ssh_config_layout,
+                       state_dcls=_SSHRunnerState,
+                       temp_executor_creator=_create_temp_exec)
+def ssh_runner_node_node() -> None:
+    # _SSHTempExecutor will run ssh connection, nothing to do here.
+    return None

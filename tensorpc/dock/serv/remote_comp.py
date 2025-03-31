@@ -15,7 +15,7 @@ from tensorpc.core import marker
 from tensorpc.core.asyncclient import (AsyncRemoteManager,
                                        simple_chunk_call_async)
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.core.defs import FileDesp, FileResource, FileResourceRequest
+from tensorpc.core.defs import FileDesc, FileResource, FileResourceRequest
 from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp
 from tensorpc.dock.components.mui import FlexBox

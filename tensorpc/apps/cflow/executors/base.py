@@ -6,9 +6,10 @@ from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.datamodel.draft import DraftUpdateOp
 from tensorpc.dock import mui
 import abc 
-from tensorpc.apps.cflow.coremodel import ResourceDesp
+from tensorpc.apps.cflow.coremodel import ResourceDesc
 from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core import BuiltinServiceKeys
+from tensorpc.dock.components.terminal import AsyncSSHTerminal, TerminalBuffer
 
 if TYPE_CHECKING:
     from tensorpc.apps.cflow.model import ComputeNodeModel
@@ -31,15 +32,15 @@ class RemoteExecutorServiceKeys(enum.Enum):
     IMPORT_REGISTRY_MODULES = f"{NODE_EXEC_SERVICE}.import_registry_modules"
 
 @dataclasses.dataclass
-class ExecutorRemoteDesp:
+class ExecutorRemoteDesc:
     id: str # global unique id
     type: ExecutorType
     url: str
-    rc: ResourceDesp
+    rc: ResourceDesc
     
     @staticmethod
     def get_empty():
-        return ExecutorRemoteDesp(id="", url="", type=ExecutorType.LOCAL, rc=ResourceDesp())
+        return ExecutorRemoteDesc(id="", url="", type=ExecutorType.LOCAL, rc=ResourceDesc())
 
     def is_empty(self):
         return self.id == "" and self.url == ""
@@ -49,7 +50,7 @@ class DataHandle:
     # for distributed task, we won't send node run result back to scheduler, instead we send back the data handle.
     # other executors can use this handle to get the data directly.
     id: str 
-    executor_desp: ExecutorRemoteDesp
+    executor_desp: ExecutorRemoteDesc
     data: Union[Undefined, Any] = undefined
     update_ops: Optional[list[DraftUpdateOp]] = None
 
@@ -85,24 +86,31 @@ class RemoteGrpcDataHandle(DataHandle):
         await self.remote_obj.chunked_remote_call(RemoteExecutorServiceKeys.RELEASE_DATA.value, self.id)
 
 class NodeExecutorBase(abc.ABC):
-    def __init__(self, id: str, desp: ResourceDesp):
-        self._current_resource_desp = desp
-        self._resource_desp = desp
+    def __init__(self, id: str, desc: ResourceDesc):
+        self._current_resource_desp = desc
+        self._resource_desp = desc
         self._id = id
+        self._terminal_buffer = TerminalBuffer()
 
     @contextlib.contextmanager
-    def request_resource(self, desp: ResourceDesp):
-        assert self._current_resource_desp.is_request_sufficient(desp)
+    def request_resource(self, desc: ResourceDesc):
+        assert self._current_resource_desp.is_request_sufficient(desc)
         try:
-            self._current_resource_desp = self._current_resource_desp.get_request_remain_rc(desp)
+            self._current_resource_desp = self._current_resource_desp.get_request_remain_rc(desc)
             yield
         finally:
-            self._current_resource_desp = self._current_resource_desp.add_request_rc(desp)
+            self._current_resource_desp = self._current_resource_desp.add_request_rc(desc)
 
     def get_id(self) -> str:
         return self._id
 
-    def get_current_resource_desp(self) -> ResourceDesp:
+    def get_terminal_buffer(self):
+        return self._terminal_buffer
+
+    def get_ssh_terminal(self) -> Optional[AsyncSSHTerminal]:
+        return None 
+
+    def get_current_resource_desp(self) -> ResourceDesc:
         return self._current_resource_desp
 
     def get_bottom_layout(self) -> Optional[mui.FlexBox]:

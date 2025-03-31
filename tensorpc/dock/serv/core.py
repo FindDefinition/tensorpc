@@ -1780,7 +1780,7 @@ async def _close_lang_serv(uid: str,
     return port
 
 
-class NodeDesp:
+class NodeDesc:
 
     def __init__(self, node: Node, graph: FlowGraph,
                  driver: Optional[Node]) -> None:
@@ -1834,7 +1834,7 @@ class Flow:
         if node.driver_id != "":
             if gh.node_exists(node.driver_id):
                 driver = gh.get_node_by_id(node.driver_id)
-        return NodeDesp(node, gh, driver)
+        return NodeDesc(node, gh, driver)
 
     @marker.mark_server_event(
         event_type=marker.ServiceEventType.WebSocketOnDisConnect)

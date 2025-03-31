@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 import grpc
 from tensorpc.core.asyncclient import simple_chunk_call_async
-from tensorpc.core.defs import FileDesp, FileResource, FileResourceRequest
+from tensorpc.core.defs import FileDesc, FileResource, FileResourceRequest
 from tensorpc.dock.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_LSP_EXTRA_PATH
 from tensorpc.dock.coretypes import ScheduleEvent, get_unique_node_id
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp

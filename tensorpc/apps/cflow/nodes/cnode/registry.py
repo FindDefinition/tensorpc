@@ -6,7 +6,7 @@ from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator,
                     Awaitable, Callable, Coroutine, Deque, Dict, List, Literal, Mapping,
                     Optional, Tuple, Type, TypedDict, TypeVar, Union, cast,
                     get_origin)
-from tensorpc.apps.cflow.coremodel import ResourceDesp
+from tensorpc.apps.cflow.coremodel import ResourceDesc
 import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.dock.components import flowui, mui
 from tensorpc.core.moduleid import get_module_id_of_type
@@ -18,7 +18,8 @@ from tensorpc.dock.jsonlike import (as_dict_no_undefined,
 import dataclasses as dataclasses_plain
 from pydantic_core import core_schema
 from pydantic import GetCoreSchemaHandler
-
+if TYPE_CHECKING:
+    from tensorpc.apps.cflow.executors.base import NodeExecutorBase
 
 class ComputeNodeFlags(enum.IntFlag):
     EXEC_ALWAYS_LOCAL = enum.auto()
@@ -55,10 +56,10 @@ class ComputeNodeBase(abc.ABC):
         return v
 
 class ComputeNodeFuncWrapper(ComputeNodeBase):
-    def __init__(self, desp: "ComputeNodeDesp") -> None:
-        self._desp = desp
-        assert inspect.isfunction(desp.func), "func should be a function"
-        self._compute_func = desp.func 
+    def __init__(self, desc: "ComputeNodeDesc") -> None:
+        self._desp = desc
+        assert inspect.isfunction(desc.func), "func should be a function"
+        self._compute_func = desc.func 
 
     def compute(
         self, *args, **kwargs
@@ -80,7 +81,7 @@ class ComputeNodeFuncWrapper(ComputeNodeBase):
         return None
 
 @dataclasses.dataclass
-class ComputeNodeDesp:
+class ComputeNodeDesc:
     func: Union[Callable, type[ComputeNodeBase]]
     key: str
     name: str
@@ -90,7 +91,7 @@ class ComputeNodeDesp:
     resizer_props: Optional[flowui.NodeResizerProps] = None
     layout_overflow: Optional[mui._OverflowType] = None
     is_dynamic_cls: bool = False
-    resource_desp: Optional[ResourceDesp] = None
+    resource_desp: Optional[ResourceDesc] = None
     # static layout
     layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None
     detail_layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None
@@ -98,6 +99,9 @@ class ComputeNodeDesp:
     state_dcls: Optional[type] = None
     # options
     flags: ComputeNodeFlags = ComputeNodeFlags(0)
+    # private executor
+    # WARNING: node with private executor always run in local.
+    temp_executor_creator: Optional[Callable[[Any], Any]] = None
 
     def get_resizer(self):
         if self.resizer_props is not None:
@@ -116,7 +120,7 @@ class ComputeNodeDesp:
 
 class CustomNodeEditorContext:
 
-    def __init__(self, cfg: Optional[ComputeNodeDesp] = None) -> None:
+    def __init__(self, cfg: Optional[ComputeNodeDesc] = None) -> None:
         self.cfg = cfg
 
 
@@ -145,7 +149,7 @@ T = TypeVar("T")
 class ComputeNodeRegistry:
 
     def __init__(self, allow_duplicate: bool = True):
-        self.global_dict: dict[str, ComputeNodeDesp] = {}
+        self.global_dict: dict[str, ComputeNodeDesc] = {}
         self.allow_duplicate = allow_duplicate
 
     def register(
@@ -163,9 +167,10 @@ class ComputeNodeRegistry:
             layout_overflow: Optional[mui._OverflowType] = None,
             layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None,
             detail_layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None,
-            resource_desp: Optional[ResourceDesp] = None,
+            resource_desp: Optional[ResourceDesc] = None,
             state_dcls: Optional[type] = None,
-            flags: ComputeNodeFlags = ComputeNodeFlags(0)) -> Union[T, Callable[[T], T]]:
+            flags: ComputeNodeFlags = ComputeNodeFlags(0),
+            temp_executor_creator: Optional[Callable[[Any], Any]] = None) -> Union[T, Callable[[T], T]]:
 
         def wrapper(func: T) -> T:
             assert inspect.isclass(func) or inspect.isfunction(
@@ -202,7 +207,7 @@ class ComputeNodeRegistry:
                     if max_size is not None:
                         resizer_props_.maxWidth = max_size[0]
                         resizer_props_.maxHeight = max_size[1]
-            node_cfg = ComputeNodeDesp(func=func, 
+            node_cfg = ComputeNodeDesc(func=func, 
                                          key=key_,
                                          name=name_,
                                          icon_cfg=icon_cfg,
@@ -214,7 +219,8 @@ class ComputeNodeRegistry:
                                          detail_layout_creator=detail_layout_creator,
                                          resource_desp=resource_desp,
                                          flags=flags,
-                                         state_dcls=state_dcls)
+                                         state_dcls=state_dcls,
+                                         temp_executor_creator=temp_executor_creator)
             # parse function annotation to validate it.
             # TODO add class support
             if inspect.isclass(func):
@@ -265,9 +271,10 @@ def register_compute_node(
         layout_overflow: Optional[mui._OverflowType] = None,
         layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None,
         detail_layout_creator: Optional[Callable[[Any], mui.FlexBox]] = None,
-        resource_desp: Optional[ResourceDesp] = None,
+        resource_desp: Optional[ResourceDesc] = None,
         state_dcls: Optional[type] = None,
-        flags: ComputeNodeFlags = ComputeNodeFlags(0)):
+        flags: ComputeNodeFlags = ComputeNodeFlags(0),
+        temp_executor_creator: Optional[Callable[[Any], Any]] = None):
     editor_ctx = get_node_editor_context()
     if editor_ctx is None:
         assert key is not None, "you must provide a GLOBAL unique key for the node to make sure code of node can be moved."
@@ -283,6 +290,7 @@ def register_compute_node(
                                   detail_layout_creator=detail_layout_creator,
                                   resource_desp=resource_desp,
                                   flags=flags,
+                                  temp_executor_creator=temp_executor_creator,
                                   state_dcls=state_dcls)
 
 def parse_code_to_compute_cfg(code: str):
@@ -294,7 +302,7 @@ def parse_code_to_compute_cfg(code: str):
 
 @dataclasses_plain.dataclass
 class ComputeNodeRuntime:
-    cfg: ComputeNodeDesp
+    cfg: ComputeNodeDesc
     cnode: ComputeNodeBase
     # required by scheduler
     inp_handles: list[AnnoHandle]
@@ -302,7 +310,17 @@ class ComputeNodeRuntime:
     executor: Optional[Any] = None # TODO find a way to replace Any with real type
     impl_code: str = ""
 
-def get_compute_node_runtime(cfg: ComputeNodeDesp, code: str = "") -> ComputeNodeRuntime:
+    def has_private_exec(self):
+        return self.cfg.temp_executor_creator is not None
+
+    def create_temp_executor(self) -> "NodeExecutorBase":
+        from tensorpc.apps.cflow.executors.base import NodeExecutorBase
+        assert self.cfg.temp_executor_creator is not None
+        temp_executor = self.cfg.temp_executor_creator(self)
+        assert isinstance(temp_executor, NodeExecutorBase)
+        return temp_executor
+
+def get_compute_node_runtime(cfg: ComputeNodeDesc, code: str = "") -> ComputeNodeRuntime:
     if inspect.isclass(cfg.func):
         cnode = cfg.func()
         inp_handles, out_handles = parse_function_to_handles(cnode.compute, cfg.is_dynamic_cls)

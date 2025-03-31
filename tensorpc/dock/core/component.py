@@ -436,8 +436,8 @@ class FrontendEventType(enum.IntEnum):
     # Terminal Events
     TerminalInput = 110
     TerminalResize = 111
-    TerminalSaveState = 112
-    TerminalTriggerLoadState = 113
+    TerminalFrontendUnmount = 112
+    TerminalFrontendMount = 113
 
     # data box events
     DataBoxSecondaryActionClick = 120
@@ -1894,6 +1894,16 @@ class Component(Generic[T_base_props, T_child]):
         assert self._flow_uid is not None
         ev = ComponentEvent(
             {self._flow_uid.uid_encoded: as_dict_no_undefined(data)})
+        # uid is set in flowapp service later.
+        return AppEvent("", {AppEventType.ComponentEvent: ev})
+
+    def create_comp_raw_event(self, data: Any):
+        """create component control event for
+        backend -> frontend direct communication
+        """
+        assert self._flow_uid is not None
+        ev = ComponentEvent(
+            {self._flow_uid.uid_encoded: data})
         # uid is set in flowapp service later.
         return AppEvent("", {AppEventType.ComponentEvent: ev})
 

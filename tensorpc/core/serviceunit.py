@@ -1155,11 +1155,13 @@ class FunctionUserMeta:
             type: ServiceType,
             event_name: str = "",
             is_dynamic: bool = False,
-            event_type: ServiceEventType = ServiceEventType.Normal) -> None:
+            event_type: ServiceEventType = ServiceEventType.Normal,
+            serv_key_override: Optional[str] = None) -> None:
         self.type = type
         self._event_name = event_name
         self.is_dynamic = is_dynamic
         self.event_type = event_type
+        self.serv_key_override = serv_key_override
 
     @property
     def event_name(self):
@@ -1268,6 +1270,8 @@ class ServiceUnit(DynamicClass):
                 # meta: FunctionUserMeta = inspect.getattr_static(v, TENSORPC_FUNC_META_KEY)
                 serv_type = meta.type
                 serv_event_type = meta.event_type
+                if meta.serv_key_override is not None:
+                    serv_key = meta.serv_key_override
                 if serv_type == ServiceType.WebSocketEventProvider:
                     num_parameters = len(
                         v_sig.parameters) - (0 if is_static else 1)

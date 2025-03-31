@@ -61,7 +61,7 @@ class FileResource:
 
 
 @dataclass
-class FileDesp:
+class FileDesc:
     name: str
     content_type: Optional[str] = None
     length: Optional[int] = None

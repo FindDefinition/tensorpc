@@ -3,14 +3,14 @@ import uuid
 from tensorpc.apps.cflow.model import ComputeNodeModel
 from tensorpc.core.annolib import Undefined
 from tensorpc.dock.components import mui
-from .base import NodeExecutorBase, DataHandle, ExecutorRemoteDesp
+from .base import NodeExecutorBase, DataHandle, ExecutorRemoteDesc
 import inspect
 
 from typing_extensions import override
 
 class LocalNodeExecutor(NodeExecutorBase):
-    def get_executor_remote_desp(self) -> ExecutorRemoteDesp: 
-        return ExecutorRemoteDesp.get_empty()
+    def get_executor_remote_desp(self) -> ExecutorRemoteDesc: 
+        return ExecutorRemoteDesc.get_empty()
 
     # each scheduler should only have one local executor.
     @override
@@ -47,7 +47,7 @@ class LocalNodeExecutor(NodeExecutorBase):
             for k, v in data.items():
                 uuid_str = uuid.uuid4().hex
                 uid = f"{self.get_id()}-{uuid_str}-{k}"
-                data_handle_dict[k] = DataHandle(id=uid, executor_desp=ExecutorRemoteDesp.get_empty(), data=v)
+                data_handle_dict[k] = DataHandle(id=uid, executor_desp=ExecutorRemoteDesc.get_empty(), data=v)
             return data_handle_dict
         else:
             assert data is None, f"compute_func {compute_func} should return None or dict."

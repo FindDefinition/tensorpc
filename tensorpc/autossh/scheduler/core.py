@@ -96,7 +96,7 @@ class Task:
 
     name: Optional[str] = None
 
-    desp: str = ""
+    desc: str = ""
 
     cwd: str = ""
 

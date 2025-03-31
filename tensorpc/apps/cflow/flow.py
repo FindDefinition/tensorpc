@@ -10,14 +10,17 @@ import tensorpc.core.datamodel.funcs as D
 from functools import partial
 from tensorpc.core.tree_id import UniqueTreeIdForTree
 
-from typing import Optional, Any
+from typing import Annotated, Optional, Any
 
 from tensorpc.apps.cflow.binder import ComputeFlowBinder, FlowPanelComps
-from tensorpc.apps.cflow.model import DEFAULT_EXECUTOR_ID, ComputeFlowDrafts, ComputeFlowModelRoot, ComputeNodeModel, ComputeNodeType, DetailType, InlineCode, ResourceDesp, get_compute_flow_drafts
+from tensorpc.apps.cflow.model import DEFAULT_EXECUTOR_ID, ComputeFlowDrafts, ComputeFlowModelRoot, ComputeNodeModel, ComputeNodeType, DetailType, InlineCode, ResourceDesc, get_compute_flow_drafts
 from tensorpc.apps.cflow.nodes.cnode.default_code import get_default_custom_node_code
 from tensorpc.apps.cflow.nodes.cnode.handle import HandleTypePrefix
 from tensorpc.dock.components.flowplus.style import default_compute_flow_css
+from tensorpc.dock.components.models.flow import BaseEdgeModel
+from tensorpc.dock.components.plus.config import ConfigDialogEvent, ConfigPanel, ConfigPanelDialog
 from tensorpc.dock.components.plus.styles import get_tight_icon_tab_theme
+from tensorpc.dock.components.terminal import TerminalBuffer
 from tensorpc.utils.code_fmt import PythonCodeFormatter
 from tensorpc.apps.cflow.nodes.cnode.registry import NODE_REGISTRY, get_compute_node_runtime, parse_code_to_compute_cfg
 import tensorpc.apps.cflow.nodes.defaultnodes
@@ -29,15 +32,19 @@ from .executors import LocalNodeExecutor
 _SYS_NODE_PREFIX = "sys-"
 _USER_NODE_PREFIX = "user-"
 
+@dataclasses.dataclass
+class NodeSettings:
+    executor_id: Annotated[str, ConfigPanel.base_meta(alias="Executor Id")]
 
 def _get_local_resource_desp():
     gpus = get_nvidia_gpu_measures()
     # TODO add memory schedule
-    desp = ResourceDesp(-1, -1, len(gpus), sum([a.memtotal for a in gpus]))
-    return desp
+    desc = ResourceDesc(-1, -1, len(gpus), sum([a.memtotal for a in gpus]))
+    return desc
 
 class NodeContextMenuItemNames:
     Run = "Run Sub Graph"
+    Setting = "Node Settings"
     RunThisNode = "Run Cached Node"
     StopGraphRun = "Stop Graph Run"
 
@@ -51,7 +58,17 @@ class NodeContextMenuItemNames:
 class ComputeFlow(mui.FlexBox):
     executors: Sequence[NodeExecutorBase]
     scheduler: SchedulerBase
-    def __init__(self, scheduler: Optional[SchedulerBase] = None, executors: Optional[Sequence[NodeExecutorBase]] = None):
+    def __init__(self, scheduler: Optional[SchedulerBase] = None, executors: Optional[Sequence[NodeExecutorBase]] = None,
+            nodes: Optional[Sequence[ComputeNodeModel]] = None, edges: Optional[Sequence[BaseEdgeModel]] = None):
+        nodes_dict = {}
+        if nodes is not None:
+            for node in nodes:
+                nodes_dict[node.id] = node
+        edges_dict = {}
+        if edges is not None:
+            for edge in edges:
+                edges_dict[edge.id] = edge
+        
         items = [
             mui.MenuItem(id=f"{_SYS_NODE_PREFIX}markdown", label="Add Markdown"),
             mui.MenuItem(id=f"{_SYS_NODE_PREFIX}compute", label="Add Compute"),
@@ -73,6 +90,10 @@ class ComputeFlow(mui.FlexBox):
             mui.MenuItem(NodeContextMenuItemNames.Run,
                          NodeContextMenuItemNames.Run,
                          icon=mui.IconType.PlayArrow),
+            mui.MenuItem(NodeContextMenuItemNames.Setting,
+                         NodeContextMenuItemNames.Setting,
+                         icon=mui.IconType.Settings),
+
         ]
 
         self.graph.prop(nodeContextMenuItems=self._node_menu_items)
@@ -123,25 +144,17 @@ class ComputeFlow(mui.FlexBox):
             self.code_editor
         ]).prop(height="100%", width="100%", overflow="hidden")
         node_settings = mui.Input("executor id")
-        setting_box = mui.VBox([
-            node_settings
-        ]).prop(height="100%", width="100%", overflow="hidden")
         tabdefs: list[mui.TabDef] = [
             mui.TabDef("",
                        "0",
-                       detail_box,
-                       icon=mui.IconType.Dashboard,
-                       tooltip="node detail layout"),
-            mui.TabDef("",
-                       "1",
                        debug_box,
                        icon=mui.IconType.BugReport,
                        tooltip="compute node debug panel"),
             mui.TabDef("",
-                       "2",
-                       setting_box,
-                       icon=mui.IconType.Code,
-                       tooltip="custom node editor"),
+                       "1",
+                       detail_box,
+                       icon=mui.IconType.Dashboard,
+                       tooltip="node detail layout"),
 
         ]
         self.user_detail = mui.HBox([
@@ -194,7 +207,9 @@ class ComputeFlow(mui.FlexBox):
             show_bottom_panel_btn,
             show_right_panel_btn,
         ]).prop(flex=1)
-        self.dm = mui.DataModel(ComputeFlowModelRoot(edges={}, nodes={}), [
+        self._node_setting_dialog = ConfigPanelDialog(self._on_node_config)
+
+        self.dm = mui.DataModel(ComputeFlowModelRoot(edges=edges_dict, nodes=nodes_dict), [
             mui.VBox([
                 mui.HBox([
                     path_breadcrumb.prop(flex=1),
@@ -208,14 +223,13 @@ class ComputeFlow(mui.FlexBox):
         ])
         draft = self.dm.get_draft()
         flow_draft = get_compute_flow_drafts(draft)
-
-        flow_with_editor.bind_fields(visibles=f"[`true`, {flow_draft.show_editor}]")
-        global_container.bind_fields(visibles=f"[`true`, {flow_draft.show_detail}]")
+        flow_with_editor.bind_fields(visibles=f"create_array(`true`, {flow_draft.show_editor})")
+        global_container.bind_fields(visibles=f"create_array(`true`, {flow_draft.show_detail})")
         detail_ct.bind_fields(condition=flow_draft.selected_node_detail_type)
         node_settings.bind_draft_change(flow_draft.selected_node.vExecId)
         self.graph.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=flow_draft.cur_model))
         self.graph_preview.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=flow_draft.preview_model))
-
+        self._flow_draft = flow_draft
         self.graph.event_node_context_menu.on(self._on_node_contextmenu)
         self.graph_preview.event_node_context_menu.on(self._on_node_contextmenu)
 
@@ -234,9 +248,16 @@ class ComputeFlow(mui.FlexBox):
             self.scheduler = scheduler
         else:
             self.scheduler = SimpleScheduler(self.dm, self._shutdown_ev)
+        self._executor_term_buffers: dict[str, TerminalBuffer] = {}
         if executors is not None:
             self.executors = list(executors)
             has_local_executor = False
+            for executor in executors:
+                buf = executor.get_terminal_buffer()
+                ssh_term = executor.get_ssh_terminal()
+                if ssh_term is not None:
+                    self._executor_term_buffers[executor.get_id()] = buf
+                    ssh_term.set_state_buffers(self._executor_term_buffers)
             for executor in executors:
                 if executor.is_local():
                     has_local_executor = True
@@ -249,12 +270,20 @@ class ComputeFlow(mui.FlexBox):
             self.executors = [
                 LocalNodeExecutor(DEFAULT_EXECUTOR_ID, _get_local_resource_desp())
             ]
-        super().__init__([self.dm])
+        super().__init__([
+            self.dm,
+            self._node_setting_dialog,
+        ])
         self.event_after_unmount.on(self._on_flow_unmount)
         self.prop(width="100%", height="100%", overflow="hidden")
 
     async def _on_flow_unmount(self):
         self._shutdown_ev.set()
+        print("CLOSE SCHEDULER")
+        await self.scheduler.close()
+        for executor in self.executors:
+            print(f"CLOSE EXECUTOR {executor.get_id()}")
+            await executor.close()
 
     def _process_save_ev_before_save(self, ev: mui.MonacoEditorSaveEvent, drafts: ComputeFlowDrafts):
         cur_flow_draft = drafts.cur_model
@@ -290,6 +319,30 @@ class ComputeFlow(mui.FlexBox):
         draft = self.dm.get_draft()
         draft.cur_path = res_path
 
+    def _debug_add_sys_node(self, key: str,  pos: tuple[int, int], target_flow_draft: Optional[Any] = None) -> ComputeNodeModel:
+        """For debugging purpose, add a node to the flow by programming.
+        """
+        if target_flow_draft is None:
+            target_flow_draft = self.dm.get_draft_type_only()
+        target_flow = D.evaluate_draft(target_flow_draft, self.dm.model)
+        assert target_flow is not None
+        node_id = target_flow.make_unique_node_name(key)
+        cfg = NODE_REGISTRY.global_dict[key]
+        new_node = ComputeNodeModel(
+            nType=ComputeNodeType.COMPUTE, id=node_id, position=flowui.XYPosition(*pos), moduleId=cfg.module_id, key=cfg.key,
+                name=cfg.name)
+        if cfg.state_dcls is not None:
+            target_flow_draft.node_states[node_id] = cfg.state_dcls()
+        target_flow_draft.nodes[node_id] = new_node
+        return new_node
+
+    def _debug_add_edge(self, edge: BaseEdgeModel, target_flow_draft: Optional[Any] = None):
+        """For debugging purpose, add a node to the flow by programming.
+        """
+        if target_flow_draft is None:
+            target_flow_draft = self.dm.get_draft_type_only()
+        target_flow_draft.edges[edge.id] = edge
+
     def add_node(self, data: flowui.PaneContextMenuEvent, target_flow_draft: Any):
         item_id = data.itemId
         node_type = item_id
@@ -324,13 +377,25 @@ class ComputeFlow(mui.FlexBox):
 
         target_flow_draft.nodes[node_id] = new_node
 
+    async def _on_node_config(self, data: ConfigDialogEvent):
+        setting_obj = data.cfg
+        assert isinstance(setting_obj, NodeSettings)
+        node_draft = data.userdata
+        node_draft.vExecId = setting_obj.executor_id
+
     async def _on_node_contextmenu(self, data: flowui.NodeContextMenuEvent):
         item_id = data.itemId
         node_id = data.nodeId
-
+        cur_flow = self.dm.model.get_cur_flow()
+        assert cur_flow is not None and node_id in cur_flow.nodes
+        node = cur_flow.nodes[node_id]
         if item_id == NodeContextMenuItemNames.Run:
-            # if node is cached, only run it from cached input
-            await self.scheduler.run_sub_graph(self.dm.model, node_id, self.executors)
+            await self.scheduler.run_sub_graph(cur_flow, node_id, self.executors, self._executor_term_buffers)
+        elif item_id == NodeContextMenuItemNames.Setting:
+            node_draft = self._flow_draft.cur_model.nodes[node_id]
+            await self._node_setting_dialog.open_config_dialog(
+                NodeSettings(node.vExecId), node_draft
+            )
         # elif item_id == NodeContextMenuItemNames.RunThisNode:
         #     await self.run_cached_node(node_id)
         # elif item_id == NodeContextMenuItemNames.StopGraphRun:

@@ -80,8 +80,8 @@ _ONEARG_DATAGRID_EVENTS = set([
 _ONEARG_TERMINAL_EVENTS = set([
     FrontendEventType.TerminalInput.value,
     FrontendEventType.TerminalResize.value,
-    FrontendEventType.TerminalSaveState.value,
-    FrontendEventType.TerminalTriggerLoadState.value,
+    FrontendEventType.TerminalFrontendUnmount.value,
+    FrontendEventType.TerminalFrontendMount.value,
 ])
 
 _ONEARG_EVENTS = set(

@@ -6,7 +6,7 @@ import io
 from pathlib import Path
 from typing import Callable, Optional, Union, Coroutine
 
-from tensorpc.core.defs import FileDesp, FileResourceRequest, FileResource
+from tensorpc.core.defs import FileDesc, FileResourceRequest, FileResource
 
 
 async def handle_file_resource(req: FileResourceRequest, handler: Callable[[FileResourceRequest], Union[FileResource, Coroutine[None, None, FileResource]]], chunk_size: int, count: Optional[int]):
@@ -36,7 +36,7 @@ async def handle_file_resource(req: FileResourceRequest, handler: Callable[[File
             assert res.chunk_size > 1024
             chunk_size = res.chunk_size
         if res.path is not None:
-            # yield FileDesp(Path(res.path).name, res.content_type)
+            # yield FileDesc(Path(res.path).name, res.content_type)
             with open(res.path, "rb") as f:
                 if offset is not None:
                     f.seek(offset)
@@ -56,7 +56,7 @@ async def handle_file_resource(req: FileResourceRequest, handler: Callable[[File
             if offset is not None:
                 bio.seek(offset)
             chunk = bio.read(chunk_size)
-            # yield FileDesp(fname, res.content_type)
+            # yield FileDesc(fname, res.content_type)
             while chunk:
                 yield chunk
                 if count is not None:

@@ -6,7 +6,7 @@ from tensorpc.dock.components import flowui, mui
 from tensorpc.apps.cflow.nodes.cnode.handle import parse_func_to_handle_components, IOHandle, HandleTypePrefix
 from tensorpc.dock.components.flowplus.style import ComputeFlowClasses
 from tensorpc.apps.cflow.model import ComputeFlowNodeDrafts, ComputeNodeModel, ComputeNodeType, ComputeFlowModel, ComputeNodeStatus
-from .registry import ComputeNodeBase, ComputeNodeDesp, parse_code_to_compute_cfg
+from .registry import ComputeNodeBase, ComputeNodeDesc, parse_code_to_compute_cfg
 from .ctx import ComputeFlowNodeContext, enter_flow_ui_node_context_object
 from tensorpc.dock.jsonlike import (as_dict_no_undefined,
                                     as_dict_no_undefined_no_deepcopy,
@@ -49,7 +49,7 @@ def _error_layout_creator(draft):
 
 class ComputeNodeWrapper(BaseNodeWrapper):
 
-    def __init__(self, node_id: str, cnode_cfg: ComputeNodeDesp, node_state: Any, cnode: ComputeNodeBase,
+    def __init__(self, node_id: str, cnode_cfg: ComputeNodeDesc, node_state: Any, cnode: ComputeNodeBase,
                  node_model_draft: ComputeFlowNodeDrafts):
         parsed_cfg, comps = self.create_node_child_layout(cnode_cfg, cnode, node_model_draft)
         self.io_handles = comps.io_handles
@@ -87,7 +87,7 @@ class ComputeNodeWrapper(BaseNodeWrapper):
         self.set_flow_event_context_creator(
             lambda: enter_flow_ui_node_context_object(self._ctx))
 
-    async def set_new_cnode(self, cnode_cfg: ComputeNodeDesp,
+    async def set_new_cnode(self, cnode_cfg: ComputeNodeDesc,
                                 cnode: ComputeNodeBase,
                                  node_model_draft: ComputeFlowNodeDrafts):
         parsed_cfg, comps = self.create_node_child_layout(cnode_cfg, cnode, node_model_draft)
@@ -97,13 +97,13 @@ class ComputeNodeWrapper(BaseNodeWrapper):
         await self.update_childs(comps.get_ui_dict()) # type: ignore
         return comps.io_handles
 
-    async def set_node_from_code(self, cfg: ComputeNodeDesp, new_state: Any, cnode: ComputeNodeBase, node_model_draft: ComputeFlowNodeDrafts):
+    async def set_node_from_code(self, cfg: ComputeNodeDesc, new_state: Any, cnode: ComputeNodeBase, node_model_draft: ComputeFlowNodeDrafts):
         # raise error instead of set to error node, we only use error node in init.
         if new_state is not None:
             self._ctx.state = new_state
         return await self.set_new_cnode(cfg, cnode, node_model_draft)
 
-    def create_node_child_layout(self, cnode_cfg: Union[ComputeNodeDesp, str],
+    def create_node_child_layout(self, cnode_cfg: Union[ComputeNodeDesc, str],
                                 cnode: ComputeNodeBase,
                                  node_model_draft: ComputeFlowNodeDrafts):
         if isinstance(cnode_cfg, str):
@@ -111,10 +111,10 @@ class ComputeNodeWrapper(BaseNodeWrapper):
                 cnode_cfg = parse_code_to_compute_cfg(cnode_cfg)
             except:
                 traceback.print_exc()
-                cnode_cfg = ComputeNodeDesp(_error_function, "Error Node", "Error Node", "",
+                cnode_cfg = ComputeNodeDesc(_error_function, "Error Node", "Error Node", "",
                     layout_creator=_error_layout_creator)
         else:
-            assert isinstance(cnode_cfg, ComputeNodeDesp)
+            assert isinstance(cnode_cfg, ComputeNodeDesc)
         header = mui.Typography("").prop(variant="body2")
         header.bind_fields(value=node_model_draft.node.name)
         icon_container = mui.Fragment([])

@@ -125,3 +125,5 @@ docs_out
 
 *.exp
 *.lib
+
+tensorpc/secret.yaml

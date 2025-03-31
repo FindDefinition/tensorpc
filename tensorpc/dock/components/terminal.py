@@ -3,11 +3,12 @@ from collections import deque
 import enum
 from functools import partial
 import inspect
+import time
 import traceback
-from typing import Any, Callable, Optional, Union
+from typing import Any, Awaitable, Callable, Optional, Union
 from typing_extensions import Literal
 from tensorpc.autossh.constants import TENSORPC_ASYNCSSH_INIT_SUCCESS
-from tensorpc.autossh.core import CommandEvent, CommandEventType, EofEvent, ExceptionEvent, LineEvent, LineEventType, LineRawEvent, RawEvent, SSHClient, SSHRequest, SSHRequestType, LOGGER, remove_trivial_r_lines
+from tensorpc.autossh.core import CommandEvent, CommandEventType, EofEvent, ExceptionEvent, LineEvent, LineEventType, LineRawEvent, RawEvent, SSHClient, SSHConnDesc, SSHRequest, SSHRequestType, LOGGER, remove_trivial_r_lines
 from tensorpc.autossh.core import Event as SSHEvent
 import dataclasses as dataclasses_plain
 import tensorpc.core.dataclass_dispatch as dataclasses
@@ -17,11 +18,12 @@ from tensorpc.dock.jsonlike import Undefined, undefined
 from tensorpc.autossh.core import LOGGER as SSH_LOGGER
 from .mui import (MUIBasicProps, MUIComponentBase, FlexBoxProps, NumberType,
                   Event)
-
+import bisect 
 
 @dataclasses.dataclass
 class TerminalProps(MUIBasicProps):
     initData: Union[str, bytes, Undefined] = undefined
+    terminalId: Union[str, Undefined] = undefined
     boxProps: Union[FlexBoxProps, Undefined] = undefined
     theme: Union[Literal["light", "dark"], Undefined] = undefined
 
@@ -76,40 +78,137 @@ class TerminalResizeEvent:
     width: int
     height: int
 
+class TerminalBuffer:
+    def __init__(self, maxlen: int = 10000, min_buffer_len: int = 256):
+        self._raw_buffers_with_ts: deque[tuple[bytes, int]] = deque(maxlen=maxlen)
+        self._min_buffer_len = min_buffer_len
+
+    def get_total_size(self):
+        return sum(len(x[0]) for x in self._raw_buffers_with_ts)
+
+    def save_state(self, state: bytes, state_ts: int):
+        assert state_ts >= 0
+        if not self._raw_buffers_with_ts:
+            self._raw_buffers_with_ts.append((state, state_ts))
+            return
+        # clean up old data with ts belongs to [0, state_ts]
+        old_ts_idx = bisect.bisect_right(self._raw_buffers_with_ts, state_ts, key=lambda x: x[1])
+        # print("old_ts_idx", old_ts_idx, len(self._raw_buffers_with_ts), state_ts)
+        new_dq = list(self._raw_buffers_with_ts)[old_ts_idx:]
+        # assert new_dq[0][1] > state_ts
+        self._raw_buffers_with_ts = deque([(state, state_ts)] + new_dq, maxlen=self._raw_buffers_with_ts.maxlen)
+    
+    def load_state(self):
+        # merge all buffers to one
+        if not self._raw_buffers_with_ts:
+            return b"", 0
+        last_ts = self._raw_buffers_with_ts[-1][1]
+        buffers = [x[0] for x in self._raw_buffers_with_ts]
+        buffer = b"".join(buffers)
+        self._raw_buffers_with_ts.clear()
+        self._raw_buffers_with_ts.append((buffer, last_ts))
+        return buffer, last_ts
+
+    def load_state_backend_only(self):
+        # load state without merge buffer
+        last_ts = self._raw_buffers_with_ts[-1][1]
+        buffers = [x[0] for x in self._raw_buffers_with_ts]
+        buffer = b"".join(buffers)
+        return buffer, last_ts
+
+    def append_buffer(self, buffer: bytes, ts: int):
+        if self._raw_buffers_with_ts:
+            last_buf = self._raw_buffers_with_ts[-1]
+            assert ts >= last_buf[1], f"ts {ts} is less than last ts {last_buf[1]}"
+            if len(buffer) + len(last_buf[0]) < self._min_buffer_len:
+                # merge buffer with last buffer
+                self._raw_buffers_with_ts[-1] = (last_buf[0] + buffer, ts)
+            else:
+                # add new buffer
+                self._raw_buffers_with_ts.append((buffer, ts))
+        else:
+            self._raw_buffers_with_ts.append((buffer, ts))
+
 class Terminal(MUIComponentBase[TerminalProps]):
 
-    def __init__(self, init_data: Optional[Union[bytes, str]] = None, callback: Optional[Callable[[Union[str, bytes]], Any]] = None) -> None:
+    def __init__(self, init_data: Optional[Union[bytes, str]] = None, callback: Optional[Callable[[Union[str, bytes]], Any]] = None, 
+            terminalId: Optional[str] = None, 
+            state_buffers: Optional[dict[str, TerminalBuffer]] = None,
+            dont_use_frontend_state: bool = True) -> None:
         super().__init__(UIType.Terminal,
                          TerminalProps,
                          allowed_events=[
                              FrontendEventType.TerminalInput.value,
                              FrontendEventType.TerminalResize.value,
-                             FrontendEventType.TerminalSaveState.value,
-                             FrontendEventType.TerminalTriggerLoadState.value,
+                             FrontendEventType.TerminalFrontendUnmount.value,
+                             FrontendEventType.TerminalFrontendMount.value,
                          ])
         if init_data is not None:
             self.prop(initData=init_data)
+        if terminalId is not None:
+            self.prop(terminalId=terminalId)
+        if state_buffers is not None:
+            assert terminalId is not None, "state_buffers must be None when terminalId is None."
+            assert terminalId in state_buffers, f"terminalId {terminalId} not in state_buffers."
+        self._state_buffers = state_buffers
+        self._dont_use_frontend_state = dont_use_frontend_state
         self.event_terminal_input = self._create_event_slot(
             FrontendEventType.TerminalInput)
         self.event_terminal_resize = self._create_event_slot(
             FrontendEventType.TerminalResize, lambda x: TerminalResizeEvent(**x))
-        self.event_terminal_save_state = self._create_event_slot(
-            FrontendEventType.TerminalSaveState)
-        self.event_terminal_trigger_load_state = self._create_event_slot(
-            FrontendEventType.TerminalTriggerLoadState)
+        self.event_terminal_frontend_unmount = self._create_event_slot(
+            FrontendEventType.TerminalFrontendUnmount)
+        self.event_terminal_frontend_mount = self._create_event_slot(
+            FrontendEventType.TerminalFrontendMount)
 
-        self.event_terminal_save_state.on(self._default_on_save_state)
-        self.event_terminal_trigger_load_state.on(self._send_state_to_frontend)
-
+        # self._terminal_state = b""
+        # self._is_terminal_frontend_unmounted = False
+        # if self._state_buffers is not None:
+        self.event_terminal_frontend_unmount.on(self._terminal_state_unmount)
+        self.event_terminal_frontend_mount.on(self._terminal_state_mount)
         if callback is not None:
             self.event_terminal_input.on(callback)
 
-    def _default_on_save_state(self, state):
-        self.props.initData = state
+    def set_state_buffers(self, state_buffers: dict[str, TerminalBuffer]):
+        assert not isinstance(self.props.terminalId, Undefined), "terminalId must be set when state_buffers is not None."
+        assert self.props.terminalId in state_buffers, f"terminalId {self.props.terminalId} not in state_buffers."
+        self._state_buffers = state_buffers
 
-    async def _send_state_to_frontend(self, ev):
-        if not isinstance(self.props.initData, Undefined):
-            await self.send_raw(self.props.initData)
+    def reset_state_buffers(self):
+        self._state_buffers = None
+
+    async def _terminal_state_unmount(self, evdata):
+        state = evdata["state"]
+        term_id = evdata["terminalId"]
+        ts = evdata["ts"]
+        # print(ts, state, evdata["terminalId"])
+        if self._state_buffers is not None and not self._dont_use_frontend_state:
+            if term_id in self._state_buffers:
+                buffer = self._state_buffers[term_id]
+                buffer.save_state(state, ts)
+                # print("terminal state unmount", len(state), buffer.get_total_size(), "|", len(buffer._raw_buffers_with_ts), self.props.terminalId)
+                # print(state)
+        # self._terminal_state = state
+        # self._is_terminal_frontend_unmounted = True
+
+    async def _terminal_state_mount(self, term_id):
+        if self._state_buffers is not None:
+            if term_id is not None and term_id in self._state_buffers:
+                buffer = self._state_buffers[term_id]
+                if self._dont_use_frontend_state:
+                    state_to_send, ts = buffer.load_state_backend_only()
+                else:
+                    state_to_send, ts = buffer.load_state()
+                # print("terminal state mount", len(state_to_send), self.props.terminalId)
+                # print(state_to_send)
+                await self.clear_and_write(state_to_send, ts)
+
+        # state = self._state_buffers[self.props.terminalId].load_state()
+        # state_to_send = self._terminal_state
+        # self._terminal_state = b""
+        # self._is_terminal_frontend_unmounted = False
+        # print("terminal state mount", state_to_send, self.props.terminalId)
+        # await self.send_raw(state_to_send)
 
     @property
     def prop(self):
@@ -125,45 +224,50 @@ class Terminal(MUIComponentBase[TerminalProps]):
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
     async def clear(self):
-        await self.put_app_event(
-            self.create_comp_event({
-                "type": TerminalEventType.ClearAndWrite.value,
-                "data": ""
-            }))
+        await self.clear_and_write(b"")
 
-    async def clear_and_write(self, content: Union[str, bytes]):
+    async def clear_and_write(self, content: Union[str, bytes], ts: Optional[int] = None):
         await self.put_app_event(
-            self.create_comp_event({
-                "type": TerminalEventType.ClearAndWrite.value,
-                "data": content
-            }))
+            self.create_comp_raw_event([TerminalEventType.ClearAndWrite.value, content, ts]))
 
-    async def send_raw(self, data: Union[bytes, str]):
+    def append_buffer(self, data: Union[bytes, str], ts: int = 0):
+        if self._state_buffers is not None:
+            assert not isinstance(self.props.terminalId, Undefined), "terminalId must be set when state_buffers is not None."
+            if self.props.terminalId in self._state_buffers:
+                buffer = self._state_buffers[self.props.terminalId]
+                if isinstance(data, str):
+                    data = data.encode("utf-8")
+                buffer.append_buffer(data, ts)
+
+    async def send_raw(self, data: Union[bytes, str], ts: int = 0, append_buffer: bool = True):
+        # if self._is_terminal_frontend_unmounted:
+        #     if isinstance(data, str):
+        #         data = data.encode("utf-8")
+        #     self._terminal_state += data
+        #     return
+        # print("SEND RAW", data, self.props.terminalId)
+        if append_buffer:
+            self.append_buffer(data, ts)
         await self.put_app_event(
-            self.create_comp_event({
-                "type": TerminalEventType.Raw.value,
-                "data": data
-            }))
-
-    async def send_raw_may_unmounted(self, data: bytes):
-        if self.is_mounted():
-            await self.send_raw(data)
-        pass 
+            self.create_comp_raw_event([TerminalEventType.Raw.value, data, ts]))
     
     async def send_eof(self):
         await self.put_app_event(
-            self.create_comp_event({
-                "type": TerminalEventType.Eof.value,
-                "data": ""
-            }))
-
+            self.create_comp_raw_event([TerminalEventType.Eof.value, None]))
 
 
 @dataclasses_plain.dataclass
+class TerminalLineEvent:
+    ts: int 
+    d: bytes
+@dataclasses_plain.dataclass
 class TerminalCmdCompleteEvent:
     cmd: str 
-    outputs: list[bytes]
+    outputs: list[TerminalLineEvent]
     return_code: Optional[int] = None
+
+    def get_output(self):
+        return b"".join([x.d for x in self.outputs])
 
 @dataclasses_plain.dataclass
 class _AsyncSSHTerminalState:
@@ -172,26 +276,29 @@ class _AsyncSSHTerminalState:
     inited: bool 
     pid: int
     size: TerminalResizeEvent
+    base_ts: int
     current_cmd: str = ""
-    current_cmd_buffer: Optional[deque[bytes]] = None
+    current_cmd_buffer: Optional[deque[TerminalLineEvent]] = None
     current_cmd_rpc_future: Optional[asyncio.Future[TerminalCmdCompleteEvent]] = None
 
 class AsyncSSHTerminal(Terminal):
 
     def __init__(self,
-                 url_with_port: str = "",
-                 username: str = "",
-                 password: str = "",
+                 desc: Optional[SSHConnDesc] = None,
                  init_data: Optional[Union[bytes, str]] = None,
                  manual_connect: bool = True,
                  manual_disconnect: bool = False,
                  line_raw_ev_max_length: int = 10000,
-                 init_size: Optional[tuple[int, int]] = (80, 24)) -> None:
-        super().__init__(init_data)
-        if not url_with_port or not username or not password:
+                 init_size: Optional[tuple[int, int]] = (80, 24),
+                 terminalId: Optional[str] = None) -> None:
+        super().__init__(init_data, terminalId=terminalId)
+        if desc is None:
             assert manual_connect, "Cannot auto connect/disconnect when mount without url_with_port(ip:port), username, and password."
         self._shutdown_ev = asyncio.Event()
-        self._client = SSHClient(url_with_port, username, password)
+        if desc is not None:
+            self._client = SSHClient(desc.url_with_port, desc.username, desc.password)
+        else:
+            self._client = SSHClient("", "", "")
         self.event_after_mount.on(self._on_mount)
         self.event_after_unmount.on(self._on_unmount)
         self._manual_connect = manual_connect
@@ -216,6 +323,7 @@ class AsyncSSHTerminal(Terminal):
         if init_size is not None:
             self._init_size = TerminalResizeEvent(init_size[0], init_size[1])
         self._raw_data_buffer: Optional[bytes] = None
+        self._raw_data_ts: int = 0
         self._line_raw_ev_max_length = line_raw_ev_max_length
         self._line_raw_event_buffer: deque[bytes] = deque(maxlen=line_raw_ev_max_length)
 
@@ -223,9 +331,10 @@ class AsyncSSHTerminal(Terminal):
                       event_callback: Optional[Callable[[SSHEvent],
                                                         None]] = None):
         assert self._client.url and self._client.username and self._client.password, "Cannot connect without url, username, and password."
-        await self.connect_with_new_info(self._client.url,
+        desc = SSHConnDesc(self._client.url,
                                          self._client.username,
-                                         self._client.password, event_callback)
+                                         self._client.password)
+        await self.connect_with_new_desc(desc, event_callback)
 
     async def _on_exit(self):
         if self._ssh_state is not None:
@@ -236,23 +345,24 @@ class AsyncSSHTerminal(Terminal):
             # we can't await task here because it will cause deadlock
             self._ssh_state = None
         SSH_LOGGER.warning("SSH Exit.")
+        self._init_event.set()
 
         await self.flow_event_emitter.emit_async(
             self._backend_ssh_conn_close_event_key,
             Event(self._backend_ssh_conn_close_event_key, None))
 
-    async def connect_with_new_info(
+    async def connect_with_new_desc(
             self,
-            url_with_port: str,
-            username: str,
-            password: str,
+            desc: SSHConnDesc,
             event_callback: Optional[Callable[[SSHEvent], None]] = None,
-            init_cmds: Optional[list[str]] = None):
+            init_cmds: Optional[list[str]] = None,
+            term_line_event_callback: Optional[Callable[[TerminalLineEvent], None]] = None,
+            exit_event: Optional[asyncio.Event] = None):
         if init_cmds:
             for cmd in init_cmds:
                 assert cmd.endswith("\n"), "All command must end with \\n"
         assert self._ssh_state is None, "Cannot connect with new info while the current connection is still active."
-        self._client = SSHClient(url_with_port, username, password)
+        self._client = SSHClient(desc.url_with_port, desc.username, desc.password)
         if self.is_mounted():
             await self.clear()
         self._shutdown_ev.clear()
@@ -272,7 +382,7 @@ class AsyncSSHTerminal(Terminal):
         await cur_inp_queue.put(
             f" echo \"{TENSORPC_ASYNCSSH_INIT_SUCCESS}|PID=$TENSORPC_SSH_CURRENT_PID\"\n"
         )
-
+        base_ts = time.time_ns()
         ssh_task = asyncio.create_task(
             self._client.connect_queue(cur_inp_queue,
                                        partial(self._handle_ssh_queue,
@@ -282,9 +392,15 @@ class AsyncSSHTerminal(Terminal):
                                        exit_callback=self._on_exit,
                                        term_type="xterm-256color",
                                        enable_raw_event=True,
-                                       line_raw_callback=self._handle_line_raw_event))
-        self._ssh_state = _AsyncSSHTerminalState(cur_inp_queue, ssh_task, False, -1, size_state)
+                                       exit_event=exit_event,
+                                       line_raw_callback=partial(
+                                           self._handle_line_raw_event,
+                                           term_line_event_callback=term_line_event_callback),))
+        self._ssh_state = _AsyncSSHTerminalState(cur_inp_queue, ssh_task, False, -1, size_state, base_ts)
+        # TODO change init event to future
         await self._init_event.wait()
+        if self._ssh_state is None:
+            raise RuntimeError("SSH connect failed.")
         return self._ssh_state.inp_queue
 
     async def disconnect(self):
@@ -295,7 +411,7 @@ class AsyncSSHTerminal(Terminal):
 
     async def _on_mount(self):
         if self._line_raw_event_buffer:
-            self.props.initData = b"".join(self._line_raw_event_buffer)
+            self._terminal_state = b"".join(self._line_raw_event_buffer)
             self._line_raw_event_buffer.clear()
         if not self._manual_connect:
             await self.connect()
@@ -321,7 +437,8 @@ class AsyncSSHTerminal(Terminal):
                            [data.width, data.height]))
 
     async def _handle_line_raw_event(self,
-                                event: LineRawEvent):
+                                event: LineRawEvent,
+                                term_line_event_callback: Optional[Callable[[TerminalLineEvent], None]] = None):
         if event.line_ev_type != LineEventType.EXCEPTION:
             if event.line_ev_type == LineEventType.RBUF_OVERFLOW or event.line_ev_type == LineEventType.INCOMPLETE_START:
                 if self._raw_data_buffer is not None:
@@ -330,18 +447,25 @@ class AsyncSSHTerminal(Terminal):
                 else:
                     rbuf = event.data
                 self._raw_data_buffer = remove_trivial_r_lines(rbuf)
+                self._raw_data_ts = event.ts
             else:
                 if self._raw_data_buffer is not None:
                     self._line_raw_event_buffer.append(self._raw_data_buffer)
                     if self._ssh_state is not None:
                         if self._ssh_state.current_cmd_buffer is not None:
-                            self._ssh_state.current_cmd_buffer.append(self._raw_data_buffer)
+                            self._ssh_state.current_cmd_buffer.append(TerminalLineEvent(self._raw_data_ts, self._raw_data_buffer))
+                        if term_line_event_callback is not None:
+                            term_line_event_callback(TerminalLineEvent(self._raw_data_ts, self._raw_data_buffer))
+
                     self._raw_data_buffer = None
+                    self._raw_data_ts = 0
                 data = event.data
                 self._line_raw_event_buffer.append(data)
                 if self._ssh_state is not None:
                     if self._ssh_state.current_cmd_buffer is not None:
-                        self._ssh_state.current_cmd_buffer.append(data)
+                        self._ssh_state.current_cmd_buffer.append(TerminalLineEvent(event.ts, data))
+                    if term_line_event_callback is not None:
+                        term_line_event_callback(TerminalLineEvent(event.ts, data))
 
 
     async def _handle_ssh_queue(self,
@@ -383,14 +507,14 @@ class AsyncSSHTerminal(Terminal):
                         self._ssh_state.current_cmd_buffer = None
                         self._ssh_state.current_cmd = ""
                         self._ssh_state.current_cmd_rpc_future = None
-                        cmd_outputs: list[bytes] = []
+                        cmd_outputs: list[TerminalLineEvent] = []
                         if msg_buf is not None:
                             # line raw callback is called before event handler, so we remove last line.
                             cmd_outputs = list(msg_buf)[:-1]
                             # remove last lines starts with \x1b
                             last_idx = len(cmd_outputs)
                             while last_idx > 0:
-                                if cmd_outputs[last_idx - 1].startswith(b"\x1b"):
+                                if cmd_outputs[last_idx - 1].d.startswith(b"\x1b"):
                                     last_idx -= 1
                                 else:
                                     break
@@ -423,7 +547,9 @@ class AsyncSSHTerminal(Terminal):
             if isinstance(event, RawEvent):
                 # print(event.raw)
                 if self.is_mounted():
-                    await self.send_raw(event.raw)
+                    await self.send_raw(event.raw, event.timestamp - self._ssh_state.base_ts)
+                else:
+                    self.append_buffer(event.raw, event.timestamp - self._ssh_state.base_ts)
             elif isinstance(event, (EofEvent, ExceptionEvent)):
                 if self._ssh_state.current_cmd_rpc_future is not None:
                     self._ssh_state.current_cmd_rpc_future.set_exception(

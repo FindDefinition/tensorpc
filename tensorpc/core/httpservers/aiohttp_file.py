@@ -10,7 +10,7 @@ import stat
 from contextlib import suppress
 from types import MappingProxyType
 
-from tensorpc.core.defs import FileDesp, FileResource
+from tensorpc.core.defs import FileDesc, FileResource
 from aiohttp.helpers import ETAG_ANY, ETag, must_be_empty_body
 from aiohttp.typedefs import LooseHeaders, PathLike
 from aiohttp import hdrs

@@ -56,7 +56,7 @@ from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.constants import PACKAGE_ROOT, TENSORPC_FILE_NAME_PREFIX, TENSORPC_FLOW_FUNC_META_KEY, TENSORPC_OBSERVED_FUNCTION_ATTR
 from tensorpc.core.astex.astcache import AstCache
 from tensorpc.core.asynctools import cancel_task
-from tensorpc.core.defs import FileDesp, FileResource, FileResourceRequest
+from tensorpc.core.defs import FileDesc, FileResource, FileResourceRequest
 from tensorpc.core.event_emitter.call_server import SimpleRPCHandler
 from tensorpc.core.funcid import remove_common_indent_from_code
 from tensorpc.core.inspecttools import get_all_members_by_type

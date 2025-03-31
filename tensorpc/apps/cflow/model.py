@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 import traceback
 from typing import Annotated, Any, Callable, Mapping, Optional, cast
 from tensorpc.core.datamodel.draft import DraftFieldMeta
@@ -12,7 +13,7 @@ from tensorpc.core.datamodel.draftstore import (DraftStoreMapMeta)
 from tensorpc.utils.uniquename import UniqueNamePool
 import uuid
 from tensorpc.apps.cflow.nodes.cnode.registry import NODE_REGISTRY
-from .coremodel import ResourceDesp
+from .coremodel import ResourceDesc
 
 class ComputeNodeType(enum.IntEnum):
     # compute node
@@ -87,7 +88,7 @@ class ComputeNodeModel(BaseNodeModel):
     # vrc props
     # for compute node, this indicate the resource it require
     # for virtual resource (vrc) node, this indicate the resource it provide
-    vResource: ResourceDesp = dataclasses.field(default_factory=ResourceDesp)
+    vResource: ResourceDesc = dataclasses.field(default_factory=ResourceDesc)
     # nodes with same exec id will always be scheduled in same executor.
     vExecId: str = DEFAULT_EXECUTOR_ID
     # backend only fields
@@ -217,6 +218,19 @@ class ComputeFlowModelRoot(ComputeFlowModel):
             node.runtime = node.get_node_runtime(self)
         return node.runtime
 
+    def get_cur_flow(self) -> Optional[ComputeFlowModel]:
+        cur_obj = self
+        for p in self.cur_path:
+            if cur_obj is None:
+                return None 
+            if isinstance(cur_obj, Mapping):
+                cur_obj = cur_obj.get(p, None)
+            elif dataclasses.is_dataclass(cur_obj):
+                cur_obj = getattr(cur_obj, p, None)
+            else:
+                return None
+        return cast(Optional[ComputeFlowModel], cur_obj)
+    
 @dataclasses_relaxed.dataclass
 class ComputeFlowDrafts:
     root: ComputeFlowModelRoot

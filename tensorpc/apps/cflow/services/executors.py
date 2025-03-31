@@ -4,7 +4,7 @@ from typing import Any, Optional, Union
 from tensorpc.apps.cflow.nodes.cnode.ctx import ComputeFlowNodeContext, enter_flow_ui_node_context_object
 from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.apps.cflow.model import ComputeNodeModel, ComputeNodeRuntime
-from tensorpc.apps.cflow.executors.base import ExecutorType, NodeExecutorBase, DataHandle, ExecutorRemoteDesp, RemoteExecutorServiceKeys
+from tensorpc.apps.cflow.executors.base import ExecutorType, NodeExecutorBase, DataHandle, ExecutorRemoteDesc, RemoteExecutorServiceKeys
 import inspect 
 import uuid
 from tensorpc import prim
@@ -65,7 +65,7 @@ class _RemoteObjectStateManager:
                 traceback.print_exc()
         self._exec_id_to_robj.clear()
 
-    async def get_or_create_remote_obj(self, exec_desp: ExecutorRemoteDesp) -> AsyncRemoteManager:
+    async def get_or_create_remote_obj(self, exec_desp: ExecutorRemoteDesc) -> AsyncRemoteManager:
         if exec_desp.id not in self._exec_id_to_robj:
             self._exec_id_to_robj[exec_desp.id] = AsyncRemoteManager(exec_desp.url)
         else:
@@ -82,19 +82,19 @@ class _RemoteObjectStateManager:
 
 
 class SingleProcNodeExecutor:
-    def __init__(self, desp: ExecutorRemoteDesp):
+    def __init__(self, desc: ExecutorRemoteDesc):
         self._cached_data: dict[str, Any] = {}
         self._node_state_mgr = _NodeStateManager()
         self._remote_state_mgr = _RemoteObjectStateManager()
-        self._desp = desp
+        self._desp = desc
 
-    def get_executor_remote_desp(self) -> ExecutorRemoteDesp: 
+    def get_executor_remote_desp(self) -> ExecutorRemoteDesc: 
         return self._desp
 
     async def clear(self):
         self._cached_data.clear()
         self._node_state_mgr.clear()
-        self._desp = ExecutorRemoteDesp.get_empty()
+        self._desp = ExecutorRemoteDesc.get_empty()
         await self._remote_state_mgr.clear()
 
     def get_cached_data(self, data_id: str) -> Any:
@@ -163,7 +163,7 @@ class SingleProcNodeExecutor:
 
 class TorchDistNodeExecutor:
     # TODO
-    def __init__(self, desp: ExecutorRemoteDesp):
+    def __init__(self, desc: ExecutorRemoteDesc):
         pass 
 
     async def clear(self):
@@ -188,8 +188,8 @@ class TorchDistNodeExecutor:
 
 
 class NodeExecutorService:
-    def __init__(self, desp: dict[str, Any]):
-        desp_obj = ExecutorRemoteDesp(**desp)
+    def __init__(self, desc: dict[str, Any]):
+        desp_obj = ExecutorRemoteDesc(**desc)
         self._desp = desp_obj
         if desp_obj.type == ExecutorType.SINGLE_PROC:
             self._executor = SingleProcNodeExecutor(desp_obj)
@@ -204,7 +204,7 @@ class NodeExecutorService:
             module_key = module_id.split("::")[0]
             importlib.import_module(module_key)
 
-    def get_executor_remote_desp(self) -> ExecutorRemoteDesp: 
+    def get_executor_remote_desp(self) -> ExecutorRemoteDesc: 
         return self._desp
 
     @marker.mark_server_event(event_type=ServiceEventType.Exit)

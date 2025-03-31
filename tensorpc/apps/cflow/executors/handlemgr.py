@@ -1,7 +1,7 @@
 from typing import Any, Optional, TypeVar, Union
 from typing_extensions import overload
 import uuid
-from .base import DataHandle, ExecutorRemoteDesp
+from .base import DataHandle, ExecutorRemoteDesc
 
 _T = TypeVar("_T")
 
@@ -36,7 +36,7 @@ class DataHandleManager:
             for k, v in inp.items():
                 if not isinstance(v, DataHandle):
                     uid = uuid.uuid4().hex
-                    inp_handles[k] = DataHandle(f"{node_id}-{uid}", ExecutorRemoteDesp.get_empty(), data=v)
+                    inp_handles[k] = DataHandle(f"{node_id}-{uid}", ExecutorRemoteDesc.get_empty(), data=v)
                 else:
                     inp_handles[k] = v
             res[node_id] = inp_handles

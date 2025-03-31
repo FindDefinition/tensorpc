@@ -50,6 +50,13 @@ _SSH_ARGSERVER_SERV_NAME = "tensorpc.services.collection::ArgServer"
 BASH_HOOKS_FILE_NAME = "hooks-bash.sh"
 
 @dataclasses.dataclass
+class SSHConnDesc:
+    url_with_port: str 
+    username: str 
+    password: str
+
+
+@dataclasses.dataclass
 class ShellInfo:
     type: Literal["bash", "zsh", "fish", "powershell", "cmd", "cygwin"]
     os_type: Literal["linux", "macos", "windows"]
@@ -431,6 +438,7 @@ class LineRawEvent:
 
     def __init__(self,
                  data: Any,
+                 ts: int,
                  is_eof: bool,
                  is_exc: bool,
                  traceback_str: str = "",
@@ -442,11 +450,12 @@ class LineRawEvent:
         self.traceback_str = traceback_str
         self.should_exit = should_exit
         self.line_ev_type = line_ev_type
+        self.ts = ts
 
         self.is_stderr = False
 
     def shallow_copy(self):
-        return LineRawEvent(self.data, self.is_eof, self.is_exc,
+        return LineRawEvent(self.data, self.ts, self.is_eof, self.is_exc,
                             self.traceback_str, self.should_exit, self.line_ev_type)
 
 
@@ -488,32 +497,38 @@ class PeerSSHClient:
         try:
             res, ty = await reader.readuntil_ex(self._vsc_re)
             is_eof = reader.at_eof()
-            return LineRawEvent(res, is_eof, False, line_ev_type=ty)
+            ts = time.time_ns()
+            return LineRawEvent(res, ts, is_eof, False, line_ev_type=ty)
         except asyncio.IncompleteReadError as exc:
             tb_str = io.StringIO()
             traceback.print_exc(file=tb_str)
             is_eof = reader.at_eof()
-            print("IncompleteReadError")
+            ts = time.time_ns()
             if is_eof:
-                return LineRawEvent(exc.partial, True, False, should_exit=True, line_ev_type=LineEventType.EOF)
+                LOGGER.warning("SSH Eof")
+                return LineRawEvent(exc.partial, ts, True, False, should_exit=True, line_ev_type=LineEventType.EOF)
             else:
+                LOGGER.warning("SSH Unknown Error")
                 print(tb_str.getvalue())
                 return LineRawEvent(exc.partial,
+                                    ts,
                                   False,
                                   False,
                                   tb_str.getvalue(),
                                   should_exit=False,
                                   line_ev_type=LineEventType.INCOMPLETE_START)
             # return LineRawEvent(exc.partial, True, False)
-        except Exception as exc:
+        except BaseException as exc:
             tb_str = io.StringIO()
             traceback.print_exc(file=tb_str)
-            return LineRawEvent(exc, False, True, tb_str.getvalue(), line_ev_type=LineEventType.EXCEPTION)
+            ts = time.time_ns()
+            return LineRawEvent(exc, ts, False, True, tb_str.getvalue(), line_ev_type=LineEventType.EXCEPTION)
 
     async def _handle_result(self, res: LineRawEvent,
-                             reader: asyncssh.stream.SSHReader, ts: int,
+                             reader: asyncssh.stream.SSHReader, 
                              callback: Callable[[Event], Awaitable[None]],
                              is_stderr: bool):
+        ts = res.ts
         if res.is_eof:
             await callback(LineEvent(ts, res.data, uid=self.uid))
             retcode: int = -1
@@ -579,7 +594,6 @@ class PeerSSHClient:
             (done,
              pending) = await asyncio.wait(wait_tasks,
                                            return_when=asyncio.FIRST_COMPLETED)
-            ts = time.time_ns()
             if shutdown_task in done:
                 for task in pending:
                     await _cancel(task)
@@ -590,7 +604,7 @@ class PeerSSHClient:
                 if line_raw_callback is not None:
                     await line_raw_callback(res)
                 try:
-                    if await self._handle_result(res, self.stdout, ts, callback,
+                    if await self._handle_result(res, self.stdout, callback,
                                                 False):
                         break
                 except:
@@ -604,7 +618,7 @@ class PeerSSHClient:
                     res.is_stderr = True
                     await line_raw_callback(res)
                 try:
-                    if await self._handle_result(res, self.stderr, ts, callback,
+                    if await self._handle_result(res, self.stderr, callback,
                                                 True):
                         break
                 except:

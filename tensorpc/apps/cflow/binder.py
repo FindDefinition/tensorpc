@@ -107,13 +107,14 @@ class ComputeFlowBinder:
                     mui.Markdown("## Debug")
                 ])
         else:
-            # print("EXECUTOR!!!", ev.old_value, ev.new_value)
             if ev.old_value is ev.new_value:
                 # no change
                 return
             # TODO set remote preview layout to wrapper
             assert isinstance(executor, NodeExecutorBase)
             bottom_layout = executor.get_bottom_layout()
+            # print("EXECUTOR!!!", ev.old_value, ev.new_value, bottom_layout)
+
             if bottom_layout is not None:
                 await self.panel_comps.debug.set_new_layout([
                     bottom_layout
