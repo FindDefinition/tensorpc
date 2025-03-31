@@ -31,9 +31,11 @@ from functools import partial
 from pathlib import Path
 from typing import (Any, Awaitable, Callable, Coroutine, Dict, Iterable, List,
                     Optional, Set, Tuple, Type, Union)
+
+from regex import T
 from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.core.asyncclient import AsyncRemoteManager, simple_remote_call_async
-from tensorpc.core.datamodel.draft import DraftUpdateOp, apply_draft_update_ops_to_json
+from tensorpc.core.datamodel.draft import DraftUpdateOp, JMESPathOpType, apply_draft_update_ops_to_json, apply_draft_update_ops_to_json_with_root
 from tensorpc.core.defs import File
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.serviceunit import ServiceEventType
@@ -69,7 +71,7 @@ from tensorpc.dock.core.component import (AppEvent, AppEventType, ComponentEvent
                                         NotifyType, ScheduleNextForApp,
                                         UIEvent, UISaveStateEvent,
                                         app_event_from_data)
-from tensorpc.dock.jsonlike import JsonLikeNode
+from tensorpc.dock.jsonlike import JsonLikeNode, JsonLikeType, parse_obj_to_jsonlike
 from tensorpc.dock.serv_names import serv_names
 from tensorpc.utils.address import get_url_port
 from tensorpc.utils.registry import HashableRegistry
@@ -863,22 +865,31 @@ class DataStorageNodeBase(abc.ABC):
         root, last = self._get_and_create_storage_root_path(key) 
         return root / f"{last}.json"
 
-    def update_storage_data(self, key: str, timestamp: int, ops: list[DraftUpdateOp]):
+    def update_storage_data(self, key: str, timestamp: int, ops: list[DraftUpdateOp], create_type: StorageType = StorageType.JSON):
         if not self.has_data_item(key):
-            return False # if client get this, it can create data instead of update.
-        item = self.read_data(key)
-        assert item.storage_type in [StorageType.JSONARRAY, StorageType.JSON], f"only support json or jarr, not {item.storage_type}"
-        if item.storage_type == StorageType.JSON:
-            data_dec = json.loads(item.data)
+            assert ops[
+                0].op == JMESPathOpType.RootAssign, f"path {key} not exist, {ops[0]}"
+            data_dec = None
+            meta = JsonLikeNode(UniqueTreeIdForTree.from_parts([key]), key, JsonLikeType.Object.value)
         else:
-            data_dec = core_io.loads(item.data)
-        apply_draft_update_ops_to_json(data_dec, ops)
-        if item.storage_type == StorageType.JSON:
-            self.save_data(key, json.dumps(data_dec).encode("utf-8"), item.meta, timestamp, type=item.storage_type)
+            item = self.read_data(key)
+            assert item.storage_type in [StorageType.JSONARRAY, StorageType.JSON], f"only support json or jarr, not {item.storage_type}"
+            if item.storage_type == StorageType.JSON:
+                data_dec = json.loads(item.data)
+            else:
+                data_dec = core_io.loads(item.data)
+            meta = item.meta
+            create_type = item.storage_type
+        is_root_changed, root_obj = apply_draft_update_ops_to_json_with_root(
+            data_dec, ops)
+        if is_root_changed:
+            data_dec = root_obj
+        if create_type == StorageType.JSON:
+            self.save_data(key, json.dumps(data_dec).encode("utf-8"), meta, timestamp, type=create_type)
         else:
             res = core_io.dumps(data_dec)
             mem = memoryview(res)
-            self.save_data(key, mem, item.meta, timestamp, type=item.storage_type)
+            self.save_data(key, mem, meta, timestamp, type=create_type)
         return True 
 
     def save_data(self, key: str, data: bytes, meta: JsonLikeNode,
@@ -915,6 +926,13 @@ class DataStorageNodeBase(abc.ABC):
                 meta_dict = json.load(f)
             return meta_dict
         raise DataStorageKeyError(f"{key}({meta_path}) not exists")
+
+    def remove_folder(self, path: str):
+        path_p = self.get_store_root() / path
+        if path_p.exists():
+            shutil.rmtree(path_p)
+            return True 
+        return False
 
     def remove_data(self, key: Optional[str]):
         if key is None:
@@ -2827,9 +2845,10 @@ class Flow:
 
     async def update_data_in_storage(self, graph_id: str, node_id: Optional[str], key: str,
                                    timestamp: int,
-                                   ops: list[DraftUpdateOp]):
+                                   ops: list[DraftUpdateOp],
+                                   create_type: StorageType = StorageType.JSON):
         node = self._get_data_node(graph_id, node_id)
-        res = node.update_storage_data(key, timestamp, ops)
+        res = node.update_storage_data(key, timestamp, ops, create_type)
         if isinstance(node, DataStorageNode):
             await self._user_ev_q.put(
                 (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
@@ -2865,6 +2884,15 @@ class Flow:
     async def query_data_attrs(self, graph_id: str, node_id: Optional[str], glob_prefix: Optional[str] = None):
         node = self._get_data_node(graph_id, node_id)
         return node.get_data_attrs(glob_prefix)
+
+    async def remove_folder_from_storage(self, graph_id: str, node_id: str,
+                                        folder: str):
+        node = self._get_data_node(graph_id, node_id)
+        res = node.remove_folder(folder)
+        # if isinstance(node, DataStorageNode):
+        #     await self._user_ev_q.put(
+        #         (node.get_uid(), UserDataUpdateEvent(node.get_data_attrs())))
+        return res
 
     async def delete_datastorage_data(self, graph_id: str, node_id: str,
                                       key: Optional[str]):
