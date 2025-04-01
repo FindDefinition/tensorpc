@@ -280,6 +280,12 @@ class _ServiceNames:
                                        Flow.delete_datastorage_data.__name__)
 
     @property
+    def FLOW_DATA_DELETE_FOLDER(self):
+        from tensorpc.dock.serv.core import Flow
+        return get_service_key_by_type(Flow,
+                                       Flow.remove_folder_from_storage.__name__)
+
+    @property
     def FLOW_DATA_RENAME_ITEM(self):
         from tensorpc.dock.serv.core import Flow
         return get_service_key_by_type(Flow,

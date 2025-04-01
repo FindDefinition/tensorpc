@@ -83,8 +83,6 @@ class ComputeNodeModel(BaseNodeModel):
     readOnly: bool = False
     flowKey: Optional[str] = None
     hasDetail: bool = True
-    # schedule props
-    run_in_proc: bool = False  # only valid when no vrc props set.
     # vrc props
     # for compute node, this indicate the resource it require
     # for virtual resource (vrc) node, this indicate the resource it provide

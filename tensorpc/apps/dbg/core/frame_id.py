@@ -5,7 +5,7 @@ import enum
 from pathlib import Path
 from types import FrameType
 from tensorpc.utils.loader import get_frame_module_meta
-from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_STORAGE_PREFIX
+from tensorpc.apps.dbg.constants import TENSORPC_DBG_FRAME_STORAGE_PREFIX
 
 class VariableMetaType(enum.Enum):
     Layout = "layout"

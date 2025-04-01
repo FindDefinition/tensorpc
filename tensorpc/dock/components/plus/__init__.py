@@ -31,5 +31,5 @@ from .scheduler import TmuxScheduler, Task, SSHTarget
 from .tutorials import AppInMemory, MarkdownTutorial
 from .vscodetracer import VscodeTracerBox, CodeFragTracerResult
 from .ctrlloop import controlled_loop, ControlledLoop
-from .dbg.dbgpanel import MasterDebugPanel
+from ....apps.dbg.components.dbgpanel import MasterDebugPanel
 from . import handlers as _handlers

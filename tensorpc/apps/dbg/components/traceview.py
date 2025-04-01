@@ -24,12 +24,12 @@ from tensorpc.core.asyncclient import (simple_chunk_call_async,
 from tensorpc.core.client import simple_remote_call
 from tensorpc.core.funcid import find_toplevel_func_node_container_by_lineno
 from tensorpc.core.tree_id import UniqueTreeIdForTree
-from tensorpc.dbg.constants import (
+from tensorpc.apps.dbg.constants import (
     TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_SPLIT, DebugDistributedInfo,
     DebugFrameInfo, DebugInfo, RecordFilterConfig, RecordMode,
     RemoteDebugEventType, RemoteDebugTargetTrace, TracerConfig, TraceResult,
     TracerSingleResult, TracerType, TracerUIConfig)
-from tensorpc.dbg.serv_names import serv_names as dbg_serv_names
+from tensorpc.apps.dbg.serv_names import serv_names as dbg_serv_names
 from tensorpc.dock import appctx, marker
 from tensorpc.dock.components import chart, mui
 from tensorpc.dock.components.plus.config import ConfigDialogEvent, ConfigPanelDialog, ConfigPanelDialogPersist

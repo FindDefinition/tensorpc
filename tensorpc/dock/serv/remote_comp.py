@@ -41,6 +41,7 @@ class MountedAppMeta:
     port: int
     key: str
     prefixes: List[str]
+    is_bistream: bool = False
 
     @property
     def url_with_port(self):
@@ -233,6 +234,12 @@ class RemoteComponentService:
         lay["remoteRootUid"] = UniqueTreeIdForComp.from_parts(
             prefixes + root_uid.parts).uid_encoded
         return lay
+
+    # @marker.mark_bidirectional_stream
+    # async def connect_app_loop_bistream(self, msg_iter, node_uid: str, key: str,
+    #                     prefixes: List[str]):
+        
+    #     pass 
 
     async def _send_loop(self, app_obj: AppObject):
         # mount_meta = app_obj.mounted_app_meta

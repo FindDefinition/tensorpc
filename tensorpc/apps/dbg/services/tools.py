@@ -17,7 +17,7 @@ from tensorpc.core.asyncclient import simple_remote_call_async
 from tensorpc.core.funcid import (find_toplevel_func_node_by_lineno,
                                   find_toplevel_func_node_container_by_lineno)
 from tensorpc.core.serviceunit import ServiceEventType
-from tensorpc.dbg.constants import (
+from tensorpc.apps.dbg.constants import (
     TENSORPC_DBG_FRAME_INSPECTOR_KEY,
     TENSORPC_DBG_TRACE_VIEW_KEY,
     TENSORPC_ENV_DBG_DEFAULT_BREAKPOINT_ENABLE, BackgroundDebugToolsConfig,
@@ -26,11 +26,11 @@ from tensorpc.dbg.constants import (
     DebugServerStatus, ExternalTrace, RecordMode, TraceMetrics, TraceResult,
     TracerConfig,
     TracerType)
-from tensorpc.dbg.core.sourcecache import LineCache, PythonSourceASTCache, SourceChangeDiffCache
-from tensorpc.dbg.serv_names import serv_names
+from tensorpc.apps.dbg.core.sourcecache import LineCache, PythonSourceASTCache, SourceChangeDiffCache
+from tensorpc.apps.dbg.serv_names import serv_names
 from tensorpc.dock.client import list_all_app_in_machine
-from tensorpc.dock.components.plus.dbg.bkptpanel import BreakpointDebugPanel
-from tensorpc.dock.components.plus.dbg.traceview import TraceView
+from tensorpc.apps.dbg.components.bkptpanel import BreakpointDebugPanel
+from tensorpc.apps.dbg.components.traceview import TraceView
 from tensorpc.dock.components.plus.objinspect.tree import BasicObjectTree
 from tensorpc.dock.core.appcore import enter_app_context, get_app_context
 from tensorpc.dock.serv_names import serv_names as app_serv_names

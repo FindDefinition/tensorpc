@@ -25,7 +25,7 @@ from tensorpc.core.bgserver import BACKGROUND_SERVER
 from tensorpc.core.client import simple_chunk_call, simple_remote_call
 from tensorpc.core.inspecttools import get_co_qualname_from_frame
 from tensorpc.core.moduleid import get_module_id_of_type
-from tensorpc.dbg.serv_names import serv_names
+from tensorpc.apps.dbg.serv_names import serv_names
 
 
 THREAD_GLOBALS = threading.local()

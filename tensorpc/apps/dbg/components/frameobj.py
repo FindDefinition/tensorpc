@@ -10,7 +10,7 @@ from typing import (Any, Callable, Dict, Hashable, Iterable, List, Optional,
 from tensorpc.constants import TENSORPC_FILE_NAME_PREFIX
 from tensorpc.core import funcid
 from tensorpc.core.tree_id import UniqueTreeIdForTree
-from tensorpc.dbg.core.frame_id import VariableMetaType, get_storage_frame_path
+from tensorpc.apps.dbg.core.frame_id import VariableMetaType, get_storage_frame_path
 from tensorpc.dock import appctx
 from tensorpc.dock.components import mui, three
 from tensorpc.dock.components.plus.objinspect.tree import BasicObjectTree
@@ -18,7 +18,7 @@ from tensorpc.dock.components.plus.objview.script import get_frame_obj_layout_fr
 from tensorpc.dock.components.plus.styles import get_tight_icon_tab_theme
 from tensorpc.dock.core.objtree import UserObjTreeProtocol
 from tensorpc.utils.rich_logging import get_logger
-from ..objview.preview import ObjectPreview, ObjectPreviewBase
+from ....dock.components.plus.objview.preview import ObjectPreview, ObjectPreviewBase
 
 LOGGER = get_logger("tensorpc.dbg")
 

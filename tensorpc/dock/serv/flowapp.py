@@ -75,6 +75,7 @@ class FlowApp:
         if external_argv is not None:
             print("external_argv", external_argv)
         if init_code:
+            print("RUN CODE", init_code)
             # run dynamic import code here
             # used to register user data
             exec(init_code, {})

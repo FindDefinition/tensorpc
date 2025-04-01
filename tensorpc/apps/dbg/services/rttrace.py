@@ -1,8 +1,8 @@
 
 
 from typing import Any, Optional
-from tensorpc.dbg.rttracer import ChromeTraceStorage, RTTracerContext
-from tensorpc.dbg.tracer import json_dump_to_bytes
+from tensorpc.apps.dbg.rttracer import ChromeTraceStorage, RTTracerContext
+from tensorpc.apps.dbg.tracer import json_dump_to_bytes
 import gzip
 class RTTraceStorageService:
     def __init__(self):

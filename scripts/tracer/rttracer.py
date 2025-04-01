@@ -1,4 +1,4 @@
-from tensorpc.dbg.rttracer import fetch_trace_result
+from tensorpc.apps.dbg.rttracer import fetch_trace_result
 import gzip
 
 def __main():
@@ -10,7 +10,7 @@ def __main():
 def __main2():
     import io 
     import zipfile
-    from tensorpc.dock.components.plus.dbg.dbgpanel import list_all_dbg_server_in_machine
+    from tensorpc.apps.dbg.components.dbgpanel import list_all_dbg_server_in_machine
     proc_metas = list_all_dbg_server_in_machine()
     res_all = []
     _use_perfetto_undoc_zip_of_gzip = False

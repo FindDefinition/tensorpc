@@ -20,12 +20,12 @@ from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
 from tensorpc.core.asyncclient import (simple_chunk_call_async,
                                        simple_remote_call_async)
 from tensorpc.core.client import simple_remote_call
-from tensorpc.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
+from tensorpc.apps.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
                                     TENSORPC_DBG_SPLIT, TENSORPC_DBG_TRACE_VIEW_KEY, DebugDistributedInfo, DebugFrameInfo,
                                     DebugInfo, RecordFilterConfig, RecordMode, RemoteDebugEventType, RemoteDebugTargetTrace, TargetTraceConfig, TraceLaunchType,
                                     TracerConfig, TraceResult, TracerType,
                                     TracerUIConfig)
-from tensorpc.dbg.serv_names import serv_names as dbg_serv_names
+from tensorpc.apps.dbg.serv_names import serv_names as dbg_serv_names
 from tensorpc.dock import appctx, marker
 from tensorpc.dock.components import chart, mui
 from tensorpc.dock.components.plus.config import ConfigDialogEvent, ConfigPanelDialog, ConfigPanelDialogPersist

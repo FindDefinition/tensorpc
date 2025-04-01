@@ -10,5 +10,5 @@ from tensorpc.core.httpclient import http_remote_call, http_remote_call_request
 from tensorpc.core.serviceunit import ServiceEventType
 
 from . import __version__
-from . import dbg
+from .apps import dbg
 from .constants import PACKAGE_ROOT

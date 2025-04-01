@@ -244,6 +244,27 @@ class AppStorage:
             if key in self.__flowapp_storage_cache:
                 self.__flowapp_storage_cache.pop(key)
 
+    async def remove_folder(self,
+                            path: str,
+                            node_id: Optional[Union[str, Undefined]] = None,
+                            graph_id: Optional[str] = None):
+        Path(path)
+        if not self._is_remote_comp:
+            assert self.__flowapp_master_meta.is_inside_devflow, "you must call this in devflow apps."
+        if graph_id is None:
+            graph_id = self.__flowapp_graph_id
+        if node_id is None:
+            node_id = self.__flowapp_node_id
+        elif isinstance(node_id, Undefined):
+            # graph storage
+            node_id = None
+        await self._remote_call(serv_names.FLOW_DATA_DELETE_FOLDER, graph_id,
+                                node_id, path)
+        prev_keys  = list(self.__flowapp_storage_cache.keys())
+        for k in prev_keys:
+            if k.startswith(path):
+                self.__flowapp_storage_cache.pop(k)
+
     async def rename_data_storage_item(self,
                                        key: str,
                                        newname: str,
@@ -336,7 +357,4 @@ class AppDraftFileStoreBackend(DraftFileStoreBackendBase):
         return {k: v.data for k, v in res.items()}
         
     async def remove_folder(self, path: str) -> Any: 
-        """remove all item (recursive) in path. usually used when you use real file system 
-        as backend.
-        """
-        raise NotImplementedError
+        return await get_app_storage().remove_folder(path, node_id=self._node_id)

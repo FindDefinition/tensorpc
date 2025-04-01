@@ -41,12 +41,12 @@ from tensorpc.autossh.scheduler.core import TaskType
 from tensorpc.core import prim
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.inspecttools import get_all_members_by_type
-from tensorpc.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY
+from tensorpc.apps.dbg.constants import TENSORPC_DBG_FRAME_INSPECTOR_KEY
 from tensorpc.dock import (App, EditableApp, EditableLayoutApp, leaflet,
                            mark_autorun, mark_create_layout, marker, mui,
                            chart, plus, three, UserObjTree, appctx, V)
 from tensorpc.dock.client import AppClient, AsyncAppClient, add_message
-from tensorpc.dock.components.plus.dbg.traceview import TraceView
+from tensorpc.apps.dbg.components.traceview import TraceView
 from tensorpc.dock.coretypes import MessageLevel, ScheduleEvent
 from tensorpc.dock.core.appcore import observe_autorun_function, observe_function, observe_autorun_script
 from tensorpc.dock.components.mui import (Button, HBox, ListItemButton,

@@ -400,6 +400,7 @@ class FieldMeta:
 
 
 def _analysis_model_store_meta(root_annotype: AnnotatedType,
+                                exclude_field_ids: set[int],
                                field_meta_dict: dict[int, FieldMeta],
                                parent_metas: list[FieldMeta],
                                all_store_ids: Optional[set[str]] = None):
@@ -414,6 +415,8 @@ def _analysis_model_store_meta(root_annotype: AnnotatedType,
         type_hints = resolve_type_hints(root_annotype.origin_type)
     has_splitted_store = False
     for field in dataclasses.fields(root_annotype.origin_type):
+        if id(field) in exclude_field_ids:
+            continue
         field_type = type_hints[field.name]
         annotype, store_meta = _get_first_store_meta(field_type)
         field_meta = FieldMeta(field.name, annotype)
@@ -443,6 +446,7 @@ def _analysis_model_store_meta(root_annotype: AnnotatedType,
                 value_type = annotype.get_dict_value_anno_type()
                 if value_type.is_dataclass_type():
                     _analysis_model_store_meta(value_type,
+                                                  exclude_field_ids,
                                                field_meta_dict,
                                                parent_metas + [field_meta],
                                                all_store_ids)
@@ -473,7 +477,7 @@ def _analysis_model_store_meta(root_annotype: AnnotatedType,
             continue
         if annotype.is_dataclass_type():
             has_splitted_store |= _analysis_model_store_meta(
-                annotype, field_meta_dict,
+                annotype, exclude_field_ids, field_meta_dict,
                 parent_metas + [field_meta], all_store_ids)
         else:
             # all non-dataclass field type shouldn't contain any store meta
@@ -489,9 +493,10 @@ def _analysis_model_store_meta(root_annotype: AnnotatedType,
 
 
 def analysis_model_store_meta(model_type: type[T],
+                                exclude_field_ids: set[int],
                               all_store_ids: Optional[set[str]] = None):
     field_meta_dict: dict[int, FieldMeta] = {}
-    res = _analysis_model_store_meta(parse_type_may_optional_undefined(model_type), field_meta_dict, [],
+    res = _analysis_model_store_meta(parse_type_may_optional_undefined(model_type), exclude_field_ids, field_meta_dict, [],
                                      all_store_ids)
     new_field_meta_dict: dict[Optional[int], FieldMeta] = {**field_meta_dict}
     return res, new_field_meta_dict
@@ -846,8 +851,6 @@ class DraftFileStorage(Generic[T]):
         self._main_store_id = main_store_id
         assert dataclasses.is_dataclass(model)
         all_store_ids = set(self._store.keys())
-        self._has_splitted_store, self._field_store_meta = analysis_model_store_meta(
-            type(model), all_store_ids)
         self._mashumaro_decoder: Optional[BasicDecoder] = None
         self._mashumaro_encoder: Optional[BasicEncoder] = None
         self._exclude_field_ids: set[int] = set()
@@ -864,6 +867,8 @@ class DraftFileStorage(Generic[T]):
                                         " because this field is managed by user, it won't be stored to draft storage.")
                                 self._exclude_field_ids.add(v.field_id)
                             break
+        self._has_splitted_store, self._field_store_meta = analysis_model_store_meta(
+            type(model), self._exclude_field_ids, all_store_ids)
 
     def _lazy_get_mashumaro_coder(self):
         if self._mashumaro_decoder is None:

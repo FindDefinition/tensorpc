@@ -102,7 +102,7 @@ class ComputeFlowBinder:
         if executor is None:
             # TODO reset preview layout and detail layout
             # reset executor debug panel
-            if ev.old_value_dict and ev.old_value.is_local():
+            if ev.old_value is not None and ev.old_value.is_local():
                 await self.panel_comps.debug.set_new_layout([
                     mui.Markdown("## Debug")
                 ])

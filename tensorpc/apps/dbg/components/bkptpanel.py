@@ -7,17 +7,17 @@ from types import FrameType
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
 from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
 from tensorpc.core import inspecttools
-from tensorpc.dbg.core.frame_id import get_frame_uid
+from tensorpc.apps.dbg.core.frame_id import get_frame_uid
 from tensorpc.dock import appctx
 from tensorpc.dock.components import chart, mui
 from tensorpc.dock.components.plus.config import ConfigDialogEvent, ConfigPanelDialog
-from tensorpc.dock.components.plus.dbg.frameobj import FrameObjectPreview
-from tensorpc.dock.components.plus.dbg.perfetto_utils import zip_trace_result
+from tensorpc.apps.dbg.components.frameobj import FrameObjectPreview
+from tensorpc.apps.dbg.components.perfetto_utils import zip_trace_result
 from tensorpc.dock.components.plus.objinspect.tree import BasicObjectTree
 from tensorpc.dock.components.plus.scriptmgr import ScriptManager
 from tensorpc.dock.components.plus.styles import CodeStyles
 from tensorpc.dock.components.plus.objinspect.inspector import ObjectInspector
-from tensorpc.dbg.constants import BackgroundDebugToolsConfig, DebugFrameInfo, DebugFrameState, RecordMode, TracerConfig, TracerSingleResult, TracerUIConfig
+from tensorpc.apps.dbg.constants import BackgroundDebugToolsConfig, DebugFrameInfo, DebugFrameState, RecordMode, TracerConfig, TracerSingleResult, TracerUIConfig
 from tensorpc.utils.loader import FrameModuleMeta
 from .framescript import FrameScript
 
@@ -312,3 +312,4 @@ class BreakpointDebugPanel(mui.FlexBox):
     async def set_perfetto_data(self, trace_res: TracerSingleResult):
         zip_data = zip_trace_result([trace_res.data], [trace_res.external_events])
         await self._perfetto.set_trace_data(zip_data, title="trace")
+

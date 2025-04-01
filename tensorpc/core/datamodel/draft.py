@@ -138,10 +138,11 @@ class DraftUpdateOp:
 
     def __repr__(self) -> str:
         path_str = self.node.get_jmes_path()
+        prefix = f"JOp[{path_str}|{self.op.name}|{self.is_external}]"
         # jpath_str = _get_jmes_path(self.path)
         if self.op == JMESPathOpType.SetAttr:
             key, value = self.opData["items"][0]
-            return f"JOp[{path_str}|{self.op.name}]:{key}={value}"
+            return f"{prefix}:{key}={value}"
         elif self.op == JMESPathOpType.RootInplaceOp or self.op == JMESPathOpType.ScalarInplaceOp:
             op = self.opData["op"]
             value = self.opData["value"]
@@ -149,8 +150,8 @@ class DraftUpdateOp:
                 key = "$"
             else:
                 key = self.opData["key"]
-            return f"JOp[{path_str}|{self.op.name}]:{key}{_scalar_inplace_op_to_str(op)}{value}"
-        return f"JOp[{path_str}|{self.op.name}]:{self.opData}"
+            return f"{prefix}:{key}{_scalar_inplace_op_to_str(op)}{value}"
+        return f"{prefix}:{self.opData}"
 
     def to_jmes_path_op(self) -> JMESPathOp:
         # app internal will handle non-dict data in self.opData.

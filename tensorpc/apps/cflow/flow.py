@@ -21,6 +21,7 @@ from tensorpc.dock.components.models.flow import BaseEdgeModel
 from tensorpc.dock.components.plus.config import ConfigDialogEvent, ConfigPanel, ConfigPanelDialog
 from tensorpc.dock.components.plus.styles import get_tight_icon_tab_theme
 from tensorpc.dock.components.terminal import TerminalBuffer
+from tensorpc.dock.flowapp.appstorage import AppDraftFileStoreBackend
 from tensorpc.utils.code_fmt import PythonCodeFormatter
 from tensorpc.apps.cflow.nodes.cnode.registry import NODE_REGISTRY, get_compute_node_runtime, parse_code_to_compute_cfg
 import tensorpc.apps.cflow.nodes.defaultnodes
@@ -143,7 +144,7 @@ class ComputeFlow(mui.FlexBox):
         code_box = mui.HBox([
             self.code_editor
         ]).prop(height="100%", width="100%", overflow="hidden")
-        node_settings = mui.Input("executor id")
+        node_settings = mui.Input("executor id").prop(debounce=300)
         tabdefs: list[mui.TabDef] = [
             mui.TabDef("",
                        "0",
@@ -221,6 +222,8 @@ class ComputeFlow(mui.FlexBox):
                 global_container,
             ]).prop(flex=1),
         ])
+        self.dm.connect_draft_store(f"__tensorpc_cflow", AppDraftFileStoreBackend())
+
         draft = self.dm.get_draft()
         flow_draft = get_compute_flow_drafts(draft)
         flow_with_editor.bind_fields(visibles=f"create_array(`true`, {flow_draft.show_editor})")

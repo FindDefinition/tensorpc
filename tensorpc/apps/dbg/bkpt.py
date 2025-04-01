@@ -16,13 +16,13 @@ from tensorpc.compat import InWindows
 from tensorpc.constants import TENSORPC_MAIN_PID
 from tensorpc.core.bgserver import BACKGROUND_SERVER
 from tensorpc.core.tracers.targettracer import TargetTracer
-from tensorpc.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
+from tensorpc.apps.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
                                     TENSORPC_DBG_TRACE_VIEW_KEY,
                                     TENSORPC_ENV_DBG_ENABLE, BreakpointEvent,
                                     BreakpointType, TraceLaunchType,
                                     TracerConfig, TraceResult, TracerType,
                                     RecordFilterConfig, DebugDistributedInfo)
-from tensorpc.dbg.tracer import DebugTracerWrapper, VizTracerAndPytorchTracer
+from tensorpc.apps.dbg.tracer import DebugTracerWrapper, VizTracerAndPytorchTracer
 from tensorpc.utils.rich_logging import get_logger
 import sys
 from .serv_names import serv_names
@@ -249,8 +249,8 @@ def init(proc_name: Optional[str] = None, port: int = -1):
         return False
     if not BACKGROUND_SERVER.is_started:
         # put app import here to reduce import time
-        from tensorpc.dock.components.plus.dbg.bkptpanel import BreakpointDebugPanel
-        from tensorpc.dock.components.plus.dbg.traceview import TraceView
+        from tensorpc.apps.dbg.components.bkptpanel import BreakpointDebugPanel
+        from tensorpc.apps.dbg.components.traceview import TraceView
         assert not InWindows, "init is not supported in Windows due to setproctitle."
         cur_pid = os.getpid()
         if proc_name is None:
