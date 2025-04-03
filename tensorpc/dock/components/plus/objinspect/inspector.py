@@ -87,7 +87,8 @@ class ObjectInspector(mui.FlexBox):
                  default_sizes: Optional[List[mui.NumberType]] = None,
                  with_builtins: bool = True,
                  custom_tabs: Optional[List[mui.TabDef]] = None,
-                 custom_preview: Optional[ObjectPreviewBase] = None) -> None:
+                 custom_preview: Optional[ObjectPreviewBase] = None,
+                 horizontal: bool = False) -> None:
 
         # self.preview_container = mui.HBox([]).prop(overflow="auto",
         #                                            flex=1,
@@ -186,9 +187,8 @@ class ObjectInspector(mui.FlexBox):
                 default_sizes = [1.5, 1]
             final_layout = [
                 mui.Allotment(final_layout).prop(
-                    overflow="hidden",
                     defaultSizes=default_sizes if with_detail else [1],
-                    vertical=True)
+                    vertical=not horizontal)
             ]
         super().__init__(final_layout)
         self.prop(flexDirection="column",
@@ -196,7 +196,6 @@ class ObjectInspector(mui.FlexBox):
                   overflow="hidden",
                   minHeight=0,
                   minWidth=0)
-
         if with_detail:
             self.tree.tree.register_event_handler(
                 FrontendEventType.TreeItemSelectChange.value, self._on_select)

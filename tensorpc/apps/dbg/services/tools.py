@@ -2,6 +2,7 @@ import ast
 import asyncio
 import dataclasses
 import os
+import queue
 import threading
 import time
 import traceback
@@ -12,8 +13,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import grpc
 import gzip
 from tensorpc import prim
+from tensorpc.apps.dbg.core.bkpt_events import BkptLaunchTraceEvent, BkptLeaveEvent, BreakpointEvent
+from tensorpc.apps.dbg.core.bkptmgr import BreakpointManager, FrameLocMeta
+from tensorpc.apps.dbg.model import Breakpoint
 from tensorpc.core import inspecttools, marker
 from tensorpc.core.asyncclient import simple_remote_call_async
+from tensorpc.core.datamodel.draft import capture_draft_update
 from tensorpc.core.funcid import (find_toplevel_func_node_by_lineno,
                                   find_toplevel_func_node_container_by_lineno)
 from tensorpc.core.serviceunit import ServiceEventType
@@ -21,7 +26,7 @@ from tensorpc.apps.dbg.constants import (
     TENSORPC_DBG_FRAME_INSPECTOR_KEY,
     TENSORPC_DBG_TRACE_VIEW_KEY,
     TENSORPC_ENV_DBG_DEFAULT_BREAKPOINT_ENABLE, BackgroundDebugToolsConfig,
-    BreakpointEvent, BreakpointType,
+    BreakpointType,
     DebugDistributedInfo, DebugFrameInfo, DebugInfo, DebugMetric,
     DebugServerStatus, ExternalTrace, RecordMode, TraceMetrics, TraceResult,
     TracerConfig,
@@ -29,7 +34,7 @@ from tensorpc.apps.dbg.constants import (
 from tensorpc.apps.dbg.core.sourcecache import LineCache, PythonSourceASTCache, SourceChangeDiffCache
 from tensorpc.apps.dbg.serv_names import serv_names
 from tensorpc.dock.client import list_all_app_in_machine
-from tensorpc.apps.dbg.components.bkptpanel import BreakpointDebugPanel
+from tensorpc.apps.dbg.components.bkptpanel_v2 import BreakpointDebugPanel
 from tensorpc.apps.dbg.components.traceview import TraceView
 from tensorpc.dock.components.plus.objinspect.tree import BasicObjectTree
 from tensorpc.dock.core.appcore import enter_app_context, get_app_context
@@ -45,22 +50,37 @@ LOGGER = get_logger("tensorpc.dbg")
 class BreakpointMeta:
     name: Optional[str]
     type: BreakpointType
-    path: str
-    lineno: int
+    frame_loc: FrameLocMeta
     line_text: str
-    event: BreakpointEvent
+    q: queue.Queue[BreakpointEvent]
     user_dict: Optional[Dict[str, Any]] = None
-    mapped_lineno: Optional[int] = None
 
 
 @dataclasses.dataclass
 class TracerState:
-    tracer: Any
     cfg: TracerConfig
     metric: TraceMetrics
-    frame_identifier: Tuple[str, int]  # path, lineno
+    frame_loc: FrameLocMeta
     force_stop: bool = False
 
+    def increment_trace_state(self, new_frame_loc: FrameLocMeta) -> bool:
+        is_record_stop = False
+        cfg = self.cfg
+        metric = self.metric
+        is_same_bkpt = False
+        is_inf_record = cfg.mode == RecordMode.INFINITE
+        if cfg.mode == RecordMode.SAME_BREAKPOINT:
+            frame_uid = (
+                new_frame_loc.path, new_frame_loc.lineno)
+            cur_frame_uid = (
+                self.frame_loc.path, self.frame_loc.lineno)
+            is_same_bkpt = frame_uid == cur_frame_uid
+        if not is_inf_record:
+            metric.breakpoint_count -= 1
+        if (metric.breakpoint_count == 0 and not is_inf_record
+            ) or is_same_bkpt or self.force_stop:
+            is_record_stop = True
+        return is_record_stop
 
 class BackgroundDebugTools:
 
@@ -77,12 +97,12 @@ class BackgroundDebugTools:
         self._ast_cache = PythonSourceASTCache()
         self._line_cache = LineCache()
         self._scd_cache = SourceChangeDiffCache()
-
-        self._vscode_breakpoints: Dict[str, List[VscodeBreakpoint]] = {}
-        # workspaceUri -> (path, lineno) -> VscodeBreakpoint
-        self._vscode_breakpoints_dict: Dict[str, Dict[Tuple[Path, int],
-                                                      VscodeBreakpoint]] = {}
-        self._vscode_breakpoints_ts_dict: Dict[Path, int] = {}
+        self._bkpt_mgr = BreakpointManager()
+        # self._vscode_breakpoints: Dict[str, List[VscodeBreakpoint]] = {}
+        # # workspaceUri -> (path, lineno) -> VscodeBreakpoint
+        # self._vscode_breakpoints_dict: Dict[str, Dict[Tuple[Path, int],
+        #                                               VscodeBreakpoint]] = {}
+        # self._vscode_breakpoints_ts_dict: Dict[Path, int] = {}
 
         self._bkpt_lock = asyncio.Lock()
 
@@ -115,7 +135,7 @@ class BackgroundDebugTools:
                 if bkpts is not None:
                     LOGGER.info(
                         f"Fetch vscode breakpoints from App {meta.name}", url)
-                    self._set_vscode_breakpoints_and_dict(bkpts)
+                    self._bkpt_mgr.set_vscode_breakpoints(bkpts)
                     break
             except:
                 traceback.print_exc()
@@ -134,14 +154,19 @@ class BackgroundDebugTools:
 
     async def enter_breakpoint(self,
                                frame: FrameType,
-                               event: BreakpointEvent,
+                               q: queue.Queue,
                                type: BreakpointType,
                                name: Optional[str] = None):
         """should only be called in main thread (server runs in background thread)"""
         # FIXME better vscode breakpoint handling
         if self._cfg.skip_breakpoint:
-            event.set()
+            q.put(BkptLeaveEvent())
             return
+        obj, app = prim.get_service(
+            app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
+                TENSORPC_DBG_FRAME_INSPECTOR_KEY)
+        assert isinstance(obj, BreakpointDebugPanel)
+        draft = obj.dm.get_draft_type_only()
         async with self._bkpt_lock:
             assert prim.is_loopback_call(
             ), "this function should only be called in main thread"
@@ -150,29 +175,38 @@ class BackgroundDebugTools:
             # store code of frame when first see it, and compare it with current code
             # by difflib. if the frame lineno is inside a `equal` block, we map
             # frame lineno to the lineno in the new code.
-            may_changed_frame_lineno = self._scd_cache.query_mapped_linenos(
-                frame.f_code.co_filename, frame.f_lineno)
-            if may_changed_frame_lineno < 1:
-                may_changed_frame_lineno = frame.f_lineno
-            # try:
-            #     lines = self._line_cache.getlines(frame.f_code.co_filename)
-            #     linetext = lines[frame.f_lineno - 1]
-            # except:
+            # may_changed_frame_lineno = self._scd_cache.query_mapped_linenos(
+            #     frame.f_code.co_filename, frame.f_lineno)
+            # if may_changed_frame_lineno < 1:
+            #     may_changed_frame_lineno = frame.f_lineno
+            frame_loc = self._bkpt_mgr.get_frame_loc_meta(frame)
             linetext = ""
             pid = os.getpid()
             self._cur_breakpoint = BreakpointMeta(
                 name,
                 type,
-                frame.f_code.co_filename,
-                frame.f_lineno,
+                frame_loc,
                 linetext,
-                event,
-                mapped_lineno=may_changed_frame_lineno)
+                q)
+            frame_select_items = Breakpoint.generate_frame_select_items(frame)
+            frame_info = Breakpoint.get_frame_info_from_frame(frame)
+            bkpt_model = Breakpoint(
+                type,
+                frame_info,
+                frame_select_items,
+                frame_select_items[0],
+                frame, 
+                self.leave_breakpoint,
+                self.leave_breakpoint,
+            )
+            with capture_draft_update() as ctx:
+
+                draft.bkpt = bkpt_model
             if self._cur_breakpoint is not None and self._cur_breakpoint.type == BreakpointType.Vscode:
-                is_cur_bkpt_is_vscode = self._determine_vscode_bkpt_status(
-                    self._cur_breakpoint, self._vscode_breakpoints_dict)
+                is_cur_bkpt_is_vscode = self._bkpt_mgr.check_vscode_bkpt_is_enabled(
+                    self._cur_breakpoint.frame_loc)
                 if not is_cur_bkpt_is_vscode:
-                    event.set()
+                    q.put(BkptLeaveEvent())
                     # LOGGER.warning(
                     #     f"Skip Vscode breakpoint",
                     #     extra={
@@ -184,25 +218,11 @@ class BackgroundDebugTools:
                     return
             res_tracer = None
             is_record_stop = False
-            if self._cur_tracer_state is not None and self._cur_tracer_state.tracer is not None:
-                # is tracing
-                cfg = self._cur_tracer_state.cfg
-                metric = self._cur_tracer_state.metric
-                is_same_bkpt = False
-                is_inf_record = cfg.mode == RecordMode.INFINITE
-                if cfg.mode == RecordMode.SAME_BREAKPOINT:
-                    is_same_bkpt = self._cur_tracer_state.frame_identifier == (
-                        frame.f_code.co_filename, frame.f_lineno)
-                if not is_inf_record:
-                    metric.breakpoint_count -= 1
-                if (metric.breakpoint_count == 0 and not is_inf_record
-                    ) or is_same_bkpt or self._cur_tracer_state.force_stop:
-                    res_tracer = (self._cur_tracer_state.tracer,
-                                  self._cur_tracer_state.cfg)
-                    self._cur_tracer_state = None
-                    is_record_stop = True
+            if self._cur_tracer_state is not None:
+                is_record_stop = self._cur_tracer_state.increment_trace_state(
+                    frame_loc)
                 if not is_record_stop:
-                    event.set()
+                    q.put(BkptLeaveEvent())
                     # if cfg.mode != RecordMode.INFINITE:
                     #     msg_str = f"Skip Vscode breakpoint (Remaining trace count: {metric.breakpoint_count})"
                     #     LOGGER.warning(
@@ -217,14 +237,15 @@ class BackgroundDebugTools:
             assert self._frame is None, "already in breakpoint, shouldn't happen"
             self._frame = frame
             self._debug_metric.total_skipped_bkpt = 0
-            obj, app = prim.get_service(
-                app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
-                    TENSORPC_DBG_FRAME_INSPECTOR_KEY)
-            assert isinstance(obj, BreakpointDebugPanel)
+            # obj, app = prim.get_service(
+            #     app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
+            #         TENSORPC_DBG_FRAME_INSPECTOR_KEY)
+            # assert isinstance(obj, BreakpointDebugPanel)
             with enter_app_context(app):
-                await obj.set_breakpoint_frame_meta(frame,
-                                                    self.leave_breakpoint,
-                                                    is_record_stop)
+                await obj.dm._update_with_jmes_ops(ctx._ops)
+                # await obj.set_breakpoint_frame_meta(frame,
+                #                                     self.leave_breakpoint,
+                #                                     is_record_stop)
             self._cur_status = DebugServerStatus.InsideBreakpoint
             LOGGER.warning(
                 f"Breakpoint({type.name}), "
@@ -240,20 +261,30 @@ class BackgroundDebugTools:
         """should only be called from remote"""
         assert not prim.is_loopback_call(
         ), "this function should only be called from remote"
+        obj, app = prim.get_service(
+            app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
+                TENSORPC_DBG_FRAME_INSPECTOR_KEY)
+        assert isinstance(obj, BreakpointDebugPanel)
+        draft = obj.dm.get_draft_type_only()
+        with capture_draft_update() as ctx:
+            draft.bkpt = None 
         async with self._bkpt_lock:
-            obj, app = prim.get_service(
-                app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
-                    TENSORPC_DBG_FRAME_INSPECTOR_KEY)
-            assert isinstance(obj, BreakpointDebugPanel)
+            # obj, app = prim.get_service(
+            #     app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
+            #         TENSORPC_DBG_FRAME_INSPECTOR_KEY)
+            # assert isinstance(obj, BreakpointDebugPanel)
             is_record_start = False
             if self._cur_breakpoint is not None:
                 if trace_cfg is not None and trace_cfg.enable and self._frame is not None:
                     if self._cur_tracer_state is None:
                         is_record_start = True
+            
             if get_app_context() is None:
                 with enter_app_context(app):
-                    await obj.leave_breakpoint(is_record_start)
+                    await obj.dm._update_with_jmes_ops(ctx._ops)
+                    # await obj.leave_breakpoint(is_record_start)
             else:
+                await obj.dm._update_with_jmes_ops(ctx._ops)
                 await obj.leave_breakpoint(is_record_start)
             self._cur_status = DebugServerStatus.Idle
             if self._cur_breakpoint is not None:
@@ -261,12 +292,17 @@ class BackgroundDebugTools:
                     if self._cur_tracer_state is None:
                         metric = TraceMetrics(trace_cfg.breakpoint_count)
                         self._cur_tracer_state = TracerState(
-                            None, trace_cfg, metric,
-                            (self._frame.f_code.co_filename,
-                             self._frame.f_lineno))
-                        self._cur_breakpoint.event.enable_trace_in_main_thread = True
-                        self._cur_breakpoint.event.trace_cfg = trace_cfg
-                self._cur_breakpoint.event.set()
+                            trace_cfg, metric,
+                            FrameLocMeta(self._frame.f_code.co_filename,
+                            self._frame.f_lineno, -1))
+                        # self._cur_breakpoint.event.enable_trace_in_main_thread = True
+                        # self._cur_breakpoint.event.trace_cfg = trace_cfg
+                    self._cur_breakpoint.q.put(BkptLaunchTraceEvent(trace_cfg))
+
+                # self._cur_breakpoint.event.set()
+
+                self._cur_breakpoint.q.put(BkptLeaveEvent())
+
                 self._cur_breakpoint = None
             self._frame = None
 
@@ -280,7 +316,7 @@ class BackgroundDebugTools:
 
     def set_tracer(self, tracer: Any):
         assert self._cur_tracer_state is not None
-        self._cur_tracer_state.tracer = tracer
+        # self._cur_tracer_state.tracer = tracer
 
     async def set_trace_data(self, trace_res: TraceResult, cfg: TracerConfig):
         obj, app = prim.get_service(
@@ -364,59 +400,11 @@ class BackgroundDebugTools:
         local_vars = self._get_filtered_local_vars(self._frame)
         return eval(expr, None, local_vars)
 
-    def _determine_vscode_bkpt_status(
-            self, bkpt_meta: BreakpointMeta, 
-            vscode_bkpt_dict: Dict[str, Dict[Tuple[Path, int],
-                                             VscodeBreakpoint]]):
-        if bkpt_meta.type == BreakpointType.Vscode:
-            key = (Path(bkpt_meta.path).resolve(), bkpt_meta.mapped_lineno)
-            # rich.print("BKPT", key, vscode_bkpt_dict)
-            for bkpts in vscode_bkpt_dict.values():
-                if key in bkpts:
-                    return bkpts[key].enabled
-        return False
-
-    def _set_vscode_breakpoints_and_dict(
-            self, bkpt_dict: Dict[str, tuple[List[VscodeBreakpoint], int]]):
-        for wuri, (bkpts, ts) in bkpt_dict.items():
-            new_bkpts: List[VscodeBreakpoint] = []
-            for x in bkpts:
-                if x.enabled and x.lineText is not None and (
-                        ".breakpoint" in x.lineText
-                        or ".vscode_breakpoint" in x.lineText):
-                    new_bkpts.append(x)
-            if wuri not in self._vscode_breakpoints_dict:
-                self._vscode_breakpoints_dict[wuri] = {}
-            self._vscode_breakpoints_dict[wuri] = {
-                (Path(x.path).resolve(), x.line + 1): x
-                for x in new_bkpts
-            }
-            # save bkpt timestamp
-            for x in new_bkpts:
-                self._vscode_breakpoints_ts_dict[Path(x.path).resolve()] = ts
-            self._vscode_breakpoints[wuri] = new_bkpts
-
     async def set_vscode_breakpoints(self,
                                      bkpts: Dict[str, tuple[list[VscodeBreakpoint], int]]):
-        self._set_vscode_breakpoints_and_dict(bkpts)
+        self._bkpt_mgr.set_vscode_breakpoints(bkpts)
         if self._cur_breakpoint is not None and self._cur_breakpoint.type == BreakpointType.Vscode:
-            # update mapped lineno here because file may change during breakpoint
-            mtime = None 
-            may_changed_frame_lineno = self._scd_cache.query_mapped_linenos(
-                self._cur_breakpoint.path, self._cur_breakpoint.lineno)
-            cache_entry = self._scd_cache.cache[self._cur_breakpoint.path]
-            mtime = cache_entry.mtime
-            if mtime is None:
-                return 
-            self._cur_breakpoint.mapped_lineno = may_changed_frame_lineno
-            mtime_ns = int(mtime * 1e9)
-            if Path(self._cur_breakpoint.path).resolve() in self._vscode_breakpoints_ts_dict:
-                vscode_bkpt_ts = self._vscode_breakpoints_ts_dict[Path(self._cur_breakpoint.path).resolve()]
-                if mtime_ns > vscode_bkpt_ts:
-                    # vscode bkpt state is outdated, skip current check.
-                    return
-            is_cur_bkpt_is_vscode = self._determine_vscode_bkpt_status(
-                self._cur_breakpoint, self._vscode_breakpoints_dict)
+            is_cur_bkpt_is_vscode = self._bkpt_mgr.check_vscode_bkpt_is_enabled_after_set_vscode_bkpt(self._cur_breakpoint.frame_loc)
             # if not found, release this breakpoint
             if not is_cur_bkpt_is_vscode:
                 await self.leave_breakpoint()

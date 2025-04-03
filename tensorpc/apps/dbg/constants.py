@@ -13,6 +13,12 @@ class DebugServerStatus(enum.IntEnum):
     InsideBreakpoint = 1
 
 @dataclasses.dataclass
+class FrameLocMeta:
+    path: str 
+    lineno: int 
+    mapped_lineno: int 
+
+@dataclasses.dataclass
 class DebugFrameInfo:
     name: str
     qualname: str

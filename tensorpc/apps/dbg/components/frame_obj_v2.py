@@ -15,7 +15,7 @@ from tensorpc.dock import appctx
 from tensorpc.dock.components import mui, three
 from tensorpc.dock.components.plus.objinspect.tree import BasicObjectTree
 from tensorpc.dock.components.plus.objview.script import get_frame_obj_layout_from_code, get_init_obj_convert_code
-from tensorpc.dock.components.plus.styles import get_tight_icon_tab_theme
+from tensorpc.dock.components.plus.styles import get_tight_icon_tab_theme, get_tight_tab_theme_horizontal
 from tensorpc.dock.core.objtree import UserObjTreeProtocol
 from tensorpc.utils.rich_logging import get_logger
 from ....dock.components.plus.objview.preview import ObjectPreview, ObjectPreviewBase
@@ -27,6 +27,7 @@ class FrameObjTabType(enum.Enum):
     OriginPreview = "origin_preview"
     Tree = "tree"
     Editor = "editor"
+    UserSelPreview = "UserSelPreview"
 
 @dataclasses.dataclass
 class FrameObjectPreviewState:
@@ -63,64 +64,49 @@ class FrameObjectPreview(ObjectPreviewBase):
 
         self._fold_editor_container = mui.HBox([]).prop(flex=1)
 
-        self._obj_simple_tree = BasicObjectTree(use_fast_tree=True)
-        self._obj_simple_tree.prop(minHeight=0,
-                        minWidth=0,
-                        width="100%",
-                        height="100%",
-                        overflow="hidden")
+        # self._obj_simple_tree = BasicObjectTree(use_fast_tree=True)
+        # self._obj_simple_tree.prop(minHeight=0,
+        #                 minWidth=0,
+        #                 width="100%",
+        #                 height="100%",
+        #                 overflow="hidden")
         tab_theme = get_tight_icon_tab_theme()
-        self._editor = mui.MonacoEditor("", "python", "")
-        self._editor.prop(minHeight=0,
-                        minWidth=0,
-                        width="100%",
-                        height="100%",
-                        overflow="hidden")
-        self._editor.event_editor_save.on(
-            self._on_editor_save)
-        self._editor.event_component_ready.on(
-            self._on_editor_ready)
-        tabdefs = [
-            mui.TabDef("",
+        tab_theme = get_tight_tab_theme_horizontal(tab_padding="10px")
+
+        obj_inspect_tabs = [
+            mui.TabDef("obj",
                        FrameObjTabType.Preview.value,
                        mui.HBox([
                             self._obj_preview.prop(flex=1),
-                            mui.Divider("vertical"),
-                            self._obj_user_sel_preview.prop(flex=1),
-                            mui.Divider("vertical"),
-                            self._fold_editor_container.prop(flex=1),
 
                        ]).prop(width="100%", height="100%", overflow="hidden"),
-                       icon=mui.IconType.Preview,
-                       tooltip="preview"),
-            mui.TabDef("",
-                       FrameObjTabType.OriginPreview.value,
-                       self._obj_original_preview,
-                       icon=mui.IconType.Preview,
-                       tooltip="origin preview"),
-            mui.TabDef("",
-                       FrameObjTabType.Tree.value,
-                       self._obj_simple_tree,
-                       icon=mui.IconType.AccountTree,
-                       tooltip="simple tree"),
-            mui.TabDef("",
+                       tooltip="object preview"),
+            mui.TabDef("vscode obj",
+                       FrameObjTabType.UserSelPreview.value,
+                       mui.HBox([
+                            self._obj_user_sel_preview.prop(flex=1),
+
+                       ]).prop(width="100%", height="100%", overflow="hidden"),
+                       tooltip="vscode obj preview"),
+            mui.TabDef("fold code",
                        FrameObjTabType.Editor.value,
-                       self._editor,
-                       icon=mui.IconType.Code,
-                       tooltip="editor"),
+                       mui.HBox([
+                            self._fold_editor_container.prop(flex=1),
+                       ]).prop(width="100%", height="100%", overflow="hidden"),
+                       tooltip="vscode fold code"),
         ]
+        self._preview_tabs = mui.Tabs(obj_inspect_tabs, init_value=FrameObjTabType.Preview.value).prop(
+                    panelProps=mui.FlexBoxProps(flex=1, padding=0),
+                    borderBottom=1,
+                    borderColor='divider',
+                    # flex=1,
+                    tooltipPlacement="bottom")
         super().__init__([
             mui.ThemeProvider([
-                mui.Tabs(tabdefs, init_value=FrameObjTabType.Preview.value).prop(
-                    panelProps=mui.FlexBoxProps(width="100%", padding=0),
-                    orientation="vertical",
-                    borderRight=1,
-                    flex=1,
-                    borderColor='divider',
-                    tooltipPlacement="right")
+                self._preview_tabs
             ], tab_theme)
         ])
-        self.prop(flex=1, flexFlow="row nowrap", alignItems="stretch", border="1px solid #e0e0e0", overflow="hidden")
+        self.prop(flex=1, flexFlow="column nowrap", alignItems="stretch", border="1px solid #e0e0e0", overflow="hidden")
         self._cur_state: Optional[FrameObjectPreviewState] = None
 
         self._cur_fold_frame_holder: Optional[_FrameHolder] = None
@@ -144,13 +130,14 @@ class FrameObjectPreview(ObjectPreviewBase):
             # TODO here we assume the inspector call this method.
             uid_obj = UniqueTreeIdForTree(uid)
             parts = uid_obj.parts 
-            print("?", parts)
             if len(parts) == 2:
                 # we only check frame local variables
                 var_name = parts[1]
-                return await self.set_frame_variable(var_name, obj)
+                # return await self.set_frame_variable(var_name, obj)
+                header = f"{self._cur_state.frame_qualname}::{var_name}"
+        await self._preview_tabs.set_value(FrameObjTabType.Preview.value)
         await self._obj_preview.set_obj_preview_layout(obj, uid, root, header)
-        await self._obj_original_preview.set_obj_preview_layout(obj, uid, root, header)
+        # await self._obj_original_preview.set_obj_preview_layout(obj, uid, root, header)
 
     async def set_frame_meta(self, frame_id: str, frame_qualname: str):
         self._cur_state = FrameObjectPreviewState(frame_id, frame_qualname)
@@ -159,13 +146,12 @@ class FrameObjectPreview(ObjectPreviewBase):
         assert self._cur_state is not None 
         self._cur_state.name = var_name
         self._cur_state.value = value
-        await self._obj_simple_tree.set_root_object_dict({
-            var_name: value
-        })
-        if appctx.get_app_storage().is_available():
-            await self._on_editor_ready() 
+        # await self._obj_simple_tree.set_root_object_dict({
+        #     var_name: value
+        # })
 
     async def set_user_selection_frame_variable(self, var_name: str, value: Any):
+        await self._preview_tabs.set_value(FrameObjTabType.UserSelPreview.value)
         await self._obj_user_sel_preview.set_obj_preview_layout(value, None, header=f"Vscode: {var_name}")
 
     async def _fold_editor_sel(self, ev: mui.MonacoEditorSelectionEvent, frame_holder: _FrameHolder):
@@ -196,10 +182,6 @@ class FrameObjectPreview(ObjectPreviewBase):
 
     async def clear_frame_variable(self):
         self._cur_state = None
-        await self.send_and_wait(
-            self._editor.update_event(
-                value="",
-                path=""))
 
     async def clear_preview_layouts(self):
         if self._cur_fold_frame_holder is not None:
@@ -208,70 +190,54 @@ class FrameObjectPreview(ObjectPreviewBase):
             del frame
             self._cur_fold_frame_holder = None
         await self._obj_preview.clear_preview_layout()
-        await self._obj_original_preview.clear_preview_layout()
+        # await self._obj_original_preview.clear_preview_layout()
         await self._obj_user_sel_preview.clear_preview_layout()
-        await self._obj_simple_tree.set_root_object_dict({})
+        # await self._obj_simple_tree.set_root_object_dict({})
         await self._fold_editor_container.set_new_layout([])
 
-    def _determine_convert_code_is_trivial(self, tree: ast.Module):
-        for node in tree.body:
-            if isinstance(node, ast.FunctionDef):
-                if node.name == "convert":
-                    # TODO handle doc string
-                    # analysis function node body
-                    if len(node.body) > 1:
-                        return True 
-                    # one-line return stmt. check is  "return x"
-                    if len(node.body) == 1 and isinstance(node.body[0], ast.Return):
-                        if isinstance(node.body[0], ast.Name):
-                            return True
-                    break
-        return False
-
-    async def _on_editor_ready(self):
-        if self._cur_state is not None and self._cur_state.name is not None:
-            assert appctx.get_app().app_storage.is_available()
-            var_storage_path = self._get_storage_var_path(self._cur_state.frame_id, self._cur_state.name)
-            prev_obj_meta_dict = await appctx.read_data_storage(var_storage_path, raise_if_not_found=False)
-            if prev_obj_meta_dict is None:
-                init_code = get_init_obj_convert_code()
-                meta = FrameObjectMeta(init_code)
-            else:
-                meta = FrameObjectMeta(**prev_obj_meta_dict)
-            await self.send_and_wait(
-                self._editor.update_event(
-                    value=meta.convert_code,
-                    path=self._cur_state.frame_object_path))
-            await self._set_frame_obj_layout_from_code(meta.convert_code)
+    # def _determine_convert_code_is_trivial(self, tree: ast.Module):
+    #     for node in tree.body:
+    #         if isinstance(node, ast.FunctionDef):
+    #             if node.name == "convert":
+    #                 # TODO handle doc string
+    #                 # analysis function node body
+    #                 if len(node.body) > 1:
+    #                     return True 
+    #                 # one-line return stmt. check is  "return x"
+    #                 if len(node.body) == 1 and isinstance(node.body[0], ast.Return):
+    #                     if isinstance(node.body[0], ast.Name):
+    #                         return True
+    #                 break
+    #     return False
 
     def _get_storage_var_path(self, frame_id: str, var_name: str):
         storage_path = get_storage_frame_path(frame_id)
         return f"{storage_path}/{var_name}/{VariableMetaType.Layout.value}"
 
-    async def _set_frame_obj_layout_from_code(self, value: str):
-        if self._cur_state is not None and self._cur_state.name is not None:
-            header = f"{self._cur_state.frame_qualname}::{self._cur_state.name}"
-            init_code_for_compare = get_init_obj_convert_code()
-            await self._obj_original_preview.set_obj_preview_layout(self._cur_state.value, None, header=header)
-            if value.strip() == init_code_for_compare.strip():
-                return await self._obj_preview.set_obj_preview_layout(self._cur_state.value, None, header=header)
-            var_storage_path = self._get_storage_var_path(self._cur_state.frame_id, self._cur_state.name)
-            prev_obj_meta_dict = await appctx.read_data_storage(var_storage_path, raise_if_not_found=False)
-            if prev_obj_meta_dict is not None:
-                meta = FrameObjectMeta(**prev_obj_meta_dict)
-                meta = dataclasses.replace(meta, convert_code=value)
-            else:
-                meta = FrameObjectMeta(value)
-            await appctx.save_data_storage(var_storage_path, dataclasses.asdict(meta))
-            fname = f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-{self._cur_state.frame_object_path}>"
-            obj_converted, layouts = get_frame_obj_layout_from_code(fname, value, self._cur_state.value, )
-            if layouts is None:
-                return await self._obj_preview.set_obj_preview_layout(obj_converted, None, header=header)
-            await self._obj_preview.set_preview_layout([mui.VBox(layouts).prop(flex=1, overflow="auto")], header=header)
+    # async def _set_frame_obj_layout_from_code(self, value: str):
+    #     if self._cur_state is not None and self._cur_state.name is not None:
+    #         header = f"{self._cur_state.frame_qualname}::{self._cur_state.name}"
+    #         init_code_for_compare = get_init_obj_convert_code()
+    #         await self._obj_original_preview.set_obj_preview_layout(self._cur_state.value, None, header=header)
+    #         if value.strip() == init_code_for_compare.strip():
+    #             return await self._obj_preview.set_obj_preview_layout(self._cur_state.value, None, header=header)
+    #         var_storage_path = self._get_storage_var_path(self._cur_state.frame_id, self._cur_state.name)
+    #         prev_obj_meta_dict = await appctx.read_data_storage(var_storage_path, raise_if_not_found=False)
+    #         if prev_obj_meta_dict is not None:
+    #             meta = FrameObjectMeta(**prev_obj_meta_dict)
+    #             meta = dataclasses.replace(meta, convert_code=value)
+    #         else:
+    #             meta = FrameObjectMeta(value)
+    #         await appctx.save_data_storage(var_storage_path, dataclasses.asdict(meta))
+    #         fname = f"<{TENSORPC_FILE_NAME_PREFIX}-scripts-{self._cur_state.frame_object_path}>"
+    #         obj_converted, layouts = get_frame_obj_layout_from_code(fname, value, self._cur_state.value, )
+    #         if layouts is None:
+    #             return await self._obj_preview.set_obj_preview_layout(obj_converted, None, header=header)
+    #         await self._obj_preview.set_preview_layout([mui.VBox(layouts).prop(flex=1, overflow="auto")], header=header)
 
 
-    async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
-        if self._cur_state is not None:
-            value = ev.value
-            await self._set_frame_obj_layout_from_code(value)
+    # async def _on_editor_save(self, ev: mui.MonacoEditorSaveEvent):
+    #     if self._cur_state is not None:
+    #         value = ev.value
+    #         await self._set_frame_obj_layout_from_code(value)
 

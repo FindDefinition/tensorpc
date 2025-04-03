@@ -6,6 +6,7 @@ import inspect
 import io
 import json
 import os
+import queue
 import threading
 from pathlib import Path
 import traceback
@@ -16,9 +17,10 @@ from tensorpc.compat import InWindows
 from tensorpc.constants import TENSORPC_MAIN_PID
 from tensorpc.core.bgserver import BACKGROUND_SERVER
 from tensorpc.core.tracers.targettracer import TargetTracer
+from tensorpc.apps.dbg.core.bkpt_events import BreakpointEvent, BkptLeaveEvent, BkptLaunchTraceEvent
 from tensorpc.apps.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
                                     TENSORPC_DBG_TRACE_VIEW_KEY,
-                                    TENSORPC_ENV_DBG_ENABLE, BreakpointEvent,
+                                    TENSORPC_ENV_DBG_ENABLE,
                                     BreakpointType, TraceLaunchType,
                                     TracerConfig, TraceResult, TracerType,
                                     RecordFilterConfig, DebugDistributedInfo)
@@ -249,7 +251,7 @@ def init(proc_name: Optional[str] = None, port: int = -1):
         return False
     if not BACKGROUND_SERVER.is_started:
         # put app import here to reduce import time
-        from tensorpc.apps.dbg.components.bkptpanel import BreakpointDebugPanel
+        from tensorpc.apps.dbg.components.bkptpanel_v2 import BreakpointDebugPanel
         from tensorpc.apps.dbg.components.traceview import TraceView
         assert not InWindows, "init is not supported in Windows due to setproctitle."
         cur_pid = os.getpid()
@@ -326,7 +328,6 @@ def breakpoint(name: Optional[str] = None,
     global RECORDING
     if not should_enable_debug():
         return False
-    bev = BreakpointEvent(threading.Event())
     if external_frame is not None:
         frame = external_frame
     else:
@@ -349,10 +350,10 @@ def breakpoint(name: Optional[str] = None,
                                  "path": frame.f_code.co_filename,
                                  "lineno": frame.f_lineno
                              })
-    trace_res = BACKGROUND_SERVER.execute_service(
-        serv_names.DBG_ENTER_BREAKPOINT, frame, bev, type, name)
-    if trace_res is not None:
-        tracer_to_stop, tracer_cfg = trace_res
+    event_q: queue.Queue[BreakpointEvent] = queue.Queue()
+    is_trace_stop = BACKGROUND_SERVER.execute_service(
+        serv_names.DBG_ENTER_BREAKPOINT, frame, event_q, type, name)
+    if is_trace_stop:
         RECORDING = False
         _TRACER_WRAPPER.stop()
         res = _TRACER_WRAPPER.save(BACKGROUND_SERVER.cur_proc_title)
@@ -371,7 +372,7 @@ def breakpoint(name: Optional[str] = None,
                         _patch_events_for_pytorch_dist(
                             single_res.external_events)
                         dist.all_gather_object(output,
-                                               single_res.external_events)
+                                            single_res.external_events)
                         events_all_rank = []
                         for events in output:
                             assert events is not None
@@ -379,36 +380,43 @@ def breakpoint(name: Optional[str] = None,
                         _patch_events_pid_for_pytorch_dist(events_all_rank)
                         single_res.external_events = events_all_rank
             trace_res_obj = TraceResult(res)
+        trace_cfg = _TRACER_WRAPPER._trace_cfg
+        assert trace_cfg is not None 
         _TRACER_WRAPPER.reset_tracer()
         # tracer_to_stop.stop()
         LOGGER.warning(f"Record Stop.")
         if trace_res_obj is not None:
             BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACE_DATA,
-                                              trace_res_obj, tracer_cfg)
+                                            trace_res_obj, trace_cfg)
 
-    bev.event.wait(timeout)
-    if bev.enable_trace_in_main_thread:
-        # tracer must be create/start/stop in main thread (or same thread)
-        meta = BACKGROUND_SERVER.get_userdata_typed(DebugDistributedInfo)
-        tracer_name: Optional[str] = None
-        if meta.backend is not None:
-            tracer_name = f"{meta.backend}|{meta.rank}/{meta.world_size}"
-        else:
-            tracer_name = f"Process"
-        tracer, tracer_type = _get_viztracer(bev.trace_cfg, name=tracer_name)
-        if tracer is not None:
-            LOGGER.warning(f"Record Start. Config:")
-            LOGGER.warning(bev.trace_cfg)
-            RECORDING = True
-            _TRACER_WRAPPER.set_tracer(bev.trace_cfg, tracer, tracer_type,
-                                       tracer_name, meta)
-            _TRACER_WRAPPER.start()
-            BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACER,
-                                              tracer)
-        else:
-            LOGGER.error(
-                "viztracer is not installed, can't record trace data. use `pip install viztracer` to install."
-            )
+    is_launch_trace = False
+    while True:
+        ev = event_q.get(timeout=timeout)
+        if isinstance(ev, BkptLaunchTraceEvent):
+            meta = BACKGROUND_SERVER.get_userdata_typed(DebugDistributedInfo)
+            tracer_name: Optional[str] = None
+            if meta.backend is not None:
+                tracer_name = f"{meta.backend}|{meta.rank}/{meta.world_size}"
+            else:
+                tracer_name = f"Process"
+            tracer, tracer_type = _get_viztracer(ev.trace_cfg, name=tracer_name)
+            if tracer is not None:
+                LOGGER.warning(f"Record Start. Config:")
+                LOGGER.warning(ev.trace_cfg)
+                RECORDING = True
+                _TRACER_WRAPPER.set_tracer(ev.trace_cfg, tracer, tracer_type,
+                                        tracer_name, meta)
+                is_launch_trace = True
+                BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACER,
+                                                tracer)
+            else:
+                LOGGER.error(
+                    "viztracer is not installed, can't record trace data. use `pip install viztracer` to install."
+                )
+        elif isinstance(ev, BkptLeaveEvent):
+            break
+    if is_launch_trace:
+        _TRACER_WRAPPER.start()
     return True
 
 def breakpoint_dist_pth(name: Optional[str] = None,
