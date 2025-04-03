@@ -157,8 +157,9 @@ class BreakpointDebugPanel(mui.FlexBox):
             self._trace_launch_dialog,
         ])
         draft = self.dm.get_draft_type_only()
-        self.header.bind_fields(value=D.not_null(D.literal_val("%s(%s)") % (draft.bkpt.info.qualname, draft.bkpt.info.lineno), ""))
-        self._all_frame_select.bind_fields(value=draft.bkpt.selected_frame_item, options=D.not_null(draft.bkpt.frame_select_items, []))
+        self.header.bind_fields(value=D.not_null(D.literal_val("%s(%s)") % (draft.bkpt.selected_frame_item["qualname"], draft.bkpt.selected_frame_item["lineno"]), ""))
+        self._all_frame_select.bind_fields(options=D.not_null(draft.bkpt.frame_select_items, []))
+        self._all_frame_select.bind_draft_change(draft.bkpt.selected_frame_item)
         self.dm.install_draft_change_handler(draft.bkpt.selected_frame_item, 
             self._handle_selected_frame_change, installed_comp=self.header_actions, user_eval_vars={
                 "frame": draft.bkpt.frame
@@ -207,9 +208,10 @@ class BreakpointDebugPanel(mui.FlexBox):
 
     async def _copy_frame_path_lineno(self):
         if self.dm.model.bkpt is not None:
-            info = self.dm.model.bkpt.info
-            path_lineno = f"{info.path}:{info.lineno}"
-            await appctx.copy_text_to_clipboard(path_lineno)
+            info = self.dm.model.bkpt.selected_frame_item
+            if info is not None:
+                path_lineno = f"{info['path']}:{info['lineno']}"
+                await appctx.copy_text_to_clipboard(path_lineno)
 
     async def _skip_further_bkpt(self, skip: Optional[bool] = None):
         await self._continue_bkpt()
@@ -259,17 +261,6 @@ class BreakpointDebugPanel(mui.FlexBox):
                              trace_name=config.trace_name,
                              max_stack_depth=config.max_stack_depth))
 
-    async def _select_frame(self, option: Dict[str, Any]):
-        if self._cur_frame_state.frame is None:
-            return
-        cur_frame = self._cur_frame_state.frame
-        count = option["count"]
-        while count > 0:
-            assert cur_frame is not None
-            cur_frame = cur_frame.f_back
-            count -= 1
-        assert cur_frame is not None
-        await self._set_frame_meta(cur_frame)
 
     async def _set_frame_meta(self, frame: FrameType):
         # frame_func_name = inspecttools.get_co_qualname_from_frame(frame)
@@ -280,36 +271,36 @@ class BreakpointDebugPanel(mui.FlexBox):
         # await self.frame_script.mount_frame(
         #     dataclasses.replace(self._cur_frame_state, frame=frame))
 
-    async def set_breakpoint_frame_meta(
-            self,
-            frame: FrameType,
-            leave_bkpt_cb: Callable[[Optional[TracerConfig]],
-                                    Coroutine[None, None, Any]],
-            is_record_stop: bool = False):
-        qname = inspecttools.get_co_qualname_from_frame(frame)
-        self._cur_frame_meta = DebugFrameInfo(frame.f_code.co_name, qname,
-                                              frame.f_code.co_filename,
-                                              frame.f_lineno)
-        self._cur_frame_state.frame = frame
-        self._cur_leave_bkpt_cb = leave_bkpt_cb
-        ev = self.copy_path_btn.update_event(disabled=False)
-        if is_record_stop:
-            ev += self.record_btn.update_event(disabled=False,
-                                               muiColor="primary")
-        await self.send_and_wait(ev)
-        cur_frame = frame
-        frame_select_opts = []
-        count = 0
-        while cur_frame is not None:
-            qname = inspecttools.get_co_qualname_from_frame(cur_frame)
-            frame_select_opts.append({"label": qname, "count": count})
-            count += 1
-            cur_frame = cur_frame.f_back
-        await self._all_frame_select.update_options(frame_select_opts, 0)
-        await self._set_frame_meta(frame)
-        frame_uid, frame_meta = get_frame_uid(frame)
-        await self._frame_obj_preview.set_frame_meta(frame_uid,
-                                                     frame_meta.qualname)
+    # async def set_breakpoint_frame_meta(
+    #         self,
+    #         frame: FrameType,
+    #         leave_bkpt_cb: Callable[[Optional[TracerConfig]],
+    #                                 Coroutine[None, None, Any]],
+    #         is_record_stop: bool = False):
+    #     qname = inspecttools.get_co_qualname_from_frame(frame)
+    #     self._cur_frame_meta = DebugFrameInfo(frame.f_code.co_name, qname,
+    #                                           frame.f_code.co_filename,
+    #                                           frame.f_lineno)
+    #     self._cur_frame_state.frame = frame
+    #     self._cur_leave_bkpt_cb = leave_bkpt_cb
+    #     ev = self.copy_path_btn.update_event(disabled=False)
+    #     if is_record_stop:
+    #         ev += self.record_btn.update_event(disabled=False,
+    #                                            muiColor="primary")
+    #     await self.send_and_wait(ev)
+    #     cur_frame = frame
+    #     frame_select_opts = []
+    #     count = 0
+    #     while cur_frame is not None:
+    #         qname = inspecttools.get_co_qualname_from_frame(cur_frame)
+    #         frame_select_opts.append({"label": qname, "count": count})
+    #         count += 1
+    #         cur_frame = cur_frame.f_back
+    #     await self._all_frame_select.update_options(frame_select_opts, 0)
+    #     await self._set_frame_meta(frame)
+    #     frame_uid, frame_meta = get_frame_uid(frame)
+    #     await self._frame_obj_preview.set_frame_meta(frame_uid,
+    #                                                  frame_meta.qualname)
 
     # async def leave_breakpoint(self, is_record_start: bool = False):
     #     await self.header.write("")

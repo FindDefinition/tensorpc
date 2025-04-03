@@ -2565,6 +2565,10 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
             "addOption": True,
         }
 
+    def bind_draft_change(self, draft: Any):
+        # TODO validate type
+        assert isinstance(draft, DraftBase)
+        return self._bind_field_with_change_event("value", draft)
 
 @dataclasses.dataclass
 class MultipleAutocompleteProps(AutocompletePropsBase):

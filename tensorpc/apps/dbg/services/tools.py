@@ -15,7 +15,7 @@ import gzip
 from tensorpc import prim
 from tensorpc.apps.dbg.core.bkpt_events import BkptLaunchTraceEvent, BkptLeaveEvent, BreakpointEvent
 from tensorpc.apps.dbg.core.bkptmgr import BreakpointManager, FrameLocMeta
-from tensorpc.apps.dbg.model import Breakpoint
+from tensorpc.apps.dbg.model import Breakpoint, TracerState, TracerRuntimeState
 from tensorpc.core import inspecttools, marker
 from tensorpc.core.asyncclient import simple_remote_call_async
 from tensorpc.core.datamodel.draft import capture_draft_update
@@ -56,32 +56,6 @@ class BreakpointMeta:
     user_dict: Optional[Dict[str, Any]] = None
 
 
-@dataclasses.dataclass
-class TracerState:
-    cfg: TracerConfig
-    metric: TraceMetrics
-    frame_loc: FrameLocMeta
-    force_stop: bool = False
-
-    def increment_trace_state(self, new_frame_loc: FrameLocMeta) -> bool:
-        is_record_stop = False
-        cfg = self.cfg
-        metric = self.metric
-        is_same_bkpt = False
-        is_inf_record = cfg.mode == RecordMode.INFINITE
-        if cfg.mode == RecordMode.SAME_BREAKPOINT:
-            frame_uid = (
-                new_frame_loc.path, new_frame_loc.lineno)
-            cur_frame_uid = (
-                self.frame_loc.path, self.frame_loc.lineno)
-            is_same_bkpt = frame_uid == cur_frame_uid
-        if not is_inf_record:
-            metric.breakpoint_count -= 1
-        if (metric.breakpoint_count == 0 and not is_inf_record
-            ) or is_same_bkpt or self.force_stop:
-            is_record_stop = True
-        return is_record_stop
-
 class BackgroundDebugTools:
 
     def __init__(self) -> None:
@@ -106,7 +80,7 @@ class BackgroundDebugTools:
 
         self._bkpt_lock = asyncio.Lock()
 
-        self._cur_tracer_state: Optional[TracerState] = None
+        self._cur_tracer_state: Optional[TracerRuntimeState] = None
 
         self._trace_gzip_data_dict: Dict[str, Tuple[int, TraceResult]] = {}
 
@@ -193,6 +167,7 @@ class BackgroundDebugTools:
             bkpt_model = Breakpoint(
                 type,
                 frame_info,
+                frame_loc,
                 frame_select_items,
                 frame_select_items[0],
                 frame, 
@@ -202,6 +177,8 @@ class BackgroundDebugTools:
             with capture_draft_update() as ctx:
 
                 draft.bkpt = bkpt_model
+                if obj.dm.model.tracer_state.runtime is not None:
+                    pass 
             if self._cur_breakpoint is not None and self._cur_breakpoint.type == BreakpointType.Vscode:
                 is_cur_bkpt_is_vscode = self._bkpt_mgr.check_vscode_bkpt_is_enabled(
                     self._cur_breakpoint.frame_loc)
@@ -219,8 +196,9 @@ class BackgroundDebugTools:
             res_tracer = None
             is_record_stop = False
             if self._cur_tracer_state is not None:
-                is_record_stop = self._cur_tracer_state.increment_trace_state(
+                new_bkpt_cnt, is_record_stop = self._cur_tracer_state.increment_trace_state(
                     frame_loc)
+                self._cur_tracer_state.metric.breakpoint_count = new_bkpt_cnt
                 if not is_record_stop:
                     q.put(BkptLeaveEvent())
                     # if cfg.mode != RecordMode.INFINITE:
@@ -267,7 +245,11 @@ class BackgroundDebugTools:
         assert isinstance(obj, BreakpointDebugPanel)
         draft = obj.dm.get_draft_type_only()
         with capture_draft_update() as ctx:
+            prev_bkpt = obj.dm.model.bkpt
+            if trace_cfg is not None and trace_cfg.enable and prev_bkpt is not None:
+                draft.tracer_state.runtime = TracerState.create_new_runtime(trace_cfg, prev_bkpt.frame_loc)
             draft.bkpt = None 
+
         async with self._bkpt_lock:
             # obj, app = prim.get_service(
             #     app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
@@ -285,13 +267,13 @@ class BackgroundDebugTools:
                     # await obj.leave_breakpoint(is_record_start)
             else:
                 await obj.dm._update_with_jmes_ops(ctx._ops)
-                await obj.leave_breakpoint(is_record_start)
+                # await obj.leave_breakpoint(is_record_start)
             self._cur_status = DebugServerStatus.Idle
             if self._cur_breakpoint is not None:
                 if trace_cfg is not None and trace_cfg.enable and self._frame is not None:
                     if self._cur_tracer_state is None:
                         metric = TraceMetrics(trace_cfg.breakpoint_count)
-                        self._cur_tracer_state = TracerState(
+                        self._cur_tracer_state = TracerRuntimeState(
                             trace_cfg, metric,
                             FrameLocMeta(self._frame.f_code.co_filename,
                             self._frame.f_lineno, -1))

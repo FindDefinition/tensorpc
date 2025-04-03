@@ -355,8 +355,6 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                             dict_factory_with_field=facto_fn)
                 op.opData = cast(dict, opData)["obj"]
         frontend_ops = [op.to_jmes_path_op().to_dict() for op in frontend_ops]
-        import rich 
-        rich.print(frontend_ops)
         if frontend_ops:
             return self.create_comp_event({
                 "type": 0,

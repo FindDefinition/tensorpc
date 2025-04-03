@@ -21,7 +21,7 @@ class TracerRuntimeState:
     frame_loc: FrameLocMeta
     force_stop: bool = False
 
-    def increment_trace_state(self, new_frame_loc: FrameLocMeta) -> bool:
+    def increment_trace_state(self, new_frame_loc: FrameLocMeta) -> tuple[int, bool]:
         is_record_stop = False
         cfg = self.cfg
         metric = self.metric
@@ -33,12 +33,13 @@ class TracerRuntimeState:
             cur_frame_uid = (
                 self.frame_loc.path, self.frame_loc.lineno)
             is_same_bkpt = frame_uid == cur_frame_uid
+        breakpoint_cnt = metric.breakpoint_count
         if not is_inf_record:
-            metric.breakpoint_count -= 1
-        if (metric.breakpoint_count == 0 and not is_inf_record
+            breakpoint_cnt -= 1
+        if (breakpoint_cnt == 0 and not is_inf_record
             ) or is_same_bkpt or self.force_stop:
             is_record_stop = True
-        return is_record_stop
+        return breakpoint_cnt, is_record_stop
 
 
 @dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
@@ -46,6 +47,10 @@ class TracerState:
     runtime: Optional[TracerRuntimeState]
     results: Annotated[dict[str, tuple[int, TraceResult]], DraftFieldMeta(is_external=True)] = dataclasses.field(default_factory=dict)
 
+    @staticmethod
+    def create_new_runtime(cfg: TracerConfig, frame_loc: FrameLocMeta) -> TracerRuntimeState:
+        runtime = TracerRuntimeState(cfg, TraceMetrics(0), frame_loc)
+        return runtime
 
 @dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
 class VscodeSelectedObject:
@@ -58,6 +63,7 @@ class VscodeSelectedObject:
 class Breakpoint:
     type: BreakpointType
     info: FrameInfo
+    frame_loc: FrameLocMeta
     frame_select_items: list[dict[str, Any]]
     selected_frame_item: Optional[dict[str, Any]] = None
     frame: Annotated[Optional[FrameType], DraftFieldMeta(is_external=True)] = None
@@ -71,8 +77,8 @@ class Breakpoint:
         frame_select_opts: list[dict[str, Any]] = []
         offset = 0
         while cur_frame is not None:
-            qname = inspecttools.get_co_qualname_from_frame(cur_frame)
-            frame_select_opts.append({"label": qname, "offset": offset})
+            info = Breakpoint.get_frame_info_from_frame(cur_frame)
+            frame_select_opts.append({"label": info.qualname, "offset": offset, **dataclasses.asdict(info)})
             offset += 1
             cur_frame = cur_frame.f_back
         return frame_select_opts
@@ -86,7 +92,7 @@ class Breakpoint:
         if self.release_fn is None:
             raise ValueError("release_fn is None")
         return self.release_fn
-        
+
     @staticmethod
     def get_frame_info_from_frame(frame: FrameType) -> FrameInfo:
         qname = inspecttools.get_co_qualname_from_frame(frame)
