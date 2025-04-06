@@ -50,7 +50,7 @@ from tensorpc.core.core_io import JsonOnlyData
 from tensorpc.core.event_emitter.base import ExceptionParam
 from tensorpc.core.moduleid import is_tensorpc_dynamic_path
 from tensorpc.core.tree_id import UniqueTreeIdForComp, UniqueTreeIdForTree
-from tensorpc.dock import marker
+from tensorpc.dock import appctx, marker
 from tensorpc.dock.coretypes import MessageLevel, get_unique_node_id
 
 from tensorpc.dock.core.appcore import EventHandler, EventHandlers, enter_batch_event_context
@@ -2995,6 +2995,9 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
 
         self._fail_callback = fail_callback
 
+        self._shutdown_ev: asyncio.Event = asyncio.Event()
+        self._task: Optional[asyncio.Task] = None
+
     @property
     def is_remote_mounted(self):
         return self._is_remote_mounted
@@ -3014,12 +3017,16 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         ...
 
     @abc.abstractmethod
+    async def health_check(self, timeout: Optional[int] = None) -> Any:
+        ...
+
+    @abc.abstractmethod
     async def remote_call(self, service_key: str, timeout: Optional[int], /, *args, **kwargs) -> Any:
         ...
 
     @abc.abstractmethod
     async def remote_generator(self, service_key: str, timeout: Optional[int], /, *args, **kwargs) -> AsyncGenerator[Any, None]:
-        ...
+        yield
 
     @abc.abstractmethod
     def remote_call_sync(self, service_key: str, timeout: Optional[int], /, *args, **kwargs) -> Any:
@@ -3038,9 +3045,75 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             # avoid unmount during mount.
             await self._reconnect_to_remote_comp()
 
+    @marker.mark_will_unmount
+    async def unmount_handler(self):
+        async with self._mount_lock:
+            if self._is_remote_mounted:
+                self._is_remote_mounted = False
+                try:
+                    await self.remote_call(serv_names.REMOTE_COMP_UNMOUNT_APP,
+                                        2, self._key)
+                finally:
+                    await self.shutdown_remote_object()
+
+    async def _remote_msg_handle_loop(self, node_uid: str, 
+                        prefixes: list[str], url: str = "", port: int = -1):
+        aiter_remote = self.remote_generator(serv_names.REMOTE_COMP_MOUNT_APP_GENERATOR, None, 
+                    node_uid, self._key, prefixes, url, port)
+        res = await aiter_remote.__anext__()
+        layout, root_comp_uid = res["layout"], res["remoteRootUid"]
+
+        # first event: update layout from remote
+        update_comp_ev = self.create_update_comp_event(layout, [])
+        # second event: update childs prop in remote container
+        prop_upd_ev = self.create_update_event({"childs": [root_comp_uid]})
+        # WARNING: connect button remove container that contains itself,
+        # so the actual set_new_layout is delayed after current callback finish.
+        # so we can't update stuff here, we must ensure
+        # layout update done after set_new_layout.
+        # so we use post_ev_creator here.
+        await self.set_new_layout({}, post_ev_creator=lambda: update_comp_ev + prop_upd_ev)
+        self._is_remote_mounted = True
+        next_item_task = asyncio.create_task(aiter_remote.__anext__())
+        shutdown_task = asyncio.create_task(self._shutdown_ev.wait())
+        while True:
+            done, pending = await asyncio.wait(
+                [next_item_task, shutdown_task],
+                return_when=asyncio.FIRST_COMPLETED)
+            if shutdown_task in done:
+                # shutdown
+                for task in pending:
+                    task.cancel()
+                break
+            if next_item_task in done:
+                try:
+                    ev = next_item_task.result()
+                    app = get_app()
+                    if isinstance(ev, RemoteCompEvent):
+                        key = ev.key
+                        await self.run_callback(partial(app.handle_msg_from_remote_comp, key, ev))
+                    else:
+                        app_event_dict = ev
+                        assert "remotePrefixes" in app_event_dict
+                        prefixes = app_event_dict["remotePrefixes"]
+                        # sync some state from remote component
+                        for ev_type, ev_dict in app_event_dict["typeToEvents"]:
+                            if ev_type == AppEventType.UpdateComponents:
+                                # when layout in remote changed, we must keep comp uids in main app.
+                                assert "remoteComponentAllChilds" in ev_dict
+                                self.set_cur_child_uids(ev_dict["remoteComponentAllChilds"])
+                        app_ev = AppEvent.from_dict(app_event_dict)
+                        await self.put_app_event(app_ev)
+
+                    next_item_task = asyncio.create_task(aiter_remote.__anext__())
+                except StopAsyncIteration:
+                    break
+
     async def _reconnect_to_remote_comp(self):
+        _use_remote_generator: bool = True
         try:
             await self.shutdown_remote_object()
+            await self._close_remote_loop()
             assert self._flow_uid is not None, "shouldn't happen"
             master_meta = MasterMeta()
             node_uid = get_unique_node_id(master_meta.graph_id,
@@ -3054,34 +3127,38 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                 app_url = "localhost"
             else:
                 app_url = get_primary_ip()
-            await self.remote_call(serv_names.REMOTE_COMP_MOUNT_APP, 10, node_uid, self._key,
-                                   app_url, app_serv_meta.grpc_port, prefixes)
-            layout, root_comp_uid = await self.get_layout_dict()
-            # first event: update layout from remote
-            update_comp_ev = self.create_update_comp_event(layout, [])
-            # second event: update childs prop in remote container
-            prop_upd_ev = self.create_update_event({"childs": [root_comp_uid]})
-            # WARNING: connect button remove container that contains itself,
-            # so the actual set_new_layout is delayed after current callback finish.
-            # so we can't update stuff here, we must ensure
-            # layout update done after set_new_layout.
-            # so we use post_ev_creator here.
-            await self.set_new_layout({}, post_ev_creator=lambda: update_comp_ev + prop_upd_ev)
-            self._is_remote_mounted = True
+            if not _use_remote_generator:
+                await self.remote_call(serv_names.REMOTE_COMP_MOUNT_APP, 10, node_uid, self._key,
+                                    app_url, app_serv_meta.grpc_port, prefixes)
+                layout, root_comp_uid = await self.get_layout_dict()
+                # first event: update layout from remote
+                update_comp_ev = self.create_update_comp_event(layout, [])
+                # second event: update childs prop in remote container
+                prop_upd_ev = self.create_update_event({"childs": [root_comp_uid]})
+                # WARNING: connect button remove container that contains itself,
+                # so the actual set_new_layout is delayed after current callback finish.
+                # so we can't update stuff here, we must ensure
+                # layout update done after set_new_layout.
+                # so we use post_ev_creator here.
+                await self.set_new_layout({}, post_ev_creator=lambda: update_comp_ev + prop_upd_ev)
+                self._is_remote_mounted = True
+            else:
+                self._shutdown_ev.clear()
+                await self.health_check(1)
+                self._task = asyncio.create_task(
+                    self._remote_msg_handle_loop(node_uid, prefixes, app_url, int(app_serv_meta.grpc_port)))
         except Exception as e:
             await self.send_exception(e)
             await self.disconnect()
 
-    @marker.mark_will_unmount
-    async def unmount_handler(self):
-        async with self._mount_lock:
-            if self._is_remote_mounted:
-                self._is_remote_mounted = False
-                await self.remote_call(serv_names.REMOTE_COMP_UNMOUNT_APP,
-                                    2, self._key)
-                await self.shutdown_remote_object()
+    async def _close_remote_loop(self):
+        self._shutdown_ev.set()
+        if self._task is not None:
+            await self._task
+            self._task = None
 
     async def disconnect(self):
+        await self._close_remote_loop()
         await self.shutdown_remote_object()
         self._is_remote_mounted = False 
         if self._fail_callback is not None:

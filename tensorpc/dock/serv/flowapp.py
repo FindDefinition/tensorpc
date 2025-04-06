@@ -85,10 +85,9 @@ class FlowApp:
         self.master_meta = MasterMeta()
         self.app_meta = AppLocalMeta()
         assert not prim.get_server_is_sync(), "only support async server"
-        process_title = self.master_meta.process_title
         try:
             import setproctitle  # type: ignore
-            setproctitle.setproctitle(process_title)
+            self.master_meta.set_process_title()
         except ImportError:
             pass
         if not headless:

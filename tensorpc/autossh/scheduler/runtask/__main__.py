@@ -14,7 +14,6 @@ from tensorpc.autossh.serv_names import serv_names
 import subprocess
 import importlib
 import inspect
-import psutil
 
 
 def run_func_in_module(module_func_id: str, *args, **kwargs):

@@ -15,10 +15,11 @@ from tensorpc.core.defs import ServiceDef, Service
 from tensorpc.core.server import serve_service_core
 import threading
 import atexit
-from tensorpc.core import BUILTIN_SERVICES
+from tensorpc.core import BUILTIN_SERVICES, BuiltinServiceProcType
 from tensorpc.core.server_core import ProtobufServiceCore, ServerMeta, ServiceCore
 from tensorpc.compat import InMacOS, InLinux
 from tensorpc.apps.dbg.constants import TENSORPC_DBG_SPLIT
+from tensorpc.utils.proctitle import TensorpcServerProcessMeta, set_tensorpc_server_process_title
 from tensorpc.utils.rich_logging import get_logger 
 
 LOGGER = get_logger("tensorpc.core")
@@ -33,6 +34,23 @@ class _BackgroundServerState:
     server_uuid: str
     userdata: Any
 
+@dataclasses.dataclass
+class BackgroundProcMeta:
+    pid: int 
+    name: str
+    server_id: str
+    port: int 
+    server_uuid: str 
+
+    @staticmethod 
+    def from_trpc_proc_meta(meta: TensorpcServerProcessMeta):
+        return BackgroundProcMeta(
+            pid=meta.pid,
+            name=meta.name,
+            server_id=meta.args[0],
+            port=int(meta.args[1]),
+            server_uuid=meta.args[-1]
+        )
 
 class BackgroundServer:
     """A background server that runs in a separate thread.
@@ -69,18 +87,18 @@ class BackgroundServer:
     def cur_proc_title(self):
         return self._cur_proc_title
 
-    def _try_set_proc_title(self, uid: str, id: str, status: int = 0):
+    def _try_set_proc_title(self, uid: str, id: str, proc_type: BuiltinServiceProcType, status: int = 0):
         assert self._state is not None 
         parts = [
-            TENSORPC_BG_PROCESS_NAME_PREFIX, id, str(self._state.port), str(status), uid,
+            id, str(self._state.port), uid,
         ]
-        title = TENSORPC_DBG_SPLIT.join(parts)
+        # title = TENSORPC_DBG_SPLIT.join(parts)
         try:
             import setproctitle  # type: ignore
             if self._prev_proc_title is None:
                 self._prev_proc_title = setproctitle.getproctitle()
-            self._cur_proc_title = title
-            setproctitle.setproctitle(title)
+            self._cur_proc_title = set_tensorpc_server_process_title(proc_type, *parts)
+            # set_tensorpc_server_process_title(proc_type, parts)
         except ImportError:
             pass
 
@@ -89,7 +107,8 @@ class BackgroundServer:
                     port: int = -1,
                     id: Optional[str] = None,
                     wait_for_start: bool = True,
-                    userdata: Optional[Any] = None):
+                    userdata: Optional[Any] = None,
+                    proc_type: BuiltinServiceProcType = BuiltinServiceProcType.REMOTE_COMP):
         if id is not None:
             if TENSORPC_MAIN_PID != os.getpid():
                 # forked process
@@ -133,7 +152,7 @@ class BackgroundServer:
             self._state = state
             if id is not None:
                 state.server_id = id
-                self._try_set_proc_title(uid, id)
+                self._try_set_proc_title(uid, id, proc_type)
             if wait_for_start:
                 ev.wait()
         except:
@@ -146,20 +165,6 @@ class BackgroundServer:
         res = self._state.userdata
         assert isinstance(res, userdata_type)
         return res
-
-    def set_running_proc_status(self, status: Union[int, str]):
-        assert self._state is not None
-        assert self._state.port > 0 and self._state.server_id is not None and self._state.server_uuid is not None
-        uid = self._state.server_uuid
-        title = f"{TENSORPC_BG_PROCESS_NAME_PREFIX}-{self._state.server_id}-{self._state.port}-{status}-{uid}"
-        try:
-            import setproctitle  # type: ignore
-            if self._prev_proc_title is None:
-                self._prev_proc_title = setproctitle.getproctitle()
-            self._cur_proc_title = title
-            setproctitle.setproctitle(title)
-        except ImportError:
-            pass
 
     def stop(self, is_fork: bool = False):
         if self.is_started:

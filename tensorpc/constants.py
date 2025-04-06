@@ -25,7 +25,7 @@ TENSORPC_OBSERVED_FUNCTION_ATTR = "__tensorpc_observed_function__"
 
 TENSORPC_PORT_MAX_TRY = 15
 
-TENSORPC_SERVER_PROCESS_NAME_PREFIX = "__tensorpc_server"
+TENSORPC_SERVER_PROCESS_NAME_PREFIX = "__tensorpc_s"
 
 TENSORPC_BG_PROCESS_NAME_PREFIX = "__tensorpc_bg_server"
 

@@ -16,7 +16,7 @@ import asyncio
 import contextlib
 from functools import partial
 import threading
-from typing import (Any, AsyncGenerator, Awaitable, Callable, ContextManager, Coroutine, Dict,
+from typing import (TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, ContextManager, Coroutine, Dict,
                     Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union)
 
 from typing_extensions import ParamSpec
@@ -29,9 +29,12 @@ from tensorpc.dock.core.appcore import (AppSpecialEventType, RemoteCompEvent, en
                                         is_inside_app, observe_function,
                                         enqueue_delayed_callback, run_coro_sync,
                                         app_is_remote_comp)
-from tensorpc.dock.components import plus
+from tensorpc.dock.components import plus, mui
 from tensorpc.dock.components.plus.objinspect.controllers import ThreadLocker
 from tensorpc.dock.core.context import ALL_APP_CONTEXT_GETTERS
+if TYPE_CHECKING:
+    from ..flowapp.app import App
+    from ..core.component import Component
 
 P = ParamSpec('P')
 
@@ -220,6 +223,17 @@ def unregister_app_special_event_handler(event: AppSpecialEventType,
     app = get_app()
     return app.unregister_app_special_event_handler(event, handler)
 
+def _app_special_event_effect(app: "App", event: AppSpecialEventType,
+                              handler: Callable):
+    app.register_app_special_event_handler(event, handler)
+    return partial(
+        app.unregister_app_special_event_handler, event, handler)
+
+def use_app_special_event_handler(comp: mui.Component, event: AppSpecialEventType,
+                                             handler: Callable):
+    app = get_app()
+    comp.use_effect(partial(_app_special_event_effect, app, event, handler),)
+
 def register_remote_comp_event_handler(key: str,
                                         handler: Callable[[RemoteCompEvent], Any]):
     app = get_app()
@@ -229,6 +243,17 @@ def unregister_remote_comp_event_handler(key: str,
                                         handler: Callable[[RemoteCompEvent], Any]):
     app = get_app()
     return app.unregister_remote_comp_event_handler(key, handler)
+
+def _app_remote_comp_event_effect(app: "App", key: str,
+                              handler: Callable):
+    app.register_remote_comp_event_handler(key, handler)
+    return partial(
+        app.unregister_remote_comp_event_handler, key, handler)
+
+def use_remote_comp_event_handler(comp: mui.Component, key: str,
+                                             handler: Callable):
+    app = get_app()
+    comp.use_effect(partial(_app_remote_comp_event_effect, app, key, handler),)
 
 def register_simple_rpc_handler(key: str, handler: Callable):
     app = get_app()

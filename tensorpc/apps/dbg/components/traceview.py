@@ -1,9 +1,7 @@
 import ast
 import asyncio
 import dataclasses
-import datetime
 import enum
-import gzip
 import io
 import json
 import time
@@ -11,36 +9,18 @@ import traceback
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple, Union
 import zipfile
 
-import grpc
-import psutil
-import rich
-import yaml
 import os
 
-from tensorpc.compat import InWindows
-from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
-from tensorpc.core.asyncclient import (simple_chunk_call_async,
-                                       simple_remote_call_async)
-from tensorpc.core.client import simple_remote_call
 from tensorpc.core.funcid import find_toplevel_func_node_container_by_lineno
-from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.apps.dbg.constants import (
     TENSORPC_DBG_FRAME_INSPECTOR_KEY, TENSORPC_DBG_SPLIT, DebugDistributedInfo,
     DebugFrameInfo, DebugInfo, RecordFilterConfig, RecordMode,
     RemoteDebugEventType, RemoteDebugTargetTrace, TracerConfig, TraceResult,
     TracerSingleResult, TracerType, TracerUIConfig)
-from tensorpc.apps.dbg.serv_names import serv_names as dbg_serv_names
-from tensorpc.dock import appctx, marker
 from tensorpc.dock.components import chart, mui
 from tensorpc.dock.components.plus.config import ConfigDialogEvent, ConfigPanelDialog, ConfigPanelDialogPersist
 from tensorpc.dock.components.plus.objview.preview import ObjectPreview
-from tensorpc.dock.components.plus.styles import (CodeStyles,
-                                                  get_tight_icon_tab_theme)
-from tensorpc.dock.core.appcore import AppSpecialEventType
 from tensorpc.dock.jsonlike import JsonLikeNode, JsonLikeType, as_dict_no_undefined
-from tensorpc.dock.vscode.coretypes import (VscodeBreakpoint,
-                                            VscodeTensorpcMessage,
-                                            VscodeTensorpcMessageType)
 import re
 import numpy as np
 

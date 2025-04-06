@@ -43,6 +43,13 @@ BUILTIN_SERVICES = [
     Service(BuiltinServiceKeys.TaskManager.value, {}),
 ]
 
+class BuiltinServiceProcType(enum.IntEnum):
+    # app service
+    DOCK_APP = 0
+    # remote component service
+    REMOTE_COMP = 1
+    # relay monitor service, for target without remote forward
+    RELAY_MONITOR = 2
 
 def get_http_url(url: str, port: int):
     return f"http://{url}:{port}/api/rpc"

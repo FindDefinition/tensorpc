@@ -1407,6 +1407,10 @@ class RemoteBoxGrpc(RemoteComponentBase[MUIFlexBoxProps, MUIComponentType]):
             await self._robj.close(close_channel=True)
             self._robj = None
 
+    async def health_check(self, timeout: Optional[int] = None):
+        assert self._robj is not None
+        await self._robj.health_check(timeout=timeout)
+
     async def remote_call(self, service_key: str, timeout: Optional[int], /,
                           *args, **kwargs):
         assert self._robj is not None

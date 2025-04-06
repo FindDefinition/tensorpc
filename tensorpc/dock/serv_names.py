@@ -351,4 +351,10 @@ class _ServiceNames:
         from tensorpc.dock.serv.remote_comp import RemoteComponentService
         return get_service_key_by_type(RemoteComponentService, RemoteComponentService.handle_msg_from_remote_comp.__name__)
 
+    @property
+    def REMOTE_COMP_MOUNT_APP_GENERATOR(self):
+        from tensorpc.dock.serv.remote_comp import RemoteComponentService
+        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.mount_app_generator.__name__)
+
+
 serv_names = _ServiceNames()

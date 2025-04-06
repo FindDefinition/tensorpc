@@ -17,8 +17,10 @@ import yaml
 
 from tensorpc.compat import InWindows
 from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
+from tensorpc.core import BuiltinServiceProcType
 from tensorpc.core.asyncclient import (simple_chunk_call_async,
                                        simple_remote_call_async)
+from tensorpc.core.bgserver import BackgroundProcMeta
 from tensorpc.core.client import simple_remote_call
 from tensorpc.apps.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
                                     TENSORPC_DBG_SPLIT, TENSORPC_DBG_TRACE_VIEW_KEY, DebugDistributedInfo, DebugFrameInfo,
@@ -36,6 +38,7 @@ from tensorpc.dock.jsonlike import as_dict_no_undefined
 from tensorpc.dock.vscode.coretypes import (VscodeBreakpoint,
                                             VscodeTensorpcMessage,
                                             VscodeTensorpcMessageType)
+from tensorpc.utils.proctitle import list_all_tensorpc_server_in_machine
 from tensorpc.utils.rich_logging import get_logger
 
 try:
@@ -114,24 +117,13 @@ exclude_files:
 
 def list_all_dbg_server_in_machine():
     res: List[DebugServerProcessInfo] = []
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-        proc_name = proc.info["name"]
-        proc_cmdline = proc.info["cmdline"]
-        if proc_name.startswith(TENSORPC_BG_PROCESS_NAME_PREFIX):
-            parts = proc_name.split(TENSORPC_DBG_SPLIT)[1:]
-            meta = DebugServerProcessInfo(str(proc.info["pid"]), proc_name,
-                                          proc.info["pid"], parts[-1],
-                                          parts[0], int(parts[1]))
-            res.append(meta)
-            continue
-        if proc_cmdline and proc_cmdline[0].startswith(
-                TENSORPC_BG_PROCESS_NAME_PREFIX):
-            # some platform need cmdline
-            parts = proc_cmdline[0].split(TENSORPC_DBG_SPLIT)[1:]
-            meta = DebugServerProcessInfo(str(proc.info["pid"]),
-                                          proc_cmdline[0], proc.info["pid"],
-                                          parts[-1], parts[0], int(parts[1]))
-            res.append(meta)
+    proc_metas = list_all_tensorpc_server_in_machine(BuiltinServiceProcType.REMOTE_COMP)
+    for meta in proc_metas:
+        bg_meta = BackgroundProcMeta.from_trpc_proc_meta(meta)
+        dbg_meta = DebugServerProcessInfo(str(meta.pid),
+                                        meta.name, meta.pid,
+                                        bg_meta.server_uuid, bg_meta.server_id, bg_meta.port)
+        res.append(dbg_meta)
     return res
 
 
@@ -614,7 +606,7 @@ class MasterDebugPanel(mui.FlexBox):
     async def query_record_data_by_key(self, key: str):
         # perfetto support zip of gzip trace in their source code.
         # so we can just use already gzipped data to avoid expensive zip again.
-        _use_perfetto_undoc_zip_of_gzip = False
+        _use_perfetto_undoc_zip_of_gzip = True
         LOGGER.warning("Querying record data by key %s", key)
         if key in self._record_data_cache:
             all_timestamps_with_none: List[Optional[int]] = await self._run_rpc_on_metas_chunk_call(

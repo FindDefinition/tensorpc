@@ -41,7 +41,7 @@ class MountedAppMeta:
     port: int
     key: str
     prefixes: List[str]
-    is_bistream: bool = False
+    remote_gen_queue: Optional[asyncio.Queue] = None
 
     @property
     def url_with_port(self):
@@ -170,12 +170,17 @@ class RemoteComponentService:
         return self._app_objs[key].app.root, self._app_objs[key].app
 
     async def mount_app(self, node_uid: str, key: str, url: str, port: int,
-                        prefixes: List[str]):
+                        prefixes: List[str], remote_gen_queue: Optional[asyncio.Queue] = None):
         print("MOUNT", key)
         assert key in self._app_objs, key
         app_obj = self._app_objs[key]
-        #
+        # 
         if app_obj.mounted_app_meta is not None:
+            if app_obj.mounted_app_meta.remote_gen_queue is not None:
+                # mount app via remote generator (client -> remote comp server)
+                # server can't access client url.
+                raise ValueError("app is already mounted")
+            # mount app that support server -> client connection
             # check is same
             if (url == app_obj.mounted_app_meta.url
                 and port == app_obj.mounted_app_meta.port):
@@ -193,7 +198,7 @@ class RemoteComponentService:
 
         assert app_obj.mounted_app_meta is None, "already mounted"
         app_obj.mounted_app_meta = MountedAppMeta(node_uid, url, port, key,
-                                                  prefixes)
+                                                  prefixes, remote_gen_queue)
         app_obj.mount_ev.set()
         app_obj.app.app_storage.set_remote_grpc_url(
             app_obj.mounted_app_meta.url_with_port)
@@ -235,11 +240,43 @@ class RemoteComponentService:
             prefixes + root_uid.parts).uid_encoded
         return lay
 
-    # @marker.mark_bidirectional_stream
-    # async def connect_app_loop_bistream(self, msg_iter, node_uid: str, key: str,
-    #                     prefixes: List[str]):
-        
-    #     pass 
+    async def mount_app_generator(self, node_uid: str, key: str,
+                        prefixes: List[str], url: str = "", port: int = -1):
+        print("MOUNT", key)
+        assert key in self._app_objs, key
+        app_obj = self._app_objs[key]
+        try:
+            queue = asyncio.Queue()
+            await self.mount_app(node_uid, key, url, port, prefixes, queue)
+            shutdown_task = asyncio.create_task(app_obj.shutdown_ev.wait(), name="shutdown")
+            wait_queue_task = asyncio.create_task(queue.get(), name="wait for queue")
+            yield self.get_layout_dict(key, prefixes)
+            while True:
+                (done,
+                 pending) = await asyncio.wait([shutdown_task, wait_queue_task],
+                                               return_when=asyncio.FIRST_COMPLETED)
+                if shutdown_task in done:
+                    for task in pending:
+                        await cancel_task(task)
+                    break
+                try:
+                    ev = wait_queue_task.result()
+                    if isinstance(ev, AppEvent):
+                        ev_dict = self._patch_app_event(ev, prefixes, app_obj.app)
+                        yield ev_dict
+                    elif isinstance(ev, RemoteCompEvent):
+                        yield ev 
+                    wait_queue_task = asyncio.create_task(queue.get(), name="wait for queue")
+                except StopAsyncIteration:
+                    for task in pending:
+                        await cancel_task(task)
+                    break
+        except:
+            traceback.print_exc()
+            raise 
+        finally:
+            print("UNMOUNT", key)
+            await self.unmount_app(key)
 
     async def _send_loop(self, app_obj: AppObject):
         # mount_meta = app_obj.mounted_app_meta
@@ -267,8 +304,9 @@ class RemoteComponentService:
             if wait_for_mount_task in done:
                 assert app_obj.mounted_app_meta is not None, "shouldn't happen"
                 # print("ROBJ", app_obj.mounted_app_meta.url_with_port)
-                robj = tensorpc.AsyncRemoteManager(
-                    app_obj.mounted_app_meta.url_with_port)
+                if app_obj.mounted_app_meta.remote_gen_queue is None:
+                    robj = tensorpc.AsyncRemoteManager(
+                        app_obj.mounted_app_meta.url_with_port)
                 wait_tasks: List[asyncio.Task] = [shut_task, send_task]
                 if send_task not in done:
                     continue
@@ -280,7 +318,7 @@ class RemoteComponentService:
             if app_obj.mounted_app_meta is None:
                 # must clear robj here because app is unmounted
                 robj = None
-            if app_obj.mounted_app_meta is None or robj is None:
+            if app_obj.mounted_app_meta is None or (robj is None and app_obj.mounted_app_meta.remote_gen_queue is None):
                 # we got app event, but
                 # remote component isn't mounted, ignore app event
                 send_task = asyncio.create_task(app_obj.send_loop_queue.get(), name="wait for queue")
@@ -304,41 +342,49 @@ class RemoteComponentService:
             succeed = False
             # when user use additional event such as RemoteCompEvent, regular app event may be empty.
             if ev.type_to_event:
-                # retry
-                for _ in range(retry_cnt):
-                    try:
-                        await self._send_grpc_event_large(
-                            ev,
-                            robj,
-                            app_obj.mounted_app_meta.prefixes,
-                            app,
-                            timeout=10)
-                        succeed = True
-                        break
-                    except Exception as e:
-                        traceback.print_exc()
-                if not succeed:
-                    print("Master disconnect for too long, unmount")
-                    if robj is not None:
-                        await robj.close()
-                        robj = None
-                    await self.unmount_app(app_obj.mounted_app_meta.key)
-                    wait_for_mount_task = asyncio.create_task(
-                        app_obj.mount_ev.wait(), name=f"wait for mount-{os.getpid()}")
-                    wait_tasks: List[asyncio.Task] = [
-                        shut_task, wait_for_mount_task, send_task
-                    ]
-                    continue
+                if robj is None:
+                    assert app_obj.mounted_app_meta.remote_gen_queue is not None
+                    await app_obj.mounted_app_meta.remote_gen_queue.put(ev)
+                else:
+                    # retry
+                    for _ in range(retry_cnt):
+                        try:
+                            await self._send_grpc_event_large(
+                                ev,
+                                robj,
+                                app_obj.mounted_app_meta.prefixes,
+                                app,
+                                timeout=10)
+                            succeed = True
+                            break
+                        except Exception as e:
+                            traceback.print_exc()
+                    if not succeed:
+                        print("Master disconnect for too long, unmount")
+                        if robj is not None:
+                            await robj.close()
+                            robj = None
+                        await self.unmount_app(app_obj.mounted_app_meta.key)
+                        wait_for_mount_task = asyncio.create_task(
+                            app_obj.mount_ev.wait(), name=f"wait for mount-{os.getpid()}")
+                        wait_tasks: List[asyncio.Task] = [
+                            shut_task, wait_for_mount_task, send_task
+                        ]
+                        continue
             # trigger sent event here.
             if ev.sent_event is not None:
                 ev.sent_event.set()
             # handle additional events
             for addi_ev in ev._additional_events:
                 if isinstance(addi_ev, RemoteCompEvent):
-                    try:
-                        await robj.remote_call(serv_names.APP_RUN_REMOTE_COMP_EVENT, addi_ev.key, addi_ev, rpc_timeout=1)
-                    except Exception as e:
-                        traceback.print_exc()
+                    if robj is None:
+                        assert app_obj.mounted_app_meta.remote_gen_queue is not None
+                        await app_obj.mounted_app_meta.remote_gen_queue.put(addi_ev)
+                    else:
+                        try:
+                            await robj.remote_call(serv_names.APP_RUN_REMOTE_COMP_EVENT, addi_ev.key, addi_ev, rpc_timeout=1)
+                        except Exception as e:
+                            traceback.print_exc()
 
         app_obj.send_loop_task = None
         app_obj.mounted_app_meta = None
@@ -350,12 +396,7 @@ class RemoteComponentService:
         app_obj = self._app_objs[key]
         return await app_obj.app.handle_msg_from_remote_comp(rpc_key, event)
 
-    async def _send_grpc_event_large(self,
-                                     ev: AppEvent,
-                                     robj: tensorpc.AsyncRemoteManager,
-                                     prefixes: List[str],
-                                     app: App,
-                                     timeout: Optional[int] = None):
+    def _patch_app_event(self, ev: AppEvent, prefixes: List[str], app: App,):
         ev._remote_prefixes = prefixes
         ev.patch_keys_prefix_inplace(prefixes)
         for ui_ev in ev.type_to_event.values():
@@ -365,6 +406,16 @@ class RemoteComponentService:
                     list(comp_dict.keys()), prefixes)
         ev_dict = ev.to_dict()
         ev_dict = patch_unique_id(ev_dict, prefixes)
+        return ev_dict
+
+    async def _send_grpc_event_large(self,
+                                     ev: AppEvent,
+                                     robj: tensorpc.AsyncRemoteManager,
+                                     prefixes: List[str],
+                                     app: App,
+                                     timeout: Optional[int] = None):
+        
+        ev_dict = self._patch_app_event(ev, prefixes, app)
         # print("APP EVENT", ev_dict)
         return await robj.chunked_remote_call(
             serv_names.APP_RELAY_APP_EVENT_FROM_REMOTE,

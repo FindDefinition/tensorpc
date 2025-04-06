@@ -16,7 +16,7 @@ from tensorpc import prim
 from tensorpc.apps.dbg.core.bkpt_events import BkptLaunchTraceEvent, BkptLeaveEvent, BreakpointEvent
 from tensorpc.apps.dbg.core.bkptmgr import BreakpointManager, FrameLocMeta
 from tensorpc.apps.dbg.model import Breakpoint, TracerState, TracerRuntimeState
-from tensorpc.core import inspecttools, marker
+from tensorpc.core import BuiltinServiceProcType, inspecttools, marker
 from tensorpc.core.asyncclient import simple_remote_call_async
 from tensorpc.core.datamodel.draft import capture_draft_update
 from tensorpc.core.funcid import (find_toplevel_func_node_by_lineno,
@@ -40,6 +40,7 @@ from tensorpc.dock.components.plus.objinspect.tree import BasicObjectTree
 from tensorpc.dock.core.appcore import enter_app_context, get_app_context
 from tensorpc.dock.serv_names import serv_names as app_serv_names
 from tensorpc.dock.vscode.coretypes import VscodeBreakpoint
+from tensorpc.utils.proctitle import list_all_tensorpc_server_in_machine
 from tensorpc.utils.rich_logging import (
     TENSORPC_LOGGING_OVERRIDED_PATH_LINENO_KEY, get_logger)
 
@@ -100,6 +101,8 @@ class BackgroundDebugTools:
 
     # @marker.mark_server_event(event_type=ServiceEventType.BeforeServerStart)
     async def try_fetch_vscode_breakpoints(self):
+        # relay_proc_metas = list_all_tensorpc_server_in_machine(BuiltinServiceProcType.RELAY_MONITOR)
+
         all_app_metas = list_all_app_in_machine()
         for meta in all_app_metas:
             url = f"localhost:{meta.app_grpc_port}"

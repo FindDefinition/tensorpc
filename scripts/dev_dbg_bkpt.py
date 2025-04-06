@@ -32,7 +32,7 @@ class MyModule(nn.Module):
         with profiler.record_function("MASK INDICES"):
             threshold = out.sum(axis=1).mean().item()
             hi_idx = np.argwhere(mask.cpu().numpy() > threshold)
-            hi_idx = torch.from_numpy(hi_idx).cuda()
+            hi_idx = torch.from_numpy(hi_idx).to(input.device)
 
         return out, hi_idx
 
@@ -78,6 +78,7 @@ def mp_func_for_fork_debug(rank):
 def mp_func_inf_record(rank):
     print("FORK START", os.getpid())
     tensorpc.dbg.init()
+    device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("mps")
     for j in range(1000):
         a = 5
         b = 3
@@ -90,10 +91,10 @@ def mp_func_inf_record(rank):
 
         # tensorpc.dbg.vscode_breakpoint(name=f"WTF-{rank}")
         # tensorpc.dbg.breakpoint(name="WTF")
-        model = MyModule(50, 10).cuda()
-        model2 = MyModule2(50, 10).cuda()
-        input = torch.rand(128, 50).cuda()
-        mask = torch.rand((50, 50, 50), dtype=torch.double).cuda()
+        model = MyModule(50, 10).to(device)
+        model2 = MyModule2(50, 10).to(device)
+        input = torch.rand(128, 50).to(device)
+        mask = torch.rand((50, 50, 50), dtype=torch.float32).to(device)
         # with tensorpc.dbg.rttracer.enter_tracer("debug"):
         model(input, mask)
         complex_obj = mui.Button("Hello")

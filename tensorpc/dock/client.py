@@ -15,8 +15,9 @@
 import dataclasses
 from typing import Any, AsyncGenerator, List, Optional, Tuple, Generator
 
-from tensorpc.core import prim
+from tensorpc.core import BuiltinServiceProcType, prim
 from tensorpc.protos_export import rpc_message_pb2
+from tensorpc.utils.proctitle import list_all_tensorpc_server_in_machine, set_tensorpc_server_process_title
 
 from ..utils.address import get_url_port
 from . import constants
@@ -99,15 +100,15 @@ class MasterMeta:
         assert self._node_id is not None
         return self._node_id
 
-    @property
-    def process_title(self):
+    def set_process_title(self):
         gport = self.grpc_port if self.grpc_port else 0
         port = self.http_port if self.http_port else 0
         app_meta = AppLocalMeta()
         app_gport = app_meta.grpc_port if app_meta.grpc_port else 0
         app_port = app_meta.http_port if app_meta.http_port else 0
         readable_id = self.node_readable_id
-        return f"{constants.TENSORPC_FLOW_PROCESS_NAME_PREFIX}-{gport}-{port}-{app_gport}-{app_port}-{readable_id}"
+        return set_tensorpc_server_process_title(BuiltinServiceProcType.DOCK_APP, 
+            str(gport), str(port), str(app_gport), str(app_port), readable_id)
 
 
 class AppLocalMeta:
@@ -142,23 +143,15 @@ class AppProcessMeta:
 
 def list_all_app_in_machine():
     res: List[AppProcessMeta] = []
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-        proc_name = proc.info["name"]
-        proc_cmdline = proc.info["cmdline"]
-
-        if proc_name.startswith(constants.TENSORPC_FLOW_PROCESS_NAME_PREFIX):
-            parts = proc_name.split("-")
-            ports = list(map(int, parts[1:-1]))
-            meta = AppProcessMeta(parts[-1], proc.info["pid"], ports[0],
-                                  ports[1], ports[2], ports[3])
-            res.append(meta)
-            continue 
-        if proc_cmdline and proc_cmdline[0].startswith(constants.TENSORPC_FLOW_PROCESS_NAME_PREFIX):
-            parts = proc_cmdline[0].split("-")
-            ports = list(map(int, parts[1:-1]))
-            meta = AppProcessMeta(parts[-1], proc.info["pid"], ports[0],
-                                  ports[1], ports[2], ports[3])
-            res.append(meta)
+    proc_metas = list_all_tensorpc_server_in_machine(BuiltinServiceProcType.DOCK_APP)
+    for meta in proc_metas:
+        gport = int(meta.args[0])
+        port = int(meta.args[1])
+        app_gport = int(meta.args[2])
+        app_port = int(meta.args[3])
+        readable_id = meta.args[4]
+        meta = AppProcessMeta(readable_id, meta.pid, gport, port, app_gport, app_port)
+        res.append(meta)
     return res
 
 
