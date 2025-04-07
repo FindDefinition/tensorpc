@@ -15,8 +15,6 @@
 from pathlib import Path
 import os
 
-from tensorpc.utils.app.process import TENSORPC_FLOW_PROCESS_NAME_PREFIX
-
 _FLOW_FOLDER_PATH_ENV = os.getenv("TENSORPC_FLOW_ROOT",
                                   str(Path.home() / ".tensorpc" / "flow"))
 FLOW_FOLDER_PATH = Path(_FLOW_FOLDER_PATH_ENV)

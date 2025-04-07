@@ -121,13 +121,13 @@ class FrameScript(mui.FlexBox):
     # async def _on_mount(self):
     #     pass 
 
-    @marker.mark_did_mount
-    async def _on_mount(self):
-        appctx.register_app_special_event_handler(AppSpecialEventType.RemoteCompMount, self._on_remote_comp_mount)
+    # @marker.mark_did_mount
+    # async def _on_mount(self):
+    #     appctx.register_app_special_event_handler(AppSpecialEventType.RemoteCompMount, self._on_remote_comp_mount)
     
-    @marker.mark_will_unmount
-    async def _on_unmount(self):
-        appctx.unregister_app_special_event_handler(AppSpecialEventType.RemoteCompMount, self._on_remote_comp_mount)
+    # @marker.mark_will_unmount
+    # async def _on_unmount(self):
+    #     appctx.unregister_app_special_event_handler(AppSpecialEventType.RemoteCompMount, self._on_remote_comp_mount)
 
     async def _on_remote_comp_mount(self, data: Any):
         await self._on_editor_ready()

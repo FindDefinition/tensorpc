@@ -225,13 +225,13 @@ class ScriptManager(mui.FlexBox):
                 self._storage_node_rid = MasterMeta().node_id
             if self._init_graph_id is None:
                 self._graph_id = MasterMeta().graph_id
-        appctx.register_app_special_event_handler(AppSpecialEventType.RemoteCompMount, self._on_remote_comp_mount)
+        # appctx.register_app_special_event_handler(AppSpecialEventType.RemoteCompMount, self._on_remote_comp_mount)
     
     @marker.mark_will_unmount
     async def _on_unmount(self):
         # we clear the global storage when unmount to provide a way for user to reset the global storage
         self._manager_global_storage.clear()
-        appctx.unregister_app_special_event_handler(AppSpecialEventType.RemoteCompMount, self._on_remote_comp_mount)
+        # appctx.unregister_app_special_event_handler(AppSpecialEventType.RemoteCompMount, self._on_remote_comp_mount)
 
     async def _on_remote_comp_mount(self, data: Any):
         await self._on_editor_ready()

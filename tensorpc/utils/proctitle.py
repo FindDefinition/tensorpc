@@ -1,3 +1,4 @@
+import traceback
 from typing import Optional
 import psutil
 
@@ -13,7 +14,7 @@ class TensorpcServerProcessMeta:
     type: BuiltinServiceProcType
     args: list[str]
 
-def list_all_tensorpc_server_in_machine(proc_type: Optional[BuiltinServiceProcType] = None, parent_pid: Optional[int] = None):
+def list_all_tensorpc_server_in_machine(target_proc_type: Optional[BuiltinServiceProcType] = None, parent_pid: Optional[int] = None):
     # format: __tensorpc_server-unique_id
     res: list[TensorpcServerProcessMeta] = []
     if parent_pid is None:
@@ -24,22 +25,28 @@ def list_all_tensorpc_server_in_machine(proc_type: Optional[BuiltinServiceProcTy
     for proc in proc_iter:
         proc_name: str = proc.info["name"]
         proc_cmdline = proc.info["cmdline"]
-        if proc_name.startswith(TENSORPC_SERVER_PROCESS_NAME_PREFIX):
-            first_split = proc_name.find("-")
-            uid_encoded = proc_name[first_split + 1:]
-            uid_obj = UniqueTreeId(uid_encoded)
-            proc_type = BuiltinServiceProcType(int(uid_obj.parts[0]))
-            res.append(TensorpcServerProcessMeta(proc.info["pid"], proc_name, proc_type, uid_obj.parts[1:]))
-            continue 
-        if proc_cmdline and proc_cmdline[0].startswith(TENSORPC_SERVER_PROCESS_NAME_PREFIX):
-            proc_name = proc_cmdline[0]
-            first_split = proc_name.find("-")
-            uid_encoded = proc_name[first_split + 1:]
-            uid_obj = UniqueTreeId(uid_encoded)
-            proc_type = BuiltinServiceProcType(int(uid_obj.parts[0]))
-            res.append(TensorpcServerProcessMeta(proc.info["pid"], proc_name, proc_type, uid_obj.parts[1:]))
-    if proc_type is not None:
-        res = [r for r in res if r.type == proc_type]
+        try:
+
+            if proc_name.startswith(TENSORPC_SERVER_PROCESS_NAME_PREFIX):
+                first_split = proc_name.find("-")
+                uid_encoded = proc_name[first_split + 1:]
+                uid_obj = UniqueTreeId(uid_encoded)
+                proc_type = BuiltinServiceProcType(int(uid_obj.parts[0]))
+                res.append(TensorpcServerProcessMeta(proc.info["pid"], proc_name, proc_type, uid_obj.parts[1:]))
+                continue 
+            if proc_cmdline and proc_cmdline[0].startswith(TENSORPC_SERVER_PROCESS_NAME_PREFIX):
+                proc_name = proc_cmdline[0]
+                first_split = proc_name.find("-")
+                uid_encoded = proc_name[first_split + 1:]
+                uid_obj = UniqueTreeId(uid_encoded)
+                proc_type = BuiltinServiceProcType(int(uid_obj.parts[0]))
+                res.append(TensorpcServerProcessMeta(proc.info["pid"], proc_name, proc_type, uid_obj.parts[1:]))
+        
+        except:
+            traceback.print_exc()
+            continue
+    if target_proc_type is not None:
+        res = [r for r in res if r.type == target_proc_type]
     return res
 
 def get_tensorpc_server_process_title(type: BuiltinServiceProcType, *args: str) -> str:

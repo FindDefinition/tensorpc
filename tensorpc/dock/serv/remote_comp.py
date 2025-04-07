@@ -160,7 +160,7 @@ class RemoteComponentService:
         else:
             app.root._attach(UniqueTreeIdForComp.from_parts([TENSORPC_APP_ROOT_COMP]),
                              app._flow_app_comp_core)
-        send_loop_task = asyncio.create_task(self._send_loop(app_obj))
+        send_loop_task = asyncio.create_task(self._send_loop(app_obj), name=f"send loop {key}")
         app.app_initialize()
         await app.app_initialize_async()
         app_obj.send_loop_task = send_loop_task
@@ -171,10 +171,8 @@ class RemoteComponentService:
 
     async def mount_app(self, node_uid: str, key: str, url: str, port: int,
                         prefixes: List[str], remote_gen_queue: Optional[asyncio.Queue] = None):
-        print("MOUNT", key)
         assert key in self._app_objs, key
         app_obj = self._app_objs[key]
-        # 
         if app_obj.mounted_app_meta is not None:
             if app_obj.mounted_app_meta.remote_gen_queue is not None:
                 # mount app via remote generator (client -> remote comp server)
@@ -209,10 +207,15 @@ class RemoteComponentService:
 
         # app_obj.send_loop_task = send_loop_task
 
-    async def unmount_app(self, key: str):
-        print("UNMOUNT", key)
+    async def unmount_app(self, key: str, is_local_call: bool = False):
         assert key in self._app_objs
         app_obj = self._app_objs[key]
+        if not is_local_call:
+            if app_obj.mounted_app_meta is not None and app_obj.mounted_app_meta.remote_gen_queue is not None:
+                app_obj.shutdown_ev.set()
+                return
+        print("UNMOUNT", key)
+            # raise ValueError("app is mounted via remote generator, you can't call unmount")
         with enter_app_context(app_obj.app):
             await app_obj.app._flowapp_special_eemitter.emit_async(AppSpecialEventType.RemoteCompUnmount, None)
 
@@ -242,7 +245,7 @@ class RemoteComponentService:
 
     async def mount_app_generator(self, node_uid: str, key: str,
                         prefixes: List[str], url: str = "", port: int = -1):
-        print("MOUNT", key)
+        print("MOUNT GENERATOR", key)
         assert key in self._app_objs, key
         app_obj = self._app_objs[key]
         try:
@@ -252,31 +255,38 @@ class RemoteComponentService:
             wait_queue_task = asyncio.create_task(queue.get(), name="wait for queue")
             yield self.get_layout_dict(key, prefixes)
             while True:
-                (done,
-                 pending) = await asyncio.wait([shutdown_task, wait_queue_task],
-                                               return_when=asyncio.FIRST_COMPLETED)
-                if shutdown_task in done:
-                    for task in pending:
-                        await cancel_task(task)
-                    break
                 try:
-                    ev = wait_queue_task.result()
-                    if isinstance(ev, AppEvent):
-                        ev_dict = self._patch_app_event(ev, prefixes, app_obj.app)
-                        yield ev_dict
-                    elif isinstance(ev, RemoteCompEvent):
-                        yield ev 
-                    wait_queue_task = asyncio.create_task(queue.get(), name="wait for queue")
-                except StopAsyncIteration:
-                    for task in pending:
-                        await cancel_task(task)
+                    (done,
+                    pending) = await asyncio.wait([shutdown_task, wait_queue_task],
+                                                return_when=asyncio.FIRST_COMPLETED)
+                    if shutdown_task in done:
+                        for task in pending:
+                            await cancel_task(task)
+                        break
+                    try:
+
+                        ev = wait_queue_task.result()
+                        if isinstance(ev, AppEvent):
+                            ev_dict = self._patch_app_event(ev, prefixes, app_obj.app)
+                            yield ev_dict
+                        elif isinstance(ev, RemoteCompEvent):
+                            yield ev 
+                        wait_queue_task = asyncio.create_task(queue.get(), name="wait for queue")
+                    except StopAsyncIteration:
+                        for task in pending:
+                            await cancel_task(task)
+                        break
+                except asyncio.CancelledError:
+                    print("CANCELLED")
+                    await cancel_task(wait_queue_task)
+                    await cancel_task(shutdown_task)
                     break
         except:
             traceback.print_exc()
             raise 
         finally:
-            print("UNMOUNT", key)
-            await self.unmount_app(key)
+            print("UNMOUNT GENERATOR", key)
+            await self.unmount_app(key, is_local_call=True)
 
     async def _send_loop(self, app_obj: AppObject):
         # mount_meta = app_obj.mounted_app_meta

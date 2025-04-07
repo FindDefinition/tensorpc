@@ -103,4 +103,24 @@ class _ServiceNames:
         from tensorpc.apps.dbg.services.rttrace import RTTraceStorageService
         return get_service_key_by_type(RTTraceStorageService, RTTraceStorageService.get_trace_result.__name__)
 
+    @property
+    def RELAY_GET_CURRENT_INFOS(self):
+        from tensorpc.apps.dbg.services.relay import RelayMonitor
+        return get_service_key_by_type(RelayMonitor, RelayMonitor.get_current_infos.__name__)
+
+    @property
+    def RELAY_GET_VSCODE_BKPTS(self):
+        from tensorpc.apps.dbg.services.relay import RelayMonitor
+        return get_service_key_by_type(RelayMonitor, RelayMonitor.get_vscode_breakpoints.__name__)
+
+    @property
+    def RELAY_SET_VSCODE_BKPTS(self):
+        from tensorpc.apps.dbg.services.relay import RelayMonitor
+        return get_service_key_by_type(RelayMonitor, RelayMonitor.set_vscode_breakpoints.__name__)
+
+    @property
+    def RELAY_LEAVE_BKPT(self):
+        from tensorpc.apps.dbg.services.relay import RelayMonitor
+        return get_service_key_by_type(RelayMonitor, RelayMonitor.leave_breakpoint.__name__)
+
 serv_names = _ServiceNames()

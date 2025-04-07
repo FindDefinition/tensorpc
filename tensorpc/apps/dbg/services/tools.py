@@ -182,6 +182,9 @@ class BackgroundDebugTools:
                 draft.bkpt = bkpt_model
                 if obj.dm.model.tracer_state.runtime is not None:
                     pass 
+            with enter_app_context(app):
+                await obj.dm._update_with_jmes_ops(ctx._ops)
+
             if self._cur_breakpoint is not None and self._cur_breakpoint.type == BreakpointType.Vscode:
                 is_cur_bkpt_is_vscode = self._bkpt_mgr.check_vscode_bkpt_is_enabled(
                     self._cur_breakpoint.frame_loc)
@@ -215,6 +218,9 @@ class BackgroundDebugTools:
                     self._cur_breakpoint = None
                     self._debug_metric.total_skipped_bkpt += 1
                     return
+                else:
+                    self._cur_tracer_state = None
+                
             assert self._frame is None, "already in breakpoint, shouldn't happen"
             self._frame = frame
             self._debug_metric.total_skipped_bkpt = 0
@@ -222,8 +228,6 @@ class BackgroundDebugTools:
             #     app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
             #         TENSORPC_DBG_FRAME_INSPECTOR_KEY)
             # assert isinstance(obj, BreakpointDebugPanel)
-            with enter_app_context(app):
-                await obj.dm._update_with_jmes_ops(ctx._ops)
                 # await obj.set_breakpoint_frame_meta(frame,
                 #                                     self.leave_breakpoint,
                 #                                     is_record_stop)
@@ -236,7 +240,7 @@ class BackgroundDebugTools:
                     TENSORPC_LOGGING_OVERRIDED_PATH_LINENO_KEY:
                     (frame.f_code.co_filename, frame.f_lineno)
                 })
-            return res_tracer
+            return is_record_stop
 
     async def leave_breakpoint(self, trace_cfg: Optional[TracerConfig] = None):
         """should only be called from remote"""

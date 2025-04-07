@@ -51,7 +51,7 @@ def _print_draft_change_event(ev: DraftChangeEvent, draft_expr_str_dict):
         if not ev.old_value_dict:
             print(f"{k_expr}|{v}: New: {ev.new_value_dict[k]}")
         else:
-            print(f"{k_expr}|{v}: {ev.old_value_dict[k][0]} -> {ev.new_value_dict[k]}")
+            print(f"{k_expr}|{v}: {ev.old_value_dict[k]} -> {ev.new_value_dict[k]}")
 
 @dataclasses.dataclass
 class _DataclassSer:

@@ -85,7 +85,7 @@ class BreakpointDebugPanel(mui.FlexBox):
         self._all_frame_select.prop(size="small",
                                     textFieldProps=mui.TextFieldProps(
                                         muiMargin="dense",
-                                        fontFamily=CodeStyles.fontFamily),
+                                        variant="outlined"),
                                     padding="0 3px 0 3px")
         self._trace_launch_dialog = ConfigPanelDialog(
             self._on_trace_launch).prop(okLabel="Launch Record")
@@ -131,6 +131,7 @@ class BreakpointDebugPanel(mui.FlexBox):
 
         filter_input = mui.TextField("filter").prop(
             valueChangeTarget=(self.tree_viewer.tree.tree, "globalFilter"))
+        filter_input.prop(variant="outlined")
         tree = self.tree_viewer.tree.tree
         if isinstance(tree, mui.TanstackJsonLikeTree):
             filter_input.event_change.on(
@@ -149,9 +150,39 @@ class BreakpointDebugPanel(mui.FlexBox):
         self.content_container = mui.VBox([
             self.tree_viewer.prop(flex=1),
         ]).prop(flex=1)
+        textfield_theme = mui.Theme(
+            components={
+                "MuiInputLabel": {
+                    "defaultProps": {
+                        "sx": {
+                            "fontSize": "14px",
+                            "fontFamily": CodeStyles.fontFamily,
+                        },
+                    },
+                },
+                "MuiOutlinedInput": {
+                    "defaultProps": {
+                        "sx": {
+                            "fontSize": "14px",
+                            "fontFamily": CodeStyles.fontFamily,
+                        }
+                    }
+                },
+                "MuiInput": {
+                    "defaultProps": {
+                        "sx": {
+                            "fontSize": "14px",
+                            "fontFamily": CodeStyles.fontFamily,
+                        }
+                    }
+                }
 
+            }
+        )
         self.dm = mui.DataModel(PyDbgModel(TracerState(None, {})), [
-            self.header_container,
+            mui.ThemeProvider([
+                self.header_container
+            ], textfield_theme),
             mui.Divider(),
             self.content_container,
             self._trace_launch_dialog,

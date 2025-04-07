@@ -22,6 +22,7 @@ class ExecutorType(enum.IntEnum):
     LOCAL = 2
 
 NODE_EXEC_SERVICE = f"tensorpc.apps.cflow.services.executors::NodeExecutorService"
+RELAY_SERVICE = f"tensorpc.apps.dbg.services.relay::RelayMonitor"
 
 
 class RemoteExecutorServiceKeys(enum.Enum):
