@@ -69,6 +69,7 @@ class Breakpoint:
     frame: Annotated[Optional[FrameType], DraftFieldMeta(is_external=True)] = None
     release_fn: Annotated[Optional[Callable[[], Awaitable[None]]], DraftFieldMeta(is_external=True)] = None
     launch_trace_fn: Annotated[Optional[Callable[[TracerConfig], Awaitable[None]]], DraftFieldMeta(is_external=True)] = None
+    is_external: bool = False
 
     @staticmethod 
     def generate_frame_select_items(frame: FrameType):

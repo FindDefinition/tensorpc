@@ -451,6 +451,6 @@ def simple_remote_call(addr, key, *args, rpc_timeout=None, **kwargs):
         return robj.remote_call(key, *args, rpc_timeout=rpc_timeout, **kwargs)
 
 
-def simple_chunk_call(addr, key, *args, rpc_timeout: Optional[int] = None, **kwargs):
+def simple_chunk_call(addr, key, *args, rpc_timeout: Optional[int] = None, rpc_relay_urls: Optional[list[str]] = None, **kwargs):
     with RemoteManager(addr) as robj:
-        return robj.chunked_remote_call(key, *args, rpc_timeout=rpc_timeout, **kwargs)
+        return robj.chunked_remote_call(key, *args, rpc_timeout=rpc_timeout, rpc_relay_urls=rpc_relay_urls, **kwargs)

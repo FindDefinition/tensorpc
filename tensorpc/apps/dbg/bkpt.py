@@ -15,6 +15,7 @@ from typing import Any, List, Optional
 
 from tensorpc.compat import InWindows
 from tensorpc.constants import TENSORPC_MAIN_PID
+from tensorpc.core import prim
 from tensorpc.core.bgserver import BACKGROUND_SERVER
 from tensorpc.core.tracers.targettracer import TargetTracer
 from tensorpc.apps.dbg.core.bkpt_events import BreakpointEvent, BkptLeaveEvent, BkptLaunchTraceEvent
@@ -251,8 +252,6 @@ def init(proc_name: Optional[str] = None, port: int = -1):
         return False
     if not BACKGROUND_SERVER.is_started:
         # put app import here to reduce import time
-        from tensorpc.apps.dbg.components.bkptpanel_v2 import BreakpointDebugPanel
-        from tensorpc.apps.dbg.components.traceview import TraceView
         assert not InWindows, "init is not supported in Windows due to setproctitle."
         cur_pid = os.getpid()
         if proc_name is None:
@@ -262,11 +261,16 @@ def init(proc_name: Optional[str] = None, port: int = -1):
         userdata = _try_get_distributed_meta()
         if userdata.backend is not None:
             proc_name += f"_{userdata.get_backend_short()}_{userdata.rank}"
-
         BACKGROUND_SERVER.start_async(id=proc_name,
                                       port=port,
                                       userdata=userdata)
+    from tensorpc.dock.serv_names import serv_names as app_serv_names
+    has_bkgd_ui = BACKGROUND_SERVER.execute_service(app_serv_names.REMOTE_COMP_HAS_LAYOUT_OBJECT, TENSORPC_DBG_FRAME_INSPECTOR_KEY)
+    if not has_bkgd_ui:
+        from tensorpc.apps.dbg.components.bkptpanel_v2 import BreakpointDebugPanel
+        from tensorpc.apps.dbg.components.traceview import TraceView
         panel = BreakpointDebugPanel().prop(flex=1)
+        userdata = _try_get_distributed_meta()
         trace_view = TraceView(userdata).prop(flex=1)
         set_background_layout(TENSORPC_DBG_FRAME_INSPECTOR_KEY, panel)
         set_background_layout(TENSORPC_DBG_TRACE_VIEW_KEY, trace_view)
@@ -278,7 +282,6 @@ def init(proc_name: Optional[str] = None, port: int = -1):
         if userdata.backend is not None:
             BACKGROUND_SERVER.execute_service(
                 serv_names.DBG_SET_DISTRIBUTED_META, userdata)
-
     return True
 
 
@@ -328,6 +331,11 @@ def breakpoint(name: Optional[str] = None,
     global RECORDING
     if not should_enable_debug():
         return False
+    is_server_proc = prim.is_in_server_context()
+    if is_server_proc:
+        LOGGER.warning(f"Bkpt skipped due to you run it in tensorpc server which isn't supported for now.")
+        return
+
     if external_frame is not None:
         frame = external_frame
     else:
@@ -444,7 +452,7 @@ def vscode_breakpoint(name: Optional[str] = None,
     only triggered if a vscode breakpoint is set on the same line.
     you can use specific UI or command tool or just remove breakpoint
     in vscode to exit breakpoint.
-    WARNING: currently don't support multi-thread
+    WARNING: currently don't support multi-threadpytorch_dist_extra
     """
     return breakpoint(name,
                       timeout,

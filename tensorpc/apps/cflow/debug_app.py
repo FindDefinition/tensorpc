@@ -54,11 +54,14 @@ class ComputeFlowApp:
     def my_layout(self):
         with open(TENSORPC_DEV_SECRET_PATH, "r") as f:
             secret = yaml.safe_load(f)["cflow_debug"]
+        init_cmd = ""
+        if "init_cmd" in secret:
+            init_cmd = f"{secret['init_cmd']}\n"
         self.ssh_desc = SSHConnDesc(
-            "localhost:22", secret["username"], secret["password"])
+            "localhost:22", secret["username"], secret["password"], init_cmd=init_cmd)
         executors = [
             SSHCreationNodeExecutor("remote", ResourceDesc(), self.ssh_desc, [
-                "conda activate base\n"
+                init_cmd
             ])
         ]
         self.cflow = ComputeFlow(executors=executors)

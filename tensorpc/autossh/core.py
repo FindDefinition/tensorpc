@@ -54,6 +54,7 @@ class SSHConnDesc:
     url_with_port: str 
     username: str 
     password: str
+    init_cmd: str = ""
 
 
 @dataclasses.dataclass
@@ -704,7 +705,7 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
         async with self._read_locks[datatype]:
             while True:
                 while curbuf < len(recv_buf):
-                    if isinstance(recv_buf[curbuf], Exception):
+                    if isinstance(recv_buf[curbuf], BaseException):
                         if buf:
                             recv_buf[:curbuf] = []
                             self._recv_buf_len -= buflen
@@ -716,7 +717,7 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
                             if isinstance(exc, SoftEOFReceived):
                                 return buf, LineEventType.EOF
                             else:
-                                raise cast(Exception, exc)
+                                raise cast(BaseException, exc)
 
                     newbuf = cast(AnyStr, recv_buf[curbuf])
                     buf += newbuf
@@ -1244,7 +1245,8 @@ class SSHClient:
             rbuf_max_length: int = 4000,
             enable_raw_event: bool = True,
             line_raw_callback: Optional[Callable[[LineRawEvent],
-                                                       Awaitable[None]]] = None):
+                                                       Awaitable[None]]] = None,
+            conn_set_callback: Optional[Callable[[Optional[asyncssh.SSHClientConnection]], None]] = None):
         if env is None:
             env = {}
         # TODO better keepalive
@@ -1307,6 +1309,8 @@ class SSHClient:
                     env_port_modifier(fwd_ports, rfwd_ports, env)
                 if init_event is not None:
                     init_event.set()
+                if conn_set_callback is not None:
+                    conn_set_callback(conn)
                 if env:
                     if self.encoding is None:
                         cmds2: List[bytes] = []
@@ -1367,6 +1371,8 @@ class SSHClient:
         except BaseException as exc:
             await callback(_warp_exception_to_event(exc, self.uid))
         finally:
+            if conn_set_callback is not None:
+                conn_set_callback(None)
             if init_event:
                 init_event.set()
             if exit_event is not None:

@@ -86,20 +86,24 @@ class _SSHRunnerState:
     url_with_port: str = "localhost:22"
     username: str = "root"
     password: str = ""
+    initCmd: str = ""
 
 def _ssh_config_layout(drafts):
-    url_with_port_ui = mui.Input("url:port")
-    url_with_port_ui.bind_draft_change(drafts.url_with_port)
-    username_ui = mui.Input("username")
-    username_ui.bind_draft_change(drafts.username)
-    password_ui = mui.Input("password").prop(type="password")
-    password_ui.bind_draft_change(drafts.password)
+    url_with_port_ui = mui.Input("url:port", init=mui.undefined).prop(debounce=300)
+    url_with_port_ui.bind_draft_change_uncontrolled(drafts.url_with_port)
+    username_ui = mui.Input("username", init=mui.undefined).prop(debounce=300)
+    username_ui.bind_draft_change_uncontrolled(drafts.username)
+    password_ui = mui.Input("password", init=mui.undefined).prop(type="password", debounce=300)
+    password_ui.bind_draft_change_uncontrolled(drafts.password)
+    init_cmd_ui = mui.Input("init cmd", init=mui.undefined).prop(debounce=300)
+    init_cmd_ui.bind_draft_change_uncontrolled(drafts.initCmd)
     return mui.VBox([
         url_with_port_ui,
         username_ui,
         password_ui,
+        init_cmd_ui,
     ]).prop(width="200px",
-            maxHeight="300px",
+            maxHeight="400px",
             overflow="auto",
             padding="5px")
 
@@ -108,7 +112,8 @@ class _SSHTempExecutor(SSHTempExecutorBase):
         return SSHConnDesc(
             node_state.url_with_port,
             node_state.username,
-            node_state.password
+            node_state.password,
+            node_state.initCmd,
         )
 
 def _create_temp_exec(node: ComputeNodeModel) -> SSHTempExecutorBase:

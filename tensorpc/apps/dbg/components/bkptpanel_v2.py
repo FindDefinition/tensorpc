@@ -94,6 +94,7 @@ class BreakpointDebugPanel(mui.FlexBox):
                                  justifyContent="flex-end",
                                  paddingRight="4px",
                                  alignItems="center")
+        self.header_actions_may_disable = mui.MatchCase.binary_selection(True, self.header_actions)
         # self.frame_script = FrameScript()
         self._perfetto = chart.Perfetto().prop(width="100%", height="100%")
         custom_tabs = [
@@ -141,7 +142,7 @@ class BreakpointDebugPanel(mui.FlexBox):
             filter_input.prop(flex=1),
             self._all_frame_select.prop(flex=2),
             self.header.prop(flex=4),
-            self.header_actions,
+            self.header_actions_may_disable,
         ]).prop(
             paddingLeft="4px",
             alignItems="center",
@@ -187,7 +188,10 @@ class BreakpointDebugPanel(mui.FlexBox):
             self.content_container,
             self._trace_launch_dialog,
         ])
+
         draft = self.dm.get_draft_type_only()
+        self.header_actions_may_disable.bind_fields(condition=D.not_null(not draft.bkpt.is_external, False))
+
         self.header.bind_fields(value=D.not_null(D.literal_val("%s(%s)") % (draft.bkpt.selected_frame_item["qualname"], draft.bkpt.selected_frame_item["lineno"]), ""))
         self._all_frame_select.bind_fields(options=D.not_null(draft.bkpt.frame_select_items, []))
         self._all_frame_select.bind_draft_change(draft.bkpt.selected_frame_item)

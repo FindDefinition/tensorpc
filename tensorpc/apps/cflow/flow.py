@@ -229,7 +229,7 @@ class ComputeFlow(mui.FlexBox):
         flow_with_editor.bind_fields(visibles=f"create_array(`true`, {flow_draft.show_editor})")
         global_container.bind_fields(visibles=f"create_array(`true`, {flow_draft.show_detail})")
         detail_ct.bind_fields(condition=flow_draft.selected_node_detail_type)
-        node_settings.bind_draft_change(flow_draft.selected_node.vExecId)
+        node_settings.bind_draft_change_uncontrolled(flow_draft.selected_node.vExecId)
         self.graph.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=flow_draft.cur_model))
         self.graph_preview.event_pane_context_menu.on(partial(self.add_node, target_flow_draft=flow_draft.preview_model))
         self._flow_draft = flow_draft

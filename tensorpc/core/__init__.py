@@ -50,6 +50,8 @@ class BuiltinServiceProcType(enum.IntEnum):
     REMOTE_COMP = 1
     # relay monitor service, for target without remote forward
     RELAY_MONITOR = 2
+    # server with debug panel, proc title args should be [id, port]
+    SERVER_WITH_DEBUG = 3
 
 def get_http_url(url: str, port: int):
     return f"http://{url}:{port}/api/rpc"

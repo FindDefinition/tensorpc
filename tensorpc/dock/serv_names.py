@@ -325,7 +325,12 @@ class _ServiceNames:
     def REMOTE_COMP_SET_LAYOUT_OBJECT(self):
         from tensorpc.dock.serv.remote_comp import RemoteComponentService
         return get_service_key_by_type(RemoteComponentService, RemoteComponentService.set_layout_object.__name__)
-    
+
+    @property
+    def REMOTE_COMP_HAS_LAYOUT_OBJECT(self):
+        from tensorpc.dock.serv.remote_comp import RemoteComponentService
+        return get_service_key_by_type(RemoteComponentService, RemoteComponentService.has_layout_object.__name__)
+
     @property
     def REMOTE_COMP_REMOVE_LAYOUT_OBJECT(self):
         from tensorpc.dock.serv.remote_comp import RemoteComponentService

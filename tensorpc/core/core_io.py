@@ -234,8 +234,9 @@ class FromBufferStream(object):
                 assert self.current_buf_shape is not None 
                 res = np.empty(self.current_buf_shape, dtype=dtype)
                 self.args.append(res)
-            res_u8_view = memoryview(self.args[-1].view(np.uint8))
-            res_u8_view[self.accum_buf_length:self.accum_buf_length + len(buf.chunked_data)] = buf.chunked_data
+            # res_u8_view = memoryview(self.args[-1].view(np.uint8))
+            res_u8_view = self.args[-1].reshape(-1).view(np.uint8)
+            res_u8_view[self.accum_buf_length:self.accum_buf_length + len(buf.chunked_data)] = np.frombuffer(buf.chunked_data, dtype=np.uint8)
         else:
             self.current_datas.append(buf.chunked_data)
         if buf.chunk_id == buf.num_chunk - 1:

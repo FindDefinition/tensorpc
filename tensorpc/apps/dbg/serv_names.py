@@ -64,9 +64,19 @@ class _ServiceNames:
         return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.set_trace_data.__name__)
 
     @property
+    def DBG_SET_EXTERNAL_FRAME(self):
+        from tensorpc.apps.dbg.services.tools import BackgroundDebugTools
+        return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.set_external_frame.__name__)
+
+    @property
     def DBG_SET_TRACER(self):
         from tensorpc.apps.dbg.services.tools import BackgroundDebugTools
         return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.set_tracer.__name__)
+
+    @property
+    def DBG_GET_CURRENT_DEBUG_INFO(self):
+        from tensorpc.apps.dbg.services.tools import BackgroundDebugTools
+        return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.get_cur_debug_info.__name__)
 
     @property
     def DBG_GET_TRACE_DATA(self):
@@ -122,5 +132,10 @@ class _ServiceNames:
     def RELAY_LEAVE_BKPT(self):
         from tensorpc.apps.dbg.services.relay import RelayMonitor
         return get_service_key_by_type(RelayMonitor, RelayMonitor.leave_breakpoint.__name__)
+
+    @property
+    def RELAY_SET_BKPTS_AND_GET_INFOS_LIST(self):
+        from tensorpc.apps.dbg.services.relay import RelayMonitor
+        return get_service_key_by_type(RelayMonitor, RelayMonitor.set_vscode_breakpoints_and_get_infos_list.__name__)
 
 serv_names = _ServiceNames()

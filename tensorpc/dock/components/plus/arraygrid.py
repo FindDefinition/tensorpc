@@ -171,7 +171,7 @@ class NumpyArrayGrid(mui.FlexBox):
                 mui.MatchCase.Case("index", mui.Typography("min")),
                 mui.MatchCase.Case(
                     mui.undefined,
-                    mui.Typography().bind_fields(value="data").prop(
+                    mui.Typography().bind_fields(value="$").prop(
                         enableTooltipWhenOverflow=True,
                         tooltipEnterDelay=400,
                         fontSize="12px")),
@@ -180,7 +180,7 @@ class NumpyArrayGrid(mui.FlexBox):
                 mui.MatchCase.Case("index", mui.Typography("max")),
                 mui.MatchCase.Case(
                     mui.undefined,
-                    mui.Typography().bind_fields(value="data").prop(
+                    mui.Typography().bind_fields(value="$").prop(
                         enableTooltipWhenOverflow=True,
                         tooltipEnterDelay=400,
                         fontSize="12px")),
@@ -270,9 +270,7 @@ class NumpyArrayGrid(mui.FlexBox):
                     min_val = str(min_val)
                 if isnan(max_val) or isinf(max_val):
                     max_val = str(max_val)
-                footer_min_datas[col_key] = {
-                    "type"
-                }
+                footer_min_datas[col_key] = min_val
                 footer_max_datas[col_key] = max_val
         return [footer_min_datas, footer_max_datas]
 

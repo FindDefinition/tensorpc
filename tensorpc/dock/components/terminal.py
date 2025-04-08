@@ -1,11 +1,13 @@
 import asyncio
 from collections import deque
+from collections.abc import MutableMapping
 import enum
 from functools import partial
 import inspect
 import time
 import traceback
 from typing import Any, Awaitable, Callable, Optional, Union
+from asyncssh import SSHClientConnection
 from typing_extensions import Literal
 from tensorpc.autossh.constants import TENSORPC_ASYNCSSH_INIT_SUCCESS
 from tensorpc.autossh.core import CommandEvent, CommandEventType, EofEvent, ExceptionEvent, LineEvent, LineEventType, LineRawEvent, RawEvent, SSHClient, SSHConnDesc, SSHRequest, SSHRequestType, LOGGER, remove_trivial_r_lines
@@ -73,6 +75,12 @@ class TerminalEventType(enum.IntEnum):
     Eof = 1
     ClearAndWrite = 2
 
+class SSHCloseError(ValueError):
+    pass
+
+class SSHUnknownError(ValueError):
+    pass
+
 @dataclasses.dataclass
 class TerminalResizeEvent:
     width: int
@@ -111,6 +119,8 @@ class TerminalBuffer:
 
     def load_state_backend_only(self):
         # load state without merge buffer
+        if not self._raw_buffers_with_ts:
+            return b"", 0
         last_ts = self._raw_buffers_with_ts[-1][1]
         buffers = [x[0] for x in self._raw_buffers_with_ts]
         buffer = b"".join(buffers)
@@ -152,6 +162,9 @@ class Terminal(MUIComponentBase[TerminalProps]):
             assert terminalId in state_buffers, f"terminalId {terminalId} not in state_buffers."
         self._state_buffers = state_buffers
         self._dont_use_frontend_state = dont_use_frontend_state
+        self._buffer = None 
+        if dont_use_frontend_state:
+            self._buffer = TerminalBuffer(maxlen=10000, min_buffer_len=256)
         self.event_terminal_input = self._create_event_slot(
             FrontendEventType.TerminalInput)
         self.event_terminal_resize = self._create_event_slot(
@@ -192,13 +205,14 @@ class Terminal(MUIComponentBase[TerminalProps]):
         # self._is_terminal_frontend_unmounted = True
 
     async def _terminal_state_mount(self, term_id):
+        if self._dont_use_frontend_state and self._buffer is not None:
+            state_to_send, ts = self._buffer.load_state_backend_only()
+            await self.clear_and_write(state_to_send, ts)
+            return 
         if self._state_buffers is not None:
             if term_id is not None and term_id in self._state_buffers:
                 buffer = self._state_buffers[term_id]
-                if self._dont_use_frontend_state:
-                    state_to_send, ts = buffer.load_state_backend_only()
-                else:
-                    state_to_send, ts = buffer.load_state()
+                state_to_send, ts = buffer.load_state()
                 # print("terminal state mount", len(state_to_send), self.props.terminalId)
                 # print(state_to_send)
                 await self.clear_and_write(state_to_send, ts)
@@ -231,6 +245,11 @@ class Terminal(MUIComponentBase[TerminalProps]):
             self.create_comp_raw_event([TerminalEventType.ClearAndWrite.value, content, ts]))
 
     def append_buffer(self, data: Union[bytes, str], ts: int = 0):
+        if self._dont_use_frontend_state and self._buffer is not None:
+            if isinstance(data, str):
+                data = data.encode("utf-8")
+            self._buffer.append_buffer(data, ts)
+            return
         if self._state_buffers is not None:
             assert not isinstance(self.props.terminalId, Undefined), "terminalId must be set when state_buffers is not None."
             if self.props.terminalId in self._state_buffers:
@@ -278,6 +297,7 @@ class _AsyncSSHTerminalState:
     size: TerminalResizeEvent
     base_ts: int
     current_cmd: str = ""
+    conn: Optional[SSHClientConnection] = None
     current_cmd_buffer: Optional[deque[TerminalLineEvent]] = None
     current_cmd_rpc_future: Optional[asyncio.Future[TerminalCmdCompleteEvent]] = None
 
@@ -340,7 +360,7 @@ class AsyncSSHTerminal(Terminal):
         if self._ssh_state is not None:
             if self._ssh_state.current_cmd_rpc_future is not None:
                 self._ssh_state.current_cmd_rpc_future.set_exception(
-                    Exception("SSH Unknown error."))
+                    SSHUnknownError("SSH Unknown error."))
                 self._ssh_state.current_cmd_rpc_future = None
             # we can't await task here because it will cause deadlock
             self._ssh_state = None
@@ -351,6 +371,10 @@ class AsyncSSHTerminal(Terminal):
             self._backend_ssh_conn_close_event_key,
             Event(self._backend_ssh_conn_close_event_key, None))
 
+    def _set_state_conn(self, conn: Optional[SSHClientConnection]):
+        if self._ssh_state is not None:
+            self._ssh_state.conn = conn
+
     async def connect_with_new_desc(
             self,
             desc: SSHConnDesc,
@@ -358,9 +382,6 @@ class AsyncSSHTerminal(Terminal):
             init_cmds: Optional[list[str]] = None,
             term_line_event_callback: Optional[Callable[[TerminalLineEvent], None]] = None,
             exit_event: Optional[asyncio.Event] = None):
-        if init_cmds:
-            for cmd in init_cmds:
-                assert cmd.endswith("\n"), "All command must end with \\n"
         assert self._ssh_state is None, "Cannot connect with new info while the current connection is still active."
         self._client = SSHClient(desc.url_with_port, desc.username, desc.password)
         if self.is_mounted():
@@ -378,6 +399,8 @@ class AsyncSSHTerminal(Terminal):
                     [self._init_size.width, self._init_size.height]))
         if init_cmds:
             for cmd in init_cmds:
+                if not cmd.endswith("\n"):
+                    cmd += "\n"
                 await cur_inp_queue.put(cmd)
         await cur_inp_queue.put(
             f" echo \"{TENSORPC_ASYNCSSH_INIT_SUCCESS}|PID=$TENSORPC_SSH_CURRENT_PID\"\n"
@@ -393,6 +416,7 @@ class AsyncSSHTerminal(Terminal):
                                        term_type="xterm-256color",
                                        enable_raw_event=True,
                                        exit_event=exit_event,
+                                       conn_set_callback=self._set_state_conn,
                                        line_raw_callback=partial(
                                            self._handle_line_raw_event,
                                            term_line_event_callback=term_line_event_callback),))
@@ -553,7 +577,7 @@ class AsyncSSHTerminal(Terminal):
             elif isinstance(event, (EofEvent, ExceptionEvent)):
                 if self._ssh_state.current_cmd_rpc_future is not None:
                     self._ssh_state.current_cmd_rpc_future.set_exception(
-                        Exception("SSH connection closed."))
+                        SSHCloseError("SSH connection closed."))
                     self._ssh_state.current_cmd_rpc_future = None
                 if isinstance(event, ExceptionEvent):
                     LOGGER.error(event.traceback_str)
@@ -564,7 +588,7 @@ class AsyncSSHTerminal(Terminal):
         except:
             if self._ssh_state.current_cmd_rpc_future is not None:
                 self._ssh_state.current_cmd_rpc_future.set_exception(
-                    Exception("SSH Unknown error."))
+                    SSHUnknownError("SSH Unknown error."))
                 self._ssh_state.current_cmd_rpc_future = None
 
             traceback.print_exc()
@@ -598,3 +622,12 @@ class AsyncSSHTerminal(Terminal):
 
     def is_connected(self):
         return self._ssh_state is not None and self._ssh_state.inited
+
+    async def forward_local_port(self, remote_port: int) -> int:
+        """Create a local port dynamically, then forward this port to a remote port.
+        """
+        assert self._ssh_state is not None
+        assert self._ssh_state.conn is not None
+        listener = await self._ssh_state.conn.forward_local_port(
+            '', 0, 'localhost', remote_port)
+        return listener.get_port()

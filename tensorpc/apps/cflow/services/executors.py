@@ -1,5 +1,7 @@
 import importlib
+import sys
 import traceback
+from types import FrameType
 from typing import Any, Optional, Union
 from tensorpc.apps.cflow.nodes.cnode.ctx import ComputeFlowNodeContext, enter_flow_ui_node_context_object
 from tensorpc.core.asyncclient import AsyncRemoteManager
@@ -8,7 +10,7 @@ from tensorpc.apps.cflow.executors.base import ExecutorType, NodeExecutorBase, D
 import inspect 
 import uuid
 from tensorpc import prim
-from tensorpc.core import inspecttools, marker
+from tensorpc.core import BuiltinServiceProcType, inspecttools, marker
 
 from tensorpc.core.datamodel.draft import DraftUpdateOp, capture_draft_update, draft_from_node_and_type
 from tensorpc.core.datamodel.draftast import DraftASTNode
@@ -16,6 +18,14 @@ from tensorpc.core.serviceunit import ServiceEventType
 from tensorpc.core.tree_id import UniqueTreeId
 from tensorpc.dock.components import mui 
 from tensorpc.dock.serv_names import serv_names as app_serv_names
+from tensorpc.apps.dbg.components.bkptpanel_v2 import BreakpointDebugPanel
+from tensorpc.apps.dbg.components.traceview import TraceView
+from tensorpc.dock.serv_names import serv_names as app_serv_names
+from tensorpc.apps.dbg.bkpt import _try_get_distributed_meta
+from tensorpc.apps.dbg.constants import (DebugServerProcessInfo, TENSORPC_DBG_FRAME_INSPECTOR_KEY,
+                                    TENSORPC_DBG_TRACE_VIEW_KEY)
+from tensorpc.utils.proctitle import set_tensorpc_server_process_title
+from tensorpc.apps.dbg.serv_names import serv_names as dbg_serv_names
 
 class _NodeStateManager:
     def __init__(self):
@@ -87,6 +97,7 @@ class SingleProcNodeExecutor:
         self._node_state_mgr = _NodeStateManager()
         self._remote_state_mgr = _RemoteObjectStateManager()
         self._desp = desc
+        self._has_exc: bool = False
 
     def get_executor_remote_desp(self) -> ExecutorRemoteDesc: 
         return self._desp
@@ -115,6 +126,12 @@ class SingleProcNodeExecutor:
                 removed_data_ids: Optional[set[str]] = None) -> tuple[Optional[dict[str, DataHandle]], list[DraftUpdateOp]]:
         if removed_data_ids is not None:
             self.remove_cached_datas(removed_data_ids)
+        # 
+        if self._has_exc:
+            dbg_serv = prim.get_service(dbg_serv_names.DBG_SET_EXTERNAL_FRAME)
+            await dbg_serv(None)
+            self._has_exc = False
+
         node_id = node.id 
         runtime = await self._node_state_mgr.process_node(node, node_impl_code)
         cnode = runtime.cnode
@@ -141,9 +158,22 @@ class SingleProcNodeExecutor:
                 # print(runtime.cfg.state_dcls, draft, type(draft))
 
                 with enter_flow_ui_node_context_object(ComputeFlowNodeContext(node_id, state_obj, draft)):
-                    data = compute_func(**inputs_val)
-                    if inspect.iscoroutine(data):
-                        data = await data
+                    try:
+                        data = compute_func(**inputs_val)
+                        if inspect.iscoroutine(data):
+                            data = await data
+                    except:
+                        _, _, exc_traceback = sys.exc_info()
+                        dbg_serv = prim.get_service(dbg_serv_names.DBG_SET_EXTERNAL_FRAME)
+                        frame: Optional[FrameType] = None
+                        # walk to the innermost frame
+                        for frame, _ in traceback.walk_tb(exc_traceback):
+                            pass
+                        if frame is None:
+                            raise
+                        self._has_exc = True
+                        await dbg_serv(frame)
+                        raise 
             else:
                 data = compute_func(**inputs_val)
                 if inspect.iscoroutine(data):
@@ -197,6 +227,19 @@ class NodeExecutorService:
             self._executor = TorchDistNodeExecutor(desp_obj)
         else:
             raise ValueError(f"unsupported executor type {desp_obj.type}")
+
+    @marker.mark_server_event(event_type=marker.ServiceEventType.Init)
+    async def _init(self):
+        port = prim.get_server_grpc_port()
+        set_tensorpc_server_process_title(
+            BuiltinServiceProcType.SERVER_WITH_DEBUG, self._desp.id, str(port))
+        panel = BreakpointDebugPanel().prop(flex=1)
+        userdata = _try_get_distributed_meta()
+        trace_view = TraceView(userdata).prop(flex=1)
+        set_layout_service = prim.get_service(
+            app_serv_names.REMOTE_COMP_SET_LAYOUT_OBJECT)
+        await set_layout_service(TENSORPC_DBG_FRAME_INSPECTOR_KEY, panel)
+        await set_layout_service(TENSORPC_DBG_TRACE_VIEW_KEY, trace_view)
 
     def import_registry_modules(self, registry_module_ids: list[str]):
         # import all modules in registry_module_ids

@@ -3,10 +3,13 @@ import dataclasses
 import os
 import threading
 from types import FrameType
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
+
+import grpc
+from tensorpc.core.annolib import Undefined, undefined
 from tensorpc.core.datamodel import typemetas
 from typing_extensions import Annotated, Literal
-from tensorpc.core import dataclass_dispatch as pydantic_dataclasses
+from tensorpc.core import BuiltinServiceProcType, dataclass_dispatch as pydantic_dataclasses
 
 class DebugServerStatus(enum.IntEnum):
     Idle = 0
@@ -178,6 +181,33 @@ class RemoteDebugTargetTrace(RemoteDebugEvent):
     target_expr: str
     is_distributed: bool = False
     max_num_variable: int = 1
+
+@dataclasses.dataclass
+class DebugServerProcessInfo:
+    id: str
+    name: str
+    pid: int
+    uid: str
+    server_id: str
+    port: int
+    secondary_name: str = "running"
+    is_tracing: bool = False
+    primaryColor: Union[Undefined, str] = undefined
+    secondaryColor: Union[Undefined, str] = undefined
+    dist_info: Optional[DebugDistributedInfo] = None
+    is_mounted: bool = False
+    proc_type: BuiltinServiceProcType = BuiltinServiceProcType.REMOTE_COMP
+    @property
+    def url_with_port(self):
+        return f"localhost:{self.port}"
+
+
+@dataclasses.dataclass
+class RelayMonitorChildInfo:
+    dbg_proc_info: DebugServerProcessInfo
+    debug_info: Optional[DebugInfo]
+    error_code: Optional[grpc.StatusCode] = None
+    traceback: Optional[str] = None
 
 TENSORPC_ENV_DBG_ENABLE = os.getenv("TENSORPC_DBG_ENABLE", "1") != "0"
 TENSORPC_ENV_DBG_DEFAULT_BREAKPOINT_ENABLE = os.getenv("TENSORPC_DBG_DEFAULT_BREAKPOINT_ENABLE", "1") != "0"

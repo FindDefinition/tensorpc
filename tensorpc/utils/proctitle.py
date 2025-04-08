@@ -1,5 +1,5 @@
 import traceback
-from typing import Optional
+from typing import Optional, Union
 import psutil
 
 from tensorpc.constants import TENSORPC_SERVER_PROCESS_NAME_PREFIX
@@ -14,8 +14,11 @@ class TensorpcServerProcessMeta:
     type: BuiltinServiceProcType
     args: list[str]
 
-def list_all_tensorpc_server_in_machine(target_proc_type: Optional[BuiltinServiceProcType] = None, parent_pid: Optional[int] = None):
+def list_all_tensorpc_server_in_machine(target_proc_type: Optional[Union[set[BuiltinServiceProcType], BuiltinServiceProcType]] = None, parent_pid: Optional[int] = None):
     # format: __tensorpc_server-unique_id
+    if target_proc_type is not None:
+        if isinstance(target_proc_type, BuiltinServiceProcType):
+            target_proc_type = {target_proc_type}
     res: list[TensorpcServerProcessMeta] = []
     if parent_pid is None:
         proc_iter = psutil.process_iter(['pid', 'name', 'cmdline'])
@@ -46,7 +49,7 @@ def list_all_tensorpc_server_in_machine(target_proc_type: Optional[BuiltinServic
             traceback.print_exc()
             continue
     if target_proc_type is not None:
-        res = [r for r in res if r.type == target_proc_type]
+        res = [r for r in res if r.type in target_proc_type]
     return res
 
 def get_tensorpc_server_process_title(type: BuiltinServiceProcType, *args: str) -> str:

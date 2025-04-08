@@ -303,7 +303,7 @@ class ServiceCore(object):
                 func, meta = self.service_units.get_service_and_meta(
                     service_key)
                 assert not meta.is_async and meta.is_gen
-                assert meta.type == service_type
+                assert meta.type == service_type, f"{service_key}, {service_type}, {meta.type}"
                 # client code can call primitives to get server contents.
                 for res in func(*args, **kwargs):
                     yield res, is_exception
@@ -329,8 +329,8 @@ class ServiceCore(object):
                 # so we need to put get_service in try block
                 func, meta = self.service_units.get_service_and_meta(
                     service_key)
-                assert meta.is_async and meta.is_gen, service_key
-                assert meta.type == service_type
+                assert meta.is_async and meta.is_gen, f"{service_key}, {service_type}, {meta.type}"
+                assert meta.type == service_type, f"{service_key}, {service_type}, {meta.type}"
                 # client code can call primitives to get server contents.
                 async for res in func(*args, **kwargs):
                     yield res, is_exception
@@ -901,7 +901,7 @@ class ProtobufServiceCore(ServiceCore):
                     key, args,
                     kwargs,
                     False,
-                    service_type=serviceunit.ServiceType.BiStream):
+                    service_type=serviceunit.ServiceType.Normal):
                 self._reset_timeout()
                 if is_exc:
                     # exception

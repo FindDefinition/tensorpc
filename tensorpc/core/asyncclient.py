@@ -328,7 +328,7 @@ class AsyncRemoteObject(object):
             async def stream_generator_async():
                 if rpc_relay_urls is not None:
                     relay_reqs = self._prepare_relay_reqs(
-                        rpc_relay_urls, RelayCallType.BiStream, rpc_timeout,
+                        rpc_relay_urls, RelayCallType.RemoteCall, rpc_timeout,
                         rpc_flags)
                     for chunk in relay_reqs:
                         yield chunk
@@ -353,7 +353,7 @@ class AsyncRemoteObject(object):
             def stream_generator():
                 if rpc_relay_urls is not None:
                     relay_reqs = self._prepare_relay_reqs(
-                        rpc_relay_urls, RelayCallType.BiStream, rpc_timeout,
+                        rpc_relay_urls, RelayCallType.RemoteCall, rpc_timeout,
                         rpc_flags)
                     for chunk in relay_reqs:
                         yield chunk

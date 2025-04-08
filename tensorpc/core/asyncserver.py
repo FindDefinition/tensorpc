@@ -92,9 +92,13 @@ class AsyncRemoteObjectService(remote_object_pb2_grpc.RemoteObjectServicer):
             yield res
 
     async def ChunkedRemoteCall(self, request_iterator, context):
-        async for res in self.server_core.chunked_remote_call_async(
-                request_iterator):
-            yield res
+        try:
+            async for res in self.server_core.chunked_remote_call_async(
+                    request_iterator):
+                yield res
+        except:
+            traceback.print_exc()
+            raise 
 
     async def RemoteStreamCall(self, request_iterator, context):
         async for res in self.server_core.remote_stream_call_async(

@@ -120,6 +120,9 @@ class RemoteComponentService:
         await app_obj.app.app_terminate_async()
         app_obj.app.app_storage.set_remote_grpc_url(None)
 
+    def has_layout_object(self, key: str):
+        return key in self._app_objs
+
     async def set_layout_object(self, key: str, obj):
         reload_mgr = AppReloadManager(ALL_OBSERVED_FUNCTIONS)
         if isinstance(obj, FlexBox):

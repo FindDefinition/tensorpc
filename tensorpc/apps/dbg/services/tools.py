@@ -101,7 +101,19 @@ class BackgroundDebugTools:
 
     # @marker.mark_server_event(event_type=ServiceEventType.BeforeServerStart)
     async def try_fetch_vscode_breakpoints(self):
-        # relay_proc_metas = list_all_tensorpc_server_in_machine(BuiltinServiceProcType.RELAY_MONITOR)
+        relay_proc_metas = list_all_tensorpc_server_in_machine(BuiltinServiceProcType.RELAY_MONITOR)
+        for meta in relay_proc_metas:
+            url = f"localhost:{meta.args[0]}"
+            try:
+                bkpts = await simple_remote_call_async(
+                    url, serv_names.RELAY_GET_VSCODE_BKPTS)
+                if bkpts is not None:
+                    LOGGER.info(
+                        f"Fetch vscode breakpoints from Relay Monitor {meta.name}", url)
+                    self._bkpt_mgr.set_vscode_breakpoints(bkpts)
+                    return
+            except:
+                traceback.print_exc()
 
         all_app_metas = list_all_app_in_machine()
         for meta in all_app_metas:
@@ -113,7 +125,7 @@ class BackgroundDebugTools:
                     LOGGER.info(
                         f"Fetch vscode breakpoints from App {meta.name}", url)
                     self._bkpt_mgr.set_vscode_breakpoints(bkpts)
-                    break
+                    return
             except:
                 traceback.print_exc()
 
@@ -128,6 +140,44 @@ class BackgroundDebugTools:
     def init_bkpt_debug_panel(self, panel: BreakpointDebugPanel):
         # panel may change the cfg
         panel._bkgd_debug_tool_cfg = self._cfg
+
+    async def set_external_frame(self, frame: Optional[FrameType]):
+        """If we only need to inspect frame stack instead of enter
+        a breakpoint (e.g. exception), we can set the frame here to 
+        avoid pause the program by breakpoint.
+        """
+        obj, app = prim.get_service(
+            app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
+                TENSORPC_DBG_FRAME_INSPECTOR_KEY)
+        assert isinstance(obj, BreakpointDebugPanel)
+        draft = obj.dm.get_draft_type_only()
+        if frame is None:
+            with capture_draft_update() as ctx:
+                draft.bkpt = None
+            with enter_app_context(app):
+                await obj.dm._update_with_jmes_ops(ctx._ops)
+            return
+
+        # set external frames to debugger UI.
+        frame_select_items = Breakpoint.generate_frame_select_items(frame)
+        frame_info = Breakpoint.get_frame_info_from_frame(frame)
+        frame_loc = self._bkpt_mgr.get_frame_loc_meta(frame)
+
+        bkpt_model = Breakpoint(
+            BreakpointType.Normal,
+            frame_info,
+            frame_loc,
+            frame_select_items,
+            frame_select_items[0],
+            frame, 
+            self.leave_breakpoint,
+            self.leave_breakpoint,
+            is_external=True
+        )
+        with capture_draft_update() as ctx:
+            draft.bkpt = bkpt_model
+        with enter_app_context(app):
+            await obj.dm._update_with_jmes_ops(ctx._ops)
 
     async def enter_breakpoint(self,
                                frame: FrameType,
@@ -362,17 +412,25 @@ class BackgroundDebugTools:
         return self._frame
 
     def get_cur_debug_info(self):
-        frame_info: Optional[DebugFrameInfo] = None
+        obj, app = prim.get_service(
+            app_serv_names.REMOTE_COMP_GET_LAYOUT_ROOT_BY_KEY)(
+                TENSORPC_DBG_FRAME_INSPECTOR_KEY)
+        assert isinstance(obj, BreakpointDebugPanel)
 
-        if self._frame is not None:
-            qname = inspecttools.get_co_qualname_from_frame(self._frame)
-            frame_info = DebugFrameInfo(self._frame.f_code.co_name, qname,
-                                        self._frame.f_code.co_filename,
-                                        self._frame.f_lineno)
+        model = obj.dm.model
+        frame_info: Optional[DebugFrameInfo] = None
+        debug_metric = self._debug_metric
+        if model.bkpt is not None and model.bkpt.frame is not None:
+            frame = model.bkpt.frame
+            qname = inspecttools.get_co_qualname_from_frame(frame)
+            frame_info = DebugFrameInfo(frame.f_code.co_name, qname,
+                                        frame.f_code.co_filename,
+                                        frame.f_lineno)
+            debug_metric = DebugMetric(-1)
         trace_cfg: Optional[TracerConfig] = None
         if self._cur_tracer_state is not None:
             trace_cfg = self._cur_tracer_state.cfg
-        return DebugInfo(self._debug_metric, frame_info, trace_cfg, self._distributed_meta)
+        return DebugInfo(debug_metric, frame_info, trace_cfg, self._distributed_meta)
 
     def _get_filtered_local_vars(self, frame: FrameType):
         local_vars = frame.f_locals.copy()

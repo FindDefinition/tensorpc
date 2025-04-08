@@ -1391,9 +1391,11 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
 
 class RemoteBoxGrpc(RemoteComponentBase[MUIFlexBoxProps, MUIComponentType]):
 
-    def __init__(self, url: str, port: int, key: str, fail_callback: Optional[Callable[[], Coroutine[None, None, Any]]] = None, enable_fallback_layout: bool = True) -> None:
+    def __init__(self, url: str, port: int, key: str, fail_callback: Optional[Callable[[], Coroutine[None, None, Any]]] = None, 
+                 enable_fallback_layout: bool = True, relay_urls: Optional[list[str]] = None) -> None:
         super().__init__(url, port, key, UIType.FlexBox, MUIFlexBoxProps, fail_callback, enable_fallback_layout)
         self._robj: Optional[AsyncRemoteManager] = None
+        self._relay_urls = relay_urls
 
     def _get_addr(self):
         return f"{self._url}:{self._port}"
@@ -1417,6 +1419,7 @@ class RemoteBoxGrpc(RemoteComponentBase[MUIFlexBoxProps, MUIComponentType]):
         return await self._robj.chunked_remote_call(service_key,
                                                     *args,
                                                     rpc_timeout=timeout,
+                                                    rpc_relay_urls=self._relay_urls,
                                                     **kwargs)
 
     def remote_call_sync(self, service_key: str, timeout: Optional[int], *args,
@@ -1425,15 +1428,17 @@ class RemoteBoxGrpc(RemoteComponentBase[MUIFlexBoxProps, MUIComponentType]):
                                  service_key,
                                  *args,
                                  rpc_timeout=timeout,
+                                 rpc_relay_urls=self._relay_urls,
                                  **kwargs)
 
     async def remote_generator(self, service_key: str, timeout: Optional[int],
                                /, *args,
                                **kwargs) -> AsyncGenerator[Any, None]:
         assert self._robj is not None
-        async for x in self._robj.remote_generator(service_key,
+        async for x in self._robj.chunked_remote_generator(service_key,
                                                    *args,
                                                    rpc_timeout=timeout,
+                                                   rpc_relay_urls=self._relay_urls,
                                                    **kwargs):
             yield x
 
@@ -1700,12 +1705,21 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    def bind_draft_change(self, draft: Any):
+    def bind_fields(self, **kwargs: Union[str, tuple["Component", Union[str, DraftBase]], DraftBase]):
+        if "value" in kwargs:
+            raise NotImplementedError("you can't bind value field of input.")
+        return super().bind_fields(**kwargs)
+
+    def bind_draft_change_uncontrolled(self, draft: Any):
+        """all input/textfield components require change value in frontend immediately, 
+        so it can't be controlled when you use a datamodel to control it.
+        """
         # TODO validate type
         assert isinstance(draft, DraftBase)
-        assert not isinstance(self.value,
-                              Undefined), "must be controlled component"
-        return self._bind_field_with_change_event("value", draft)
+        # assert not isinstance(self.value,
+        #                       Undefined), "must be controlled component"
+        self.bind_fields(defaultValue=draft)
+        return self._bind_field_with_change_event("value", draft, bind_field=False)
 
 
 @dataclasses.dataclass

@@ -2180,7 +2180,7 @@ class Component(Generic[T_base_props, T_child]):
         async with comp.draft_update():
             insert_assign_draft_op(draft, value)
 
-    def _bind_field_with_change_event(self, field_name: str, draft: Any, sync_update: bool = False):
+    def _bind_field_with_change_event(self, field_name: str, draft: Any, sync_update: bool = False, bind_field: bool = True):
         """Bind a draft with change event. bind_fields is called automatically.
         Equal to following code:
 
@@ -2197,7 +2197,8 @@ class Component(Generic[T_base_props, T_child]):
         if draft._tensorpc_draft_attr_cur_node.type == DraftASTType.FUNC_CALL:
             raise ValueError("can't bind field with getitem or getattr result")
         assert FrontendEventType.Change.value in self._flow_allowed_events
-        self.bind_fields(**{field_name: draft})
+        if bind_field:
+            self.bind_fields(**{field_name: draft})
         if sync_update:
             self.register_event_handler(FrontendEventType.Change, 
                 partial(self.__data_model_auto_event_handler_sync, draft=draft, comp=comp), simple_event=True)
