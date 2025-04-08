@@ -1159,8 +1159,7 @@ class SSHClient:
                 init_cmd_2 = f"source ~/.tensorpc_hooks-bash{bash_file_path.suffix}"
             elif shell_type.type == "zsh":
                 init_cmd_2 = ""
-                user_zdotdir = os.getenv("ZDOTDIR", "$HOME")
-                init_cmd = f"export ZDOTDIR=~/.tensorpc_hooks-zsh && export USER_ZDOTDIR={user_zdotdir} && zsh -il"
+                init_cmd = f"export ZDOTDIR=~/.tensorpc_hooks-zsh && export USER_ZDOTDIR=$HOME && zsh -il"
         else:
             init_cmd = f"bash"
             init_cmd_2 = ""
@@ -1264,7 +1263,9 @@ class SSHClient:
             async with conn_ctx as conn:
                 assert isinstance(conn, asyncssh.SSHClientConnection)
                 shell_type = await self.determine_shell_type_by_conn(conn)
-                
+                LOGGER.warning(
+                    "SSH connection established, shell type: %s, os type: %s",
+                    shell_type.type, shell_type.os_type)
                 if client_ip_callback is not None and shell_type.os_type != "windows":
                     # TODO if fail?
                     result = await conn.run(

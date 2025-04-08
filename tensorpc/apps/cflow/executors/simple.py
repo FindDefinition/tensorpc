@@ -189,6 +189,9 @@ class _SSHManagedRemoteObject:
                 stdout = res.get_output().decode("utf-8").strip()
                 port = int(stdout)
                 break
+            else:
+                print(res.get_output().decode("utf-8"))
+
         assert port != -1, f"failed to allocate port for ssh terminal {ssh_desc.url_with_port}"
         return port
 
@@ -320,9 +323,6 @@ class SSHCreationNodeExecutor(NodeExecutorBase):
                 WARNING: should only be used for temp executor
         """
         super().__init__(id, resource)
-        if init_cmds is not None:
-            for cmd in init_cmds:
-                assert cmd.endswith("\n"), f"command {cmd} should end with \\n"
         self._ssh_desc = ssh_desc
         # read-only terminal for user
         self._terminal: AsyncSSHTerminal = AsyncSSHTerminal(
