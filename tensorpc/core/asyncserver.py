@@ -221,6 +221,7 @@ async def serve_service(
         start_thread_ev.set()
     await server.start()
     loop = asyncio.get_running_loop()
+    await server_core.run_event_async(ServiceEventType.AfterServerStart)
 
     async def server_graceful_shutdown():
         # Shuts down the server with 5 seconds of grace period. During the

@@ -88,6 +88,7 @@ class ServiceEventType(Enum):
     Exit = "Exit"
     Init = "AsyncInit"
     BeforeServerStart = "BeforeServerStart"  # all server meta are ready
+    AfterServerStart = "AfterServerStart"  # all server meta are ready
     WebSocketOnConnect = "WebSocketOnConnect"  # only support ws
     WebSocketOnDisConnect = "WebSocketOnDisConnect"  # only support ws
 

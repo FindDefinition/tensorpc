@@ -79,7 +79,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         self,
         model: _T,
         children: Union[Sequence[Component], Mapping[str, Component]],
-        model_type: Optional[type[_T]] = None
+        model_type: Optional[type[_T]] = None,
+        debug: bool = False
     ) -> None:
         """
         Args:
@@ -113,7 +114,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         self._draft_store_handler_registered: bool = False
         self._draft_store_data_fetched = False
         model_type_real = type(model)
-
+        self._debug = debug
         self._is_model_dataclass = dataclasses.is_dataclass(model_type_real)
         self._is_model_pydantic_dataclass = dataclasses.is_pydantic_dataclass(
             model_type_real)
@@ -152,7 +153,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                 for k, expr in h.draft_expr_dict.items():
                     obj = evaluate_draft_ast_noexcept(expr, self.model)
                     val_dict[k] = obj
-                    type_dict[k] = DraftEventType.InitChange
+                    type_dict[k] = DraftEventType.MountChange
                 # TODO if eval failed, should we call it during init?
                 all_handlers.append(partial(h.handler, DraftChangeEvent(type_dict, {k: None for k in val_dict}, val_dict)))
         with prevent_draft_update():
@@ -166,25 +167,25 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
     #     if not self._draft_store_handler_registered:
     #         await self._run_all_draft_change_handlers_when_init()
 
-    async def _draft_change_handler_effect(self, paths: tuple[str, ...],
-                                     handler: DraftChangeEventHandler):
+    async def _run_draft_effect_handler(self, handler: DraftChangeEventHandler, is_mount: bool):
         should_run_handler = False
         if not self._draft_store_handler_registered:
             should_run_handler = True
         else:
             should_run_handler = self._draft_store_data_fetched
-        if paths not in self._draft_change_event_handlers:
-            self._draft_change_event_handlers[paths] = {}
-        self._draft_change_event_handlers[paths][handler.handler] = handler
+
         if should_run_handler:
             val_dict: dict[str, Any] = {}
             type_dict: dict[str, DraftEventType] = {}
             for k in handler.draft_expr_dict.keys():
                 obj = handler.evaluate_draft_expr_noexcept(k, self.model)
                 val_dict[k] = obj
-                type_dict[k] = DraftEventType.InitChange
+                type_dict[k] = DraftEventType.MountChange
             # TODO if eval failed, should we call it during init?
-            ev = DraftChangeEvent(type_dict, {}, val_dict)
+            if is_mount:
+                ev = DraftChangeEvent(type_dict, {k: None for k in val_dict}, val_dict)
+            else:
+                ev = DraftChangeEvent(type_dict, val_dict, {k: None for k in val_dict})
             if handler.user_eval_vars:
                 # user can define custom evaluates to get new model value.
                 user_vars = {}
@@ -197,7 +198,18 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                 await self.run_callback(partial(handler.handler, ev),
                                         change_status=False,
                                         capture_draft=False)
-        def unmount():
+
+    async def _draft_change_handler_effect(self, paths: tuple[str, ...],
+                                     handler: DraftChangeEventHandler):
+        if paths not in self._draft_change_event_handlers:
+            self._draft_change_event_handlers[paths] = {}
+        self._draft_change_event_handlers[paths][handler.handler] = handler
+        await self._run_draft_effect_handler(handler, True)
+        # we have to run handler during UI mount/unmount (backend) with reversed data -> None because
+        # uncontrolled components usually require draft event change to set
+        # their UI value. 
+        async def unmount():
+            await self._run_draft_effect_handler(handler, False)
             self._draft_change_event_handlers[paths].pop(handler.handler)
 
         return unmount
@@ -435,7 +447,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         self.event_draft_update.on(
             partial(self._handle_draft_store_update,
                     store=self._store))
-        self.event_after_unmount.on(
+        self.event_before_unmount.on(
             partial(self._clear_draft_store_status))
 
         self._draft_store_handler_registered = True

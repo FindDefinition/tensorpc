@@ -338,10 +338,23 @@ class SSHCreationNodeExecutor(NodeExecutorBase):
                                                        resource)
         self._init_cmds = init_cmds
         self._debug_panel_box = mui.HBox([])
+        self._debug_panel: Optional[MasterDebugPanel] = None
+        self._debug_panel_box.event_after_mount.on(self._exec_layout_mount)
+        # self._debug_panel_box.event_before_mount.on(self._exec_layout_unmount)
+
         self._ui_container_box = mui.HBox({
             "terminal": self._get_ui_terminals().prop(flex=1, overflow="hidden"),
             "debug": self._debug_panel_box.prop(flex=2),
         }).prop(width="100%", height="100%", overflow="hidden")
+
+    async def _exec_layout_mount(self):
+        if self._debug_panel is not None:
+            await self._debug_panel_box.set_new_layout([
+                self._debug_panel
+            ])
+
+    async def _exec_layout_unmount(self):
+        await self._debug_panel_box.set_new_layout([])
 
     def _get_ui_terminals(self):
         tab_theme = get_tight_tab_theme_horizontal()
@@ -379,13 +392,18 @@ class SSHCreationNodeExecutor(NodeExecutorBase):
         return self._ui_container_box
 
     async def _relay_service_start(self, robj: AsyncRemoteManager):
-        await self._debug_panel_box.set_new_layout([
-            MasterDebugPanel(relay_robj=robj).prop(flex=1)
-        ])
+        if self._debug_panel_box.is_mounted():
+            await self._debug_panel_box.set_new_layout([
+                MasterDebugPanel(relay_robj=robj).prop(flex=1)
+            ])
+        else:
+            self._debug_panel = MasterDebugPanel(relay_robj=robj).prop(flex=1)
 
     async def _relay_service_end(self):
         if self._debug_panel_box.is_mounted():
             await self._debug_panel_box.set_new_layout([])
+        else:
+            self._debug_panel = None
 
     @override
     async def run_node(
@@ -421,11 +439,9 @@ class SSHTempExecutorBase(SSHCreationNodeExecutor):
         async with self._serv_rpc_state._run_relay_with_ssh_directly(
                 ssh_desc, self._init_cmds) as (robj, relay_task, exit_ev):
             # wait for relay task to finish
-            await self._debug_panel_box.set_new_layout([
-                MasterDebugPanel(relay_robj=robj).prop(flex=1)
-            ])
+            await self._relay_service_start(robj)
             await exit_ev.wait()
-            await self._debug_panel_box.set_new_layout([])
+            await self._relay_service_end()
         try:
             await relay_task
         except SSHCloseError:

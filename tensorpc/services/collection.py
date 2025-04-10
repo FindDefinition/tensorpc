@@ -246,3 +246,29 @@ class ArgServer(SimpleRPCHandler):
     async def call_event(self, event: str, *args, **kwargs):
         return await super().call_event(event, *args, **kwargs)
 
+class KVStore:
+    def __init__(self):
+        self._store = {}
+
+    def set_item(self, key: str, value):
+        self._store[key] = value
+
+    def has_item(self, key: str) -> bool:
+        return key in self._store
+
+    def get_item(self, key: str):
+        return self._store[key]
+
+    def get_all_keys(self) -> List[str]:
+        return list(self._store.keys())
+
+    def remove_item(self, key: str):
+        if key in self._store:
+            del self._store[key]
+
+    def remove_items(self, keys: List[str]):
+        for key in keys:
+            self.remove_item(key)
+
+    def clear(self):
+        self._store.clear()

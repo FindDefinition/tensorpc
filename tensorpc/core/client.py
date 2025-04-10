@@ -9,6 +9,7 @@ from typing import Any, Dict, Generator, Iterator, List, Optional, Tuple, Union
 import grpc
 
 from tensorpc.core import core_io as core_io
+from tensorpc.core.defs import RelayCallType
 from tensorpc.protos_export import remote_object_pb2 as rpc_pb2
 from tensorpc.protos_export import rpc_message_pb2 as rpc_msg_pb2
 
@@ -283,27 +284,53 @@ class RemoteObject(object):
             # "to_server": server_time - t,
         }
 
+    def _prepare_relay_reqs(self,
+                            urls: list[str],
+                            type: RelayCallType,
+                            rpc_timeout: Optional[int] = None,
+                            rpc_flags: int = rpc_msg_pb2.PickleArray):
+        relay_data = {
+            "urls": urls,
+            "type": int(type),
+            "rpc_timeout": rpc_timeout
+        }
+        relay_bin = core_io.dumps_method(relay_data, rpc_flags)
+        res = core_io.to_protobuf_stream([relay_bin], "", rpc_flags)
+        return res 
+
     def chunked_stream_remote_call(
             self,
             key: str,
             stream_iter,
             rpc_flags: int = rpc_msg_pb2.PickleArray,
-            rpc_timeout: Optional[int] = None) -> Iterator[Any]:
+            rpc_timeout: Optional[int] = None,
+            rpc_chunk_size: int = 256 * 1024,
+            rpc_relay_urls: Optional[list[str]] = None) -> Iterator[Any]:
         # assert key in self.func_dict
         flags = rpc_flags
 
         def stream_generator():
+            if rpc_relay_urls is not None:
+                relay_reqs = self._prepare_relay_reqs(
+                    rpc_relay_urls, RelayCallType.RemoteCall, rpc_timeout,
+                    rpc_flags)
+                for chunk in relay_reqs:
+                    yield chunk
+
             for data in stream_iter:
                 arrays, data_skeleton = core_io.extract_arrays_from_data(data)
                 data_to_be_send = arrays + [
                     core_io.dumps_method(data_skeleton, flags)
                 ]
-                stream = core_io.to_protobuf_stream(data_to_be_send, key,
-                                                    flags)
+                stream = core_io.to_protobuf_stream_gen(
+                    data_to_be_send, key, flags, rpc_chunk_size)
                 for s in stream:
                     yield s
-
-        responses = self.stub.ChunkedRemoteCall(stream_generator(), timeout=rpc_timeout)
+        if rpc_relay_urls is not None:
+            serv_fn = self.stub.RelayStream
+        else:
+            serv_fn = self.stub.ChunkedRemoteCall
+        responses = serv_fn(stream_generator(), timeout=rpc_timeout)
         from_stream = core_io.FromBufferStream()
         for response in responses:
             self._check_remote_exception(response.exception)
@@ -325,6 +352,7 @@ class RemoteObject(object):
                             *args,
                             rpc_flags: int = rpc_msg_pb2.PickleArray,
                             rpc_timeout: Optional[int] = None,
+                                  rpc_relay_urls: Optional[list[str]] = None,
                             **kwargs) -> Any:
 
         def stream_generator():
@@ -335,7 +363,8 @@ class RemoteObject(object):
         for res in self.chunked_stream_remote_call(key,
                                                    stream_generator(),
                                                    rpc_flags=rpc_flags,
-                                                   rpc_timeout=rpc_timeout):
+                                                   rpc_timeout=rpc_timeout,
+                                                   rpc_relay_urls=rpc_relay_urls):
             count += 1
         assert count == 1
         assert not isinstance(res, _PlaceHolder)

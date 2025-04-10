@@ -155,8 +155,7 @@ class FlowApp:
             self.app.root._attach(UniqueTreeIdForComp.from_parts([TENSORPC_APP_ROOT_COMP]),
                                   self.app._flow_app_comp_core)
         # print(lay["layout"])
-        self.app.app_initialize()
-        await self.app.app_initialize_async()
+        # await self.app.app_initialize_async()
         enable_lsp = self.lsp_port is not None and self.app._flowapp_enable_lsp
         print(enable_lsp, self.lsp_port)
         if enable_lsp:
@@ -169,8 +168,10 @@ class FlowApp:
                 traceback.print_exc()
         lay = self.app._get_app_layout()
         self.app._flowapp_is_inited = True
+        first_event = AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)})
+        # first_event._after_send_callback = self.app.app_initialize_async
         await self._send_loop_queue.put(
-            AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)}))
+            first_event)
         # TODO should we just use grpc client to query init state here?
         init_event: Dict[AppEventType, Any] = {
             AppEventType.Notify: NotifyEvent(NotifyType.AppStart)
@@ -194,6 +195,12 @@ class FlowApp:
                     appctx.run_in_executor_with_exception_inspect(
                         partial(self._run_app_script,
                                 argv=self.external_argv), ))
+
+    @marker.mark_server_event(event_type=marker.ServiceEventType.AfterServerStart)
+    async def _after_server_start(self):
+        # we need to put init here because frontend may run events after layout mount
+        self.app.app_initialize()
+        await self.app.app_initialize_async()
 
     def _run_app_script(self, argv: List[str]):
         argv_bkp = sys.argv
@@ -554,7 +561,6 @@ class FlowApp:
                             await self._send_grpc_event_large(exc_ev, robj)
                         except Exception as e:
                             traceback.print_exc()
-
                 # trigger sent event here.
                 if ev.sent_event is not None:
                     ev.sent_event.set()
@@ -597,6 +603,7 @@ class FlowApp:
                 # trigger sent event here.
                 if ev.sent_event is not None:
                     ev.sent_event.set()
+
         except:
             traceback.print_exc()
             raise

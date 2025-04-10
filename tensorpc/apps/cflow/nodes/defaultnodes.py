@@ -25,7 +25,7 @@ class JsonInputState:
 
 def _json_input_layout(drafts):
     editor = mui.SimpleCodeEditor("0", "json")
-    editor.bind_draft_change(drafts.value)
+    editor.bind_draft_change_uncontrolled(drafts.value)
     return mui.VBox([editor.prop(editorPadding=5)
                          ]).prop(width="200px",
                                  maxHeight="300px",
@@ -89,13 +89,13 @@ class _SSHRunnerState:
     initCmd: str = ""
 
 def _ssh_config_layout(drafts):
-    url_with_port_ui = mui.Input("url:port", init=mui.undefined).prop(debounce=300)
+    url_with_port_ui = mui.Input("url:port").prop(debounce=300)
     url_with_port_ui.bind_draft_change_uncontrolled(drafts.url_with_port)
-    username_ui = mui.Input("username", init=mui.undefined).prop(debounce=300)
+    username_ui = mui.Input("username").prop(debounce=300)
     username_ui.bind_draft_change_uncontrolled(drafts.username)
-    password_ui = mui.Input("password", init=mui.undefined).prop(type="password", debounce=300)
+    password_ui = mui.Input("password").prop(type="password", debounce=300)
     password_ui.bind_draft_change_uncontrolled(drafts.password)
-    init_cmd_ui = mui.Input("init cmd", init=mui.undefined).prop(debounce=300)
+    init_cmd_ui = mui.Input("init cmd").prop(debounce=300)
     init_cmd_ui.bind_draft_change_uncontrolled(drafts.initCmd)
     return mui.VBox([
         url_with_port_ui,

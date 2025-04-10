@@ -286,7 +286,7 @@ class PytorchModuleViewer(mui.FlexBox):
 
         self._torch_util_path = Path(torch.utils.__file__).parent.resolve()
         self.event_after_mount.on(self._on_init)
-        self.event_after_unmount.on(self._on_unmount)
+        self.event_before_unmount.on(self._on_unmount)
 
         self._nested_depth = _nested_depth
         self._max_nested_depth = max_nested_depth

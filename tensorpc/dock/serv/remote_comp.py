@@ -25,7 +25,8 @@ from tensorpc.dock.core.component import (AppEvent, AppEventType,
                                           FrontendEventType, LayoutEvent,
                                           UIEvent, UpdateComponentsEvent,
                                           patch_uid_keys_with_prefix,
-                                          patch_uid_list_with_prefix)
+                                          patch_uid_list_with_prefix,
+                                          patch_unique_id)
 from tensorpc.dock.core.reload import AppReloadManager, FlowSpecialMethods
 from tensorpc.dock.coretypes import split_unique_node_id
 from tensorpc.dock.flowapp.app import App, EditableApp
@@ -59,48 +60,7 @@ class AppObject:
     mounted_app_meta: Optional[MountedAppMeta] = None
 
 
-def patch_unique_id(data: Any, prefixes: List[str]):
-    # can't use abc.Sequence because string is sequence too.
-    if isinstance(data, list):
-        new_data = []
-        for i in range(len(data)):
-            d = data[i]
-            if isinstance(d, UniqueTreeIdForComp):
-                d = d.copy()
-                d.set_parts_inplace(prefixes + d.parts)
-            else:
-                d = patch_unique_id(d, prefixes)
-            new_data.append(d)
-        return new_data
-    elif isinstance(data, tuple):
-        new_data = []
-        for i in range(len(data)):
-            d = data[i]
-            if isinstance(d, UniqueTreeIdForComp):
-                d = d.copy()
-                d.set_parts_inplace(prefixes + d.parts)
-            else:
-                d = patch_unique_id(d, prefixes)
-            new_data.append(d)
-        return tuple(new_data)
-    elif isinstance(data, collections.abc.Mapping):
-        new_data = {}
-        for k, d in data.items():
-            if isinstance(d, UniqueTreeIdForComp):
-                d = d.copy()
-                d.set_parts_inplace(prefixes + d.parts)
-            else:
-                d = patch_unique_id(d, prefixes)
-            new_data[k] = d
-        return new_data
-    elif isinstance(data, UniqueTreeIdForComp):
-        # data.parts[1:]: remote the ROOT part
-        data = data.copy()
-        data.set_parts_inplace(prefixes + data.parts)
-        return data
-    else:
-        return data
-
+_PATCH_IN_REMOTE = True
 
 class RemoteComponentService:
 
@@ -237,13 +197,21 @@ class RemoteComponentService:
         root_uid = app_obj.app.root._flow_uid
         assert root_uid is not None
         layout_dict = lay["layout"]
-        layout_dict = patch_uid_keys_with_prefix(layout_dict, prefixes)
-        for k, v in layout_dict.items():
-            layout_dict[k] = patch_unique_id(v, prefixes)
+        if False:
+            layout_dict = patch_uid_keys_with_prefix(layout_dict, prefixes)
+            for k, v in layout_dict.items():
+                layout_dict[k] = patch_unique_id(v, prefixes)
         lay["layout"] = layout_dict
-        # print("APP layout_dict", layout_dict)
-        lay["remoteRootUid"] = UniqueTreeIdForComp.from_parts(
-            prefixes + root_uid.parts).uid_encoded
+        # # print("APP layout_dict", layout_dict)
+        uid_tobe_patched = UniqueTreeIdForComp.from_parts(
+                prefixes + root_uid.parts).uid_encoded
+        print("WTF", uid_tobe_patched)
+        if False:
+            lay["remoteRootUid"] = UniqueTreeIdForComp.from_parts(
+                prefixes + root_uid.parts).uid_encoded
+        else:
+            lay["remoteRootUid"] = UniqueTreeIdForComp.from_parts(
+                root_uid.parts).uid_encoded
         return lay
 
     async def mount_app_generator(self, node_uid: str, key: str,
@@ -410,15 +378,20 @@ class RemoteComponentService:
         return await app_obj.app.handle_msg_from_remote_comp(rpc_key, event)
 
     def _patch_app_event(self, ev: AppEvent, prefixes: List[str], app: App,):
-        ev._remote_prefixes = prefixes
-        ev.patch_keys_prefix_inplace(prefixes)
+        if _PATCH_IN_REMOTE:
+            ev._remote_prefixes = prefixes
+            ev.patch_keys_prefix_inplace(prefixes)
         for ui_ev in ev.type_to_event.values():
             if isinstance(ui_ev, UpdateComponentsEvent):
                 comp_dict = app.root._get_uid_encoded_to_comp_dict()
-                ui_ev.remote_component_all_childs = patch_uid_list_with_prefix(
-                    list(comp_dict.keys()), prefixes)
+                if _PATCH_IN_REMOTE:
+                    ui_ev.remote_component_all_childs = patch_uid_list_with_prefix(
+                        list(comp_dict.keys()), prefixes)
+                else:
+                    ui_ev.remote_component_all_childs = list(comp_dict.keys())
         ev_dict = ev.to_dict()
-        ev_dict = patch_unique_id(ev_dict, prefixes)
+        if _PATCH_IN_REMOTE:
+            ev_dict = patch_unique_id(ev_dict, prefixes)
         return ev_dict
 
     async def _send_grpc_event_large(self,

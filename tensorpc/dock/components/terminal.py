@@ -320,7 +320,7 @@ class AsyncSSHTerminal(Terminal):
         else:
             self._client = SSHClient("", "", "")
         self.event_after_mount.on(self._on_mount)
-        self.event_after_unmount.on(self._on_unmount)
+        self.event_before_unmount.on(self._on_unmount)
         self._manual_connect = manual_connect
         self._manual_disconnect = manual_disconnect
         self.event_terminal_input.on(self._on_input)
@@ -631,3 +631,7 @@ class AsyncSSHTerminal(Terminal):
         listener = await self._ssh_state.conn.forward_local_port(
             '', 0, 'localhost', remote_port)
         return listener.get_port()
+
+    async def send_ctrl_c(self):
+        if self._ssh_state is not None:
+            await self._ssh_state.inp_queue.put("\x03")

@@ -335,6 +335,8 @@ class MasterDebugPanel(mui.FlexBox):
 
     async def _handle_infos_change(self, ev: DraftChangeEvent):
         process_infos = ev.new_value 
+        if process_infos is None:
+            process_infos = []
         infos_dict = [as_dict_no_undefined(info) for info in process_infos]
         await self.send_and_wait(
             self._remote_server_discover_lst.update_event(
@@ -437,7 +439,8 @@ class MasterDebugPanel(mui.FlexBox):
         indexes = ev.indexes
         assert not isinstance(indexes, mui.Undefined)
         meta = self.dm.get_model().infos[indexes[0]]
-        self.dm.get_draft().cur_mounted_info_uid = meta.uid
+        async with self.dm.draft_update():
+            self.dm.get_draft().cur_mounted_info_uid = meta.uid
 
     async def _scan_loop(self, shutdown_ev: asyncio.Event):
         shutdown_task = asyncio.create_task(shutdown_ev.wait())
@@ -561,8 +564,9 @@ class MasterDebugPanel(mui.FlexBox):
                     draft.cur_mounted_info_uid = None
 
     async def _unmount_remote_comp(self):
-        draft = self.dm.get_draft()
-        draft.cur_mounted_info_uid = None
+        async with self.dm.draft_update():
+            draft = self.dm.get_draft()
+            draft.cur_mounted_info_uid = None
 
     async def _handle_secondary_actions(self, item_id: str):
         async with self._serv_list_lock:
@@ -932,7 +936,8 @@ class MasterDebugPanel(mui.FlexBox):
     async def handle_breadcrumb_click(self, data: list[str]):
         # print(data)
         if len(data) == 1:
-            self.dm.get_draft().cur_mounted_info_uid = None
+            async with self.dm.draft_update():
+                self.dm.get_draft().cur_mounted_info_uid = None
 
 if __name__ == "__main__":
     print(list_all_dbg_server_in_machine())

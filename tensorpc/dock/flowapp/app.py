@@ -540,13 +540,15 @@ class App:
                         "state": user_state,
                     }
         if reload:
-            detached = self.root._detach_child()
+            detached = self.root._prepare_detach_child()
             # make sure will_unmount is called from leaf to root (reverse breadth first order)
             detached_items = list(detached.items())
             detached_items.sort(key=lambda x: len(x[0].parts), reverse=True)
 
             await self.root._run_special_methods(
                 [], {x[0] : x[1] for x in detached_items}, self._flow_reload_manager)
+            for v in detached.values():
+                v._finish_detach()
             del detached
         root_uid = UniqueTreeIdForComp.from_parts([_ROOT])
 

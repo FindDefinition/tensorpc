@@ -868,7 +868,7 @@ class SubprocessRpcClient(abc.ABC):
 
 
     async def _call_base(self, args, kwargs, func_id, is_code: bool, need_result: bool = True):
-        arg_event_id, ret_event_id, ev, result = self.set_args_to_argserver(args, kwargs, func_id, is_code, self._is_bkgd)
+        arg_event_id, ret_event_id, ev, result = self.set_args_to_argserver(args, kwargs, func_id, is_code, self._bkgd_loop)
 
         run_cmd = f"python -m tensorpc.cli.cmd_rpc_call {arg_event_id} {ret_event_id} {self._port} {need_result}"
         final_cmds = [

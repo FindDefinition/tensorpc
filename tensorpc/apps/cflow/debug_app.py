@@ -25,7 +25,7 @@ def _json_input_layout(drafts):
     editor = mui.SimpleCodeEditor("0", "json")
     if drafts is not None:
         # FIXME: fix this
-        editor.bind_draft_change(drafts.value)
+        editor.bind_draft_change_uncontrolled(drafts.value)
     return mui.VBox([editor.prop(editorPadding=5)
                          ]).prop(width="200px",
                                  maxHeight="300px",

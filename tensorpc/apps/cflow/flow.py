@@ -277,7 +277,7 @@ class ComputeFlow(mui.FlexBox):
             self.dm,
             self._node_setting_dialog,
         ])
-        self.event_after_unmount.on(self._on_flow_unmount)
+        self.event_before_unmount.on(self._on_flow_unmount)
         self.prop(width="100%", height="100%", overflow="hidden")
 
     async def _on_flow_unmount(self):

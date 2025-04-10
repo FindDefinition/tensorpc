@@ -753,6 +753,8 @@ class ComplexCanvas(mui.FlexBox):
         for deleted in all_removed:
             await deleted._cancel_task()
         await self._run_special_methods(all_attached, all_removed)
+        for v in all_removed.values():
+            v._finish_detach()
 
     async def _gv_cards_callback(self, checked: bool, group: three.Group):
         if group.is_mounted():

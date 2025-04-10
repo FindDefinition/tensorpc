@@ -445,6 +445,58 @@ def _extract_arrays_from_data(arrays,
             data_skeleton = data
         return data_skeleton
 
+def _extract_arrays_from_data_no_unique_id(arrays,
+                              data,
+                              object_classes=(np.ndarray, bytes, JSArrayBuffer),
+                              json_index=False):
+    # can't use abc.Sequence because string is sequence too.
+    # TODO use pytorch optree if available
+    data_skeleton: Optional[Union[List[Any], Dict[str, Any], Placeholder]]
+    if isinstance(data, (list, tuple)):
+        data_skeleton = [None] * len(data)
+        for i in range(len(data)):
+            e = data[i]
+            if isinstance(e, object_classes):
+                if json_index:
+                    data_skeleton[i] = {JSON_INDEX_KEY: len(arrays)}
+                else:
+                    data_skeleton[i] = Placeholder(len(arrays), byte_size(e))
+                arrays.append(e)
+            else:
+                data_skeleton[i] = _extract_arrays_from_data(
+                    arrays, e, object_classes, json_index)
+        data_skeleton_res = data_skeleton
+        if isinstance(data, tuple):
+            data_skeleton_res = tuple(data_skeleton)
+        return data_skeleton_res
+    elif isinstance(data, abc.Mapping):
+        data_skeleton = {}
+        for k, v in data.items():
+            if isinstance(v, object_classes):
+                if json_index:
+                    data_skeleton[k] = {JSON_INDEX_KEY: len(arrays)}
+                else:
+                    data_skeleton[k] = Placeholder(len(arrays), byte_size(v))
+                arrays.append(v)
+            else:
+                data_skeleton[k] = _extract_arrays_from_data(
+                    arrays, v, object_classes, json_index)
+        return data_skeleton
+    elif isinstance(data, JsonOnlyData):
+        return data.data
+    else:
+        data_skeleton = None
+        if isinstance(data, object_classes):
+            if json_index:
+                data_skeleton = {JSON_INDEX_KEY: len(arrays)}
+            else:
+                data_skeleton = Placeholder(len(arrays), byte_size(data))
+            arrays.append(data)
+        else:
+            data_skeleton = data
+        return data_skeleton
+
+
 def extract_object_from_data(data,
                              object_classes):
     arrays: List[Any] = []
@@ -457,7 +509,8 @@ def extract_object_from_data(data,
 
 def extract_arrays_from_data(data,
                              object_classes=(np.ndarray, bytes, JSArrayBuffer),
-                             json_index=False):
+                             json_index=False,
+                             handle_unique_tree_id: bool = False):
     arrays: List[Union[np.ndarray, bytes, JSArrayBuffer]] = []
     if HAS_OPTREE:
         variables, structure = optree.tree_flatten(data)
@@ -471,7 +524,7 @@ def extract_arrays_from_data(data,
                 arrays.append(v)
             elif isinstance(v, JsonOnlyData):
                 new_vars.append(v.data)
-            elif isinstance(v, UniqueTreeIdForComp):
+            elif isinstance(v, UniqueTreeIdForComp) and handle_unique_tree_id:
                 # we delay UniqueTreeIdForComp conversion here to allow modify uid
                 new_vars.append(v.uid_encoded)
             else:
@@ -479,10 +532,16 @@ def extract_arrays_from_data(data,
         # currently no way to convert structure to json, so we have to build json skeleton manually
         data_skeleton = optree.tree_unflatten(structure, new_vars)
         return arrays, data_skeleton
-    data_skeleton = _extract_arrays_from_data(arrays,
-                                              data,
-                                              object_classes=object_classes,
-                                              json_index=json_index)
+    if handle_unique_tree_id:
+        data_skeleton = _extract_arrays_from_data(arrays,
+                                                data,
+                                                object_classes=object_classes,
+                                                json_index=json_index)
+    else:
+        data_skeleton = _extract_arrays_from_data_no_unique_id(arrays,
+                                                data,
+                                                object_classes=object_classes,
+                                                json_index=json_index)
     return arrays, data_skeleton
 
 
@@ -884,7 +943,8 @@ class SocketMessageEncoder:
 
     def __init__(
         self, data, skeleton_size_limit: int = int(1024 * 1024 * 3.6)) -> None:
-        arrays, data_skeleton = extract_arrays_from_data(data, json_index=True)
+        # unique tree id obj will only be handled in websocket.
+        arrays, data_skeleton = extract_arrays_from_data(data, json_index=True, handle_unique_tree_id=True)
         self.arrays: List[Union[np.ndarray, bytes, JSArrayBuffer]] = arrays
         self.data_skeleton = data_skeleton
         self._total_size = 0

@@ -31,7 +31,8 @@ class DraftEventType(enum.IntEnum):
     ObjectInplaceChange = 4
     ChildObjectChange = 5
     # when we init model, we should trigger all change event handlers, the type will be this.
-    InitChange = 6
+    MountChange = 6
+    UnmountChange = 7
 
 @dataclasses.dataclass
 class DraftChangeEvent:
@@ -49,17 +50,17 @@ class DraftChangeEvent:
 
     @property 
     def type(self):
-        assert len(self.type_dict) == 1, "you provide more than one draft expr"
+        assert len(self.type_dict) == 1, f"you provide more than one draft expr, {self.type_dict}"
         return list(self.type_dict.values())[0]
 
     @property 
     def new_value(self):
-        assert len(self.new_value_dict) == 1, "you provide more than one draft expr"
+        assert len(self.new_value_dict) == 1, f"you provide more than one draft expr, {self.new_value_dict}"
         return list(self.new_value_dict.values())[0]
 
     @property
     def old_value(self):
-        assert len(self.old_value_dict) == 1, f"you provide more than one draft expr"
+        assert len(self.old_value_dict) == 1, f"you provide more than one draft expr, {self.old_value_dict}, {self.new_value_dict}"
         return list(self.old_value_dict.values())[0]
 
 @dataclasses.dataclass

@@ -21,6 +21,7 @@ import copy
 from functools import partial
 from typing_extensions import override
 
+from tensorpc.core.annolib import DataclassType
 from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.client import simple_chunk_call
 import tensorpc.core.dataclass_dispatch as dataclasses
@@ -1718,8 +1719,7 @@ class _InputBaseComponent(MUIComponentBase[T_input_base_props]):
         assert isinstance(draft, DraftBase)
         # assert not isinstance(self.value,
         #                       Undefined), "must be controlled component"
-        self.bind_fields(defaultValue=draft)
-        return self._bind_field_with_change_event("value", draft, bind_field=False)
+        return self._bind_field_with_change_event("value", draft, uncontrolled=True)
 
 
 @dataclasses.dataclass
@@ -2116,10 +2116,13 @@ class SimpleCodeEditor(MUIComponentBase[SimpleCodeEditorProps]):
         propcls = self.propcls
         return self._update_props_base(propcls)
 
-    def bind_draft_change(self, draft: Any):
+    def bind_draft_change_uncontrolled(self, draft: Any):
+        """all input/textfield components require change value in frontend immediately, 
+        so it can't be controlled when you use a datamodel to control it.
+        """
         # TODO validate type
         assert isinstance(draft, DraftBase)
-        return self._bind_field_with_change_event("value", draft)
+        return self._bind_field_with_change_event("value", draft, uncontrolled=True)
 
 @dataclasses.dataclass
 class SwitchProps(MUIComponentBaseProps):
@@ -2440,7 +2443,7 @@ class MultipleSelect(MUIComponentBase[MultipleSelectProps]):
 @dataclasses.dataclass
 class AutocompletePropsBase(MUIComponentBaseProps, SelectBaseProps):
     # input_value: str = ""
-    options: Sequence[Dict[str, Any]] = dataclasses.field(default_factory=list)
+    options: Sequence[Union[Dict[str, Any], Any]] = dataclasses.field(default_factory=list)
 
     disableClearable: Union[Undefined, bool] = undefined
     disableCloseOnSelect: Union[Undefined, bool] = undefined
@@ -2482,7 +2485,7 @@ class Autocomplete(MUIComponentBase[AutocompleteProps]):
     def __init__(
         self,
         label: str,
-        options: Sequence[Dict[str, Any]],
+        options: Sequence[Union[Dict[str, Any], DataclassType]],
         callback: Optional[Callable[[Dict[str, Any]],
                                     _CORO_NONE]] = None) -> None:
         super().__init__(UIType.AutoComplete, AutocompleteProps, [
@@ -2598,14 +2601,14 @@ class MultipleAutocomplete(MUIComponentBase[MultipleAutocompleteProps]):
     def __init__(
         self,
         label: str,
-        options: Sequence[Dict[str, Any]],
+        options: Sequence[Union[Dict[str, Any], DataclassType]],
         callback: Optional[Callable[[Dict[str, Any]],
                                     _CORO_NONE]] = None) -> None:
         super().__init__(UIType.MultipleAutoComplete,
                          MultipleAutocompleteProps,
                          [FrontendEventType.Change.value])
-        for op in options:
-            assert "label" in op, "must contains label in options"
+        # for op in options:
+        #     assert "label" in op, "must contains label in options"
         self.props.label = label
         self.callback = callback
         # assert len(items) > 0

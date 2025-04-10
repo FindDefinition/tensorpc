@@ -326,7 +326,7 @@ class DefaultHandler(ObjectPreviewHandler):
         self.obj: Any = np.zeros([1])
         self.obj_uid: Optional[str] = None
 
-        self.event_after_unmount.on(self._on_unmount)
+        self.event_before_unmount.on(self._on_unmount)
 
     async def _on_print(self):
         string = str(self.obj)

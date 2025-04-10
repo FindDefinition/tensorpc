@@ -15,8 +15,9 @@
 import abc
 import asyncio
 import builtins
+import collections
 from contextlib import nullcontext
-from typing import TYPE_CHECKING, Mapping, Sequence
+from typing import TYPE_CHECKING, Mapping, Sequence, cast
 import copy
 import dataclasses
 import enum
@@ -33,6 +34,7 @@ from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable, Cor
 
 from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec, Self, TypeAlias, TypeVar)
 from tensorpc.core.asynctools import cancel_task
+from tensorpc.core.datamodel.events import DraftChangeEvent
 import tensorpc.core.datamodel.jmes as jmespath
 from tensorpc.core.datamodel.draft import DraftASTType, DraftBase, DraftObject, JMESPathOp, DraftUpdateOp, apply_draft_update_ops, capture_draft_update, create_draft, create_draft_type_only, enter_op_process_ctx, evaluate_draft_ast_noexcept, get_draft_ast_node, get_draft_jmespath, insert_assign_draft_op
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
@@ -71,7 +73,8 @@ from ..jsonlike import (BackendOnlyProp, Undefined,
 from .appcore import RemoteCompEvent, SimpleEventType, NumberType, ValueType, enter_event_handling_conetxt, get_app, Event, EventDataType, get_event_handling_context
 from tensorpc.dock.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_FLOW_COMP_UID_STRUCTURE_SPLIT
 from tensorpc.utils.rich_logging import get_logger
-
+if TYPE_CHECKING:
+    from .datamodel import DataModel
 LOGGER = get_logger("tensorpc.ui")
 
 
@@ -164,7 +167,6 @@ class UIType(enum.IntEnum):
     # this component have different state structure.
     TanstackJsonLikeTreeView = 0x39
     MenuList = 0x3a
-    MatrixDataGrid = 0x3b
     SimpleEditor = 0x3c
     IFrame = 0x3d
     Pagination = 0x3e
@@ -192,6 +194,7 @@ class UIType(enum.IntEnum):
     DataFlexBox = 0x10002
     DataPortal = 0x10003
     DataSubQuery = 0x10004
+    MatrixDataGrid = 0x10005
 
     MASK_THREE = 0x1000
     MASK_THREE_GEOMETRY = 0x0100
@@ -559,6 +562,48 @@ def unpatch_uid_keys_with_prefix(data: dict[str, Any], prefixes: list[str]):
         new_data[new_uid.uid_encoded] = v
     return new_data
 
+def patch_unique_id(data: Any, prefixes: list[str]):
+    # can't use abc.Sequence because string is sequence too.
+    if isinstance(data, list):
+        new_data = []
+        for i in range(len(data)):
+            d = data[i]
+            if isinstance(d, UniqueTreeIdForComp):
+                d = d.copy()
+                d.set_parts_inplace(prefixes + d.parts)
+            else:
+                d = patch_unique_id(d, prefixes)
+            new_data.append(d)
+        return new_data
+    elif isinstance(data, tuple):
+        new_data = []
+        for i in range(len(data)):
+            d = data[i]
+            if isinstance(d, UniqueTreeIdForComp):
+                d = d.copy()
+                d.set_parts_inplace(prefixes + d.parts)
+            else:
+                d = patch_unique_id(d, prefixes)
+            new_data.append(d)
+        return tuple(new_data)
+        
+    elif isinstance(data, collections.abc.Mapping):
+        new_data = {}
+        for k, d in data.items():
+            if isinstance(d, UniqueTreeIdForComp):
+                d = d.copy()
+                d.set_parts_inplace(prefixes + d.parts)
+            else:
+                d = patch_unique_id(d, prefixes)
+            new_data[k] = d
+        return new_data
+    elif isinstance(data, UniqueTreeIdForComp):
+        # data.parts[1:]: remote the ROOT part
+        data = data.copy()
+        data.set_parts_inplace(prefixes + data.parts)
+        return data
+    else:
+        return data
 
 class AppEditorFrontendEvent:
 
@@ -972,6 +1017,8 @@ class AppEvent:
         # for additional events, such as remote component events.
         # RemoteCompEvent: only available in remote component.
         self._additional_events: list[RemoteCompEvent] = []
+        # currently only used for app init
+        self._after_send_callback: Optional[Callable[[], Awaitable[None]]] = None
 
     def is_empty(self):
         return not self.type_to_event and not self._additional_events
@@ -1358,14 +1405,17 @@ class Component(Generic[T_base_props, T_child]):
             EventDataType, Event] = AsyncIOEventEmitter()
         self._flow_event_emitter.add_exception_listener(
             self.__event_emitter_on_exc)
+        # can be used to init data before dict send to frontend.
         self.event_before_mount = self._create_emitter_event_slot_noarg(
             FrontendEventType.BeforeMount)
         self.event_before_unmount = self._create_emitter_event_slot_noarg(
             FrontendEventType.BeforeUnmount)
         self.event_after_mount = self._create_emitter_event_slot_noarg(
             FrontendEventType.AfterMount)
-        self.event_after_unmount = self._create_emitter_event_slot_noarg(
-            FrontendEventType.AfterUnmount)
+        # we don't need after_unmount because there is no interaction between
+        # before and after unmount.
+        # self.event_after_unmount = self._create_emitter_event_slot_noarg(
+        #     FrontendEventType.AfterUnmount)
 
     def use_effect(self,
                    effect: Callable[[],
@@ -1488,16 +1538,21 @@ class Component(Generic[T_base_props, T_child]):
         self._flow_reference_count += 1
         return {}
 
-    def _detach(self) -> dict[UniqueTreeIdForComp, "Component"]:
+    def _finish_detach(self):
+        self._flow_uid = None
+        self._flow_comp_core = None
+
+    def _prepare_detach(self) -> dict[UniqueTreeIdForComp, "Component"]:
         self._flow_reference_count -= 1
         if self._flow_reference_count == 0:
-            self.flow_event_emitter.emit(
-                FrontendEventType.BeforeUnmount.value,
-                Event(FrontendEventType.BeforeUnmount.value, None))
+            # self.flow_event_emitter.emit(
+            #     FrontendEventType.BeforeUnmount.value,
+            #     Event(FrontendEventType.BeforeUnmount.value, None))
             res_uid = self._flow_uid
             assert res_uid is not None
-            self._flow_uid = None
-            self._flow_comp_core = None
+            # self._flow_uid = None
+            # self._flow_comp_core = None
+            # delay _flow_uid and _flow_comp_core clean in _finish_detach
             return {res_uid: self}
         return {}
 
@@ -2180,7 +2235,14 @@ class Component(Generic[T_base_props, T_child]):
         async with comp.draft_update():
             insert_assign_draft_op(draft, value)
 
-    def _bind_field_with_change_event(self, field_name: str, draft: Any, sync_update: bool = False, bind_field: bool = True):
+    async def __uncontrolled_draft_change_handler(self, ev: DraftChangeEvent, prop_name: str):
+        print(type(self), prop_name, ev.new_value)
+        await self.send_and_wait(self.create_update_event({
+            prop_name: ev.new_value
+        }))
+
+
+    def _bind_field_with_change_event(self, field_name: str, draft: Any, sync_update: bool = False, uncontrolled: bool = False):
         """Bind a draft with change event. bind_fields is called automatically.
         Equal to following code:
 
@@ -2193,11 +2255,11 @@ class Component(Generic[T_base_props, T_child]):
         assert not self.is_mounted(), "you can't bind field after component mounted"
         assert isinstance(draft, DraftBase)
         assert isinstance(draft._tensorpc_draft_attr_userdata, DraftOpUserData), "you must use comp.get_draft_target() to get draft"
-        comp = draft._tensorpc_draft_attr_userdata.component
+        comp: DataModel = cast(Any, draft._tensorpc_draft_attr_userdata.component)
         if draft._tensorpc_draft_attr_cur_node.type == DraftASTType.FUNC_CALL:
             raise ValueError("can't bind field with getitem or getattr result")
         assert FrontendEventType.Change.value in self._flow_allowed_events
-        if bind_field:
+        if not uncontrolled:
             self.bind_fields(**{field_name: draft})
         if sync_update:
             self.register_event_handler(FrontendEventType.Change, 
@@ -2205,6 +2267,8 @@ class Component(Generic[T_base_props, T_child]):
         else:
             self.register_event_handler(FrontendEventType.Change, 
                 partial(self.__data_model_auto_event_handler, draft=draft), simple_event=True)
+        if uncontrolled:
+            comp.install_draft_change_handler(draft, partial(self.__uncontrolled_draft_change_handler, prop_name=field_name), installed_comp=self)
         return self 
 
     async def sync_status(self,
@@ -2245,8 +2309,8 @@ class Component(Generic[T_base_props, T_child]):
         with capture_draft_update() as ctx:
             await self._flow_event_emitter.emit_async(FrontendEventType.AfterMount.value,
                                                     Event(FrontendEventType.AfterMount.value, None)) 
-            if ctx._ops:
-                await self._run_draft_update(ctx._ops)
+        if ctx._ops:
+            await self._run_draft_update(ctx._ops)
 
         # run effects
         for k, effects in self.effects._flow_effects.items():
@@ -2271,8 +2335,8 @@ class Component(Generic[T_base_props, T_child]):
                 special_methods.will_unmount.get_binded_fn(),
                 sync_status_first=False,
                 change_status=False)
-        await self._flow_event_emitter.emit_async(FrontendEventType.AfterUnmount.value,
-                                                  Event(FrontendEventType.AfterUnmount.value, None)) 
+        await self._flow_event_emitter.emit_async(FrontendEventType.BeforeUnmount.value,
+                                                  Event(FrontendEventType.BeforeUnmount.value, None)) 
         for k, unmount_effects in self.effects._flow_unmounted_effects.items(
         ):
             for _, unmount_effect in unmount_effects:
@@ -2540,19 +2604,19 @@ class ContainerBase(Component[T_container_props, T_child]):
 
         self._foreach_comp(handler)
 
-    def _detach(self):
-        disposed_uids: dict[UniqueTreeIdForComp, Component] = super()._detach()
+    def _prepare_detach(self):
+        disposed_uids: dict[UniqueTreeIdForComp, Component] = super()._prepare_detach()
         for v in self._child_comps.values():
-            disposed_uids.update(v._detach())
+            disposed_uids.update(v._prepare_detach())
         return disposed_uids
 
-    def _detach_child(self, childs: Optional[list[str]] = None):
+    def _prepare_detach_child(self, childs: Optional[list[str]] = None):
         disposed_uids: dict[UniqueTreeIdForComp, Component] = {}
         if childs is None:
             childs = list(self._child_comps.keys())
         for k in childs:
             v = self._child_comps[k]
-            disposed_uids.update(v._detach())
+            disposed_uids.update(v._prepare_detach())
         return disposed_uids
 
     def _attach_child(self,
@@ -2721,7 +2785,7 @@ class ContainerBase(Component[T_container_props, T_child]):
 
     async def set_new_layout_locally(self, layout: Union[dict[str, Component],
                                                          T_child_structure]):
-        detached_uid_to_comp = self._detach_child()
+        detached_uid_to_comp = self._prepare_detach_child()
         if isinstance(layout, dict):
             self._child_comps = layout
         else:
@@ -2736,6 +2800,13 @@ class ContainerBase(Component[T_container_props, T_child]):
             for comp, local_id in children_dict:
                 self._child_comps[local_id] = comp
         attached = self._attach_child(self.flow_app_comp_core)
+        new_detached_uid_to_comp = detached_uid_to_comp.copy()
+        for k, v in detached_uid_to_comp.items():
+            if v._flow_reference_count > 0:
+                assert k in attached
+                new_detached_uid_to_comp.pop(k)
+                attached.pop(k)
+        detached_uid_to_comp = new_detached_uid_to_comp
         # update all childs of this component
         comps_frontend = {
             c._flow_uid_encoded: c
@@ -2793,6 +2864,8 @@ class ContainerBase(Component[T_container_props, T_child]):
         if post_ev_creator is not None:
             await self.put_app_event(post_ev_creator())
         await self._run_special_methods(attached, removed_dict)
+        for v in removed_dict.values():
+            v._finish_detach()
 
     def _check_ctx_contains_self(self, keys: Union[list[str], Set[str]]):
         evctx = get_event_handling_context()
@@ -2831,7 +2904,7 @@ class ContainerBase(Component[T_container_props, T_child]):
             keys: list[str],
             post_ev_creator: Optional[Callable[[], AppEvent]] = None,
             comp_dont_need_cancel: Optional[UniqueTreeIdForComp] = None):
-        detached_uid_to_comp = self._detach_child(keys)
+        detached_uid_to_comp = self._prepare_detach_child(keys)
         for k, comp in detached_uid_to_comp.items():
             if comp_dont_need_cancel is not None and comp_dont_need_cancel == k:
                 continue
@@ -2852,6 +2925,8 @@ class ContainerBase(Component[T_container_props, T_child]):
         if post_ev_creator is not None:
             await self.put_app_event(post_ev_creator())
         await self._run_special_methods([], detached_uid_to_comp)
+        for v in detached_uid_to_comp.values():
+            v._finish_detach()
 
     def update_childs_complex_event(self):
         update_msg: dict[str, Any] = {}
@@ -2878,10 +2953,18 @@ class ContainerBase(Component[T_container_props, T_child]):
         if update_child_complex:
             self.__check_child_structure_is_none()
         intersect = set(layout.keys()).intersection(self._child_comps.keys())
-        detached = self._detach_child(list(intersect))
+        detached = self._prepare_detach_child(list(intersect))
         self._child_comps.update(layout)
         attached = self._attach_child(self.flow_app_comp_core,
                                       list(layout.keys()))
+        new_detached_uid_to_comp = detached.copy()
+        for k, v in detached.items():
+            if v._flow_reference_count > 0:
+                assert k in attached
+                new_detached_uid_to_comp.pop(k)
+                attached.pop(k)
+        detached = new_detached_uid_to_comp
+
         # remove replaced components first.
         comps_frontend = {
             c._flow_uid_encoded: c
@@ -2952,6 +3035,8 @@ class ContainerBase(Component[T_container_props, T_child]):
         if post_ev_creator is not None:
             await self.put_app_event(post_ev_creator())
         await self._run_special_methods(attached, removed_dict)
+        for v in removed_dict.values():
+            v._finish_detach()
 
     async def replace_childs(self, layout: dict[str, Component]):
         self.__check_child_structure_is_none()
@@ -2999,6 +3084,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
 
         self._shutdown_ev: asyncio.Event = asyncio.Event()
         self._remote_task: Optional[asyncio.Task] = None
+
+        self._patch_in_remote = False
 
     @property
     def is_remote_mounted(self):
@@ -3066,17 +3153,23 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             aiter_remote = self.remote_generator(serv_names.REMOTE_COMP_MOUNT_APP_GENERATOR, None, 
                         node_uid, self._key, prefixes, url, port)
             res = await aiter_remote.__anext__()
-            layout, root_comp_uid = res["layout"], res["remoteRootUid"]
+            layout, root_comp_uid_before = res["layout"], res["remoteRootUid"]
+            _patch_in_remote = self._patch_in_remote
+            root_comp_uid = root_comp_uid_before
+            if not _patch_in_remote:
+                layout, root_comp_uid = self._patch_layout_dict(layout, root_comp_uid_before, prefixes)
+            print("root_comp_uid", root_comp_uid)
+            print("root_comp_uid_before_before", root_comp_uid_before)
             # first event: update layout from remote
-            update_comp_ev = self.create_update_comp_event(layout, [])
-            # second event: update childs prop in remote container
-            prop_upd_ev = self.create_update_event({"childs": [root_comp_uid]})
-            # WARNING: connect button remove container that contains itself,
-            # so the actual set_new_layout is delayed after current callback finish.
-            # so we can't update stuff here, we must ensure
-            # layout update done after set_new_layout.
-            # so we use post_ev_creator here.
-            await self.set_new_layout({}, post_ev_creator=lambda: update_comp_ev + prop_upd_ev)
+            # update_comp_ev = self.create_update_comp_event(layout, [])
+            # # second event: update childs prop in remote container
+            # prop_upd_ev = self.create_update_event({"childs": [root_comp_uid]})
+            # # WARNING: connect button remove container that contains itself,
+            # # so the actual set_new_layout is delayed after current callback finish.
+            # # so we can't update stuff here, we must ensure
+            # # layout update done after set_new_layout.
+            # # so we use post_ev_creator here.
+            # await self.set_new_layout({}, post_ev_creator=lambda: update_comp_ev + prop_upd_ev)
 
             self._is_remote_mounted = True
             next_item_task = asyncio.create_task(aiter_remote.__anext__())
@@ -3106,15 +3199,29 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                             await self.run_callback(partial(app.handle_msg_from_remote_comp, key, ev))
                         else:
                             app_event_dict = ev
-                            assert "remotePrefixes" in app_event_dict
-                            prefixes = app_event_dict["remotePrefixes"]
-                            # sync some state from remote component
-                            for ev_type, ev_dict in app_event_dict["typeToEvents"]:
-                                if ev_type == AppEventType.UpdateComponents:
-                                    # when layout in remote changed, we must keep comp uids in main app.
-                                    assert "remoteComponentAllChilds" in ev_dict
-                                    self.set_cur_child_uids(ev_dict["remoteComponentAllChilds"])
-                            app_ev = AppEvent.from_dict(app_event_dict)
+                            if True:
+                                assert "remotePrefixes" in app_event_dict
+                                prefixes = app_event_dict["remotePrefixes"]
+                                # sync some state from remote component
+                                for ev_type, ev_dict in app_event_dict["typeToEvents"]:
+                                    if ev_type == AppEventType.UpdateComponents:
+                                        # when layout in remote changed, we must keep comp uids in main app.
+                                        assert "remoteComponentAllChilds" in ev_dict
+                                        self.set_cur_child_uids(ev_dict["remoteComponentAllChilds"])
+                                app_ev = AppEvent.from_dict(app_event_dict)
+                            else:
+                                app_event = AppEvent.from_dict(app_event_dict)
+                                # ev._remote_prefixes = prefixes
+                                app_event.patch_keys_prefix_inplace(prefixes)
+                                for ui_ev in app_event.type_to_event.values():
+                                    if isinstance(ui_ev, UpdateComponentsEvent):
+                                        assert ui_ev.remote_component_all_childs is not None
+                                        ui_ev.remote_component_all_childs = patch_uid_list_with_prefix(
+                                            ui_ev.remote_component_all_childs, prefixes)
+                                        self.set_cur_child_uids(ui_ev.remote_component_all_childs)
+                                app_event_dict = app_event.to_dict()
+                                app_event_dict = patch_unique_id(app_event_dict, prefixes)
+                                app_ev = AppEvent.from_dict(cast(dict, app_event_dict))
                             await self.put_app_event(app_ev)
                         next_item_task = asyncio.create_task(aiter_remote.__anext__())
                     except StopAsyncIteration:
@@ -3199,7 +3306,21 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         except:
             traceback.print_exc()
             return {}, ""
-        return res["layout"], res["remoteRootUid"]
+        if self._patch_in_remote:
+            return res["layout"], res["remoteRootUid"]
+        else:
+            return self._patch_layout_dict(res["layout"],
+                                           res["remoteRootUid"], prefixes)
+
+    def _patch_layout_dict(self, layout, remote_root_uid: str, prefixes: list[str]):
+        layout_dict = layout
+        layout_dict = patch_uid_keys_with_prefix(layout_dict, prefixes)
+        for k, v in layout_dict.items():
+            layout_dict[k] = patch_unique_id(v, prefixes)
+        root_uid = UniqueTreeIdForComp(remote_root_uid)
+        root_comp_uid = UniqueTreeIdForComp.from_parts(prefixes + root_uid.parts).uid_encoded
+        return layout_dict, root_comp_uid
+
 
     async def get_layout_dict(self) -> tuple[dict[str, Any], str]:
         assert self._flow_uid is not None, "shouldn't happen"
@@ -3210,7 +3331,11 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         except:
             traceback.print_exc()
             return {}, ""
-        return res["layout"], res["remoteRootUid"]
+        if self._patch_in_remote:
+            return res["layout"], res["remoteRootUid"]
+        else:
+            return self._patch_layout_dict(res["layout"],
+                                           res["remoteRootUid"], prefixes)
 
     async def handle_remote_event(self,
                                   ev_data: tuple[str, Any],
