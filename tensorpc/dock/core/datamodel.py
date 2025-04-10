@@ -19,7 +19,7 @@ from tensorpc.core import dataclass_dispatch as dataclasses
 from tensorpc.core.datamodel.draft import (
     DraftBase, DraftFieldMeta, DraftUpdateOp, apply_draft_update_ops, capture_draft_update,
     create_draft, create_draft_type_only, enter_op_process_ctx,
-    evaluate_draft_ast_noexcept, get_draft_ast_node, get_draft_update_context, prevent_draft_update, stabilize_getitem_path_in_op_main_path)
+    evaluate_draft_ast_noexcept, get_draft_ast_node, get_draft_update_context, get_draft_update_context_noexcept, prevent_draft_update, stabilize_getitem_path_in_op_main_path)
 from tensorpc.core.datamodel.events import (DraftChangeEvent,
                                             DraftChangeEventHandler,
                                             DraftEventType,
@@ -92,6 +92,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                 ```
                 gdm = DataModel(GenericModel(), ..., model_type=GenericModel[int])
                 ```
+                We recommend to inherit your generic model with fixed type vars instead of
+                use this argument.
         """
         if children is not None and isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
@@ -417,7 +419,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         WARNING: draft change event handler will be called (if change) in each draft update.
         """
         draft = self.get_draft()
-        cur_ctx = get_draft_update_context()
+        cur_ctx = get_draft_update_context_noexcept()
         if cur_ctx is not None and cur_ctx._prevent_inner_draft:
             raise RuntimeError("Draft operation is disabled by a prevent_draft_update context, usually exists in draft event handler.")
         with capture_draft_update() as ctx:

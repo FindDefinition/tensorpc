@@ -1217,11 +1217,11 @@ class SSHClient:
                          b"param([string]$line)\n"
                          b"return $line.Length -gt 3 -and $line[0] -ne ' ' -and $line[0] -ne ';'\n"
                          b"}\n")
-        else:
-            if shell_type.type == "zsh":
-                stdin.write(b"setopt HIST_IGNORE_SPACE\n")
-            elif shell_type.type == "bash":
-                stdin.write(b"export HISTCONTROL=ignorespace\n")
+        # else:
+        #     if shell_type.type == "zsh":
+        #         stdin.write(b"setopt HIST_IGNORE_SPACE\n")
+        #     elif shell_type.type == "bash":
+        #         stdin.write(b"export HISTCONTROL=ignorespace\n")
         return chan, session, stdin, stdout, stderr
 
     async def connect_queue(

@@ -37,7 +37,6 @@ from urllib import parse
 
 @dataclasses.dataclass
 class MountedAppMeta:
-    node_uid: str
     url: str
     port: int
     key: str
@@ -60,7 +59,7 @@ class AppObject:
     mounted_app_meta: Optional[MountedAppMeta] = None
 
 
-_PATCH_IN_REMOTE = True
+_PATCH_IN_REMOTE = False
 
 class RemoteComponentService:
 
@@ -132,7 +131,7 @@ class RemoteComponentService:
     def get_layout_root_and_app_by_key(self, key: str):
         return self._app_objs[key].app.root, self._app_objs[key].app
 
-    async def mount_app(self, node_uid: str, key: str, url: str, port: int,
+    async def mount_app(self, key: str, url: str, port: int,
                         prefixes: List[str], remote_gen_queue: Optional[asyncio.Queue] = None):
         assert key in self._app_objs, key
         app_obj = self._app_objs[key]
@@ -158,13 +157,13 @@ class RemoteComponentService:
                 await self.unmount_app(app_obj.mounted_app_meta.key)
 
         assert app_obj.mounted_app_meta is None, "already mounted"
-        app_obj.mounted_app_meta = MountedAppMeta(node_uid, url, port, key,
+        app_obj.mounted_app_meta = MountedAppMeta(url, port, key,
                                                   prefixes, remote_gen_queue)
         app_obj.mount_ev.set()
         app_obj.app.app_storage.set_remote_grpc_url(
             app_obj.mounted_app_meta.url_with_port)
-        gid, nid = split_unique_node_id(node_uid)
-        app_obj.app.app_storage.set_graph_node_id(gid, nid)
+        # gid, nid = split_unique_node_id(node_uid)
+        # app_obj.app.app_storage.set_graph_node_id(gid, nid)
         with enter_app_context(app_obj.app):
             await app_obj.app._flowapp_special_eemitter.emit_async(AppSpecialEventType.RemoteCompMount, app_obj.mounted_app_meta)
 
@@ -197,16 +196,13 @@ class RemoteComponentService:
         root_uid = app_obj.app.root._flow_uid
         assert root_uid is not None
         layout_dict = lay["layout"]
-        if False:
+        if _PATCH_IN_REMOTE:
             layout_dict = patch_uid_keys_with_prefix(layout_dict, prefixes)
             for k, v in layout_dict.items():
                 layout_dict[k] = patch_unique_id(v, prefixes)
         lay["layout"] = layout_dict
         # # print("APP layout_dict", layout_dict)
-        uid_tobe_patched = UniqueTreeIdForComp.from_parts(
-                prefixes + root_uid.parts).uid_encoded
-        print("WTF", uid_tobe_patched)
-        if False:
+        if _PATCH_IN_REMOTE:
             lay["remoteRootUid"] = UniqueTreeIdForComp.from_parts(
                 prefixes + root_uid.parts).uid_encoded
         else:
@@ -214,14 +210,14 @@ class RemoteComponentService:
                 root_uid.parts).uid_encoded
         return lay
 
-    async def mount_app_generator(self, node_uid: str, key: str,
+    async def mount_app_generator(self, key: str,
                         prefixes: List[str], url: str = "", port: int = -1):
         print("MOUNT GENERATOR", key)
         assert key in self._app_objs, key
         app_obj = self._app_objs[key]
         try:
             queue = asyncio.Queue()
-            await self.mount_app(node_uid, key, url, port, prefixes, queue)
+            await self.mount_app(key, url, port, prefixes, queue)
             shutdown_task = asyncio.create_task(app_obj.shutdown_ev.wait(), name="shutdown")
             wait_queue_task = asyncio.create_task(queue.get(), name="wait for queue")
             yield self.get_layout_dict(key, prefixes)
@@ -317,7 +313,7 @@ class RemoteComponentService:
 
             # assign uid here.
             # print("WTF", ev.to_dict(), app_obj.mounted_app_meta.node_uid)
-            ev.uid = app_obj.mounted_app_meta.node_uid
+            # ev.uid = app_obj.mounted_app_meta.node_uid
             send_task = asyncio.create_task(app_obj.send_loop_queue.get(), name="wait for queue")
             wait_tasks: List[asyncio.Task] = [shut_task, send_task]
             succeed = False
@@ -420,7 +416,8 @@ class RemoteComponentService:
         prefixes = app_obj.mounted_app_meta.prefixes
         if type == AppEventType.UIEvent.value:
             ev = UIEvent.from_dict(data)
-            ev.unpatch_keys_prefix_inplace(prefixes)
+            if _PATCH_IN_REMOTE:
+                ev.unpatch_keys_prefix_inplace(prefixes)
             return await app_obj.app._handle_event_with_ctx(ev, is_sync)
 
     async def handle_simple_rpc(self, key: str, event: str, *args, **kwargs):

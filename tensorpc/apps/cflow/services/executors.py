@@ -20,7 +20,6 @@ from tensorpc.dock.components import mui
 from tensorpc.dock.serv_names import serv_names as app_serv_names
 from tensorpc.apps.dbg.components.bkptpanel_v2 import BreakpointDebugPanel
 from tensorpc.apps.dbg.components.traceview import TraceView
-from tensorpc.dock.serv_names import serv_names as app_serv_names
 from tensorpc.apps.dbg.bkpt import _try_get_distributed_meta
 from tensorpc.apps.dbg.constants import (DebugServerProcessInfo, TENSORPC_DBG_FRAME_INSPECTOR_KEY,
                                     TENSORPC_DBG_TRACE_VIEW_KEY)

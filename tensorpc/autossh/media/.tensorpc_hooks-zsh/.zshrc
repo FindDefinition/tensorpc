@@ -196,3 +196,4 @@ if [[ $options[login] = off && $USER_ZDOTDIR != $VSCODE_ZDOTDIR ]]; then
 fi
 
 export TENSORPC_SSH_CURRENT_PID=$$
+setopt HIST_IGNORE_SPACE

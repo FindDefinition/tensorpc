@@ -192,11 +192,12 @@ class Terminal(MUIComponentBase[TerminalProps]):
 
     async def _terminal_state_unmount(self, evdata):
         state = evdata["state"]
-        term_id = evdata["terminalId"]
         ts = evdata["ts"]
         # print(ts, state, evdata["terminalId"])
         if self._state_buffers is not None and not self._dont_use_frontend_state:
+            term_id = evdata["terminalId"]
             if term_id in self._state_buffers:
+
                 buffer = self._state_buffers[term_id]
                 buffer.save_state(state, ts)
                 # print("terminal state unmount", len(state), buffer.get_total_size(), "|", len(buffer._raw_buffers_with_ts), self.props.terminalId)

@@ -39,6 +39,7 @@ Our draft change detection only check main path nodes, other node will be treate
 
 import contextlib
 import contextvars
+from dataclasses import is_dataclass
 import enum
 import json
 import traceback
@@ -1323,6 +1324,23 @@ def cast_any_draft_to_dataclass(draft: Any, target_type: type[T]) -> T:
                             draft._tensorpc_draft_attr_userdata,
                             draft._tensorpc_draft_attr_cur_node, new_state)
     return cast(T, new_draft)
+
+def cast_any_draft(draft: Any, target_type: type[T]) -> T:
+    if dataclasses.is_dataclass(target_type):
+        return cast_any_draft_to_dataclass(draft, target_type)
+    assert issubclass(target_type, (int, bool, str, float))
+    assert isinstance(
+        draft, (DraftAny, DraftUnion)), "draft should be a DraftAny or DraftUnion"
+    anno_type = get_draft_anno_type(draft)
+    assert anno_type is not None and anno_type.is_any_type(
+    ), "draft type should be any type"
+    new_anno_type = parse_type_may_optional_undefined(target_type)
+    new_state = dataclasses.replace(draft._tensorpc_draft_attr_anno_state,
+                                    anno_type=new_anno_type)
+    res = _tensorpc_draft_anno_dispatch(
+        new_anno_type, draft._tensorpc_draft_attr_cur_node, draft._tensorpc_draft_attr_userdata,
+        new_state)
+    return cast(T, res)
 
 def draft_from_node_and_type(node: DraftASTNode, target_type: Any) -> Any:
     new_anno_type = parse_type_may_optional_undefined(target_type)

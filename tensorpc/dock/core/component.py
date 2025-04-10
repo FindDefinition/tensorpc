@@ -2833,14 +2833,15 @@ class ContainerBase(Component[T_container_props, T_child]):
             self,
             layout: Union[dict[str, Component], list[Component],
                           T_child_structure],
-            post_ev_creator: Optional[Callable[[], AppEvent]] = None):
+            post_ev_creator: Optional[Callable[[], AppEvent]] = None,
+            disable_delay: bool = False):
         if isinstance(layout, list):
             layout = {str(i): v for i, v in enumerate(layout)}
 
         self_to_be_removed = self._check_ctx_contains_self(
             list(self._child_comps.keys()))
         evctx = get_event_handling_context()
-        if evctx is not None and self_to_be_removed:
+        if evctx is not None and self_to_be_removed and not disable_delay:
             evctx.delayed_callbacks.append(lambda: self._set_new_layout_delay(
                 layout,
                 comp_dont_need_cancel=evctx.comp_uid,
@@ -3146,31 +3147,28 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                 finally:
                     await self.shutdown_remote_object()
 
-    async def _remote_msg_handle_loop(self, node_uid: str, 
-                        prefixes: list[str], url: str = "", port: int = -1):
+    async def _remote_msg_handle_loop(self, prefixes: list[str], url: str = "", port: int = -1):
 
         try:
             aiter_remote = self.remote_generator(serv_names.REMOTE_COMP_MOUNT_APP_GENERATOR, None, 
-                        node_uid, self._key, prefixes, url, port)
+                        self._key, prefixes, url, port)
             res = await aiter_remote.__anext__()
             layout, root_comp_uid_before = res["layout"], res["remoteRootUid"]
             _patch_in_remote = self._patch_in_remote
             root_comp_uid = root_comp_uid_before
             if not _patch_in_remote:
                 layout, root_comp_uid = self._patch_layout_dict(layout, root_comp_uid_before, prefixes)
-            print("root_comp_uid", root_comp_uid)
-            print("root_comp_uid_before_before", root_comp_uid_before)
             # first event: update layout from remote
-            # update_comp_ev = self.create_update_comp_event(layout, [])
-            # # second event: update childs prop in remote container
-            # prop_upd_ev = self.create_update_event({"childs": [root_comp_uid]})
-            # # WARNING: connect button remove container that contains itself,
-            # # so the actual set_new_layout is delayed after current callback finish.
-            # # so we can't update stuff here, we must ensure
-            # # layout update done after set_new_layout.
-            # # so we use post_ev_creator here.
-            # await self.set_new_layout({}, post_ev_creator=lambda: update_comp_ev + prop_upd_ev)
-
+            update_comp_ev = self.create_update_comp_event(layout, [])
+            # second event: update childs prop in remote container
+            prop_upd_ev = self.create_update_event({"childs": [root_comp_uid]})
+            # WARNING: connect button remove container that contains itself,
+            # so the actual set_new_layout is delayed after current callback finish.
+            # so we can't update stuff here, we must ensure
+            # layout update done after set_new_layout.
+            # so we use post_ev_creator here.
+            print("LAYOUT", layout)
+            await self.set_new_layout({}, post_ev_creator=lambda: update_comp_ev + prop_upd_ev, disable_delay=True)
             self._is_remote_mounted = True
             next_item_task = asyncio.create_task(aiter_remote.__anext__())
             shutdown_task = asyncio.create_task(self._shutdown_ev.wait())
@@ -3199,9 +3197,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                             await self.run_callback(partial(app.handle_msg_from_remote_comp, key, ev))
                         else:
                             app_event_dict = ev
-                            if True:
-                                assert "remotePrefixes" in app_event_dict
-                                prefixes = app_event_dict["remotePrefixes"]
+                            if self._patch_in_remote:
                                 # sync some state from remote component
                                 for ev_type, ev_dict in app_event_dict["typeToEvents"]:
                                     if ev_type == AppEventType.UpdateComponents:
@@ -3220,6 +3216,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                                             ui_ev.remote_component_all_childs, prefixes)
                                         self.set_cur_child_uids(ui_ev.remote_component_all_childs)
                                 app_event_dict = app_event.to_dict()
+                                print("ASFASF", app_event_dict)
                                 app_event_dict = patch_unique_id(app_event_dict, prefixes)
                                 app_ev = AppEvent.from_dict(cast(dict, app_event_dict))
                             await self.put_app_event(app_ev)
@@ -3241,20 +3238,23 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             await self.shutdown_remote_object()
             await self._close_remote_loop()
             assert self._flow_uid is not None, "shouldn't happen"
-            master_meta = MasterMeta()
-            node_uid = get_unique_node_id(master_meta.graph_id,
-                                master_meta.node_id)
-            app_serv_meta = AppLocalMeta()
-            assert app_serv_meta.grpc_port is not None 
+
+            # node_uid = get_unique_node_id(master_meta.graph_id,
+            #                     master_meta.node_id)
             await self.setup_remote_object()
             prefixes = self._flow_uid.parts
-            if self._url.strip() == "localhost" or self._url.strip(
-            ) == "127.0.0.1":
-                app_url = "localhost"
-            else:
-                app_url = get_primary_ip()
             if not _use_remote_generator:
-                await self.remote_call(serv_names.REMOTE_COMP_MOUNT_APP, 10, node_uid, self._key,
+                master_meta = MasterMeta()
+                if self._url.strip() == "localhost" or self._url.strip(
+                ) == "127.0.0.1":
+                    app_url = "localhost"
+                else:
+                    app_url = get_primary_ip()
+
+                app_serv_meta = AppLocalMeta()
+                assert app_serv_meta.grpc_port is not None 
+
+                await self.remote_call(serv_names.REMOTE_COMP_MOUNT_APP, 10, self._key,
                                     app_url, app_serv_meta.grpc_port, prefixes)
                 layout, root_comp_uid = await self.get_layout_dict()
                 # first event: update layout from remote
@@ -3272,7 +3272,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                 self._shutdown_ev.clear()
                 await self.health_check(1)
                 self._remote_task = asyncio.create_task(
-                    self._remote_msg_handle_loop(node_uid, prefixes, app_url, int(app_serv_meta.grpc_port)))
+                    self._remote_msg_handle_loop(prefixes, "", -1))
         except Exception as e:
             await self.send_exception(e)
             await self.disconnect()
@@ -3341,12 +3341,19 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                                   ev_data: tuple[str, Any],
                                   is_sync: bool = False):
         # print(ev_data)
+        assert self._flow_uid is not None, "shouldn't happen"
+        prefixes = self._flow_uid.parts
         try:
+            ev_data_dict = {
+                ev_data[0]: ev_data[1]
+            }
+            uiev = UIEvent.from_dict(ev_data_dict)
+            if not self._patch_in_remote:
+                uiev.unpatch_keys_prefix_inplace(prefixes)
+                ev_data_dict = uiev.to_dict()
             return await self.remote_call(
                 serv_names.REMOTE_COMP_RUN_SINGLE_EVENT, 1, self._key,
-                AppEventType.UIEvent.value, {
-                    ev_data[0]: ev_data[1]
-                }, is_sync)
+                AppEventType.UIEvent.value, ev_data_dict, is_sync)
         except Exception as e:
             await self.send_exception(e)
             await self.disconnect()
