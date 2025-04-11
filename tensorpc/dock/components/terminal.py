@@ -552,7 +552,6 @@ class AsyncSSHTerminal(Terminal):
                             await self.flow_event_emitter.emit_async(
                                 self._backend_ssh_conn_inited_event_key,
                                 Event(self._backend_ssh_conn_inited_event_key, None))
-
                         if self._ssh_state.inited and TENSORPC_ASYNCSSH_INIT_SUCCESS not in cur_cmd:
                             ev = TerminalCmdCompleteEvent(cur_cmd, cmd_outputs, return_code)
                             SSH_LOGGER.warning("Command \"%s\" succeed, retcode: %d", cur_cmd, return_code)
@@ -603,7 +602,8 @@ class AsyncSSHTerminal(Terminal):
         
         WARNING: this function can't be called parallelly, e.g. asyncio.gather
         """
-        assert cmd.endswith("\n")
+        if not cmd.endswith("\n"):
+            cmd += "\n"
         assert self._ssh_state is not None and self._ssh_state.current_cmd == "", f"current command is not empty: {self._ssh_state}."
         assert self._ssh_state.current_cmd_rpc_future is None, "previous command is not finished yet."
         future: asyncio.Future[TerminalCmdCompleteEvent] = asyncio.get_running_loop().create_future()

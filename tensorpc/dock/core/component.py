@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine, Generator,
                     Generic, Iterable, Optional, Set, Type, Union)
 
+import grpc
 from typing_extensions import (Concatenate, ContextManager, Literal, ParamSpec, Self, TypeAlias, TypeVar)
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.datamodel.events import DraftChangeEvent
@@ -71,7 +72,7 @@ from ..jsonlike import (BackendOnlyProp, Undefined,
                         split_props_to_undefined, undefined,
                         undefined_dict_factory)
 from .appcore import RemoteCompEvent, SimpleEventType, NumberType, ValueType, enter_event_handling_conetxt, get_app, Event, EventDataType, get_event_handling_context
-from tensorpc.dock.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_FLOW_COMP_UID_STRUCTURE_SPLIT
+from tensorpc.dock.constants import TENSORPC_APP_ROOT_COMP, TENSORPC_FLOW_COMP_UID_STRUCTURE_SPLIT, TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT
 from tensorpc.utils.rich_logging import get_logger
 if TYPE_CHECKING:
     from .datamodel import DataModel
@@ -557,9 +558,17 @@ def unpatch_uid_keys_with_prefix(data: dict[str, Any], prefixes: list[str]):
     new_data = {}
     len_prefix = len(prefixes)
     for k, v in data.items():
-        k_uid = UniqueTreeIdForComp(k)
-        new_uid = UniqueTreeIdForComp.from_parts(k_uid.parts[len_prefix:])
-        new_data[new_uid.uid_encoded] = v
+        temp_index = k.find(TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT)
+        if temp_index != -1:
+            k_no_template = k[:temp_index]
+            k_uid = UniqueTreeIdForComp(k_no_template)
+            new_uid = UniqueTreeIdForComp.from_parts(k_uid.parts[len_prefix:])
+            new_uid_encoded = new_uid.uid_encoded + k[temp_index:]
+        else:
+            k_uid = UniqueTreeIdForComp(k)
+            new_uid = UniqueTreeIdForComp.from_parts(k_uid.parts[len_prefix:])
+            new_uid_encoded = new_uid.uid_encoded
+        new_data[new_uid_encoded] = v
     return new_data
 
 def patch_unique_id(data: Any, prefixes: list[str]):
@@ -2236,8 +2245,8 @@ class Component(Generic[T_base_props, T_child]):
             insert_assign_draft_op(draft, value)
 
     async def __uncontrolled_draft_change_handler(self, ev: DraftChangeEvent, prop_name: str):
-        print(type(self), prop_name, ev.new_value)
-        await self.send_and_wait(self.create_update_event({
+        # print("WTFWTF", type(self), prop_name, ev.new_value)
+        await self.put_app_event(self._update_props_base(self.propcls)(**{
             prop_name: ev.new_value
         }))
 
@@ -2556,6 +2565,7 @@ class ContainerBase(Component[T_container_props, T_child]):
         try:
             child_comp = self._child_comps[key]
         except KeyError:
+            traceback.print_exc()
             LOGGER.error("can't find child comp %s by uid %s, ava: %s", str(type(self)), key, str(list(self._child_comps.keys())))
             raise
         if isinstance(child_comp,
@@ -3148,7 +3158,6 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                     await self.shutdown_remote_object()
 
     async def _remote_msg_handle_loop(self, prefixes: list[str], url: str = "", port: int = -1):
-
         try:
             aiter_remote = self.remote_generator(serv_names.REMOTE_COMP_MOUNT_APP_GENERATOR, None, 
                         self._key, prefixes, url, port)
@@ -3158,16 +3167,18 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             root_comp_uid = root_comp_uid_before
             if not _patch_in_remote:
                 layout, root_comp_uid = self._patch_layout_dict(layout, root_comp_uid_before, prefixes)
+            self.set_cur_child_uids(list(layout.keys()))
+
             # first event: update layout from remote
             update_comp_ev = self.create_update_comp_event(layout, [])
             # second event: update childs prop in remote container
-            prop_upd_ev = self.create_update_event({"childs": [root_comp_uid]})
+            prop_upd_ev = self.create_update_event({"childs": [UniqueTreeIdForComp(root_comp_uid)]})
             # WARNING: connect button remove container that contains itself,
             # so the actual set_new_layout is delayed after current callback finish.
             # so we can't update stuff here, we must ensure
             # layout update done after set_new_layout.
             # so we use post_ev_creator here.
-            print("LAYOUT", layout)
+            # print("LAYOUT", layout)
             await self.set_new_layout({}, post_ev_creator=lambda: update_comp_ev + prop_upd_ev, disable_delay=True)
             self._is_remote_mounted = True
             next_item_task = asyncio.create_task(aiter_remote.__anext__())
@@ -3216,8 +3227,18 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                                             ui_ev.remote_component_all_childs, prefixes)
                                         self.set_cur_child_uids(ui_ev.remote_component_all_childs)
                                 app_event_dict = app_event.to_dict()
-                                print("ASFASF", app_event_dict)
                                 app_event_dict = patch_unique_id(app_event_dict, prefixes)
+
+                                # if get_app()._is_remote_component:
+                                #     print("---------REMOTE-------", self._flow_uid)
+                                #     print("REMOTE!!!", app_event_dict)
+                                #     print("---------REMOTE END-------")
+                                # else:
+                                #     print("---------LOCAL-------", self._flow_uid, self._cur_child_uids)
+
+                                #     print("LOCAL!!!", app_event_dict)
+                                #     print("---------LOCAL END-------")
+
                                 app_ev = AppEvent.from_dict(cast(dict, app_event_dict))
                             await self.put_app_event(app_ev)
                         next_item_task = asyncio.create_task(aiter_remote.__anext__())
@@ -3354,9 +3375,11 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             return await self.remote_call(
                 serv_names.REMOTE_COMP_RUN_SINGLE_EVENT, 1, self._key,
                 AppEventType.UIEvent.value, ev_data_dict, is_sync)
-        except Exception as e:
+        except grpc.aio.AioRpcError as e:
             await self.send_exception(e)
             await self.disconnect()
+        except Exception as e:
+            await self.send_exception(e)
 
     async def collect_drag_source_data(self,
                                   ev: UIEvent):
@@ -3367,9 +3390,11 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                 serv_names.REMOTE_COMP_RUN_SINGLE_EVENT, 1, self._key,
                 AppEventType.UIEvent.value, ev.to_dict(), is_sync=True)
             return list(res.values())[0]
-        except Exception as e:
+        except grpc.aio.AioRpcError as e:
             await self.send_exception(e)
             await self.disconnect()
+        except Exception as e:
+            await self.send_exception(e)
         return None
 
     async def get_file(self, file_key: str, offset: int, count: Optional[int] = None, chunk_size=2**16):

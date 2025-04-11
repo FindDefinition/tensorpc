@@ -52,6 +52,7 @@ REQUIRED = [
     "rich",
     "jmespath-community",
     "hsluv",
+    "fsspec",
 ]
 
 # What packages are optional?

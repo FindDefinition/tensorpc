@@ -667,8 +667,8 @@ class AsyncRemoteManager(AsyncRemoteObject):
             traceback.print_exc()
             assert rpc_error.code() == grpc.StatusCode.UNAVAILABLE
             assert not wait_for_ready
-        else:
-            assert wait_for_ready
+        # else:
+        #     assert wait_for_ready
 
     async def wait_for_remote_ready(self, timeout: float = 10, max_retries=20):
         # await self.wait_for_channel_ready(timeout)

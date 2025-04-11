@@ -16,7 +16,8 @@ import abc
 import asyncio
 import base64
 import contextlib
-from typing import Generic, Mapping, Sequence, cast
+from dataclasses import is_dataclass
+from typing import Generic, Mapping, Sequence, cast, AsyncContextManager
 import copy
 from functools import partial
 from typing_extensions import override
@@ -44,7 +45,7 @@ from PIL import Image as PILImage
 from typing_extensions import Literal, TypeAlias, TypedDict, Self
 from pydantic import field_validator, model_validator
 
-from tensorpc.core.datamodel.draft import DraftASTNode, DraftBase, DraftObject, JMESPathOp, DraftUpdateOp, apply_draft_update_ops, capture_draft_update, create_draft, create_draft_type_only, enter_op_process_ctx, get_draft_ast_node, insert_assign_draft_op
+from tensorpc.core.datamodel.draft import DraftASTNode, DraftBase, DraftObject, JMESPathOp, DraftUpdateOp, apply_draft_update_ops, apply_draft_update_ops_to_json, capture_draft_update, create_draft, create_draft_type_only, enter_op_process_ctx, get_draft_ast_node, insert_assign_draft_op
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp, UniqueTreeIdForTree
 from tensorpc.dock import marker
 from tensorpc.dock.coretypes import StorageType
@@ -2061,7 +2062,7 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
 @dataclasses.dataclass
 class SimpleCodeEditorProps(MUIComponentBaseProps):
     value: str = ""
-    language: Union[Literal["cpp", "python", "json", "yaml"],
+    language: Union[Literal["cpp", "python", "json", "yaml", "bash"],
                     Undefined] = undefined
     debounce: Union[NumberType, Undefined] = undefined
     tabSize: Union[NumberType, Undefined] = undefined
@@ -2078,7 +2079,7 @@ class SimpleCodeEditorProps(MUIComponentBaseProps):
 class SimpleCodeEditor(MUIComponentBase[SimpleCodeEditorProps]):
 
     def __init__(self, value: str, language: Literal["cpp", "python", "json",
-                                                     "yaml"]) -> None:
+                                                     "yaml", "bash"]) -> None:
         all_evs = [
             FrontendEventType.Change.value,
         ]
@@ -5070,49 +5071,30 @@ class DataUpdate:
     index: int
     update: Any
 
+_T = TypeVar("_T", bound=DataclassType)
 
-class DataOperationType(enum.IntEnum):
-    Set = 0
-    Delete = 1
-    Extend = 2
-    Slice = 3
-    ArraySet = 4
+class _DataListUpdateContext(Generic[_T]):
+    def __init__(self, draft: _T, current_data_length: int):
+        self._update_list: list[tuple[Optional[Union[list[int], int]], list[DraftUpdateOp]]] = []
+        self._already_has_none = False
+        self._current_data_length = current_data_length
+        self.draft = draft
 
-
-@dataclasses.dataclass
-class DataOpSet:
-    items: list[tuple[str, Any]]
-
-
-@dataclasses.dataclass
-class DataOpDelete:
-    keys: list[tuple[str, Any]]
-
-
-@dataclasses.dataclass
-class DataOpArraySet:
-    items: list[tuple[int, Any]]
-
-
-@dataclasses.dataclass
-class DataOpExtend:
-    items: list[tuple[int, Any]]
-    dropCount: Optional[int] = None
-
-
-@dataclasses.dataclass
-class DataOpSlice:
-    start: int
-    end: int
-
-
-@dataclasses.dataclass
-class DataOperation:
-    index: int
-    jmespath: str
-    op: DataOperationType
-    opData: Union[DataOpSet, DataOpDelete, DataOpExtend, DataOpSlice,
-                  DataOpArraySet]
+    @contextlib.contextmanager 
+    def group(self, index: Optional[Union[list[int], int]]):
+        if index is None:
+            assert not self._already_has_none, "only one None index is allowed"
+            self._already_has_none = True
+        elif isinstance(index, int):
+            assert index >= 0 and index < self._current_data_length, \
+                f"index {index} out of range, current data length is {self._current_data_length}"
+        else:
+            for i in index:
+                assert i >= 0 and i < self._current_data_length, \
+                    f"index {i} out of range, current data length is {self._current_data_length}"
+        with capture_draft_update() as ctx:
+            yield 
+        self._update_list.append((index, ctx._ops))
 
 
 class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps,
@@ -5201,76 +5183,46 @@ class DataFlexBox(MUIContainerBase[MUIDataFlexBoxWithDndProps,
                 } for x in updates],
             }))
 
-    def _do_data_operation(self, updates: List[DataOperation],
-                           validate_only: bool):
-        # TODO validate data model
-        for upd in updates:
-            path = upd.jmespath
-            search_res = jmespath.search(path, self.props.dataList[upd.index])
-            if isinstance(search_res, list):
-                if upd.op == DataOperationType.Extend:
-                    assert isinstance(upd.opData, DataOpExtend)
-                    if not validate_only:
-                        if upd.opData.dropCount is not None:
-                            search_res = search_res[:-upd.opData.dropCount]
-                        search_res.extend(upd.opData.items)
-                elif upd.op == DataOperationType.Slice:
-                    assert isinstance(upd.opData, DataOpSlice)
-                    if not validate_only:
-                        search_res[:] = search_res[upd.opData.start:upd.opData.
-                                                   end]
-                elif upd.op == DataOperationType.ArraySet:
-                    assert isinstance(upd.opData, DataOpArraySet)
-                    if not validate_only:
-                        for i, item in upd.opData.items:
-                            search_res[i] = item
-                    else:
-                        # validate all indexes
-                        for i, _ in upd.opData.items:
-                            assert i >= 0 and i < len(search_res)
-                else:
-                    raise ValueError(f"invalid operation {upd.op}")
+    @contextlib.asynccontextmanager
+    async def draft_update(self, model_cls: type[_T]) -> AsyncGenerator[_DataListUpdateContext[_T], None]:
+        assert dataclasses.is_pydantic_dataclass(model_cls), "only pydantic dataclass is supported"
+        assert len(self.props.dataList) != 0, "data list is empty, can't use draft update"
+        # validate DataclassType
+        if dataclasses.is_dataclass(self.props.dataList[0]):
+            assert isinstance(self.props.dataList[0], model_cls)
+        else:
+            model_cls(**self.props.dataList[0])
+        draft = create_draft_type_only(model_cls)
+        ctx = _DataListUpdateContext(draft, len(self.props.dataList))
+        yield ctx
+        none_index_ops: Optional[list[DraftUpdateOp]] = None
+        idx_to_ops: dict[int, list[DraftUpdateOp]] = {}
+        for index, updates in ctx._update_list:
+            if index is None:
+                none_index_ops = updates
+            elif isinstance(index, int):
+                idx_to_ops[index] = updates
             else:
-                assert dataclasses.is_dataclass(search_res) or isinstance(
-                    search_res, dict)
-                if isinstance(search_res, dict):
-                    if upd.op == DataOperationType.Set:
-                        assert isinstance(upd.opData, DataOpSet)
-                        if not validate_only:
-                            for k, v in upd.opData.items:
-                                search_res[k] = v
-                    elif upd.op == DataOperationType.Delete:
-                        assert isinstance(upd.opData, DataOpDelete)
-                        if not validate_only:
-                            for k, v in upd.opData.keys:
-                                del search_res[k]
-                        else:
-                            for k, v in upd.opData.keys:
-                                assert k in search_res
-                    else:
-                        raise ValueError(f"invalid operation {upd.op}")
-                else:
-                    # dataclass
-                    if upd.op == DataOperationType.Set:
-                        assert isinstance(upd.opData, DataOpSet)
-                        if not validate_only:
-                            for k, v in upd.opData.items:
-                                setattr(search_res, k, v)
-                        else:
-                            for k, v in upd.opData.items:
-                                assert hasattr(search_res, k)
-                    else:
-                        raise ValueError(
-                            f"invalid operation {upd.op} for dataclass object, only support `Set`"
-                        )
-
-    async def _operate_datas_in_index(self, updates: List[DataOperation]):
-        self._do_data_operation(updates, False)
-        self._do_data_operation(updates, True)
-        return await self.send_and_wait(
+                for ind in index:
+                    idx_to_ops[ind] = updates
+        if none_index_ops is not None:
+            for i in range(len(self.props.dataList)):
+                if i not in idx_to_ops:
+                    idx_to_ops[i] = none_index_ops
+        for ind, updates in idx_to_ops.items():
+            obj = self.props.dataList[ind]
+            if dataclasses.is_dataclass(obj):
+                apply_draft_update_ops(obj, updates)
+            else:
+                apply_draft_update_ops_to_json(obj, updates)
+        await self.send_and_wait(
             self.create_comp_event({
-                "type": DataListControlType.OperateData.value,
-                "updates": as_dict_no_undefined(updates),
+                "type":
+                DataListControlType.OperateData.value,
+                "updates": [{
+                    "index": x,
+                    "ops": [op.to_jmes_path_op().to_dict() for op in ops]
+                } for x, ops in ctx._update_list],
             }))
 
     async def _comp_bind_update_data(self, event: Event, prop_name: str):

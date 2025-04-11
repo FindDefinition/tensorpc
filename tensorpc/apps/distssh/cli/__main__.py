@@ -9,7 +9,7 @@ def main(
     rank: int,
     world_size: int,
     password: str,
-    ip_folder: str,
+    workdir: str,
     port: int = TENSORPC_APPS_DISTSSH_DEFAULT_PORT,
     username: str = "root",
 ):
@@ -19,7 +19,7 @@ def main(
                 "cmd": " ".join(cmd),
                 "password": password,
                 "username": username,
-                "ip_folder": ip_folder,
+                "workdir": workdir,
                 "rank": rank,
                 "world_size": world_size,
             }

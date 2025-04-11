@@ -13,6 +13,8 @@ import copy
 from collections.abc import Mapping, MutableMapping
 import enum
 from pathlib import Path, PurePath, PurePosixPath
+import shutil
+import traceback
 from typing import (Any, Generic, Optional, TypeVar, Union, get_type_hints)
 
 from mashumaro.codecs.basic import BasicDecoder, BasicEncoder
@@ -213,6 +215,70 @@ class DraftMongoStoreBackend(DraftFileStoreBackendBase):
         path_p = PurePosixPath(path)
         coll = self._db[str(path_p)]
         coll.delete_many({"key": {"$regex": f"^{path_p.name}/"}})
+
+class DraftSimpleFileStoreBackend(DraftFileStoreBackendBase):
+    def __init__(self, root: Path):
+        self._root = root
+    
+    def _get_abs_path(self, path: str):
+        path_p = self._root / Path(path + ".json")
+        return path_p
+
+    async def read(self, path: str) -> Optional[Any]:
+        path_p = self._get_abs_path(path)
+        if not path_p.exists():
+            return None 
+        try:
+            with open(path_p, "r") as f:
+                return json.load(f)
+        except:
+            traceback.print_exc()
+            return None 
+
+    async def write(self, path: str, data: Any) -> None:
+        path_p = self._get_abs_path(path)
+        path_p_parent = path_p.parent 
+        if not path_p_parent.exists():
+            path_p_parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+        with open(path_p, "w") as f:
+            json.dump(data, f)
+
+    async def update(self, path: str, ops: list[DraftUpdateOp]) -> None:
+        # for in-memory store, avoid store and frontend share same dict.
+        ops = [
+            dataclasses.replace(o, opData=json.loads(json.dumps(o.opData)))
+            for o in ops
+        ]
+        data = await self.read(path)
+        if data is None:
+            assert ops[
+                0].op == JMESPathOpType.RootAssign, f"path {path} not exist, {ops[0]}"
+        is_root_changed, root_obj = apply_draft_update_ops_to_json_with_root(
+            data, ops)
+        if is_root_changed:
+            await self.write(path, root_obj)
+        else:
+            await self.write(path, data)
+
+    async def remove(self, path: str) -> None:
+        path_p = self._get_abs_path(path)
+        path_p.unlink()
+
+    async def read_all_childs(self, path: str) -> dict[str, Any]:
+        res = {}
+        for p in self._root.glob(str(Path(path) / "*.json")):
+            relative_path = p.relative_to(self._root)
+            relative_path_no_suffix = relative_path.with_suffix("")
+            with p.open("r") as f:
+                res[str(relative_path_no_suffix)] = json.load(f)
+        return res
+
+    async def remove_folder(self, path: str) -> Any:
+        path_p = Path(path)
+        if not path_p.exists():
+            return False
+        shutil.rmtree(path_p)
+        return True
 
 
 def _is_none_or_undefined(obj: Any):

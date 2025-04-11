@@ -22,7 +22,7 @@ from tensorpc.dock.components.mui import FlexBox
 from tensorpc.dock.constants import TENSORPC_APP_ROOT_COMP
 from tensorpc.dock.core.appcore import ALL_OBSERVED_FUNCTIONS, AppSpecialEventType, RemoteCompEvent, enter_app_context
 from tensorpc.dock.core.component import (AppEvent, AppEventType,
-                                          FrontendEventType, LayoutEvent,
+                                          FrontendEventType, LayoutEvent, RemoteComponentBase,
                                           UIEvent, UpdateComponentsEvent,
                                           patch_uid_keys_with_prefix,
                                           patch_uid_list_with_prefix,
@@ -381,6 +381,10 @@ class RemoteComponentService:
             if isinstance(ui_ev, UpdateComponentsEvent):
                 comp_dict = app.root._get_uid_encoded_to_comp_dict()
                 if _PATCH_IN_REMOTE:
+                    uids = list(comp_dict.keys())
+                    for v in comp_dict.values():
+                        if isinstance(v, RemoteComponentBase):
+                            uids.extend(v._cur_child_uids)
                     ui_ev.remote_component_all_childs = patch_uid_list_with_prefix(
                         list(comp_dict.keys()), prefixes)
                 else:
