@@ -12,6 +12,7 @@ def main(
     workdir: str,
     port: int = TENSORPC_APPS_DISTSSH_DEFAULT_PORT,
     username: str = "root",
+    logdir: str = "",
 ):
     service_config = {
         BuiltinServiceKeys.FaultToleranceSSHServer.value: {
@@ -22,6 +23,7 @@ def main(
                 "workdir": workdir,
                 "rank": rank,
                 "world_size": world_size,
+                "logdir": logdir,
             }
         }
     }
@@ -32,4 +34,5 @@ def main(
 
 
 if __name__ == "__main__":
+    # python -m tensorpc.apps.distssh.cli --rank=0 --world_size=2 --workdir=./build --password= 
     fire.Fire(main)

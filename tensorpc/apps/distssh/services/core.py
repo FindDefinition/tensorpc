@@ -3,6 +3,7 @@ import enum
 from functools import partial
 import json
 from pathlib import Path
+import time
 import traceback
 from typing import Any, Awaitable, Callable, Optional, Union
 
@@ -29,6 +30,10 @@ from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_UI_KEY)
 class CmdStatus(enum.IntEnum):
     IDLE = 0
     RUNNING = 1
+    # indicate servers are shutdown (by user)
+    # if any rank is shutdown by unexpected reason,
+    # master should relaunch cmd for all ranks if enabled.
+    DURING_SHUTDOWN = 2
 
 
 class FTStatus(enum.IntEnum):
@@ -50,9 +55,10 @@ class FTSSHServerArgs:
     rank: int
     world_size: int
 
-    # used to save its ip to a folder to ensure
+    # used to save ip of each worker to a folder to ensure
     # failed worker can discover the master
     # assume your cluster has a NAS.
+    # also save state.
     workdir: str
     cmd: str
     password: str
@@ -72,12 +78,17 @@ class FTSSHServerArgs:
     cmd_shutdown_timeout: int = 10
     cmd_ctrl_c_retry: int = 2
 
+    logdir: str = ""
+
+    cmd_retry_when_reconnect: bool = True
+
 @dataclasses.dataclass
 class FTState:
     label: str
     rank: int
     uuid: str
     ip: str
+    port: int
     is_master: bool 
     cur_cmd: Optional[str] = None
     status: FTStatus = FTStatus.OK
@@ -107,7 +118,7 @@ class FTStatusBoxState:
             color = "gray"
         else:
             if ft_state.ssh_status == SSHStatus.IDLE:
-                color = "deepskyblue"
+                color = "blue"
             elif ft_state.ssh_status == SSHStatus.DISCONNECTED:
                 color = "red"
             elif ft_state.ssh_status == SSHStatus.RUNNING:
@@ -126,6 +137,43 @@ class FTStatusBoxState:
             selected=selected,
         )
 
+class SimpleLogEventType(enum.Enum):
+    LINE = "L"
+    INIT_METADATA = "M"
+
+class SSHEventLogger:
+
+    def __init__(self, outdir: Path, open_mode: str = "w"):
+        self.outdir = outdir
+        self.jsonl_writer = None
+        self._open_mode = open_mode
+
+    def open(self):
+        if self.jsonl_writer is None:
+            self.jsonl_writer = open(self.outdir, self._open_mode)
+
+    def log(self, metrics: dict[str, Any], compact: bool = False):
+        if compact:
+            print(json.dumps(metrics, separators=(',', ':')),
+                  file=self.jsonl_writer,
+                  flush=True)
+        else:
+            print(json.dumps(metrics), file=self.jsonl_writer, flush=True)
+
+    def close(self):
+        if self.jsonl_writer is not None:
+            self.jsonl_writer.close()
+            self.jsonl_writer = None
+
+    def __enter__(self):
+        self.open()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def __del__(self):
+        self.close()
 
 class WorkersStatusBox(mui.DataFlexBox):
     def __init__(self, init_data_list: list[FTStatusBoxState], on_click: Callable[[mui.Event], mui.CORO_NONE], box_size: int = 10):
@@ -220,9 +268,9 @@ class FaultToleranceUIMaster(mui.FlexBox):
             if selected_state is not None:
                 selected_idx = selected_state["rank"]
             ui_states = [FTStatusBoxState.from_ft_state(state, i == selected_idx) for i, state in enumerate(states)]
-            await self.put_app_event(self.worker_status_box.update_event(dataList=ui_states))
+            await self.send_and_wait(self.worker_status_box.update_event(dataList=ui_states))
         else:
-            await self.put_app_event(self.worker_status_box.update_event(dataList=[]))
+            await self.send_and_wait(self.worker_status_box.update_event(dataList=[]))
 
     async def _handle_selected_box_change(self, ev: DraftChangeEvent):
         selected_state_dict = ev.new_value 
@@ -279,34 +327,36 @@ class FaultToleranceSSHServer:
             rank=cfg.rank,
             uuid=uuid.uuid4().hex,
             ip=ip,
+            port=0,
             is_master=cfg.rank == self._master_rank,
         )
         self._is_master = cfg.rank == self._master_rank
-        self._master_ui_state = MasterUIState(
+        master_ui_state = MasterUIState(
             cmd_status=CmdStatus.IDLE,
             client_states=[],
             cmd_history=[],
         )
         for j in range(cfg.world_size):
             if j == self._master_rank:
-                self._master_ui_state.client_states.append(state)
+                master_ui_state.client_states.append(state)
             else:
                 init_client_state = FTState(
                     label=f"{j} ({ip})",
                     rank=j,
                     uuid="",
                     ip="",
+                    port=0,
                     is_master=False,
-                    status=FTStatus.UNKNOWN,
+                    status=FTStatus.WORKER_DISCONNECTED,
                 )
-                self._master_ui_state.client_states.append(init_client_state)
-        self._master_ui = FaultToleranceUIMaster(self._master_rank, self._master_ui_state, self._terminal, prim.get_server_grpc_port(),
+                master_ui_state.client_states.append(init_client_state)
+        self._master_ui = FaultToleranceUIMaster(self._master_rank, master_ui_state, self._terminal, prim.get_server_grpc_port(),
             self._master_start_or_cancel, partial(self._master_shutdown_or_kill_cmd, just_kill=False), 
             partial(self._master_shutdown_or_kill_cmd, just_kill=True))
 
         self._client_ui = FaultToleranceUIClient(state, self._terminal)
 
-        self._master_discovery_fn: Optional[Callable[[], Optional[str]]] = None
+        self._master_discovery_fn: Optional[Callable[[], Optional[tuple[str, str]]]] = None
 
         self._client_robjs: dict[int, AsyncRemoteManager] = {}
         self._master_robj: Optional[AsyncRemoteManager] = None
@@ -315,6 +365,9 @@ class FaultToleranceSSHServer:
         self._cmd_task: Optional[asyncio.Task] = None
 
         self._disconnect_retry_count = 0
+
+        self._cur_logger: Optional[SSHEventLogger] = None
+        self._cmd_start_ts: int = 0
 
     @property 
     def state(self):
@@ -337,15 +390,20 @@ class FaultToleranceSSHServer:
             with file_name.open("w") as f:
                 json.dump({
                     "ip": self.state.ip,
+                    "port": prim.get_server_grpc_port(),
                     "uuid": self.state.uuid,
                 }, f, indent=4)
+        if self._is_master:
+            self._master_ui.dm.model.client_states[self._master_rank].port = prim.get_server_grpc_port()
+        else:
+            self._client_ui.dm.model.port = prim.get_server_grpc_port()
         self._loop_task = asyncio.create_task(self._heartbeat_loop())
         if self._is_master:
             workdir = Path(self._cfg.workdir) 
             if not workdir.exists():
                 workdir.mkdir(parents=True, exist_ok=True, mode=0o755)
             fs_backend = DraftSimpleFileStoreBackend(workdir)
-            self._master_ui.dm.connect_draft_store("_distssh_store", fs_backend)
+            self._master_ui.dm.connect_draft_store(f"_distssh_store_{self._cfg.world_size}", fs_backend)
         set_layout_service = prim.get_service(
             app_serv_names.REMOTE_COMP_SET_LAYOUT_OBJECT)
         if self._is_master:
@@ -374,6 +432,11 @@ class FaultToleranceSSHServer:
             if client_state.ssh_status != SSHStatus.IDLE and client_state.ssh_status != SSHStatus.ERROR:
                 return False 
         return True 
+
+    def set_logdir(self, logdir: str):
+        # real logger will be created when a command started, and reset
+        # when the command finished.
+        self._cfg.logdir = logdir
 
     def _get_ssh_child_pids(self):
         state = self._terminal.get_current_state()
@@ -477,7 +540,7 @@ class FaultToleranceSSHServer:
             for i in range(self._cfg.cmd_ctrl_c_retry):
                 await self._terminal.send_ctrl_c()
                 try:
-                    with async_timeout.timeout(self._cfg.cmd_shutdown_timeout):
+                    async with async_timeout.timeout(self._cfg.cmd_shutdown_timeout):
                         await self._cmd_task
                         return
                 except asyncio.TimeoutError:
@@ -487,7 +550,7 @@ class FaultToleranceSSHServer:
             # 2. send sigterm to all subprocess of ssh process
             self._term_or_kill_all_ssh_child(True)
             try:
-                with async_timeout.timeout(self._cfg.cmd_shutdown_timeout):
+                async with async_timeout.timeout(self._cfg.cmd_shutdown_timeout):
                     await self._cmd_task
                     return
             except asyncio.TimeoutError:
@@ -496,48 +559,81 @@ class FaultToleranceSSHServer:
         self._term_or_kill_all_ssh_child(False)
         await self._cmd_task
 
+    def _line_event_cb(self, ev: terminal.TerminalLineEvent):
+        if self._cur_logger is not None:
+            relative_ts = (ev.ts - self._cmd_start_ts) // 1000
+            self._cur_logger.log({
+                "ts": relative_ts,
+                "t": SimpleLogEventType.LINE.value,
+                "d": ev.d.decode("utf-8")
+            })
 
     async def _cmd_waiter(self, cmd: str):
         shutdown_ev = prim.get_async_shutdown_event()
         shutdown_ev_task = asyncio.create_task(shutdown_ev.wait())
         LOGGER.warning("Launch command: %s", cmd)
-        run_cmd_task = asyncio.create_task(self._terminal.ssh_command_rpc(cmd))
-        if self._is_master:
-            async with self._master_ui.dm.draft_update() as draft:
-                draft.client_states[self._master_rank].cur_cmd = cmd 
-                draft.client_states[self._master_rank].ssh_status = SSHStatus.RUNNING
-        else:
-            async with self._client_ui.dm.draft_update() as draft:
-                draft.cur_cmd = cmd 
-                draft.ssh_status = SSHStatus.RUNNING
-        if not self._is_master:
-            await self._client_set_worker_state()
-        done, pending = await asyncio.wait(
-            [shutdown_ev_task, run_cmd_task],
-            return_when=asyncio.FIRST_COMPLETED)
-        if shutdown_ev_task in done:
-            await cancel_task(run_cmd_task)
-            # TODO use ctrl-c->terminal->kill sequence
-            await self._terminal.disconnect()
-            return 
-
-        assert run_cmd_task in done, "run_cmd_task should be done"
-        res = run_cmd_task.result()
-        ssh_status = SSHStatus.IDLE if res.return_code == 0 else SSHStatus.ERROR
-
-        if self._is_master:
-            async with self._master_ui.dm.draft_update() as draft:
-                draft.client_states[self._master_rank].cur_cmd = None
-                draft.client_states[self._master_rank].ssh_status = ssh_status
-            await self._master_sync_cmd_status()
-        else:
-            async with self._client_ui.dm.draft_update() as draft:
-                draft.cur_cmd = None
-                draft.ssh_status = ssh_status
-            if self._master_robj is not None:
+        try:
+            if self._cfg.logdir != "":
+                logpath = Path(self._cfg.logdir) / f"cmd-log-{self.state.rank}.jsonl"
+                if not logpath.parent.exists():
+                    logpath.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+                logger = SSHEventLogger(logpath, open_mode="a")
+                logger.open()
+                self._cur_logger = logger
+            self._cmd_start_ts = time.time_ns()
+            if self._cur_logger is not None:
+                self._cur_logger.log({
+                    "ts": self._cmd_start_ts,
+                    "t": SimpleLogEventType.INIT_METADATA.value,
+                    "d": {
+                        "start_ts": self._cmd_start_ts,
+                        "cmd": cmd,
+                        "rank": self.state.rank,
+                    }
+                })
+            run_cmd_task = asyncio.create_task(self._terminal.ssh_command_rpc(cmd))
+            if self._is_master:
+                async with self._master_ui.dm.draft_update() as draft:
+                    draft.client_states[self._master_rank].cur_cmd = cmd 
+                    draft.client_states[self._master_rank].ssh_status = SSHStatus.RUNNING
+            else:
+                async with self._client_ui.dm.draft_update() as draft:
+                    draft.cur_cmd = cmd 
+                    draft.ssh_status = SSHStatus.RUNNING
+            if not self._is_master:
                 await self._client_set_worker_state()
-        self._cmd_task = None
+            done, pending = await asyncio.wait(
+                [shutdown_ev_task, run_cmd_task],
+                return_when=asyncio.FIRST_COMPLETED)
+            if shutdown_ev_task in done:
+                await cancel_task(run_cmd_task)
+                # TODO use ctrl-c->terminal->kill sequence
+                await self._terminal.disconnect()
+                return 
 
+            assert run_cmd_task in done, "run_cmd_task should be done"
+            res = run_cmd_task.result()
+            ssh_status = SSHStatus.IDLE if res.return_code == 0 else SSHStatus.ERROR
+
+            if self._is_master:
+                async with self._master_ui.dm.draft_update() as draft:
+                    draft.client_states[self._master_rank].cur_cmd = None
+                    draft.client_states[self._master_rank].ssh_status = ssh_status
+                await self._master_sync_cmd_status()
+            else:
+                async with self._client_ui.dm.draft_update() as draft:
+                    draft.cur_cmd = None
+                    draft.ssh_status = ssh_status
+                if self._master_robj is not None:
+                    await self._client_set_worker_state()
+            self._cmd_task = None
+        except:
+            LOGGER.error("cmd waiter error.", exc_info=True)
+            raise
+        finally:
+            if self._cur_logger is not None:
+                self._cur_logger.close()
+                self._cur_logger = None
 
     async def _master_sync_cmd_status(self):
         is_all_ssh_finish = self._master_check_is_all_ssh_idle_or_err()
@@ -549,7 +645,7 @@ class FaultToleranceSSHServer:
                 draft_master.cmd_status = CmdStatus.RUNNING
 
 
-    async def set_worker_state(self, state: FTState):
+    async def set_worker_state(self, state: FTState) -> FTStatus:
         assert state.rank != self._master_rank, "master rank should not be set"
         if self.state.is_master:
             async with self._master_ui.dm.draft_update() as draft_master:
@@ -560,16 +656,18 @@ class FaultToleranceSSHServer:
                     await prev_robj.close()
                 except:
                     traceback.print_exc()
-            robj = AsyncRemoteManager(f"{state.ip}:{prim.get_server_grpc_port()}")
+            robj = AsyncRemoteManager(f"{state.ip}:{state.port}")
             self._client_robjs[state.rank] = robj
             await self._master_sync_cmd_status()
+        return self._master_ui.dm.model.client_states[state.rank].status
 
     async def _query_master_robj(self):
         folder_p = Path(self._cfg.workdir)
         port = prim.get_server_grpc_port()
         if self._master_discovery_fn is not None:
-            master_ip = self._master_discovery_fn()
-            if master_ip is not None:
+            master_ip_port = self._master_discovery_fn()
+            if master_ip_port is not None:
+                master_ip, port = master_ip_port
                 robj = AsyncRemoteManager(f"{master_ip}:{port}")
                 try:
                     await robj.health_check(timeout=self._cfg.disconnect_rpc_check_timeout, wait_for_ready=True)
@@ -589,6 +687,8 @@ class FaultToleranceSSHServer:
                     master_info = json.load(f)
                     master_ip = master_info["ip"]
                     uuid = master_info["uuid"]
+                    if "port" in master_info:
+                        port = master_info["port"]
                     robj = AsyncRemoteManager(f"{master_ip}:{port}")
                     try:
                         await robj.health_check(timeout=self._cfg.disconnect_rpc_check_timeout, wait_for_ready=True)
@@ -605,95 +705,97 @@ class FaultToleranceSSHServer:
     async def _heartbeat_loop(self):
         shutdown_ev = prim.get_async_shutdown_event()
         shutdown_ev_task = asyncio.create_task(shutdown_ev.wait())
-
-        if self.state.is_master:
-            while True:
-                sleep_task = asyncio.create_task(
-                    asyncio.sleep(self._cfg.heartbeat_interval))
-                done, _ = await asyncio.wait(
-                    [shutdown_ev_task, sleep_task],
-                    return_when=asyncio.FIRST_COMPLETED)
-                if shutdown_ev_task in done:
-                    await cancel_task(sleep_task)
-                    break 
-                if self.state.status == FTStatus.OK:
-                    for client_state in self._master_ui_state.client_states:
-                        if not client_state.is_master:
-                            assert client_state.status != FTStatus.UNKNOWN
-                    tasks = []
-                    ranks: list[int] = []
-                    for rank, robj in self._client_robjs.items():
-                        tasks.append(robj.health_check(timeout=self._cfg.disconnect_rpc_check_timeout))
-                        ranks.append(rank)
-                    res = asyncio.gather(*tasks, return_exceptions=True)
-                    has_disconnect = False
-                    async with self._master_ui.dm.draft_update() as draft:
-                        for rank, r in zip(ranks, res):
-                            if isinstance(r, BaseException):
-                                draft.client_states[rank].status = FTStatus.WORKER_DISCONNECTED
-                                poped_robj = self._client_robjs.pop(rank)
-                                try:
-                                    await poped_robj.close()
-                                except:
-                                    traceback.print_exc()
-                                LOGGER.warning(f"worker {rank} disconnected")
-                                has_disconnect = True
-                        if has_disconnect:
-                            draft.client_states[self._master_rank].status = FTStatus.WORKER_DISCONNECTED
-                else:
-                    if len(self._client_robjs) != self._cfg.world_size - 1:
-                        # get current disconnected worker rank
-                        disconnected_ranks = []
-                        for client_st in self._master_ui.dm.model.client_states:
-                            if not client_st.is_master and client_st.rank not in self._client_robjs:
-                                disconnected_ranks.append(client_st.rank)
-                        self._disconnect_retry_count += 1
-                        LOGGER.warning("master wait for all worker retry: %d, disconnected ranks: %s", self._disconnect_retry_count, str(disconnected_ranks))
-                        if self._disconnect_retry_count > self._cfg.disconnect_total_retry:
-                            LOGGER.warning("master wait for all worker timeout, exit.")
-                            shutdown_ev.set()
-                            break
-                    else:
+        try:
+            if self.state.is_master:
+                while True:
+                    sleep_task = asyncio.create_task(
+                        asyncio.sleep(self._cfg.heartbeat_interval))
+                    done, _ = await asyncio.wait(
+                        [shutdown_ev_task, sleep_task],
+                        return_when=asyncio.FIRST_COMPLETED)
+                    if shutdown_ev_task in done:
+                        await cancel_task(sleep_task)
+                        break 
+                    # LOGGER.warning("Master Heartbeat|status: %s.", self.state.status.name)
+                    if self.state.status == FTStatus.OK:
+                        is_all_worker_conn = self._num_client_robj_is_valid()
+                        tasks = []
+                        ranks: list[int] = []
+                        for rank, robj in self._client_robjs.items():
+                            tasks.append(robj.health_check(timeout=self._cfg.disconnect_rpc_check_timeout))
+                            ranks.append(rank)
+                        res = asyncio.gather(*tasks, return_exceptions=True)
+                        has_disconnect = False
                         async with self._master_ui.dm.draft_update() as draft:
-                            draft.client_states[self._master_rank].status = FTStatus.OK
-        else:
-            while True:
-                sleep_task = asyncio.create_task(
-                    asyncio.sleep(self._cfg.heartbeat_interval))
-                done, _ = await asyncio.wait(
-                    [shutdown_ev_task, sleep_task],
-                    return_when=asyncio.FIRST_COMPLETED)
-                if shutdown_ev_task in done:
-                    await cancel_task(sleep_task)
-                    break 
-                LOGGER.info("Worker Heartbeat|status: %s.", self.state.status.name)
-                if self.state.status == FTStatus.OK:
-                    if self._master_robj is None:
+                            for rank, r in zip(ranks, res):
+                                if isinstance(r, BaseException):
+                                    draft.client_states[rank].status = FTStatus.WORKER_DISCONNECTED
+                                    poped_robj = self._client_robjs.pop(rank)
+                                    try:
+                                        await poped_robj.close()
+                                    except:
+                                        traceback.print_exc()
+                                    LOGGER.warning(f"worker {rank} disconnected")
+                                    has_disconnect = True
+                            if has_disconnect or not is_all_worker_conn:
+                                draft.client_states[self._master_rank].status = FTStatus.WORKER_DISCONNECTED
+                    else:
+                        if len(self._client_robjs) != self._cfg.world_size - 1:
+                            # get current disconnected worker rank
+                            disconnected_ranks = []
+                            for client_st in self._master_ui.dm.model.client_states:
+                                if not client_st.is_master and client_st.rank not in self._client_robjs:
+                                    disconnected_ranks.append(client_st.rank)
+                            self._disconnect_retry_count += 1
+                            LOGGER.warning("master wait for all worker retry: %d, disconnected ranks: %s", self._disconnect_retry_count, str(disconnected_ranks))
+                            if self._disconnect_retry_count > self._cfg.disconnect_total_retry:
+                                LOGGER.warning("master wait for all worker timeout, exit.")
+                                shutdown_ev.set()
+                                break
+                        else:
+                            async with self._master_ui.dm.draft_update() as draft:
+                                draft.client_states[self._master_rank].status = FTStatus.OK
+            else:
+                while True:
+                    sleep_task = asyncio.create_task(
+                        asyncio.sleep(self._cfg.heartbeat_interval))
+                    done, _ = await asyncio.wait(
+                        [shutdown_ev_task, sleep_task],
+                        return_when=asyncio.FIRST_COMPLETED)
+                    if shutdown_ev_task in done:
+                        await cancel_task(sleep_task)
+                        break 
+                    LOGGER.info("Worker Heartbeat|status: %s.", self.state.status.name)
+                    if self.state.status == FTStatus.OK:
+                        if self._master_robj is None:
+                            robj = await self._query_master_robj()
+                            if robj is None:
+                                LOGGER.warning(f"Master disconnected")
+                                async with self._client_ui.dm.draft_update() as draft:
+                                    draft.status = FTStatus.MASTER_DISCONNECTED
+                                continue 
+                            self._master_robj = robj
+                        else:
+                            robj = self._master_robj
+                        await self._client_set_worker_state()
+                    else:
                         robj = await self._query_master_robj()
                         if robj is None:
-                            LOGGER.warning(f"Master disconnected")
+                            self._disconnect_retry_count += 1
+                            LOGGER.warning("worker wait for master retry: %d", self._disconnect_retry_count)
+                            if self._disconnect_retry_count > self._cfg.disconnect_total_retry:
+                                LOGGER.warning("worker wait for master timeout, exit.")
+                                prim.get_async_shutdown_event().set()
+                                break
+                        else:
+                            LOGGER.warning(f"Master {robj.url} connected")
+
+                            self._master_robj = robj
                             async with self._client_ui.dm.draft_update() as draft:
-                                draft.status = FTStatus.MASTER_DISCONNECTED
-                            continue 
-                        self._master_robj = robj
-                    else:
-                        robj = self._master_robj
-                    await self._client_set_worker_state()
-                else:
-                    robj = await self._query_master_robj()
-                    if robj is None:
-                        self._disconnect_retry_count += 1
-                        LOGGER.warning("worker wait for master retry: %d", self._disconnect_retry_count)
-                        if self._disconnect_retry_count > self._cfg.disconnect_total_retry:
-                            LOGGER.warning("worker wait for master timeout, exit.")
-                            prim.get_async_shutdown_event().set()
-                            break
-                    else:
-                        LOGGER.warning(f"Master {robj.url} connected")
-
-                        self._master_robj = robj
-                        async with self._client_ui.dm.draft_update() as draft:
-                            self._disconnect_retry_count = 0
-                            draft.status = FTStatus.OK
-
-        print("heartbeat loop exit")
+                                self._disconnect_retry_count = 0
+                                draft.status = FTStatus.OK
+        except:
+            LOGGER.warning("heartbeat loop exception", exc_info=True)
+            raise 
+        finally:
+            print("heartbeat loop exit")

@@ -434,7 +434,8 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
                             path: str,
                             backend_map: Union[DraftStoreBackendBase, Mapping[str, DraftStoreBackendBase]]):
         """Register event handler that store and send update info to your backend.
-        WARNING: this function must be called before mount.
+
+        **WARNING**: this function must be called before mount.
         """
         assert self._is_model_dataclass, "only support dataclass model when use storage"
         assert not self.is_mounted(), "you should call this function when unmounted."

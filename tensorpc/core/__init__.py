@@ -20,6 +20,8 @@ class BuiltinServiceKeys(enum.Enum):
     FileOps = f"tensorpc.services.collection{TENSORPC_SPLIT}FileOps"
     ArgServer = f"tensorpc.services.collection{TENSORPC_SPLIT}ArgServer"
     KVStore = f"tensorpc.services.collection{TENSORPC_SPLIT}KVStore"
+    ShmKVStore = f"tensorpc.services.collection{TENSORPC_SPLIT}ShmKVStore"
+
     SpeedTestServer = f"tensorpc.services.collection{TENSORPC_SPLIT}SpeedTestServer"
     Flow = f"tensorpc.dock.serv.core{TENSORPC_SPLIT}Flow"
     RemoteComponentService = f"tensorpc.dock.serv.remote_comp{TENSORPC_SPLIT}RemoteComponentService"
@@ -35,6 +37,7 @@ BUILTIN_SERVICES = [
     Service(BuiltinServiceKeys.FileOps.value, {}),
     Service(BuiltinServiceKeys.ArgServer.value, {}),
     Service(BuiltinServiceKeys.KVStore.value, {}),
+    Service(BuiltinServiceKeys.ShmKVStore.value, {}),
     Service(BuiltinServiceKeys.SpeedTestServer.value, {}),
     Service(BuiltinServiceKeys.Flow.value, {}),
     Service(BuiltinServiceKeys.RemoteComponentService.value, {}),

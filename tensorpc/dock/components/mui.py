@@ -1296,7 +1296,15 @@ class ListItemButton(MUIContainerBase[ListItemButtonProps, MUIComponentType]):
         return self._update_props_base(propcls)
 
 
-class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
+@dataclasses.dataclass
+class MUIFlexBoxWithDndPropsAnimated(MUIFlexBoxWithDndProps):
+    animatedProps: Union[Dict[str, Any], Undefined] = undefined
+    # when duration is 0, disable loop. can be used to implement
+    # frequency animation.
+    animatedDuration: Union[NumberType, Undefined] = undefined
+
+
+class FlexBox(MUIContainerBase[MUIFlexBoxWithDndPropsAnimated, MUIComponentType]):
 
     def __init__(self,
                  children: Optional[LayoutType] = None,
@@ -1307,7 +1315,7 @@ class FlexBox(MUIContainerBase[MUIFlexBoxWithDndProps, MUIComponentType]):
         if children is not None and isinstance(children, Sequence):
             children = {str(i): v for i, v in enumerate(children)}
         super().__init__(base_type,
-                         MUIFlexBoxWithDndProps,
+                         MUIFlexBoxWithDndPropsAnimated,
                          children,
                          uid=uid,
                          app_comp_core=app_comp_core,
