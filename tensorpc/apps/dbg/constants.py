@@ -122,6 +122,8 @@ class TracerSingleResult:
     trace_events: Optional[List[Any]] = None
     site_packages_prefix: Optional[str] = None
     external_events: Optional[List[Any]] = None
+    is_tar: bool = False
+    fname: str = ""
 
 @dataclasses.dataclass
 class TraceResult:

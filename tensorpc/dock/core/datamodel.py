@@ -110,7 +110,7 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
         self.event_draft_update: EventSlotEmitter[
             list[DraftUpdateOp]] = self._create_emitter_event_slot(
                 self._backend_draft_update_event_key)
-        self.event_storage_fetched: EventSlotNoArgEmitter = self._create_emitter_event_slot_noarg(
+        self.event_storage_fetched: EventSlotEmitter[_T] = self._create_emitter_event_slot(
             self._backend_storage_fetched_event_key)
 
         self._draft_store_handler_registered: bool = False
@@ -461,13 +461,14 @@ class DataModel(ContainerBase[DataModelProps, Component], Generic[_T]):
     async def _fetch_internal_data_from_draft_store(self, store: DraftFileStorage):
         assert dataclasses.is_dataclass(
             self.model), "only support dataclass model"
+        prev_model = self._model
         self._model = await store.fetch_model()
         self.props.dataObject = self._model
         # user should init their external fields in this event.
         # TODO should we capture draft here?
         await self.flow_event_emitter.emit_async(
             self._backend_storage_fetched_event_key,
-            Event(self._backend_storage_fetched_event_key, None))
+            Event(self._backend_storage_fetched_event_key, prev_model))
         # finally sync the model.
         await self.sync_model()
         await self._run_all_draft_change_handlers_when_init()

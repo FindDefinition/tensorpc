@@ -1245,7 +1245,8 @@ class SSHClient:
             enable_raw_event: bool = True,
             line_raw_callback: Optional[Callable[[LineRawEvent],
                                                        Awaitable[None]]] = None,
-            conn_set_callback: Optional[Callable[[Optional[asyncssh.SSHClientConnection]], None]] = None):
+            conn_set_callback: Optional[Callable[[Optional[asyncssh.SSHClientConnection]], None]] = None,
+            shell_type_callback: Optional[Callable[[ShellInfo], None]] = None):
         if env is None:
             env = {}
         # TODO better keepalive
@@ -1263,6 +1264,8 @@ class SSHClient:
             async with conn_ctx as conn:
                 assert isinstance(conn, asyncssh.SSHClientConnection)
                 shell_type = await self.determine_shell_type_by_conn(conn)
+                if shell_type_callback is not None:
+                    shell_type_callback(shell_type)
                 LOGGER.warning(
                     "SSH connection established, shell type: %s, os type: %s",
                     shell_type.type, shell_type.os_type)
@@ -1368,7 +1371,7 @@ class SSHClient:
                     wait_tasks = [
                         asyncio.create_task(inp_queue.get()), shutdown_task, loop_task
                     ]
-                await loop_task
+                # await loop_task
         except BaseException as exc:
             await callback(_warp_exception_to_event(exc, self.uid))
         finally:

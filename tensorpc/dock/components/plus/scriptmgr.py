@@ -617,8 +617,7 @@ class ScriptManagerV2(mui.FlexBox):
         cur_script_draft = draft.scripts[draft.cur_script_idx]
         cur_code_draft = cur_script_draft.states[cur_script_draft.language]
         code_path_draft = create_literal_draft(f"{self._editor_path_uid}/%s.%s") % (cur_script_draft.label, cur_script_draft.language)
-        self.code_editor.bind_draft_change_uncontrolled(self.dm, 
-            cur_code_draft.code, 
+        self.code_editor.bind_draft_change_uncontrolled(cur_code_draft.code, 
             code_path_draft, cur_script_draft.language,
             lang_modifier=lambda x: _LANG_TO_VSCODE_MAPPING[x])
         from tensorpc.dock.flowapp.appstorage import AppDraftFileStoreBackend
@@ -685,7 +684,7 @@ class ScriptManagerV2(mui.FlexBox):
                 value=script.states[script.language].code,
                 path=self._get_path(script.label, script.language)))
 
-    async def _on_editor_ready(self):
+    async def _on_editor_ready(self, prev_model=None):
         draft = self.dm.get_draft()
         model = self.dm.model
         if model.scripts:

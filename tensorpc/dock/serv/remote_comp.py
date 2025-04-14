@@ -30,7 +30,7 @@ from tensorpc.dock.core.component import (AppEvent, AppEventType,
 from tensorpc.dock.core.reload import AppReloadManager, FlowSpecialMethods
 from tensorpc.dock.coretypes import split_unique_node_id
 from tensorpc.dock.flowapp.app import App, EditableApp
-from tensorpc.dock.serv.common import handle_file_resource
+from tensorpc.dock.serv.common import handle_file_resource, REMOTE_APP_LOGGER
 from tensorpc.dock.serv_names import serv_names
 from urllib import parse
 
@@ -176,7 +176,8 @@ class RemoteComponentService:
             if app_obj.mounted_app_meta is not None and app_obj.mounted_app_meta.remote_gen_queue is not None:
                 app_obj.shutdown_ev.set()
                 return
-        print("UNMOUNT", key)
+        if not is_local_call:
+            REMOTE_APP_LOGGER.warning("Unmount remote comp %s", key)
             # raise ValueError("app is mounted via remote generator, you can't call unmount")
         with enter_app_context(app_obj.app):
             await app_obj.app._flowapp_special_eemitter.emit_async(AppSpecialEventType.RemoteCompUnmount, None)
@@ -212,7 +213,7 @@ class RemoteComponentService:
 
     async def mount_app_generator(self, key: str,
                         prefixes: List[str], url: str = "", port: int = -1):
-        print("MOUNT GENERATOR", key)
+        REMOTE_APP_LOGGER.warning("Mount remote comp %s (Generator)", key)
         assert key in self._app_objs, key
         app_obj = self._app_objs[key]
         try:
@@ -244,7 +245,7 @@ class RemoteComponentService:
                             await cancel_task(task)
                         break
                 except asyncio.CancelledError:
-                    print("CANCELLED")
+                    REMOTE_APP_LOGGER.warning("Remote comp %s (Generator) cancelled", key)
                     await cancel_task(wait_queue_task)
                     await cancel_task(shutdown_task)
                     break
@@ -252,7 +253,7 @@ class RemoteComponentService:
             traceback.print_exc()
             raise 
         finally:
-            print("UNMOUNT GENERATOR", key)
+            REMOTE_APP_LOGGER.warning("Unmount remote comp %s (Generator)", key)
             await self.unmount_app(key, is_local_call=True)
 
     async def _send_loop(self, app_obj: AppObject):

@@ -64,7 +64,7 @@ from ..jsonlike import JsonLikeType, BackendOnlyProp, ContextMenuData, JsonLikeN
 from ..core import colors
 from ..core.component import (
     AppComponentCore, AppEvent, AppEventType, BasicProps, Component,
-    ContainerBase, ContainerBaseProps, EventHandler, EventSlot,
+    ContainerBase, ContainerBaseProps, DraftOpUserData, EventHandler, EventSlot,
     EventSlotEmitter, EventSlotNoArgEmitter, SimpleEventType,
     FlowSpecialMethods, Fragment, FrontendEventType, NumberType, T_base_props,
     T_child, T_container_props, TaskLoopEvent, UIEvent, UIRunStatus, UIType,
@@ -2038,7 +2038,6 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
 
     def bind_draft_change_uncontrolled(
             self,
-            model_comp: DataModel,
             draft: Any,
             path_draft: Optional[Any] = None,
             lang_draft: Optional[Any] = None,
@@ -2047,6 +2046,9 @@ class MonacoEditor(MUIComponentBase[MonacoEditorProps]):
             save_event_prep: Optional[Callable[[MonacoEditorSaveEvent], None]] = None):
         assert not self.is_mounted(), "must be called when unmount"
         assert isinstance(draft, DraftBase)
+        assert isinstance(draft._tensorpc_draft_attr_userdata, DraftOpUserData), "you must use comp.get_draft_target() to get draft"
+        model_comp: DataModel = cast(Any, draft._tensorpc_draft_attr_userdata.component)
+        assert isinstance(model_comp, DataModel)
         draft_dict: Dict[str, Any] = {"value": draft}
         if path_draft is not None:
             assert isinstance(path_draft, DraftBase)

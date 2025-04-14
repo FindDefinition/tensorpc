@@ -1,3 +1,4 @@
+from queue import Queue
 from types import FrameType
 from typing import Annotated, Any, Awaitable, Callable, Optional
 from tensorpc.core import dataclass_dispatch as dataclasses 
@@ -49,7 +50,7 @@ class TracerState:
 
     @staticmethod
     def create_new_runtime(cfg: TracerConfig, frame_loc: FrameLocMeta) -> TracerRuntimeState:
-        runtime = TracerRuntimeState(cfg, TraceMetrics(0), frame_loc)
+        runtime = TracerRuntimeState(cfg, TraceMetrics(cfg.breakpoint_count), frame_loc)
         return runtime
 
 @dataclasses.dataclass(config=dataclasses.PyDanticConfigForAnyObject)
@@ -70,6 +71,7 @@ class Breakpoint:
     release_fn: Annotated[Optional[Callable[[], Awaitable[None]]], DraftFieldMeta(is_external=True)] = None
     launch_trace_fn: Annotated[Optional[Callable[[TracerConfig], Awaitable[None]]], DraftFieldMeta(is_external=True)] = None
     is_external: bool = False
+    queue: Annotated[Optional[Queue], DraftFieldMeta(is_external=True)] = None
 
     @staticmethod 
     def generate_frame_select_items(frame: FrameType):

@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import Callable, Optional, Union, Coroutine
 
 from tensorpc.core.defs import FileDesc, FileResourceRequest, FileResource
+from tensorpc.utils.rich_logging import get_logger
 
+
+APP_LOGGER = get_logger("tensorpc.dock")
+REMOTE_APP_LOGGER = get_logger("tensorpc.dock[R]")
 
 async def handle_file_resource(req: FileResourceRequest, handler: Callable[[FileResourceRequest], Union[FileResource, Coroutine[None, None, FileResource]]], chunk_size: int, count: Optional[int]):
     # base = req.key

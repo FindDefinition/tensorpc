@@ -240,7 +240,7 @@ class ComputeFlow(mui.FlexBox):
         path_breadcrumb.event_change.on(self.handle_breadcrumb_click)
         show_bottom_panel_btn.bind_draft_change(draft.settings.isBottomPanelVisible)
         show_right_panel_btn.bind_draft_change(draft.settings.isRightPanelVisible)
-        self.code_editor.bind_draft_change_uncontrolled(self.dm, flow_draft.selected_node_code, 
+        self.code_editor.bind_draft_change_uncontrolled(flow_draft.selected_node_code, 
             path_draft=flow_draft.selected_node_code_path, 
             lang_draft=flow_draft.selected_node_code_language,
             save_event_prep=partial(self._process_save_ev_before_save, drafts=flow_draft))
