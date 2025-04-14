@@ -1,4 +1,5 @@
 """Client for tensorpc builtin service `ShmKVStore`."""
+import time
 from typing import Any
 from tensorpc.core.asyncclient import AsyncRemoteObject
 from tensorpc.core.client import RemoteObject
@@ -14,10 +15,13 @@ class ShmKVStoreClient:
     def store_array_tree(self, key: str, arr_tree: Any):
         variables, treespec = core_io.extract_arrays_from_data(arr_tree, (np.ndarray,))
         arr_desps = [(a.shape, a.dtype) for a in variables] # type: ignore
-        segments: list[SharedArraySegment] = self._robj.remote_call(f"{self._serv_key}.get_or_create_shared_array_segments", key, arr_desps)
+        segment_descs: list[SharedArraySegmentDesc] = self._robj.remote_call(f"{self._serv_key}.get_or_create_shared_array_segments", key, arr_desps)
         # copy to shm
+        segments = [s.get_segment() for s in segment_descs]
         for i, a in enumerate(variables):
             segments[i].get_array_view()[:] = a
+        for segment in segments:
+            segment.close_in_remote()
         # send tree spec
         self._robj.remote_call(f"{self._serv_key}.set_item_treespec", key, treespec, arr_desps)
 
@@ -55,10 +59,13 @@ class ShmKVStoreAsyncClient:
     async def store_array_tree(self, key: str, arr_tree: Any):
         variables, treespec = core_io.extract_arrays_from_data(arr_tree, (np.ndarray,))
         arr_desps = [(a.shape, a.dtype) for a in variables] # type: ignore
-        segments: list[SharedArraySegment] = await self._robj.remote_call(f"{self._serv_key}.get_or_create_shared_array_segments", key, arr_desps)
+        segment_descs: list[SharedArraySegmentDesc] = await self._robj.remote_call(f"{self._serv_key}.get_or_create_shared_array_segments", key, arr_desps)
         # copy to shm
+        segments = [s.get_segment() for s in segment_descs]
         for i, a in enumerate(variables):
             segments[i].get_array_view()[:] = a
+        for segment in segments:
+            segment.close_in_remote()
         # send tree spec
         await self._robj.remote_call(f"{self._serv_key}.set_item_treespec", key, treespec, arr_desps)
 

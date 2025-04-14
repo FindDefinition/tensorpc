@@ -359,7 +359,7 @@ class ShmKVStore:
             segments.append(SharedArraySegment(shm, shape, dtype))
 
         self._store_shared_segments[key] = segments
-        return segments
+        return [s.get_desc() for s in segments]
 
     def set_item_treespec(self, key: str, treespec: Any, arr_desps: list[tuple[list[int], np.dtype]]):
         # validate value_arr_desps
