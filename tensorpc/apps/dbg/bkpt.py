@@ -304,6 +304,12 @@ def _patch_events_pid_for_pytorch_dist(events: List[Any]):
             # set thread id to rank
             ev["pid"] = pid
 
+def force_stop_trace():
+    global RECORDING
+    RECORDING = False
+    _TRACER_WRAPPER.stop()
+    _TRACER_WRAPPER.reset_tracer()
+    BACKGROUND_SERVER.execute_service(serv_names.DBG_FORCE_TRACE_STOP)
 
 def breakpoint(name: Optional[str] = None,
                timeout: Optional[float] = None,

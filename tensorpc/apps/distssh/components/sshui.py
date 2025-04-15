@@ -6,7 +6,7 @@ import tensorpc.core.dataclass_dispatch as dataclasses
 from tensorpc.dock.components import mui
 import tensorpc.core.datamodel as D
 import psutil
-from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_UI_KEY,
+from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, TENSORPC_DISTSSH_UI_KEY,
                                              TENSORPC_ENV_DISTSSH_URL_WITH_PORT
                                              )
 from ..typedefs import FTState, CmdStatus, MasterUIState, FTStatusBoxState
@@ -38,10 +38,11 @@ class WorkersStatusBox(mui.DataFlexBox):
 class FaultToleranceUIMaster(mui.FlexBox):
 
     def __init__(self, master_rank: int, ui_state: MasterUIState,
-                 term: terminal.AsyncSSHTerminal, port: int,
-                 start_or_cancel_fn: Callable[[], mui.CORO_NONE],
-                 stop_fn: Callable[[], mui.CORO_NONE],
-                 kill_fn: Callable[[], mui.CORO_NONE]):
+                 term: terminal.AsyncSSHTerminal, debug_panel: MasterDebugPanel, port: int,
+                 start_or_cancel_fn: Callable[[], mui.CORO_ANY],
+                 stop_fn: Callable[[], mui.CORO_ANY],
+                 kill_fn: Callable[[], mui.CORO_ANY],
+                 release_bkpt_fn: Callable[[], Awaitable[None]]):
         master_state = ui_state.client_states[master_rank]
         states = ui_state.client_states
         self._master_rank = master_rank
@@ -50,6 +51,7 @@ class FaultToleranceUIMaster(mui.FlexBox):
             title = "Main Worker"
         else:
             title = f"Worker ({master_state.rank})"
+        self._release_bkpt_fn = release_bkpt_fn
 
         start_or_cancel_btn = mui.IconButton(
             mui.IconType.PlayArrow, start_or_cancel_fn).prop(iconSize="small",
@@ -68,7 +70,9 @@ class FaultToleranceUIMaster(mui.FlexBox):
             confirmTitle="Dangerous Operation",
             confirmMessage="Are you sure to kill ALL running process?",
             tooltip="kill all child process")
-
+        enable_control_btn = mui.TooltipFlexBox("Toggle all pth_control_point in your running program.", [
+            mui.ToggleButton(icon=mui.IconType.Adb, callback=self._handle_toggle_btn).prop(muiColor="success", size="small", )
+        ]).prop(enterDelay=400)
         header_str = mui.Typography(title).prop(variant="body2",
                                                 color="primary")
         rank_select = mui.Autocomplete("Workers", []).prop(muiMargin="dense",
@@ -97,20 +101,23 @@ class FaultToleranceUIMaster(mui.FlexBox):
             True, self._terminal_box, self._remote_terminal_box)
         ssh_panel = mui.VBox([
             header,
-            rank_select,
+            mui.HBox([
+                rank_select.prop(flex=1),
+                enable_control_btn,
+            ]),
             self.worker_status_box,
             self._code_editor,
             self._terminal_panel,
         ]).prop(width="100%", height="100%", overflow="hidden")
-        self._master_panel = MasterDebugPanel()
+        self._master_panel = debug_panel
         child_control_panel = mui.VBox([
             self._master_panel.prop(flex=1)
-        ])
+        ]).prop(width="100%", height="100%", overflow="hidden")
+        self._child_control_panel = child_control_panel
         global_panel = mui.Allotment(mui.Allotment.ChildDef([
             mui.Allotment.Pane(ssh_panel),
             mui.Allotment.Pane(child_control_panel),
         ])).prop(vertical=False, defaultSizes=[150, 300])
-
         self.dm = mui.DataModel(ui_state, [
             global_panel
         ])
@@ -147,6 +154,15 @@ class FaultToleranceUIMaster(mui.FlexBox):
             self.dm,
         ])
         self.prop(flexDirection="column", flex=1)
+
+    async def _handle_toggle_btn(self, enable: bool):
+        if enable:
+            # only master rank control point check this value, so no need to sent to all
+            # client. 
+            self.dm.get_draft().client_states[self._master_rank].is_user_control_enabled = True
+        else:
+            self.dm.get_draft().client_states[self._master_rank].is_user_control_enabled = False
+            await self._release_bkpt_fn()
 
     def _init_fields_when_fetch_model(self, prev_model: MasterUIState):
         # client_states are runtime state, don't use stored value.
@@ -186,14 +202,17 @@ class FaultToleranceUIMaster(mui.FlexBox):
                     return
             if rank == self._master_rank:
                 await self._remote_terminal_box.set_new_layout([])
+                print("WTFWTF")
+                await self._child_control_panel.set_new_layout([self._master_panel])
             else:
                 await self._remote_terminal_box.set_new_layout([
                     mui.RemoteBoxGrpc(ip, self._port,
                                       TENSORPC_DISTSSH_UI_KEY).prop(flex=1)
                 ])
-                # await self._remote_terminal_box.set_new_layout([
-                #     mui.Markdown("## DEBUG")
-                # ])
+                await self._child_control_panel.set_new_layout([
+                    mui.RemoteBoxGrpc(ip, self._port,
+                                      TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY).prop(flex=1)
+                ])
             async with self.worker_status_box.draft_update(
                     FTStatusBoxState) as dctx:
                 with dctx.group(rank):
@@ -202,6 +221,7 @@ class FaultToleranceUIMaster(mui.FlexBox):
                     dctx.draft.selected = False
         else:
             await self._remote_terminal_box.set_new_layout([])
+            await self._child_control_panel.set_new_layout([self._master_panel])
 
 
 class FaultToleranceUIClient(mui.FlexBox):

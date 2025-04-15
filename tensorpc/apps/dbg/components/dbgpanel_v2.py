@@ -9,7 +9,7 @@ import time
 import traceback
 import uuid
 import zipfile
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple, Union
+from typing import Any, Awaitable, Callable, Coroutine, Dict, List, Optional, Tuple, Union
 
 import grpc
 import psutil
@@ -21,6 +21,7 @@ from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
 from tensorpc.core import BuiltinServiceProcType
 from tensorpc.core.asyncclient import (AsyncRemoteManager, simple_chunk_call_async,
                                        simple_remote_call_async)
+from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.bgserver import BackgroundProcMeta
 from tensorpc.core.client import simple_remote_call
 from tensorpc.apps.dbg.constants import (TENSORPC_DBG_FRAME_INSPECTOR_KEY,
@@ -154,11 +155,13 @@ class MasterDebugPanelSimpleModel:
 
 class MasterDebugPanel(mui.FlexBox):
 
-    def __init__(self, app_storage_key: str = "MasterDebugPanel", relay_robj: Optional[AsyncRemoteManager] = None, parent_pid: Optional[int] = None):
+    def __init__(self, app_storage_key: str = "MasterDebugPanel", relay_robj: Optional[AsyncRemoteManager] = None, parent_pid: Optional[int] = None,
+            rpc_call_external: Optional[Callable[..., Awaitable[None]]] = None):
         self._app_storage_key = app_storage_key
         assert not InWindows, "MasterDebugPanel is not supported in Windows due to setproctitle."
         self._relay_robj = relay_robj
         self._parent_pid = parent_pid
+        self._rpc_call_external = rpc_call_external
         lst_name_primary_prop = mui.TypographyProps(
             variant="body1",
             fontFamily=CodeStyles.fontFamily,
@@ -476,6 +479,8 @@ class MasterDebugPanel(mui.FlexBox):
             done, pending = await asyncio.wait(
                 wait_tasks, return_when=asyncio.FIRST_COMPLETED)
             if shutdown_task in done:
+                for task in pending:
+                    await cancel_task(task)
                 break
             if sleep_task in done:
                 wait_tasks.remove(sleep_task)
@@ -623,16 +628,17 @@ class MasterDebugPanel(mui.FlexBox):
 
     async def start_record(self, trace_cfg: Optional[TracerConfig] = None, dist_id: Optional[str] = None):
         ts = time.time_ns()
+        if trace_cfg is None:
+            trace_cfg = TracerConfig(enable=True,
+                                        breakpoint_count=1,
+                                        trace_timestamp=ts)
+        else:
+            trace_cfg = dataclasses.replace(trace_cfg, trace_timestamp=ts)
+
         for info in self._current_proc_infos:
             if dist_id is not None and info.dist_info is not None:
                 if info.dist_info.run_id != dist_id:
                     continue
-            if trace_cfg is None:
-                trace_cfg = TracerConfig(enable=True,
-                                         breakpoint_count=1,
-                                         trace_timestamp=ts)
-            else:
-                trace_cfg = dataclasses.replace(trace_cfg, trace_timestamp=ts)
             if info.proc_type == BuiltinServiceProcType.SERVER_WITH_DEBUG:
                 continue 
             try:
@@ -647,11 +653,15 @@ class MasterDebugPanel(mui.FlexBox):
                     continue
                 else:
                     traceback.print_exc()
+        if self._rpc_call_external is not None:
+            await self._rpc_call_external(dbg_serv_names.DBG_LEAVE_BREAKPOINT, trace_cfg, rpc_timeout=1)
 
     async def force_trace_stop(self):
         await self._run_rpc_on_processes(self._current_proc_infos,
-                                     dbg_serv_names.DBG_FORCE_TRACE_STOP,
+                                     dbg_serv_names.DBG_TRACE_STOP_IN_NEXT_BKPT,
                                      rpc_timeout=3)
+        if self._rpc_call_external is not None:
+            await self._rpc_call_external(dbg_serv_names.DBG_TRACE_STOP_IN_NEXT_BKPT, rpc_timeout=3)
 
     async def _on_trace_launch(self, cfg_ev: ConfigDialogEvent[TracerUIConfig]):
         config = cfg_ev.cfg
@@ -806,22 +816,28 @@ class MasterDebugPanel(mui.FlexBox):
                 await self._perfetto_select.update_items(options)
                 await self._on_dist_perfetto_select(self._perfetto_select.value)
 
-    async def release_all_breakpoints(self):
+    async def release_all_breakpoints(self, trigger_rpc_external: bool = True):
         await self._run_rpc_on_processes(self._current_proc_infos,
                                      dbg_serv_names.DBG_LEAVE_BREAKPOINT,
                                      rpc_timeout=1)
+        if self._rpc_call_external is not None and trigger_rpc_external:
+            await self._rpc_call_external(dbg_serv_names.DBG_LEAVE_BREAKPOINT, rpc_timeout=1)
 
     async def skip_all_breakpoints(self):
         await self._run_rpc_on_processes(self._current_proc_infos,
                                      dbg_serv_names.DBG_SET_SKIP_BREAKPOINT,
                                      True,
                                      rpc_timeout=1)
+        if self._rpc_call_external is not None:
+            await self._rpc_call_external(dbg_serv_names.DBG_SET_SKIP_BREAKPOINT, True, rpc_timeout=1)
 
     async def enable_all_breakpoints(self):
         await self._run_rpc_on_processes(self._current_proc_infos,
                                      dbg_serv_names.DBG_SET_SKIP_BREAKPOINT,
                                      False,
                                      rpc_timeout=1)
+        if self._rpc_call_external is not None:
+            await self._rpc_call_external(dbg_serv_names.DBG_SET_SKIP_BREAKPOINT, False, rpc_timeout=1)
 
     async def _run_rpc_on_process(self,
                                meta: DebugServerProcessInfo,
@@ -853,6 +869,15 @@ class MasterDebugPanel(mui.FlexBox):
             else:
                 traceback.print_exc()
                 return None
+
+    async def run_rpc_on_current_processes(self,
+                                service_key: str,
+                                *args,
+                                rpc_timeout: int = 1):
+        return await self._run_rpc_on_processes(self._current_proc_infos,
+                                         service_key,
+                                         *args,
+                                         rpc_timeout=rpc_timeout)
 
     async def _run_rpc_on_processes(self,
                                 process_infos: List[DebugServerProcessInfo],
@@ -886,17 +911,6 @@ class MasterDebugPanel(mui.FlexBox):
                                       rpc_timeout=rpc_timeout,
                                       rpc_is_chunk_call=True))
         return await asyncio.gather(*all_tasks)
-
-    async def release_server_breakpoint(self, event: mui.Event):
-        indexes = event.indexes
-        assert not isinstance(indexes, mui.Undefined)
-        info = self._current_proc_infos[indexes[0]]
-        url = info.url_with_port
-        if info.proc_type == BuiltinServiceProcType.SERVER_WITH_DEBUG:
-            return 
-        await self._run_rpc_on_process(info, 
-                                        dbg_serv_names.DBG_LEAVE_BREAKPOINT,
-                                        rpc_timeout=1)
 
     async def _handle_target_trace_from_distributed_group_worker(self, ev: mui.RemoteCompEvent):
         trace_ev = ev.data

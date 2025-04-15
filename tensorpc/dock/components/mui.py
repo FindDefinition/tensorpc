@@ -77,6 +77,7 @@ if TYPE_CHECKING:
 
 _CORO_NONE = Union[Coroutine[None, None, None], None]
 CORO_NONE = Union[Coroutine[None, None, None], None]
+CORO_ANY = Union[Coroutine[None, None, Any], None]
 
 _PIL_FORMAT_TO_SUFFIX = {"JPEG": "jpg", "PNG": "png"}
 
@@ -586,6 +587,9 @@ class IconType(enum.IntEnum):
     LinkOff = 67
     Search = 68
     Info = 69
+    QueryStats = 70
+    BarChart = 71
+    Adb = 72
 
 
 @dataclasses.dataclass

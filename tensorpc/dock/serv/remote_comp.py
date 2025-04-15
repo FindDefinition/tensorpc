@@ -129,6 +129,8 @@ class RemoteComponentService:
         self._app_objs[key] = app_obj
 
     def get_layout_root_and_app_by_key(self, key: str):
+        if key not in self._app_objs:
+            raise KeyError(f"key {key} not found, available keys: {list(self._app_objs.keys())}")
         return self._app_objs[key].app.root, self._app_objs[key].app
 
     async def mount_app(self, key: str, url: str, port: int,
@@ -433,21 +435,22 @@ class RemoteComponentService:
     async def on_exit(self):
         for app_obj in self._app_objs.values():
             try:
-                if app_obj.mounted_app_meta is not None:
+                if app_obj.mounted_app_meta is not None and app_obj.mounted_app_meta.remote_gen_queue is None:
                     prefixes = app_obj.mounted_app_meta.prefixes
                     await simple_chunk_call_async(
                         app_obj.mounted_app_meta.url_with_port,
                         serv_names.APP_REMOTE_COMP_SHUTDOWN, prefixes)
             except:
                 traceback.print_exc()
-            app_obj.shutdown_ev.set()
-            if app_obj.send_loop_task is not None:
-                await app_obj.send_loop_task
+            # send loop must be shutdown after all ui unmount.
             try:
                 app_obj.app.app_terminate()
                 await app_obj.app.app_terminate_async()
             except:
                 traceback.print_exc()
+            app_obj.shutdown_ev.set()
+            if app_obj.send_loop_task is not None:
+                await app_obj.send_loop_task
 
     def _get_file_path_stat(
         self, path: str

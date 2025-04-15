@@ -78,7 +78,7 @@ def mp_func_for_fork_debug(rank):
 def mp_func_inf_record(rank):
     print("FORK START", os.getpid())
     tensorpc.dbg.init()
-    device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("mps")
+    device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
     for j in range(1000):
         a = 5
         b = 3

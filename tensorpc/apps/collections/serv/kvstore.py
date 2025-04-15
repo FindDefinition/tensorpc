@@ -112,7 +112,6 @@ class ShmKVStore:
 
     @marker.mark_server_event(event_type=marker.ServiceEventType.Exit)
     def _exit(self):
-        print("SHUTDOWN shared memory managers")
         for key, segments in self._store_shared_segments.items():
             for seg in segments:
                 seg.shm.close()

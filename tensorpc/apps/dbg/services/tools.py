@@ -440,12 +440,18 @@ class BackgroundDebugTools:
         await self.set_vscode_breakpoints(bkpts)
         return info
 
-    async def force_trace_stop(self):
+    async def trace_stop_in_next_bkpt(self):
         dm, app = self._get_bkgd_panel_dm_and_app()
         if dm.model.tracer_state.runtime is not None:
             async with dm.draft_update() as draft:
                 draft.tracer_state.runtime.force_stop = True # type: ignore
             # actual stop will be done in next enter breakpoint.
+
+    async def force_trace_stop(self):
+        dm, app = self._get_bkgd_panel_dm_and_app()
+        if dm.model.tracer_state.runtime is not None:
+            async with dm.draft_update() as draft:
+                draft.tracer_state.runtime = True # type: ignore
 
     async def handle_code_selection_msg(self, code_segment: str, path: str,
                                         code_range: Tuple[int, int, int, int]):

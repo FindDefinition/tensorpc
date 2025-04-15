@@ -99,6 +99,11 @@ class _ServiceNames:
         return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.force_trace_stop.__name__)
 
     @property
+    def DBG_TRACE_STOP_IN_NEXT_BKPT(self):
+        from tensorpc.apps.dbg.services.tools import BackgroundDebugTools
+        return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.trace_stop_in_next_bkpt.__name__)
+
+    @property
     def DBG_TRACEVIEW_SET_VARIABLE_INSPECT(self):
         from tensorpc.apps.dbg.services.tools import BackgroundDebugTools
         return get_service_key_by_type(BackgroundDebugTools, BackgroundDebugTools.set_traceview_variable_inspect.__name__)

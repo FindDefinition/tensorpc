@@ -143,7 +143,7 @@ async def get_torchrun_dataworker_traceback_by_pyspy(main_thread_only: bool = Tr
 def _main():
     import rich 
     # res = asyncio.run(get_torchrun_traceback_by_pyspy(main_thread_only=True))
-    res = asyncio.run(get_process_traceback_by_pyspy(3255158))
+    res = asyncio.run(get_process_traceback_by_pyspy(185137))
 
     rich.print(res)
     

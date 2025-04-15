@@ -10,6 +10,8 @@ from typing import Any, Awaitable, Callable, Optional, Union
 import async_timeout
 import grpc
 import rich
+from tensorpc.apps.dbg.serv_names import serv_names as dbg_serv_names
+from tensorpc.apps.dbg.components.dbgpanel_v2 import MasterDebugPanel
 from tensorpc.autossh.core import SSHConnDesc
 from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.asynctools import cancel_task
@@ -26,7 +28,7 @@ from tensorpc.core.moduleid import import_dynamic_func
 import tensorpc.core.datamodel as D
 import psutil 
 from tensorpc.dock.serv_names import serv_names as app_serv_names
-from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_UI_KEY, TENSORPC_ENV_DISTSSH_URL_WITH_PORT)
+from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, TENSORPC_DISTSSH_UI_KEY, TENSORPC_ENV_DISTSSH_URL_WITH_PORT)
 from rich.syntax import Syntax
 from ..typedefs import FTState, FTSSHServerArgs, FTStatus, SSHStatus, CmdStatus, MasterUIState
 from ..components.sshui import FaultToleranceUIMaster, FaultToleranceUIClient
@@ -113,9 +115,12 @@ class FaultToleranceSSHServer:
                     status=FTStatus.WORKER_DISCONNECTED,
                 )
                 master_ui_state.client_states.append(init_client_state)
-        self._master_ui = FaultToleranceUIMaster(self._master_rank, master_ui_state, self._terminal, prim.get_server_grpc_port(),
+        self._debug_panel = MasterDebugPanel(rpc_call_external=self._debug_panel_broadcast).prop(flex=1)
+        self._master_ui = FaultToleranceUIMaster(self._master_rank, master_ui_state, 
+            self._terminal, self._debug_panel, prim.get_server_grpc_port(),
             self._master_start_or_cancel, partial(self._master_shutdown_or_kill_cmd, just_kill=False), 
-            partial(self._master_shutdown_or_kill_cmd, just_kill=True))
+            partial(self._master_shutdown_or_kill_cmd, just_kill=True),
+            self._release_all_bkpt)
 
         self._client_ui = FaultToleranceUIClient(state, self._terminal)
 
@@ -145,11 +150,11 @@ class FaultToleranceSSHServer:
     @marker.mark_server_event(event_type=marker.ServiceEventType.Init)
     async def _init(self):
         await self._terminal.connect_with_new_desc(self._conn_desc, init_cmds=[
-            f"export {TENSORPC_ENV_DISTSSH_URL_WITH_PORT}={self.state.ip}:{prim.get_server_grpc_port()}\n",
+            f"export {TENSORPC_ENV_DISTSSH_URL_WITH_PORT}=localhost:{prim.get_server_grpc_port()}\n",
         ])
         term_state = self._terminal.get_current_state()
         assert term_state is not None 
-        self._master_ui._master_panel.set_parent_pid(term_state.pid)
+        self._debug_panel.set_parent_pid(term_state.pid)
         file_name = Path(self._cfg.workdir) / f"distssh-rank-{self.state.rank}.json"
         if self._cfg.master_discovery_fn is not None:
             self._master_discovery_fn = import_dynamic_func(
@@ -183,6 +188,7 @@ class FaultToleranceSSHServer:
             await set_layout_service(TENSORPC_DISTSSH_UI_KEY, self._master_ui)
         else:
             await set_layout_service(TENSORPC_DISTSSH_UI_KEY, self._client_ui)
+            await set_layout_service(TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, self._debug_panel)
 
     @marker.mark_server_event(event_type=marker.ServiceEventType.Exit)
     async def _close(self):
@@ -199,6 +205,33 @@ class FaultToleranceSSHServer:
                     await self._master_robj.close()
                 except:
                     traceback.print_exc()
+
+    async def _debug_panel_broadcast(self, key: str, *args, **kwargs):
+        exclude_rank = self.state.rank
+        if self._is_master:
+            await self.master_debug_panel_broadcast(key, *args, exclude_rank=exclude_rank, **kwargs) 
+        else:
+
+            if self._master_robj is not None:
+                try:
+                    await self._master_robj.remote_call(get_service_key_by_type(FaultToleranceSSHServer, "master_debug_panel_broadcast"), key, *args, exclude_rank=exclude_rank, **kwargs)
+                except:
+                    traceback.print_exc()
+                    self._master_robj = None 
+                    LOGGER.warning(f"Master disconnected")
+                    async with self._client_ui.dm.draft_update() as draft:
+                        draft.status = FTStatus.MASTER_DISCONNECTED
+
+    async def run_debug_panel_rpc(self, key: str, *args, **kwargs):
+        await self._debug_panel.run_rpc_on_current_processes(key, *args, **kwargs)
+
+    async def _release_all_bkpt(self):
+        await self.master_debug_panel_broadcast(dbg_serv_names.DBG_LEAVE_BREAKPOINT, exclude_rank=-1)
+
+    async def master_debug_panel_broadcast(self, key: str, *args, exclude_rank: int = -1, **kwargs):
+        if exclude_rank != self._master_rank:
+            await self._master_ui._master_panel.run_rpc_on_current_processes(key, *args, **kwargs)
+        await self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "run_debug_panel_rpc"), {exclude_rank}, key, *args, **kwargs)
 
     def _master_check_is_all_ssh_idle_or_err(self):
         for client_state in self._master_ui.dm.model.client_states:
@@ -248,12 +281,14 @@ class FaultToleranceSSHServer:
         else:
             await self._master_cancel_cmd()
 
-    async def _master_call_all_client(self, key: str, *args, rpc_timeout: Optional[int] = None, rpc_is_health_check: bool = False, **kwargs):
+    async def _master_call_all_client(self, key: str, exclude_ranks: set[int], *args, rpc_timeout: Optional[int] = None, rpc_is_health_check: bool = False, **kwargs):
         async with self._master_lock:
             is_all_worker_conn = self._num_client_robj_is_valid()
             tasks = []
             ranks: list[int] = []
             for rank, robj in self._client_robjs.items():
+                if rank in exclude_ranks:
+                    continue
                 if rpc_is_health_check:
                     tasks.append(robj.health_check(timeout=rpc_timeout))
                 else:
@@ -291,7 +326,7 @@ class FaultToleranceSSHServer:
                 raise RuntimeError(f"worker {client_state.rank} is not in IDLE state")  
         async with self._master_ui.dm.draft_update() as draft:
             draft.cmd_status = CmdStatus.RUNNING
-        res = await self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "client_run_cmd"), cmd)
+        res = await self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "client_run_cmd"), set(), cmd)
         if res is not None:
             self._cmd_task = asyncio.create_task(self._cmd_waiter(cmd))
         return res
@@ -303,10 +338,10 @@ class FaultToleranceSSHServer:
     async def _master_cancel_cmd(self):
         if self._master_ui.dm.model.cmd_status != CmdStatus.IDLE:
             await self.cancel_cmd()
-            await self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "cancel_cmd"))
+            await self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "cancel_cmd"), set())
 
     async def _master_shutdown_or_kill_cmd(self, just_kill: bool = False):
-        res = await self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "shutdown_or_kill_cmd"), just_kill)
+        res = await self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "shutdown_or_kill_cmd"), set(), just_kill)
         await self.shutdown_or_kill_cmd(just_kill)
         return res 
 
@@ -393,12 +428,12 @@ class FaultToleranceSSHServer:
             shell_file_path = Path(self._cfg.workdir) / f"_distssh-rank-cmd-{self.state.rank}.zsh"
             with shell_file_path.open("w") as f:
                 f.write(cmd)
-            cmd = f"zsh -i {shell_file_path.absolute()}"
+            cmd = f" zsh -i {shell_file_path.absolute()}"
         elif shell_info.type == "bash":
             shell_file_path = Path(self._cfg.workdir) / f"_distssh-rank-cmd-{self.state.rank}.sh"
             with shell_file_path.open("w") as f:
                 f.write(cmd)
-            cmd = f"bash -i {shell_file_path.absolute()}"
+            cmd = f" bash -i {shell_file_path.absolute()}"
         else:
             raise RuntimeError(f"Unsupported shell type: {shell_info.type}")
         shutdown_ev = prim.get_async_shutdown_event()
@@ -583,7 +618,7 @@ class FaultToleranceSSHServer:
                             self._fast_wakeup_event.wait(), name="heartbeat_fast_wakeup")
                     # LOGGER.warning("Master Heartbeat|status: %s.", self.state.status.name)
                     if self.state.status == FTStatus.OK:
-                        res = await self._master_call_all_client("", rpc_timeout=self._cfg.disconnect_rpc_check_timeout, rpc_is_health_check=True)
+                        res = await self._master_call_all_client("", set(), rpc_timeout=self._cfg.disconnect_rpc_check_timeout, rpc_is_health_check=True)
                         if res is not None:
                             if self._master_ui.dm.model.cmd_status == CmdStatus.DURING_RESTART:
                                 res = await self._master_shutdown_or_kill_cmd()

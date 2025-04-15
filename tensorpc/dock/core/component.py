@@ -2761,7 +2761,8 @@ class ContainerBase(Component[T_container_props, T_child]):
             self,
             attached: list[Component],
             detached: dict[UniqueTreeIdForComp, Component],
-            reload_mgr: Optional[AppReloadManager] = None):
+            reload_mgr: Optional[AppReloadManager] = None,
+            center_callback: Optional[Callable[[], Awaitable[None]]] = None):
         """Run lifecycle methods.
         All methods must run in leaf-to-root order, include attach
         and detach.
@@ -2789,7 +2790,10 @@ class ContainerBase(Component[T_container_props, T_child]):
             if is_detach:
                 deleted = comp
                 await deleted._run_unmount_special_methods(self, reload_mgr)
-            else:
+        if center_callback is not None:
+            await center_callback()
+        for _, is_detach, comp in sort_items:
+            if not is_detach:
                 attach = comp
                 await attach._run_mount_special_methods(self, reload_mgr)
 
@@ -2860,6 +2864,11 @@ class ContainerBase(Component[T_container_props, T_child]):
             await self._set_new_layout_delay(
                 layout, post_ev_creator=post_ev_creator)
 
+    async def _lifecycle_center_cb(self, new_ev: AppEvent, post_ev_creator: Optional[Callable[[], AppEvent]] = None):
+        await self.put_app_event(new_ev)
+        if post_ev_creator is not None:
+            await self.put_app_event(post_ev_creator())
+
     async def _set_new_layout_delay(
             self,
             layout: Union[dict[str, Component], T_child_structure],
@@ -2871,10 +2880,10 @@ class ContainerBase(Component[T_container_props, T_child]):
             if comp_dont_need_cancel is not None and comp_dont_need_cancel == deleted_uid:
                 continue
             await deleted._cancel_task(f"set_new_layout-{deleted_uid}-{type(deleted)}")
-        await self.put_app_event(new_ev)
-        if post_ev_creator is not None:
-            await self.put_app_event(post_ev_creator())
-        await self._run_special_methods(attached, removed_dict)
+        # await self.put_app_event(new_ev)
+        # if post_ev_creator is not None:
+        #     await self.put_app_event(post_ev_creator())
+        await self._run_special_methods(attached, removed_dict, center_callback=partial(self._lifecycle_center_cb, new_ev, post_ev_creator))
         for v in removed_dict.values():
             v._finish_detach()
 
@@ -2932,10 +2941,12 @@ class ContainerBase(Component[T_container_props, T_child]):
         ev = self.create_delete_comp_event(deleted)
         # if post_ev_creator is not None:
         #     ev = ev + post_ev_creator()
-        await self.put_app_event(ev)
-        if post_ev_creator is not None:
-            await self.put_app_event(post_ev_creator())
-        await self._run_special_methods([], detached_uid_to_comp)
+        # await self.put_app_event(ev)
+        # if post_ev_creator is not None:
+        #     await self.put_app_event(post_ev_creator())
+        await self._run_special_methods([], detached_uid_to_comp, center_callback=partial(
+            self._lifecycle_center_cb, ev, post_ev_creator)
+        )
         for v in detached_uid_to_comp.values():
             v._finish_detach()
 
@@ -3042,10 +3053,12 @@ class ContainerBase(Component[T_container_props, T_child]):
             await deleted._cancel_task("update_childs")
         # if post_ev_creator is not None:
         #     new_ev = new_ev + post_ev_creator()
-        await self.put_app_event(new_ev)
-        if post_ev_creator is not None:
-            await self.put_app_event(post_ev_creator())
-        await self._run_special_methods(attached, removed_dict)
+        # await self.put_app_event(new_ev)
+        # if post_ev_creator is not None:
+        #     await self.put_app_event(post_ev_creator())
+        await self._run_special_methods(attached, removed_dict, center_callback=partial(
+            self._lifecycle_center_cb, new_ev, post_ev_creator)
+        )
         for v in removed_dict.values():
             v._finish_detach()
 
@@ -3189,6 +3202,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                         [next_item_task, shutdown_task],
                         return_when=asyncio.FIRST_COMPLETED)
                 except asyncio.CancelledError:
+                    print("CANCEL")
                     await cancel_task(shutdown_task)
                     await cancel_task(next_item_task)
                     break
@@ -3244,13 +3258,14 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                         next_item_task = asyncio.create_task(aiter_remote.__anext__())
                     except StopAsyncIteration:
                         break
+
         except:
             traceback.print_exc()
             raise 
         finally:
             # await self.remote_call(serv_names.REMOTE_COMP_UNMOUNT_APP,
             #                         2, self._key)
-
+            await self.disconnect(close_remote_loop=False)
             self._is_remote_mounted = False
 
     async def _reconnect_to_remote_comp(self):
@@ -3304,13 +3319,14 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             await self._remote_task
             self._remote_task = None
 
-    async def disconnect(self):
+    async def disconnect(self, close_remote_loop: bool = True):
         # try:
         #     await self.remote_call(serv_names.REMOTE_COMP_UNMOUNT_APP,
         #                             2, self._key)
         # except:
         #     traceback.print_exc()
-        await self._close_remote_loop()
+        if close_remote_loop:
+            await self._close_remote_loop()
         await self.shutdown_remote_object()
         self._is_remote_mounted = False 
         if self._fail_callback is not None:
