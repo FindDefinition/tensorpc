@@ -1,4 +1,5 @@
 import dataclasses
+from typing import Any
 
 from tensorpc.apps.dbg.constants import TracerConfig
 
@@ -8,7 +9,7 @@ class BreakpointEvent:
 
 @dataclasses.dataclass
 class BkptLeaveEvent(BreakpointEvent):
-    pass 
+    data: Any = None 
 
 
 @dataclasses.dataclass

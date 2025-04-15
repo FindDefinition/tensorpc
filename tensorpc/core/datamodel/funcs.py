@@ -8,7 +8,7 @@ from tensorpc.core.annolib import (AnnotatedType,
                                    parse_type_may_optional_undefined)
 from tensorpc.core.datamodel.draftast import evaluate_draft_ast_noexcept
 
-from .draft import (DraftASTFuncType, DraftASTNode, DraftASTType, DraftBase,
+from .draft import (DraftASTFuncType, DraftASTNode, DraftASTType, DraftBase, DraftDict,
                     DraftImmutableScalar, DraftSequence,
                     _tensorpc_draft_anno_dispatch,
                     create_literal_draft, get_draft_anno_type,
@@ -81,3 +81,7 @@ def logical_and(a: Any, b: Any) -> bool:
 
 def logical_or(a: Any, b: Any) -> bool:
     return _logical_op(a, b, "||")
+
+def dict_get_item(a: Any, attr: str):
+    assert isinstance(a, DraftDict)
+    return cast(Any, a[attr])

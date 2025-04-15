@@ -5,7 +5,7 @@ from tensorpc.core.asyncclient import AsyncRemoteObject
 from tensorpc.core.client import RemoteObject
 from tensorpc.core import BuiltinServiceKeys, core_io
 import numpy as np 
-from tensorpc.services.collection import SharedArraySegment, SharedArraySegmentDesc
+from tensorpc.apps.collections.serv.kvstore import SharedArraySegment, SharedArraySegmentDesc
 
 class ShmKVStoreClient:
     def __init__(self, robj: RemoteObject):

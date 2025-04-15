@@ -28,116 +28,10 @@ import psutil
 from tensorpc.dock.serv_names import serv_names as app_serv_names
 from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_UI_KEY, TENSORPC_ENV_DISTSSH_URL_WITH_PORT)
 from rich.syntax import Syntax
-
-class CmdStatus(enum.IntEnum):
-    IDLE = 0
-    RUNNING = 1
-    # when some rank is restarted during cmd running,
-    # master will enter this state and try to restart all workers with 
-    # same cmd.
-    DURING_RESTART = 2
-
-class FTStatus(enum.IntEnum):
-    OK = 0
-    MASTER_DISCONNECTED = 1
-    WORKER_DISCONNECTED = 2
-    UNKNOWN = 3
-
-class SSHStatus(enum.IntEnum):
-    IDLE = 0
-    DISCONNECTED = 1
-    RUNNING = 2
-    ERROR = 3
+from ..typedefs import FTState, FTSSHServerArgs, FTStatus, SSHStatus, CmdStatus, MasterUIState
+from ..components.sshui import FaultToleranceUIMaster, FaultToleranceUIClient
 
 LOGGER = rich_logging.get_logger("distssh")
-
-@dataclasses.dataclass
-class FTSSHServerArgs:
-    rank: int
-    world_size: int
-    # used to save ip of each worker to a folder to ensure
-    # failed worker can discover the master
-    # assume your cluster has a NAS.
-    # also save state.
-    workdir: str
-    cmd: str
-    password: str
-    username: str = "root"
-    # max_retries: int = 1
-    # log_path: Optional[str] = None
-    # distributed arguments
-    master_discovery_fn: Optional[str] = None
-    heartbeat_interval: int = 5
-    # 5 min
-    # when some worker or master disconnected, we assume
-    # your cluster manager will restart it. so we 
-    # wait for 5 min to check if the worker is really.
-    disconnect_total_retry: int = 60
-    disconnect_rpc_check_timeout: int = 2
-    # cmd shutdown configs
-    cmd_shutdown_timeout: int = 10
-    cmd_ctrl_c_retry: int = 3
-
-    logdir: str = ""
-
-    cmd_retry_when_reconnect: bool = True
-
-@dataclasses.dataclass
-class FTState:
-    label: str
-    rank: int
-    uuid: str
-    ip: str
-    port: int
-    is_master: bool 
-    cur_cmd: Optional[str] = None
-    status: FTStatus = FTStatus.OK
-    ssh_status: SSHStatus = SSHStatus.IDLE
-    master_uuid: str = ""
-
-@dataclasses.dataclass
-class MasterUIState:
-    cmd_status: CmdStatus
-    client_states: list[FTState]
-    selected_client_state: Optional[dict[str, Any]] = None
-    cmd: str = "echo $HOME"
-    cmd_history: list[str] = dataclasses.field(default_factory=list)
-
-@dataclasses.dataclass
-class FTStatusBoxState:
-    id: str
-    rank: int 
-    ip: str
-    status: FTStatus
-    ssh_status: SSHStatus
-    color: str
-    selected: bool
-    @staticmethod 
-    def from_ft_state(ft_state: FTState, selected: bool):
-        if ft_state.status == FTStatus.WORKER_DISCONNECTED:
-            color = "orange"
-        elif ft_state.status == FTStatus.UNKNOWN:
-            color = "gray"
-        else:
-            if ft_state.ssh_status == SSHStatus.IDLE:
-                color = "blue"
-            elif ft_state.ssh_status == SSHStatus.DISCONNECTED:
-                color = "red"
-            elif ft_state.ssh_status == SSHStatus.RUNNING:
-                color = "lime"
-            elif ft_state.ssh_status == SSHStatus.ERROR:
-                color = "red"
-            else:
-                color = "gray"
-        return FTStatusBoxState(
-            id=str(ft_state.rank),
-            rank=ft_state.rank,
-            ip=ft_state.ip,
-            status=ft_state.status,
-            ssh_status=ft_state.ssh_status,
-            color=color,
-            selected=selected,
-        )
 
 class SimpleLogEventType(enum.Enum):
     LINE = "L"
@@ -176,156 +70,6 @@ class SSHEventLogger:
 
     def __del__(self):
         self.close()
-
-class WorkersStatusBox(mui.DataFlexBox):
-    def __init__(self, init_data_list: list[FTStatusBoxState], on_click: Callable[[mui.Event], mui.CORO_NONE], box_size: int = 10):
-        self._box_template = mui.HBox([])
-        box_size_px = f"{box_size}px"
-        self._box_template.prop(width=box_size_px, height=box_size_px, margin="2px")
-        self._box_template.bind_fields(backgroundColor="color", border=f"where(selected, '2px solid lightpink', '2px solid transparent')",)
-        self._box_template.event_click.on_standard(on_click)
-        self._selected_idx = -1
-        super().__init__(self._box_template, init_data_list)
-        self.prop(flexFlow="row wrap", padding="10px")
-
-
-class FaultToleranceUIMaster(mui.FlexBox):
-    def __init__(self, master_rank: int, ui_state: MasterUIState, term: terminal.AsyncSSHTerminal, port: int,
-            start_or_cancel_fn: Callable[[], mui.CORO_NONE],
-            stop_fn: Callable[[], mui.CORO_NONE], kill_fn: Callable[[], mui.CORO_NONE]):
-        master_state = ui_state.client_states[master_rank]
-        states = ui_state.client_states
-        self._master_rank = master_rank
-        self._port = port
-        if master_state.is_master:
-            title = "Main Worker"
-        else:
-            title = f"Worker ({master_state.rank})"
-
-        start_or_cancel_btn = mui.IconButton(mui.IconType.PlayArrow, start_or_cancel_fn).prop(iconSize="small", size="small")
-        stop_btn = mui.IconButton(mui.IconType.Stop, stop_fn).prop(iconSize="small", size="small", muiColor="error",
-            confirmTitle="Dangerous Operation", confirmMessage="Are you sure to shutdown (ctrl-c->terminate->kill) ALL running process?",
-            tooltip="shutdown command")
-        kill_btn = mui.IconButton(mui.IconType.Delete, kill_fn).prop(iconSize="small", size="small",
-            confirmTitle="Dangerous Operation", confirmMessage="Are you sure to kill ALL running process?",
-            tooltip="kill all child process")
-
-        header_str = mui.Typography(title).prop(variant="body2", color="primary")
-        rank_select = mui.Autocomplete("Workers", []).prop(muiMargin="dense", size="small")
-        self.worker_status_box = WorkersStatusBox([FTStatusBoxState.from_ft_state(state, False) for state in states], self._on_status_box_click)
-        header = mui.HBox([
-            mui.HBox([
-                header_str,
-            ]).prop(flex=1),
-            start_or_cancel_btn,
-            stop_btn,
-            kill_btn,
-        ])
-        # self._remote_box = mui.HBox([])
-        # self._code_editor = mui.SimpleCodeEditor("echo $HOME", "bash").prop(debounce=300, height="300px", border="1px solid gray")
-        self._code_editor = mui.MonacoEditor("echo $HOME", "shell", "root").prop(debounce=300, height="300px")
-
-        self._terminal_box = mui.VBox([
-            term,
-        ]).prop(flex=1, overflow="auto")
-        self._remote_terminal_box = mui.HBox([
-
-        ]).prop(flex=1, overflow="auto")
-        self._terminal_panel = mui.MatchCase.binary_selection(True, self._terminal_box, self._remote_terminal_box)
-        self.dm = mui.DataModel(ui_state, [
-            header,
-            rank_select,
-            self.worker_status_box,
-            self._code_editor,
-            self._terminal_panel,
-        ])
-        self.dm.event_storage_fetched.on(self._init_fields_when_fetch_model)
-        master_draft = self.dm.get_draft()
-        self._terminal_panel.bind_fields(condition=D.logical_or(master_draft.selected_client_state == None, D.cast_any_draft(master_draft.selected_client_state["rank"], int) == master_rank))
-        start_or_cancel_btn.bind_fields(icon=D.where(master_draft.cmd_status == CmdStatus.IDLE, mui.IconType.PlayArrow, mui.IconType.Stop),
-            disabled=D.where(master_draft.cmd_status == CmdStatus.DURING_RESTART, True, False))
-        stop_btn.bind_fields(disabled=D.where(master_draft.cmd_status == CmdStatus.IDLE, True, False))
-        kill_btn.bind_fields(disabled=D.where(master_draft.cmd_status == CmdStatus.IDLE, True, False))
-        self._code_editor.bind_draft_change_uncontrolled(master_draft.cmd)
-        # self._code_editor.bind_draft_change_uncontrolled(master_draft.cmd)
-        # FIXME can't install to worker_status_box
-        self.dm.install_draft_change_handler(
-            master_draft.client_states, self._handle_client_state_change, 
-            handle_child_change=True)
-        self.dm.install_draft_change_handler(
-            master_draft.selected_client_state, self._handle_selected_box_change)
-
-        rank_select.bind_draft_change(master_draft.selected_client_state)
-        rank_select.bind_fields(options=master_draft.client_states)
-
-        super().__init__([
-            self.dm,
-        ])
-        self.prop(flexDirection="column", flex=1)
-
-    def _init_fields_when_fetch_model(self, prev_model: MasterUIState):
-        # client_states are runtime state, don't use stored value.
-        # TODO exclude client_states in draft store
-        self.dm.model.client_states = prev_model.client_states
-        self.dm.model.selected_client_state = None
-
-    async def _on_status_box_click(self, ev: mui.Event):
-        rank = ev.get_indexes_checked()[0]
-        self.dm.get_draft().selected_client_state = dataclasses.asdict(self.dm.model.client_states[rank])
-
-    async def _handle_client_state_change(self, ev: DraftChangeEvent):
-        if ev.new_value is not None:
-            states: list[FTState] = ev.new_value
-            selected_idx = -1
-            selected_state = self.dm.model.selected_client_state
-            if selected_state is not None:
-                selected_idx = selected_state["rank"]
-            ui_states = [FTStatusBoxState.from_ft_state(state, i == selected_idx) for i, state in enumerate(states)]
-            await self.send_and_wait(self.worker_status_box.update_event(dataList=ui_states))
-        else:
-            await self.send_and_wait(self.worker_status_box.update_event(dataList=[]))
-
-    async def _handle_selected_box_change(self, ev: DraftChangeEvent):
-        selected_state_dict = ev.new_value 
-        if selected_state_dict is not None:
-            rank = selected_state_dict["rank"]
-            ip = selected_state_dict["ip"]
-            if ev.old_value is not None:
-                if ev.old_value["rank"] == rank:
-                    return
-            if rank == self._master_rank:
-                await self._remote_terminal_box.set_new_layout([])
-            else:
-                await self._remote_terminal_box.set_new_layout([
-                    mui.RemoteBoxGrpc(ip, self._port, TENSORPC_DISTSSH_UI_KEY).prop(flex=1)
-                ])
-                # await self._remote_terminal_box.set_new_layout([
-                #     mui.Markdown("## DEBUG")
-                # ])
-            async with self.worker_status_box.draft_update(FTStatusBoxState) as dctx:
-                with dctx.group(rank):
-                    dctx.draft.selected = True 
-                with dctx.group(None):
-                    dctx.draft.selected = False 
-        else:
-            await self._remote_terminal_box.set_new_layout([])
-
-
-class FaultToleranceUIClient(mui.FlexBox):
-    def __init__(self, state: FTState, term: terminal.AsyncSSHTerminal):
-        title = f"Worker ({state.rank})"
-        header_str = mui.Typography(title).prop(variant="body2", color="primary")
-        self._terminal_box = mui.VBox([
-            term,
-        ]).prop(flex=1, overflow="auto")
-        self.dm = mui.DataModel(state, [
-            header_str,
-            self._terminal_box
-        ])
-        super().__init__([
-            self.dm,
-        ])
-        self.prop(flexDirection="column", flex=1, border="1px solid gray")
 
 
 class FaultToleranceSSHServer:
@@ -403,6 +147,9 @@ class FaultToleranceSSHServer:
         await self._terminal.connect_with_new_desc(self._conn_desc, init_cmds=[
             f"export {TENSORPC_ENV_DISTSSH_URL_WITH_PORT}={self.state.ip}:{prim.get_server_grpc_port()}\n",
         ])
+        term_state = self._terminal.get_current_state()
+        assert term_state is not None 
+        self._master_ui._master_panel.set_parent_pid(term_state.pid)
         file_name = Path(self._cfg.workdir) / f"distssh-rank-{self.state.rank}.json"
         if self._cfg.master_discovery_fn is not None:
             self._master_discovery_fn = import_dynamic_func(
@@ -906,3 +653,9 @@ class FaultToleranceSSHServer:
             raise 
         finally:
             print("heartbeat loop exit")
+
+    def is_user_control_enabled(self):
+        """pth control point will access this value and 
+        enter breakpoint when set.
+        """
+        return self.state.is_user_control_enabled

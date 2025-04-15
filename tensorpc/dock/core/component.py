@@ -1768,12 +1768,12 @@ class Component(Generic[T_base_props, T_child]):
         if self.is_mounted():
             return await self.queue.put(ev)
 
-    def bind_fields(self, **kwargs: Union[str, tuple["Component", Union[str, DraftBase]], DraftBase]):
+    def bind_fields(self, **kwargs: Union[str, tuple["Component", Union[str, Any]], Any]):
         for k in kwargs.keys():
             assert k in self._prop_field_names, f"overrided prop must be defined in props class, {k}"
         return self.bind_fields_unchecked(**kwargs)
 
-    def bind_fields_unchecked(self, **kwargs: Union[str, tuple["Component", Union[str, DraftBase]], DraftBase]):
+    def bind_fields_unchecked(self, **kwargs: Union[str, tuple["Component", Union[str, Any]], Any]):
         new_kwargs: dict[str, Union[str, tuple["Component", str]]] = {}
         for k, v_may_draft in kwargs.items():
             # validate expr

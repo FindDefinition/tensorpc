@@ -2,6 +2,7 @@ import asyncio
 import dataclasses
 import datetime
 import enum
+from functools import partial
 import gzip
 import io
 import time
@@ -42,6 +43,7 @@ from tensorpc.dock.vscode.coretypes import (VscodeBreakpoint,
 from tensorpc.utils.proctitle import list_all_tensorpc_server_in_machine
 from tensorpc.utils.rich_logging import get_logger
 import tensorpc.core.datamodel as D
+import tarfile
 from tensorpc.apps.dbg.constants import DebugServerProcessInfo
 try:
     import orjson as json  # type: ignore
@@ -109,6 +111,26 @@ def list_all_dbg_server_in_machine():
         res.append(dbg_meta)
     return res
 
+def adjust_name(info: tarfile.TarInfo, new_name: str) -> tarfile.TarInfo:
+    info.name = new_name
+    return info
+
+def is_nested_child(child_pid: int, parent_pid: int) -> bool:
+    """
+    Check if the process with child_pid is a descendant (nested child) 
+    of the process with parent_pid.
+    """
+    try:
+        child_proc = psutil.Process(child_pid)
+    except psutil.NoSuchProcess:
+        return False
+
+    # Get all parent processes.
+    for ancestor in child_proc.parents():
+        if ancestor.pid == parent_pid:
+            return True
+
+    return False
 
 class ServerItemActions(enum.Enum):
     RELEASE_BREAKPOINT = "release_breakpoint"
@@ -132,10 +154,11 @@ class MasterDebugPanelSimpleModel:
 
 class MasterDebugPanel(mui.FlexBox):
 
-    def __init__(self, app_storage_key: str = "MasterDebugPanel", relay_robj: Optional[AsyncRemoteManager] = None):
+    def __init__(self, app_storage_key: str = "MasterDebugPanel", relay_robj: Optional[AsyncRemoteManager] = None, parent_pid: Optional[int] = None):
         self._app_storage_key = app_storage_key
         assert not InWindows, "MasterDebugPanel is not supported in Windows due to setproctitle."
         self._relay_robj = relay_robj
+        self._parent_pid = parent_pid
         lst_name_primary_prop = mui.TypographyProps(
             variant="body1",
             fontFamily=CodeStyles.fontFamily,
@@ -332,6 +355,8 @@ class MasterDebugPanel(mui.FlexBox):
         self._serv_list_lock = asyncio.Lock()
         self._vscode_handler_registered = False
 
+    def set_parent_pid(self, pid: Optional[int]):
+        self._parent_pid = pid
 
     async def _handle_infos_change(self, ev: DraftChangeEvent):
         process_infos = ev.new_value 
@@ -371,9 +396,10 @@ class MasterDebugPanel(mui.FlexBox):
         self._scan_shutdown_ev.clear()
         self._scan_loop_task = asyncio.create_task(
             self._scan_loop(self._scan_shutdown_ev))
-        filter_cfg_str = await appctx.read_data_storage(f"{self._app_storage_key}/record_filter", raise_if_not_found=False)
-        if filter_cfg_str is not None:
-            await self.send_and_wait(self._trace_yaml_cfg_editor.update_event(value=filter_cfg_str))
+        if not appctx.app_is_remote_comp():
+            filter_cfg_str = await appctx.read_data_storage(f"{self._app_storage_key}/record_filter", raise_if_not_found=False)
+            if filter_cfg_str is not None:
+                await self.send_and_wait(self._trace_yaml_cfg_editor.update_event(value=filter_cfg_str))
 
     @marker.mark_will_unmount
     async def _on_unmount(self):
@@ -526,6 +552,9 @@ class MasterDebugPanel(mui.FlexBox):
                             info.primaryColor = "error"
             else:
                 process_infos = list_all_dbg_server_in_machine()
+                if self._parent_pid is not None:
+                    # filter out all other processes
+                    process_infos = [info for info in process_infos if is_nested_child(info.pid, self._parent_pid)]
                 process_infos.sort(key=lambda x: x.server_id)
                 self._current_proc_infos = process_infos
                 for i, info in enumerate(process_infos):
@@ -630,7 +659,8 @@ class MasterDebugPanel(mui.FlexBox):
         if not isinstance(filter_cfg_value, mui.Undefined):
             filter_cfg = yaml.safe_load(filter_cfg_value)
             filter_obj = RecordFilterConfig(**filter_cfg)
-            await appctx.save_data_storage(f"{self._app_storage_key}/record_filter", filter_cfg_value)
+            if not appctx.app_is_remote_comp():
+                await appctx.save_data_storage(f"{self._app_storage_key}/record_filter", filter_cfg_value)
             cfg = TracerConfig(enable=True,
                                 record_filter=filter_obj,
                             **dataclasses.asdict(config))
@@ -662,7 +692,7 @@ class MasterDebugPanel(mui.FlexBox):
     async def query_record_data_by_key(self, key: str):
         # perfetto support zip of gzip trace in their source code.
         # so we can just use already gzipped data to avoid expensive zip again.
-        _use_perfetto_undoc_zip_of_gzip = True
+        _use_perfetto_undoc_zip_of_gzip = False
         LOGGER.warning("Querying record data by key %s", key)
         if key in self._record_data_cache:
             all_timestamps_with_none: List[Optional[int]] = await self._run_rpc_on_metas_chunk_call(
@@ -684,16 +714,21 @@ class MasterDebugPanel(mui.FlexBox):
         LOGGER.warning("Finish querying record data by key %s", key)
 
         # print("RPC TIME", time.time() - t)
-        all_data = []
+        all_data: list[tuple[bytes, str]] = []
         all_data_external_evs = []
         all_timestamps = []
         for data_gzipped in all_data_gzipped:
             if data_gzipped is None:
                 continue
             if not _use_perfetto_undoc_zip_of_gzip:
-                datas = [gzip.decompress(d.data) for d in data_gzipped[1].single_results]
+                datas = []
+                for d in data_gzipped[1].single_results:
+                    if d.is_tar:
+                        raise NotImplementedError
+                    else:
+                        datas.append((gzip.decompress(d.data), d.fname))
             else:
-                datas = [d.data for d in data_gzipped[1].single_results]
+                datas = [(d.data, d.fname) for d in data_gzipped[1].single_results]
             for single_res in data_gzipped[1].single_results:
                 if single_res.external_events is not None:
                     all_data_external_evs.append(single_res.external_events)
@@ -705,14 +740,20 @@ class MasterDebugPanel(mui.FlexBox):
             raise ValueError("No trace data found for key", key)
         if self._debug_use_zip_instead_of_merge:
             zip_ss = io.BytesIO()
-            zip_mode = zipfile.ZIP_DEFLATED if not _use_perfetto_undoc_zip_of_gzip else zipfile.ZIP_STORED
+            zip_mode = zipfile.ZIP_STORED if not _use_perfetto_undoc_zip_of_gzip else zipfile.ZIP_STORED
             compresslevel = 9 if not _use_perfetto_undoc_zip_of_gzip else None
+            ext = "tar" if _use_perfetto_undoc_zip_of_gzip else "json"
             with zipfile.ZipFile(zip_ss, mode="w", compression=zip_mode, compresslevel=compresslevel) as zf:
-                for i, data in enumerate(all_data):
-                    zf.writestr(f"{i}.json", data)
+                for i, (data, fname) in enumerate(all_data):
+                        # tarinfo = tarfile.TarInfo(f"M{i}.{ext}")
+                        # tarinfo.size = len(data)
+                        # tf.addfile(tarinfo, io.BytesIO(data))
+                    # with gzip.GzipFile(fileobj=ss, mode="wb", compresslevel=9) as gz:
+                    #     gz.write(data)
+                    zf.writestr(fname, data)
                 for i, data in enumerate(all_data_external_evs):
                     if data:
-                        zf.writestr(f"{i}_extra.json", json.dumps({
+                        zf.writestr(f"E{i}_extra.json", json.dumps({
                             "traceEvents": data
                         }))
             res = zip_ss.getvalue()
@@ -727,7 +768,7 @@ class MasterDebugPanel(mui.FlexBox):
             # merge trace events
             all_trace_events = []
             data_json_meta = {}
-            for i, data in enumerate(all_data):
+            for i, (data, fname) in enumerate(all_data):
                 data_json = json.loads(data)
                 trace_ev = data_json.pop("traceEvents")
                 external_evs = all_data_external_evs[i]

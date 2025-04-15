@@ -19,8 +19,8 @@ from tensorpc.constants import TENSORPC_SPLIT
 class BuiltinServiceKeys(enum.Enum):
     FileOps = f"tensorpc.services.collection{TENSORPC_SPLIT}FileOps"
     ArgServer = f"tensorpc.services.collection{TENSORPC_SPLIT}ArgServer"
-    KVStore = f"tensorpc.services.collection{TENSORPC_SPLIT}KVStore"
-    ShmKVStore = f"tensorpc.services.collection{TENSORPC_SPLIT}ShmKVStore"
+    KVStore = f"tensorpc.apps.collections.serv.kvstore{TENSORPC_SPLIT}KVStore"
+    ShmKVStore = f"tensorpc.apps.collections.serv.kvstore{TENSORPC_SPLIT}ShmKVStore"
 
     SpeedTestServer = f"tensorpc.services.collection{TENSORPC_SPLIT}SpeedTestServer"
     Flow = f"tensorpc.dock.serv.core{TENSORPC_SPLIT}Flow"

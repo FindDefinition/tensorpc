@@ -9,7 +9,7 @@ import time
 import traceback
 from pathlib import Path
 from types import FrameType
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import uuid
 
 import grpc
@@ -49,7 +49,7 @@ import tarfile
 
 def _compress_bytes_to_tar(data: bytes, filename: str):
     ss = io.BytesIO()
-    with tarfile.open(fileobj=ss, mode="w:xz") as tar:
+    with tarfile.open(fileobj=ss, mode="w:gz") as tar:
         info = tarfile.TarInfo(filename)
         info.size = len(data)
         tar.addfile(info, io.BytesIO(data))
@@ -179,8 +179,18 @@ class BackgroundDebugTools:
                                frame: FrameType,
                                q: queue.Queue,
                                type: BreakpointType,
-                               name: Optional[str] = None):
-        """should only be called in main thread (server runs in background thread)"""
+                               should_enter_fn: Optional[Callable[[Breakpoint], bool]] = None):
+        """should only be called in main thread (server runs in background thread).
+        
+        Args:
+            frame (FrameType): the frame to be inspected.
+            q (queue.Queue): the queue to be used for communication between
+                background server and user program.
+            type (BreakpointType): the type of the breakpoint.
+            should_enter_fn (Callable[[Breakpoint], bool], optional): a function to determine
+                whether to enter the breakpoint. Defaults to None. this is usually used
+                when you have a external server to determine whether to enter the breakpoint.
+        """
         # FIXME better vscode breakpoint handling
         if self._cfg.skip_breakpoint:
             q.put(BkptLeaveEvent())
@@ -232,6 +242,7 @@ class BackgroundDebugTools:
                 with capture_draft_update() as ctx:
                     draft.tracer_state.runtime.metric.breakpoint_count = new_bkpt_cnt # type: ignore
                 with enter_app_context(app):
+
                     await obj.dm._update_with_jmes_ops(ctx._ops)
                 if not is_record_stop:
                     q.put(BkptLeaveEvent())
@@ -242,6 +253,11 @@ class BackgroundDebugTools:
                         draft.tracer_state.runtime = None
                     with enter_app_context(app):
                         await obj.dm._update_with_jmes_ops(ctx._ops)
+            should_enter = True
+            if should_enter_fn is not None:
+                should_enter = should_enter_fn(bkpt_model)
+            if not should_enter:
+                return 
             with capture_draft_update() as ctx:
                 draft.bkpt = bkpt_model
                 # if obj.dm.model.tracer_state.runtime is not None:
@@ -260,8 +276,15 @@ class BackgroundDebugTools:
                 })
             return is_record_stop
 
-    async def leave_breakpoint(self, trace_cfg: Optional[TracerConfig] = None):
-        """should only be called from remote"""
+    async def leave_breakpoint(self, trace_cfg: Optional[TracerConfig] = None, userdata: Any = None):
+        """should only be called from remote.
+        
+        Args:
+            trace_cfg (Optional[TracerConfig], optional): the trace config. Defaults to None.
+            userdata (Any, optional): the user data. Defaults to None.
+                user can use this to send a control message to foreground
+                program.
+        """
         assert not prim.is_loopback_call(
         ), "this function should only be called from remote"
         dm, app = self._get_bkgd_panel_dm_and_app()
@@ -273,16 +296,13 @@ class BackgroundDebugTools:
                 draft.tracer_state.runtime = TracerState.create_new_runtime(trace_cfg, prev_bkpt.frame_loc)
             draft.bkpt = None 
         async with self._bkpt_lock:
-            if get_app_context() is None:
-                with enter_app_context(app):
-                    await dm._update_with_jmes_ops(ctx._ops)
-            else:
+            with enter_app_context(app):
                 await dm._update_with_jmes_ops(ctx._ops)
             if prev_bkpt is not None:
                 assert prev_bkpt.queue is not None 
                 if trace_cfg is not None and trace_cfg.enable:
                     prev_bkpt.queue.put(BkptLaunchTraceEvent(trace_cfg))
-                prev_bkpt.queue.put(BkptLeaveEvent())
+                prev_bkpt.queue.put(BkptLeaveEvent(userdata))
 
     async def set_traceview_variable_inspect(self, var_name: str, var_obj: Any):
         tv_obj, tv_app = prim.get_service(

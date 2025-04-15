@@ -11,8 +11,9 @@ import threading
 from pathlib import Path
 import traceback
 from types import FrameType
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
+from tensorpc.apps.dbg.model import Breakpoint
 from tensorpc.compat import InWindows
 from tensorpc.constants import TENSORPC_MAIN_PID
 from tensorpc.core import prim
@@ -312,7 +313,8 @@ def breakpoint(name: Optional[str] = None,
                *,
                _frame_cnt: int = 1,
                pytorch_dist_extra: bool = False,
-               external_frame: Optional[FrameType] = None):
+               external_frame: Optional[FrameType] = None,
+               should_enter_fn: Optional[Callable[[Breakpoint], bool]] = None):
     """Enter a breakpoint in the background server.
     you must use specific UI or command tool to exit breakpoint.
     WARNING: currently don't support multi-thread
@@ -330,24 +332,24 @@ def breakpoint(name: Optional[str] = None,
     """
     global RECORDING
     if not should_enable_debug():
-        return False
+        return None
     is_server_proc = prim.is_in_server_context()
     if is_server_proc:
         LOGGER.warning(f"Bkpt skipped due to you run it in tensorpc server which isn't supported for now.")
-        return
+        return None
 
     if external_frame is not None:
         frame = external_frame
     else:
         frame = inspect.currentframe()
         if frame is None:
-            return False
+            return None
         while _frame_cnt > 0:
             if frame is not None:
                 frame = frame.f_back
             _frame_cnt -= 1
         if frame is None:
-            return False
+            return None
     if init_proc_name is None:
         init_proc_name = frame.f_code.co_name
 
@@ -360,7 +362,7 @@ def breakpoint(name: Optional[str] = None,
                              })
     event_q: queue.Queue[BreakpointEvent] = queue.Queue()
     is_trace_stop = BACKGROUND_SERVER.execute_service(
-        serv_names.DBG_ENTER_BREAKPOINT, frame, event_q, type, name)
+        serv_names.DBG_ENTER_BREAKPOINT, frame, event_q, type, should_enter_fn)
     if is_trace_stop:
         RECORDING = False
         _TRACER_WRAPPER.stop()
@@ -398,6 +400,7 @@ def breakpoint(name: Optional[str] = None,
                                             trace_res_obj, trace_cfg)
 
     is_launch_trace = False
+    result_data: Any = None
     while True:
         ev = event_q.get(timeout=timeout)
         if isinstance(ev, BkptLaunchTraceEvent):
@@ -422,10 +425,11 @@ def breakpoint(name: Optional[str] = None,
                     "viztracer is not installed, can't record trace data. use `pip install viztracer` to install."
                 )
         elif isinstance(ev, BkptLeaveEvent):
+            result_data = ev.data
             break
     if is_launch_trace:
         _TRACER_WRAPPER.start()
-    return True
+    return result_data
 
 def breakpoint_dist_pth(name: Optional[str] = None,
                         timeout: Optional[float] = None,
