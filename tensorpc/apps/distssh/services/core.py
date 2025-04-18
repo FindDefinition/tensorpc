@@ -28,7 +28,7 @@ from tensorpc.core.moduleid import import_dynamic_func
 import tensorpc.core.datamodel as D
 import psutil 
 from tensorpc.dock.serv_names import serv_names as app_serv_names
-from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, TENSORPC_DISTSSH_UI_KEY, TENSORPC_ENV_DISTSSH_URL_WITH_PORT)
+from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, TENSORPC_DISTSSH_UI_KEY, TENSORPC_ENV_DISTSSH_URL_WITH_PORT, TENSORPC_ENV_DISTSSH_WORKDIR)
 from rich.syntax import Syntax
 from ..typedefs import FTState, FTSSHServerArgs, FTStatus, SSHStatus, CmdStatus, MasterUIState
 from ..components.sshui import FaultToleranceUIMaster, FaultToleranceUIClient
@@ -38,6 +38,7 @@ LOGGER = rich_logging.get_logger("distssh")
 class SimpleLogEventType(enum.Enum):
     LINE = "L"
     INIT_METADATA = "M"
+    LOGGER_CHANGE = "C"
 
 class SSHEventLogger:
 
@@ -135,6 +136,8 @@ class FaultToleranceSSHServer:
         self._disconnect_retry_count = 0
 
         self._cur_logger: Optional[SSHEventLogger] = None
+        self._root_logger: Optional[SSHEventLogger] = None
+
         self._cmd_start_ts: int = 0
 
         self._master_lock = asyncio.Lock()
@@ -149,20 +152,26 @@ class FaultToleranceSSHServer:
 
     @marker.mark_server_event(event_type=marker.ServiceEventType.Init)
     async def _init(self):
+        workdir_p = Path(self._cfg.workdir).resolve()
         await self._terminal.connect_with_new_desc(self._conn_desc, init_cmds=[
             f"export {TENSORPC_ENV_DISTSSH_URL_WITH_PORT}=localhost:{prim.get_server_grpc_port()}\n",
+            f"export {TENSORPC_ENV_DISTSSH_WORKDIR}={str(workdir_p)}\n",
         ])
         term_state = self._terminal.get_current_state()
         assert term_state is not None 
         self._debug_panel.set_parent_pid(term_state.pid)
-        file_name = Path(self._cfg.workdir) / f"distssh-rank-{self.state.rank}.json"
+        file_name = workdir_p / f"distssh-rank-{self.state.rank}.json"
+        if not workdir_p.exists():
+            workdir_p.mkdir(parents=True, exist_ok=True, mode=0o755)
+            (workdir_p / "framescript").mkdir(parents=True, exist_ok=True, mode=0o755)
+        assert workdir_p.exists(), f"{self._cfg.workdir} does not exist"
+        if self._cfg.logdir != "":
+            assert Path(self._cfg.logdir).exists(), f"{self._cfg.logdir} does not exist"
+            self._root_logger = SSHEventLogger(Path(self._cfg.logdir) / f"root-cmd-log-{self.state.rank}.jsonl", open_mode="a")
         if self._cfg.master_discovery_fn is not None:
             self._master_discovery_fn = import_dynamic_func(
                 self._cfg.master_discovery_fn, is_func_id=True)
         else:
-            if not Path(self._cfg.workdir).exists():
-                Path(self._cfg.workdir).mkdir(parents=True, exist_ok=True)
-            assert Path(self._cfg.workdir).exists(), f"{self._cfg.workdir} does not exist"
             with file_name.open("w") as f:
                 json.dump({
                     "ip": self.state.ip,
@@ -211,7 +220,6 @@ class FaultToleranceSSHServer:
         if self._is_master:
             await self.master_debug_panel_broadcast(key, *args, exclude_rank=exclude_rank, **kwargs) 
         else:
-
             if self._master_robj is not None:
                 try:
                     await self._master_robj.remote_call(get_service_key_by_type(FaultToleranceSSHServer, "master_debug_panel_broadcast"), key, *args, exclude_rank=exclude_rank, **kwargs)
@@ -225,8 +233,8 @@ class FaultToleranceSSHServer:
     async def run_debug_panel_rpc(self, key: str, *args, **kwargs):
         await self._debug_panel.run_rpc_on_current_processes(key, *args, **kwargs)
 
-    async def _release_all_bkpt(self):
-        await self.master_debug_panel_broadcast(dbg_serv_names.DBG_LEAVE_BREAKPOINT, exclude_rank=-1)
+    async def _release_all_bkpt(self, data: Any = None):
+        await self.master_debug_panel_broadcast(dbg_serv_names.DBG_LEAVE_BREAKPOINT, data, exclude_rank=-1)
 
     async def master_debug_panel_broadcast(self, key: str, *args, exclude_rank: int = -1, **kwargs):
         if exclude_rank != self._master_rank:
@@ -239,10 +247,29 @@ class FaultToleranceSSHServer:
                 return False 
         return True 
 
-    def set_logdir(self, logdir: str):
+    def start_logging(self, logdir: str):
         # real logger will be created when a command started, and reset
         # when the command finished.
-        self._cfg.logdir = logdir
+        if self._cur_logger is not None:
+            raise RuntimeError("logger is already created, please set logdir before run command.")
+        if Path(logdir).exists():
+            logpath = Path(self._cfg.logdir) / f"cmd-log-{self.state.rank}.jsonl"
+            if not logpath.parent.exists():
+                logpath.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+            logger = SSHEventLogger(logpath, open_mode="a")
+            logger.open()
+            if self._root_logger is not None:
+                ts = time.time_ns()
+                self._root_logger.log({
+                    "ts": ts,
+                    "t": SimpleLogEventType.LOGGER_CHANGE.value,
+                    "d": {
+                        "logdir": logdir,
+                        "rank": self.state.rank,
+                        "logger": str(logpath),
+                    }
+                })
+            self._cur_logger = logger
 
     def _get_ssh_child_pids(self):
         state = self._terminal.get_current_state()
@@ -407,10 +434,18 @@ class FaultToleranceSSHServer:
         self._term_or_kill_all_ssh_child(False)
         await wait_task
 
-    def _line_event_cb(self, ev: terminal.TerminalLineEvent):
+    def _get_active_logger(self):
         if self._cur_logger is not None:
+            active_logger = self._cur_logger
+        else:
+            active_logger = self._root_logger
+        return active_logger
+
+    def _line_event_cb(self, ev: terminal.TerminalLineEvent):
+        active_logger = self._get_active_logger()
+        if active_logger is not None:
             relative_ts = (ev.ts - self._cmd_start_ts) // 1000
-            self._cur_logger.log({
+            active_logger.log({
                 "ts": relative_ts,
                 "t": SimpleLogEventType.LINE.value,
                 "d": ev.d.decode("utf-8")
@@ -440,16 +475,10 @@ class FaultToleranceSSHServer:
         shutdown_ev_task = asyncio.create_task(shutdown_ev.wait())
 
         try:
-            if self._cfg.logdir != "":
-                logpath = Path(self._cfg.logdir) / f"cmd-log-{self.state.rank}.jsonl"
-                if not logpath.parent.exists():
-                    logpath.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
-                logger = SSHEventLogger(logpath, open_mode="a")
-                logger.open()
-                self._cur_logger = logger
             self._cmd_start_ts = time.time_ns()
-            if self._cur_logger is not None:
-                self._cur_logger.log({
+            active_logger = self._get_active_logger()
+            if active_logger is not None:
+                active_logger.log({
                     "ts": self._cmd_start_ts,
                     "t": SimpleLogEventType.INIT_METADATA.value,
                     "d": {
@@ -498,7 +527,7 @@ class FaultToleranceSSHServer:
             LOGGER.error("cmd waiter error.", exc_info=True)
             raise
         finally:
-            if self._cur_logger is not None:
+            if self._cur_logger is not None and self._cur_logger is not self._root_logger:
                 self._cur_logger.close()
                 self._cur_logger = None
 
@@ -694,3 +723,11 @@ class FaultToleranceSSHServer:
         enter breakpoint when set.
         """
         return self.state.is_user_control_enabled
+
+    def get_ft_state_by_rank(self, rank: int) -> FTState:
+        """get fault tolerance state by rank.
+        """
+        if self._is_master:
+            return self._master_ui.dm.model.client_states[rank]
+        else:
+            return self._client_ui.dm.model

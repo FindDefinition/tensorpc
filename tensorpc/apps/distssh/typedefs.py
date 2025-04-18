@@ -23,6 +23,22 @@ class SSHStatus(enum.IntEnum):
     RUNNING = 2
     ERROR = 3
 
+class CheckpointType(enum.IntEnum):
+    # same as standard checkpoint
+    TRAIN_MAJOR = 0
+    # fast ckpt cache
+    TRAIN_MINOR = 1
+    # infer only ckpt cache
+    FIXED = 2
+
+@dataclasses.dataclass
+class CheckpointMetadata:
+    type: CheckpointType
+    # key to identify the different model
+    key: str
+    # train step, for fixed checkpoint cache, this is None.
+    step: Optional[int] = None
+    rank: int = 0
 
 @dataclasses.dataclass
 class FTSSHServerArgs:
@@ -77,6 +93,7 @@ class MasterUIState:
     selected_client_state: Optional[dict[str, Any]] = None
     cmd: str = "echo $HOME"
     cmd_history: list[str] = dataclasses.field(default_factory=list)
+    pending_ctrl: list[Any] = dataclasses.field(default_factory=list)
 
 @dataclasses.dataclass
 class FTStatusBoxState:

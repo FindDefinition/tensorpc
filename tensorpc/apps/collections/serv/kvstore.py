@@ -1,4 +1,5 @@
 
+import asyncio
 import dataclasses
 import enum
 from multiprocessing.managers import SharedMemoryManager
@@ -11,50 +12,78 @@ from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 from tensorpc.compat import Python3_13AndLater
 from multiprocessing.resource_tracker import unregister
 
-@dataclasses.dataclass
-class SharedArraySegment:
-    shm: SharedMemory
-    shape: list[int]
-    dtype: np.dtype
+ALIGN_SIZE = 128
 
-    def get_array_view(self):
-        return np.ndarray(self.shape, dtype=self.dtype, buffer=self.shm.buf)
-
-    def get_desc(self):
-        return SharedArraySegmentDesc(self.shm.name, self.shape, self.dtype)
-
-    def close_in_remote(self):
-        self.shm.close()
+def _align_up(size: int, align: int) -> int:
+    return (size + align - 1) // align * align
 
 @dataclasses.dataclass
-class SharedArraySegmentDesc:
-    shm_name: str
+class TensorInfo:
     shape: list[int]
     dtype: np.dtype
+    meta: Optional[Any]
+
+@dataclasses.dataclass
+class SharedArraySegmentDesc(TensorInfo):
+    shm_offset: int = 0
 
     def get_byte_size(self):
         return int(np.prod(self.shape) * np.dtype(self.dtype).itemsize)
 
-    def get_segment(self):
-        shm = SharedMemory(name=self.shm_name, create=False, size=self.get_byte_size())
+    def get_aligned_byte_size(self):
+        return _align_up(self.get_byte_size(), ALIGN_SIZE)
+
+@dataclasses.dataclass
+class SharedArraySegments:
+    shm: SharedMemory
+    descs: list[SharedArraySegmentDesc]
+
+    def __len__(self):
+        return len(self.descs)
+
+    def get_aligned_byte_size(self):
+        return sum(seg.get_aligned_byte_size() for seg in self.descs)
+
+    def get_array_view(self, index: int):
+        desc = self.descs[index]
+        byte_size = desc.get_byte_size()
+        memview = self.shm.buf[desc.shm_offset:desc.shm_offset + byte_size]
+        return np.ndarray(desc.shape, dtype=desc.dtype, buffer=memview)
+
+    def close_in_remote(self):
+        self.shm.close()
+
+    def get_segments_desc(self):
+        return SharedArraySegmentsDesc(self.shm.name, self.descs)
+
+@dataclasses.dataclass
+class SharedArraySegmentsDesc:
+    shm_name: str
+    descs: list[SharedArraySegmentDesc]
+
+    def get_aligned_byte_size(self):
+        return sum(seg.get_aligned_byte_size() for seg in self.descs)
+
+    def get_segments(self):
         if Python3_13AndLater:
             # when we use this shared mem in other process, we don't need
             # to track it in resource tracker.
-            shm = SharedMemory(name=self.shm_name, create=False, size=self.get_byte_size(), track=False) # type: ignore
+            shm = SharedMemory(name=self.shm_name, create=False, size=self.get_aligned_byte_size(), track=False) # type: ignore
         else:
-            shm = SharedMemory(name=self.shm_name, create=False, size=self.get_byte_size())
+            shm = SharedMemory(name=self.shm_name, create=False, size=self.get_aligned_byte_size())
             # if not Python3_13AndLater:
             unregister(shm._name, "shared_memory") # type: ignore
-        return SharedArraySegment(shm, self.shape, self.dtype)
+        return SharedArraySegments(shm, self.descs)
+
 
 class KVStoreEventType(enum.IntEnum):
     ITEM_CHANGE = 0
 
 @dataclasses.dataclass
 class KVStoreItem:
-    type: Union[int, str]
     mtime: float
     data: Any
+    metadata: Optional[Any] = None
 
 @dataclasses.dataclass
 class KVStoreChangeEvent:
@@ -72,8 +101,8 @@ class KVStore:
     def backend_get_event_emitter(self):
         return self._event_emitter
 
-    async def set_item(self, key: str, value: Any, type: Union[int, str] = "unknown"):
-        self._store[key] = KVStoreItem(type=type, mtime=time.time(), data=value)
+    async def set_item(self, key: str, value: Any, metadata: Optional[Any] = None):
+        self._store[key] = KVStoreItem(metadata=metadata, mtime=time.time(), data=value)
         await self._event_emitter.emit_async(KVStoreEventType.ITEM_CHANGE, self._store)
 
     def has_item(self, key: str) -> bool:
@@ -84,6 +113,12 @@ class KVStore:
 
     def get_all_keys(self) -> List[str]:
         return list(self._store.keys())
+
+    def get_all_key_to_meta(self) -> dict[str, Any]:
+        return {key: item.metadata for key, item in self._store.items()}
+
+    def get_item_metadata(self, key: str):
+        return self._store[key].metadata
 
     async def remove_item(self, key: str, emit_event: bool = True):
         if key in self._store:
@@ -104,65 +139,73 @@ class ShmKVStore:
     def __init__(self):
         self._store: dict[str, KVStoreItem] = {}
         self._store_shared_mgrs: dict[str, SharedMemoryManager] = {}
-        self._store_shared_segments: dict[str, list[SharedArraySegment]] = {}
-
-    @marker.mark_server_event(event_type=marker.ServiceEventType.Init)
-    def _init(self):
+        self._store_shared_segments: dict[str, SharedArraySegments] = {}
         self._event_emitter: AsyncIOEventEmitter[KVStoreEventType, dict[str, KVStoreItem]] = AsyncIOEventEmitter()
+
+        self._lock = asyncio.Lock()
 
     @marker.mark_server_event(event_type=marker.ServiceEventType.Exit)
     def _exit(self):
         for key, segments in self._store_shared_segments.items():
-            for seg in segments:
-                seg.shm.close()
-        for key, mgr in self._store_shared_mgrs.items():
+            mgr = self._store_shared_mgrs[key]
+            segments.shm.close()
             mgr.shutdown()
+        self._store_shared_segments.clear()
         self._store_shared_mgrs.clear()
 
-    def _validate_arr_desps(self, key: str, arr_desps: list[tuple[list[int], np.dtype]]):
-        segments = self._store_shared_segments[key]
-        if len(arr_desps) == len(segments):
+    def _validate_arr_desps(self, key: str, arr_desps: list[TensorInfo]):
+        segment_descs = self._store_shared_segments[key].descs
+        if len(arr_desps) == len(segment_descs):
             for i in range(len(arr_desps)):
-                shape, dtype = arr_desps[i]
-                seg = segments[i]
+                info = arr_desps[i]
+                shape, dtype = info.shape, info.dtype
+                seg_desc = segment_descs[i]
                 seg_byte_size = np.prod(shape) * np.dtype(dtype).itemsize
-                target_byte_size = seg.shm.size
+                target_byte_size = seg_desc.get_byte_size()
                 if seg_byte_size != target_byte_size:
                     raise ValueError(f"{key} already allocated with different byte length.")
         else:
             raise ValueError(f"{key} already allocated with different number of segments.")
 
-    def get_or_create_shared_array_segments(self, key: str, arr_desps: list[tuple[list[int], np.dtype]]):
+    def get_or_create_shared_array_segments(self, key: str, arr_desps: list[TensorInfo]):
         if key in self._store_shared_segments:
             # validate existed segments. if same, just return them.
             segments = self._store_shared_segments[key]
             self._validate_arr_desps(key, arr_desps)
-            return segments
+            return segments.get_segments_desc()
         mgr = SharedMemoryManager()
         mgr.start()
         self._store_shared_mgrs[key] = mgr
-        segments: list[SharedArraySegment] = []
-        for shape, dtype in arr_desps:
+        segment_descs: list[SharedArraySegmentDesc] = []
+        offset = 0
+        for info in arr_desps:
+            shape, dtype, meta = info.shape, info.dtype, info.meta
             # segments.append(mgr.SharedMemory(size=size))
-            size = np.prod(shape) * np.dtype(dtype).itemsize
-            shm = mgr.SharedMemory(size=int(size))
-            segments.append(SharedArraySegment(shm, shape, dtype))
-
-        self._store_shared_segments[key] = segments
-        return [s.get_desc() for s in segments]
+            desc = SharedArraySegmentDesc(shape, dtype, meta, offset)
+            aligned_size = desc.get_aligned_byte_size()
+            offset += aligned_size
+            segment_descs.append(desc)
+        total_size = sum(seg.get_aligned_byte_size() for seg in segment_descs)
+        mem = mgr.SharedMemory(size=total_size)
+        self._store_shared_segments[key] = SharedArraySegments(mem, segment_descs)
+        return self._store_shared_segments[key].get_segments_desc()
 
     def backend_get_event_emitter(self):
         return self._event_emitter
 
-    async def set_item_treespec(self, key: str, treespec: Any, arr_desps: list[tuple[list[int], np.dtype]], type: Union[int, str] = "unknown"):
-        # validate value_arr_desps
-        if key not in self._store_shared_segments:
-            raise ValueError(f"{key} not allocated. call `get_or_create_shared_array_segments` first.")
-        self._validate_arr_desps(key, arr_desps)
-        # we assume client already copy data to shared memory. so we only
-        # need to store treespec.
-        self._store[key] = KVStoreItem(type=type, mtime=time.time(), data=treespec)
-        await self._event_emitter.emit_async(KVStoreEventType.ITEM_CHANGE, self._store)
+    def backend_get_store(self):
+        return self._store
+
+    async def set_item_treespec(self, key: str, treespec: Any, arr_desps: list[TensorInfo], metadata: Optional[Any] = None):
+        async with self._lock:
+            # validate value_arr_desps
+            if key not in self._store_shared_segments:
+                raise ValueError(f"{key} not allocated. call `get_or_create_shared_array_segments` first.")
+            self._validate_arr_desps(key, arr_desps)
+            # we assume client already copy data to shared memory. so we only
+            # need to store treespec.
+            self._store[key] = KVStoreItem(metadata=metadata, mtime=time.time(), data=treespec)
+            await self._event_emitter.emit_async(KVStoreEventType.ITEM_CHANGE, self._store)
 
     def has_item(self, key: str) -> bool:
         return key in self._store
@@ -170,40 +213,46 @@ class ShmKVStore:
     def get_item_treespec(self, key: str):
         return self._store[key].data
 
+    def get_item_metadata(self, key: str):
+        return self._store[key].metadata
+
     def get_item_segment_descs(self, key: str):
-        return [seg.get_desc() for seg in self._store_shared_segments[key]]
+        return self._store_shared_segments[key].get_segments_desc()
 
     def get_item_shm_size(self, key: str):
         if key not in self._store_shared_segments:
             raise ValueError(f"{key} not allocated.")
         segments = self._store_shared_segments[key]
-        size = 0
-        for seg in segments:
-            size += seg.shm.size
-        return size
+        return segments.shm.size
 
     def get_all_keys(self) -> List[str]:
         return list(self._store.keys())
 
+    def get_all_key_to_meta(self) -> dict[str, Any]:
+        return {key: item.metadata for key, item in self._store.items()}
+
     async def remove_item(self, key: str, emit_event: bool = True):
-        if key in self._store:
-            del self._store[key]
-            assert key in self._store_shared_mgrs
-            mgr = self._store_shared_mgrs[key]
-            mgr.shutdown()
-            del self._store_shared_mgrs[key]
-            # segments always created from mgr, so no need to close
-            # manually.
-            del self._store_shared_segments[key]
-            if emit_event:
-                await self._event_emitter.emit_async(KVStoreEventType.ITEM_CHANGE, self._store)
+        async with self._lock:
+            if key in self._store:
+                del self._store[key]
+                assert key in self._store_shared_mgrs
+                mgr = self._store_shared_mgrs.pop(key)
+                seg = self._store_shared_segments.pop(key)
+                seg.shm.close()
+                mgr.shutdown()
+                # segments always created from mgr, so no need to close
+                # manually.
+                if emit_event:
+                    await self._event_emitter.emit_async(KVStoreEventType.ITEM_CHANGE, self._store)
 
     async def remove_items(self, keys: List[str]):
+        # async with self._lock:
         for key in keys:
             await self.remove_item(key, emit_event=False)
         await self._event_emitter.emit_async(KVStoreEventType.ITEM_CHANGE, self._store)
 
     async def clear(self):
+        # async with self._lock:
         for key in self._store.keys():
             await self.remove_item(key, emit_event=False)
         await self._event_emitter.emit_async(KVStoreEventType.ITEM_CHANGE, self._store)

@@ -20,10 +20,12 @@ import inspect
 import os
 import time
 import traceback
+from types import FrameType
 from typing import Any, Callable, Coroutine, Dict, Iterable, List, Mapping, Optional, Set, Tuple, TypeVar, Union
 from typing_extensions import Literal, overload
 
 from tensorpc.core.datamodel.draft import create_literal_draft
+from tensorpc.core.datamodel.draftstore import DraftStoreBackendBase
 from tensorpc.utils.containers.dict_proxy import DictProxy
 
 import numpy as np
@@ -122,6 +124,11 @@ int main(){
 echo "Hello World"
     """,
 }
+
+_INITIAL_SCRIPT_PER_LANG_FOR_FRAMESCRIPT = _INITIAL_SCRIPT_PER_LANG.copy()
+_INITIAL_SCRIPT_PER_LANG_FOR_FRAMESCRIPT["python"] = f"""
+# frame script, you can access all frame variables here.
+"""
 
 
 class ScriptManager(mui.FlexBox):
@@ -528,8 +535,12 @@ class ScriptManagerV2(mui.FlexBox):
     def __init__(self,
                  storage_node_rid: Optional[str] = None,
                  graph_id: Optional[str] = None,
-                 init_scripts: Optional[Dict[str, str]] = None):
-        """when storage_node_rid is None, use app node storage, else use the specified node storage
+                 init_scripts: Optional[Dict[str, str]] = None,
+                 init_store_backend: Optional[tuple[DraftStoreBackendBase, str]] = None,
+                 frame: Optional[FrameType] = None,
+                 enable_app_backend: bool = True):
+        """Script manager that use draft storage
+
         """
         super().__init__()
         self._init_storage_node_rid = storage_node_rid
@@ -537,7 +548,12 @@ class ScriptManagerV2(mui.FlexBox):
         self._storage_node_rid = storage_node_rid
         self._graph_id = graph_id
         self._editor_path_uid = "scriptmgr_v2"
-        init_model = ScriptManagerModel([], -1)
+        if frame is not None:
+            init_model = ScriptManagerModel([
+                ScriptModel("dev", "python", _create_init_script_states(_INITIAL_SCRIPT_PER_LANG_FOR_FRAMESCRIPT)),
+            ], 0)
+        else:
+            init_model = ScriptManagerModel([], -1)
         self.code_editor = mui.MonacoEditor("", "python",
                                             "default").prop(flex=1,
                                                             minHeight=0,
@@ -576,12 +592,19 @@ class ScriptManagerV2(mui.FlexBox):
                textFieldProps=mui.TextFieldProps(muiMargin="dense"),
                padding="0 3px 0 3px",
                **CommonOptions.AddableAutocomplete)
-        self.langs = mui.ToggleButtonGroup([
-            mui.GroupToggleButtonDef("cpp", name="CPP"),
-            mui.GroupToggleButtonDef("python", name="PY"),
-            mui.GroupToggleButtonDef("bash", name="BASH"),
-            mui.GroupToggleButtonDef("app", name="APP"),
-        ]).prop(enforceValueSet=True)
+        self._frame = frame
+        if frame is not None:
+            self.langs = mui.ToggleButtonGroup([
+                mui.GroupToggleButtonDef("python", name="PY"),
+            ]).prop(enforceValueSet=True)
+        else:
+            self.langs = mui.ToggleButtonGroup([
+                mui.GroupToggleButtonDef("cpp", name="CPP"),
+                mui.GroupToggleButtonDef("python", name="PY"),
+                mui.GroupToggleButtonDef("bash", name="BASH"),
+                mui.GroupToggleButtonDef("app", name="APP"),
+            ]).prop(enforceValueSet=True)
+
         self._save_and_run_btn = mui.IconButton(
             mui.IconType.PlayArrow,
             self._on_save_and_run).prop(progressColor="primary")
@@ -620,9 +643,12 @@ class ScriptManagerV2(mui.FlexBox):
         self.code_editor.bind_draft_change_uncontrolled(cur_code_draft.code, 
             code_path_draft, cur_script_draft.language,
             lang_modifier=lambda x: _LANG_TO_VSCODE_MAPPING[x])
-        from tensorpc.dock.flowapp.appstorage import AppDraftFileStoreBackend
-
-        self.dm.connect_draft_store(f"{SCRIPT_STORAGE_KEY_PREFIX_V2}", AppDraftFileStoreBackend())
+        if init_store_backend is not None:
+            self.dm.connect_draft_store(init_store_backend[1], init_store_backend[0])
+        else:
+            if enable_app_backend:
+                from tensorpc.dock.flowapp.appstorage import AppDraftFileStoreBackend
+                self.dm.connect_draft_store(f"{SCRIPT_STORAGE_KEY_PREFIX_V2}", AppDraftFileStoreBackend())
         self.langs.bind_draft_change(draft.scripts[draft.cur_script_idx].language)
         # make sure lang change is handled before `_on_lang_select`
         self.langs.event_change.on(self._on_lang_select)
@@ -793,24 +819,29 @@ class ScriptManagerV2(mui.FlexBox):
                 code = cur_script.states[cur_lang].code
             label = cur_script.label
             if cur_lang == "python":
-                __tensorpc_script_res: List[Optional[Coroutine]] = [None]
-                lines = code.splitlines()
-                lines = [" " * 4 + line for line in lines]
-                run_name = f"run_{label}"
-                lines.insert(0, f"async def _{run_name}():")
-                lines.append(f"__tensorpc_script_res[0] = _{run_name}()")
-                code = "\n".join(lines)
-                code_comp = compile(code, fname, "exec")
-                gs = {}
-                exec(code_comp, gs,
-                     {"__tensorpc_script_res": __tensorpc_script_res})
-                if SCRIPT_TEMP_STORAGE_KEY in gs:
-                    storage_var = gs[SCRIPT_TEMP_STORAGE_KEY]
-                    if isinstance(storage_var, DictProxy):
-                        storage_var.set_internal(self._manager_global_storage)
-                res = __tensorpc_script_res[0]
-                assert res is not None
-                await res
+                if self._frame is not None:
+                    # for frame script.
+                    code_comp = compile(code, fname, "exec")
+                    exec(code_comp, self._frame.f_globals, self._frame.f_locals)
+                else:
+                    __tensorpc_script_res: List[Optional[Coroutine]] = [None]
+                    lines = code.splitlines()
+                    lines = [" " * 4 + line for line in lines]
+                    run_name = f"run_{label}"
+                    lines.insert(0, f"async def _{run_name}():")
+                    lines.append(f"__tensorpc_script_res[0] = _{run_name}()")
+                    code = "\n".join(lines)
+                    code_comp = compile(code, fname, "exec")
+                    gs = {}
+                    exec(code_comp, gs,
+                        {"__tensorpc_script_res": __tensorpc_script_res})
+                    if SCRIPT_TEMP_STORAGE_KEY in gs:
+                        storage_var = gs[SCRIPT_TEMP_STORAGE_KEY]
+                        if isinstance(storage_var, DictProxy):
+                            storage_var.set_internal(self._manager_global_storage)
+                    res = __tensorpc_script_res[0]
+                    assert res is not None
+                    await res
             elif cur_lang == "bash":
                 proc = await asyncio.create_subprocess_shell(
                     code,

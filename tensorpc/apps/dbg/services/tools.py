@@ -290,6 +290,12 @@ class BackgroundDebugTools:
         dm, app = self._get_bkgd_panel_dm_and_app()
         draft = dm.get_draft_type_only()
         prev_bkpt: Optional[Breakpoint] = None
+        if dm.model.bkpt is None:
+            # ignore if no breakpoint
+            LOGGER.warning(
+                "No breakpoint found."
+            )
+            return 
         with capture_draft_update() as ctx:
             prev_bkpt = dm.model.bkpt
             if trace_cfg is not None and trace_cfg.enable and prev_bkpt is not None:

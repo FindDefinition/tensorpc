@@ -651,15 +651,24 @@ class VscodeStyleSSHClientStreamSession(asyncssh.stream.SSHClientStreamSession
 
         self.state = CommandEventParseState.VscPromptEnd  # idle
         self._rbuf_max_length = 4000
+        self._vscode_raw_recv_buf: list[RawEvent] = []
+        self._wait_event: Optional[asyncio.Event] = None
+
 
     def data_received(self, data: bytes, datatype) -> None:
         res = super().data_received(data, datatype)
-        if self.callback is not None:
-            ts = time.time_ns()
-            res_str = data
-            loop = asyncio.get_running_loop()
-            asyncio.run_coroutine_threadsafe(
-                self.callback(RawEvent(ts, res_str, False, self.uid)), loop)
+        ts = time.time_ns()
+        if self._wait_event is not None:
+            ts = time.time_ns() 
+            ev = RawEvent(ts, data, uid=self.uid)
+            self._vscode_raw_recv_buf.append(ev)
+            self._wait_event.set()
+        # if self.callback is not None:
+        #     ts = time.time_ns()
+        #     res_str = data
+        #     loop = asyncio.get_running_loop()
+        #     asyncio.run_coroutine_threadsafe(
+        #         self.callback(RawEvent(ts, res_str, False, self.uid)), loop)
         return res
 
     async def readuntil(self,
@@ -1187,13 +1196,14 @@ class SSHClient:
             request_pty: Union[Literal["force", "auto"], bool] = "force",
             rbuf_max_length: int = 4000,
             term_type: Optional[str] = None,
-            env: Optional[MutableMapping[str, str]] = None):
+            env: Optional[MutableMapping[str, str]] = None,
+            enable_raw_event: bool = True):
         session: VscodeStyleSSHClientStreamSession
         bash_file_path = determine_hook_path_by_shell_info(shell_type)
         if init_bash_file:
             await self._sync_sh_init_file(conn, shell_type)
         init_cmd, init_cmd_2 = self._get_shell_init_cmd(shell_type, bash_file_path if self._enable_vscode_cmd_util else None)
-
+        raw_wait_ev = asyncio.Event()
         chan, session = await conn.create_session(
             VscodeStyleSSHClientStreamSession,
             init_cmd,
@@ -1203,6 +1213,8 @@ class SSHClient:
             term_type=term_type,
             encoding=self.encoding) # type: ignore
         session._rbuf_max_length = rbuf_max_length
+        if enable_raw_event:
+            session._wait_event = raw_wait_ev
         stdin, stdout, stderr = (
             asyncssh.stream.SSHWriter(session, chan),
             VscodeSSHReader(session, chan),
@@ -1222,7 +1234,7 @@ class SSHClient:
         #         stdin.write(b"setopt HIST_IGNORE_SPACE\n")
         #     elif shell_type.type == "bash":
         #         stdin.write(b"export HISTCONTROL=ignorespace\n")
-        return chan, session, stdin, stdout, stderr
+        return chan, session, stdin, stdout, stderr, raw_wait_ev
 
     async def connect_queue(
             self,
@@ -1288,12 +1300,11 @@ class SSHClient:
                     self.bash_file_inited = True
                 else:
                     init_bash_file = False
-                chan, session, stdin, stdout, stderr = await self._create_controlled_session(conn, 
+                chan, session, stdin, stdout, stderr, raw_ev = await self._create_controlled_session(conn, 
                     shell_type, init_bash_file=init_bash_file, request_pty=request_pty,
-                    rbuf_max_length=rbuf_max_length, term_type=term_type)
+                    rbuf_max_length=rbuf_max_length, term_type=term_type,
+                    enable_raw_event=enable_raw_event)
                 session.uid = self.uid
-                if enable_raw_event:
-                    session.callback = callback
                 peer_client = PeerSSHClient(stdin,
                                             stdout,
                                             stderr,
@@ -1301,14 +1312,17 @@ class SSHClient:
                 loop_task = asyncio.create_task(
                     peer_client.wait_loop_queue(callback, shutdown_task, line_raw_callback))
                 wait_tasks = [
-                    asyncio.create_task(inp_queue.get()), shutdown_task,
-                    loop_task
+                    asyncio.create_task(inp_queue.get()), 
+                    shutdown_task, loop_task,
                 ]
+                raw_ev_task = asyncio.create_task(raw_ev.wait())
+                if enable_raw_event:
+                    wait_tasks.append(raw_ev_task)
                 fwd_ports, rfwd_ports, fwd_listeners, rfwd_listeners = await self._handle_forward_ports(conn, forward_ports, r_forward_ports)
-                for listener in rfwd_listeners:
-                    wait_tasks.append(asyncio.create_task(listener.wait_closed()))
-                for listener in fwd_listeners:
-                    wait_tasks.append(asyncio.create_task(listener.wait_closed()))
+                # for listener in rfwd_listeners:
+                #     wait_tasks.append(asyncio.create_task(listener.wait_closed()))
+                # for listener in fwd_listeners:
+                #     wait_tasks.append(asyncio.create_task(listener.wait_closed()))
                 if env_port_modifier is not None and (rfwd_ports or fwd_ports):
                     env_port_modifier(fwd_ports, rfwd_ports, env)
                 if init_event is not None:
@@ -1343,6 +1357,17 @@ class SSHClient:
                 while True:
                     done, pending = await asyncio.wait(
                         wait_tasks, return_when=asyncio.FIRST_COMPLETED)
+                    if enable_raw_event and raw_ev_task in done:
+                        ev_buf = session._vscode_raw_recv_buf.copy()
+                        session._vscode_raw_recv_buf.clear()
+                        # merge ev buf
+                        if len(ev_buf) > 0:
+                            new_data = b"".join(ev.raw for ev in ev_buf)
+                            new_ev = RawEvent(ev_buf[-1].timestamp, new_data, False)
+                            await callback(new_ev)
+                        raw_ev.clear()
+                        raw_ev_task = asyncio.create_task(raw_ev.wait())
+                        wait_tasks[-1] = raw_ev_task
                     if shutdown_task in done:
                         for task in pending:
                             await _cancel(task)
@@ -1352,6 +1377,8 @@ class SSHClient:
                         for task in pending:
                             await _cancel(task)
                         break
+                    if wait_tasks[0] not in done:
+                        continue 
                     text = wait_tasks[0].result()
                     if isinstance(text, SSHRequest):
                         if text.type == SSHRequestType.ChangeSize:
@@ -1368,9 +1395,7 @@ class SSHClient:
                                 stdin.write(text.encode("utf-8"))
                             else:
                                 stdin.write(text)
-                    wait_tasks = [
-                        asyncio.create_task(inp_queue.get()), shutdown_task, loop_task
-                    ]
+                    wait_tasks[0] = asyncio.create_task(inp_queue.get())
                 # await loop_task
         except BaseException as exc:
             await callback(_warp_exception_to_event(exc, self.uid))

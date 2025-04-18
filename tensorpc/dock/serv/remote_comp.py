@@ -177,6 +177,8 @@ class RemoteComponentService:
         if not is_local_call:
             if app_obj.mounted_app_meta is not None and app_obj.mounted_app_meta.remote_gen_queue is not None:
                 app_obj.shutdown_ev.set()
+                with enter_app_context(app_obj.app):
+                    await app_obj.app._flowapp_special_eemitter.emit_async(AppSpecialEventType.RemoteCompUnmount, None)
                 return
         if not is_local_call:
             REMOTE_APP_LOGGER.warning("Unmount remote comp %s", key)

@@ -7,7 +7,7 @@ import traceback
 
 async def get_process_traceback_by_pyspy(pid: int, with_locals: bool = False) -> Any:
     cmd = [
-        "py-spy", "dump", f"--pid={pid}", "-j", # "--nonblocking"
+        "py-spy", "dump", f"--pid={pid}", "-j", "--nonblocking"
     ]
     if with_locals:
         cmd.append("--locals")
@@ -97,7 +97,7 @@ async def _get_torchrun_traceback_by_pyspy(main_thread_only: bool = True, is_dat
         raise ValueError("pt_elastic process not found.")
     # 2. get all subprocess except data worker named `pt_data_worker`
     current_process = psutil.Process(main_pid)
-    children = current_process.children(recursive=True)
+    children = current_process.children(recursive=is_data_worker)
     name_to_pid_to_tb: dict[str, dict[int, Any]] = {}
     for child in children:
         try:

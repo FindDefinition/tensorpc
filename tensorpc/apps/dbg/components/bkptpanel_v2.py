@@ -2,12 +2,16 @@ import ast
 import asyncio
 import dataclasses
 import enum
+import os
+from pathlib import Path
 from time import sleep
 from types import FrameType
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
+from tensorpc.apps.distssh.constants import TENSORPC_ENV_DISTSSH_WORKDIR
 from tensorpc.constants import TENSORPC_BG_PROCESS_NAME_PREFIX
 from tensorpc.core import inspecttools
 from tensorpc.apps.dbg.core.frame_id import get_frame_uid
+from tensorpc.core.datamodel.draftstore import DraftSimpleFileStoreBackend
 from tensorpc.core.datamodel.events import DraftChangeEvent
 from tensorpc.dock import appctx
 from tensorpc.dock.components import chart, mui
@@ -15,14 +19,16 @@ from tensorpc.dock.components.plus.config import ConfigDialogEvent, ConfigPanelD
 from tensorpc.apps.dbg.components.frame_obj_v2 import FrameObjectPreview
 from tensorpc.apps.dbg.components.perfetto_utils import zip_trace_result
 from tensorpc.dock.components.plus.objinspect.tree import BasicObjectTree
-from tensorpc.dock.components.plus.scriptmgr import ScriptManager
+from tensorpc.dock.components.plus.scriptmgr import ScriptManager, ScriptManagerV2
 from tensorpc.dock.components.plus.styles import CodeStyles
 from tensorpc.dock.components.plus.objinspect.inspector import ObjectInspector
 from tensorpc.apps.dbg.constants import BackgroundDebugToolsConfig, DebugFrameInfo, DebugFrameState, RecordMode, TracerConfig, TracerSingleResult, TracerUIConfig
+from tensorpc.dock.core.appcore import AppSpecialEventType
 from tensorpc.utils.loader import FrameModuleMeta
 from .framescript import FrameScript
 from tensorpc.apps.dbg.model import PyDbgModel, TracerState
 import tensorpc.core.datamodel as D
+from tensorpc.dock import marker
 
 class DebugActions(enum.Enum):
     RECORD_TO_NEXT_SAME_BKPT = "Record To Same Breakpoint"
@@ -95,19 +101,14 @@ class BreakpointDebugPanel(mui.FlexBox):
                                  paddingRight="4px",
                                  alignItems="center")
         self.header_actions_may_disable = mui.MatchCase.binary_selection(True, self.header_actions)
-        # self.frame_script = FrameScript()
+        self.frame_script_container = mui.VBox([]).prop(width="100%", height="100%", overflow="hidden")
         self._perfetto = chart.Perfetto().prop(width="100%", height="100%")
         custom_tabs = [
             mui.TabDef("",
-                       "1",
-                       ScriptManager(),
-                       icon=mui.IconType.Code,
-                       tooltip="script manager"),
-            # mui.TabDef("",
-            #            "2",
-            #            self.frame_script,
-            #            icon=mui.IconType.DataArray,
-            #            tooltip="frame script manager"),
+                       "2",
+                       self.frame_script_container,
+                       icon=mui.IconType.DataArray,
+                       tooltip="frame script manager"),
             mui.TabDef("",
                        "3",
                        self._perfetto,
@@ -217,6 +218,57 @@ class BreakpointDebugPanel(mui.FlexBox):
         self._cur_frame_state: DebugFrameState = DebugFrameState(None)
 
         self._bkgd_debug_tool_cfg: Optional[BackgroundDebugToolsConfig] = None
+    
+        self._cur_frame_script: Optional[ScriptManagerV2] = None
+
+        self._is_remote_mounted = False
+
+    @marker.mark_did_mount
+    async def _on_mount(self):
+        appctx.use_app_special_event_handler(self, AppSpecialEventType.RemoteCompMount, self._frame_script_remote_comp_mount)
+        appctx.use_app_special_event_handler(self, AppSpecialEventType.RemoteCompUnmount, self._frame_script_remote_comp_unmount)
+
+    
+    async def _frame_script_remote_comp_unmount(self, ev):
+        self._is_remote_mounted = False
+        await self.frame_script_container.set_new_layout([])
+
+    def _get_frame_script_from_frame(self, frame: FrameType, offset: int):
+        cur_frame: Optional[FrameType] = frame
+        count = offset
+        while count > 0:
+            assert cur_frame is not None
+            cur_frame = cur_frame.f_back
+            count -= 1
+        assert cur_frame is not None
+        frame_uid, frame_meta = get_frame_uid(cur_frame)
+        distssh_workdir = os.getenv(TENSORPC_ENV_DISTSSH_WORKDIR)
+        if distssh_workdir is not None:
+            distssh_workdir_framescript = Path(distssh_workdir) / "framescript"
+            fs_backend = DraftSimpleFileStoreBackend(distssh_workdir_framescript)
+            script_mgr = ScriptManagerV2(
+                init_store_backend=(fs_backend, frame_uid),
+                frame=frame,
+            )
+        else:
+            script_mgr = ScriptManagerV2(
+                enable_app_backend=False,
+                frame=frame,
+            )
+        return script_mgr
+
+    async def _frame_script_remote_comp_mount(self, ev):
+        self._is_remote_mounted = True
+        if self.dm.model.bkpt is not None:
+            frame = self.dm.model.bkpt.frame
+            assert frame is not None 
+            selected = self.dm.model.bkpt.selected_frame_item
+            offset = 0
+            if selected is not None:
+                offset = selected["offset"]
+            await self.frame_script_container.set_new_layout([
+                self._get_frame_script_from_frame(frame, offset),
+            ])
 
     async def _handle_selected_frame_change(self, ev: DraftChangeEvent):
         assert ev.user_eval_vars is not None 
@@ -234,11 +286,16 @@ class BreakpointDebugPanel(mui.FlexBox):
             frame_uid, frame_meta = get_frame_uid(frame)
             await self._frame_obj_preview.set_frame_meta(frame_uid,
                                                         frame_meta.qualname)
+            if self._is_remote_mounted:
+                await self.frame_script_container.set_new_layout([
+                    self._get_frame_script_from_frame(cur_frame, 0),
+                ])
         else:
             # await self._frame_obj_preview.clear() 
             await self._frame_obj_preview.clear_frame_variable()
             await self._frame_obj_preview.clear_preview_layouts()
             await self.tree_viewer.tree.set_root_object_dict({})
+            await self.frame_script_container.set_new_layout([])
 
 
     async def _copy_frame_path_lineno(self):

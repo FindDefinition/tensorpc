@@ -584,7 +584,6 @@ class AsyncSSHTerminal(Terminal):
                     except:
                         traceback.print_exc()
             if isinstance(event, RawEvent):
-                # print(event.raw)
                 if self.is_mounted():
                     await self.send_raw(event.raw, event.timestamp - self._ssh_state.base_ts)
                 else:

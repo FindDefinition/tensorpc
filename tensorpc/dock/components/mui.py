@@ -5393,7 +5393,7 @@ class DataGridPropsBase:
     customFooterDatas: Union[Undefined, List[Dict[str, Any]]] = undefined
 
     headerMenuItems: Union[Undefined, List[MenuItem]] = undefined
-
+    tableContainerProps: Union[Undefined, FlexBoxProps] = undefined
 
 @dataclasses.dataclass
 class DataGridProps(MUIFlexBoxProps, DataGridPropsBase):
@@ -5402,7 +5402,7 @@ class DataGridProps(MUIFlexBoxProps, DataGridPropsBase):
     # it may contain component.
     # WARNING when you use data proxy, id is set by us, not user,
     # it will be str(index) of your data list proxy.
-    dataList: Union[List[Dict[str, Any]],
+    dataList: Union[List[Any],
                     DataGridProxy] = dataclasses.field(default_factory=list)
 
     @model_validator(mode='after')
@@ -5551,6 +5551,49 @@ class DataGrid(MUIContainerBase[DataGridProps, MUIComponentType]):
                     "index": x.index,
                     "update": x.update
                 } for x in updates],
+            }))
+
+    @contextlib.asynccontextmanager
+    async def draft_update(self, model_cls: type[_T]) -> AsyncGenerator[_DataListUpdateContext[_T], None]:
+        assert dataclasses.is_pydantic_dataclass(model_cls), "only pydantic dataclass is supported"
+        assert not isinstance(self.props.dataList, DataGridProxy)
+        assert len(self.props.dataList) != 0, "data list is empty, can't use draft update"
+        # validate DataclassType
+        if dataclasses.is_dataclass(self.props.dataList[0]):
+            assert isinstance(self.props.dataList[0], model_cls)
+        else:
+            model_cls(**self.props.dataList[0])
+        draft = create_draft_type_only(model_cls)
+        ctx = _DataListUpdateContext(draft, len(self.props.dataList))
+        yield ctx
+        none_index_ops: Optional[list[DraftUpdateOp]] = None
+        idx_to_ops: dict[int, list[DraftUpdateOp]] = {}
+        for index, updates in ctx._update_list:
+            if index is None:
+                none_index_ops = updates
+            elif isinstance(index, int):
+                idx_to_ops[index] = updates
+            else:
+                for ind in index:
+                    idx_to_ops[ind] = updates
+        if none_index_ops is not None:
+            for i in range(len(self.props.dataList)):
+                if i not in idx_to_ops:
+                    idx_to_ops[i] = none_index_ops
+        for ind, updates in idx_to_ops.items():
+            obj = self.props.dataList[ind]
+            if dataclasses.is_dataclass(obj):
+                apply_draft_update_ops(obj, updates)
+            else:
+                apply_draft_update_ops_to_json(obj, updates)
+        await self.send_and_wait(
+            self.create_comp_event({
+                "type":
+                DataListControlType.OperateData.value,
+                "updates": [{
+                    "index": x,
+                    "ops": [op.to_jmes_path_op().to_dict() for op in ops]
+                } for x, ops in ctx._update_list],
             }))
 
     async def _comp_bind_update_data(self, event: Event, prop_name: str):

@@ -885,9 +885,15 @@ class MasterDebugPanel(mui.FlexBox):
                                 *args,
                                 rpc_timeout: int = 1):
         all_tasks = []
+        avail_infos: list[DebugServerProcessInfo] = []
         for info in process_infos:
             if info.proc_type == BuiltinServiceProcType.SERVER_WITH_DEBUG:
                 continue 
+            avail_infos.append(info)
+        if not avail_infos:
+            LOGGER.warning(f"No available debug process to run for {service_key}")
+            return []
+        for info in avail_infos:
             all_tasks.append(
                 self._run_rpc_on_process(info,
                                       service_key,
@@ -901,9 +907,15 @@ class MasterDebugPanel(mui.FlexBox):
                                            *args,
                                            rpc_timeout: int = 10):
         all_tasks = []
+        avail_infos: list[DebugServerProcessInfo] = []
         for info in process_infos:
             if info.proc_type == BuiltinServiceProcType.SERVER_WITH_DEBUG:
                 continue 
+            avail_infos.append(info)
+        if not avail_infos:
+            LOGGER.warning(f"No available debug process to run for {service_key}")
+            return []
+        for info in avail_infos:
             all_tasks.append(
                 self._run_rpc_on_process(info,
                                       service_key,

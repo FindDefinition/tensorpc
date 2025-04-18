@@ -40,4 +40,8 @@ def pth_control_point(*, _frame_cnt: int = 2):
         force_stop_trace()
         return 
 
-    return breakpoint(_frame_cnt=_frame_cnt)
+    res = breakpoint(_frame_cnt=_frame_cnt)
+    # we must sync bkpt res from rank 0 to avoid inconsistent state.
+    obj_list = [res] * world_size
+    dist.broadcast_object_list(obj_list, src=0)
+    return res 
