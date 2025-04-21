@@ -155,6 +155,9 @@ class FaultToleranceSSHServer:
     @marker.mark_server_event(event_type=marker.ServiceEventType.Init)
     async def _init(self):
         workdir_p = Path(self._cfg.workdir).resolve()
+        LOGGER.warning("Current OS Environments:")
+        for k, v in os.environ.items():
+            print(f"{k}={v}")
         init_cmds = [
             f"export {TENSORPC_ENV_DISTSSH_URL_WITH_PORT}=localhost:{prim.get_server_grpc_port()}\n",
             f"export {TENSORPC_ENV_DISTSSH_WORKDIR}={str(workdir_p)}\n",
@@ -166,18 +169,23 @@ class FaultToleranceSSHServer:
             for k, v in envs.items():
                 if env_fwd_re.match(k):
                     init_cmds.append(f"export {k}={v}\n")
-        await self._terminal.connect_with_new_desc(self._conn_desc, init_cmds=init_cmds)
+        await self._terminal.connect_with_new_desc(self._conn_desc, init_cmds=init_cmds,
+            term_line_event_callback=self._line_event_cb)
         term_state = self._terminal.get_current_state()
         assert term_state is not None 
         self._debug_panel.set_parent_pid(term_state.pid)
-        file_name = workdir_p / f"distssh-rank-{self.state.rank}.json"
+        file_name = workdir_p / "sync" / f"distssh-rank-{self.state.rank}.json"
         if not workdir_p.exists():
             workdir_p.mkdir(parents=True, exist_ok=True, mode=0o755)
+        if not (workdir_p / "sync").exists():
+            (workdir_p / "sync").mkdir(parents=True, exist_ok=True, mode=0o755)
+        if not (workdir_p / "framescript").exists():
             (workdir_p / "framescript").mkdir(parents=True, exist_ok=True, mode=0o755)
         assert workdir_p.exists(), f"{self._cfg.workdir} does not exist"
         if self._cfg.logdir != "":
             assert Path(self._cfg.logdir).exists(), f"{self._cfg.logdir} does not exist"
             self._root_logger = SSHEventLogger(Path(self._cfg.logdir) / f"root-cmd-log-{self.state.rank}.jsonl", open_mode="a")
+            self._root_logger.open()
         if self._cfg.master_discovery_fn is not None:
             self._master_discovery_fn = import_dynamic_func(
                 self._cfg.master_discovery_fn, is_func_id=True)
@@ -196,8 +204,8 @@ class FaultToleranceSSHServer:
         self._master_state_backup_path: Optional[Path] = None 
         if self._is_master:
             workdir = Path(self._cfg.workdir) 
-            if not workdir.exists():
-                workdir.mkdir(parents=True, exist_ok=True, mode=0o755)
+            # if not workdir.exists():
+            #     workdir.mkdir(parents=True, exist_ok=True, mode=0o755)
             fs_backend = DraftSimpleFileStoreBackend(workdir)
             self._master_ui.dm.connect_draft_store(f"_distssh_store_{self._cfg.world_size}", fs_backend)
             self._master_state_backup_path = fs_backend._get_abs_path(f"_distssh_store_backup_{self._cfg.world_size}")
@@ -220,6 +228,9 @@ class FaultToleranceSSHServer:
     @marker.mark_server_event(event_type=marker.ServiceEventType.Exit)
     async def _close(self):
         await self._terminal.disconnect()
+        if self._root_logger is not None:
+            self._root_logger.close()
+            self._root_logger = None
         if self.state.is_master:
             for rank, robj in self._client_robjs.items():
                 try:
@@ -464,9 +475,9 @@ class FaultToleranceSSHServer:
         if active_logger is not None:
             relative_ts = (ev.ts - self._cmd_start_ts) // 1000
             active_logger.log({
+                "d": ev.d.decode("utf-8"),
                 "ts": relative_ts,
                 "t": SimpleLogEventType.LINE.value,
-                "d": ev.d.decode("utf-8")
             })
 
     async def _cmd_waiter(self, cmd: str):
@@ -478,12 +489,12 @@ class FaultToleranceSSHServer:
         shell_info = ssh_state.shell_info
         assert shell_info is not None 
         if shell_info.type == "zsh":
-            shell_file_path = Path(self._cfg.workdir) / f"_distssh-rank-cmd-{self.state.rank}.zsh"
+            shell_file_path = Path(self._cfg.workdir) / "sync" / f"_distssh-rank-cmd-{self.state.rank}.zsh"
             with shell_file_path.open("w") as f:
                 f.write(cmd)
             cmd = f" zsh -i {shell_file_path.absolute()}"
         elif shell_info.type == "bash":
-            shell_file_path = Path(self._cfg.workdir) / f"_distssh-rank-cmd-{self.state.rank}.sh"
+            shell_file_path = Path(self._cfg.workdir) / "sync" / f"_distssh-rank-cmd-{self.state.rank}.sh"
             with shell_file_path.open("w") as f:
                 f.write(cmd)
             cmd = f" bash -i {shell_file_path.absolute()}"
@@ -595,7 +606,7 @@ class FaultToleranceSSHServer:
         return self.state
 
     async def _query_master_robj(self):
-        folder_p = Path(self._cfg.workdir)
+        folder_p = Path(self._cfg.workdir) /"sync"
         port = prim.get_server_grpc_port()
         if self._master_discovery_fn is not None:
             master_ip_port = self._master_discovery_fn()
