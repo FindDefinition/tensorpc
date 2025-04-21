@@ -67,7 +67,8 @@ class CheckpointManager(mui.FlexBox):
                     btn
                 ])).bind_fields(condition="type")),
         ]
-        btn.bind_fields(disabled=(master_dm, "!has_bkpt_process"),)
+        draft = master_dm.get_draft()
+        btn.bind_fields(disabled=(master_dm, f"!({draft.client_states[0].has_bkpt_process})"),)
         dgrid = mui.DataGrid(column_defs, []).prop(idKey="id", rowHover=True)
         self.dgrid = dgrid
         super().__init__([
@@ -277,8 +278,10 @@ class FaultToleranceUIMaster(mui.FlexBox):
         self.prop(flexDirection="column", flex=1)
 
     async def _on_has_bkpt_change(self, val: bool):
-        async with self.dm.draft_update() as draft:
-            draft.client_states[self._master_rank].has_bkpt_process = val
+        prev = self.dm.model.client_states[self._master_rank].has_bkpt_process
+        if prev != val:
+            async with self.dm.draft_update() as draft:
+                draft.client_states[self._master_rank].has_bkpt_process = val
 
     async def _handle_toggle_btn(self, enable: bool):
         if enable:

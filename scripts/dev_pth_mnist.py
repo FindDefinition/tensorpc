@@ -12,6 +12,7 @@ from torch.distributed.device_mesh import init_device_mesh
 import torch.distributed as dist
 
 from tensorpc.apps.distssh.client import TorchDistributedCkptClient
+from tensorpc.apps.distssh.pth import pth_control_point
 from tensorpc.apps.distssh.constants import TENSORPC_ENV_DISTSSH_URL_WITH_PORT
 import tensorpc 
 def distributed_is_initialized():
@@ -88,6 +89,7 @@ class Trainer(object):
                     'train loss: {}, train acc: {},'.format(train_loss, train_acc),
                     'test loss: {}, test acc: {}.'.format(test_loss, test_acc),
                 )
+                pth_control_point()
 
     def train(self):
         self.model.train()

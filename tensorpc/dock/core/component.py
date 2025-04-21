@@ -1681,7 +1681,7 @@ class Component(Generic[T_base_props, T_child]):
             dm_paths_new = {}
             for k, v in self._flow_data_model_paths.items():
                 if not isinstance(v, str):
-                    dm_paths_new[k] = (v[0]._flow_uid_encoded, v[1])
+                    dm_paths_new[k] = (v[0]._flow_uid, v[1])
                 else:
                     dm_paths_new[k] = v
             res["dmProps"] = dm_paths_new

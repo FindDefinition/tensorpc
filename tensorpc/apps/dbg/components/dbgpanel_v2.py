@@ -197,7 +197,6 @@ class MasterDebugPanel(mui.FlexBox):
             self._on_server_item_click).configure(True)
         self._backend_has_breakpoint_worker = "__backend_event_breakpoint_worker"
 
-        self.event_has_breakpoint_worker_change: mui.EventSlotEmitter[bool] = self._create_emitter_event_slot(self._backend_has_breakpoint_worker)
         self._menu = mui.MenuList(
             [
                 # mui.MenuItem(id=ServerItemActions.RELEASE_BREAKPOINT.value,
@@ -360,6 +359,7 @@ class MasterDebugPanel(mui.FlexBox):
 
         self._serv_list_lock = asyncio.Lock()
         self._vscode_handler_registered = False
+        self.event_has_breakpoint_worker_change: mui.EventSlotEmitter[bool] = self._create_emitter_event_slot(self._backend_has_breakpoint_worker)
 
     def set_parent_pid(self, pid: Optional[int]):
         self._parent_pid = pid
