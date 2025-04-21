@@ -298,7 +298,7 @@ class AnnotatedType:
         return issubclass(self.origin_type, list)
 
     def is_sequence_type(self) -> bool:
-        if self.is_union_type():
+        if self.is_union_type() or self.is_any_type():
             return False
         assert inspect.isclass(
             self.origin_type
@@ -307,7 +307,7 @@ class AnnotatedType:
                           Sequence) and not issubclass(self.origin_type, str)
 
     def is_mapping_type(self) -> bool:
-        if self.is_union_type():
+        if self.is_union_type() or self.is_any_type():
             return False
         assert inspect.isclass(
             self.origin_type

@@ -32,7 +32,6 @@ from pathlib import Path
 from typing import (Any, Awaitable, Callable, Coroutine, Dict, Iterable, List,
                     Optional, Set, Tuple, Type, Union)
 
-from regex import T
 from tensorpc.autossh.coretypes import SSHTarget
 from tensorpc.core.asyncclient import AsyncRemoteManager, simple_remote_call_async
 from tensorpc.core.datamodel.draft import DraftUpdateOp, JMESPathOpType, apply_draft_update_ops_to_json, apply_draft_update_ops_to_json_with_root
