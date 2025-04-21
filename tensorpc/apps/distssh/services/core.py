@@ -157,7 +157,7 @@ class FaultToleranceSSHServer:
         workdir_p = Path(self._cfg.workdir).resolve()
         LOGGER.warning("Current OS Environments:")
         for k, v in os.environ.items():
-            print(f"{k}={v}")
+            print(f"{k}=\"{v}\"")
         init_cmds = [
             f"export {TENSORPC_ENV_DISTSSH_URL_WITH_PORT}=localhost:{prim.get_server_grpc_port()}\n",
             f"export {TENSORPC_ENV_DISTSSH_WORKDIR}={str(workdir_p)}\n",
