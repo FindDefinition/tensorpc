@@ -2,6 +2,8 @@
 #   Copyright (c) Microsoft Corporation. All rights reserved.
 #   Licensed under the MIT License. See License.txt in the project root for license information.
 # ---------------------------------------------------------------------------------------------
+export DISABLE_UPDATE_PROMPT=true
+
 builtin autoload -Uz add-zsh-hook
 export TERM=xterm-256color
 # Prevent the script recursing when setting up
