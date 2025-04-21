@@ -70,6 +70,7 @@ class FTSSHServerArgs:
     logdir: str = ""
 
     cmd_retry_when_reconnect: bool = True
+    env_fwd_re: str = ""
 
 @dataclasses.dataclass
 class FTState:

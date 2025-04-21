@@ -13,6 +13,7 @@ def main(
     port: int = TENSORPC_APPS_DISTSSH_DEFAULT_PORT,
     username: str = "root",
     logdir: str = "",
+    env_fwd_re: str = "",
 ):
     service_config = {
         BuiltinServiceKeys.FaultToleranceSSHServer.value: {
@@ -24,6 +25,7 @@ def main(
                 "rank": rank,
                 "world_size": world_size,
                 "logdir": logdir,
+                "env_fwd_re": env_fwd_re,
             }
         }
     }

@@ -10,6 +10,8 @@ from typing import Any, Awaitable, Callable, Optional, Union
 import async_timeout
 import grpc
 import rich
+import re 
+import os 
 from tensorpc.apps.dbg.serv_names import serv_names as dbg_serv_names
 from tensorpc.apps.dbg.components.dbgpanel_v2 import MasterDebugPanel
 from tensorpc.autossh.core import SSHConnDesc
@@ -153,10 +155,18 @@ class FaultToleranceSSHServer:
     @marker.mark_server_event(event_type=marker.ServiceEventType.Init)
     async def _init(self):
         workdir_p = Path(self._cfg.workdir).resolve()
-        await self._terminal.connect_with_new_desc(self._conn_desc, init_cmds=[
+        init_cmds = [
             f"export {TENSORPC_ENV_DISTSSH_URL_WITH_PORT}=localhost:{prim.get_server_grpc_port()}\n",
             f"export {TENSORPC_ENV_DISTSSH_WORKDIR}={str(workdir_p)}\n",
-        ])
+        ]
+        if self._cfg.env_fwd_re != "":
+            # use re to capture env thatt need to forward to ssh
+            env_fwd_re = re.compile(self._cfg.env_fwd_re)
+            envs = os.environ.copy()
+            for k, v in envs.items():
+                if env_fwd_re.match(k):
+                    init_cmds.append(f"export {k}={v}\n")
+        await self._terminal.connect_with_new_desc(self._conn_desc, init_cmds=init_cmds)
         term_state = self._terminal.get_current_state()
         assert term_state is not None 
         self._debug_panel.set_parent_pid(term_state.pid)
