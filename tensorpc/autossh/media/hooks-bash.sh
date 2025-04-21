@@ -302,6 +302,12 @@ __vsc_preexec() {
 	__vsc_command_output_start
 }
 
+# remove all trap
+# # trap | awk '{ print $NF }' | while read SIG ; do trap - $SIG ; done
+# echo $(compgen -A signal)
+# trap - $(compgen -A signal)
+trap - DEBUG
+
 # Debug trapping/preexec inspired by starship (ISC)
 if [[ -n "${bash_preexec_imported:-}" ]]; then
 	__vsc_preexec_only() {
@@ -314,7 +320,6 @@ if [[ -n "${bash_preexec_imported:-}" ]]; then
 	preexec_functions+=(__vsc_preexec_only)
 else
 	__vsc_dbg_trap="$(__vsc_get_trap DEBUG)"
-
 	if [[ -z "$__vsc_dbg_trap" ]]; then
 		__vsc_preexec_only() {
 			if [ "$__vsc_in_command_execution" = "0" ]; then

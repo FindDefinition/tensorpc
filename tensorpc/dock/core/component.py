@@ -53,7 +53,7 @@ from tensorpc.dock.serv_names import serv_names
 from tensorpc.core.core_io import JsonOnlyData
 from tensorpc.core.event_emitter.base import ExceptionParam
 from tensorpc.core.moduleid import is_tensorpc_dynamic_path
-from tensorpc.core.tree_id import UniqueTreeIdForComp, UniqueTreeIdForTree
+from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForComp, UniqueTreeIdForTree
 from tensorpc.dock import appctx, marker
 from tensorpc.dock.coretypes import MessageLevel, get_unique_node_id
 
@@ -3181,7 +3181,8 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             if not _patch_in_remote:
                 layout, root_comp_uid = self._patch_layout_dict(layout, root_comp_uid_before, prefixes)
             self.set_cur_child_uids(list(layout.keys()))
-
+            for k, v in layout.items():
+                assert isinstance(v["uid"], UniqueTreeId), f"{layout}"
             # first event: update layout from remote
             update_comp_ev = self.create_update_comp_event(layout, [])
             # second event: update childs prop in remote container

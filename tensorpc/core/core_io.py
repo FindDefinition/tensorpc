@@ -463,7 +463,7 @@ def _extract_arrays_from_data_no_unique_id(arrays,
                     data_skeleton[i] = Placeholder(len(arrays), byte_size(e))
                 arrays.append(e)
             else:
-                data_skeleton[i] = _extract_arrays_from_data(
+                data_skeleton[i] = _extract_arrays_from_data_no_unique_id(
                     arrays, e, object_classes, json_index)
         data_skeleton_res = data_skeleton
         if isinstance(data, tuple):
@@ -479,7 +479,7 @@ def _extract_arrays_from_data_no_unique_id(arrays,
                     data_skeleton[k] = Placeholder(len(arrays), byte_size(v))
                 arrays.append(v)
             else:
-                data_skeleton[k] = _extract_arrays_from_data(
+                data_skeleton[k] = _extract_arrays_from_data_no_unique_id(
                     arrays, v, object_classes, json_index)
         return data_skeleton
     elif isinstance(data, JsonOnlyData):
