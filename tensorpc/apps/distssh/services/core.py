@@ -168,7 +168,7 @@ class FaultToleranceSSHServer:
             envs = os.environ.copy()
             for k, v in envs.items():
                 if env_fwd_re.match(k):
-                    init_cmds.append(f"export {k}={v}\n")
+                    init_cmds.append(f"export {k}=\"{v}\"\n")
         await self._terminal.connect_with_new_desc(self._conn_desc, init_cmds=init_cmds,
             term_line_event_callback=self._line_event_cb)
         term_state = self._terminal.get_current_state()
