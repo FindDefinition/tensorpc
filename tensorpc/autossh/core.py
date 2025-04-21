@@ -1363,7 +1363,7 @@ class SSHClient:
                         # merge ev buf
                         if len(ev_buf) > 0:
                             new_data = b"".join(ev.raw for ev in ev_buf)
-                            new_ev = RawEvent(ev_buf[-1].timestamp, new_data, False)
+                            new_ev = RawEvent(ev_buf[-1].timestamp, new_data, False, uid=self.uid)
                             await callback(new_ev)
                         raw_ev.clear()
                         raw_ev_task = asyncio.create_task(raw_ev.wait())

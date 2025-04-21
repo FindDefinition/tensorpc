@@ -198,6 +198,7 @@ class DebugServerProcessInfo:
     secondaryColor: Union[Undefined, str] = undefined
     dist_info: Optional[DebugDistributedInfo] = None
     is_mounted: bool = False
+    is_paused: bool = False
     proc_type: BuiltinServiceProcType = BuiltinServiceProcType.REMOTE_COMP
     @property
     def url_with_port(self):

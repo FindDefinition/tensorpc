@@ -11,7 +11,7 @@ from tensorpc.dock import mark_create_layout
 import yaml
 from tensorpc.apps.cflow.nodes import register_compute_node, get_node_state_draft, ComputeNodeBase, SpecialHandleDict
 from tensorpc.core import dataclass_dispatch as dataclasses
-from tensorpc.dock.components import mui
+from tensorpc.dock.components import mui, three
 from typing import TypedDict, Any
 
 from tensorpc.dock.components.models.flow import BaseEdgeModel
@@ -48,6 +48,32 @@ async def delay_node(x) -> _JsonOutputDict:
         print("delay step", j)
     return {'x': x}
 
+def _3d_layout(drafts):
+    cam = three.PerspectiveCamera(fov=75, near=0.1, far=1000)
+    cam.prop(position=(0, 0, 5))
+
+    view = three.View([
+        cam,
+        three.CameraControl().prop(makeDefault=True),
+        three.Mesh([
+            three.BoxGeometry(),
+            three.MeshBasicMaterial().prop(color="orange",
+                                            transparent=True),
+        ]),
+    ]).prop(flex=1, overflow="hidden")
+
+    return mui.VBox([view
+                         ]).prop(width="300px",
+                                 height="300px",
+                                 overflow="hidden")
+
+
+@register_compute_node(key="3D Test",
+                       name="3D Test",
+                       icon_cfg=mui.IconProps(icon=mui.IconType.DataObject),
+                       layout_creator=_3d_layout)
+async def d3_test() -> None:
+    return None
 
 class ComputeFlowApp:
     @mark_create_layout

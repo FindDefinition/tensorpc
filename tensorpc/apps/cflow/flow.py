@@ -60,7 +60,8 @@ class ComputeFlow(mui.FlexBox):
     executors: Sequence[NodeExecutorBase]
     scheduler: SchedulerBase
     def __init__(self, scheduler: Optional[SchedulerBase] = None, executors: Optional[Sequence[NodeExecutorBase]] = None,
-            nodes: Optional[Sequence[ComputeNodeModel]] = None, edges: Optional[Sequence[BaseEdgeModel]] = None):
+            nodes: Optional[Sequence[ComputeNodeModel]] = None, edges: Optional[Sequence[BaseEdgeModel]] = None,
+            enable_three: bool = True):
         nodes_dict = {}
         if nodes is not None:
             for node in nodes:
@@ -273,12 +274,27 @@ class ComputeFlow(mui.FlexBox):
             self.executors = [
                 LocalNodeExecutor(DEFAULT_EXECUTOR_ID, _get_local_resource_desp())
             ]
-        super().__init__([
-            self.dm,
-            self._node_setting_dialog,
-        ])
+        if enable_three:
+            # use a special canvas here, it doesn't render 3d child directly,
+            # but you can use three.View inside nodes to render a 3d view.
+            super().__init__([
+                three.ViewCanvas([
+                    self.dm,
+                ]).prop(display="flex",
+                    flexDirection="column", width="100%", height="100%", overflow="hidden"),
+                self._node_setting_dialog,
+            ])
+        else:
+            super().__init__([
+                self.dm,
+                self._node_setting_dialog,
+            ])
         self.event_before_unmount.on(self._on_flow_unmount)
-        self.prop(width="100%", height="100%", overflow="hidden")
+        if enable_three:
+            self.prop(width="100%", height="100%", overflow="hidden", position="relative", minHeight=0,
+                    minWidth=0,)
+        else:
+            self.prop(width="100%", height="100%", overflow="hidden")
 
     async def _on_flow_unmount(self):
         self._shutdown_ev.set()

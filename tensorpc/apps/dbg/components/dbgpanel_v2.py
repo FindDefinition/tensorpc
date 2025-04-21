@@ -195,6 +195,9 @@ class MasterDebugPanel(mui.FlexBox):
                                               virtualized=False)
         remote_server_item.event_click.on_standard(
             self._on_server_item_click).configure(True)
+        self._backend_has_breakpoint_worker = "__backend_event_breakpoint_worker"
+
+        self.event_has_breakpoint_worker_change: mui.EventSlotEmitter[bool] = self._create_emitter_event_slot(self._backend_has_breakpoint_worker)
         self._menu = mui.MenuList(
             [
                 # mui.MenuItem(id=ServerItemActions.RELEASE_BREAKPOINT.value,
@@ -521,10 +524,12 @@ class MasterDebugPanel(mui.FlexBox):
             info.is_tracing = True
             info.primaryColor = "success"
         if frame_meta is not None:
+            info.is_paused = True
             info.secondary_name = f"{prefix}|{frame_meta.lineno}:{frame_meta.name}"
             info.primaryColor = "primary"
         else:
             info.secondary_name = f"{prefix}|{status_str}"
+            info.is_paused = False
 
 
     async def _update_remote_server_discover_lst(self):
@@ -587,6 +592,13 @@ class MasterDebugPanel(mui.FlexBox):
                         continue
             async with self.dm.draft_update():
                 draft.infos = process_infos
+                has_breakpoint_info = False
+                for info in process_infos:
+                    if info.is_paused:
+                        has_breakpoint_info = True
+                        break
+                await self.flow_event_emitter.emit_async(self._backend_has_breakpoint_worker, 
+                    mui.Event(self._backend_has_breakpoint_worker, has_breakpoint_info))
                 found = False
                 if cur_model.cur_mounted_info_uid is not None:
                     # check infos still contains this uid

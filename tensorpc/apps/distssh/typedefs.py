@@ -85,6 +85,7 @@ class FTState:
     master_uuid: str = ""
     # when enabled, your distributed problem will enter breakpoint
     is_user_control_enabled: bool = False
+    has_bkpt_process: bool = False
 
 @dataclasses.dataclass
 class MasterUIState:

@@ -196,8 +196,16 @@ class FaultToleranceSSHServer:
         if self._is_master:
             await set_layout_service(TENSORPC_DISTSSH_UI_KEY, self._master_ui)
         else:
+            self._debug_panel.event_has_breakpoint_worker_change.on(self._client_on_has_bkpt_change)
             await set_layout_service(TENSORPC_DISTSSH_UI_KEY, self._client_ui)
             await set_layout_service(TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, self._debug_panel)
+
+    async def _client_on_has_bkpt_change(self, val: bool):
+        val_before = self._client_ui.dm.model.has_bkpt_process
+        async with self._client_ui.dm.draft_update() as draft:
+            draft.has_bkpt_process = val
+        if val_before != val:
+            await self._client_set_worker_state()
 
     @marker.mark_server_event(event_type=marker.ServiceEventType.Exit)
     async def _close(self):

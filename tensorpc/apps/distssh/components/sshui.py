@@ -67,7 +67,7 @@ class CheckpointManager(mui.FlexBox):
                     btn
                 ])).bind_fields(condition="type")),
         ]
-        btn.bind_fields(disabled=(master_dm, "length(pending_ctrls) > `0`"))
+        btn.bind_fields(disabled=(master_dm, "!has_bkpt_process"),)
         dgrid = mui.DataGrid(column_defs, []).prop(idKey="id", rowHover=True)
         self.dgrid = dgrid
         super().__init__([
@@ -82,6 +82,7 @@ class CheckpointManager(mui.FlexBox):
     async def _init(self):
         store = prim.get_service(f"{BuiltinServiceKeys.ShmKVStore.value}.backend_get_store")()
         await self._on_kvstore_item_change(store)
+
 
     async def _on_kvstore_item_change(self, store: dict[str, KVStoreItem]):
         item_getsize = prim.get_service(f"{BuiltinServiceKeys.ShmKVStore.value}.get_item_shm_size")
@@ -201,6 +202,7 @@ class FaultToleranceUIMaster(mui.FlexBox):
             self._terminal_panel,
         ]).prop(width="100%", height="100%", overflow="hidden")
         self._master_panel = debug_panel
+        self._master_panel.event_has_breakpoint_worker_change.on(self._on_has_bkpt_change)
         child_control_panel = mui.VBox([
 
         ]).prop(width="100%", height="100%", overflow="hidden")
@@ -273,6 +275,10 @@ class FaultToleranceUIMaster(mui.FlexBox):
             self.dm,
         ])
         self.prop(flexDirection="column", flex=1)
+
+    async def _on_has_bkpt_change(self, val: bool):
+        async with self.dm.draft_update() as draft:
+            draft.client_states[self._master_rank].has_bkpt_process = val
 
     async def _handle_toggle_btn(self, enable: bool):
         if enable:
