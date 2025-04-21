@@ -34,7 +34,7 @@ from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KE
 from rich.syntax import Syntax
 from ..typedefs import FTState, FTSSHServerArgs, FTStatus, SSHStatus, CmdStatus, MasterUIState
 from ..components.sshui import FaultToleranceUIMaster, FaultToleranceUIClient
-
+import shlex
 LOGGER = rich_logging.get_logger("distssh")
 
 class SimpleLogEventType(enum.Enum):
@@ -159,8 +159,8 @@ class FaultToleranceSSHServer:
         for k, v in os.environ.items():
             print(f"{k}=\"{v}\"")
         init_cmds = [
-            f"export {TENSORPC_ENV_DISTSSH_URL_WITH_PORT}=localhost:{prim.get_server_grpc_port()}\n",
-            f"export {TENSORPC_ENV_DISTSSH_WORKDIR}={str(workdir_p)}\n",
+            f" export {TENSORPC_ENV_DISTSSH_URL_WITH_PORT}=localhost:{prim.get_server_grpc_port()}\n",
+            f" export {TENSORPC_ENV_DISTSSH_WORKDIR}={str(workdir_p)}\n",
         ]
         if self._cfg.env_fwd_re != "":
             # use re to capture env thatt need to forward to ssh
@@ -168,7 +168,8 @@ class FaultToleranceSSHServer:
             envs = os.environ.copy()
             for k, v in envs.items():
                 if env_fwd_re.match(k):
-                    init_cmds.append(f"export {k}=\"{v}\"\n")
+                    vv = shlex.quote(v)
+                    init_cmds.append(f" export {k}={vv}\n")
         await self._terminal.connect_with_new_desc(self._conn_desc, init_cmds=init_cmds,
             term_line_event_callback=self._line_event_cb)
         term_state = self._terminal.get_current_state()
@@ -483,7 +484,6 @@ class FaultToleranceSSHServer:
     async def _cmd_waiter(self, cmd: str):
         LOGGER.warning("Launch command:")
         rich.print(cmd)
-
         ssh_state = self._terminal.get_current_state()
         assert ssh_state is not None 
         shell_info = ssh_state.shell_info
