@@ -149,7 +149,7 @@ class WebsocketClientBase(abc.ABC):
             try:
                 return await self.send_bytes(
                     core_io.json_only_encode(data, msg_type, req))
-            except Exception as e:
+            except BaseException as e:
                 traceback.print_exc()
                 raise JsonEncodeException(str(e))
         max_size = self.get_msg_max_size() - 128
@@ -159,7 +159,7 @@ class WebsocketClientBase(abc.ABC):
         try:
             encoder = core_io.SocketMessageEncoder(
                 data, skeleton_size_limit=max_size - 8192)
-        except Exception as e:
+        except BaseException as e:
             traceback.print_exc()
             raise JsonEncodeException(str(e))
         assert self._large_data_ws is not self
@@ -413,7 +413,7 @@ class WebsocketHandler:
             try:
                 await service_core.service_units.run_event_async(
                     ServiceEventType.WebSocketOnConnect, client)
-            except Exception as e:
+            except BaseException as e:
                 await client.send_user_error(e, 0)
         # assert not self.event_to_clients and not self.client_to_events
         # pingpong_task = asyncio.create_task(self.send_ping_loop(client))
@@ -460,7 +460,7 @@ class WebsocketHandler:
                         header = core_io.TensoRPCHeader(data)
                         msg_type = header.type
                         req = header.req
-                    except Exception as e:
+                    except BaseException as e:
                         await client.send_user_error(e, 0)
                         continue
                     if msg_type == core_io.SocketMsgType.Pong:

@@ -2103,7 +2103,7 @@ class Component(Generic[T_base_props, T_child]):
                         await self._run_draft_update(ctx._ops)
                 if not batch_ev.is_empty():
                     await self.put_app_event(batch_ev)
-            except Exception as e:
+            except BaseException as e:
                 traceback.print_exc()
                 ss = io.StringIO()
                 traceback.print_exc(file=ss)
@@ -2188,7 +2188,7 @@ class Component(Generic[T_base_props, T_child]):
                                     await res_coro
                         if ctx is not None and ctx._ops:
                             await self._run_draft_update(ctx._ops)
-                    except Exception as e:
+                    except BaseException as e:
                         traceback.print_exc()
                         ss = io.StringIO()
                         traceback.print_exc(file=ss)
@@ -3310,7 +3310,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
                 await self.health_check(1)
                 self._remote_task = asyncio.create_task(
                     self._remote_msg_handle_loop(prefixes, "", -1))
-        except Exception as e:
+        except BaseException as e:
             await self.send_exception(e)
             await self.disconnect()
 
@@ -3395,7 +3395,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         except grpc.aio.AioRpcError as e:
             await self.send_exception(e)
             await self.disconnect()
-        except Exception as e:
+        except BaseException as e:
             await self.send_exception(e)
 
     async def collect_drag_source_data(self,
@@ -3410,7 +3410,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         except grpc.aio.AioRpcError as e:
             await self.send_exception(e)
             await self.disconnect()
-        except Exception as e:
+        except BaseException as e:
             await self.send_exception(e)
         return None
 

@@ -339,7 +339,7 @@ class RemoteComponentService:
                                 timeout=10)
                             succeed = True
                             break
-                        except Exception as e:
+                        except BaseException as e:
                             traceback.print_exc()
                     if not succeed:
                         print("Master disconnect for too long, unmount")
@@ -365,7 +365,7 @@ class RemoteComponentService:
                     else:
                         try:
                             await robj.remote_call(serv_names.APP_RUN_REMOTE_COMP_EVENT, addi_ev.key, addi_ev, rpc_timeout=1)
-                        except Exception as e:
+                        except BaseException as e:
                             traceback.print_exc()
 
         app_obj.send_loop_task = None

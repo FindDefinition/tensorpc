@@ -20,7 +20,7 @@ from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.datamodel.draftstore import DraftSimpleFileStoreBackend
 from tensorpc.core.datamodel.events import DraftChangeEvent
 from tensorpc.dock import terminal
-import tensorpc.core.dataclass_dispatch as dataclasses
+import dataclasses
 import uuid
 from tensorpc.dock.components import mui
 from tensorpc.utils import get_service_key_by_type, rich_logging
@@ -30,7 +30,7 @@ from tensorpc.core.moduleid import import_dynamic_func
 import tensorpc.core.datamodel as D
 import psutil 
 from tensorpc.dock.serv_names import serv_names as app_serv_names
-from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, TENSORPC_DISTSSH_UI_KEY, TENSORPC_ENV_DISTSSH_URL_WITH_PORT, TENSORPC_ENV_DISTSSH_WORKDIR)
+from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, TENSORPC_DISTSSH_UI_KEY, TENSORPC_ENV_DISTSSH_RANK, TENSORPC_ENV_DISTSSH_URL_WITH_PORT, TENSORPC_ENV_DISTSSH_WORKDIR, TENSORPC_ENV_DISTSSH_WORLD_SIZE)
 from rich.syntax import Syntax
 from ..typedefs import FTState, FTSSHServerArgs, FTStatus, SSHStatus, CmdStatus, MasterUIState
 from ..components.sshui import FaultToleranceUIMaster, FaultToleranceUIClient
@@ -76,6 +76,10 @@ class SSHEventLogger:
     def __del__(self):
         self.close()
 
+@dataclasses.dataclass
+class CmdTaskState:
+    task: asyncio.Task
+    event: asyncio.Event
 
 class FaultToleranceSSHServer:
     def __init__(self,
@@ -84,7 +88,7 @@ class FaultToleranceSSHServer:
         cfg = FTSSHServerArgs(**config_dict)
         self._cfg = cfg
         self._conn_desc = SSHConnDesc(default_url, cfg.username, cfg.password)
-        self._terminal = terminal.AsyncSSHTerminal().prop(disableStdin=True)
+        self._terminal = terminal.AsyncSSHTerminal().prop(disableStdin=False)
         self._master_rank = 0
         ip = get_primary_ip()
         state = FTState(
@@ -95,6 +99,7 @@ class FaultToleranceSSHServer:
             port=0,
             is_master=cfg.rank == self._master_rank,
             master_uuid="",
+            master_ip=ip,
         )
         self._is_master = cfg.rank == self._master_rank
         if self._is_master:
@@ -133,7 +138,7 @@ class FaultToleranceSSHServer:
         self._master_robj: Optional[AsyncRemoteManager] = None
 
         self._loop_task: Optional[asyncio.Task] = None
-        self._cmd_task: Optional[asyncio.Task] = None
+        self._cmd_task: Optional[CmdTaskState] = None
 
         self._disconnect_retry_count = 0
 
@@ -155,12 +160,11 @@ class FaultToleranceSSHServer:
     @marker.mark_server_event(event_type=marker.ServiceEventType.Init)
     async def _init(self):
         workdir_p = Path(self._cfg.workdir).resolve()
-        LOGGER.warning("Current OS Environments:")
-        for k, v in os.environ.items():
-            print(f"{k}=\"{v}\"")
         init_cmds = [
             f" export {TENSORPC_ENV_DISTSSH_URL_WITH_PORT}=localhost:{prim.get_server_grpc_port()}\n",
             f" export {TENSORPC_ENV_DISTSSH_WORKDIR}={str(workdir_p)}\n",
+            f" export {TENSORPC_ENV_DISTSSH_RANK}={self._cfg.rank}\n",
+            f" export {TENSORPC_ENV_DISTSSH_WORLD_SIZE}={self._cfg.world_size}\n",
         ]
         if self._cfg.env_fwd_re != "":
             # use re to capture env thatt need to forward to ssh
@@ -169,7 +173,11 @@ class FaultToleranceSSHServer:
             for k, v in envs.items():
                 if env_fwd_re.match(k):
                     vv = shlex.quote(v)
-                    init_cmds.append(f" export {k}={vv}\n")
+                    if v != vv:
+                        init_cmds.append(f" export {k}={vv}\n")
+                    else:
+                        init_cmds.append(f" export {k}=\"{v}\"\n")
+                    # init_cmds.append(f" export {k}={vv}\n")
         await self._terminal.connect_with_new_desc(self._conn_desc, init_cmds=init_cmds,
             term_line_event_callback=self._line_event_cb)
         term_state = self._terminal.get_current_state()
@@ -185,7 +193,7 @@ class FaultToleranceSSHServer:
         assert workdir_p.exists(), f"{self._cfg.workdir} does not exist"
         if self._cfg.logdir != "":
             assert Path(self._cfg.logdir).exists(), f"{self._cfg.logdir} does not exist"
-            self._root_logger = SSHEventLogger(Path(self._cfg.logdir) / f"root-cmd-log-{self.state.rank}.jsonl", open_mode="a")
+            self._root_logger = SSHEventLogger(Path(self._cfg.logdir) / f"root-cmd-log-{self.state.rank}.jsonl", open_mode="w")
             self._root_logger.open()
         if self._cfg.master_discovery_fn is not None:
             self._master_discovery_fn = import_dynamic_func(
@@ -333,6 +341,8 @@ class FaultToleranceSSHServer:
             return self._master_robj is not None
 
     async def _master_start_or_cancel(self):
+        # await self._master_ui.send_error("Debug", f"Cmd {self._master_ui.dm.model.cmd_status}")
+        print(self._master_ui.dm.model.cmd_status, self._master_ui.dm.model.cmd)
         if self._master_ui.dm.model.cmd_status == CmdStatus.IDLE:
             await self._master_run_cmd(self._master_ui.dm.model.cmd)
         else:
@@ -385,7 +395,8 @@ class FaultToleranceSSHServer:
             draft.cmd_status = CmdStatus.RUNNING
         res = await self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "client_run_cmd"), set(), cmd)
         if res is not None:
-            self._cmd_task = asyncio.create_task(self._cmd_waiter(cmd))
+            exit_ev = asyncio.Event()
+            self._cmd_task = CmdTaskState(asyncio.create_task(self._cmd_waiter(cmd, exit_ev)), exit_ev)
         return res
 
     async def cancel_cmd(self):
@@ -404,13 +415,14 @@ class FaultToleranceSSHServer:
 
     async def shutdown_or_kill_cmd(self, just_kill: bool = False):
         if self._cmd_task is not None:
-            await self._cmd_shutdown_sequence(just_kill)
+            await self._cmd_shutdown_sequence(not just_kill)
 
     async def client_run_cmd(self, cmd: str):
         assert self._cmd_task is None, "master can only run one command at a time" 
         if self.state.status != FTStatus.OK:
             raise RuntimeError("worker is not in OK state")
-        self._cmd_task = asyncio.create_task(self._cmd_waiter(cmd))
+        exit_ev = asyncio.Event()
+        self._cmd_task = CmdTaskState(asyncio.create_task(self._cmd_waiter(cmd, exit_ev)), exit_ev)
 
 
     async def client_cancel_cmd(self):
@@ -418,7 +430,7 @@ class FaultToleranceSSHServer:
             await self._terminal.send_ctrl_c()
 
 
-    async def _client_set_worker_state(self, wait_task: Optional[asyncio.Task] = None, handle_restart: bool = True):
+    async def _client_set_worker_state(self, wait_ev: Optional[asyncio.Event] = None, handle_restart: bool = True):
         assert self._master_robj is not None 
         try:
             master_ftstate = await self._master_robj.remote_call(get_service_key_by_type(FaultToleranceSSHServer, "set_worker_state"), self.state)
@@ -426,8 +438,9 @@ class FaultToleranceSSHServer:
                 if self.state.master_uuid != "" and self.state.master_uuid != master_ftstate.master_uuid:
                     # master restart. if cmd is running, shutdown it.
                     if self._cmd_task is not None:
-                        await self._cmd_shutdown_sequence(wait_task=wait_task)
+                        await self._cmd_shutdown_sequence(wait_ev=wait_ev)
             self.state.master_uuid = master_ftstate.master_uuid
+            self.state.master_ip = master_ftstate.master_ip
         except:
             traceback.print_exc()
             self._master_robj = None 
@@ -436,33 +449,41 @@ class FaultToleranceSSHServer:
                 draft.status = FTStatus.MASTER_DISCONNECTED
 
 
-    async def _cmd_shutdown_sequence(self, try_cancel_and_term: bool = True, wait_task: Optional[asyncio.Task] = None):
-        if wait_task is None:
+    async def _cmd_shutdown_sequence(self, try_cancel_and_term: bool = True, wait_ev: Optional[asyncio.Event] = None):
+        if wait_ev is None:
             assert self._cmd_task is not None 
-            wait_task = self._cmd_task
+            wait_ev = self._cmd_task.event
         if try_cancel_and_term:
             # 1. send ctrl c
             for i in range(self._cfg.cmd_ctrl_c_retry):
                 await self._terminal.send_ctrl_c()
                 try:
                     async with async_timeout.timeout(self._cfg.cmd_shutdown_timeout):
-                        await wait_task
+                        await wait_ev.wait()
                         return
                 except asyncio.TimeoutError:
                     LOGGER.warning(f"ctrl-c timeout, retry {i}")
                     if i == self._cfg.cmd_ctrl_c_retry - 1:
                         raise RuntimeError("ctrl-c timeout")
+                # except asyncio.CancelledError:
+                #     return 
             # 2. send sigterm to all subprocess of ssh process
             self._term_or_kill_all_ssh_child(True)
             try:
                 async with async_timeout.timeout(self._cfg.cmd_shutdown_timeout):
-                    await wait_task
+                    await wait_ev.wait()
                     return
             except asyncio.TimeoutError:
                 LOGGER.warning(f"sigterm timeout, perform kill.")
+            # except asyncio.CancelledError:
+            #     return 
+
         # 3. send sigkill to all subprocess of ssh process
         self._term_or_kill_all_ssh_child(False)
-        await wait_task
+        # try:
+        await wait_ev.wait()
+        # except asyncio.CancelledError:
+        #     return 
 
     def _get_active_logger(self):
         if self._cur_logger is not None:
@@ -481,7 +502,7 @@ class FaultToleranceSSHServer:
                 "t": SimpleLogEventType.LINE.value,
             })
 
-    async def _cmd_waiter(self, cmd: str):
+    async def _cmd_waiter(self, cmd: str, exit_ev: asyncio.Event):
         LOGGER.warning("Launch command:")
         rich.print(cmd)
         ssh_state = self._terminal.get_current_state()
@@ -516,7 +537,7 @@ class FaultToleranceSSHServer:
                         "rank": self.state.rank,
                     }
                 })
-            run_cmd_task = asyncio.create_task(self._terminal.ssh_command_rpc(cmd))
+            run_cmd_task = asyncio.create_task(self._terminal.ssh_command_rpc(cmd), name="cmd task")
             if self._is_master:
                 async with self._master_ui.dm.draft_update() as draft:
                     draft.client_states[self._master_rank].cur_cmd = cmd 
@@ -526,7 +547,7 @@ class FaultToleranceSSHServer:
                     draft.cur_cmd = cmd 
                     draft.ssh_status = SSHStatus.RUNNING
             if not self._is_master:
-                await self._client_set_worker_state(wait_task=run_cmd_task)
+                await self._client_set_worker_state(wait_ev=exit_ev)
             done, pending = await asyncio.wait(
                 [shutdown_ev_task, run_cmd_task],
                 return_when=asyncio.FIRST_COMPLETED)
@@ -541,6 +562,7 @@ class FaultToleranceSSHServer:
             ssh_status = SSHStatus.IDLE if res.return_code == 0 else SSHStatus.ERROR
 
             if self._is_master:
+
                 async with self._master_ui.dm.draft_update() as draft:
                     draft.client_states[self._master_rank].cur_cmd = None
                     draft.client_states[self._master_rank].ssh_status = ssh_status
@@ -551,14 +573,27 @@ class FaultToleranceSSHServer:
                     draft.ssh_status = ssh_status
                 if self._master_robj is not None:
                     await self._client_set_worker_state(handle_restart=False)
-            self._cmd_task = None
         except:
             LOGGER.error("cmd waiter error.", exc_info=True)
+            if self._is_master:
+                async with self._master_ui.dm.draft_update() as draft:
+                    draft.client_states[self._master_rank].cur_cmd = None
+                    draft.client_states[self._master_rank].ssh_status = SSHStatus.ERROR
+                await self._master_sync_cmd_status()
+            else:
+                async with self._client_ui.dm.draft_update() as draft:
+                    draft.cur_cmd = None
+                    draft.ssh_status = SSHStatus.ERROR
+                if self._master_robj is not None:
+                    await self._client_set_worker_state(handle_restart=False)
             raise
         finally:
             if self._cur_logger is not None and self._cur_logger is not self._root_logger:
                 self._cur_logger.close()
                 self._cur_logger = None
+            exit_ev.set()
+            self._cmd_task = None
+            LOGGER.warning("cmd waiter finished.")
 
     async def _master_sync_cmd_status(self):
         if self._master_ui.dm.model.cmd_status != CmdStatus.DURING_RESTART:

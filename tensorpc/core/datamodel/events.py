@@ -79,7 +79,7 @@ class DraftChangeEventHandler:
             self._draft_expr_compiled_cache[key] = self.draft_expr_dict[key].compile()
         try:
             return self._draft_expr_compiled_cache[key](model)
-        except Exception as e:
+        except BaseException as e:
             return None
 
     def evaluate_user_eval_var_noexcept(self, key: str, model: Any):
@@ -88,7 +88,7 @@ class DraftChangeEventHandler:
             self._user_eval_vars_compiled_cache[key] = self.user_eval_vars[key].compile()
         try:
             return self._user_eval_vars_compiled_cache[key](model)
-        except Exception as e:
+        except BaseException as e:
             return None
 
 

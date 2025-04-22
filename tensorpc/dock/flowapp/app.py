@@ -581,7 +581,7 @@ class App:
                     res = self.app_create_layout()
             self.__previous_error_sync_props.clear()
             self.__previous_error_persist_state.clear()
-        except Exception as e:
+        except BaseException as e:
             # TODO store
             traceback.print_exc()
             ss = io.StringIO()

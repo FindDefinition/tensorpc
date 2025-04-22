@@ -1492,7 +1492,7 @@ async def run_callback_noexcept(callback: Callable[_P, Any], *args: _P.args, **k
         else:
             res = res_may_coro
         return res, None
-    except Exception as e:
+    except BaseException as e:
         ss = io.StringIO()
         traceback.print_exc(file=ss)
         return None, (e, ss.getvalue())

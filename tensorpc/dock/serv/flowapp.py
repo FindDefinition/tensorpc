@@ -526,7 +526,7 @@ class FlowApp:
                                 previous_event, robj)
                             master_disconnect = -1
                             previous_event = AppEvent(self._uid, {})
-                        except Exception as e:
+                        except BaseException as e:
                             # TODO send error event to frontend
                             traceback.print_exc()
                             # print("Retry connection Fail.")
@@ -551,15 +551,15 @@ class FlowApp:
                             exc_ev.uid = self._uid
                             try:
                                 await self._send_grpc_event_large(exc_ev, robj)
-                            except Exception as e:
+                            except BaseException as e:
                                 traceback.print_exc()
-                    except Exception as e:
+                    except BaseException as e:
                         traceback.print_exc()
                         exc_ev = self._create_exception_event(e)
                         exc_ev.uid = self._uid
                         try:
                             await self._send_grpc_event_large(exc_ev, robj)
-                        except Exception as e:
+                        except BaseException as e:
                             traceback.print_exc()
                 # trigger sent event here.
                 if ev.sent_event is not None:

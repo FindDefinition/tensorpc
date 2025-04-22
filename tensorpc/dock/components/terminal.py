@@ -626,7 +626,7 @@ class AsyncSSHTerminal(Terminal):
         cmd = cmd.strip()
         if not cmd.endswith("\n"):
             cmd += "\n"
-        assert self._ssh_state is not None and self._ssh_state.current_cmd == "", f"current command is not empty: {self._ssh_state}."
+        assert self._ssh_state is not None and self._ssh_state.current_cmd == "", f"current command is not empty: {self._ssh_state.current_cmd}."
         assert self._ssh_state.current_cmd_rpc_future is None, "previous command is not finished yet."
         future: asyncio.Future[TerminalCmdCompleteEvent] = asyncio.get_running_loop().create_future()
         self._ssh_state.current_cmd_rpc_future = future

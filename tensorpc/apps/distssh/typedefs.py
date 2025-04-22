@@ -84,6 +84,7 @@ class FTState:
     status: FTStatus = FTStatus.OK
     ssh_status: SSHStatus = SSHStatus.IDLE
     master_uuid: str = ""
+    master_ip: str = ""
     # when enabled, your distributed problem will enter breakpoint
     is_user_control_enabled: bool = False
     has_bkpt_process: bool = False

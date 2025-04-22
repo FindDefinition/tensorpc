@@ -227,7 +227,7 @@ class ServiceCore(object):
                 assert not meta.is_async and not meta.is_gen
                 # client code can call primitives to get server contents.
                 res = func(*args, **kwargs)
-        except Exception as e:
+        except BaseException as e:
             res = self._remote_exception_json(e)
             is_exception = True
         return res, is_exception
@@ -255,7 +255,7 @@ class ServiceCore(object):
                     res = await func(*args, **kwargs)
                 else:
                     res = func(*args, **kwargs)
-        except Exception as e:
+        except BaseException as e:
 
             res = self._remote_exception_json(e)
             is_exception = True
@@ -308,7 +308,7 @@ class ServiceCore(object):
                 for res in func(*args, **kwargs):
                     yield res, is_exception
 
-        except Exception as e:
+        except BaseException as e:
             res = self._remote_exception_json(e)
             yield res, True
 
@@ -335,7 +335,7 @@ class ServiceCore(object):
                 async for res in func(*args, **kwargs):
                     yield res, is_exception
 
-        except Exception as e:
+        except BaseException as e:
             res = self._remote_exception_json(e)
             yield res, True
 

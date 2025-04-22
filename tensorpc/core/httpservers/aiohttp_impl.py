@@ -146,7 +146,7 @@ class HttpService:
             pb_data.ParseFromString(data_bin)
             pb_data.flags = rpc_message_pb2.JsonArray
             res = await self.service_core.remote_json_call_async(pb_data)
-        except Exception as e:
+        except BaseException as e:
             data = self.service_core._remote_exception_json(e)
             res = rpc_message_pb2.RemoteCallReply(exception=data)
         byte = res.SerializeToString()
@@ -175,7 +175,7 @@ class HttpService:
                 res_json_str = res.exception
             else:
                 res_json_str = res.data
-        except Exception as e:
+        except BaseException as e:
             traceback.print_exc()
             data = self.service_core._remote_exception_json(e)
             res = rpc_message_pb2.RemoteCallReply(exception=data)
@@ -273,7 +273,7 @@ class HttpService:
             pb_data.ParseFromString(data_bin)
             pb_data.flags = rpc_message_pb2.Pickle
             res = await self.service_core.remote_call_async(pb_data)
-        except Exception as e:
+        except BaseException as e:
             data = self.service_core._remote_exception_json(e)
             res = rpc_message_pb2.RemoteCallReply(exception=data)
         byte = res.SerializeToString()
