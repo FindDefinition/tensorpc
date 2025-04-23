@@ -42,7 +42,7 @@ class UniqueTreeId:
 
     def set_parts_inplace(self, parts: List[str], splitter: str = "."):
         self.parts = parts
-        self.uid_encoded = ",".join([str(len(p)) for p in parts]) + "|" + splitter.join(parts)
+        self.uid_encoded = _LENGTH_SPLIT.join([str(len(p)) for p in parts]) + "|" + splitter.join(parts)
 
     @classmethod
     def from_parts(cls,
@@ -51,7 +51,7 @@ class UniqueTreeId:
         if len(parts) == 0:
             return cls("", len(splitter))
         return cls(
-            ",".join([str(len(p))
+            _LENGTH_SPLIT.join([str(len(p))
                       for p in parts]) + "|" + splitter.join(parts),
             len(splitter))
 
@@ -136,7 +136,7 @@ class UniqueTreeIdForTree(UniqueTreeId):
         if len(parts) == 0:
             return cls("", len(splitter))
         return cls(
-            ",".join([str(len(p))
+            _LENGTH_SPLIT.join([str(len(p))
                       for p in parts]) + "|" + splitter.join(parts),
             len(splitter))
 
