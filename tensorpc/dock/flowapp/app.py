@@ -105,7 +105,7 @@ from ..core.component import (AppComponentCore, AppEditorEvent, AppEditorEventTy
                    FlowSpecialMethods, ForEachResult, FrontendEventType,
                    LayoutEvent, RemoteComponentBase, TaskLoopEvent, UIEvent, UIExceptionEvent,
                    UIRunStatus, UIType, UIUpdateEvent, Undefined, UserMessage,
-                   ValueType, component_dict_to_serializable_dict, undefined)
+                   ValueType, component_dict_to_serializable_dict_async, undefined)
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 
 ALL_APP_EVENTS = HashableRegistry()
@@ -630,10 +630,11 @@ class App:
             del prev_user_states
 
         if send_layout_ev:
+            layout = await self._get_app_layout(with_code_editor)
             ev = AppEvent(
                 "", {
                     AppEventType.UpdateLayout:
-                    LayoutEvent(self._get_app_layout(with_code_editor))
+                    LayoutEvent(layout)
                 })
             await self._queue.put(ev)
             if reload:
@@ -706,10 +707,10 @@ class App:
         assert self._app_service_unit is not None
         return self._app_service_unit
 
-    def _get_app_layout(self, with_code_editor: bool = True):
+    async def _get_app_layout(self, with_code_editor: bool = True):
         uid_to_comp = self.root._get_uid_encoded_to_comp_dict()
         # print({k: v._flow_uid for k, v in uid_to_comp.items()})
-        layout_dict = component_dict_to_serializable_dict(uid_to_comp)
+        layout_dict = await component_dict_to_serializable_dict_async(uid_to_comp)
         # print("????????????????", layout_dict)
         res = {
             "layout": layout_dict,

@@ -127,3 +127,5 @@ docs_out
 *.lib
 
 tensorpc/secret.yaml
+
+core

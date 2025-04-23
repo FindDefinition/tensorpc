@@ -9,6 +9,8 @@ from tensorpc import simple_remote_call
 import os 
 from tensorpc.core import BuiltinServiceKeys
 from tensorpc.core.tree_id import UniqueTreeId
+import traceback
+from tensorpc.apps.dbg.bkpt import breakpoint, init, force_stop_trace
 
 _DISTSSH_URL = os.getenv(TENSORPC_ENV_DISTSSH_URL_WITH_PORT)
 
@@ -57,19 +59,19 @@ class TorchDistributedCkptClient(ShmKVStoreTensorClient):
         new_store_key = UniqueTreeId.from_parts([key, str(step), str(rank)]).uid_encoded
         return new_store_key, rank
 
-    def _store_train_checkpoint(self, is_major: bool, key: str, step: int, state_dict: dict[str, Any]):
+    def _store_train_checkpoint(self, is_major: bool, key: str, step: int, state_dict: dict[str, Any], stream: Optional[Any] = None):
         key_to_ckpt_meta = self._get_key_to_ckpt_meta()
         ckpt_type = CheckpointType.TRAIN_MAJOR if is_major else CheckpointType.TRAIN_MINOR
         store_key, rank = self._encode_train_key(key, step)
         if store_key in key_to_ckpt_meta:
-            meta = key_to_ckpt_meta[key]
+            meta = key_to_ckpt_meta[store_key]
             if meta.type == CheckpointType.FIXED:
                 raise ValueError(
-                    f"Checkpoint {key} is fixed, not train, use another key."
+                    f"Checkpoint {store_key} is fixed, not train, use another key."
                 )
         all_ckpts: dict[int, list[tuple[str, CheckpointMetadata]]] = {}
         for k, v in key_to_ckpt_meta.items():
-            if v.key == key and v.type != CheckpointType.FIXED and v.rank == rank:
+            if v.key == key and v.type == ckpt_type and v.rank == rank:
                 if v.step is not None:
                     cur_step = v.step
                 else:
@@ -85,16 +87,16 @@ class TorchDistributedCkptClient(ShmKVStoreTensorClient):
             poped_item = all_ckpts_list.pop(0)
             all_keys_to_remove = [x[0] for x in poped_item[1]]
             store_keys_to_remove.extend(all_keys_to_remove)
-        self.remove_items(store_keys_to_remove)
         new_meta = CheckpointMetadata(ckpt_type, key, step, rank)
-        print(len(all_ckpts), len(all_ckpts_list), store_key)
-        return self.store_tensor_tree(store_key, state_dict, new_meta)
+        # print(len(all_ckpts), len(all_ckpts_list), store_key)
+        return self.store_tensor_tree(store_key, state_dict, new_meta, removed_keys=set(store_keys_to_remove), stream=stream)
     
     def store_major_checkpoint(self, key: str, step: int, state_dict: dict[str, Any]):
         return self._store_train_checkpoint(True, key, step, state_dict)
 
-    def store_minor_checkpoint(self, key: str, step: int, state_dict: dict[str, Any]):
-        return self._store_train_checkpoint(False, key, step, state_dict)
+    def store_minor_checkpoint(self, key: str, step: int, state_dict: dict[str, Any], stream: Optional[Any] = None):
+        # stream only available for minor (flash) checkpoint.
+        return self._store_train_checkpoint(False, key, step, state_dict, stream=stream)
 
     def store_fixed_checkpoint(self, key: str, state_dict: dict):
         return self.store_tensor_tree(key, state_dict, CheckpointMetadata(CheckpointType.FIXED, key))
@@ -116,9 +118,68 @@ class TorchDistributedCkptClient(ShmKVStoreTensorClient):
         store_key = self._encode_train_key(key, step)[0]
         return self.load_tensor_tree(store_key, state_dict)
 
+    def get_all_train_checkpoint_metas(self,  key: str):
+        rank = _get_rank_may_distributed()
+        key_to_ckpt_meta = self._get_key_to_ckpt_meta()
+        all_ckpts: dict[int, list[tuple[str, CheckpointMetadata]]] = {}
+        for k, v in key_to_ckpt_meta.items():
+            if v.key == key and v.type != CheckpointType.FIXED and v.rank == rank:
+                if v.step is not None:
+                    cur_step = v.step
+                else:
+                    cur_step = -1
+                if cur_step not in all_ckpts:
+                    all_ckpts[cur_step] = []
+                all_ckpts[cur_step].append((k, v))
+        return all_ckpts
+
 def start_distssh_logging(logdir: str):
     """
     Start logger of distssh.
     """
     assert _DISTSSH_URL is not None, "you must run this in distssh server"
     simple_remote_call(_DISTSSH_URL, f"{BuiltinServiceKeys.FaultToleranceSSHServer.value}.start_logging", logdir)
+
+def pth_control_point(*, _frame_cnt: int = 2):
+    import torch.distributed as dist
+    url_with_port = os.environ.get(TENSORPC_ENV_DISTSSH_URL_WITH_PORT)
+    if url_with_port is None:
+        raise ValueError("You must use pth_control_point inside distssh.")
+    if not dist.is_initialized():
+        raise RuntimeError(
+            "You must use pth_control_point inside a pytorch distributed process group."
+        )
+    global_rank = dist.get_rank()
+    should_enter_breakpoint = False 
+    if global_rank == 0:
+        try:
+            should_enter_breakpoint = simple_remote_call(
+                url_with_port, BuiltinServiceKeys.FaultToleranceSSHServer.value + ".is_user_control_enabled"
+            )
+        except:
+            # server may not prepared yet, ignore this control.
+            traceback.print_exc()
+            should_enter_breakpoint = False
+    # broadcast should_enter_breakpoint to all rank
+    world_size = dist.get_world_size()
+    obj_list = [should_enter_breakpoint] * world_size
+    dist.broadcast_object_list(obj_list, src=0)
+    should_enter_breakpoint = obj_list[global_rank]
+    if not should_enter_breakpoint:
+        # tell dbg server disable all running traces.
+        # trace result won't be saved.
+        init()
+        force_stop_trace()
+        return 
+
+    res = breakpoint(_frame_cnt=_frame_cnt)
+    # we must sync bkpt res from rank 0 to avoid inconsistent state.
+    obj_list = [res] * world_size
+    dist.broadcast_object_list(obj_list, src=0)
+    return res 
+
+def is_inside_distssh():
+    """
+    Check if the current process is inside distssh.
+    """
+    return _DISTSSH_URL is not None

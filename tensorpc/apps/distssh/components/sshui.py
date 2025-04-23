@@ -116,6 +116,7 @@ class CheckpointManager(mui.FlexBox):
             if isinstance(v.size, int):
                 v.size = humanize.naturalsize(v.size)
             res_items.append(v)
+        res_items.sort(key=lambda x: -x.step)
         await self.dgrid.send_and_wait(self.dgrid.update_event(dataList=res_items))
 
     async def _on_ckpt_load(self, ev: mui.Event):

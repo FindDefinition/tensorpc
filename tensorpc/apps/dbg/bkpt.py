@@ -371,41 +371,43 @@ def breakpoint(name: Optional[str] = None,
         serv_names.DBG_ENTER_BREAKPOINT, frame, event_q, type, should_enter_fn)
     if is_trace_stop:
         RECORDING = False
-        _TRACER_WRAPPER.stop()
-        res = _TRACER_WRAPPER.save(BACKGROUND_SERVER.cur_proc_title)
-        trace_res_obj = None
-        if res is not None:
-            if pytorch_dist_extra:
-                # broadcast external events to all rank.
-                # usually used for perfetto distributed visualization in single rank.
-                # you can insert custom duration event to show distributed events
-                # such as pipeline parallel.
-                for single_res in res:
-                    if single_res.external_events:
-                        import torch.distributed as dist
-                        ws = dist.get_world_size()
-                        output = [None for _ in range(ws)]
-                        _patch_events_for_pytorch_dist(
-                            single_res.external_events)
-                        dist.all_gather_object(output,
-                                            single_res.external_events)
-                        events_all_rank = []
-                        for events in output:
-                            assert events is not None
-                            events_all_rank.extend(events)
-                        _patch_events_pid_for_pytorch_dist(events_all_rank)
-                        single_res.external_events = events_all_rank
-            trace_res_obj = TraceResult(res)
-        trace_cfg = _TRACER_WRAPPER._trace_cfg
-        assert trace_cfg is not None 
+        if _TRACER_WRAPPER._tracer_atleast_started_once:
+            _TRACER_WRAPPER.stop()
+            res = _TRACER_WRAPPER.save(BACKGROUND_SERVER.cur_proc_title)
+            trace_res_obj = None
+            if res is not None:
+                if pytorch_dist_extra:
+                    # broadcast external events to all rank.
+                    # usually used for perfetto distributed visualization in single rank.
+                    # you can insert custom duration event to show distributed events
+                    # such as pipeline parallel.
+                    for single_res in res:
+                        if single_res.external_events:
+                            import torch.distributed as dist
+                            ws = dist.get_world_size()
+                            output = [None for _ in range(ws)]
+                            _patch_events_for_pytorch_dist(
+                                single_res.external_events)
+                            dist.all_gather_object(output,
+                                                single_res.external_events)
+                            events_all_rank = []
+                            for events in output:
+                                assert events is not None
+                                events_all_rank.extend(events)
+                            _patch_events_pid_for_pytorch_dist(events_all_rank)
+                            single_res.external_events = events_all_rank
+                trace_res_obj = TraceResult(res)
+            trace_cfg = _TRACER_WRAPPER._trace_cfg
+            assert trace_cfg is not None 
+            LOGGER.warning(f"Record Stop.")
+            if trace_res_obj is not None:
+                BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACE_DATA,
+                                                trace_res_obj, trace_cfg)
+
         _TRACER_WRAPPER.reset_tracer()
-        # tracer_to_stop.stop()
-        LOGGER.warning(f"Record Stop.")
-        if trace_res_obj is not None:
-            BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACE_DATA,
-                                            trace_res_obj, trace_cfg)
 
     is_launch_trace = False
+    is_manual_scope: bool = False
     result_data: Any = None
     while True:
         ev = event_q.get(timeout=timeout)
@@ -418,14 +420,17 @@ def breakpoint(name: Optional[str] = None,
                 tracer_name = f"Process"
             tracer, tracer_type = _get_viztracer(ev.trace_cfg, name=tracer_name)
             if tracer is not None:
-                LOGGER.warning(f"Record Start. Config:")
-                LOGGER.warning(ev.trace_cfg)
-                RECORDING = True
+                # LOGGER.warning(ev.trace_cfg)
                 _TRACER_WRAPPER.set_tracer(ev.trace_cfg, tracer, tracer_type,
                                         tracer_name, meta)
                 is_launch_trace = True
-                BACKGROUND_SERVER.execute_service(serv_names.DBG_SET_TRACER,
-                                                tracer)
+                is_manual_scope = ev.trace_cfg.manual_scope != ""
+                if is_manual_scope:
+                    LOGGER.warning(f"Record Start (Manual Scope {ev.trace_cfg.manual_scope}).")
+                    _TRACER_WRAPPER._delayed_trace_event = ev
+                else:
+                    LOGGER.warning(f"Record Start.")
+
             else:
                 LOGGER.error(
                     "viztracer is not installed, can't record trace data. use `pip install viztracer` to install."
@@ -433,9 +438,34 @@ def breakpoint(name: Optional[str] = None,
         elif isinstance(ev, BkptLeaveEvent):
             result_data = ev.data
             break
-    if is_launch_trace:
+    if is_launch_trace and not is_manual_scope:
+        RECORDING = True
         _TRACER_WRAPPER.start()
     return result_data
+
+@contextlib.contextmanager
+def manual_trace_scope(name: str):
+    global RECORDING
+    delayed_trace_ev = _TRACER_WRAPPER._delayed_trace_event
+    if delayed_trace_ev is None:
+        yield
+        return 
+    scope = delayed_trace_ev.trace_cfg.manual_scope.strip()
+    name = name.strip()
+    if scope != name:
+        LOGGER.warning(f"manual scope {name} mismatch with trace setting scope {scope}. skip")
+        yield 
+        return 
+    # TODO support multiple manual scopes
+    # here we disable further manual scope.
+    _TRACER_WRAPPER._delayed_trace_event = None 
+    try:
+        _TRACER_WRAPPER.start()
+        RECORDING = True
+        yield 
+    finally:
+        RECORDING = False
+        _TRACER_WRAPPER.stop()
 
 def breakpoint_dist_pth(name: Optional[str] = None,
                         timeout: Optional[float] = None,

@@ -447,7 +447,7 @@ class RemoteManager(RemoteObject):
         except TimeoutError:
             return False
 
-    def close(self, close_channel: bool = False):
+    def close(self, close_channel: bool = True):
         if self._channel is not None:
             # if we shutdown remote and close channel,
             # will raise strange error.
@@ -466,7 +466,7 @@ class RemoteManager(RemoteObject):
     def __exit__(self, exc_type, exc_value, exc_traceback):
         # if self.channel is not None:
         #     self.channel.__exit__(exc_type, exc_value, exc_traceback)
-        return self.close()
+        return self.close(close_channel=True)
 
 
 @contextlib.contextmanager

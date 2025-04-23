@@ -1,4 +1,5 @@
 """Client for tensorpc builtin service `ShmKVStore`."""
+from contextlib import nullcontext
 import time
 from typing import Any, Optional, Union
 from tensorpc.core.asyncclient import AsyncRemoteObject
@@ -6,6 +7,7 @@ from tensorpc.core.client import RemoteObject
 from tensorpc.core import BuiltinServiceKeys, core_io
 import numpy as np 
 from tensorpc.apps.collections.serv.kvstore import SharedArraySegmentsDesc, SharedArraySegmentDesc, TensorInfo
+from tensorpc.protos_export import rpc_message_pb2 as rpc_msg_pb2
 
 class ShmKVStoreClientBase:
     def __init__(self, robj: RemoteObject):
@@ -33,6 +35,9 @@ class ShmKVStoreClientBase:
     def get_item_type(self, key: str):
         return self._robj.remote_call(f"{self._serv_key}.get_item_type", key)
 
+    def get_item_tree_spec(self, key: str):
+        return self._robj.remote_call(f"{self._serv_key}.get_item_treespec", key, rpc_flags=rpc_msg_pb2.Pickle)
+
 class ShmKVStoreClient(ShmKVStoreClientBase):
 
     def store_array_tree(self, key: str, arr_tree: Any, metadata: Optional[Any] = None):
@@ -45,10 +50,10 @@ class ShmKVStoreClient(ShmKVStoreClientBase):
             segments.get_array_view(i)[:] = a
         segments.close_in_remote()
         # send tree spec
-        self._robj.remote_call(f"{self._serv_key}.set_item_treespec", key, treespec, arr_desps, metadata)
+        self._robj.remote_call(f"{self._serv_key}.set_item_treespec", key, treespec, arr_desps, metadata, rpc_flags=rpc_msg_pb2.Pickle)
 
     def get_array_tree(self, key: str, copy: bool = True):
-        treespec = self._robj.remote_call(f"{self._serv_key}.get_item_treespec", key)
+        treespec = self._robj.remote_call(f"{self._serv_key}.get_item_treespec", key, rpc_flags=rpc_msg_pb2.Pickle)
         segments_desc: SharedArraySegmentsDesc = self._robj.remote_call(f"{self._serv_key}.get_item_segment_descs", key)
         if copy:
             segments = segments_desc.get_segments()
@@ -91,34 +96,41 @@ class ShmKVStoreTensorClient(ShmKVStoreClientBase):
                 arr_desps.append(TensorInfo(list(v.shape), np_dtype, th_meta))
         return new_variables, arr_desps, treespec
 
-    def store_tensor_tree(self, key: str, arr_tree: Any, metadata: Optional[Any] = None):
+    def store_tensor_tree(self, key: str, arr_tree: Any, metadata: Optional[Any] = None, removed_keys: Optional[set[str]] = None, stream: Optional[Any] = None):
         import torch
         from torch.distributed.tensor import DTensor
         variables, arr_desps, treespec = self._extract_tensor_desps(arr_tree)
-        segments_desc: SharedArraySegmentsDesc = self._robj.remote_call(f"{self._serv_key}.get_or_create_shared_array_segments", key, arr_desps)
+        segments_desc: SharedArraySegmentsDesc = self._robj.remote_call(f"{self._serv_key}.get_or_create_shared_array_segments", key, arr_desps, removed_keys)
         segments = segments_desc.get_segments()
         # copy to shm
         try:
             with torch.no_grad():
-                for i, a in enumerate(variables):
-                    assert isinstance(a, torch.Tensor)
-                    if isinstance(a, DTensor):
-                        a = a.to_local()
-                    meta = arr_desps[i].meta
-                    assert meta is not None 
-                    s_np = segments.get_array_view(i)
-                    s_th = torch.from_numpy(s_np).view(meta)
-                    s_th.copy_(a)
+                if stream is not None:
+                    stream_ctx = torch.cuda.stream(stream)
+                else:
+                    stream_ctx = nullcontext()
+                with stream_ctx:
+                    # assume user will wait this stream before next optim step
+                    for i, a in enumerate(variables):
+                        assert isinstance(a, torch.Tensor)
+                        if isinstance(a, DTensor):
+                            a = a.to_local()
+                        meta = arr_desps[i].meta
+                        assert meta is not None 
+                        s_np = segments.get_array_view(i)
+                        s_th = torch.from_numpy(s_np).view(meta)
+                        s_th.copy_(a)
             # TODO replace sync with better option
-            torch.cuda.synchronize()
+            if stream is None:
+                torch.cuda.synchronize()
         finally:
             segments.close_in_remote()
         # send tree spec
-        self._robj.remote_call(f"{self._serv_key}.set_item_treespec", key, treespec, arr_desps, metadata)
+        self._robj.remote_call(f"{self._serv_key}.set_item_treespec", key, treespec, arr_desps, metadata, rpc_flags=rpc_msg_pb2.Pickle)
 
     def get_tensor_tree(self, key: str, device: Optional[Any] = None):
         import torch
-        treespec = self._robj.remote_call(f"{self._serv_key}.get_item_treespec", key)
+        treespec = self._robj.remote_call(f"{self._serv_key}.get_item_treespec", key, rpc_flags=rpc_msg_pb2.Pickle)
         segments_desc: SharedArraySegmentsDesc = self._robj.remote_call(f"{self._serv_key}.get_item_segment_descs", key)
         variables = []
         total_byte_size = 0
@@ -169,7 +181,7 @@ class ShmKVStoreTensorClient(ShmKVStoreClientBase):
             torch.cuda.synchronize()
         finally:
             segments.close_in_remote()
-        return
+        return self.get_item_tree_spec(key)
 
 class ShmKVStoreAsyncClient:
     def __init__(self, robj: AsyncRemoteObject):
@@ -189,10 +201,10 @@ class ShmKVStoreAsyncClient:
             segments.get_array_view(i)[:] = a
         segments.close_in_remote()
         # send tree spec
-        await self._robj.remote_call(f"{self._serv_key}.set_item_treespec", key, treespec, arr_desps, metadata)
+        await self._robj.remote_call(f"{self._serv_key}.set_item_treespec", key, treespec, arr_desps, metadata, rpc_flags=rpc_msg_pb2.Pickle)
 
     async def get_array_tree(self, key: str, copy: bool = True):
-        treespec = self._robj.remote_call(f"{self._serv_key}.get_item_treespec", key)
+        treespec = self._robj.remote_call(f"{self._serv_key}.get_item_treespec", key, rpc_flags=rpc_msg_pb2.Pickle)
         segments_desc: SharedArraySegmentsDesc = await self._robj.remote_call(f"{self._serv_key}.get_item_segment_descs", key)
         if copy:
             segments = segments_desc.get_segments()

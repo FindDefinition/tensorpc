@@ -6,6 +6,8 @@ from pydantic import (
     GetCoreSchemaHandler, )
 from typing_extensions import Self
 
+_LENGTH_SPLIT = "."
+
 class UniqueTreeId:
     # format: length1,length2,length3|part1::part2::part3
     # part names may contains splitter '::', so we need lengths to split
@@ -25,7 +27,7 @@ class UniqueTreeId:
         else:
             length_part = uid[:splitter_first_index]
             uid_part = uid[splitter_first_index + 1:]
-            lengths = [int(n) for n in length_part.split(",")]
+            lengths = [int(n) for n in length_part.split(_LENGTH_SPLIT)]
             assert sum(lengths) == len(uid_part) - splitter_length * (
                 len(lengths) - 1), f"{uid} not valid, {lengths}, {uid_part}"
         start = 0
@@ -54,7 +56,7 @@ class UniqueTreeId:
             len(splitter))
 
     def __repr__(self) -> str:
-        return f"UniqueTreeId({self.uid_encoded})"
+        return f"{self.__class__.__name__}({self.uid_encoded})"
 
     def __hash__(self) -> int:
         return hash(self.uid_encoded)

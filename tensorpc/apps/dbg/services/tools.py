@@ -339,9 +339,9 @@ class BackgroundDebugTools:
                 with enter_app_context(tv_app):
                     await tv_obj.set_trace_events(single_trace_res)
         if cfg.trace_timestamp is not None:
-            name = "default"
-            if cfg.trace_name is not None:
-                name = cfg.trace_name
+            name = cfg.trace_name
+            if cfg.manual_scope != "":
+                name = f"{name}_{cfg.manual_scope}"
             use_tar = False
             uid = uuid.uuid4().hex
             if use_tar:

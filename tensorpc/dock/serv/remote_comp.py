@@ -194,10 +194,10 @@ class RemoteComponentService:
         # if app_obj.send_loop_task is not None:
         #     await app_obj.send_loop_task
 
-    def get_layout_dict(self, key: str, prefixes: List[str]):
+    async def get_layout_dict(self, key: str, prefixes: List[str]):
         assert key in self._app_objs
         app_obj = self._app_objs[key]
-        lay = app_obj.app._get_app_layout()
+        lay = await app_obj.app._get_app_layout()
         root_uid = app_obj.app.root._flow_uid
         assert root_uid is not None
         layout_dict = lay["layout"]
@@ -225,7 +225,7 @@ class RemoteComponentService:
             await self.mount_app(key, url, port, prefixes, queue)
             shutdown_task = asyncio.create_task(app_obj.shutdown_ev.wait(), name="shutdown")
             wait_queue_task = asyncio.create_task(queue.get(), name="wait for queue")
-            yield self.get_layout_dict(key, prefixes)
+            yield await self.get_layout_dict(key, prefixes)
             while True:
                 try:
                     (done,
@@ -464,14 +464,21 @@ class RemoteComponentService:
         """
         return Path(path).stat()
 
-    async def get_file_metadata(self, key: str, file_key: str):
+    async def get_file_metadata(self, key: str, file_key: str, comp_uid: Optional[str] = None):
         app_obj = self._app_objs[key]
         assert app_obj.mounted_app_meta is not None
-
-
+        if comp_uid is not None:
+            comp = app_obj.app.root._get_comp_by_uid(comp_uid)
+            if isinstance(comp, RemoteComponentBase):
+                return await comp.get_file_metadata(file_key, comp_uid)
         url = parse.urlparse(file_key)
         base = url.path
         file_key_qparams = parse.parse_qs(url.query)
+        # if comp_uid is not None:
+        #     comp = self.app.root._get_comp_by_uid(comp_uid)
+        #     if isinstance(comp, RemoteComponentBase):
+        #         return await comp.get_file_metadata(file_key)
+
         if app_obj.app._flowapp_file_resource_handlers.has_event_handler(base):
             # we only use first value
             if len(file_key_qparams) > 0:

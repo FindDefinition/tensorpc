@@ -153,7 +153,7 @@ class ShmKVStore:
         self._store_shared_segments.clear()
         self._store_shared_mgrs.clear()
 
-    def _validate_arr_desps(self, key: str, arr_desps: list[TensorInfo]):
+    def _validate_arr_desps(self, key: str, arr_desps: list[TensorInfo], raise_exc: bool = True):
         segment_descs = self._store_shared_segments[key].descs
         if len(arr_desps) == len(segment_descs):
             for i in range(len(arr_desps)):
@@ -163,32 +163,71 @@ class ShmKVStore:
                 seg_byte_size = np.prod(shape) * np.dtype(dtype).itemsize
                 target_byte_size = seg_desc.get_byte_size()
                 if seg_byte_size != target_byte_size:
-                    raise ValueError(f"{key} already allocated with different byte length.")
+                    if raise_exc:
+                        raise ValueError(f"{key} already allocated with different byte length.")
+                    else:
+                        return False
         else:
-            raise ValueError(f"{key} already allocated with different number of segments.")
+            if raise_exc:
+                raise ValueError(f"{key} already allocated with different number of segments.")
+            else:
+                return False
+        return True
 
-    def get_or_create_shared_array_segments(self, key: str, arr_desps: list[TensorInfo]):
-        if key in self._store_shared_segments:
-            # validate existed segments. if same, just return them.
-            segments = self._store_shared_segments[key]
-            self._validate_arr_desps(key, arr_desps)
-            return segments.get_segments_desc()
-        mgr = SharedMemoryManager()
-        mgr.start()
-        self._store_shared_mgrs[key] = mgr
-        segment_descs: list[SharedArraySegmentDesc] = []
-        offset = 0
-        for info in arr_desps:
-            shape, dtype, meta = info.shape, info.dtype, info.meta
-            # segments.append(mgr.SharedMemory(size=size))
-            desc = SharedArraySegmentDesc(shape, dtype, meta, offset)
-            aligned_size = desc.get_aligned_byte_size()
-            offset += aligned_size
-            segment_descs.append(desc)
-        total_size = sum(seg.get_aligned_byte_size() for seg in segment_descs)
-        mem = mgr.SharedMemory(size=total_size)
-        self._store_shared_segments[key] = SharedArraySegments(mem, segment_descs)
-        return self._store_shared_segments[key].get_segments_desc()
+    def _rename_key(self, old_key: str, new_key: str):
+        if old_key == new_key:
+            return 
+        if old_key in self._store:
+            self._store[new_key] = self._store[old_key]
+            del self._store[old_key]
+        if old_key in self._store_shared_segments:
+            self._store_shared_segments[new_key] = self._store_shared_segments[old_key]
+            del self._store_shared_segments[old_key]
+        if old_key in self._store_shared_mgrs:
+            self._store_shared_mgrs[new_key] = self._store_shared_mgrs[old_key]
+            del self._store_shared_mgrs[old_key]
+
+    async def get_or_create_shared_array_segments(self, key: str, arr_desps: list[TensorInfo], removed_keys: Optional[set[str]] = None):
+        async with self._lock:
+            if removed_keys is not None:
+                # try to reuse removed shared memory
+                reuse_found = False
+                removed_keys_copy = removed_keys.copy()
+                for reuse_key in removed_keys:
+                    if reuse_key in self._store_shared_segments:
+                        if self._validate_arr_desps(reuse_key, arr_desps, raise_exc=False):
+                            # reuse this key
+                            self._rename_key(reuse_key, key)
+                            removed_keys_copy.remove(reuse_key)
+                            reuse_found = True
+                            break
+                if removed_keys_copy:
+                    for key in removed_keys_copy:
+                        await self.remove_item(key, emit_event=False)
+                if reuse_found or removed_keys_copy:
+                    await self._event_emitter.emit_async(KVStoreEventType.ITEM_CHANGE, self._store)
+            if key in self._store_shared_segments:
+                # validate existed segments. if same, just return them.
+                segments = self._store_shared_segments[key]
+                self._validate_arr_desps(key, arr_desps)
+                return segments.get_segments_desc()
+            mgr = SharedMemoryManager()
+            mgr.start()
+            self._store_shared_mgrs[key] = mgr
+            segment_descs: list[SharedArraySegmentDesc] = []
+            offset = 0
+            for info in arr_desps:
+                shape, dtype, meta = info.shape, info.dtype, info.meta
+                # segments.append(mgr.SharedMemory(size=size))
+                desc = SharedArraySegmentDesc(shape, dtype, meta, offset)
+                aligned_size = desc.get_aligned_byte_size()
+                offset += aligned_size
+                segment_descs.append(desc)
+            total_size = sum(seg.get_aligned_byte_size() for seg in segment_descs)
+            mem = mgr.SharedMemory(size=total_size)
+            self._store_shared_segments[key] = SharedArraySegments(mem, segment_descs)
+            print("create new shared memory", key, total_size)
+            return self._store_shared_segments[key].get_segments_desc()
 
     def backend_get_event_emitter(self):
         return self._event_emitter

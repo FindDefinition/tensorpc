@@ -11,6 +11,7 @@ import time
 import traceback
 from typing import Any, Dict, List, Optional, Tuple
 from typing_extensions import Literal
+from tensorpc.apps.dbg.core.bkpt_events import BkptLaunchTraceEvent
 
 from .constants import TENSORPC_DBG_USER_DURATION_EVENT_KEY, DebugDistributedInfo, TracerSingleResult, TracerType, TracerConfig
 
@@ -60,6 +61,12 @@ class DebugTracerWrapper:
 
         self._tracer_viz_has_basetime = False
 
+        self._tracer_running: bool = False
+
+        self._tracer_atleast_started_once: bool = False
+
+        self._delayed_trace_event: Optional[BkptLaunchTraceEvent] = None
+
     def set_tracer(self, cfg: Optional[TracerConfig], tracer: Any,
                    tracer_type: TracerType, proc_name: str,
                    meta: DebugDistributedInfo) -> None:
@@ -70,6 +77,8 @@ class DebugTracerWrapper:
         self._trace_dist_meta = meta
         self._trace_lock = threading.Lock()
         self._trace_tid = threading.get_ident()
+        self._tracer_atleast_started_once = False
+        self._tracer_running = False
 
         self._tracer_viz_has_basetime = False 
         if self._tracer_type == TracerType.VIZTRACER_PYTORCH:
@@ -88,6 +97,9 @@ class DebugTracerWrapper:
         self._trace_dist_meta = None
         self._trace_lock = None
         self._trace_tid = None
+        self._tracer_atleast_started_once = False
+        self._tracer_running = False
+        self._delayed_trace_event = None
 
     def _get_site_packages_by_profiler_location(self):
         if self._tracer_type == TracerType.VIZTRACER or self._tracer_type == TracerType.VIZTRACER_PYTORCH:
@@ -183,6 +195,9 @@ class DebugTracerWrapper:
 
     def start(self):
         if self._tracer is not None:
+            if not self._tracer_atleast_started_once:
+                self._tracer_atleast_started_once = True
+            assert not self._tracer_running, "Tracer already started"
             if self._tracer_type == TracerType.VIZTRACER or self._tracer_type == TracerType.VIZTRACER_PYTORCH:
                 self._tracer.start()
             elif self._tracer_type == TracerType.PYTORCH:
@@ -191,9 +206,10 @@ class DebugTracerWrapper:
                 self._tracer.start()
             else:
                 raise ValueError(f"Invalid tracer type: {self._tracer_type}")
+            self._tracer_running = True 
 
     def stop(self):
-        if self._tracer is not None:
+        if self._tracer is not None and self._tracer_running:
             if self._tracer_type == TracerType.VIZTRACER or self._tracer_type == TracerType.VIZTRACER_PYTORCH:
                 self._tracer.stop()
             elif self._tracer_type == TracerType.PYTORCH:
@@ -202,6 +218,7 @@ class DebugTracerWrapper:
                 self._tracer.stop()
             else:
                 raise ValueError(f"Invalid tracer type: {self._tracer_type}")
+            self._tracer_running = False 
 
     def _save_pth(
             self,

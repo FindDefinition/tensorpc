@@ -156,7 +156,7 @@ class MasterDebugPanelSimpleModel:
 class MasterDebugPanel(mui.FlexBox):
 
     def __init__(self, app_storage_key: str = "MasterDebugPanel", relay_robj: Optional[AsyncRemoteManager] = None, parent_pid: Optional[int] = None,
-            rpc_call_external: Optional[Callable[..., Awaitable[None]]] = None):
+            rpc_call_external: Optional[Callable[..., Awaitable[None]]] = None, manual_trace_scope: str = ""):
         self._app_storage_key = app_storage_key
         assert not InWindows, "MasterDebugPanel is not supported in Windows due to setproctitle."
         self._relay_robj = relay_robj
@@ -223,7 +223,7 @@ class MasterDebugPanel(mui.FlexBox):
         self._trace_yaml_cfg_editor.prop(width="100%", height="40vh")
 
         self._trace_launch_dialog = ConfigPanelDialogPersist(
-            TracerUIConfig(), self._on_trace_launch, children=[
+            TracerUIConfig(manual_scope=manual_trace_scope), self._on_trace_launch, children=[
                 mui.Divider(),
                 mui.Typography("Record Filter (YAML, For Viztracer)").prop(variant="body1"),
                 mui.Divider(),
@@ -762,7 +762,7 @@ class MasterDebugPanel(mui.FlexBox):
             raise ValueError("No trace data found for key", key)
         if self._debug_use_zip_instead_of_merge:
             zip_ss = io.BytesIO()
-            zip_mode = zipfile.ZIP_STORED if not _use_perfetto_undoc_zip_of_gzip else zipfile.ZIP_STORED
+            zip_mode = zipfile.ZIP_DEFLATED if not _use_perfetto_undoc_zip_of_gzip else zipfile.ZIP_STORED
             compresslevel = 9 if not _use_perfetto_undoc_zip_of_gzip else None
             ext = "tar" if _use_perfetto_undoc_zip_of_gzip else "json"
             with zipfile.ZipFile(zip_ss, mode="w", compression=zip_mode, compresslevel=compresslevel) as zf:

@@ -553,21 +553,24 @@ def patch_uid_list_with_prefix(data: list[str], prefixes: list[str]):
         new_data.append(new_uid.uid_encoded)
     return new_data
 
+def unpatch_uid(uid_encoded: str, prefixes: list[str]):
+    len_prefix = len(prefixes)
+    temp_index = uid_encoded.find(TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT)
+    if temp_index != -1:
+        k_no_template = uid_encoded[:temp_index]
+        k_uid = UniqueTreeIdForComp(k_no_template)
+        new_uid = UniqueTreeIdForComp.from_parts(k_uid.parts[len_prefix:])
+        new_uid_encoded = new_uid.uid_encoded + uid_encoded[temp_index:]
+    else:
+        k_uid = UniqueTreeIdForComp(uid_encoded)
+        new_uid = UniqueTreeIdForComp.from_parts(k_uid.parts[len_prefix:])
+        new_uid_encoded = new_uid.uid_encoded
+    return new_uid_encoded
 
 def unpatch_uid_keys_with_prefix(data: dict[str, Any], prefixes: list[str]):
     new_data = {}
-    len_prefix = len(prefixes)
     for k, v in data.items():
-        temp_index = k.find(TENSORPC_FLOW_COMP_UID_TEMPLATE_SPLIT)
-        if temp_index != -1:
-            k_no_template = k[:temp_index]
-            k_uid = UniqueTreeIdForComp(k_no_template)
-            new_uid = UniqueTreeIdForComp.from_parts(k_uid.parts[len_prefix:])
-            new_uid_encoded = new_uid.uid_encoded + k[temp_index:]
-        else:
-            k_uid = UniqueTreeIdForComp(k)
-            new_uid = UniqueTreeIdForComp.from_parts(k_uid.parts[len_prefix:])
-            new_uid_encoded = new_uid.uid_encoded
+        new_uid_encoded = unpatch_uid(k, prefixes)
         new_data[new_uid_encoded] = v
     return new_data
 
@@ -2460,10 +2463,9 @@ def component_dict_to_serializable_dict(x: dict[str, Component]):
             ll, root_uid_remote = v.get_layout_dict_sync()
             # if get_layout_dict_sync fail, root_uid_remote will be empty.
             if root_uid_remote != "":
-                # print("REMOTE LAYOUT", ll)
                 layout_dict.update(ll)
                 # patch childs of remote component container
-                layout_dict[u]["props"]["childs"] = [root_uid_remote]
+                layout_dict[u]["props"]["childs"] = [UniqueTreeIdForComp(root_uid_remote)]
     return layout_dict
 
 
@@ -2476,7 +2478,7 @@ async def component_dict_to_serializable_dict_async(x: dict[str, Component]):
             if root_uid_remote != "":
                 layout_dict.update(ll)
                 # patch childs of remote component container
-                layout_dict[u]["props"]["childs"] = [root_uid_remote]
+                layout_dict[u]["props"]["childs"] = [UniqueTreeIdForComp(root_uid_remote)]
     return layout_dict
 
 
@@ -3149,6 +3151,9 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
     async def set_fallback_layout(self):
         ...
 
+    def get_url_and_port(self):
+        return self._url, self._port
+
     def set_cur_child_uids(self, cur_child_uids: list[str]):
         self._cur_child_uids = cur_child_uids
 
@@ -3268,6 +3273,7 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
             #                         2, self._key)
             await self.disconnect(close_remote_loop=False)
             self._is_remote_mounted = False
+            self._remote_task = None
 
     async def _reconnect_to_remote_comp(self):
         _use_remote_generator: bool = True
@@ -3418,8 +3424,13 @@ class RemoteComponentBase(ContainerBase[T_container_props, T_child], abc.ABC):
         async for x in self.remote_generator(serv_names.REMOTE_COMP_GET_FILE, 10, self._key, file_key, offset, count, chunk_size):
             yield x
  
-    async def get_file_metadata(self, file_key: str):
-        return await self.remote_call(serv_names.REMOTE_COMP_GET_FILE_METADATA, 1, self._key, file_key)
+    async def get_file_metadata(self, file_key: str, comp_uid: Optional[str] = None):
+        assert self._flow_uid is not None, "shouldn't happen"
+        prefixes = self._flow_uid.parts
+        if comp_uid is not None:
+            comp_uid = unpatch_uid(comp_uid, prefixes)
+        print("WTF", file_key, comp_uid, prefixes)
+        return await self.remote_call(serv_names.REMOTE_COMP_GET_FILE_METADATA, 1, self._key, file_key, comp_uid)
 
     async def send_remote_comp_event(self, key: str, event: RemoteCompEvent):
         return await self.remote_call(serv_names.REMOTE_COMP_RUN_REMOTE_COMP_EVENT, 1, self._key, key, event)

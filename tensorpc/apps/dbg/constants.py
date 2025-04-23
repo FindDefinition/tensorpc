@@ -84,6 +84,7 @@ class DebugFrameState:
 class TracerUIConfig:
     tracer: Annotated[TracerType, typemetas.Enum(excludes=[TracerType.TARGET_TRACER])] = TracerType.VIZTRACER
     trace_name: Annotated[str, typemetas.CommonObject(alias="Trace Name")] = "trace"
+    manual_scope: Annotated[str, typemetas.CommonObject(alias="Manual Scope")] = ""
     mode: RecordMode = RecordMode.NEXT_BREAKPOINT
     breakpoint_count: Annotated[int, typemetas.RangedInt(1, 100, alias="Breakpoint Count")] = 1
     max_stack_depth: Annotated[int, typemetas.RangedInt(1, 50, alias="Max Stack Depth")] = 10

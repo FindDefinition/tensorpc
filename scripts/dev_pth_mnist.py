@@ -10,9 +10,9 @@ from torch.utils import data
 from torchvision import datasets, transforms
 from torch.distributed.device_mesh import init_device_mesh
 import torch.distributed as dist
+from torch.utils import _pytree as pytree
 
-from tensorpc.apps.distssh.client import TorchDistributedCkptClient
-from tensorpc.apps.distssh.pth import pth_control_point
+from tensorpc.apps.distssh.client import TorchDistributedCkptClient, pth_control_point
 from tensorpc.apps.distssh.constants import TENSORPC_ENV_DISTSSH_URL_WITH_PORT
 import tensorpc 
 def distributed_is_initialized():
@@ -76,9 +76,9 @@ class Trainer(object):
         assert distssh_url is not None 
         with tensorpc.RemoteManager(distssh_url) as robj:
             ckpt_client = TorchDistributedCkptClient(robj, 5, 5, -1)
-
+            flash_ckpt_stream = torch.cuda.Stream()
             for epoch in range(1, epochs + 1):
-                train_loss, train_acc = self.train()
+                train_loss, train_acc = self.train(epoch, flash_ckpt_stream, ckpt_client)
                 test_loss, test_acc = self.evaluate()
                 ckpt_client.store_major_checkpoint("mnist", epoch, {
                     "model": self.model.state_dict(),
@@ -91,25 +91,48 @@ class Trainer(object):
                 )
                 pth_control_point()
 
-    def train(self):
+    def train(self, epoch, stream: torch.cuda.Stream, ckpt_client: TorchDistributedCkptClient):
         self.model.train()
-
+        print(len(self.train_loader))
         train_loss = Average()
         train_acc = Accuracy()
-
+        cnt = 0
         for data, target in self.train_loader:
             data = data.to(self.device)
             target = target.to(self.device)
+            with tensorpc.dbg.manual_trace_scope("fwdbwd"):
+                output = self.model(data)
+                loss = F.cross_entropy(output, target)
 
-            output = self.model(data)
-            loss = F.cross_entropy(output, target)
-
-            self.optimizer.zero_grad()
-            loss.backward()
+                self.optimizer.zero_grad()
+                loss.backward()
+            # wait for minor checkpoint to be stored to remote shm
+            stream.synchronize()
+            # torch.cuda.current_stream().wait_stream(stream)
+            # torch.cuda.synchronize()
+            if ckpt_client.has_train_checkpoint("mnist", len(self.train_loader) * epoch + cnt):
+                state_dict_cur = {
+                    "model": self.model.state_dict(),
+                    "optimizer": self.optimizer.state_dict(),
+                }
+                state_dict_cur_tensors = pytree.tree_flatten(state_dict_cur)[0]
+                state_dict_stored_before = ckpt_client.get_train_checkpoint("mnist", len(self.train_loader) * epoch + cnt)
+                state_dict_stored_before_tensors = pytree.tree_flatten(state_dict_stored_before)[0]
+                for i in range(len(state_dict_cur_tensors)):
+                    if isinstance(state_dict_cur_tensors[i], torch.Tensor):
+                        assert torch.allclose(state_dict_cur_tensors[i].cpu(), state_dict_stored_before_tensors[i])
             self.optimizer.step()
 
             train_loss.update(loss.item(), data.size(0))
             train_acc.update(output, target)
+
+            cnt += 1
+            if cnt % 20 == 0:
+                stream.wait_stream(torch.cuda.current_stream())
+                ckpt_client.store_minor_checkpoint("mnist", len(self.train_loader) * epoch + cnt, {
+                    "model": self.model.state_dict(),
+                    "optimizer": self.optimizer.state_dict(),
+                }, stream=stream)
 
         return train_loss, train_acc
 

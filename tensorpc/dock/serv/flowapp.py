@@ -166,7 +166,7 @@ class FlowApp:
                                                     self.lsp_port)
             except:
                 traceback.print_exc()
-        lay = self.app._get_app_layout()
+        lay = await self.app._get_app_layout()
         self.app._flowapp_is_inited = True
         first_event = AppEvent("", {AppEventType.UpdateLayout: LayoutEvent(lay)})
         # first_event._after_send_callback = self.app.app_initialize_async
@@ -334,11 +334,11 @@ class FlowApp:
         print("DISCONNECT")
         await remote_comp.disconnect()
 
-    def get_layout(self, editor_only: bool = False):
+    async def get_layout(self, editor_only: bool = False):
         if editor_only:
             res = self.app._get_app_editor_state()
         else:
-            res = self.app._get_app_layout()
+            res = await self.app._get_app_layout()
         if self.app._flowapp_enable_lsp:
             res["lspPort"] = self.lsp_port
         return res
@@ -360,7 +360,7 @@ class FlowApp:
         if comp_uid is not None:
             comp = self.app.root._get_comp_by_uid(comp_uid)
             if isinstance(comp, RemoteComponentBase):
-                return await comp.get_file_metadata(file_key)
+                return await comp.get_file_metadata(file_key, comp_uid)
         if self.app._flowapp_file_resource_handlers.has_event_handler(base):
             # we only use first value
             if len(file_key_qparams) > 0:
