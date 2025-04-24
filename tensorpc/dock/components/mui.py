@@ -4401,8 +4401,12 @@ class TanstackJsonLikeTreeProps(JsonLikeTreePropsBase):
     maxLeafRowFilterDepth: Union[Undefined, int] = undefined
     filterFromLeafRows: Union[Undefined, bool] = undefined
     # global filter only filter node.name by default
-    # if filterNodeValue set to true, filter node.value as well
-    filterNodeValue: Union[Undefined, bool] = undefined
+    # if filterNameTypeValue set to true, filter node.value as well
+    filterNameTypeValue: Union[Undefined, bool] = undefined
+    # when your tree id is UniqueTreeId, you can use FQN of tree id 
+    # instead of name during filtering. note that this only valid
+    # when filterFromLeafRows is set.
+    filterFQNAsName: Union[Undefined, bool] = undefined
     rowFilterMatchProps: Union[Undefined, FlexBoxProps] = undefined
     globalFilterContiguousOnly: Union[Undefined, bool] = undefined
 
@@ -4434,8 +4438,12 @@ class RawTanstackJsonLikeTreeProps(RawJsonLikeTreePropsBase):
     maxLeafRowFilterDepth: Union[Undefined, int] = undefined
     filterFromLeafRows: Union[Undefined, bool] = undefined
     # global filter only filter node.name by default
-    # if filterNodeValue set to true, filter node.value as well
-    filterNodeValue: Union[Undefined, bool] = undefined
+    # if filterNameTypeValue set to true, filter node.value as well
+    filterNameTypeValue: Union[Undefined, bool] = undefined
+    # when your tree id is UniqueTreeId, you can use FQN of tree id 
+    # instead of name during filtering. note that this only valid
+    # when filterFromLeafRows is set.
+    filterFQNAsName: Union[Undefined, bool] = undefined
     rowFilterMatchProps: Union[Undefined, FlexBoxProps] = undefined
     globalFilterContiguousOnly: Union[Undefined, bool] = undefined
 

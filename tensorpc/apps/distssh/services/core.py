@@ -88,7 +88,7 @@ class FaultToleranceSSHServer:
         cfg = FTSSHServerArgs(**config_dict)
         self._cfg = cfg
         self._conn_desc = SSHConnDesc(default_url, cfg.username, cfg.password)
-        self._terminal = terminal.AsyncSSHTerminal().prop(disableStdin=False)
+        self._terminal = terminal.AsyncSSHTerminal().prop(disableStdin=True)
         self._master_rank = 0
         ip = get_primary_ip()
         state = FTState(

@@ -193,7 +193,7 @@ class TraceView(mui.FlexBox):
             expansionIconTrigger=True,
             fixedSize=True,
             filterFromLeafRows=True,
-            filterNodeValue=True,
+            filterNameTypeValue=True,
             rowFilterMatchProps=mui.FlexBoxProps(backgroundColor="beige"),
             globalFilterContiguousOnly=True)
         self.tree.props.tree = mui.JsonLikeNode.create_dummy_dict_binary()

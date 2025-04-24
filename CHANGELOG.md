@@ -1,4 +1,7 @@
 # Changelog
+# [0.16.0] - 2025-04-24
+### Changed 
+- BREAKING CHANGE: change length splitter of component uid from "," to "." to decrease length of file download URI.
 
 # [0.15.0] - 2025-02-xx
 ### Added 

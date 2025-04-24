@@ -129,7 +129,7 @@ class BreakpointDebugPanel(mui.FlexBox):
             horizontal=True)
         if isinstance(self.tree_viewer.tree.tree, mui.TanstackJsonLikeTree):
             self.tree_viewer.tree.tree.prop(maxLeafRowFilterDepth=0,
-                                            filterNodeValue=True)
+                                            filterNameTypeValue=True)
 
         filter_input = mui.TextField("filter").prop(
             valueChangeTarget=(self.tree_viewer.tree.tree, "globalFilter"))
