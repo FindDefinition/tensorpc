@@ -464,9 +464,9 @@ class RemoteManager(RemoteObject):
         return self
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
-        # if self.channel is not None:
-        #     self.channel.__exit__(exc_type, exc_value, exc_traceback)
-        return self.close(close_channel=True)
+        if self.channel is not None:
+            self.channel.__exit__(exc_type, exc_value, exc_traceback)
+        return self.close(close_channel=False)
 
 
 @contextlib.contextmanager

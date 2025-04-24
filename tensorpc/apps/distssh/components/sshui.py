@@ -1,3 +1,6 @@
+import enum
+from functools import partial
+import inspect
 from typing import Any, Awaitable, Callable, Optional, Union
 
 from tensorpc.apps.collections.serv.kvstore import KVStoreChangeEvent, KVStoreEventType, KVStoreItem
@@ -15,7 +18,7 @@ from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KE
 from tensorpc.dock.components.plus.styles import get_tight_icon_tab_theme_horizontal, get_tight_tab_theme_horizontal
 from ..typedefs import CheckpointMetadata, FTState, CmdStatus, MasterUIState, FTStatusBoxState
 from tensorpc.apps.dbg.components.dbgpanel_v2 import MasterDebugPanel
-from tensorpc.apps.distssh.typedefs import CheckpointType
+from tensorpc.apps.distssh.typedefs import CheckpointType, MasterActions
 import humanize
 
 class WorkersStatusBox(mui.DataFlexBox):
@@ -129,14 +132,22 @@ class CheckpointManager(mui.FlexBox):
                 print(data)
                 return await self._release_bkpt_fn(dataclasses.asdict(data))
 
+def _get_terminal_menus(term: terminal.AsyncSSHTerminal):
+    
+    return mui.MenuList([
+        mui.MenuItem("Clear", "Clear", iconSize="small", iconFontSize="small")
+    ], term).prop(
+            flex=1, overflow="auto", display="flex", flexFlow="column nowrap", triggerMethod="contextmenu",
+            anchorReference="anchorPosition", dense=True,
+            paperProps=mui.PaperProps(width="20ch"))
+
 class FaultToleranceUIMaster(mui.FlexBox):
 
     def __init__(self, master_rank: int, ui_state: MasterUIState,
                  term: terminal.AsyncSSHTerminal, debug_panel: MasterDebugPanel, port: int,
-                 start_or_cancel_fn: Callable[[], mui.CORO_ANY],
-                 stop_fn: Callable[[], mui.CORO_ANY],
-                 kill_fn: Callable[[], mui.CORO_ANY],
-                 release_bkpt_fn: Callable[[Any], Awaitable[None]]):
+                 master_action_fn: Callable[[MasterActions], mui.CORO_ANY],
+                 release_bkpt_fn: Callable[[Any], Awaitable[None]],
+                 enabled: bool = True):
         master_state = ui_state.client_states[master_rank]
         states = ui_state.client_states
         self._master_rank = master_rank
@@ -148,9 +159,9 @@ class FaultToleranceUIMaster(mui.FlexBox):
         self._release_bkpt_fn = release_bkpt_fn
 
         start_or_cancel_btn = mui.IconButton(
-            mui.IconType.PlayArrow, start_or_cancel_fn).prop(iconSize="small",
+            mui.IconType.PlayArrow, partial(master_action_fn, MasterActions.START_OR_CANCEL)).prop(iconSize="small",
                                                              size="small")
-        stop_btn = mui.IconButton(mui.IconType.Stop, stop_fn).prop(
+        stop_btn = mui.IconButton(mui.IconType.Stop, partial(master_action_fn, MasterActions.SHUTDOWN_ALL)).prop(
             iconSize="small",
             size="small",
             muiColor="error",
@@ -158,7 +169,7 @@ class FaultToleranceUIMaster(mui.FlexBox):
             confirmMessage=
             "Are you sure to shutdown (ctrl-c->terminate->kill) ALL running process?",
             tooltip="shutdown command")
-        kill_btn = mui.IconButton(mui.IconType.Delete, kill_fn).prop(
+        kill_btn = mui.IconButton(mui.IconType.Delete, partial(master_action_fn, MasterActions.KILL_ALL)).prop(
             iconSize="small",
             size="small",
             confirmTitle="Dangerous Operation",
@@ -174,6 +185,18 @@ class FaultToleranceUIMaster(mui.FlexBox):
         self.worker_status_box = WorkersStatusBox(
             [FTStatusBoxState.from_ft_state(state, False) for state in states],
             self._on_status_box_click)
+        menu_items: list[mui.MenuItem] = []
+        cared_menu_acts = [MasterActions.RECONNECT_ALL_CLIENT, MasterActions.CLEAR_ALL_CKPT, MasterActions.CLEAR_ALL_TERMINALS]
+        for action in MasterActions:
+            if action in cared_menu_acts:
+                menu_items.append(mui.MenuItem(action.value, action.value))
+        self._menu = mui.MenuList(
+            menu_items,
+            mui.IconButton(mui.IconType.MoreVert).prop(size="small", iconSize="small"))
+        self._menu.prop(anchorOrigin=mui.Anchor("top", "right"))
+        self._master_action_fn = master_action_fn
+        self._menu.event_contextmenu_select.on(self._handle_master_actions)
+
         header = mui.HBox([
             mui.HBox([
                 header_str,
@@ -181,15 +204,16 @@ class FaultToleranceUIMaster(mui.FlexBox):
             start_or_cancel_btn,
             stop_btn,
             kill_btn,
+            self._menu,
         ])
         # self._remote_box = mui.HBox([])
         # self._code_editor = mui.SimpleCodeEditor("echo $HOME", "bash").prop(debounce=300, height="300px", border="1px solid gray")
         self._code_editor = mui.MonacoEditor("echo $HOME", "shell",
                                              "root").prop(debounce=300,
                                                           height="300px")
-        self._terminal_box = mui.VBox([
-            term,
-        ]).prop(flex=1, overflow="auto")
+        self._terminal = term
+        self._terminal_box = _get_terminal_menus(term)
+        self._terminal_box.event_contextmenu_select.on(self._on_term_menu)
         self._remote_terminal_box = mui.VBox([]).prop(flex=1, overflow="hidden")
         self._terminal_panel = mui.MatchCase.binary_selection(
             True, self._terminal_box, self._remote_terminal_box)
@@ -204,7 +228,9 @@ class FaultToleranceUIMaster(mui.FlexBox):
             self._terminal_panel,
         ]).prop(width="100%", height="100%", overflow="hidden")
         self._master_panel = debug_panel
-        self._master_panel.event_has_breakpoint_worker_change.on(self._on_has_bkpt_change)
+        if enabled:
+            self._master_panel.event_has_breakpoint_worker_change.on(self._on_has_bkpt_change)
+
         child_control_panel = mui.VBox([
 
         ]).prop(width="100%", height="100%", overflow="hidden")
@@ -284,6 +310,12 @@ class FaultToleranceUIMaster(mui.FlexBox):
             async with self.dm.draft_update() as draft:
                 draft.client_states[self._master_rank].has_bkpt_process = val
 
+    async def _on_term_menu(self, item_id: str):
+        if item_id == "Clear":
+            await self._terminal.clear()
+        else:
+            raise ValueError(f"Unknown menu item {item_id}")
+
     async def _handle_toggle_btn(self, enable: bool):
         if enable:
             # only master rank control point check this value, so no need to sent to all
@@ -356,6 +388,11 @@ class FaultToleranceUIMaster(mui.FlexBox):
                 self._master_all_panel,
             ])
 
+    async def _handle_master_actions(self, act_id: str):
+        act = MasterActions(act_id)
+        coro = self._master_action_fn(act)
+        if inspect.iscoroutine(coro):
+            await coro
 
 class FaultToleranceUIClient(mui.FlexBox):
 
@@ -363,11 +400,18 @@ class FaultToleranceUIClient(mui.FlexBox):
         title = f"Worker ({state.rank})"
         header_str = mui.Typography(title).prop(variant="body2",
                                                 color="primary")
-        self._terminal_box = mui.VBox([
-            term,
-        ]).prop(flex=1, overflow="auto")
+        self._terminal = term
+        self._terminal_box = _get_terminal_menus(term)
+        self._terminal_box.event_contextmenu_select.on(self._on_term_menu)
+
         self.dm = mui.DataModel(state, [header_str, self._terminal_box])
         super().__init__([
             self.dm,
         ])
         self.prop(flexDirection="column", flex=1, overflow="hidden", border="1px solid gray")
+
+    async def _on_term_menu(self, item_id: str):
+        if item_id == "Clear":
+            await self._terminal.clear()
+        else:
+            raise ValueError(f"Unknown menu item {item_id}")

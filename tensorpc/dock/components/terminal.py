@@ -91,6 +91,13 @@ class TerminalBuffer:
         self._raw_buffers_with_ts: deque[tuple[bytes, int]] = deque(maxlen=maxlen)
         self._min_buffer_len = min_buffer_len
 
+    def clear(self):
+        self._raw_buffers_with_ts.clear()
+
+    def clear_and_write(self, buffer: bytes, ts: int):
+        self._raw_buffers_with_ts.clear()
+        self.append_buffer(buffer, ts)
+
     def get_total_size(self):
         return sum(len(x[0]) for x in self._raw_buffers_with_ts)
 
@@ -238,10 +245,18 @@ class Terminal(MUIComponentBase[TerminalProps]):
     async def handle_event(self, ev: Event, is_sync: bool = False):
         return await handle_standard_event(self, ev, is_sync=is_sync)
 
-    async def clear(self):
-        await self.clear_and_write(b"")
+    async def clear(self, append_buffer: bool = True):
+        if self._buffer is not None and append_buffer:
+            self._buffer.clear()
+        await self.clear_and_write(b"", append_buffer=False)
 
-    async def clear_and_write(self, content: Union[str, bytes], ts: Optional[int] = None):
+    async def clear_and_write(self, content: Union[str, bytes], ts: Optional[int] = None, append_buffer: bool = True):
+        if ts is None:
+            ts = 0
+        if self._buffer is not None and append_buffer:
+            if isinstance(content, str):
+                content = content.encode("utf-8")
+            self._buffer.clear_and_write(content, ts)
         await self.put_app_event(
             self.create_comp_raw_event([TerminalEventType.ClearAndWrite.value, content, ts]))
 

@@ -681,7 +681,7 @@ class AsyncRemoteManager(AsyncRemoteObject):
         except TimeoutError:
             return False
 
-    async def close(self, close_channel: bool = False):
+    async def close(self, close_channel: bool = True):
         if self._channel is not None:
             # if we shutdown remote and close channel,
             # will raise strange error.
@@ -701,7 +701,7 @@ class AsyncRemoteManager(AsyncRemoteObject):
     async def __aexit__(self, exc_type, exc_value, exc_traceback):
         if self._channel is not None:
             await self._channel.__aexit__(exc_type, exc_value, exc_traceback)
-        return await self.close()
+        return await self.close(close_channel=False)
 
 
 async def simple_remote_call_async(addr,

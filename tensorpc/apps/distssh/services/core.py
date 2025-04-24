@@ -18,21 +18,18 @@ from tensorpc.autossh.core import SSHConnDesc
 from tensorpc.core.asyncclient import AsyncRemoteManager
 from tensorpc.core.asynctools import cancel_task
 from tensorpc.core.datamodel.draftstore import DraftSimpleFileStoreBackend
-from tensorpc.core.datamodel.events import DraftChangeEvent
 from tensorpc.dock import terminal
 import dataclasses
 import uuid
-from tensorpc.dock.components import mui
 from tensorpc.utils import get_service_key_by_type, rich_logging
 from tensorpc.utils.wait_tools import get_primary_ip 
-from tensorpc.core import marker, prim
+from tensorpc.core import BuiltinServiceKeys, marker, prim
 from tensorpc.core.moduleid import import_dynamic_func
 import tensorpc.core.datamodel as D
 import psutil 
 from tensorpc.dock.serv_names import serv_names as app_serv_names
 from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, TENSORPC_DISTSSH_UI_KEY, TENSORPC_ENV_DISTSSH_RANK, TENSORPC_ENV_DISTSSH_URL_WITH_PORT, TENSORPC_ENV_DISTSSH_WORKDIR, TENSORPC_ENV_DISTSSH_WORLD_SIZE)
-from rich.syntax import Syntax
-from ..typedefs import FTState, FTSSHServerArgs, FTStatus, SSHStatus, CmdStatus, MasterUIState
+from ..typedefs import FTState, FTSSHServerArgs, FTStatus, SSHStatus, CmdStatus, MasterUIState, MasterActions
 from ..components.sshui import FaultToleranceUIMaster, FaultToleranceUIClient
 import shlex
 LOGGER = rich_logging.get_logger("distssh")
@@ -126,9 +123,8 @@ class FaultToleranceSSHServer:
         self._debug_panel = MasterDebugPanel(rpc_call_external=self._debug_panel_broadcast).prop(flex=1)
         self._master_ui = FaultToleranceUIMaster(self._master_rank, master_ui_state, 
             self._terminal, self._debug_panel, prim.get_server_grpc_port(),
-            self._master_start_or_cancel, partial(self._master_shutdown_or_kill_cmd, just_kill=False), 
-            partial(self._master_shutdown_or_kill_cmd, just_kill=True),
-            self._release_all_bkpt)
+            self._handle_master_actions,
+            self._release_all_bkpt, enabled=self._is_master)
 
         self._client_ui = FaultToleranceUIClient(state, self._terminal)
 
@@ -279,6 +275,27 @@ class FaultToleranceSSHServer:
             await self._master_ui._master_panel.run_rpc_on_current_processes(key, *args, **kwargs)
         await self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "run_debug_panel_rpc"), {exclude_rank}, key, *args, **kwargs)
 
+    async def handle_misc_actions(self, act: MasterActions):
+        if act == MasterActions.RECONNECT_ALL_CLIENT:
+            raise NotImplementedError
+        elif act == MasterActions.CLEAR_ALL_CKPT:
+            clear_fn = prim.get_service(f"{BuiltinServiceKeys.ShmKVStore.value}.clear")
+            await clear_fn()
+        elif act == MasterActions.CLEAR_ALL_TERMINALS:
+            await self._terminal.clear()
+
+    async def _handle_master_actions(self, act: MasterActions):
+        if act == MasterActions.SHUTDOWN_ALL:
+            await self._master_shutdown_or_kill_cmd(False)
+        elif act == MasterActions.KILL_ALL:
+            await self._master_shutdown_or_kill_cmd(True)
+        elif act == MasterActions.START_OR_CANCEL:
+            await self._master_start_or_cancel()
+        else:
+            await self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "handle_misc_actions"), set(), act)
+            await self.handle_misc_actions(act)
+            # return res 
+
     def _master_check_is_all_ssh_idle_or_err(self):
         for client_state in self._master_ui.dm.model.client_states:
             if client_state.ssh_status != SSHStatus.IDLE and client_state.ssh_status != SSHStatus.ERROR:
@@ -341,8 +358,6 @@ class FaultToleranceSSHServer:
             return self._master_robj is not None
 
     async def _master_start_or_cancel(self):
-        # await self._master_ui.send_error("Debug", f"Cmd {self._master_ui.dm.model.cmd_status}")
-        print(self._master_ui.dm.model.cmd_status, self._master_ui.dm.model.cmd)
         if self._master_ui.dm.model.cmd_status == CmdStatus.IDLE:
             await self._master_run_cmd(self._master_ui.dm.model.cmd)
         else:
@@ -409,9 +424,11 @@ class FaultToleranceSSHServer:
             await self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "cancel_cmd"), set())
 
     async def _master_shutdown_or_kill_cmd(self, just_kill: bool = False):
-        res = await self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "shutdown_or_kill_cmd"), set(), just_kill)
-        await self.shutdown_or_kill_cmd(just_kill)
-        return res 
+        res = await asyncio.gather(
+            self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "shutdown_or_kill_cmd"), set(), just_kill),
+            self.shutdown_or_kill_cmd(just_kill),
+        )
+        return res[1]
 
     async def shutdown_or_kill_cmd(self, just_kill: bool = False):
         if self._cmd_task is not None:

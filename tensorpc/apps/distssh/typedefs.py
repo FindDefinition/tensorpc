@@ -133,3 +133,12 @@ class FTStatusBoxState:
             color=color,
             selected=selected,
         )
+
+class MasterActions(enum.Enum):
+    RECONNECT_ALL_CLIENT = "Reconnect All Client"
+    CLEAR_ALL_CKPT = "Clear All Checkpoint"
+    CLEAR_ALL_TERMINALS = "Clear All Terminals"
+
+    SHUTDOWN_ALL = "Shutdown All"
+    KILL_ALL = "KILL ALL"
+    START_OR_CANCEL = "Start/Cancel"

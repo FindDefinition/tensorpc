@@ -292,6 +292,6 @@ class ShmKVStore:
 
     async def clear(self):
         # async with self._lock:
-        for key in self._store.keys():
+        for key in list(self._store.keys()):
             await self.remove_item(key, emit_event=False)
         await self._event_emitter.emit_async(KVStoreEventType.ITEM_CHANGE, self._store)
