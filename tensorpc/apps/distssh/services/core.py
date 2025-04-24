@@ -153,8 +153,7 @@ class FaultToleranceSSHServer:
         else:
             return self._client_ui.dm.model
 
-    @marker.mark_server_event(event_type=marker.ServiceEventType.Init)
-    async def _init(self):
+    def _get_init_cmds(self):
         workdir_p = Path(self._cfg.workdir).resolve()
         init_cmds = [
             f" export {TENSORPC_ENV_DISTSSH_URL_WITH_PORT}=localhost:{prim.get_server_grpc_port()}\n",
@@ -174,6 +173,11 @@ class FaultToleranceSSHServer:
                     else:
                         init_cmds.append(f" export {k}=\"{v}\"\n")
                     # init_cmds.append(f" export {k}={vv}\n")
+        return init_cmds, workdir_p
+
+    @marker.mark_server_event(event_type=marker.ServiceEventType.Init)
+    async def _init(self):
+        init_cmds, workdir_p = self._get_init_cmds()
         await self._terminal.connect_with_new_desc(self._conn_desc, init_cmds=init_cmds,
             term_line_event_callback=self._line_event_cb)
         term_state = self._terminal.get_current_state()
@@ -219,15 +223,15 @@ class FaultToleranceSSHServer:
         if self._is_master:
             await set_layout_service(TENSORPC_DISTSSH_UI_KEY, self._master_ui)
         else:
-            self._debug_panel.event_has_breakpoint_worker_change.on(self._client_on_has_bkpt_change)
+            self._debug_panel.event_breakpoint_process_change.on(self._client_on_has_bkpt_change)
             await set_layout_service(TENSORPC_DISTSSH_UI_KEY, self._client_ui)
             await set_layout_service(TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KEY, self._debug_panel)
 
-    async def _client_on_has_bkpt_change(self, val: bool):
-        val_before = self._client_ui.dm.model.has_bkpt_process
+    async def _client_on_has_bkpt_change(self, num_bkpt_proc: int):
+        val_before = self._client_ui.dm.model.num_bkpt_proc
         async with self._client_ui.dm.draft_update() as draft:
-            draft.has_bkpt_process = val
-        if val_before != val:
+            draft.num_bkpt_proc = num_bkpt_proc
+        if val_before != num_bkpt_proc:
             await self._client_set_worker_state()
 
     @marker.mark_server_event(event_type=marker.ServiceEventType.Exit)
@@ -277,7 +281,11 @@ class FaultToleranceSSHServer:
 
     async def handle_misc_actions(self, act: MasterActions):
         if act == MasterActions.RECONNECT_ALL_CLIENT:
-            raise NotImplementedError
+            init_cmds, _ = self._get_init_cmds()
+            assert self._master_check_is_all_ssh_idle_or_err(), "all ssh should be idle before reconnect"
+            await self._terminal.disconnect()
+            await self._terminal.connect_with_new_desc(self._conn_desc, init_cmds=init_cmds,
+                term_line_event_callback=self._line_event_cb)
         elif act == MasterActions.CLEAR_ALL_CKPT:
             clear_fn = prim.get_service(f"{BuiltinServiceKeys.ShmKVStore.value}.clear")
             await clear_fn()

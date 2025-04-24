@@ -35,7 +35,7 @@ class WorkersStatusBox(mui.DataFlexBox):
         self._box_template.bind_fields(
             backgroundColor="color",
             border=
-            f"where(selected, '2px solid lightpink', '2px solid transparent')",
+            f"where(num_bkpt_proc > `0`, '2px solid red', where(selected, '2px solid lightpink', '2px solid transparent'))",
         )
         self._box_template.event_click.on_standard(on_click)
         self._selected_idx = -1
@@ -71,7 +71,7 @@ class CheckpointManager(mui.FlexBox):
                 ])).bind_fields(condition="type")),
         ]
         draft = master_dm.get_draft()
-        btn.bind_fields(disabled=(master_dm, f"!({draft.client_states[0].has_bkpt_process})"),)
+        btn.bind_fields(disabled=(master_dm, f"({draft.client_states[0].num_bkpt_proc} == `0`)"),)
         dgrid = mui.DataGrid(column_defs, []).prop(idKey="id", rowHover=True)
         self.dgrid = dgrid
         super().__init__([
@@ -229,7 +229,7 @@ class FaultToleranceUIMaster(mui.FlexBox):
         ]).prop(width="100%", height="100%", overflow="hidden")
         self._master_panel = debug_panel
         if enabled:
-            self._master_panel.event_has_breakpoint_worker_change.on(self._on_has_bkpt_change)
+            self._master_panel.event_breakpoint_process_change.on(self._on_has_bkpt_change)
 
         child_control_panel = mui.VBox([
 
@@ -309,11 +309,11 @@ class FaultToleranceUIMaster(mui.FlexBox):
         ])
         self.prop(flexDirection="column", flex=1)
 
-    async def _on_has_bkpt_change(self, val: bool):
-        prev = self.dm.model.client_states[self._master_rank].has_bkpt_process
-        if prev != val:
+    async def _on_has_bkpt_change(self, num_bkpt_proc):
+        prev = self.dm.model.client_states[self._master_rank].num_bkpt_proc
+        if prev != num_bkpt_proc:
             async with self.dm.draft_update() as draft:
-                draft.client_states[self._master_rank].has_bkpt_process = val
+                draft.client_states[self._master_rank].num_bkpt_proc = num_bkpt_proc
 
     async def _on_term_menu(self, item_id: str):
         if item_id == "Clear":

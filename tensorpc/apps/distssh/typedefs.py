@@ -87,7 +87,7 @@ class FTState:
     master_ip: str = ""
     # when enabled, your distributed problem will enter breakpoint
     is_user_control_enabled: bool = False
-    has_bkpt_process: bool = False
+    num_bkpt_proc: int = 0
 
 @dataclasses.dataclass
 class MasterUIState:
@@ -107,6 +107,7 @@ class FTStatusBoxState:
     ssh_status: SSHStatus
     color: str
     selected: bool
+    num_bkpt_proc: int = 0
     @staticmethod 
     def from_ft_state(ft_state: FTState, selected: bool):
         if ft_state.status == FTStatus.WORKER_DISCONNECTED:
@@ -132,6 +133,7 @@ class FTStatusBoxState:
             ssh_status=ft_state.ssh_status,
             color=color,
             selected=selected,
+            num_bkpt_proc=ft_state.num_bkpt_proc,
         )
 
 class MasterActions(enum.Enum):

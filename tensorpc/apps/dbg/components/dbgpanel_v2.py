@@ -195,7 +195,7 @@ class MasterDebugPanel(mui.FlexBox):
                                               virtualized=False)
         remote_server_item.event_click.on_standard(
             self._on_server_item_click).configure(True)
-        self._backend_has_breakpoint_worker = "__backend_event_breakpoint_worker"
+        self._backend_bkpt_proc_change = "__backend_event_breakpoint_worker"
 
         self._menu = mui.MenuList(
             [
@@ -359,7 +359,7 @@ class MasterDebugPanel(mui.FlexBox):
 
         self._serv_list_lock = asyncio.Lock()
         self._vscode_handler_registered = False
-        self.event_has_breakpoint_worker_change: mui.EventSlotEmitter[bool] = self._create_emitter_event_slot(self._backend_has_breakpoint_worker)
+        self.event_breakpoint_process_change: mui.EventSlotEmitter[int] = self._create_emitter_event_slot(self._backend_bkpt_proc_change)
 
     def set_parent_pid(self, pid: Optional[int]):
         self._parent_pid = pid
@@ -592,13 +592,12 @@ class MasterDebugPanel(mui.FlexBox):
                         continue
             async with self.dm.draft_update():
                 draft.infos = process_infos
-                has_breakpoint_info = False
+                bkpt_proc_cnt = 0
                 for info in process_infos:
                     if info.is_paused:
-                        has_breakpoint_info = True
-                        break
-                await self.flow_event_emitter.emit_async(self._backend_has_breakpoint_worker, 
-                    mui.Event(self._backend_has_breakpoint_worker, has_breakpoint_info))
+                        bkpt_proc_cnt += 1
+                await self.flow_event_emitter.emit_async(self._backend_bkpt_proc_change, 
+                    mui.Event(self._backend_bkpt_proc_change, bkpt_proc_cnt))
                 found = False
                 if cur_model.cur_mounted_info_uid is not None:
                     # check infos still contains this uid
