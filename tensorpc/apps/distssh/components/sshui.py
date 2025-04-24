@@ -242,13 +242,18 @@ class FaultToleranceUIMaster(mui.FlexBox):
         self.dm = mui.DataModel(ui_state, [
             global_panel
         ])
+        if enabled:
+            # FIXME: better code
+            ckpt_mgr = CheckpointManager(self.dm, release_bkpt_fn)
+        else:
+            ckpt_mgr = mui.HBox([])
         debug_view_tab_defs = [
             mui.TabDef("Checkpoint",
-                       "Checkpoint",
-                       mui.VBox([CheckpointManager(self.dm, release_bkpt_fn)]).prop(width="100%",
+                    "Checkpoint",
+                    mui.VBox([ckpt_mgr]).prop(width="100%",
                                                         height="100%",
                                                         overflow="hidden"),
-                       tooltip="Checkpoint Manager"),
+                    tooltip="Checkpoint Manager"),
         ]
         self._debug_view_tabs = mui.Tabs(debug_view_tab_defs, init_value="Checkpoint").prop(
             panelProps=mui.FlexBoxProps(flex=1, padding=0, overflow="hidden"),

@@ -655,6 +655,7 @@ class FaultToleranceSSHServer:
             robj = AsyncRemoteManager(f"{state.ip}:{state.port}")
             self._client_robjs[state.rank] = robj
         await self._master_sync_cmd_status()
+        await self._master_state_check_is_ok()
         return self.state
 
     async def _query_master_robj(self):
@@ -704,6 +705,13 @@ class FaultToleranceSSHServer:
             async with self._master_ui.dm.draft_update() as draft:
                 draft.cmd_status = CmdStatus.IDLE
 
+
+    async def _master_state_check_is_ok(self):
+        if len(self._client_robjs) == self._cfg.world_size - 1:
+            async with self._master_ui.dm.draft_update() as draft:
+                draft.client_states[self._master_rank].status = FTStatus.OK
+            self._disconnect_retry_count = 0
+
     async def _heartbeat_loop(self):
         shutdown_ev = prim.get_async_shutdown_event()
         shutdown_ev_task = asyncio.create_task(shutdown_ev.wait(), name="heartbeat_shutdown")
@@ -734,6 +742,7 @@ class FaultToleranceSSHServer:
                                 res = await self._master_shutdown_or_kill_cmd()
                                 if res is not None:
                                     await self._master_run_cmd(self._master_ui.dm.model.cmd)
+                            await self._master_sync_cmd_status()
                     else:
                         if len(self._client_robjs) != self._cfg.world_size - 1:
                             # get current disconnected worker rank
@@ -748,9 +757,7 @@ class FaultToleranceSSHServer:
                                 LOGGER.warning("master wait for all worker timeout, exit.")
                                 shutdown_ev.set()
                                 break
-                        else:
-                            async with self._master_ui.dm.draft_update() as draft:
-                                draft.client_states[self._master_rank].status = FTStatus.OK
+                        await self._master_state_check_is_ok()
             else:
                 while True:
                     sleep_task = asyncio.create_task(

@@ -2,15 +2,17 @@
 import asyncio
 import dataclasses
 import enum
-from multiprocessing.managers import SharedMemoryManager
-from multiprocessing.shared_memory import SharedMemory
+# from multiprocessing import shared_memory
+# from multiprocessing.managers import SharedMemoryManager
+# from multiprocessing.shared_memory import SharedMemory
+from tensorpc.apps.collections.serv.shm_util import SharedMemory
 import time
 from typing import Any, Callable, Optional, Union, List, Dict
 from tensorpc import marker, prim, AsyncRemoteManager
 import numpy as np
 from tensorpc.core.event_emitter.aio import AsyncIOEventEmitter
 from tensorpc.compat import Python3_13AndLater
-from multiprocessing.resource_tracker import unregister
+# from multiprocessing.resource_tracker import unregister
 
 ALIGN_SIZE = 128
 
@@ -56,6 +58,9 @@ class SharedArraySegments:
     def get_segments_desc(self):
         return SharedArraySegmentsDesc(self.shm.name, self.descs)
 
+def create_untracked_shm():
+    pass 
+
 @dataclasses.dataclass
 class SharedArraySegmentsDesc:
     shm_name: str
@@ -70,9 +75,9 @@ class SharedArraySegmentsDesc:
             # to track it in resource tracker.
             shm = SharedMemory(name=self.shm_name, create=False, size=self.get_aligned_byte_size(), track=False) # type: ignore
         else:
-            shm = SharedMemory(name=self.shm_name, create=False, size=self.get_aligned_byte_size())
+            shm = SharedMemory(name=self.shm_name, create=False, size=self.get_aligned_byte_size(), track=False)
             # if not Python3_13AndLater:
-            unregister(shm._name, "shared_memory") # type: ignore
+            # unregister(shm._name, "shared_memory") # type: ignore
         return SharedArraySegments(shm, self.descs)
 
 
@@ -138,7 +143,7 @@ class KVStore:
 class ShmKVStore:
     def __init__(self):
         self._store: dict[str, KVStoreItem] = {}
-        self._store_shared_mgrs: dict[str, SharedMemoryManager] = {}
+        # self._store_shared_mgrs: dict[str, SharedMemoryManager] = {}
         self._store_shared_segments: dict[str, SharedArraySegments] = {}
         self._event_emitter: AsyncIOEventEmitter[KVStoreEventType, dict[str, KVStoreItem]] = AsyncIOEventEmitter()
 
@@ -147,11 +152,12 @@ class ShmKVStore:
     @marker.mark_server_event(event_type=marker.ServiceEventType.Exit)
     def _exit(self):
         for key, segments in self._store_shared_segments.items():
-            mgr = self._store_shared_mgrs[key]
+            # mgr = self._store_shared_mgrs[key]
             segments.shm.close()
-            mgr.shutdown()
+            segments.shm.unlink()
+            # mgr.shutdown()
         self._store_shared_segments.clear()
-        self._store_shared_mgrs.clear()
+        # self._store_shared_mgrs.clear()
 
     def _validate_arr_desps(self, key: str, arr_desps: list[TensorInfo], raise_exc: bool = True):
         segment_descs = self._store_shared_segments[key].descs
@@ -183,9 +189,9 @@ class ShmKVStore:
         if old_key in self._store_shared_segments:
             self._store_shared_segments[new_key] = self._store_shared_segments[old_key]
             del self._store_shared_segments[old_key]
-        if old_key in self._store_shared_mgrs:
-            self._store_shared_mgrs[new_key] = self._store_shared_mgrs[old_key]
-            del self._store_shared_mgrs[old_key]
+        # if old_key in self._store_shared_mgrs:
+        #     self._store_shared_mgrs[new_key] = self._store_shared_mgrs[old_key]
+        #     del self._store_shared_mgrs[old_key]
 
     async def get_or_create_shared_array_segments(self, key: str, arr_desps: list[TensorInfo], removed_keys: Optional[set[str]] = None):
         async with self._lock:
@@ -211,9 +217,9 @@ class ShmKVStore:
                 segments = self._store_shared_segments[key]
                 self._validate_arr_desps(key, arr_desps)
                 return segments.get_segments_desc()
-            mgr = SharedMemoryManager()
-            mgr.start()
-            self._store_shared_mgrs[key] = mgr
+            # mgr = SharedMemoryManager()
+            # mgr.start()
+            # self._store_shared_mgrs[key] = mgr
             segment_descs: list[SharedArraySegmentDesc] = []
             offset = 0
             for info in arr_desps:
@@ -224,7 +230,9 @@ class ShmKVStore:
                 offset += aligned_size
                 segment_descs.append(desc)
             total_size = sum(seg.get_aligned_byte_size() for seg in segment_descs)
-            mem = mgr.SharedMemory(size=total_size)
+            # FIXME currently we don't track shm in shm server because it wll generate too much zombie
+            # forked processes.
+            mem = SharedMemory(create=True, size=total_size, track=False)
             self._store_shared_segments[key] = SharedArraySegments(mem, segment_descs)
             print("create new shared memory", key, total_size)
             return self._store_shared_segments[key].get_segments_desc()
@@ -274,11 +282,12 @@ class ShmKVStore:
         async with self._lock:
             if key in self._store:
                 del self._store[key]
-                assert key in self._store_shared_mgrs
-                mgr = self._store_shared_mgrs.pop(key)
+                # assert key in self._store_shared_mgrs
+                # mgr = self._store_shared_mgrs.pop(key)
                 seg = self._store_shared_segments.pop(key)
                 seg.shm.close()
-                mgr.shutdown()
+                seg.shm.unlink()
+                # mgr.shutdown()
                 # segments always created from mgr, so no need to close
                 # manually.
                 if emit_event:
