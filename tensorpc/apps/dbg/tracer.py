@@ -259,6 +259,11 @@ class DebugTracerWrapper:
                         b'"ph": "X", "cat": "user_annotation"',
                         b'"ph": "M", "cat": "user_annotation"')
                 if meta.world_size > 1:
+                    # pytorch trace contains "cat": "overhead", "name": "Unrecognized", "pid": -1
+                    # which breaks zip-of-gzip trace, so we need to remove it
+                    data = data.replace(
+                        b'"pid": -1',
+                        f'"pid": {meta.rank}'.encode())
                     # fix duplicated flow event across ranks
                     # TODO pytorch may remove beautiful json dump (remove whitespace) in future
                     data = data.replace(

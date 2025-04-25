@@ -167,6 +167,14 @@ class FlexComponentBaseProps(BasicProps):
     borderRadius: Union[ValueType, Undefined] = undefined
     borderImage: Union[str, Undefined] = undefined
 
+    outline: Union[str, Undefined] = undefined
+    outlineWidth: Union[ValueType, Undefined] = undefined
+    outlineStyle: Union[str, Undefined] = undefined
+    outlineColor: Union[str, Undefined] = undefined
+    outlineOffset: Union[ValueType, Undefined] = undefined
+
+    animation: Union[str, Undefined] = undefined
+
     whiteSpace: Union[Literal["normal", "pre", "nowrap", "pre-wrap",
                               "pre-line", "break-spaces"],
                       Undefined] = undefined

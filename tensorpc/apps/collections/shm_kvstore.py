@@ -146,6 +146,7 @@ class ShmKVStoreTensorClient(ShmKVStoreClientBase):
                 total_byte_size += s_th.numel() * s_th.element_size()
                 variables.append(s_th)
         finally:
+            torch.cuda.synchronize()
             segments.close_in_remote()
         res = core_io.put_arrays_to_data(variables, treespec)
         return res 

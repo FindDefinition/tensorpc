@@ -713,7 +713,7 @@ class MasterDebugPanel(mui.FlexBox):
     async def query_record_data_by_key(self, key: str):
         # perfetto support zip of gzip trace in their source code.
         # so we can just use already gzipped data to avoid expensive zip again.
-        _use_perfetto_undoc_zip_of_gzip = False
+        _use_perfetto_undoc_zip_of_gzip = True
         LOGGER.warning("Querying record data by key %s", key)
         if key in self._record_data_cache:
             all_timestamps_with_none: List[Optional[int]] = await self._run_rpc_on_metas_chunk_call(
@@ -771,12 +771,13 @@ class MasterDebugPanel(mui.FlexBox):
                         # tf.addfile(tarinfo, io.BytesIO(data))
                     # with gzip.GzipFile(fileobj=ss, mode="wb", compresslevel=9) as gz:
                     #     gz.write(data)
-                    zf.writestr(fname, data)
+                    zf.writestr(f"{i}.gz", data)
                 for i, data in enumerate(all_data_external_evs):
                     if data:
-                        zf.writestr(f"E{i}_extra.json", json.dumps({
+                        jd = json_dump_to_bytes({
                             "traceEvents": data
-                        }))
+                        })
+                        zf.writestr(f"E{i}_extra.gz", gzip.compress(jd, compresslevel=9))
             res = zip_ss.getvalue()
             if _use_perfetto_undoc_zip_of_gzip:
                 LOGGER.warning("Zip (store mode) to file with length %d", len(res))

@@ -31,16 +31,47 @@ class WorkersStatusBox(mui.DataFlexBox):
         box_size_px = f"{box_size}px"
         self._box_template.prop(width=box_size_px,
                                 height=box_size_px,
+                                outlineWidth="1px",
+                                outlineOffset=0,
+                                outlineColor="rgba(0, 130, 206, 0)",
+                                outlineStyle="solid",
                                 margin="2px")
         self._box_template.bind_fields(
             backgroundColor="color",
+            animation="where(num_bkpt_proc > `0`, 'animateOutline 3s ease infinite', 'none')",
+            # border=
+            # f"where(num_bkpt_proc > `0`, '2px solid red', where(selected, '2px solid lightpink', '2px solid transparent'))",
             border=
-            f"where(num_bkpt_proc > `0`, '2px solid red', where(selected, '2px solid lightpink', '2px solid transparent'))",
+            f"where(selected, '2px solid lightpink', '2px solid transparent')",
+
         )
         self._box_template.event_click.on_standard(on_click)
         self._selected_idx = -1
         super().__init__(self._box_template, init_data_list)
         self.prop(flexFlow="row wrap", padding="10px")
+        self.update_raw_props({
+            "@keyframes animateOutline": {
+                "0%": {
+                    "outline-width": "1px",
+                    "outline-offset": 0,
+                    "outline-color": "rgba(0, 130, 206, 0)",
+                },
+                "10%": {
+                    "outline-color": "rgba(0, 130, 206, 0.75)",
+                },
+
+                "50%": {
+                    "outline-width": "4px",
+                    "outline-offset": "2px",
+                    "outline-color": "rgba(0, 130, 206, 0)",
+                },
+                "100%": {
+                    "outline-width": "4px",
+                    "outline-offset": "2px",
+                    "outline-color": "rgba(102, 102, 102, 0)",
+                },
+            }
+        })
 
 @dataclasses.dataclass
 class CheckpointItem:
