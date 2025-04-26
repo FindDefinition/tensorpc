@@ -30,7 +30,7 @@ from tensorpc.dock.core.component import EventSlotEmitter, FlowSpecialMethods, F
 from tensorpc.dock.core.coretypes import TreeDragTarget
 from tensorpc.dock.core.objtree import UserObjTree, UserObjTreeProtocol
 from tensorpc.dock.core.reload import reload_object_methods
-from tensorpc.dock.jsonlike import (CommonQualNames, ContextMenuData,
+from tensorpc.dock.jsonlike import (CommonQualNames,
                                     IconButtonData, parse_obj_to_jsonlike,
                                     TreeItem)
 from tensorpc.dock.marker import mark_did_mount, mark_will_unmount
@@ -80,18 +80,18 @@ class DataStorageTreeItem(TreeItem):
         for m in metas:
             m.id = parent_ns + m.id
             userdata = {
+                "id": m.id, 
                 "type": ContextMenuType.DataStorageItemDelete.value,
             }
             userdata_cpycmd = {
+                "id": m.id, 
                 "type": ContextMenuType.DataStorageItemCommand.value,
             }
             m.menus = [
-                ContextMenuData("Delete",
-                                m.id.uid_encoded,
-                                mui.IconType.Delete.value,
+                mui.MenuItem("Delete",
+                                icon=mui.IconType.Delete,
                                 userdata=userdata),
-                ContextMenuData("Copy Command",
-                                m.id.uid_encoded,
+                mui.MenuItem("Copy Command",
                                 userdata=userdata_cpycmd),
             ]
             m.edit = True
@@ -335,20 +335,9 @@ class BasicObjectTree(mui.FlexBox):
 
     async def _get_obj_by_uid(self, uid: UniqueTreeIdForTree,
                               tree_node_trace: List[mui.JsonLikeNode]):
-        uids = uid.parts
-        real_uids: List[str] = []
-        real_keys: List[Union[Hashable, mui.Undefined]] = []
-        for i in range(len(tree_node_trace)):
-            k = tree_node_trace[i].get_dict_key()
-            if not tree_node_trace[i].is_folder():
-                real_keys.append(k)
-                real_uids.append(uids[i])
-        with enter_tree_context(TreeContext(self._tree_parser, self.tree,
-                                            self)):
-            return await self._tree_parser.get_obj_by_uid(
-                self.root,
-                UniqueTreeIdForTree.from_parts(real_uids),
-                real_keys=real_keys)
+        res, found = await self._get_obj_by_uid_trace(
+            uid, tree_node_trace)
+        return res[-1], found
 
     async def _get_obj_by_uid_trace(self, uid: UniqueTreeIdForTree,
                                     tree_node_trace: List[mui.JsonLikeNode]):
@@ -973,10 +962,9 @@ class ObjectTree(BasicObjectTree):
             "type": ContextMenuType.CopyReadItemCode.value,
         }
 
-        context_menus: List[mui.ContextMenuData] = [
-            mui.ContextMenuData(f"Copy Load Code",
-                                id="Copy Load Code",
-                                userdata=userdata)
+        context_menus: List[mui.MenuItem] = [
+            mui.MenuItem(f"Copy Load Code",
+                        userdata=userdata)
         ]
         if is_inside_devflow():
             all_data_nodes = await appctx.list_all_data_storage_nodes()
@@ -986,10 +974,10 @@ class ObjectTree(BasicObjectTree):
                     "node_id": n,
                 }
                 context_menus.append(
-                    mui.ContextMenuData(f"Add To {readable_n}",
-                                        id=n,
-                                        icon=mui.IconType.DataObject.value,
-                                        userdata=userdata))
+                    mui.MenuItem(id=n,
+                                label=f"Add To {readable_n}",
+                                icon=mui.IconType.DataObject,
+                                userdata=userdata))
                 self._default_data_storage_nodes[readable_n] = DataStorageTreeItem(
                     n, readable_n)
         # self.tree.props.tree = await _get_root_tree_async(

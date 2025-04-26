@@ -27,7 +27,7 @@ import tensorpc
 
 import os
 import time
-from tensorpc.dock.coretypes import Message, MessageItem, MessageLevel, RelayUpdateNodeEvent
+from tensorpc.dock.coretypes import Message, MessageItem, MessageLevel
 import uuid
 
 import psutil
@@ -196,18 +196,9 @@ def update_node_status(content: str):
     meta = MasterMeta()
     if meta.is_inside_devflow and meta.is_http_valid:
         # TODO add try catch, if not found, just ignore error.
-        if not meta.is_worker:
-            http_remote_call_request(meta.http_url,
-                                     serv_names.FLOW_UPDATE_NODE_STATUS,
-                                     meta.graph_id, meta.node_id, content)
-        else:
-            # TODO remove this assert
-            assert meta.graph_id is not None
-            assert meta.node_id is not None
-            ev = RelayUpdateNodeEvent(meta.graph_id, meta.node_id, content)
-            http_remote_call_request(
-                meta.http_url, serv_names.FLOWWORKER_PUT_WORKER_EVENT_JSON,
-                meta.graph_id, ev.to_dict())
+        http_remote_call_request(meta.http_url,
+                                    serv_names.FLOW_UPDATE_NODE_STATUS,
+                                    meta.graph_id, meta.node_id, content)
         return True
     return False
 
@@ -220,13 +211,8 @@ def add_message(title: str, level: MessageLevel, items: List[MessageItem]):
             "this function can only be called via devflow frontend")
     msg = Message(str(uuid.uuid4()), level, timestamp, gid, nid,
                   f"{title} ({nrid})", items)
-    if not is_worker:
-        tensorpc.simple_remote_call(grpc_url, serv_names.FLOW_ADD_MESSAGE,
-                                    [msg.to_dict_with_detail()])
-    else:
-        tensorpc.simple_remote_call(grpc_url,
-                                    serv_names.FLOWWORKER_ADD_MESSAGE, gid,
-                                    [msg.to_dict_with_detail()])
+    tensorpc.simple_remote_call(grpc_url, serv_names.FLOW_ADD_MESSAGE,
+                                [msg.to_dict_with_detail()])
 
 
 def add_info_message(title: str, items: List[MessageItem]):

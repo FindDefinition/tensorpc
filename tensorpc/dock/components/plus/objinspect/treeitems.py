@@ -7,7 +7,7 @@ from tensorpc.core.tree_id import UniqueTreeIdForTree
 from tensorpc.dock import appctx
 from tensorpc.dock.components import mui
 from tensorpc.dock.core.reload import reload_object_methods
-from tensorpc.dock.jsonlike import (CommonQualNames, ContextMenuData,
+from tensorpc.dock.jsonlike import (CommonQualNames,
                                     IconButtonData, JsonLikeNode, JsonLikeType,
                                     parse_obj_to_jsonlike, TreeItem)
 from typing import Any, Callable, Dict, Generic, Hashable, List, Optional, TypeVar, Union, Tuple

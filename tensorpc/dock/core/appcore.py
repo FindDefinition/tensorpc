@@ -20,7 +20,7 @@ from tensorpc.core.moduleid import (get_qualname_of_type, is_lambda,
 from tensorpc.core.tree_id import UniqueTreeIdForComp
 
 from tensorpc.dock.core.context import ALL_APP_CONTEXT_GETTERS
-from tensorpc.dock.jsonlike import Undefined, BackendOnlyProp, undefined
+from tensorpc.core.annolib import Undefined, BackendOnlyProp, undefined
 from tensorpc.core.serviceunit import ObservedFunction, ObservedFunctionRegistry, ObservedFunctionRegistryProtocol
 from tensorpc.dock.client import is_inside_app_session
 

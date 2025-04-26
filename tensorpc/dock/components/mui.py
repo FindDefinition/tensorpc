@@ -59,8 +59,8 @@ from tensorpc.dock.core.appcore import Event, EventDataType, RemoteCompEvent, ge
 from tensorpc.dock.core.common import (handle_standard_event)
 from tensorpc.dock.core.reload import AppReloadManager
 from tensorpc.core import datamodel as D
-
-from ..jsonlike import JsonLikeType, BackendOnlyProp, ContextMenuData, JsonLikeNode, as_dict_no_undefined
+from tensorpc.dock.core.uitypes import MenuItem, IconType
+from ..jsonlike import JsonLikeType, BackendOnlyProp, JsonLikeNode, as_dict_no_undefined
 from ..core import colors
 from ..core.component import (
     AppComponentCore, AppEvent, AppEventType, BasicProps, Component,
@@ -522,102 +522,6 @@ class Button(MUIComponentBase[ButtonProps]):
     def update_event(self):
         propcls = self.propcls
         return self._update_props_base(propcls)
-
-
-class IconType(enum.IntEnum):
-    RestartAlt = 0
-    Menu = 1
-    Settings = 2
-    Save = 3
-    Close = 4
-    ExpandMore = 5
-    ExpandLess = 6
-    Add = 7
-    ChevronLeft = 8
-    ChevronRight = 9
-    Delete = 10
-    AddCard = 11
-    Clear = 12
-    Fullscreen = 13
-    PlayArrow = 14
-    Pause = 15
-    Stop = 16
-    MoreVert = 17
-    FullscreenExit = 18
-    Code = 19
-    Terminal = 20
-    Videocam = 21
-    CameraAlt = 22
-    DragHandle = 23
-    Dataset = 24
-    DataObject = 25
-    DataArray = 26
-    Cached = 27
-    SwapVert = 28
-    Refresh = 29
-    Grid3x3 = 30
-    Help = 31
-    Visibility = 32
-    Mic = 33
-    PlayCircleOutline = 34
-    DragIndicator = 35
-    Cancel = 36
-    Done = 37
-    Preview = 38
-    Build = 39
-    VisibilityOff = 40
-    ManageAccounts = 41
-    AccountCircle = 42
-    BugReport = 43
-    Dashboard = 44
-    DashboardCustomize = 45
-    Check = 46
-    ContentCopy = 47
-    ContentPaste = 48
-    ContentCut = 49
-    TableView = 50
-    Image = 51
-    Merge = 52
-    DoubleArrow = 53
-    AccountTree = 54
-    Timeline = 55
-    FiberManualRecord = 56
-    NavigateNext = 57
-    NavigateBefore = 58
-    SkipNext = 59
-    SkipPrevious = 60
-    RadioButtonChecked = 61
-    StopCircleOutlined = 62
-    Block = 63
-    Download = 64
-    Upload = 65
-    Link = 66
-    LinkOff = 67
-    Search = 68
-    Info = 69
-    QueryStats = 70
-    BarChart = 71
-    Adb = 72
-
-
-@dataclasses.dataclass
-class MenuItem:
-    id: str
-    label: Union[Undefined, str] = undefined
-    # null icon has same effect as undefined,
-    # the only difference is we ignore undefined by default,
-    # so you can't use undefined to remove icon.
-    icon: Optional[Union[IconType, Undefined, str]] = undefined
-    inset: Union[Undefined, bool] = undefined
-    iconSize: Union[Undefined, Literal["inherit", "large", "medium",
-                                       "small"]] = undefined
-    iconFontSize: Union[Undefined, NumberType, str] = undefined
-    divider: Union[Undefined, bool] = undefined
-    autoFocus: Union[Undefined, bool] = undefined
-    disableAutoFocusItem: Union[Undefined, bool] = undefined
-    confirmMessage: Union[str, Undefined] = undefined
-    confirmTitle: Union[str, Undefined] = undefined
-    disabled: Union[Undefined, bool] = undefined
 
 
 @dataclasses.dataclass
@@ -4386,7 +4290,7 @@ class JsonLikeTreePropsBase(MUIFlexBoxProps):
     disableSelection: Union[Undefined, bool] = undefined
     ignoreRoot: Union[Undefined, bool] = undefined
     # useFastTree: Union[Undefined, bool] = undefined
-    contextMenus: Union[Undefined, List[ContextMenuData]] = undefined
+    contextMenus: Union[Undefined, List[MenuItem]] = undefined
     fixedSize: Union[Undefined, bool] = undefined
     expansionIconTrigger: Union[Undefined, bool] = undefined
     showLazyExpandButton: Union[Undefined, bool] = undefined
@@ -4430,7 +4334,7 @@ class RawJsonLikeTreePropsBase(MUIFlexBoxProps):
     disableSelection: Union[Undefined, bool] = undefined
     ignoreRoot: Union[Undefined, bool] = undefined
     # useFastTree: Union[Undefined, bool] = undefined
-    contextMenus: Union[Undefined, List[ContextMenuData]] = undefined
+    contextMenus: Union[Undefined, List[MenuItem]] = undefined
     fixedSize: Union[Undefined, bool] = undefined
     expansionIconTrigger: Union[Undefined, bool] = undefined
     showLazyExpandButton: Union[Undefined, bool] = undefined
@@ -4924,7 +4828,7 @@ class SimpleControlsItem:
 @dataclasses.dataclass
 class SimpleControlsProps(MUIFlexBoxProps):
     tree: List[JsonLikeNode] = dataclasses.field(default_factory=list)
-    contextMenus: Union[Undefined, List[ContextMenuData]] = undefined
+    contextMenus: Union[Undefined, List[MenuItem]] = undefined
     reactKey: Union[Undefined, str] = undefined
     variant: Union[Undefined, Literal["mui",
                                       "native"]] = undefined  # mui by default

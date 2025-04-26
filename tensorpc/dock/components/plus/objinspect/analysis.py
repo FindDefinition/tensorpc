@@ -2,7 +2,6 @@ import contextlib
 import dataclasses
 import enum
 import inspect
-from re import T
 import traceback
 import types
 from pathlib import Path, PurePath
@@ -337,73 +336,12 @@ class ObjectTreeParser:
             return v
         return mui.undefined
 
-    async def get_obj_by_uid(
-        self,
-        obj,
-        uid: UniqueTreeIdForTree,
-        real_keys: Optional[List[Union[mui.Undefined, Hashable]]] = None
-    ) -> Tuple[Any, bool]:
-        parts = uid.parts
-        if real_keys is None:
-            real_keys = [mui.undefined for _ in range(len(parts))]
-        if len(parts) == 1:
-            return obj, True
-        # uid contains root, remove it at first.
-        return await self.get_obj_by_uid_resursive(obj, parts[1:],
-                                                   real_keys[1:])
-
-    async def get_obj_by_uid_resursive(
-            self, obj, parts: List[str],
-            real_keys: List[Union[mui.Undefined,
-                                  Hashable]]) -> Tuple[Any, bool]:
-        key = parts[0]
-        real_key = real_keys[0]
-        if isinstance(obj, (list, tuple, set)):
-            if isinstance(obj, set):
-                obj_list = list(obj)
-            else:
-                obj_list = obj
-            try:
-                key_index = int(key)
-            except:
-                return obj, False
-            if key_index < 0 or key_index >= len(obj_list):
-                return obj, False
-            child_obj = obj_list[key_index]
-        elif isinstance(obj, dict):
-            obj_dict = obj
-            if not isinstance(real_key, mui.Undefined):
-                key = real_key
-            if key not in obj_dict:
-                return obj, False
-            child_obj = obj_dict[key]
-        elif isinstance(obj, TreeItem):
-            child_obj = await obj.get_child(key)
-        elif isinstance(obj, tuple(USER_OBJ_TREE_TYPES)):
-            childs = obj.get_childs()
-            child_obj = childs[key]
-        else:
-            child_obj = mui.undefined
-            if self.custom_tree_item_handler is not None:
-                childs = await self.custom_tree_item_handler.get_childs(obj)
-                if childs is not None:
-                    child_obj = childs[key]
-            if isinstance(child_obj, mui.Undefined):
-                child_obj = self.get_obj_single_attr(obj, key, check_obj=False)
-                if isinstance(obj, mui.Undefined):
-                    return obj, False
-        if len(parts) == 1:
-            return child_obj, True
-        else:
-            return await self.get_obj_by_uid_resursive(child_obj, parts[1:],
-                                                       real_keys[1:])
-
     async def get_obj_by_uid_trace(
         self,
         obj,
         uid: UniqueTreeIdForTree,
         real_keys: Optional[List[Union[mui.Undefined, Hashable]]] = None
-    ) -> Tuple[Any, bool]:
+    ) -> Tuple[list[Any], bool]:
         parts = uid.parts
         if real_keys is None:
             real_keys = [mui.undefined for _ in range(len(parts))]

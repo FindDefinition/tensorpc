@@ -23,7 +23,7 @@ from tensorpc.core.datamodel.asdict import (
     undefined_dict_factory, undefined_dict_factory_with_exclude)
 from tensorpc.core.moduleid import get_qualname_of_type
 from tensorpc.core.tree_id import UniqueTreeId, UniqueTreeIdForTree
-
+from .core.uitypes import MenuItem
 ValueType: TypeAlias = Union[int, float, str]
 NumberType: TypeAlias = Union[int, float]
 
@@ -133,14 +133,6 @@ class IconButtonData:
 
 
 @dataclasses.dataclass(eq=True)
-class ContextMenuData:
-    title: str
-    id: Union[Undefined, ValueType] = undefined
-    icon: Union[Undefined, int] = undefined
-    userdata: Union[Undefined, Any] = undefined
-
-
-@dataclasses.dataclass(eq=True)
 class JsonLikeNode:
     id: UniqueTreeIdForTree
     # must be id.split(SPLIT)[-1] for child of list/dict
@@ -156,7 +148,7 @@ class JsonLikeNode:
     start: Union[Undefined, int] = undefined
     # name color
     color: Union[Undefined, str] = undefined
-    menus: Union[Undefined, List[ContextMenuData]] = undefined
+    menus: Union[Undefined, List[MenuItem]] = undefined
     edit: Union[Undefined, bool] = undefined
     userdata: Union[Undefined, Any] = undefined
     alias: Union[Undefined, str] = undefined
@@ -166,29 +158,7 @@ class JsonLikeNode:
     dictKey: Union[Undefined, BackendOnlyProp[Hashable]] = undefined
     keys: Union[Undefined, BackendOnlyProp[List[str]]] = undefined
 
-    # @staticmethod
-    # def decode_uid(uid: str, split_length: int = 2):
-    #     index = uid.find("|")
-    #     lengths = list(map(int, uid[:index].split(",")))
-    #     res: List[str] = []
-    #     start = index + 1
-    #     for l in lengths:
-    #         end = start + l
-    #         res.append(uid[start:end])
-    #         start = end + split_length
-    #     return res
-
-    # @staticmethod
-    # def encode_uid(parts: List[str], split: str = ":"):
-    #     lengths = [str(len(p)) for p in parts]
-    #     lengths_str = f",".join(lengths)
-    #     return f"{lengths_str}|{split.join(parts)}"
-
-    @staticmethod
-    def decode_uid_legacy(uid: str, split: str = ":"):
-        return uid.split(split)
-
-    def last_part(self, split: str = ":"):
+    def last_part(self):
         return self.id.parts[-1]
 
     def is_folder(self):

@@ -438,47 +438,25 @@ class FlowApp:
 
     async def _send_http_event(self, ev: AppEvent):
         ev.uid = self._uid
-        if self.master_meta.is_worker:
-            return await self._http_remote_call(
-                serv_names.FLOWWORKER_PUT_APP_EVENT, self.master_meta.graph_id,
-                ev.to_dict())
-        else:
-            return await self._http_remote_call(serv_names.FLOW_PUT_APP_EVENT,
-                                                ev.to_dict())
+        return await self._http_remote_call(serv_names.FLOW_PUT_APP_EVENT,
+                                            ev.to_dict())
 
     async def _send_grpc_event(self, ev: AppEvent,
                                robj: tensorpc.AsyncRemoteManager):
-        if self.master_meta.is_worker:
-            return await robj.remote_call(serv_names.FLOWWORKER_PUT_APP_EVENT,
-                                          self.master_meta.graph_id,
-                                          ev.to_dict())
-        else:
-            return await robj.remote_call(serv_names.FLOW_PUT_APP_EVENT,
-                                          ev.to_dict())
+        return await robj.remote_call(serv_names.FLOW_PUT_APP_EVENT,
+                                        ev.to_dict())
 
     async def _send_grpc_event_large(self, ev: AppEvent,
                                      robj: tensorpc.AsyncRemoteManager):
-        # import rich
-        # rich.print(ev.to_dict())
-        if self.master_meta.is_worker:
-            return await robj.chunked_remote_call(
-                serv_names.FLOWWORKER_PUT_APP_EVENT, self.master_meta.graph_id,
-                ev.to_dict())
-        else:
-            return await robj.chunked_remote_call(
-                serv_names.FLOW_PUT_APP_EVENT, ev.to_dict())
+        return await robj.chunked_remote_call(
+            serv_names.FLOW_PUT_APP_EVENT, ev.to_dict())
 
     def _send_grpc_event_large_sync(self, ev: AppEvent,
                                     robj: tensorpc.RemoteManager):
-        if self.master_meta.is_worker:
-            return robj.chunked_remote_call(
-                serv_names.FLOWWORKER_PUT_APP_EVENT, self.master_meta.graph_id,
-                ev.to_dict())
-        else:
-            return robj.chunked_remote_call(serv_names.FLOW_PUT_APP_EVENT,
-                                            ev.to_dict())
+        return robj.chunked_remote_call(serv_names.FLOW_PUT_APP_EVENT,
+                                        ev.to_dict())
 
-    def _create_exception_event(self, e: Exception):
+    def _create_exception_event(self, e: BaseException):
         ss = io.StringIO()
         traceback.print_exc(file=ss)
         user_exc = UserMessage.create_error("UNKNOWN", f"AppServiceError: {repr(e)}", ss.getvalue())

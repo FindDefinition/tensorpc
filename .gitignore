@@ -129,3 +129,4 @@ docs_out
 tensorpc/secret.yaml
 
 core
+!core/
