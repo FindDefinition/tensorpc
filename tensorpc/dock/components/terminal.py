@@ -638,7 +638,7 @@ class AsyncSSHTerminal(Terminal):
         
         WARNING: this function can't be called parallelly, e.g. asyncio.gather
         """
-        cmd = cmd.strip()
+        cmd = cmd.rstrip()
         if not cmd.endswith("\n"):
             cmd += "\n"
         assert self._ssh_state is not None and self._ssh_state.current_cmd == "", f"current command is not empty: {self._ssh_state.current_cmd}."

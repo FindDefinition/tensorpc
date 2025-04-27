@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import Any, Optional
-from tensorpc.apps.collections.shm_kvstore import ShmKVStoreTensorClient
+from tensorpc.apps.collections.shm_kvstore import ShmKVStoreTensorClient, ShmTrOnlyKVStoreTensorClient
 
 from tensorpc.apps.distssh.constants import TENSORPC_ENV_DISTSSH_URL_WITH_PORT
 from tensorpc.apps.distssh.typedefs import CheckpointMetadata, CheckpointType
@@ -18,7 +18,7 @@ def _get_rank_may_distributed():
     import torch.distributed as dist
     return dist.get_rank() if dist.is_initialized() else 0
 
-class TorchDistributedCkptClient(ShmKVStoreTensorClient):
+class TorchDistributedCkptClient(ShmTrOnlyKVStoreTensorClient):
     def __init__(self, robj: RemoteObject, max_major_ckpt: int, max_minor_ckpt: int, replicate_size: int = -1):
         super().__init__(robj)
         self._max_major_ckpt = max_major_ckpt

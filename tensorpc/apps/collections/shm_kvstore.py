@@ -1,18 +1,20 @@
 """Client for tensorpc builtin service `ShmKVStore`."""
+from collections.abc import Sequence
 from contextlib import nullcontext
+import queue
 import time
 from typing import Any, Optional, Union
 from tensorpc.core.asyncclient import AsyncRemoteObject
 from tensorpc.core.client import RemoteObject
 from tensorpc.core import BuiltinServiceKeys, core_io
 import numpy as np 
-from tensorpc.apps.collections.serv.kvstore import SharedArraySegmentsDesc, SharedArraySegmentDesc, TensorInfo
+from tensorpc.apps.collections.serv.kvstore import SharedArraySegmentsDesc, SharedArraySegmentDesc, SharedArraySegmentsLimitedDesc, TensorInfo
 from tensorpc.protos_export import rpc_message_pb2 as rpc_msg_pb2
 
 class ShmKVStoreClientBase:
-    def __init__(self, robj: RemoteObject):
+    def __init__(self, robj: RemoteObject, serv_key: str = BuiltinServiceKeys.ShmKVStore.value):
         self._robj = robj
-        self._serv_key = BuiltinServiceKeys.ShmKVStore.value
+        self._serv_key = serv_key
 
     def remove_array_tree(self, key: str):
         return self.remove_items([key])
@@ -42,15 +44,15 @@ class ShmKVStoreClient(ShmKVStoreClientBase):
 
     def store_array_tree(self, key: str, arr_tree: Any, metadata: Optional[Any] = None):
         variables, treespec = core_io.extract_arrays_from_data(arr_tree, (np.ndarray,))
-        arr_desps = [TensorInfo(a.shape, a.dtype, None) for a in variables] # type: ignore
-        segments_desc: SharedArraySegmentsDesc = self._robj.remote_call(f"{self._serv_key}.get_or_create_shared_array_segments", key, arr_desps)
+        arr_descs = [TensorInfo(a.shape, a.dtype, None) for a in variables] # type: ignore
+        segments_desc: SharedArraySegmentsDesc = self._robj.remote_call(f"{self._serv_key}.get_or_create_shared_array_segments", key, arr_descs)
         # copy to shm
         segments = segments_desc.get_segments()
         for i, a in enumerate(variables):
             segments.get_array_view(i)[:] = a
         segments.close_in_remote()
         # send tree spec
-        self._robj.remote_call(f"{self._serv_key}.set_item_treespec", key, treespec, arr_desps, metadata, rpc_flags=rpc_msg_pb2.Pickle)
+        self._robj.remote_call(f"{self._serv_key}.set_item_treespec", key, treespec, arr_descs, metadata, rpc_flags=rpc_msg_pb2.Pickle)
 
     def get_array_tree(self, key: str, copy: bool = True):
         treespec = self._robj.remote_call(f"{self._serv_key}.get_item_treespec", key, rpc_flags=rpc_msg_pb2.Pickle)
@@ -78,29 +80,43 @@ def _torch_dtype_to_np_dtype_size_equal(th_dtype):
     # torch dtype isn't supported by numpy.
     return _ITEMSIZE_TO_NP_DTYPE[th_dtype.itemsize]
 
-class ShmKVStoreTensorClient(ShmKVStoreClientBase):
-    def _extract_tensor_desps(self, arr_tree: Any):
-        import torch
-        from torch.distributed.tensor import DTensor
-        variables, treespec = core_io.extract_arrays_from_data(arr_tree, (torch.Tensor,), json_index=True)
-        arr_desps: list[TensorInfo] = []
-        new_variables: list[torch.Tensor] = []
-        with torch.no_grad():
-            for v in variables:
-                assert isinstance(v, torch.Tensor)
-                if isinstance(v, DTensor):
-                    v = v.to_local()
-                new_variables.append(v)
-                np_dtype = _torch_dtype_to_np_dtype_size_equal(v.dtype)
-                th_meta = v.dtype 
-                arr_desps.append(TensorInfo(list(v.shape), np_dtype, th_meta))
-        return new_variables, arr_desps, treespec
+_JSON_INDEX_KEY = "__shm_jidx__"
 
+def _extract_tensor_descs(arr_tree: Any):
+    import torch
+    from torch.distributed.tensor import DTensor
+    variables, treespec = core_io.extract_arrays_from_data(arr_tree, (torch.Tensor,), json_index=_JSON_INDEX_KEY)
+    arr_descs: list[TensorInfo] = []
+    new_variables: list[torch.Tensor] = []
+    with torch.no_grad():
+        for v in variables:
+            assert isinstance(v, torch.Tensor)
+            if isinstance(v, DTensor):
+                v = v.to_local()
+            new_variables.append(v)
+            np_dtype = _torch_dtype_to_np_dtype_size_equal(v.dtype)
+            th_meta = v.dtype 
+            arr_descs.append(TensorInfo(list(v.shape), np_dtype, th_meta))
+    return new_variables, arr_descs, treespec
+
+def _validate_load_tensor_tree(arr_descs: list[TensorInfo], segment_descs: Sequence[TensorInfo]):
+    if len(arr_descs) != len(segment_descs):
+        raise ValueError(f"arr_descs and segment_descs length not match.")
+    for i, info in enumerate(arr_descs):
+        shape, dtype, meta = info.shape, info.dtype, info.meta            
+        seg = segment_descs[i]
+        assert seg.meta == meta
+        seg_byte_size = np.prod(shape) * np.dtype(dtype).itemsize
+        target_byte_size = seg.get_byte_size()
+        if seg_byte_size != target_byte_size:
+            raise ValueError(f"{info} already allocated with different byte length.")
+
+class ShmKVStoreTensorClient(ShmKVStoreClientBase):
     def store_tensor_tree(self, key: str, arr_tree: Any, metadata: Optional[Any] = None, removed_keys: Optional[set[str]] = None, stream: Optional[Any] = None):
         import torch
         from torch.distributed.tensor import DTensor
-        variables, arr_desps, treespec = self._extract_tensor_desps(arr_tree)
-        segments_desc: SharedArraySegmentsDesc = self._robj.remote_call(f"{self._serv_key}.get_or_create_shared_array_segments", key, arr_desps, removed_keys)
+        variables, arr_descs, treespec = _extract_tensor_descs(arr_tree)
+        segments_desc: SharedArraySegmentsDesc = self._robj.remote_call(f"{self._serv_key}.get_or_create_shared_array_segments", key, arr_descs, removed_keys)
         segments = segments_desc.get_segments()
         # copy to shm
         try:
@@ -115,7 +131,7 @@ class ShmKVStoreTensorClient(ShmKVStoreClientBase):
                         assert isinstance(a, torch.Tensor)
                         if isinstance(a, DTensor):
                             a = a.to_local()
-                        meta = arr_desps[i].meta
+                        meta = arr_descs[i].meta
                         assert meta is not None 
                         s_np = segments.get_array_view(i)
                         s_th = torch.from_numpy(s_np).view(meta)
@@ -126,7 +142,7 @@ class ShmKVStoreTensorClient(ShmKVStoreClientBase):
         finally:
             segments.close_in_remote()
         # send tree spec
-        self._robj.remote_call(f"{self._serv_key}.set_item_treespec", key, treespec, arr_desps, metadata, rpc_flags=rpc_msg_pb2.Pickle)
+        self._robj.remote_call(f"{self._serv_key}.set_item_treespec", key, treespec, arr_descs, metadata, rpc_flags=rpc_msg_pb2.Pickle)
 
     def get_tensor_tree(self, key: str, device: Optional[Any] = None):
         import torch
@@ -151,23 +167,11 @@ class ShmKVStoreTensorClient(ShmKVStoreClientBase):
         res = core_io.put_arrays_to_data(variables, treespec)
         return res 
 
-    def _validate_load_tensor_tree(self, arr_desps: list[TensorInfo], segment_descs: list[SharedArraySegmentDesc]):
-        if len(arr_desps) != len(segment_descs):
-            raise ValueError(f"arr_desps and segment_descs length not match.")
-        for i, info in enumerate(arr_desps):
-            shape, dtype, meta = info.shape, info.dtype, info.meta            
-            seg = segment_descs[i]
-            assert seg.meta == meta
-            seg_byte_size = np.prod(shape) * np.dtype(dtype).itemsize
-            target_byte_size = seg.get_byte_size()
-            if seg_byte_size != target_byte_size:
-                raise ValueError(f"{info} already allocated with different byte length.")
-
     def load_tensor_tree(self, key: str, arr_tree: Any):
         import torch
-        variables, arr_desps, treespec = self._extract_tensor_desps(arr_tree)
+        variables, arr_descs, treespec = _extract_tensor_descs(arr_tree)
         segments_desc: SharedArraySegmentsDesc = self._robj.remote_call(f"{self._serv_key}.get_item_segment_descs", key)
-        self._validate_load_tensor_tree(arr_desps, segments_desc.descs)
+        _validate_load_tensor_tree(arr_descs, segments_desc.descs)
         segments = segments_desc.get_segments()
         try:
             with torch.no_grad():
@@ -184,6 +188,127 @@ class ShmKVStoreTensorClient(ShmKVStoreClientBase):
             segments.close_in_remote()
         return self.get_item_tree_spec(key)
 
+class ShmTrOnlyKVStoreTensorClient(ShmKVStoreClientBase):
+    """Shm KVStore client for tensor only. 
+
+    This client only use shm for transfer tensor data, weights are stored in regular memory.
+    """
+    def __init__(self, robj: RemoteObject, serv_key: str = BuiltinServiceKeys.ShmTrOnlyKVStore.value):
+        super().__init__(robj, serv_key)
+
+    def _bistream_q(self, q: queue.Queue, timeout: int = 10):
+        while True:
+            item = q.get(timeout=timeout)
+            if item is None:
+                break
+            yield item
+
+    def store_tensor_tree(self, key: str, arr_tree: Any, metadata: Optional[Any] = None, removed_keys: Optional[set[str]] = None, stream: Optional[Any] = None):
+        import torch
+        from torch.distributed.tensor import DTensor
+        variables, arr_descs, treespec = _extract_tensor_descs(arr_tree)
+
+        q = queue.Queue()
+        with torch.no_grad():
+            for data in self._robj.bi_stream(f"{self._serv_key}.receive_stream", self._bistream_q(q), key, treespec, arr_descs, metadata, removed_keys):
+                if data is None:
+                    q.put(None)
+                    continue 
+                assert isinstance(data, SharedArraySegmentsLimitedDesc)
+                segments = data.get_segments()
+                for i, desc in enumerate(segments.descs):
+                    a = variables[desc.var_idx]
+                    assert isinstance(a, torch.Tensor)
+                    if isinstance(a, DTensor):
+                        a = a.to_local()
+                    partial_info = desc.partial_info
+                    # TODO support non-contiguous tensor
+                    assert a.is_contiguous()
+                    assert partial_info is not None 
+                    a_partial = a.view(-1).view(torch.uint8)[partial_info.start:partial_info.start + partial_info.length]
+                    arr_view_raw = segments.get_array_view_raw(i)
+                    s_th = torch.from_numpy(arr_view_raw)
+                    s_th.copy_(a_partial)
+                torch.cuda.synchronize()
+                segments.close_in_remote()
+                q.put(0)
+
+    def get_tensor_tree(self, key: str, device: Optional[Any] = None):
+        import torch
+        treespec = self._robj.remote_call(f"{self._serv_key}.get_item_treespec", key, rpc_flags=rpc_msg_pb2.Pickle)
+        variables = []
+        q = queue.Queue()
+        q.put(0)
+        q_put_cnt = 1
+        with torch.no_grad():
+            cur_partial_tensor: Optional[torch.Tensor] = None
+            cur_partial_tensor_view: Optional[torch.Tensor] = None
+            total_time = 0
+            for data in self._robj.bi_stream(f"{self._serv_key}.send_stream", self._bistream_q(q), key):
+                if data is None:
+                    q.put(None)
+                    continue 
+                    # break
+                t = time.time()
+                assert isinstance(data, SharedArraySegmentsLimitedDesc)
+                segments = data.get_segments()
+                for i, segment_desc in enumerate(segments.descs):
+                    assert segment_desc.meta is not None 
+                    data_raw = segments.get_array_view_raw(i)
+                    partial_info = segment_desc.get_partial_info_checked()
+                    if partial_info.start != 0:
+                        assert cur_partial_tensor_view is not None
+                    else:
+                        cur_partial_tensor = torch.empty(segment_desc.shape, dtype=segment_desc.meta, device=device)
+                        cur_partial_tensor_view = cur_partial_tensor.view(-1).view(torch.uint8)
+                    a_partial = cur_partial_tensor_view[partial_info.start:partial_info.start + partial_info.length]
+                    a_partial.copy_(torch.from_numpy(data_raw))
+                    if segment_desc.is_last_partial():
+                        variables.append(cur_partial_tensor)
+                        cur_partial_tensor = None
+                        cur_partial_tensor_view = None
+                torch.cuda.synchronize()
+                segments.close_in_remote()
+                q.put(0)
+                q_put_cnt += 1
+                total_time += time.time() - t
+        # print("client total time", total_time)
+        # print("q_put_cnt", q_put_cnt)
+        res = core_io.put_arrays_to_data(variables, treespec, _JSON_INDEX_KEY)
+        return res 
+
+    def load_tensor_tree(self, key: str, arr_tree: Any):
+        import torch
+        variables, arr_descs, treespec = _extract_tensor_descs(arr_tree)
+        store_arr_descs: list[SharedArraySegmentDesc] = self._robj.remote_call(f"{self._serv_key}.get_item_arr_desc", key)
+        _validate_load_tensor_tree(arr_descs, store_arr_descs)
+        q = queue.Queue()
+        q.put(0)
+        with torch.no_grad():
+            for data in self._robj.bi_stream(f"{self._serv_key}.send_stream", self._bistream_q(q), key):
+                if data is None:
+                    q.put(None)
+                    continue 
+                assert isinstance(data, SharedArraySegmentsLimitedDesc)
+                segments = data.get_segments()
+
+                for i, segment_desc in enumerate(segments.descs):
+                    v = variables[segment_desc.var_idx]
+                    arr_view_raw = segments.get_array_view_raw(i)
+                    assert isinstance(v, torch.Tensor)
+                    partial_info = segment_desc.partial_info
+                    # TODO support non-contiguous tensor
+                    assert v.is_contiguous()
+                    assert partial_info is not None 
+                    v_partial = v.view(-1).view(torch.uint8)[partial_info.start:partial_info.start + partial_info.length]
+                    s_th = torch.from_numpy(arr_view_raw)
+                    v_partial.copy_(s_th)
+                torch.cuda.synchronize()
+                segments.close_in_remote()
+                q.put(0)
+        return self.get_item_tree_spec(key)
+
+
 class ShmKVStoreAsyncClient:
     def __init__(self, robj: AsyncRemoteObject):
         self._robj = robj
@@ -194,15 +319,15 @@ class ShmKVStoreAsyncClient:
 
     async def store_array_tree(self, key: str, arr_tree: Any, metadata: Optional[Any] = None):
         variables, treespec = core_io.extract_arrays_from_data(arr_tree, (np.ndarray,))
-        arr_desps = [TensorInfo(a.shape, a.dtype, None) for a in variables] # type: ignore
-        segments_desc: SharedArraySegmentsDesc = await self._robj.remote_call(f"{self._serv_key}.get_or_create_shared_array_segments", key, arr_desps)
+        arr_descs = [TensorInfo(a.shape, a.dtype, None) for a in variables] # type: ignore
+        segments_desc: SharedArraySegmentsDesc = await self._robj.remote_call(f"{self._serv_key}.get_or_create_shared_array_segments", key, arr_descs)
         # copy to shm
         segments = segments_desc.get_segments()
         for i, a in enumerate(variables):
             segments.get_array_view(i)[:] = a
         segments.close_in_remote()
         # send tree spec
-        await self._robj.remote_call(f"{self._serv_key}.set_item_treespec", key, treespec, arr_desps, metadata, rpc_flags=rpc_msg_pb2.Pickle)
+        await self._robj.remote_call(f"{self._serv_key}.set_item_treespec", key, treespec, arr_descs, metadata, rpc_flags=rpc_msg_pb2.Pickle)
 
     async def get_array_tree(self, key: str, copy: bool = True):
         treespec = self._robj.remote_call(f"{self._serv_key}.get_item_treespec", key, rpc_flags=rpc_msg_pb2.Pickle)

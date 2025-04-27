@@ -21,6 +21,7 @@ class BuiltinServiceKeys(enum.Enum):
     ArgServer = f"tensorpc.services.collection{TENSORPC_SPLIT}ArgServer"
     KVStore = f"tensorpc.apps.collections.serv.kvstore{TENSORPC_SPLIT}KVStore"
     ShmKVStore = f"tensorpc.apps.collections.serv.kvstore{TENSORPC_SPLIT}ShmKVStore"
+    ShmTrOnlyKVStore = f"tensorpc.apps.collections.serv.kvstore{TENSORPC_SPLIT}ShmTrOnlyKVStore"
 
     SpeedTestServer = f"tensorpc.services.collection{TENSORPC_SPLIT}SpeedTestServer"
     Flow = f"tensorpc.dock.serv.core{TENSORPC_SPLIT}Flow"
@@ -38,6 +39,7 @@ BUILTIN_SERVICES = [
     Service(BuiltinServiceKeys.ArgServer.value, {}),
     Service(BuiltinServiceKeys.KVStore.value, {}),
     Service(BuiltinServiceKeys.ShmKVStore.value, {}),
+    Service(BuiltinServiceKeys.ShmTrOnlyKVStore.value, {}),
     Service(BuiltinServiceKeys.SpeedTestServer.value, {}),
     Service(BuiltinServiceKeys.Flow.value, {}),
     Service(BuiltinServiceKeys.RemoteComponentService.value, {}),

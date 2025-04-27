@@ -86,7 +86,7 @@ class CheckpointManager(mui.FlexBox):
     def __init__(self, master_dm: mui.DataModel[MasterUIState],
             release_bkpt_fn: Callable[[Any], Awaitable[None]]):
 
-        event_emitter_kvstore = prim.get_service(f"{BuiltinServiceKeys.ShmKVStore.value}.backend_get_event_emitter")()
+        event_emitter_kvstore = prim.get_service(f"{BuiltinServiceKeys.ShmTrOnlyKVStore.value}.backend_get_event_emitter")()
         btn = mui.Button("Load").prop(loading=False, size="small")
         btn.event_click.on_standard(lambda x: print(x.keys)).configure(True)
         self._release_bkpt_fn = release_bkpt_fn
@@ -115,12 +115,12 @@ class CheckpointManager(mui.FlexBox):
         self.event_after_mount.on(self._init)
 
     async def _init(self):
-        store = prim.get_service(f"{BuiltinServiceKeys.ShmKVStore.value}.backend_get_store")()
+        store = prim.get_service(f"{BuiltinServiceKeys.ShmTrOnlyKVStore.value}.backend_get_store")()
         await self._on_kvstore_item_change(store)
 
 
     async def _on_kvstore_item_change(self, store: dict[str, KVStoreItem]):
-        item_getsize = prim.get_service(f"{BuiltinServiceKeys.ShmKVStore.value}.get_item_shm_size")
+        item_getsize = prim.get_service(f"{BuiltinServiceKeys.ShmTrOnlyKVStore.value}.get_item_shm_size")
         all_stores = store 
         res_items: list[CheckpointItem] = []
         key_step_to_res_items: dict[tuple[str, int], CheckpointItem] = {}

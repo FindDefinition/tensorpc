@@ -387,14 +387,14 @@ def to_protobuf_stream_gen(data_list: List[Any],
                     buf.shape[:] = shape
                 yield buf
 
-def is_json_index(data):
-    return isinstance(data, dict) and JSON_INDEX_KEY in data
+def is_json_index(data, json_idx_key=JSON_INDEX_KEY):
+    return isinstance(data, dict) and json_idx_key in data
 
 
 def _extract_arrays_from_data(arrays,
                               data,
                               object_classes=(np.ndarray, bytes, JSArrayBuffer),
-                              json_index=False):
+                              json_index=""):
     # can't use abc.Sequence because string is sequence too.
     # TODO use pytorch optree if available
     data_skeleton: Optional[Union[List[Any], Dict[str, Any], Placeholder]]
@@ -404,7 +404,7 @@ def _extract_arrays_from_data(arrays,
             e = data[i]
             if isinstance(e, object_classes):
                 if json_index:
-                    data_skeleton[i] = {JSON_INDEX_KEY: len(arrays)}
+                    data_skeleton[i] = {json_index: len(arrays)}
                 else:
                     data_skeleton[i] = Placeholder(len(arrays), byte_size(e))
                 arrays.append(e)
@@ -420,7 +420,7 @@ def _extract_arrays_from_data(arrays,
         for k, v in data.items():
             if isinstance(v, object_classes):
                 if json_index:
-                    data_skeleton[k] = {JSON_INDEX_KEY: len(arrays)}
+                    data_skeleton[k] = {json_index: len(arrays)}
                 else:
                     data_skeleton[k] = Placeholder(len(arrays), byte_size(v))
                 arrays.append(v)
@@ -437,7 +437,7 @@ def _extract_arrays_from_data(arrays,
         data_skeleton = None
         if isinstance(data, object_classes):
             if json_index:
-                data_skeleton = {JSON_INDEX_KEY: len(arrays)}
+                data_skeleton = {json_index: len(arrays)}
             else:
                 data_skeleton = Placeholder(len(arrays), byte_size(data))
             arrays.append(data)
@@ -448,7 +448,7 @@ def _extract_arrays_from_data(arrays,
 def _extract_arrays_from_data_no_unique_id(arrays,
                               data,
                               object_classes=(np.ndarray, bytes, JSArrayBuffer),
-                              json_index=False):
+                              json_index=""):
     # can't use abc.Sequence because string is sequence too.
     # TODO use pytorch optree if available
     data_skeleton: Optional[Union[List[Any], Dict[str, Any], Placeholder]]
@@ -458,7 +458,7 @@ def _extract_arrays_from_data_no_unique_id(arrays,
             e = data[i]
             if isinstance(e, object_classes):
                 if json_index:
-                    data_skeleton[i] = {JSON_INDEX_KEY: len(arrays)}
+                    data_skeleton[i] = {json_index: len(arrays)}
                 else:
                     data_skeleton[i] = Placeholder(len(arrays), byte_size(e))
                 arrays.append(e)
@@ -474,7 +474,7 @@ def _extract_arrays_from_data_no_unique_id(arrays,
         for k, v in data.items():
             if isinstance(v, object_classes):
                 if json_index:
-                    data_skeleton[k] = {JSON_INDEX_KEY: len(arrays)}
+                    data_skeleton[k] = {json_index: len(arrays)}
                 else:
                     data_skeleton[k] = Placeholder(len(arrays), byte_size(v))
                 arrays.append(v)
@@ -488,7 +488,7 @@ def _extract_arrays_from_data_no_unique_id(arrays,
         data_skeleton = None
         if isinstance(data, object_classes):
             if json_index:
-                data_skeleton = {JSON_INDEX_KEY: len(arrays)}
+                data_skeleton = {json_index: len(arrays)}
             else:
                 data_skeleton = Placeholder(len(arrays), byte_size(data))
             arrays.append(data)
@@ -503,13 +503,13 @@ def extract_object_from_data(data,
     data_skeleton = _extract_arrays_from_data(arrays,
                                               data,
                                               object_classes=object_classes,
-                                              json_index=True)
+                                              json_index=JSON_INDEX_KEY)
     return arrays, data_skeleton
 
 
 def extract_arrays_from_data(data,
                              object_classes=(np.ndarray, bytes, JSArrayBuffer),
-                             json_index=False,
+                             json_index="",
                              handle_unique_tree_id: bool = False):
     arrays: List[Union[np.ndarray, bytes, JSArrayBuffer]] = []
     if HAS_OPTREE:
@@ -518,7 +518,7 @@ def extract_arrays_from_data(data,
         for v in variables:
             if isinstance(v, object_classes):
                 if json_index:
-                    new_vars.append({JSON_INDEX_KEY: len(arrays)})
+                    new_vars.append({json_index: len(arrays)})
                 else:
                     new_vars.append(Placeholder(len(arrays), byte_size(v)))
                 arrays.append(v)
@@ -545,13 +545,13 @@ def extract_arrays_from_data(data,
     return arrays, data_skeleton
 
 
-def put_arrays_to_data(arrays, data_skeleton, json_index=False) -> Any:
+def put_arrays_to_data(arrays, data_skeleton, json_index=JSON_INDEX_KEY) -> Any:
     if not arrays:
         return data_skeleton
     return _put_arrays_to_data(arrays, data_skeleton, json_index)
 
 
-def _put_arrays_to_data(arrays, data_skeleton, json_index=False):
+def _put_arrays_to_data(arrays, data_skeleton, json_index=JSON_INDEX_KEY):
     if isinstance(data_skeleton, (list, tuple)):
         length = len(data_skeleton)
         data = [None] * length
@@ -559,8 +559,8 @@ def _put_arrays_to_data(arrays, data_skeleton, json_index=False):
             e = data_skeleton[i]
             if isinstance(e, Placeholder):
                 data[i] = arrays[e.index]
-            elif is_json_index(e):
-                data[i] = arrays[e[JSON_INDEX_KEY]]
+            elif is_json_index(e, json_index):
+                data[i] = arrays[e[json_index]]
             else:
                 data[i] = _put_arrays_to_data(arrays, e, json_index)
         if isinstance(data_skeleton, tuple):
@@ -571,16 +571,16 @@ def _put_arrays_to_data(arrays, data_skeleton, json_index=False):
         for k, v in data_skeleton.items():
             if isinstance(v, Placeholder):
                 data[k] = arrays[v.index]
-            elif is_json_index(v):
-                data[k] = arrays[v[JSON_INDEX_KEY]]
+            elif is_json_index(v, json_index):
+                data[k] = arrays[v[json_index]]
             else:
                 data[k] = _put_arrays_to_data(arrays, v, json_index)
         return data
     else:
         if isinstance(data_skeleton, Placeholder):
             data = arrays[data_skeleton.index]
-        elif is_json_index(data_skeleton):
-            data = arrays[data_skeleton[JSON_INDEX_KEY]]
+        elif is_json_index(data_skeleton, json_index):
+            data = arrays[data_skeleton[json_index]]
         else:
             data = data_skeleton
         return data
@@ -631,7 +631,7 @@ def data_to_pb(data, method: int):
     method &= _ENCODE_METHOD_MASK
     if method & _ENCODE_METHOD_ARRAY_MASK:
         arrays, data_skeleton = extract_arrays_from_data(
-            data, json_index=_enable_json_index(method))
+            data, json_index=JSON_INDEX_KEY if _enable_json_index(method) else "")
         data_to_be_send = arrays + [_METHOD_TO_DUMP[method](data_skeleton)]
         data_to_be_send = [data2pb(a) for a in data_to_be_send]
     else:
@@ -647,7 +647,7 @@ def data_from_pb(bufs, method: int):
         data_skeleton_bytes = results_raw[-1]
         data_skeleton = _METHOD_TO_LOAD[method](data_skeleton_bytes)
         results = put_arrays_to_data(results_array, data_skeleton,
-                                     _enable_json_index(method))
+                                     JSON_INDEX_KEY if _enable_json_index(method) else "")
     else:
         results_raw = [pb2data(b) for b in bufs]
         results = _METHOD_TO_LOAD[method](results_raw[-1])
@@ -657,7 +657,7 @@ def data_from_pb(bufs, method: int):
 def data_to_json(data, method: int) -> Tuple[List[arraybuf_pb2.ndarray], str]:
     method &= _ENCODE_METHOD_MASK
     if method == rpc_message_pb2.JsonArray:
-        arrays, decoupled = extract_arrays_from_data(data, json_index=True)
+        arrays, decoupled = extract_arrays_from_data(data, json_index=JSON_INDEX_KEY)
         arrays = [data2pb(a) for a in arrays]
     else:
         arrays = []
@@ -670,7 +670,7 @@ def data_from_json(bufs: Sequence[arraybuf_pb2.ndarray], data: str, method: int)
     data_skeleton = json.loads(data)
     method &= _ENCODE_METHOD_MASK
     if method == rpc_message_pb2.JsonArray:
-        res = put_arrays_to_data(arrays, data_skeleton, json_index=True)
+        res = put_arrays_to_data(arrays, data_skeleton, json_index=JSON_INDEX_KEY)
     else:
         res = data_skeleton
     return res
@@ -858,7 +858,7 @@ def loads(binary, copy=False):
 
 
 def dumps_arraybuf(obj):
-    arrays, data_skeleton = extract_arrays_from_data(obj, json_index=True)
+    arrays, data_skeleton = extract_arrays_from_data(obj, json_index=JSON_INDEX_KEY)
     arrays_pb = [data2pb(a) for a in arrays]
     pb = arraybuf_pb2.arrayjson(data=json.dumps(data_skeleton),
                                 arrays=arrays_pb)
@@ -871,7 +871,7 @@ def loads_arraybuf(binary: bytes):
     arrays_pb = pb.arrays
     data_skeleton = json.loads(pb.data)
     arrays = [pb2data(a) for a in arrays_pb]
-    obj = put_arrays_to_data(arrays, data_skeleton, json_index=True)
+    obj = put_arrays_to_data(arrays, data_skeleton, json_index=JSON_INDEX_KEY)
     return obj
 
 
@@ -944,7 +944,7 @@ class SocketMessageEncoder:
     def __init__(
         self, data, skeleton_size_limit: int = int(1024 * 1024 * 3.6)) -> None:
         # unique tree id obj will only be handled in websocket.
-        arrays, data_skeleton = extract_arrays_from_data(data, json_index=True, handle_unique_tree_id=True)
+        arrays, data_skeleton = extract_arrays_from_data(data, json_index=JSON_INDEX_KEY, handle_unique_tree_id=True)
         self.arrays: List[Union[np.ndarray, bytes, JSArrayBuffer]] = arrays
         self.data_skeleton = data_skeleton
         self._total_size = 0

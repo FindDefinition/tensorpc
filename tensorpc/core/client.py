@@ -275,9 +275,12 @@ class RemoteObject(object):
     def shutdown(self) -> None:
         self.stub.ServerShutdown(rpc_msg_pb2.HealthCheckRequest())
 
-    def health_check(self) -> Dict[str, float]:
+    def health_check(self, wait_for_ready=False,
+                           timeout=None) -> Dict[str, float]:
         t = time.time()
-        response = self.stub.HealthCheck(rpc_msg_pb2.HealthCheckRequest())
+        response = self.stub.HealthCheck(rpc_msg_pb2.HealthCheckRequest(),
+            wait_for_ready=wait_for_ready,
+            timeout=timeout)
         # server_time = json.loads(response.data)
         return {
             "total": time.time() - t,
@@ -413,9 +416,9 @@ class RemoteManager(RemoteObject):
         if enabled:
             self._channel = channel
         super().__init__(channel, name, print_stdout)
-        if enabled:
-            self.wait_for_channel_ready()
-        atexit.register(self.close)
+        # if enabled:
+        #     self.wait_for_channel_ready()
+        # atexit.register(self.close)
 
     def reconnect(self, timeout=10, max_retries=20):
         self.close()
@@ -430,11 +433,14 @@ class RemoteManager(RemoteObject):
         self.wait_for_remote_ready(timeout, max_retries)
 
     def wait_for_channel_ready(self, timeout: float = 10):
-        future = grpc.channel_ready_future(self.channel)
+        assert self._channel is not None
+        wait_for_ready = True
         try:
-            future.result(timeout=timeout)
-        except grpc.FutureTimeoutError as e:
-            raise TimeoutError(*e.args)
+            self.health_check(wait_for_ready, timeout)
+        except grpc.RpcError as rpc_error:
+            traceback.print_exc()
+            assert rpc_error.code() == grpc.StatusCode.UNAVAILABLE
+            assert not wait_for_ready
 
     def wait_for_remote_ready(self, timeout: float = 10, max_retries=20):
         self.wait_for_channel_ready(timeout)
@@ -464,8 +470,8 @@ class RemoteManager(RemoteObject):
         return self
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
-        if self.channel is not None:
-            self.channel.__exit__(exc_type, exc_value, exc_traceback)
+        if self._channel is not None:
+            self._channel.__exit__(exc_type, exc_value, exc_traceback)
         return self.close(close_channel=False)
 
 

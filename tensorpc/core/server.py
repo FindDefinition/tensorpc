@@ -200,13 +200,14 @@ def serve_service(service: RemoteObjectService,
                 interval = time.time() - server_core.latest_active_time
                 if wait_time > 0 and interval > wait_time:
                     break
-        server.stop(0)
+        server.stop(5)
+        server.wait_for_termination()
         # exec cleanup functions
         server_core.run_event(ServiceEventType.Exit)
         LOGGER.info("server closed")
     except KeyboardInterrupt:
         server_core.run_event(ServiceEventType.Exit)
-        server.stop(0)
+        server.stop(5)
         LOGGER.info("server shutdown by keyboard interrupt")
 
 

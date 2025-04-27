@@ -57,10 +57,11 @@ def server_client_local():
         shell=True)
     try:
         with client.simple_client("localhost:{}".format(port)) as robj:
-            robj.wait_for_remote_ready(10, 30)
+            robj.wait_for_channel_ready(10)
             yield robj
     finally:
         with client.simple_client("localhost:{}".format(port)) as robj:
+            robj.wait_for_channel_ready(10)
             robj.shutdown()
         proc.wait()
 

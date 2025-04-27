@@ -408,7 +408,7 @@ class FaultToleranceSSHServer:
 
     async def _master_run_cmd(self, cmd: str):
         assert self._cmd_task is None, "master can only run one command at a time, shutdown it first." 
-        cmd = cmd.strip()
+        cmd = cmd.rstrip()
         if self.state.status != FTStatus.OK or not self._num_client_robj_is_valid():
             raise RuntimeError("master is not in OK state")
         for client_state in self._master_ui.dm.model.client_states:
