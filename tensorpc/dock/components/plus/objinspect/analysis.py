@@ -230,7 +230,6 @@ class ObjectTreeParser:
                 node_tmp = self.custom_tree_item_handler.patch_node(v, node)
                 if node_tmp is not None:
                     node = node_tmp
-            # node.id = f"{ns}{GLOBAL_SPLIT}{str_k}"
             node.id = ns.append_part(str_k)
             if not isinstance(k, str):
                 node.dictKey = mui.BackendOnlyProp(k)

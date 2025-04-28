@@ -80,11 +80,11 @@ class DataStorageTreeItem(TreeItem):
         for m in metas:
             m.id = parent_ns + m.id
             userdata = {
-                "id": m.id, 
+                "id": m.id.uid_encoded, 
                 "type": ContextMenuType.DataStorageItemDelete.value,
             }
             userdata_cpycmd = {
-                "id": m.id, 
+                "id": m.id.uid_encoded, 
                 "type": ContextMenuType.DataStorageItemCommand.value,
             }
             m.menus = [

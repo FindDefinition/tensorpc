@@ -184,7 +184,6 @@ class JsonLikeNode:
         key = parts[0]
         node: Optional[JsonLikeNode] = None
         for c in self.children:
-            # TODO should we use id.split[-1] instead of name?
             if c.last_part() == key:
                 node = c
                 break
@@ -219,7 +218,6 @@ class JsonLikeNode:
         key = parts[0]
         node: Optional[JsonLikeNode] = None
         for c in self.children:
-            # TODO should we use id.split[-1] instead of name?
             if c.last_part() == key:
                 node = c
                 break

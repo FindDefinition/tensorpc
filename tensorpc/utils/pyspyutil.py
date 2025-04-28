@@ -67,14 +67,21 @@ def _determine_proc_name(info: dict):
             return candidate
     return proc_name
 
-async def get_all_subprocess_traceback_by_pyspy(pid: int):
+async def get_all_subprocess_traceback_by_pyspy(pid: int, ignore_error: bool = True):
     current_process = psutil.Process(pid)
     children = current_process.children(recursive=True)
     name_to_pid_to_tb: dict[str, dict[int, Any]] = {}
     for child in children:
         try:
             info = psutil.Process(child.pid).as_dict(attrs=["name", "cmdline"])
-            tb_res = await get_process_traceback_by_pyspy(child.pid)
+            try:
+                tb_res = await get_process_traceback_by_pyspy(child.pid)
+            except ValueError as e:
+                if ignore_error:
+                    print(f"Failed to get traceback for pid {child.pid}: {e}")
+                    continue
+                else:
+                    raise e
         except psutil.NoSuchProcess:
             continue
         name = _determine_proc_name(info)
@@ -83,22 +90,26 @@ async def get_all_subprocess_traceback_by_pyspy(pid: int):
         name_to_pid_to_tb[name][child.pid] = tb_res
     return name_to_pid_to_tb
 
-async def _get_torchrun_traceback_by_pyspy(main_thread_only: bool = True, is_data_worker: bool = False):
-    import torch 
-    torch_path = Path(torch.__file__).parent
+async def _get_torchrun_traceback_by_pyspy(main_thread_only: bool = True, is_data_worker: bool = False, root_pid: int = -1):
     # 1. locate torchrun process named `pt_elastic``
+    if root_pid != -1:
+        root_process = psutil.Process(root_pid)
+        proc_iter = root_process.children(recursive=True)
+    else:
+        proc_iter = psutil.process_iter(['pid', 'name', 'cmdline'])
     main_pid: int = -1
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+    for proc in proc_iter:
         proc_name = proc.info["name"]
         if proc_name == "pt_elastic":
             main_pid = proc.pid
             break 
+    name_to_pid_to_tb: dict[str, dict[int, Any]] = {}
+
     if main_pid == -1:
-        raise ValueError("pt_elastic process not found.")
+        return name_to_pid_to_tb
     # 2. get all subprocess except data worker named `pt_data_worker`
     current_process = psutil.Process(main_pid)
     children = current_process.children(recursive=is_data_worker)
-    name_to_pid_to_tb: dict[str, dict[int, Any]] = {}
     for child in children:
         try:
             info = psutil.Process(child.pid).as_dict(attrs=["name", "cmdline"])
@@ -134,10 +145,10 @@ async def _get_torchrun_traceback_by_pyspy(main_thread_only: bool = True, is_dat
         name_to_pid_to_tb[name][child.pid] = tb_res
     return name_to_pid_to_tb
 
-async def get_torchrun_traceback_by_pyspy(main_thread_only: bool = True):
+async def get_torchrun_traceback_by_pyspy(main_thread_only: bool = True, root_pid: int = -1):
     return await _get_torchrun_traceback_by_pyspy(main_thread_only, is_data_worker=False)
 
-async def get_torchrun_dataworker_traceback_by_pyspy(main_thread_only: bool = True):
+async def get_torchrun_dataworker_traceback_by_pyspy(main_thread_only: bool = True, root_pid: int = -1):
     return await _get_torchrun_traceback_by_pyspy(main_thread_only, is_data_worker=True)
 
 def _main():

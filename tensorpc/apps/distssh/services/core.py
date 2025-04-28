@@ -32,6 +32,8 @@ from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KE
 from ..typedefs import FTState, FTSSHServerArgs, FTStatus, SSHStatus, CmdStatus, MasterUIState, MasterActions
 from ..components.sshui import FaultToleranceUIMaster, FaultToleranceUIClient
 import shlex
+from tensorpc.utils.pyspyutil import get_all_subprocess_traceback_by_pyspy, get_torchrun_traceback_by_pyspy
+
 LOGGER = rich_logging.get_logger("distssh")
 
 class SimpleLogEventType(enum.Enum):
@@ -124,7 +126,9 @@ class FaultToleranceSSHServer:
         self._master_ui = FaultToleranceUIMaster(self._master_rank, master_ui_state, 
             self._terminal, self._debug_panel, prim.get_server_grpc_port(),
             self._handle_master_actions,
-            self._release_all_bkpt, enabled=self._is_master)
+            self._release_all_bkpt, 
+            self.master_fetch_pyspy_info,
+            enabled=self._is_master)
 
         self._client_ui = FaultToleranceUIClient(state, self._terminal)
 
@@ -272,7 +276,7 @@ class FaultToleranceSSHServer:
         await self._debug_panel.run_rpc_on_current_processes(key, *args, **kwargs)
 
     async def _release_all_bkpt(self, data: Any = None):
-        await self.master_debug_panel_broadcast(dbg_serv_names.DBG_LEAVE_BREAKPOINT, data, exclude_rank=-1)
+        await self.master_debug_panel_broadcast(dbg_serv_names.DBG_LEAVE_BREAKPOINT, userdata=data, exclude_rank=-1)
 
     async def master_debug_panel_broadcast(self, key: str, *args, exclude_rank: int = -1, **kwargs):
         if exclude_rank != self._master_rank:
@@ -287,7 +291,7 @@ class FaultToleranceSSHServer:
             await self._terminal.connect_with_new_desc(self._conn_desc, init_cmds=init_cmds,
                 term_line_event_callback=self._line_event_cb)
         elif act == MasterActions.CLEAR_ALL_CKPT:
-            clear_fn = prim.get_service(f"{BuiltinServiceKeys.ShmKVStore.value}.clear")
+            clear_fn = prim.get_service(f"{BuiltinServiceKeys.ShmTrOnlyKVStore.value}.clear")
             await clear_fn()
         elif act == MasterActions.CLEAR_ALL_TERMINALS:
             await self._terminal.clear()
@@ -370,6 +374,31 @@ class FaultToleranceSSHServer:
             await self._master_run_cmd(self._master_ui.dm.model.cmd)
         else:
             await self._master_cancel_cmd()
+
+    async def fetch_pyspy_info(self, pytorch_mode: bool = False):
+        state = self._terminal.get_current_state()
+        assert state is not None 
+        pid = state.pid
+        if pytorch_mode:
+            return await get_torchrun_traceback_by_pyspy(root_pid=pid)
+        else:
+            return await get_all_subprocess_traceback_by_pyspy(pid=pid)
+
+    async def master_fetch_pyspy_info(self, pytorch_mode: bool = False):
+        res: dict[tuple[int, int], Any] = {}
+        if pytorch_mode:
+            # only pytorch mode collect all rank.
+            client_res = await self._master_call_all_client(get_service_key_by_type(FaultToleranceSSHServer, "fetch_pyspy_info"), set(), pytorch_mode)
+            if client_res is None:
+                return None 
+            for rank, r in client_res.items():
+                for pid, info in r.items():
+                    res[(rank, pid)] = info
+        root_pyspy_info = await self.fetch_pyspy_info(pytorch_mode)
+        for v in root_pyspy_info.values():
+            for pid, info in v.items():
+                res[(self._master_rank, pid)] = info
+        return res 
 
     async def _master_call_all_client(self, key: str, exclude_ranks: set[int], *args, rpc_timeout: Optional[int] = None, rpc_is_health_check: bool = False, **kwargs):
         async with self._master_lock:
@@ -747,8 +776,11 @@ class FaultToleranceSSHServer:
                         res = await self._master_call_all_client("", set(), rpc_timeout=self._cfg.disconnect_rpc_check_timeout, rpc_is_health_check=True)
                         if res is not None:
                             if self._master_ui.dm.model.cmd_status == CmdStatus.DURING_RESTART:
+                                LOGGER.warning(f"Try to shutdown all previous cmd")
                                 res = await self._master_shutdown_or_kill_cmd()
                                 if res is not None:
+                                    LOGGER.warning(f"Try to rerun all cmd:")
+                                    print(self._master_ui.dm.model.cmd)
                                     await self._master_run_cmd(self._master_ui.dm.model.cmd)
                             await self._master_sync_cmd_status()
                     else:

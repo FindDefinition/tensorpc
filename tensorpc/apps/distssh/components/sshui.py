@@ -4,6 +4,7 @@ import inspect
 from typing import Any, Awaitable, Callable, Optional, Union
 
 from tensorpc.apps.collections.serv.kvstore import KVStoreChangeEvent, KVStoreEventType, KVStoreItem
+from tensorpc.apps.dbg.components.distpyspy import PyspyViewer
 from tensorpc.core import BuiltinServiceKeys, prim
 from tensorpc.core.datamodel.events import DraftChangeEvent
 from tensorpc.core.tree_id import UniqueTreeId
@@ -16,7 +17,7 @@ from tensorpc.apps.distssh.constants import (TENSORPC_DISTSSH_CLIENT_DEBUG_UI_KE
                                              TENSORPC_ENV_DISTSSH_URL_WITH_PORT,
                                              )
 from tensorpc.dock.components.plus.styles import get_tight_icon_tab_theme_horizontal, get_tight_tab_theme_horizontal
-from ..typedefs import CheckpointMetadata, FTState, CmdStatus, MasterUIState, FTStatusBoxState
+from ..typedefs import CheckpointMetadata, FTState, CmdStatus, MasterUIState, FTStatusBoxState, UILocalActions
 from tensorpc.apps.dbg.components.dbgpanel_v2 import MasterDebugPanel
 from tensorpc.apps.distssh.typedefs import CheckpointType, MasterActions
 import humanize
@@ -88,7 +89,7 @@ class CheckpointManager(mui.FlexBox):
 
         event_emitter_kvstore = prim.get_service(f"{BuiltinServiceKeys.ShmTrOnlyKVStore.value}.backend_get_event_emitter")()
         btn = mui.Button("Load").prop(loading=False, size="small")
-        btn.event_click.on_standard(lambda x: print(x.keys)).configure(True)
+        btn.event_click.on_standard(self._on_ckpt_load).configure(True)
         self._release_bkpt_fn = release_bkpt_fn
         column_defs = [
             # mui.DataGrid.ColumnDef("id", accessorKey="id"),
@@ -160,7 +161,6 @@ class CheckpointManager(mui.FlexBox):
         for data in dlist:
             assert isinstance(data, CheckpointItem)
             if data.id == key_encoded:
-                print(data)
                 return await self._release_bkpt_fn(dataclasses.asdict(data))
 
 def _get_terminal_menus(term: terminal.AsyncSSHTerminal):
@@ -178,6 +178,7 @@ class FaultToleranceUIMaster(mui.FlexBox):
                  term: terminal.AsyncSSHTerminal, debug_panel: MasterDebugPanel, port: int,
                  master_action_fn: Callable[[MasterActions], mui.CORO_ANY],
                  release_bkpt_fn: Callable[[Any], Awaitable[None]],
+                 fetch_debug_info_fn: Callable[[bool], Awaitable[Optional[dict[tuple[int, int], Any]]]],
                  enabled: bool = True):
         master_state = ui_state.client_states[master_rank]
         states = ui_state.client_states
@@ -188,7 +189,7 @@ class FaultToleranceUIMaster(mui.FlexBox):
         else:
             title = f"Worker ({master_state.rank})"
         self._release_bkpt_fn = release_bkpt_fn
-
+        self._fetch_debug_info_fn = fetch_debug_info_fn
         start_or_cancel_btn = mui.IconButton(
             mui.IconType.PlayArrow, partial(master_action_fn, MasterActions.START_OR_CANCEL)).prop(iconSize="small",
                                                              size="small")
@@ -211,16 +212,40 @@ class FaultToleranceUIMaster(mui.FlexBox):
         ]).prop(enterDelay=400)
         header_str = mui.Typography(title).prop(variant="body2",
                                                 color="primary")
-        rank_select = mui.Autocomplete("Workers", []).prop(muiMargin="dense",
+        rank_select = mui.Autocomplete("Workers", []).prop(textFieldProps=mui.TextFieldProps(muiMargin="none"),
                                                            size="small")
         self.worker_status_box = WorkersStatusBox(
             [FTStatusBoxState.from_ft_state(state, False) for state in states],
             self._on_status_box_click)
+        dialog_debug = mui.Dialog([
+            mui.JsonViewer().bind_fields(data="$")
+        ])
+        self._dialog_debug = dialog_debug
+        self._pyspy_viewer = PyspyViewer()
+        pyspy_dbg_dialog = mui.Dialog([
+            mui.HBox([
+                mui.Button("Scan Pth Distributed", partial(self._on_pyspy_scan, True)).prop(variant="outlined"),
+                mui.Button("Scan Local", partial(self._on_pyspy_scan, False)).prop(variant="outlined"),
+            ]),
+            mui.Divider(orientation="horizontal"),
+            self._pyspy_viewer.prop(flex=1)
+        ])
+        dialog_debug.prop(maxWidth="xl", fullWidth=True)
+        pyspy_dbg_dialog.prop(dialogMaxWidth=False, fullWidth=False,
+            width="75vw", height="75vh", includeFormControl=False,
+            display="flex", flexDirection="column")
+        self._pyspy_dbg_dialog = pyspy_dbg_dialog
         menu_items: list[mui.MenuItem] = []
         cared_menu_acts = [MasterActions.RECONNECT_ALL_CLIENT, MasterActions.CLEAR_ALL_CKPT, MasterActions.CLEAR_ALL_TERMINALS]
         for action in MasterActions:
             if action in cared_menu_acts:
                 menu_items.append(mui.MenuItem(action.value, action.value))
+        menu_items.extend([
+            mui.MenuItem("divider1", divider=True),
+            mui.MenuItem(UILocalActions.PYTORCH_SPY.value, "PyTorch Dist Spy"),
+            mui.MenuItem("divider2", divider=True),
+            mui.MenuItem(UILocalActions.INTERNAL_DEBUG.value, "Internal State Viewer"),
+        ])
         self._menu = mui.MenuList(
             menu_items,
             mui.IconButton(mui.IconType.MoreVert).prop(size="small", iconSize="small"))
@@ -271,7 +296,9 @@ class FaultToleranceUIMaster(mui.FlexBox):
             mui.Allotment.Pane(child_control_panel),
         ])).prop(vertical=False, defaultSizes=[150, 300])
         self.dm = mui.DataModel(ui_state, [
-            global_panel
+            global_panel,
+            dialog_debug,
+            pyspy_dbg_dialog,
         ])
         if enabled:
             # FIXME: better code
@@ -339,6 +366,15 @@ class FaultToleranceUIMaster(mui.FlexBox):
             self.dm,
         ])
         self.prop(flexDirection="column", flex=1)
+
+    async def _on_pyspy_scan(self, pytorch_mode: bool):
+        data = await self._fetch_debug_info_fn(pytorch_mode)
+        if data is not None:
+            data_with_str_id = {}
+            for k, v in data.items():
+                # only check mainthread
+                data_with_str_id[f"{k[0]}-{k[1]}"] = v[0]
+            await self._pyspy_viewer.set_pyspy_raw_data(data_with_str_id)
 
     async def _on_has_bkpt_change(self, num_bkpt_proc):
         prev = self.dm.model.client_states[self._master_rank].num_bkpt_proc
@@ -425,6 +461,13 @@ class FaultToleranceUIMaster(mui.FlexBox):
             ])
 
     async def _handle_master_actions(self, act_id: str):
+        if act_id.startswith("_local"):
+            act_local = UILocalActions(act_id)
+            if act_local == UILocalActions.INTERNAL_DEBUG:
+                await self._dialog_debug.set_open(True)
+            elif act_local == UILocalActions.PYTORCH_SPY:
+                await self._pyspy_dbg_dialog.set_open(True)
+            return 
         act = MasterActions(act_id)
         coro = self._master_action_fn(act)
         if inspect.iscoroutine(coro):

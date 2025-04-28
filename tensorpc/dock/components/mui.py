@@ -174,6 +174,12 @@ class FlexComponentBaseProps(BasicProps):
     outlineOffset: Union[ValueType, Undefined] = undefined
 
     animation: Union[str, Undefined] = undefined
+    animationComposition: Union[str, Undefined] = undefined
+    animationDelay: Union[str, Undefined] = undefined
+    animationDuration: Union[str, Undefined] = undefined
+    animationIterationCount: Union[ValueType, Undefined] = undefined
+    animationFillMode: Union[str, Undefined] = undefined
+    animationDirection: Union[str, Undefined] = undefined
 
     whiteSpace: Union[Literal["normal", "pre", "nowrap", "pre-wrap",
                               "pre-line", "break-spaces"],
@@ -2159,7 +2165,6 @@ class Checkbox(SwitchBase):
 @dataclasses.dataclass
 class SelectBaseProps:
     size: Union[Undefined, Literal["small", "medium"]] = undefined
-    muiMargin: Union[Undefined, Literal["dense", "none", "normal"]] = undefined
     variant: Union[Undefined, Literal["filled", "outlined",
                                       "standard"]] = undefined
     itemVariant: Union[Undefined, Literal["checkbox", "none"]] = undefined
@@ -2168,6 +2173,7 @@ class SelectBaseProps:
 
 @dataclasses.dataclass
 class SelectProps(MUIComponentBaseProps, SelectBaseProps):
+    muiMargin: Union[Undefined, Literal["dense", "none", "normal"]] = undefined
     items: Sequence[Tuple[str,
                           ValueType]] = dataclasses.field(default_factory=list)
     value: ValueType = ""

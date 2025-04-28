@@ -88,7 +88,6 @@ class TorchDistributedCkptClient(ShmTrOnlyKVStoreTensorClient):
             all_keys_to_remove = [x[0] for x in poped_item[1]]
             store_keys_to_remove.extend(all_keys_to_remove)
         new_meta = CheckpointMetadata(ckpt_type, key, step, rank)
-        # print(len(all_ckpts), len(all_ckpts_list), store_key)
         return self.store_tensor_tree(store_key, state_dict, new_meta, removed_keys=set(store_keys_to_remove), stream=stream)
     
     def store_major_checkpoint(self, key: str, step: int, state_dict: dict[str, Any]):

@@ -18,7 +18,6 @@ from tensorpc.dock.components.plus.objinspect.tree import BasicObjectTree
 from tensorpc.dock.components.plus.objview.script import get_frame_obj_layout_from_code, get_init_obj_convert_code
 import humanize
 
-from tensorpc.dock.jsonlike import TreeItem
 from ..common import CommonQualNames
 from ..pthcommon import PytorchModuleTreeItem, check_type_is_torch_module
 

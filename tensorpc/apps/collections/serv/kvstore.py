@@ -583,6 +583,13 @@ class ShmTrOnlyKVStore:
         return await asyncio.get_running_loop().run_in_executor(
             None, self._save_chunk_to_shm, shm, chunk, item)
 
+    async def _load_chunk_from_shm_async(self, shm: SharedMemory,
+                                     chunk: list[SharedArraySegmentDesc],
+                                     item: KVStoreItemWithArrDesc):
+        # use executor here to make sure slow operation won't block async server.
+        return await asyncio.get_running_loop().run_in_executor(
+            None, self._load_chunk_from_shm, shm, chunk, item)
+
     @marker.mark_bidirectional_stream
     async def send_stream(self, iter, key: str):
         self._lazy_init_buffer()
@@ -726,7 +733,7 @@ class ShmTrOnlyKVStore:
                             cur_recv_client_buffer.name, chunk_to_send,
                             recv_counts)
                         yield send_data
-                    self._load_chunk_from_shm(cur_recv_prepare_buffer,
+                    await self._load_chunk_from_shm_async(cur_recv_prepare_buffer,
                                               chunks[chunk_idx - 1], item)
                     if chunk_idx >= len(chunks):
                         break
@@ -738,6 +745,9 @@ class ShmTrOnlyKVStore:
             raise
         # print("STORE ITEM SUCCEED", key, need_update)
         self._store[key] = item
+        item.metadata = metadata
+        item.mtime = time.time()
+        item.data = treespec
         if need_update:
             async with self._lock:
                 await self._event_emitter.emit_async(

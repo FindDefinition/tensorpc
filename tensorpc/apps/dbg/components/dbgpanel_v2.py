@@ -856,7 +856,8 @@ class MasterDebugPanel(mui.FlexBox):
                                service_key: str,
                                *args,
                                rpc_timeout: int = 1,
-                               rpc_is_chunk_call: bool = False):
+                               rpc_is_chunk_call: bool = False,
+                               **kwargs):
         if self._relay_robj is not None:
             if rpc_is_chunk_call:
                 rpc_func = self._relay_robj.chunked_remote_call
@@ -871,7 +872,8 @@ class MasterDebugPanel(mui.FlexBox):
             return await rpc_func(meta.url_with_port,
                                   service_key,
                                   *args,
-                                  rpc_timeout=rpc_timeout)
+                                  rpc_timeout=rpc_timeout,
+                                  **kwargs)
         except TimeoutError:
             traceback.print_exc()
             return None
@@ -885,17 +887,20 @@ class MasterDebugPanel(mui.FlexBox):
     async def run_rpc_on_current_processes(self,
                                 service_key: str,
                                 *args,
-                                rpc_timeout: int = 1):
+                                rpc_timeout: int = 1,
+                                **kwargs):
         return await self._run_rpc_on_processes(self._current_proc_infos,
                                          service_key,
                                          *args,
-                                         rpc_timeout=rpc_timeout)
+                                         rpc_timeout=rpc_timeout,
+                                         **kwargs)
 
     async def _run_rpc_on_processes(self,
                                 process_infos: List[DebugServerProcessInfo],
                                 service_key: str,
                                 *args,
-                                rpc_timeout: int = 1):
+                                rpc_timeout: int = 1,
+                                **kwargs):
         all_tasks = []
         avail_infos: list[DebugServerProcessInfo] = []
         for info in process_infos:
@@ -910,7 +915,8 @@ class MasterDebugPanel(mui.FlexBox):
                 self._run_rpc_on_process(info,
                                       service_key,
                                       *args,
-                                      rpc_timeout=rpc_timeout))
+                                      rpc_timeout=rpc_timeout,
+                                      **kwargs))
         return await asyncio.gather(*all_tasks)
 
     async def _run_rpc_on_metas_chunk_call(self,
